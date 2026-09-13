@@ -33,3 +33,5 @@ mod settlement_corpus;
 /// (`tests/support/public_generic_hostile_corpus.rs`).
 #[path = "public_generic_native_adapter_v1/shared_hostile_corpus.rs"]
 mod shared_hostile_corpus;
+#[path = "public_generic_native_adapter_v1/malformed_trusted_descriptor.rs"]
+mod malformed_trusted_descriptor;

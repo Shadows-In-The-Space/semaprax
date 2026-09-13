@@ -21,12 +21,15 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
+use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 use semaprax::public_generic_abi::native::binding::NativeProviderBindingV1;
 use semaprax::public_generic_abi::native::template::render_reference_provider;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-const FIXTURE_DESCRIPTOR_BYTES: &[u8] = b"fixture-public-generic-descriptor-bytes-issue-154";
+fn fixture_descriptor_bytes() -> Vec<u8> {
+    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
+}
 
 fn fixture_binding() -> NativeProviderBindingV1 {
     NativeProviderBindingV1::new(
@@ -53,7 +56,8 @@ fn run(sanitized: bool) {
         std::env::var_os("CLANG").map_or_else(|| PathBuf::from("clang"), PathBuf::from)
     };
 
-    let provider_source = render_reference_provider(FIXTURE_DESCRIPTOR_BYTES, &fixture_binding());
+    let provider_source =
+        render_reference_provider(&fixture_descriptor_bytes(), &fixture_binding());
 
     let root = std::env::temp_dir().join(format!(
         "semaprax-public-generic-native-adapter-{}-{}-{}",

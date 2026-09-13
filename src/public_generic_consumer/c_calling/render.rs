@@ -330,10 +330,65 @@ struct spx_pg_calling_consumer {
     spx_pg_provider_v1 *provider;
 };
 
+static int spx_pg_ccc_utf8(const uint8_t *bytes, size_t length) {
+    size_t index = 0;
+    while (index < length) {
+        const uint8_t lead = bytes[index];
+        if (lead <= 0x7fu) { index += 1u; continue; }
+        size_t width = 0;
+        if (lead >= 0xc2u && lead <= 0xdfu) width = 2u;
+        else if (lead >= 0xe0u && lead <= 0xefu) width = 3u;
+        else if (lead >= 0xf0u && lead <= 0xf4u) width = 4u;
+        else return 0;
+        if (width > length - index) return 0;
+        const uint8_t second = bytes[index + 1u];
+        if (second < 0x80u || second > 0xbfu) return 0;
+        if (lead == 0xe0u && second < 0xa0u) return 0;
+        if (lead == 0xedu && second > 0x9fu) return 0;
+        if (lead == 0xf0u && second < 0x90u) return 0;
+        if (lead == 0xf4u && second > 0x8fu) return 0;
+        for (size_t tail = 2u; tail < width; tail += 1u) {
+            if (bytes[index + tail] < 0x80u || bytes[index + tail] > 0xbfu) return 0;
+        }
+        index += width;
+    }
+    return 1;
+}
+
+static int spx_pg_ccc_descriptor_v1(const uint8_t *bytes, size_t length) {
+    if (length > 131072u) return 0;
+    size_t offset = 0;
+    for (size_t field = 0; field < 12u; field += 1u) {
+        if (offset > length || length - offset < 8u) return 0;
+        const uint64_t width = spx_pg_ccc_read_u64le(bytes + offset);
+        if (width > 65536u) return 0;
+        offset += 8u;
+        if (width > length - offset) return 0;
+        const size_t field_length = (size_t)width;
+        const uint8_t *content = bytes + offset;
+        if (!spx_pg_ccc_utf8(content, field_length)) return 0;
+        static const char descriptor_schema[] = "semaprax.public-generic-descriptor.v1";
+        static const char boundary_schema[] = "semaprax.public-generic-boundary-profile.v1";
+        static const char grammar_schema[] = "semaprax.public-generic-type-grammar.v1";
+        const char *version = NULL;
+        size_t version_length = 0u;
+        if (field == 0u) { version = descriptor_schema; version_length = sizeof(descriptor_schema) - 1u; }
+        if (field == 1u) { version = boundary_schema; version_length = sizeof(boundary_schema) - 1u; }
+        if (field == 2u) { version = grammar_schema; version_length = sizeof(grammar_schema) - 1u; }
+        if (version != NULL &&
+            (field_length != version_length || memcmp(content, version, version_length) != 0)) return 0;
+        offset += field_length;
+    }
+    return offset == length;
+}
+
 static spx_pg_consumer_status spx_pg_ccc_verify_pairing(const uint8_t *descriptor_bytes,
                                                          size_t descriptor_len,
                                                          const uint8_t *binding_bytes,
                                                          size_t binding_len) {
+    if (!spx_pg_ccc_descriptor_v1(descriptor_bytes, descriptor_len)) {
+        return SPX_PG_CONSUMER_DESCRIPTOR_REJECTED;
+    }
     if (!spx_pg_ccc_bytes_equal(descriptor_bytes, descriptor_len, spx_pg_trusted_descriptor_bytes,
                                  spx_pg_trusted_descriptor_len)) {
         return SPX_PG_CONSUMER_DESCRIPTOR_REJECTED;

@@ -27,6 +27,10 @@ static SERIAL: AtomicUsize = AtomicUsize::new(0);
 
 #[path = "cross_language_benchmark_suite/booking_window_conflict.rs"]
 mod booking_window_conflict;
+#[path = "cross_language_benchmark_suite/cold_chain_release_gate.rs"]
+mod cold_chain_release_gate;
+#[path = "cross_language_benchmark_suite/stable_dispatch_order.rs"]
+mod stable_dispatch_order;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()

@@ -8,6 +8,14 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Validate bounded Descriptor-v1 frames and versions in generated calling
+  consumers before exact pairing and provider admission; exercise canonical
+  shared mutations and byte-identical malformed configured descriptors in
+  Rust, C11, C++17, and TypeScript/Wasm (Refs #173).
+- Add independent sensor-conjunction and stable three-job ordering benchmark
+  families with candidate-preserving hidden overlays and three-port negative
+  controls (Refs #106).
+
 - Add private `semaprax-full source-live run|resume|migrate` commands
   (#113/#116), with held-directory checkpoints, exclusive writers, bounded
   explicit task/read inputs and retained-Project bindings. A migration carries

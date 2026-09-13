@@ -1,0 +1,7 @@
+module bench.dispatch.tests;
+
+@id("bench.dispatch.tests")
+fn main() -> i64
+{
+    0
+}

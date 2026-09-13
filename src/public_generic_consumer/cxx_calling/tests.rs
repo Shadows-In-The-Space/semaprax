@@ -1,7 +1,10 @@
 use super::*;
 use crate::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
+use crate::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 
-const DESCRIPTOR_BYTES: &[u8] = b"fixture-public-generic-descriptor-bytes-issue-159";
+fn descriptor_bytes() -> Vec<u8> {
+    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
+}
 
 fn binding() -> NativeProviderBindingV1 {
     NativeProviderBindingV1::new(
@@ -30,7 +33,7 @@ fn shapes() -> (RecordShape, RecordShape) {
 
 fn generate() -> CallingConsumer {
     let (input, output) = shapes();
-    generate_cxx_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output)
+    generate_cxx_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
         .expect("a well-formed shape must generate")
 }
 
@@ -81,7 +84,7 @@ fn every_file_is_lf_only_and_ends_with_a_trailing_newline() {
 fn reuses_the_c_calling_consumer_files_byte_for_byte() {
     let (input, output) = shapes();
     let expected =
-        c_calling::generate_c_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output)
+        c_calling::generate_c_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
             .expect("a well-formed shape must generate");
     let actual = generate();
     for (name, contents) in expected.files() {
@@ -226,8 +229,8 @@ fn duplicate_field_identity_in_one_record_is_rejected() {
         OwnedByteField::new("same.identity"),
     ]);
     let output = RecordShape::new(vec![OwnedByteField::new("x"), OwnedByteField::new("y")]);
-    let error =
-        generate_cxx_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output).unwrap_err();
+    let error = generate_cxx_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
+        .unwrap_err();
     assert_eq!(
         error,
         ShapeError::DuplicateFieldIdentity {
@@ -241,8 +244,8 @@ fn duplicate_field_identity_in_one_record_is_rejected() {
 fn mismatched_leaf_counts_are_rejected() {
     let input = RecordShape::new(vec![OwnedByteField::new("only-one")]);
     let output = RecordShape::new(vec![OwnedByteField::new("a"), OwnedByteField::new("b")]);
-    let error =
-        generate_cxx_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output).unwrap_err();
+    let error = generate_cxx_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
+        .unwrap_err();
     assert_eq!(
         error,
         ShapeError::LeafCountMismatch {
@@ -275,7 +278,7 @@ fn field_count_and_field_lists_scale_with_the_shape() {
     ]);
     let output = input.clone();
     let consumer =
-        generate_cxx_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output).unwrap();
+        generate_cxx_calling_consumer(&descriptor_bytes(), &binding(), &input, &output).unwrap();
     let (_, header) = consumer
         .files()
         .iter()
@@ -293,7 +296,7 @@ fn field_count_and_field_lists_scale_with_the_shape() {
 fn a_single_field_shape_generates_successfully() {
     let input = RecordShape::new(vec![OwnedByteField::new("solo")]);
     let output = input.clone();
-    let consumer = generate_cxx_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output)
+    let consumer = generate_cxx_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
         .expect("a single-field shape must generate");
     let (_, round_trip) = consumer
         .files()

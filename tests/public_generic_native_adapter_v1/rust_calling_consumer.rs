@@ -34,6 +34,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
+use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 use semaprax::public_generic_abi::native::binding::NativeProviderBindingV1;
 use semaprax::public_generic_abi::native::template::render_reference_provider;
 use semaprax::public_generic_consumer::rust_calling::{
@@ -42,7 +43,9 @@ use semaprax::public_generic_consumer::rust_calling::{
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-const FIXTURE_DESCRIPTOR_BYTES: &[u8] = b"fixture-public-generic-descriptor-bytes-issue-156";
+fn fixture_descriptor_bytes() -> Vec<u8> {
+    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
+}
 
 fn fixture_binding() -> NativeProviderBindingV1 {
     NativeProviderBindingV1::new(
@@ -270,7 +273,7 @@ fn generated_rust_calling_consumer_executes_against_the_real_native_provider() {
     let (input, output) = shapes();
     let binding = fixture_binding();
     let consumer =
-        generate_rust_calling_consumer(FIXTURE_DESCRIPTOR_BYTES, &binding, &input, &output)
+        generate_rust_calling_consumer(&fixture_descriptor_bytes(), &binding, &input, &output)
             .expect("a well-formed shape must generate");
 
     let workspace = Workspace::new("execute");
@@ -278,7 +281,7 @@ fn generated_rust_calling_consumer_executes_against_the_real_native_provider() {
         "generated Rust calling consumer workspace: {}",
         workspace.0.display()
     );
-    let lib_dir = compile_provider_static_lib(&workspace.0, FIXTURE_DESCRIPTOR_BYTES, &binding);
+    let lib_dir = compile_provider_static_lib(&workspace.0, &fixture_descriptor_bytes(), &binding);
     let crate_root = workspace.path("generated-rust-consumer");
     write_generated_crate(&crate_root, &consumer);
     let target_dir = workspace.path("cargo-target");
@@ -374,7 +377,7 @@ fn generated_crate_declares_no_workspace_or_external_dependency() {
     let (input, output) = shapes();
     let binding = fixture_binding();
     let consumer =
-        generate_rust_calling_consumer(FIXTURE_DESCRIPTOR_BYTES, &binding, &input, &output)
+        generate_rust_calling_consumer(&fixture_descriptor_bytes(), &binding, &input, &output)
             .expect("a well-formed shape must generate");
     let (_, cargo_toml) = consumer
         .files()
@@ -469,7 +472,7 @@ fn generated_rust_calling_consumer_builds_and_runs_on_the_declared_msrv_toolchai
     let (input, output) = shapes();
     let binding = fixture_binding();
     let consumer =
-        generate_rust_calling_consumer(FIXTURE_DESCRIPTOR_BYTES, &binding, &input, &output)
+        generate_rust_calling_consumer(&fixture_descriptor_bytes(), &binding, &input, &output)
             .expect("a well-formed shape must generate");
 
     let workspace = Workspace::new("msrv");
@@ -477,7 +480,7 @@ fn generated_rust_calling_consumer_builds_and_runs_on_the_declared_msrv_toolchai
         "generated Rust calling consumer MSRV workspace: {}",
         workspace.0.display()
     );
-    let lib_dir = compile_provider_static_lib(&workspace.0, FIXTURE_DESCRIPTOR_BYTES, &binding);
+    let lib_dir = compile_provider_static_lib(&workspace.0, &fixture_descriptor_bytes(), &binding);
     let crate_root = workspace.path("generated-rust-consumer");
     write_generated_crate(&crate_root, &consumer);
     let target_dir = workspace.path("cargo-target");

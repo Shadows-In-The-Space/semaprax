@@ -30,6 +30,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
+use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 use semaprax::public_generic_abi::native::binding::NativeProviderBindingV1;
 use semaprax::public_generic_abi::native::template::render_reference_provider;
 use semaprax::public_generic_consumer::cxx_calling::{
@@ -39,7 +40,9 @@ use semaprax::public_generic_consumer::rust_calling::{OwnedByteField, RecordShap
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-const FIXTURE_DESCRIPTOR_BYTES: &[u8] = b"fixture-public-generic-descriptor-bytes-issue-159";
+fn fixture_descriptor_bytes() -> Vec<u8> {
+    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
+}
 
 fn fixture_binding() -> NativeProviderBindingV1 {
     NativeProviderBindingV1::new(
@@ -164,7 +167,7 @@ fn build_and_run(sanitized: bool) {
     let (input, output) = shapes();
     let binding = fixture_binding();
     let consumer =
-        generate_cxx_calling_consumer(FIXTURE_DESCRIPTOR_BYTES, &binding, &input, &output)
+        generate_cxx_calling_consumer(&fixture_descriptor_bytes(), &binding, &input, &output)
             .expect("a well-formed shape must generate");
 
     let workspace = Workspace::new(if sanitized { "sanitized" } else { "plain" });
@@ -174,7 +177,7 @@ fn build_and_run(sanitized: bool) {
     );
     write_generated_files(&workspace.0, &consumer);
     let provider_object =
-        compile_provider_object(&workspace.0, FIXTURE_DESCRIPTOR_BYTES, &binding, &clang);
+        compile_provider_object(&workspace.0, &fixture_descriptor_bytes(), &binding, &clang);
 
     for optimization in ["-O0", "-O2"] {
         let consumer_object = workspace.path(&format!("spx_pg_calling_consumer{optimization}.o"));
@@ -325,7 +328,7 @@ fn wrapper_header_compiles_standalone_as_cxx17_and_tolerates_double_inclusion() 
     let clangxx = tool("CLANGXX", "clang++");
     let (input, output) = shapes();
     let consumer = generate_cxx_calling_consumer(
-        FIXTURE_DESCRIPTOR_BYTES,
+        &fixture_descriptor_bytes(),
         &fixture_binding(),
         &input,
         &output,

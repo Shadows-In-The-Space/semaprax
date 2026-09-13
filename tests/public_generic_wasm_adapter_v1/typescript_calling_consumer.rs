@@ -41,6 +41,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Digest, Sha256};
 
 use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
+use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 use semaprax::public_generic_abi::wasm::binding::WasmProviderBindingV1;
 use semaprax::public_generic_abi::wasm::provider::FIXTURE_ENDPOINT_EXPORT_NAME;
 use semaprax::public_generic_consumer::rust_calling::{OwnedByteField, RecordShape};
@@ -52,7 +53,9 @@ use super::reference_wasm_module;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-const FIXTURE_DESCRIPTOR_BYTES: &[u8] = b"fixture-public-generic-descriptor-bytes-issue-157";
+fn fixture_descriptor_bytes() -> Vec<u8> {
+    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
+}
 
 /// This generator's own module-artifact-identity convention, restated in
 /// Rust exactly as `descriptor.ts`'s generated `computeModuleArtifactDigest`
@@ -226,9 +229,13 @@ fn generated_typescript_calling_consumer_executes_against_a_real_wasm_module() {
 
     let (input, output) = shapes();
     let binding = fixture_binding(&wasm_bytes);
-    let consumer =
-        generate_typescript_calling_consumer(FIXTURE_DESCRIPTOR_BYTES, &binding, &input, &output)
-            .expect("a well-formed shape must generate");
+    let consumer = generate_typescript_calling_consumer(
+        &fixture_descriptor_bytes(),
+        &binding,
+        &input,
+        &output,
+    )
+    .expect("a well-formed shape must generate");
 
     let workspace = Workspace::new("execute");
     eprintln!(
@@ -329,9 +336,13 @@ fn generated_package_json_declares_only_the_pinned_typescript_dev_dependency() {
     let wasm_bytes = reference_wasm_module::build();
     let (input, output) = shapes();
     let binding = fixture_binding(&wasm_bytes);
-    let consumer =
-        generate_typescript_calling_consumer(FIXTURE_DESCRIPTOR_BYTES, &binding, &input, &output)
-            .expect("a well-formed shape must generate");
+    let consumer = generate_typescript_calling_consumer(
+        &fixture_descriptor_bytes(),
+        &binding,
+        &input,
+        &output,
+    )
+    .expect("a well-formed shape must generate");
     let (_, package_json) = consumer
         .files()
         .iter()

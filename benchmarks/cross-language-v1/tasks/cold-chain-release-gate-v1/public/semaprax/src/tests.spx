@@ -1,0 +1,7 @@
+module bench.coldchain.tests;
+
+@id("bench.coldchain.tests")
+fn main() -> i64
+{
+    0
+}

@@ -1,0 +1,8 @@
+module bench.coldchain.app;
+use function @id("bench.coldchain.release_allowed") from bench.coldchain.candidate as release_allowed;
+
+@id("bench.coldchain.main")
+fn main() -> i64
+{
+    if release_allowed(5i32, 106i32) == 0i32 { if release_allowed(1i32, 100i32) == 0i32 { if release_allowed(2i32, 95i32) == 1i32 { if release_allowed(8i32, 105i32) == 1i32 { 0 } else { 1 } } else { 1 } } else { 1 } } else { 1 }
+}

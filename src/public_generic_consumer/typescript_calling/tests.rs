@@ -1,8 +1,11 @@
 use super::*;
 use crate::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
+use crate::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 use crate::public_generic_abi::wasm::provider::FIXTURE_ENDPOINT_EXPORT_NAME;
 
-const DESCRIPTOR_BYTES: &[u8] = b"fixture-public-generic-descriptor-bytes-issue-157";
+fn descriptor_bytes() -> Vec<u8> {
+    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
+}
 
 fn binding() -> WasmProviderBindingV1 {
     WasmProviderBindingV1::new(
@@ -31,7 +34,7 @@ fn shapes() -> (RecordShape, RecordShape) {
 
 fn generate() -> CallingConsumer {
     let (input, output) = shapes();
-    generate_typescript_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output)
+    generate_typescript_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
         .expect("a well-formed shape must generate")
 }
 
@@ -105,8 +108,9 @@ fn duplicate_field_identity_in_one_record_is_rejected() {
         OwnedByteField::new("same.identity"),
     ]);
     let output = RecordShape::new(vec![OwnedByteField::new("x"), OwnedByteField::new("y")]);
-    let error = generate_typescript_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output)
-        .unwrap_err();
+    let error =
+        generate_typescript_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
+            .unwrap_err();
     assert_eq!(
         error,
         ShapeError::DuplicateFieldIdentity {
@@ -120,8 +124,9 @@ fn duplicate_field_identity_in_one_record_is_rejected() {
 fn mismatched_leaf_counts_are_rejected() {
     let input = RecordShape::new(vec![OwnedByteField::new("only-one")]);
     let output = RecordShape::new(vec![OwnedByteField::new("a"), OwnedByteField::new("b")]);
-    let error = generate_typescript_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output)
-        .unwrap_err();
+    let error =
+        generate_typescript_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
+            .unwrap_err();
     assert_eq!(
         error,
         ShapeError::LeafCountMismatch {
@@ -139,7 +144,7 @@ fn embeds_the_exact_trusted_descriptor_and_binding_bytes() {
         .iter()
         .find(|(name, _)| name == "src/descriptor.ts")
         .expect("src/descriptor.ts must be generated");
-    for byte in DESCRIPTOR_BYTES {
+    for byte in &descriptor_bytes() {
         let needle = format!("0x{byte:02x}");
         assert!(
             descriptor_source.contains(&needle),
@@ -180,7 +185,7 @@ fn field_count_and_field_lists_scale_with_the_shape() {
     ]);
     let output = input.clone();
     let consumer =
-        generate_typescript_calling_consumer(DESCRIPTOR_BYTES, &binding(), &input, &output)
+        generate_typescript_calling_consumer(&descriptor_bytes(), &binding(), &input, &output)
             .unwrap();
     let (_, carrier_source) = consumer
         .files()

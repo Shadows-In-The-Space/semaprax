@@ -183,7 +183,38 @@ use crate::error::Error;
 
 "#;
 
-const DESCRIPTOR_VERIFY: &str = r#"pub(crate) fn verify(descriptor_bytes: &[u8], binding_bytes: &[u8]) -> Result<(), Error> {
+const DESCRIPTOR_VERIFY: &str = r#"fn canonical_descriptor_v1(bytes: &[u8]) -> bool {
+    // The reference Descriptor v1 wire is twelve bounded UTF-8 frames. The
+    // submitted bytes are never used to size an allocation or an index before
+    // both the total bound and each individual frame bound are checked.
+    if bytes.len() > 131_072 { return false; }
+    let mut offset = 0usize;
+    for field in 0..12usize {
+        let Some(prefix_end) = offset.checked_add(8) else { return false; };
+        let Some(prefix) = bytes.get(offset..prefix_end) else { return false; };
+        let mut width = [0u8; 8];
+        width.copy_from_slice(prefix);
+        let Ok(length) = usize::try_from(u64::from_le_bytes(width)) else { return false; };
+        if length > 65_536 { return false; }
+        let Some(end) = prefix_end.checked_add(length) else { return false; };
+        let Some(content) = bytes.get(prefix_end..end) else { return false; };
+        if std::str::from_utf8(content).is_err() { return false; }
+        let expected = match field {
+            0 => Some(b"semaprax.public-generic-descriptor.v1".as_slice()),
+            1 => Some(b"semaprax.public-generic-boundary-profile.v1".as_slice()),
+            2 => Some(b"semaprax.public-generic-type-grammar.v1".as_slice()),
+            _ => None,
+        };
+        if expected.is_some_and(|version| content != version) { return false; }
+        offset = end;
+    }
+    offset == bytes.len()
+}
+
+pub(crate) fn verify(descriptor_bytes: &[u8], binding_bytes: &[u8]) -> Result<(), Error> {
+    if !canonical_descriptor_v1(descriptor_bytes) {
+        return Err(Error::DescriptorRejected("submitted descriptor is not a canonical bounded Descriptor v1"));
+    }
     if descriptor_bytes != TRUSTED_DESCRIPTOR_BYTES {
         return Err(Error::DescriptorRejected(
             "submitted descriptor bytes do not replay the trusted value this consumer was generated from",

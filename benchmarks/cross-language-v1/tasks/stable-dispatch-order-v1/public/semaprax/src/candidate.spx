@@ -1,0 +1,7 @@
+module bench.dispatch.candidate;
+
+@id("bench.dispatch.order")
+fn dispatch_order(a_priority: i32, b_priority: i32, c_priority: i32) -> i32
+{
+    if a_priority <= b_priority && a_priority <= c_priority { if b_priority <= c_priority { 123i32 } else { 132i32 } } else { if b_priority <= a_priority && b_priority <= c_priority { if a_priority <= c_priority { 213i32 } else { 231i32 } } else { if a_priority <= b_priority { 312i32 } else { 321i32 } } }
+}

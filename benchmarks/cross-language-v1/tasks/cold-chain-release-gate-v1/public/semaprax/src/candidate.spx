@@ -1,0 +1,7 @@
+module bench.coldchain.candidate;
+
+@id("bench.coldchain.release_allowed")
+fn release_allowed(core_temperature: i32, seal_pressure: i32) -> i32
+{
+    if core_temperature >= 2i32 && core_temperature <= 8i32 && seal_pressure >= 95i32 && seal_pressure <= 105i32 { 1i32 } else { 0i32 }
+}

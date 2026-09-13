@@ -1,0 +1,8 @@
+module bench.dispatch.app;
+use function @id("bench.dispatch.order") from bench.dispatch.candidate as dispatch_order;
+
+@id("bench.dispatch.main")
+fn main() -> i64
+{
+    if dispatch_order(1i32, 1i32, 2i32) == 123i32 { if dispatch_order(1i32, 2i32, 1i32) == 132i32 { if dispatch_order(2i32, 1i32, 1i32) == 231i32 { if dispatch_order(7i32, 7i32, 7i32) == 123i32 { 0 } else { 1 } } else { 1 } } else { 1 } } else { 1 }
+}

@@ -124,10 +124,49 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 "#;
 
 const DESCRIPTOR_VERIFY: &str = r#"
+function canonicalDescriptorV1(bytes: Uint8Array): boolean {
+  if (bytes.length > 131_072) return false;
+  // ignoreBOM=true retains a leading U+FEFF. The reference UTF-8 decoder
+  // preserves it too, so a BOM-prefixed schema must never become valid here.
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  let offset = 0;
+  for (let field = 0; field < 12; field += 1) {
+    if (offset > bytes.length || bytes.length - offset < 8) return false;
+    let width = 0n;
+    for (let index = 0; index < 8; index += 1) {
+      width |= BigInt(bytes[offset + index] as number) << BigInt(index * 8);
+    }
+    if (width > 65_536n) return false;
+    offset += 8;
+    const length = Number(width);
+    if (length > bytes.length - offset) return false;
+    let text: string;
+    try {
+      text = decoder.decode(bytes.subarray(offset, offset + length));
+    } catch {
+      return false;
+    }
+    const version = [
+      "semaprax.public-generic-descriptor.v1",
+      "semaprax.public-generic-boundary-profile.v1",
+      "semaprax.public-generic-type-grammar.v1",
+    ][field];
+    if (version !== undefined && text !== version) return false;
+    offset += length;
+  }
+  return offset === bytes.length;
+}
+
 export function verifyDescriptorAndBinding(
   descriptorBytes: Uint8Array,
   bindingBytes: Uint8Array,
 ): void {
+  if (!canonicalDescriptorV1(descriptorBytes)) {
+    throw new SemapraxPublicGenericException({
+      kind: "descriptor-rejected",
+      reason: "submitted descriptor is not a canonical bounded Descriptor v1",
+    });
+  }
   if (!bytesEqual(descriptorBytes, TRUSTED_DESCRIPTOR_BYTES)) {
     throw new SemapraxPublicGenericException({
       kind: "descriptor-rejected",

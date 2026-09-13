@@ -12,7 +12,7 @@
 //! per-leaf byte bound -- see the coverage audit in this issue's report).
 //! This module does not duplicate those; it adds one MORE test per
 //! consumer, generated against a single shared baseline descriptor
-//! (`public_generic_hostile_corpus::BASELINE_DESCRIPTOR_BYTES`), that prints
+//! (`public_generic_hostile_corpus::baseline_descriptor_bytes()`), that prints
 //! its observed outcome for each shared case rather than merely asserting it
 //! locally -- so this file's own test can parse all three consumers' actual
 //! outcomes and assert they AGREE with each other, not only that each one
@@ -55,8 +55,8 @@ use semaprax::public_generic_consumer::rust_calling::{
 #[path = "../support/public_generic_hostile_corpus.rs"]
 mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
-    assert_matches_expected, parse_shared_corpus_lines, BASELINE_DESCRIPTOR_BYTES,
-    MAX_BYTES_PER_LEAF,
+    assert_matches_expected, baseline_descriptor_bytes, parse_shared_corpus_lines,
+    structured_descriptor_cases, MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -414,6 +414,7 @@ fn shared_hostile_corpus_prints_its_observed_outcomes() {
         );
         println!("SHARED_CORPUS binding_valid_for_different_artifact {status}");
     }
+__STRUCTURED_DESCRIPTOR_CASES__
 }
 "#;
 
@@ -631,6 +632,7 @@ const C_APPENDIX_FN: &str = r#"static void test_shared_hostile_corpus(void) {
         REQUIRE(spx_pg_consumer_test_live_allocations() == 0);
         printf("SHARED_CORPUS one_byte_over_per_leaf_bound_rejected %s\n", status);
     }
+__STRUCTURED_DESCRIPTOR_CASES__
 }
 
 "#;
@@ -822,9 +824,85 @@ const CXX_APPENDIX_FN: &str = r#"static void test_shared_hostile_corpus() {
         REQUIRE(::spx_pg_consumer_test_live_allocations() == 0);
         std::printf("SHARED_CORPUS one_byte_over_per_leaf_bound_rejected %s\n", status);
     }
+__STRUCTURED_DESCRIPTOR_CASES__
 }
 
 "#;
+
+fn rust_structured_cases() -> String {
+    let mut result = String::new();
+    for (name, bytes, _, _) in structured_descriptor_cases() {
+        write!(
+            &mut result,
+            r#"
+    {{
+        const CANDIDATE: &[u8] = {};
+        let before = diagnostics::live_allocations();
+        let status = match Provider::open(CANDIDATE, TRUSTED_BINDING_BYTES) {{
+            Ok(provider) => {{ drop(provider); "ACCEPTED" }}
+            Err(Error::DescriptorRejected(_)) => "DESCRIPTOR_REJECTED",
+            Err(_) => "OTHER",
+        }};
+        assert_eq!(diagnostics::live_allocations(), before);
+        println!("SHARED_CORPUS {name} {{status}}");
+    }}
+"#,
+            rust_byte_slice_literal(&bytes)
+        )
+        .unwrap();
+    }
+    result
+}
+
+fn c_structured_cases() -> String {
+    let mut result = String::new();
+    for (name, bytes, _, _) in structured_descriptor_cases() {
+        write!(
+            &mut result,
+            r#"
+    {{
+        static const uint8_t candidate[] = {};
+        spx_pg_calling_consumer *consumer = NULL;
+        size_t before = spx_pg_consumer_test_live_allocations();
+        spx_pg_consumer_status rc = spx_pg_consumer_open(
+            candidate, sizeof(candidate), spx_pg_trusted_binding_bytes,
+            spx_pg_trusted_binding_len, &consumer);
+        REQUIRE(rc == SPX_PG_CONSUMER_DESCRIPTOR_REJECTED);
+        REQUIRE(consumer == NULL);
+        REQUIRE(spx_pg_consumer_test_live_allocations() == before);
+        printf("SHARED_CORPUS {name} DESCRIPTOR_REJECTED\n");
+    }}
+"#,
+            c_byte_array_literal(&bytes)
+        )
+        .unwrap();
+    }
+    result
+}
+
+fn cxx_structured_cases() -> String {
+    let mut result = String::new();
+    for (name, bytes, _, _) in structured_descriptor_cases() {
+        write!(
+            &mut result,
+            r#"
+    {{
+        std::vector<std::uint8_t> candidate {};
+        std::size_t before = ::spx_pg_consumer_test_live_allocations();
+        auto opened = Provider::open(candidate.data(), candidate.size(),
+            ::spx_pg_trusted_binding_bytes, ::spx_pg_trusted_binding_len);
+        REQUIRE(!opened.has_value());
+        REQUIRE(opened.error().kind() == ErrorKind::DescriptorRejected);
+        REQUIRE(::spx_pg_consumer_test_live_allocations() == before);
+        std::printf("SHARED_CORPUS {name} DESCRIPTOR_REJECTED\n");
+    }}
+"#,
+            c_byte_array_literal(&bytes)
+        )
+        .unwrap();
+    }
+    result
+}
 
 fn write_generated_files(root: &Path, files: &[(String, String)], splice: Option<(&str, &str)>) {
     for (relative, contents) in files {
@@ -887,7 +965,8 @@ fn shared_hostile_corpus_agrees_across_rust_c11_and_cxx17_consumers() {
         .replace(
             "__CROSS_ARTIFACT_BINDING_BYTES__",
             &rust_byte_slice_literal(&cross_artifact_binding_bytes),
-        );
+        )
+        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &rust_structured_cases());
     let c_appendix_fn = C_APPENDIX_FN
         .replace(
             "__CROSS_TARGET_BINDING_BYTES__",
@@ -896,7 +975,8 @@ fn shared_hostile_corpus_agrees_across_rust_c11_and_cxx17_consumers() {
         .replace(
             "__CROSS_ARTIFACT_BINDING_BYTES__",
             &c_byte_array_literal(&cross_artifact_binding_bytes),
-        );
+        )
+        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &c_structured_cases());
     let cxx_appendix_fn = CXX_APPENDIX_FN
         .replace(
             "__CROSS_TARGET_BINDING_BYTES__",
@@ -905,16 +985,17 @@ fn shared_hostile_corpus_agrees_across_rust_c11_and_cxx17_consumers() {
         .replace(
             "__CROSS_ARTIFACT_BINDING_BYTES__",
             &c_byte_array_literal(&cross_artifact_binding_bytes),
-        );
+        )
+        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &cxx_structured_cases());
 
     let workspace = Workspace::new("shared-corpus");
     eprintln!("shared hostile corpus workspace: {}", workspace.0.display());
     let provider_object =
-        compile_provider_object(&workspace.0, BASELINE_DESCRIPTOR_BYTES, &binding, &clang);
+        compile_provider_object(&workspace.0, baseline_descriptor_bytes(), &binding, &clang);
 
     // ---- Rust ----
     let rust_consumer =
-        generate_rust_calling_consumer(BASELINE_DESCRIPTOR_BYTES, &binding, &input, &output)
+        generate_rust_calling_consumer(baseline_descriptor_bytes(), &binding, &input, &output)
             .expect("a well-formed shape must generate");
     let rust_root = workspace.path("rust-consumer");
     for (relative, contents) in rust_consumer.files() {
@@ -989,7 +1070,7 @@ fn shared_hostile_corpus_agrees_across_rust_c11_and_cxx17_consumers() {
 
     // ---- C11 ----
     let c_consumer =
-        generate_c_calling_consumer(BASELINE_DESCRIPTOR_BYTES, &binding, &input, &output)
+        generate_c_calling_consumer(baseline_descriptor_bytes(), &binding, &input, &output)
             .expect("a well-formed shape must generate");
     let c_root = workspace.path("c-consumer");
     write_generated_files(&c_root, c_consumer.files(), None);
@@ -1041,7 +1122,7 @@ fn shared_hostile_corpus_agrees_across_rust_c11_and_cxx17_consumers() {
 
     // ---- C++17 ----
     let cxx_consumer =
-        generate_cxx_calling_consumer(BASELINE_DESCRIPTOR_BYTES, &binding, &input, &output)
+        generate_cxx_calling_consumer(baseline_descriptor_bytes(), &binding, &input, &output)
             .expect("a well-formed shape must generate");
     let cxx_root = workspace.path("cxx-consumer");
     write_generated_files(&cxx_root, cxx_consumer.files(), None);

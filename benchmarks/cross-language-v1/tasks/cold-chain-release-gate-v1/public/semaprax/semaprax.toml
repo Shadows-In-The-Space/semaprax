@@ -1,0 +1,6 @@
+schema = "semaprax.project.v1"
+name = "cold-chain-release-gate"
+entry = "bench.coldchain.app"
+sources = ["src/app.spx", "src/candidate.spx", "src/tests.spx"]
+web_exports = ["bench.coldchain.release_allowed"]
+tests = ["bench.coldchain.tests"]

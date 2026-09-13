@@ -24,6 +24,21 @@ that did not exist when the metadata half closed; both gates stay open for
 hosted evidence of all four languages. Public generic ownership remains
 unsupported and unpublished.
 
+The four calling-consumer generators retain their byte-oriented configuration
+API: generation embeds the supplied trusted descriptor bytes without granting
+them authority. At **open**, Rust, C11, and TypeScript/Wasm independently check
+that the submitted descriptor is exactly twelve bounded UTF-8 Descriptor-v1
+frames with the frozen descriptor, boundary-profile, and type-grammar versions,
+then require byte-exact equality with the embedded trusted bytes before any
+provider call or Wasm instantiation. C++17 uses the C11 check. A generated
+consumer configured with malformed trusted bytes therefore cannot open, even
+when a caller submits those same bytes. This calling-layer pairing is stricter
+than the reference descriptor identity replay: a presentation-name-only
+change can preserve reference identity but fails byte-exact calling pairing.
+These checks validate wire framing and versions; they do not recompute
+ProgramRoot, source, export, or instance digests from checked semantics.
+The provider ABI's existing byte-pairing semantics are unchanged.
+
 ## Why metadata consumers come first
 
 Before a foreign toolchain can *call* a public generic export, several
@@ -292,8 +307,8 @@ all, so the crate never depends on this workspace's own `semaprax` crate.
 **Known limitations, stated once.** Local evidence only: no hosted CI run is
 recorded for this section, and this harness assumes a Unix-like host with
 `clang`, `ar`, and `cargo` on `PATH` — Windows/MSVC is untried. The trusted
-descriptor bytes are the same fixture placeholder `fixture.rs` uses (#119
-still blocks deriving one from a real checked generic export). The generated
+descriptor bytes are a canonical encoded Descriptor-v1 test fixture, not
+derived from a real checked generic export. The generated
 `rust-version = "1.88"` field states the minimum-toolchain claim; the
 execution harness builds and runs the generated crate with whatever
 `rustc`/`cargo` the host provides (1.98 locally), not a provisioned 1.88
@@ -424,9 +439,8 @@ provisioned.
 **Known limitations, stated once.** Local evidence only: no hosted CI run is
 recorded for this section, and this harness assumes a Unix-like host with
 `clang` (or `$CLANG`) and `ar` on `PATH` — Windows/MSVC is untried. The
-trusted descriptor bytes are the same kind of fixture placeholder
-`fixture.rs` and the Rust calling consumer use (#119 still blocks deriving
-one from a real checked generic export). The type model covers flat
+trusted descriptor bytes are a canonical encoded Descriptor-v1 test fixture,
+not derived from a real checked generic export. The type model covers flat
 owned-`Bytes` leaves only (see above); nested records and Copy scalars are
 not yet generated. No maximum-total-payload (16 MiB) case is exercised, only
 the per-leaf (64 KiB) bound — a narrower but still first-over-bound proof,
@@ -574,9 +588,8 @@ recorded for this section, and no browser/Chromium fixture is exercised —
 is deferred, not claimed. This harness is gated on `node` and a
 repository-pinned (5.8.3) `tsc` being present on `PATH` or at a known pnpm
 install location; it skips (never fails) on a host without either. The
-trusted descriptor bytes are the same kind of fixture placeholder the Rust
-section's harness uses (#119 still blocks deriving one from a real checked
-generic export). Most importantly: this proves the generated consumer's own
+trusted descriptor bytes are a canonical encoded Descriptor-v1 test fixture,
+not derived from a real checked generic export. Most importantly: this proves the generated consumer's own
 real execution, exact-copy-out, exact-integer carrier decoding, and exact
 settlement against real Wasm bytecode; it does not prove a compiled
 open/input_prepare/call/result_export/release Wasm provider ABI, because
@@ -732,9 +745,8 @@ same contract identity, not derived from any one descriptor.
 recorded for this section, and this harness assumes a Unix-like host with
 `clang`/`clang++` (or `$CLANG`/`$CLANGXX`) on `PATH` — Windows/MSVC is
 untried, matching every other native-adapter harness in this document. The
-trusted descriptor bytes are the same kind of fixture placeholder
-`fixture.rs` and the C11/Rust calling consumers use (#119 still blocks
-deriving one from a real checked generic export). The type model covers
+trusted descriptor bytes are a canonical encoded Descriptor-v1 test fixture,
+not derived from a real checked generic export. The type model covers
 flat owned-`Bytes` leaves only (see above); nested records and Copy scalars
 are not yet generated (#119), and no maximum-total-payload (16 MiB) case is
 exercised for this consumer (#226). `ReleaseFailed` is declared in the

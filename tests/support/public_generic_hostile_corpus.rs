@@ -35,45 +35,15 @@
 //! route's own full local matrix remains covered by its existing generated
 //! test, unmodified.
 //!
-//! Issue #173 added `binding_wrong_target_profile` and
-//! `binding_valid_for_different_artifact`: both submit a FULLY well-formed
-//! alternate `NativeProviderBindingV1`/`WasmProviderBindingV1` (never a
-//! corrupted byte string) that a real decoder would happily accept as *some*
-//! legitimate binding, just not this one's. This is deliberately a different
-//! failure mode than `binding_last_byte_flipped`'s arbitrary bit flip: it
-//! proves the open-time check requires exact agreement with this route's OWN
-//! trusted binding -- not merely well-formedness, not a plausible embedded
-//! digest, and not the right shape for a DIFFERENT deployment or a
-//! DIFFERENT target runtime. Issue #173 also asked, at the wider descriptor
-//! level, for hostility across "extra fields, reordering, duplicates,
-//! unknown version, wrong schema" and "stale ... type grammar, surface,
-//! target, artifact ... associations". Those are deliberately NOT added
-//! here: at the layer this file's four consumers actually exercise, the
-//! descriptor and binding are opaque authenticated byte strings compared for
-//! exact equality (see `spx_pg_provider_open_v1` in
-//! `src/public_generic_abi/native/provider_body.c` and
-//! `verifyDescriptorAndBinding` in
-//! `src/public_generic_consumer/typescript_calling/render.rs`), not the
-//! structured, framed-field `DescriptorV1` wire format
-//! (`src/public_generic_abi/descriptor.rs`) that already has its own
-//! independent hostile coverage for truncation, trailing/extra bytes,
-//! reordering, an oversized length claim, an unknown schema literal, a
-//! stale `boundary_profile`/`type_grammar_schema` version, and cross-paired
-//! staleness on every one of `export_id`/`program_root_digest`/
-//! `source_projection_digest`/`public_surface_digest`/`input.term`/
-//! `input.instance_digest`/`result.term`/`result.instance_digest`
-//! (`src/public_generic_abi/descriptor/tests.rs`). That structured schema is
-//! not yet threaded through the generated calling consumers or the
-//! native/Wasm provider ABI this file drives -- the calling-consumer layer
-//! only ever sees the encoded blob, never its fields -- so "reorder a
-//! field"/"duplicate a field"/"unknown version" collapse to exactly the same
-//! observable outcome this file already proves (any byte difference is
-//! rejected) rather than being independently meaningful new cases at THIS
-//! layer. Widening that requires the flat owned-Bytes calling-consumer type
-//! model (issue #119) to carry real descriptor structure first; until then,
-//! duplicating the reference codec's own field-level cases here would
-//! silently claim more cross-consumer coverage than the bytes actually let
-//! any of the four generated consumers observe.
+//! Issue #173 adds fully formed alternate bindings and a canonical encoded
+//! Descriptor-v1 baseline. The shared descriptor cases mutate individual
+//! framed fields, UTF-8, schema, length, order, and frame count, then pin the
+//! reference decoder/replay reason before passing identical bytes to all four
+//! generated consumers. Each generated caller also checks the Descriptor-v1
+//! frame envelope before its byte-exact trusted-descriptor pairing. The
+//! provider ABI still treats its descriptor as authenticated bytes. The
+//! reference replay accepts a presentation-name-only change to the same
+//! identity; calling-consumer pairing remains byte-exact by its own contract.
 
 /// The one descriptor baseline every one of the four generated consumers is
 /// generated from in the shared-corpus harnesses. Provider-family-agnostic
@@ -83,8 +53,136 @@
 /// `generate_typescript_calling_consumer` alike -- the descriptor-mutation
 /// cases below are the one case family that is byte-for-byte identical
 /// across all four routes, not merely recipe-identical.
-pub const BASELINE_DESCRIPTOR_BYTES: &[u8] =
-    b"fixture-public-generic-descriptor-bytes-issue-160-shared-corpus";
+pub fn baseline_descriptor_bytes() -> &'static [u8] {
+    use std::sync::OnceLock;
+
+    use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
+    static BASELINE: OnceLock<Vec<u8>> = OnceLock::new();
+    BASELINE.get_or_init(|| {
+        DescriptorV1::new(
+            "issue173.shared.export",
+            "shared_export",
+            format!("sha256:{}", "a".repeat(64)),
+            format!("sha256:{}", "b".repeat(64)),
+            format!("sha256:{}", "c".repeat(64)),
+            InstanceBinding {
+                term: "@13:issue173.pair<bytes,bool>".to_owned(),
+                instance_digest: format!("sha256:{}", "d".repeat(64)),
+            },
+            InstanceBinding {
+                term: "@13:issue173.pair<bytes,i64>".to_owned(),
+                instance_digest: format!("sha256:{}", "e".repeat(64)),
+            },
+        )
+        .encode()
+    })
+}
+
+/// Mutations of actual Descriptor-v1 frames. Each entry changes framing,
+/// identity, or one presentation field. The Rust reference replay outcome is
+/// pinned below before the same bytes enter generated consumers.
+pub fn structured_descriptor_cases() -> Vec<(&'static str, Vec<u8>, &'static str, &'static str)> {
+    let baseline = baseline_descriptor_bytes();
+    let mut frames = Vec::with_capacity(12);
+    let mut offset = 0usize;
+    for _ in 0..12 {
+        let prefix: [u8; 8] = baseline[offset..offset + 8].try_into().unwrap();
+        let length = usize::try_from(u64::from_le_bytes(prefix)).unwrap();
+        let start = offset + 8;
+        frames.push(start..start + length);
+        offset = start + length;
+    }
+    assert_eq!(offset, baseline.len());
+    let mut cases = Vec::new();
+    let mut changed = baseline.to_vec();
+    let schema_end = frames[0].end;
+    changed[schema_end - 1] = b'2';
+    cases.push((
+        "descriptor_unknown_schema",
+        changed,
+        "SPX-PG701",
+        "ae18c7e8d694b441248e75772ca328ab0a2b5c30bd2cc75aed20abdc81a66581",
+    ));
+
+    let mut changed = baseline.to_vec();
+    changed[frames[3].start] = 0xff;
+    cases.push((
+        "descriptor_invalid_utf8_export_id",
+        changed,
+        "SPX-PG701",
+        "ed3f8caa5b0db3e4437890b2e634985a0139017e5860de6e75fcf7ee43622188",
+    ));
+
+    let mut changed = baseline.to_vec();
+    changed[frames[4].start] = b'x';
+    cases.push((
+        "descriptor_stale_program_root",
+        changed,
+        "SPX-PG703",
+        "4ab9e5a74458a2cbc78ce6a7058b00e07c083f826e073b5e39df7f75b41f449d",
+    ));
+
+    let mut changed = baseline.to_vec();
+    let root = baseline[frames[4].clone()].to_vec();
+    let source = baseline[frames[5].clone()].to_vec();
+    assert_eq!(root.len(), source.len());
+    changed[frames[4].clone()].copy_from_slice(&source);
+    changed[frames[5].clone()].copy_from_slice(&root);
+    cases.push((
+        "descriptor_reordered_context",
+        changed,
+        "SPX-PG703",
+        "30ffdd3b8914c5a3db02cdacaaecc8d2455ab4ee8104c9370125350555dd5a94",
+    ));
+
+    let mut changed = baseline.to_vec();
+    changed[frames[5].clone()].copy_from_slice(&root);
+    cases.push((
+        "descriptor_duplicate_context",
+        changed,
+        "SPX-PG703",
+        "2044d90537fa0489da9a7b91013b21ed8ae761675e638d62aba1e8a3deea1089",
+    ));
+
+    let mut changed = baseline.to_vec();
+    changed.pop();
+    cases.push((
+        "descriptor_truncated_final_frame",
+        changed,
+        "SPX-PG701",
+        "63ccea6b140df4018eecb9339e31b087f99aa07106c7e4ad64efc682d825a40f",
+    ));
+
+    let mut changed = baseline.to_vec();
+    changed.extend_from_slice(&0u64.to_le_bytes());
+    cases.push((
+        "descriptor_extra_frame",
+        changed,
+        "SPX-PG701",
+        "96db6b09c830f6f74a3dbbd9f24654af0b8f765ec8f61d4c9e7f8e405a0748f2",
+    ));
+
+    let mut changed = baseline.to_vec();
+    changed[0..8].copy_from_slice(&(65_537u64).to_le_bytes());
+    cases.push((
+        "descriptor_overlong_schema_claim",
+        changed,
+        "SPX-PG701",
+        "201aed8281fcc24e9e4b414e4c481a7ed295d5704896a747d3c3f8f4b7118496",
+    ));
+
+    // Reference identity replay permits this presentation-only change, while
+    // the generated calling consumer's frozen pairing contract is byte-exact.
+    let mut changed = baseline.to_vec();
+    changed[frames[11].start + 4] = b'E';
+    cases.push((
+        "descriptor_presentation_rename",
+        changed,
+        "REFERENCE_ACCEPTED",
+        "67ef2381b1c7f08c7aaf4f11c960404133b2e477a51e0915a81d2914cf566350",
+    ));
+    cases
+}
 
 /// Restates `src/public_generic_abi/boundary_profile.rs::MAX_BYTES_PER_LEAF`
 /// (64 KiB), exactly like every generated consumer already restates it
@@ -108,6 +206,15 @@ pub const EXPECTED: &[(&str, &str)] = &[
     ("descriptor_first_byte_flipped", "DESCRIPTOR_REJECTED"),
     ("binding_last_byte_flipped", "PROVIDER_MISMATCH"),
     ("descriptor_names_different_document", "DESCRIPTOR_REJECTED"),
+    ("descriptor_unknown_schema", "DESCRIPTOR_REJECTED"),
+    ("descriptor_invalid_utf8_export_id", "DESCRIPTOR_REJECTED"),
+    ("descriptor_stale_program_root", "DESCRIPTOR_REJECTED"),
+    ("descriptor_reordered_context", "DESCRIPTOR_REJECTED"),
+    ("descriptor_duplicate_context", "DESCRIPTOR_REJECTED"),
+    ("descriptor_truncated_final_frame", "DESCRIPTOR_REJECTED"),
+    ("descriptor_extra_frame", "DESCRIPTOR_REJECTED"),
+    ("descriptor_overlong_schema_claim", "DESCRIPTOR_REJECTED"),
+    ("descriptor_presentation_rename", "DESCRIPTOR_REJECTED"),
     ("exactly_per_leaf_bound_accepted", "ACCEPTED"),
     ("one_byte_over_per_leaf_bound_rejected", "CAPACITY_EXCEEDED"),
     // Issue #173: a fully well-formed alternate `NativeProviderBindingV1` /
@@ -210,6 +317,40 @@ pub fn assert_matches_expected(route: &str, actual: &[(String, String)]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_descriptor_mutations_have_exact_reference_refusals() {
+        use semaprax::public_generic_abi::descriptor::{decode, replay};
+        use sha2::{Digest as _, Sha256};
+
+        let trusted = decode(baseline_descriptor_bytes()).unwrap();
+        assert_eq!(trusted.encode(), baseline_descriptor_bytes());
+        assert_eq!(
+            format!(
+                "{:x}",
+                semaprax::digest_hex::LowerHex(Sha256::digest(baseline_descriptor_bytes()))
+            ),
+            "2aec79caf3374cbc59c4873679417553e9d8cf5f435eb646fb4dfea999890f30"
+        );
+        assert_eq!(structured_descriptor_cases().len(), 9);
+        for (name, bytes, expected_code, expected_sha256) in structured_descriptor_cases() {
+            assert_eq!(
+                format!(
+                    "{:x}",
+                    semaprax::digest_hex::LowerHex(Sha256::digest(&bytes))
+                ),
+                expected_sha256,
+                "{name}"
+            );
+            if expected_code == "REFERENCE_ACCEPTED" {
+                let replayed = replay(&bytes, &trusted).unwrap();
+                assert_ne!(replayed.export_name(), trusted.export_name());
+            } else {
+                let error = replay(&bytes, &trusted).unwrap_err();
+                assert_eq!(error.code, expected_code, "{name}");
+            }
+        }
+    }
 
     #[test]
     fn parses_shared_corpus_lines_and_ignores_unrelated_output() {

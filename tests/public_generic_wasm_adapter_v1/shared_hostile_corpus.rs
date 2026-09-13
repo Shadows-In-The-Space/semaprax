@@ -54,8 +54,8 @@ use super::reference_wasm_module;
 #[path = "../support/public_generic_hostile_corpus.rs"]
 mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
-    assert_matches_expected, parse_shared_corpus_lines, BASELINE_DESCRIPTOR_BYTES,
-    MAX_BYTES_PER_LEAF,
+    assert_matches_expected, baseline_descriptor_bytes, parse_shared_corpus_lines,
+    structured_descriptor_cases, MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -371,7 +371,35 @@ const TS_APPENDIX: &str = r#"
     console.log(`SHARED_CORPUS binding_valid_for_different_artifact ${status}`);
   });
 
+__STRUCTURED_DESCRIPTOR_CASES__
 "#;
+
+fn ts_structured_cases() -> String {
+    let mut result = String::new();
+    for (name, bytes, _, _) in structured_descriptor_cases() {
+        write!(
+            &mut result,
+            r#"
+  await test("shared corpus: {name}", async () => {{
+    const candidate = new Uint8Array({});
+    let status = "OTHER";
+    try {{
+      const provider = await Provider.open(wasmBytes, {{ descriptorBytes: candidate }});
+      provider.close();
+      status = "ACCEPTED";
+    }} catch (error) {{
+      if (error instanceof SemapraxPublicGenericException &&
+          error.detail.kind === "descriptor-rejected") status = "DESCRIPTOR_REJECTED";
+    }}
+    console.log(`SHARED_CORPUS {name} ${{status}}`);
+  }});
+"#,
+            js_byte_array_literal(&bytes)
+        )
+        .unwrap();
+    }
+    result
+}
 
 #[test]
 fn shared_hostile_corpus_agrees_with_the_native_manifest() {
@@ -399,9 +427,13 @@ fn shared_hostile_corpus_agrees_with_the_native_manifest() {
     let wasm_bytes = reference_wasm_module::build();
     let (input, output) = shapes();
     let binding = fixture_binding(&wasm_bytes);
-    let consumer =
-        generate_typescript_calling_consumer(BASELINE_DESCRIPTOR_BYTES, &binding, &input, &output)
-            .expect("a well-formed shape must generate");
+    let consumer = generate_typescript_calling_consumer(
+        baseline_descriptor_bytes(),
+        &binding,
+        &input,
+        &output,
+    )
+    .expect("a well-formed shape must generate");
 
     let workspace = Workspace::new("execute");
     eprintln!(
@@ -425,7 +457,8 @@ fn shared_hostile_corpus_agrees_with_the_native_manifest() {
         .replace(
             "__CROSS_ARTIFACT_BINDING_BYTES__",
             &js_byte_array_literal(&cross_artifact_binding_bytes),
-        );
+        )
+        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &ts_structured_cases());
 
     let round_trip_path = package_root.join("test/round-trip.mjs");
     let mut contents = fs::read_to_string(&round_trip_path).unwrap();
@@ -472,4 +505,104 @@ fn shared_hostile_corpus_agrees_with_the_native_manifest() {
 
     let outcomes = parse_shared_corpus_lines(&stdout);
     assert_matches_expected("typescript_calling_consumer", &outcomes);
+}
+
+#[test]
+fn malformed_trusted_descriptor_is_rejected_before_wasm_instantiation() {
+    if !node_available() {
+        eprintln!("skipping: node is not available on PATH");
+        return;
+    }
+    let Some(tsc) = locate_tsc() else {
+        eprintln!("skipping: no repository-pinned (5.8.3) tsc is available on this host");
+        return;
+    };
+    let wasm_bytes = reference_wasm_module::build();
+    let (input, output) = shapes();
+    let binding = fixture_binding(&wasm_bytes);
+    let unknown_schema = structured_descriptor_cases()
+        .into_iter()
+        .find(|(name, _, _, _)| *name == "descriptor_unknown_schema")
+        .unwrap()
+        .1;
+    let baseline = baseline_descriptor_bytes();
+    let schema_length =
+        usize::try_from(u64::from_le_bytes(baseline[..8].try_into().unwrap())).unwrap();
+    let mut bom_schema = Vec::with_capacity(baseline.len() + 3);
+    bom_schema.extend_from_slice(&u64::try_from(schema_length + 3).unwrap().to_le_bytes());
+    bom_schema.extend_from_slice(&[0xef, 0xbb, 0xbf]);
+    bom_schema.extend_from_slice(&baseline[8..]);
+    assert!(semaprax::public_generic_abi::descriptor::decode(&bom_schema).is_err());
+    for (name, malformed) in [
+        ("unknown-schema", unknown_schema),
+        ("bom-prefixed-schema", bom_schema),
+    ] {
+        let consumer = generate_typescript_calling_consumer(&malformed, &binding, &input, &output)
+            .expect(
+                "generation stores configured descriptor bytes without granting them authority",
+            );
+        let workspace = Workspace::new(name);
+        let root = workspace.path("generated-typescript-consumer");
+        write_generated_package(&root, consumer.files());
+        let build = run(
+            Command::new(&tsc)
+                .current_dir(&root)
+                .args(["-p", "tsconfig.json"]),
+            "tsc -p tsconfig.json",
+        );
+        assert!(
+            build.status.success(),
+            "type-check failed:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let wasm_path = workspace.path("reference.wasm");
+        fs::write(&wasm_path, &wasm_bytes).unwrap();
+        fs::write(
+            root.join("test/malformed-trusted.mjs"),
+            r#"
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { Provider } from "../dist/wasm-provider.js";
+import { TRUSTED_DESCRIPTOR_BYTES } from "../dist/descriptor.js";
+import { SemapraxPublicGenericException } from "../dist/errors.js";
+const wasmBytes = readFileSync(process.argv[2]);
+const original = WebAssembly.instantiate;
+let instantiations = 0;
+WebAssembly.instantiate = async (...args) => {
+  instantiations++;
+  throw new Error("provider instantiation reached before descriptor rejection");
+};
+try {
+  await assert.rejects(
+    () => Provider.open(wasmBytes, { descriptorBytes: TRUSTED_DESCRIPTOR_BYTES }),
+    error => error instanceof SemapraxPublicGenericException &&
+      error.detail.kind === "descriptor-rejected",
+  );
+  assert.equal(instantiations, 0);
+} finally {
+  WebAssembly.instantiate = original;
+}
+console.log("MALFORMED_TRUSTED_DESCRIPTOR_REJECTED");
+"#,
+        )
+        .unwrap();
+        let output = run(
+            Command::new("node")
+                .current_dir(&root)
+                .arg("test/malformed-trusted.mjs")
+                .arg(&wasm_path),
+            "node test/malformed-trusted.mjs",
+        );
+        assert!(
+        output.status.success(),
+        "malformed trusted descriptor was not rejected before instantiation:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("MALFORMED_TRUSTED_DESCRIPTOR_REJECTED"),
+            "{name}"
+        );
+    }
 }

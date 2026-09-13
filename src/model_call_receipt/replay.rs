@@ -48,6 +48,12 @@ pub enum ReplayError {
     MissingRetainedResponse,
     /// Retained response bytes do not commit to `receipt.response_digest`.
     ResponseDigestMismatch,
+    /// A response was retained with a length different from the receipt's
+    /// independently recorded response length.
+    ResponseLengthMismatch,
+    /// The receipt claims no response was recorded, but carries response
+    /// metadata or a post-settlement outcome that requires one.
+    ContradictoryNoResponseState,
     /// The receipt claims a decoded or refused proposal, but no decoder was
     /// supplied to replay the decode step against.
     MissingDecoder,
@@ -62,6 +68,9 @@ pub enum ReplayError {
     /// The receipt claims the proposal was admitted, but replay's decode
     /// refused it (or vice versa) — the recorded outcome does not reproduce.
     DecodeDisagreesWithReceipt,
+    /// A receipt simultaneously claims an admitted proposal and a refusal;
+    /// these are mutually exclusive decode outcomes.
+    ContradictoryProposalOutcome,
 }
 
 /// Independently replays one receipt against retained bytes.
@@ -86,6 +95,18 @@ pub fn replay_receipt(
     }
 
     let Some(expected_response_digest) = &receipt.response_digest else {
+        // A missing response digest is meaningful state, rather than a
+        // licence to ignore the rest of the receipt. In particular, a
+        // forged decoded/settled outcome must not pass through this early
+        // return merely because no response bytes were supplied.
+        if retained.response.is_some()
+            || receipt.response_bytes_len.is_some()
+            || receipt.terminal_stage.is_settled()
+            || receipt.proposal_digest.is_some()
+            || receipt.proposal_refusal_reason.is_some()
+        {
+            return Err(ReplayError::ContradictoryNoResponseState);
+        }
         // No response was ever recorded (a pre-settlement failure or
         // cancellation) — nothing further to replay.
         return Ok(());
@@ -96,11 +117,20 @@ pub fn replay_receipt(
     if &commit_response_bytes(response_bytes) != expected_response_digest {
         return Err(ReplayError::ResponseDigestMismatch);
     }
+    if receipt
+        .response_bytes_len
+        .is_some_and(|expected_len| expected_len != response_bytes.len())
+    {
+        return Err(ReplayError::ResponseLengthMismatch);
+    }
 
     if receipt.proposal_digest.is_none() && receipt.proposal_refusal_reason.is_none() {
         // Settled but never decoded (e.g. cancelled after the response
         // arrived, before decode ran).
         return Ok(());
+    }
+    if receipt.proposal_digest.is_some() && receipt.proposal_refusal_reason.is_some() {
+        return Err(ReplayError::ContradictoryProposalOutcome);
     }
 
     let decoder = decoder.ok_or(ReplayError::MissingDecoder)?;
@@ -116,8 +146,8 @@ pub fn replay_receipt(
                 return Err(ReplayError::ProposalDigestMismatch);
             }
         }
-        ProposalOutcome::Refused(_) => {
-            if receipt.proposal_refusal_reason.is_none() {
+        ProposalOutcome::Refused(reason) => {
+            if receipt.proposal_refusal_reason.as_deref() != Some(reason.as_str()) {
                 return Err(ReplayError::DecodeDisagreesWithReceipt);
             }
         }
@@ -287,6 +317,16 @@ mod tests {
     }
 
     #[test]
+    fn replay_rejects_a_response_length_that_does_not_match_retained_bytes() {
+        let (mut receipt, _handler, mut decoder, extras) = dispatch_once_and_build_receipt();
+        receipt.response_bytes_len = Some(extras.response.as_ref().unwrap().len() + 1);
+        assert_eq!(
+            replay_receipt(&receipt, &extras, Some(&mut decoder)),
+            Err(ReplayError::ResponseLengthMismatch)
+        );
+    }
+
+    #[test]
     fn replay_rejects_schema_drift_before_attempting_decode() {
         let (receipt, _handler, _decoder, extras) = dispatch_once_and_build_receipt();
         let mut drifted_decoder = FixtureProposalDecoder::new("sha256:a-different-grammar");
@@ -312,10 +352,50 @@ mod tests {
         // refuse it, while the receipt still claims (falsely) that it was
         // admitted with the original proposal digest.
         extras.response = Some(b"not json shaped at all".to_vec());
+        receipt.response_bytes_len = Some(extras.response.as_ref().unwrap().len());
         receipt.response_digest = Some(commit_response_bytes(extras.response.as_ref().unwrap()));
         assert_eq!(
             replay_receipt(&receipt, &extras, Some(&mut decoder)),
             Err(ReplayError::DecodeDisagreesWithReceipt)
+        );
+    }
+
+    #[test]
+    fn replay_rejects_a_receipt_claiming_the_wrong_refusal_reason() {
+        let (mut receipt, _handler, mut decoder, mut extras) = dispatch_once_and_build_receipt();
+        let response = b"not json shaped at all".to_vec();
+        receipt.response_digest = Some(commit_response_bytes(&response));
+        receipt.response_bytes_len = Some(response.len());
+        receipt.proposal_digest = None;
+        receipt.proposal_refusal_reason = Some("forged_reason".into());
+        extras.response = Some(response);
+        assert_eq!(
+            replay_receipt(&receipt, &extras, Some(&mut decoder)),
+            Err(ReplayError::DecodeDisagreesWithReceipt)
+        );
+    }
+
+    #[test]
+    fn replay_rejects_a_receipt_claiming_admission_and_refusal_together() {
+        let (mut receipt, _handler, mut decoder, extras) = dispatch_once_and_build_receipt();
+        receipt.proposal_refusal_reason = Some("forged_refusal".into());
+        assert_eq!(
+            replay_receipt(&receipt, &extras, Some(&mut decoder)),
+            Err(ReplayError::ContradictoryProposalOutcome)
+        );
+    }
+
+    #[test]
+    fn replay_rejects_a_missing_response_digest_with_a_settled_outcome() {
+        let mut receipt = sample_receipt();
+        receipt.response_digest = None;
+        receipt.response_bytes_len = None;
+        receipt.terminal_stage = ReceiptStage::Decoded;
+        receipt.proposal_digest = Some(commit_proposal_bytes(b"proposal-bytes"));
+        let extras = extras_for(b"do the thing", b"turn 0 context", None);
+        assert_eq!(
+            replay_receipt(&receipt, &extras, None),
+            Err(ReplayError::ContradictoryNoResponseState)
         );
     }
 

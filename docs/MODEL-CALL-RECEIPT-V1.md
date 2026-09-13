@@ -51,25 +51,14 @@ per-call shape with root bindings, model/provider/adapter identity, timing,
 cost, or provider-reported usage) — #180 asks for the richer per-call shape,
 which is what this module adds.
 
-## Why a new module instead of extending `journal`/`model_invoke` directly
+## Journal integration
 
-`src/live_invocation/**` was leased to another workstream for the session
-this module was built in and is read-only from this module's perspective —
-its docs, however, already name `#180` as the intended owner of exactly this
-layer, and design it to be built *on top of* the journal rather than beside
-it. Concretely, a real integration constructs one
-[`ModelCallReceipt`](../src/model_call_receipt/receipt.rs) per turn by
-folding the same already-`journal::validate`-d entries
-`journal::receipt_projection` already folds (turn, `RequestIntent`'s
-`request_digest`/`reserved_budget`, `ResponseRecorded`'s `response_digest` /
-`ResponseFailed`'s `failure`, `ProposalAdmitted`'s `proposal_digest` /
-`ProposalRefused`'s reason) together with the root/attempt/adapter metadata
-the deployment already carries (`LiveInvocationId`, ProgramRoot,
-DeploymentRoot, InstanceRoot, Agent id, attempt ordinal, model/provider
-class, adapter identity). This module never re-implements
-`journal::validate`'s ordering rules and never accepts a raw
-`model_invoke::ModelHandler` anywhere in its public surface, so it
-structurally cannot redispatch a call itself — see "Replay" below.
+The [Model Call Journal Receipt v1](MODEL-CALL-JOURNAL-RECEIPT-V1.md)
+projection now folds actual generic-kernel journals and authenticated source
+checkpoints. It uses a separate schema because historical journals lack the
+required timestamps and cost estimates of the enriched v1 receipt below.
+Unknown facts remain absent; no fabricated host metadata is used to populate
+this older contract. Both schemas can be retained as Audit Capsule objects.
 
 ## Schema: `ModelCallReceipt v1`
 

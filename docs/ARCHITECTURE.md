@@ -127,6 +127,13 @@ charged replay reservations, optional usage observations, and terminal snapshots
 `source_journal/io_v5` owns additive cumulative request/response reservations
 and their nonrefundable migration carry; [Source Live I/O v5](SOURCE-LIVE-IO-V5.md)
 defines the bound limits and the private CLI v3 projection.
+`model_call_receipt/journal_projection` validates generic journal inputs and
+folds per-attempt evidence; `model_call_receipt/source_projection` folds opaque
+recovered source checkpoints. Both bind the complete journal chain, preserve
+unknown host facts, and export read-only Audit Capsule object references.
+Neither projector writes journal rows or grants replay/dispatch authority.
+[Model Call Journal Receipt v1](MODEL-CALL-JOURNAL-RECEIPT-V1.md) owns this
+additive schema separately from the enriched host-metadata receipt contract.
 `agent_lifecycle/iterative/source_live` owns the one ledger and replay cursor;
 its optional session hooks reuse the checked loop in `iterative/driver/live`
 for fresh and recovered execution. Replayed stages reserve fresh fuel before

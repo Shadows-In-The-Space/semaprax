@@ -1,4 +1,4 @@
-//! Embedding API v1: a small, versioned Rust entry point for checking one
+//! Embedding API v1: small, versioned Rust entry points for analyzing one
 //! caller-supplied SEMAPRAX compilation unit, built for issue #203 ("publish
 //! a small stable Semaprax embedding API with explicit host capabilities").
 //!
@@ -17,27 +17,28 @@
 //!
 //! # What this module is
 //!
-//! [`check_source`] parses and statically analyzes one caller-supplied
-//! source string and returns a closed, versioned [`CheckOutcome`] — never
-//! the internal [`crate::ast::Program`] or [`crate::hir::Analysis`] (whose
-//! `resolved` field carries [`crate::hir::ResolvedProgram`]). Both stay
-//! compiler-owned, exactly as issue #203's "Validated internals remain
-//! compiler-owned" acceptance criterion requires: an embedder gets
-//! diagnostics and a revision hash, never a value whose shape this crate is
-//! free to change without notice.
+//! [`check_source`], [`format_source`], [`graph_source`], and
+//! [`context_source`] parse caller-supplied source strings for four
+//! stateless analysis operations. Each returns a closed, versioned outcome —
+//! never the internal [`crate::ast::Program`] or [`crate::hir::Analysis`]
+//! (whose `resolved` field carries [`crate::hir::ResolvedProgram`]). Both
+//! stay compiler-owned, exactly as issue #203's "Validated internals remain
+//! compiler-owned" acceptance criterion requires: an embedder gets reports,
+//! canonical projections, and a revision hash, never a value whose shape
+//! this crate is free to change without notice.
 //!
-//! No capability is required to call [`check_source`]: checking is a pure
-//! function of the bytes the caller passes in (module-level "in scope"
-//! bullets "Source/Project load" and "Check"). It opens no file, spawns no
-//! process, and reaches no network — the only input is `source`, and
-//! `unit_name` is used solely to label diagnostics, never to read a path
-//! (`unit_name_is_never_read_from_disk` below proves this against a path
-//! that does not exist on this machine). A future slice that reaches
-//! "Deterministic interpreter execution for admitted profiles" would need
-//! its own explicit capability, mirroring
+//! No capability is required for any of these operations: each is a pure
+//! function of caller bytes and its declared query bounds (module-level
+//! "in scope" bullets "Source/Project load", "Check", and
+//! "Format, graph/query/context"). It opens no file, spawns no process, and
+//! reaches no network — `unit_name` only labels diagnostics and is never read
+//! as a path (`unit_name_is_never_read_from_disk` below proves this against a
+//! path that does not exist on this machine). A future slice that reaches
+//! Deterministic interpreter execution uses its own explicit
+//! [`ExecutionCapability`], mirroring
 //! [`crate::live_invocation::model_invoke::ModelInvokeCapability`] and
 //! [`crate::semantic_embedding::capability::EmbeddingCapability`]'s shape;
-//! this module does not attempt execution and grants none.
+//! it grants only the prepared, pathless evaluator and no host effect provider.
 //!
 //! # What this module is not
 //!
@@ -45,8 +46,7 @@
 //! no persisted state between calls, and no `Project`/multi-file workspace
 //! load (`docs/PERSISTENT-INCREMENTAL-SEMANTIC-SERVICE-V1.md`'s
 //! `SemanticWorkspaceService` already owns that, for its own operation
-//! surface). It is not a C ABI. It does not run the deterministic
-//! interpreter. It does not do candidate validate/replay. See
+//! surface). It is not a C ABI. It does not do candidate validate/replay. See
 //! `docs/EMBEDDING-API-V1.md` for the complete scope statement and
 //! nonclaims this module is honestly bounded by.
 //!
@@ -68,6 +68,13 @@
 
 use crate::diagnostic::{Diagnostic, Severity};
 
+mod execution;
+
+pub use execution::{
+    execute_entry_source, ExecutionCancellation, ExecutionCapability, ExecutionOptions,
+    ExecutionOutcome, ExecutionReport,
+};
+
 /// A diagnostic code reserved for [`check_source`]'s panic-normalization
 /// path. No parser or analyzer diagnostic uses this code; it names an
 /// embedding-boundary defect, never a property of the checked program.
@@ -78,7 +85,7 @@ pub const PANIC_NORMALIZED_DIAGNOSTIC_CODE: &str = "SPX-EMB001";
 /// `docs/EMBEDDING-API-V1.md`.
 pub const EMBEDDING_API_VERSION: EmbeddingApiVersion = EmbeddingApiVersion {
     major: 1,
-    minor: 2,
+    minor: 5,
     patch: 0,
 };
 
@@ -426,6 +433,418 @@ pub fn graph_source(unit_name: &str, source: &str) -> GraphOutcome {
     graph_with(&StandardGrapher, unit_name, source)
 }
 
+/// One closed semantic facet admitted by [`ContextOptions`]. The names and
+/// meanings match the v1 agent-context projection, but this distinct public
+/// enum keeps the embedding API from exposing the graph module's broader,
+/// evolving option surface as its own compatibility contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextFilter {
+    Contracts,
+    Ownership,
+    Effects,
+    Types,
+}
+
+impl ContextFilter {
+    fn into_graph_filter(self) -> crate::graph::AgentContextFilter {
+        match self {
+            Self::Contracts => crate::graph::AgentContextFilter::Contracts,
+            Self::Ownership => crate::graph::AgentContextFilter::Ownership,
+            Self::Effects => crate::graph::AgentContextFilter::Effects,
+            Self::Types => crate::graph::AgentContextFilter::Types,
+        }
+    }
+}
+
+/// Validated bounds and facets for one [`context_source`] query.
+///
+/// The default is the graph v1 context default: a depth of one, a 64 KiB
+/// output limit, 256 facts, and contracts/ownership/effects/types. The
+/// constructor delegates every range, duplicate-filter, and empty-filter
+/// refusal to the canonical graph validator before a source unit is parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextOptions {
+    depth: usize,
+    max_bytes: usize,
+    max_nodes: usize,
+    filters: Vec<ContextFilter>,
+}
+
+impl Default for ContextOptions {
+    fn default() -> Self {
+        Self {
+            depth: 1,
+            max_bytes: 64 * 1024,
+            max_nodes: 256,
+            filters: vec![
+                ContextFilter::Contracts,
+                ContextFilter::Ownership,
+                ContextFilter::Effects,
+                ContextFilter::Types,
+            ],
+        }
+    }
+}
+
+impl ContextOptions {
+    /// Construct options for a bounded v1 semantic-context query.
+    ///
+    /// The returned error is the canonical graph option diagnostic; this API
+    /// neither loosens limits nor invents a parallel diagnostic vocabulary.
+    pub fn new(
+        depth: usize,
+        max_bytes: usize,
+        max_nodes: usize,
+        filters: impl IntoIterator<Item = ContextFilter>,
+    ) -> Result<Self, Diagnostic> {
+        let options = Self {
+            depth,
+            max_bytes,
+            max_nodes,
+            filters: filters.into_iter().collect(),
+        };
+        options.to_graph_options()?;
+        Ok(options)
+    }
+
+    #[must_use]
+    pub const fn depth(&self) -> usize {
+        self.depth
+    }
+
+    #[must_use]
+    pub const fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+
+    #[must_use]
+    pub const fn max_nodes(&self) -> usize {
+        self.max_nodes
+    }
+
+    #[must_use]
+    pub fn filters(&self) -> &[ContextFilter] {
+        &self.filters
+    }
+
+    fn to_graph_options(&self) -> Result<crate::graph::AgentContextOptions, Diagnostic> {
+        crate::graph::AgentContextOptions::new(
+            self.depth,
+            self.max_bytes,
+            self.max_nodes,
+            self.filters
+                .iter()
+                .copied()
+                .map(ContextFilter::into_graph_filter),
+        )
+    }
+}
+
+/// The closed outcome of a bounded semantic-context query over one
+/// caller-supplied compilation unit. It returns canonical JSON only, never a
+/// parsed AST, resolved HIR, or graph-owned query state.
+#[derive(Debug, Clone)]
+pub struct ContextOutcome {
+    /// Echoes the `unit_name` the caller passed in; never read from disk.
+    pub unit_name: String,
+    /// Echoes the requested function display name or persistent declaration
+    /// ID; it is data for graph selection and never a filesystem path.
+    pub symbol: String,
+    /// `true` when the unit parsed and resolved and the bounded query ran,
+    /// including the ordinary no-match result (`context_json` is `None`).
+    pub ok: bool,
+    /// Parse, resolution, graph, or option diagnostics on failure. Successful
+    /// context output follows `graph::agent_context_json` and therefore does
+    /// not carry non-error analysis warnings; call [`check_source`] as well
+    /// when a host needs those warnings.
+    pub diagnostics: Vec<Diagnostic>,
+    /// The canonical `semaprax.agent-context.v1` JSON, or `None` when no
+    /// function matches `symbol` or when `ok` is false.
+    pub context_json: Option<String>,
+}
+
+/// Internal seam behind [`context_source`], used only to prove that a panic
+/// is normalized before it can cross the host boundary.
+trait SourceContexter {
+    fn context(
+        &self,
+        unit_name: &str,
+        source: &str,
+        symbol: &str,
+        options: &ContextOptions,
+    ) -> Result<Option<String>, Vec<Diagnostic>>;
+}
+
+/// The real context path parses explicit bytes then forwards to the canonical
+/// bounded v1 graph-query implementation.
+struct StandardContexter;
+
+impl SourceContexter for StandardContexter {
+    fn context(
+        &self,
+        unit_name: &str,
+        source: &str,
+        symbol: &str,
+        options: &ContextOptions,
+    ) -> Result<Option<String>, Vec<Diagnostic>> {
+        let graph_options = options.to_graph_options().map_err(|item| vec![item])?;
+        let program = crate::parse(source, unit_name).map_err(|item| vec![item])?;
+        crate::graph::agent_context_json(&program, symbol, &graph_options)
+    }
+}
+
+fn context_with(
+    contexter: &dyn SourceContexter,
+    unit_name: &str,
+    source: &str,
+    symbol: &str,
+    options: &ContextOptions,
+) -> ContextOutcome {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        contexter.context(unit_name, source, symbol, options)
+    }));
+    match outcome {
+        Ok(Ok(context_json)) => ContextOutcome {
+            unit_name: unit_name.to_owned(),
+            symbol: symbol.to_owned(),
+            ok: true,
+            diagnostics: Vec::new(),
+            context_json,
+        },
+        Ok(Err(diagnostics)) => ContextOutcome {
+            unit_name: unit_name.to_owned(),
+            symbol: symbol.to_owned(),
+            ok: false,
+            diagnostics,
+            context_json: None,
+        },
+        Err(_panic_payload) => ContextOutcome {
+            unit_name: unit_name.to_owned(),
+            symbol: symbol.to_owned(),
+            ok: false,
+            diagnostics: vec![Diagnostic {
+                code: PANIC_NORMALIZED_DIAGNOSTIC_CODE,
+                severity: Severity::Error,
+                message: format!(
+                    "the embedding context boundary caught a panic while querying {symbol:?} \
+                     in {unit_name:?} and normalized it to this diagnostic instead of letting \
+                     the unwind cross the embedding API boundary"
+                ),
+                path: Some(unit_name.to_owned()),
+                span: None,
+                help: Some(
+                    "this names an embedding-boundary defect, not a property of the checked \
+                     source; report it against the compiler"
+                        .to_owned(),
+                ),
+            }],
+            context_json: None,
+        },
+    }
+}
+
+/// Return a deterministic, byte- and node-bounded v1 semantic-context view
+/// for one caller-supplied compilation unit.
+///
+/// `source`, `unit_name`, and `symbol` are caller-supplied data. This function
+/// opens no path, reads no ambient host state, and has no capability because it
+/// is a pure read-only analysis operation. It never lets a compiler panic
+/// unwind into the caller; such a panic becomes
+/// [`PANIC_NORMALIZED_DIAGNOSTIC_CODE`]. A no-match is successful and returns
+/// `ContextOutcome { ok: true, context_json: None, .. }`.
+pub fn context_source(
+    unit_name: &str,
+    source: &str,
+    symbol: &str,
+    options: &ContextOptions,
+) -> ContextOutcome {
+    context_with(&StandardContexter, unit_name, source, symbol, options)
+}
+
+/// Closed traversal direction admitted by [`ContextV2Options`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextDirection {
+    Forward,
+    Reverse,
+    Both,
+}
+
+impl ContextDirection {
+    fn into_graph_direction(self) -> crate::graph::AgentContextDirection {
+        match self {
+            Self::Forward => crate::graph::AgentContextDirection::Forward,
+            Self::Reverse => crate::graph::AgentContextDirection::Reverse,
+            Self::Both => crate::graph::AgentContextDirection::Both,
+        }
+    }
+}
+
+/// Validated v2 context options. V2 keeps [`ContextOptions`]'s exact bounds
+/// and facets while adding an explicit traversal direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextV2Options {
+    base: ContextOptions,
+    direction: ContextDirection,
+}
+
+impl Default for ContextV2Options {
+    fn default() -> Self {
+        Self {
+            base: ContextOptions::default(),
+            direction: ContextDirection::Forward,
+        }
+    }
+}
+
+impl ContextV2Options {
+    /// Construct options for a bounded v2 semantic-context query.
+    pub fn new(
+        depth: usize,
+        max_bytes: usize,
+        max_nodes: usize,
+        filters: impl IntoIterator<Item = ContextFilter>,
+        direction: ContextDirection,
+    ) -> Result<Self, Diagnostic> {
+        Ok(Self {
+            base: ContextOptions::new(depth, max_bytes, max_nodes, filters)?,
+            direction,
+        })
+    }
+
+    #[must_use]
+    pub const fn depth(&self) -> usize {
+        self.base.depth()
+    }
+
+    #[must_use]
+    pub const fn max_bytes(&self) -> usize {
+        self.base.max_bytes()
+    }
+
+    #[must_use]
+    pub const fn max_nodes(&self) -> usize {
+        self.base.max_nodes()
+    }
+
+    #[must_use]
+    pub fn filters(&self) -> &[ContextFilter] {
+        self.base.filters()
+    }
+
+    #[must_use]
+    pub const fn direction(&self) -> ContextDirection {
+        self.direction
+    }
+
+    fn to_graph_options(&self) -> Result<crate::graph::AgentContextV2Options, Diagnostic> {
+        crate::graph::AgentContextV2Options::new(
+            self.base.depth,
+            self.base.max_bytes,
+            self.base.max_nodes,
+            self.base
+                .filters
+                .iter()
+                .copied()
+                .map(ContextFilter::into_graph_filter),
+            self.direction.into_graph_direction(),
+        )
+    }
+}
+
+/// Internal seam behind [`context_v2_source`], used only to prove v2 panic
+/// normalization at the embedding boundary.
+trait SourceV2Contexter {
+    fn context(
+        &self,
+        unit_name: &str,
+        source: &str,
+        symbol: &str,
+        options: &ContextV2Options,
+    ) -> Result<Option<String>, Vec<Diagnostic>>;
+}
+
+struct StandardV2Contexter;
+
+impl SourceV2Contexter for StandardV2Contexter {
+    fn context(
+        &self,
+        unit_name: &str,
+        source: &str,
+        symbol: &str,
+        options: &ContextV2Options,
+    ) -> Result<Option<String>, Vec<Diagnostic>> {
+        let graph_options = options.to_graph_options().map_err(|item| vec![item])?;
+        let program = crate::parse(source, unit_name).map_err(|item| vec![item])?;
+        crate::graph::agent_context_v2_json(&program, symbol, &graph_options)
+    }
+}
+
+fn context_v2_with(
+    contexter: &dyn SourceV2Contexter,
+    unit_name: &str,
+    source: &str,
+    symbol: &str,
+    options: &ContextV2Options,
+) -> ContextOutcome {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        contexter.context(unit_name, source, symbol, options)
+    }));
+    match outcome {
+        Ok(Ok(context_json)) => ContextOutcome {
+            unit_name: unit_name.to_owned(),
+            symbol: symbol.to_owned(),
+            ok: true,
+            diagnostics: Vec::new(),
+            context_json,
+        },
+        Ok(Err(diagnostics)) => ContextOutcome {
+            unit_name: unit_name.to_owned(),
+            symbol: symbol.to_owned(),
+            ok: false,
+            diagnostics,
+            context_json: None,
+        },
+        Err(_panic_payload) => ContextOutcome {
+            unit_name: unit_name.to_owned(),
+            symbol: symbol.to_owned(),
+            ok: false,
+            diagnostics: vec![Diagnostic {
+                code: PANIC_NORMALIZED_DIAGNOSTIC_CODE,
+                severity: Severity::Error,
+                message: format!(
+                    "the embedding v2 context boundary caught a panic while querying {symbol:?} \
+                     in {unit_name:?} and normalized it to this diagnostic instead of letting \
+                     the unwind cross the embedding API boundary"
+                ),
+                path: Some(unit_name.to_owned()),
+                span: None,
+                help: Some(
+                    "this names an embedding-boundary defect, not a property of the checked \
+                     source; report it against the compiler"
+                        .to_owned(),
+                ),
+            }],
+            context_json: None,
+        },
+    }
+}
+
+/// Return a deterministic, byte- and node-bounded v2 semantic-context view
+/// with explicit forward, reverse, or bidirectional traversal.
+///
+/// This is the v2 counterpart to [`context_source`]. It is equally pure and
+/// pathless: all source, selection, bounds, facets, and direction arrive from
+/// the caller, and a compiler panic becomes
+/// [`PANIC_NORMALIZED_DIAGNOSTIC_CODE`] rather than unwinding into the host.
+pub fn context_v2_source(
+    unit_name: &str,
+    source: &str,
+    symbol: &str,
+    options: &ContextV2Options,
+) -> ContextOutcome {
+    context_v2_with(&StandardV2Contexter, unit_name, source, symbol, options)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -700,5 +1119,197 @@ mod tests {
             graphed.diagnostics
         );
         assert!(graphed.graph_json.is_some());
+    }
+
+    #[test]
+    fn valid_source_context_matches_the_canonical_bounded_query_exactly() {
+        let options = ContextOptions::default();
+        let outcome = context_source("hello.spx", HELLO, "app.main", &options);
+        assert!(outcome.ok, "expected ok, got {:?}", outcome.diagnostics);
+        assert!(outcome.diagnostics.is_empty());
+        assert_eq!(outcome.unit_name, "hello.spx");
+        assert_eq!(outcome.symbol, "app.main");
+        let context_json = outcome
+            .context_json
+            .expect("matching query must carry context JSON");
+        let program = crate::parse(HELLO, "hello.spx").expect("HELLO must parse");
+        let expected = crate::graph::agent_context_json(
+            &program,
+            "app.main",
+            &crate::graph::AgentContextOptions::default(),
+        )
+        .expect("HELLO must resolve")
+        .expect("app.main must match");
+        assert_eq!(context_json, expected);
+    }
+
+    #[test]
+    fn context_no_match_is_a_successful_empty_result() {
+        let outcome = context_source(
+            "hello.spx",
+            HELLO,
+            "app.does_not_exist",
+            &ContextOptions::default(),
+        );
+        assert!(outcome.ok, "expected ok, got {:?}", outcome.diagnostics);
+        assert!(outcome.diagnostics.is_empty());
+        assert_eq!(outcome.symbol, "app.does_not_exist");
+        assert_eq!(outcome.context_json, None);
+    }
+
+    #[test]
+    fn context_options_use_the_canonical_bounds_and_refusals() {
+        let error = ContextOptions::new(0, 1, 1, [ContextFilter::Types])
+            .expect_err("one byte must be below the canonical context minimum");
+        assert_eq!(error.code, "SPX-G004");
+        let error = ContextOptions::new(0, 2048, 1, [ContextFilter::Types, ContextFilter::Types])
+            .expect_err("duplicate filters must be refused by the canonical validator");
+        assert_eq!(error.code, "SPX-G004");
+    }
+
+    #[test]
+    fn malformed_source_fails_context_with_the_specific_parser_diagnostic() {
+        let outcome = context_source(
+            "empty.spx",
+            "module app.empty;\n",
+            "app.main",
+            &ContextOptions::default(),
+        );
+        assert!(!outcome.ok);
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(outcome.diagnostics[0].code, "SPX-P101");
+        assert!(outcome.context_json.is_none());
+    }
+
+    #[test]
+    fn context_unit_name_is_never_read_from_disk() {
+        let outcome = context_source(
+            "/definitely/does/not/exist/on/this/machine/unit.spx",
+            HELLO,
+            "app.main",
+            &ContextOptions::default(),
+        );
+        assert!(
+            outcome.ok,
+            "context must depend only on `source`, not on whether `unit_name` names a file; got {:?}",
+            outcome.diagnostics
+        );
+    }
+
+    struct PanickingContexter;
+
+    impl SourceContexter for PanickingContexter {
+        fn context(
+            &self,
+            _unit_name: &str,
+            _source: &str,
+            _symbol: &str,
+            _options: &ContextOptions,
+        ) -> Result<Option<String>, Vec<Diagnostic>> {
+            panic!("deliberate test panic: proving it never crosses the embedding boundary");
+        }
+    }
+
+    #[test]
+    fn embedding_context_boundary_normalizes_a_panic_into_a_diagnostic() {
+        let outcome = context_with(
+            &PanickingContexter,
+            "panicking.spx",
+            "irrelevant",
+            "app.main",
+            &ContextOptions::default(),
+        );
+        assert!(!outcome.ok);
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(
+            outcome.diagnostics[0].code,
+            PANIC_NORMALIZED_DIAGNOSTIC_CODE
+        );
+        assert!(outcome.context_json.is_none());
+    }
+
+    #[test]
+    fn v2_context_matches_the_canonical_bidirectional_query_exactly() {
+        let options = ContextV2Options::new(
+            1,
+            64 * 1024,
+            256,
+            [
+                ContextFilter::Contracts,
+                ContextFilter::Ownership,
+                ContextFilter::Effects,
+                ContextFilter::Types,
+            ],
+            ContextDirection::Both,
+        )
+        .expect("valid v2 options");
+        let outcome = context_v2_source("hello.spx", HELLO, "app.main", &options);
+        assert!(outcome.ok, "expected ok, got {:?}", outcome.diagnostics);
+        let context_json = outcome
+            .context_json
+            .expect("matching v2 query must carry context JSON");
+        let program = crate::parse(HELLO, "hello.spx").expect("HELLO must parse");
+        let expected_options = crate::graph::AgentContextV2Options::new(
+            1,
+            64 * 1024,
+            256,
+            [
+                crate::graph::AgentContextFilter::Contracts,
+                crate::graph::AgentContextFilter::Ownership,
+                crate::graph::AgentContextFilter::Effects,
+                crate::graph::AgentContextFilter::Types,
+            ],
+            crate::graph::AgentContextDirection::Both,
+        )
+        .expect("valid graph v2 options");
+        let expected = crate::graph::agent_context_v2_json(&program, "app.main", &expected_options)
+            .expect("HELLO must resolve")
+            .expect("app.main must match");
+        assert_eq!(context_json, expected);
+        assert_eq!(options.direction(), ContextDirection::Both);
+    }
+
+    #[test]
+    fn v2_context_no_match_is_a_successful_empty_result() {
+        let outcome = context_v2_source(
+            "hello.spx",
+            HELLO,
+            "app.does_not_exist",
+            &ContextV2Options::default(),
+        );
+        assert!(outcome.ok, "expected ok, got {:?}", outcome.diagnostics);
+        assert_eq!(outcome.context_json, None);
+    }
+
+    struct PanickingV2Contexter;
+
+    impl SourceV2Contexter for PanickingV2Contexter {
+        fn context(
+            &self,
+            _unit_name: &str,
+            _source: &str,
+            _symbol: &str,
+            _options: &ContextV2Options,
+        ) -> Result<Option<String>, Vec<Diagnostic>> {
+            panic!("deliberate test panic: proving it never crosses the embedding boundary");
+        }
+    }
+
+    #[test]
+    fn embedding_v2_context_boundary_normalizes_a_panic_into_a_diagnostic() {
+        let outcome = context_v2_with(
+            &PanickingV2Contexter,
+            "panicking.spx",
+            "irrelevant",
+            "app.main",
+            &ContextV2Options::default(),
+        );
+        assert!(!outcome.ok);
+        assert_eq!(outcome.diagnostics.len(), 1);
+        assert_eq!(
+            outcome.diagnostics[0].code,
+            PANIC_NORMALIZED_DIAGNOSTIC_CODE
+        );
+        assert!(outcome.context_json.is_none());
     }
 }

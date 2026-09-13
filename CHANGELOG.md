@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add journal-derived model-call receipts (#180) for generic live runs and
+  authenticated source checkpoints, including exact replay and Audit Capsule
+  object references. Unrecorded timing and billing stay unknown. Harden enriched
+  receipt replay against contradictory response states and decode refusals.
+  Extend the Rust source embedding facade (#203) with bounded context v1/v2
+  queries and explicitly authorized, cancellable, fuel-bounded interpretation.
+
 - Implement additive Project Assurance Manifest v1 (#214): a canonical,
   integrity-bound envelope bound to one retained Project, workspace
   revision, ProgramRoot, and complete ordered source inventory. The profile

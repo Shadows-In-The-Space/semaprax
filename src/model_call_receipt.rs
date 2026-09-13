@@ -3,31 +3,13 @@
 //!
 //! # Relationship to `src/live_invocation/`
 //!
-//! `src/live_invocation/` (issues #108/#177, read-only from this module's
-//! perspective — leased elsewhere) already owns the *authoritative* record
-//! of a `model.invoke` attempt: [`crate::live_invocation::journal`]'s causal
-//! journal, plus [`crate::live_invocation::journal::receipt_projection`],
-//! which that module's own docs already name as "the entire mechanism a
-//! receipt (owned downstream by #180) uses" — a pure, coarse fold
-//! (invocation id, turn/call/failure counts, terminal case) over an
-//! already-[`crate::live_invocation::journal::validate`]d journal.
-//!
-//! This module does not duplicate that journal or invent a second causal
-//! log. What it adds, as its own schema and its own module, is the
-//! *per-call* receipt shape #180 asks for that the coarse aggregate
-//! projection does not carry: Agent/ProgramRoot/DeploymentRoot/InstanceRoot
-//! binding, attempt ordinal, model/provider/adapter identity, grammar and
-//! policy digests, timing, local vs. provider-reported usage and cost, a
-//! redacted audit view with verifiable per-field commitments, independent
-//! replay (never redispatching), and untrusted provider invoice
-//! reconciliation with a closed discrepancy vocabulary. A real integration
-//! constructs one [`receipt::ModelCallReceipt`] per turn from the same
-//! already-validated causal journal entries `receipt_projection` folds over
-//! (see [`receipt::ModelCallReceipt`]'s docs) plus the root/attempt
-//! metadata the deployment already carries; this module never re-implements
-//! `journal::validate`'s ordering rules, and never accepts a raw
-//! [`crate::live_invocation::model_invoke::ModelHandler`] anywhere, so it
-//! structurally cannot redispatch a call.
+//! The authoritative live journals remain the only causal record. The
+//! [`journal_projection`] and [`source_projection`] modules derive opaque
+//! per-attempt evidence directly from generic kernel journals and authenticated
+//! source checkpoints. Missing host timing and billing facts remain unknown in
+//! that additive schema. The enriched [`receipt::ModelCallReceipt`] v1 contract
+//! remains available for hosts that independently retain its required metadata.
+//! Both forms are evidence, and their replay paths cannot dispatch providers.
 //!
 //! # A receipt is evidence, not authority
 //!
@@ -50,9 +32,11 @@
 //! against the traits this module and `live_invocation` already fix.
 
 pub mod audit_view;
+pub mod journal_projection;
 pub mod receipt;
 pub mod reconciliation;
 pub mod replay;
+pub mod source_projection;
 
 pub use audit_view::{
     redact, verify_audit_view, AuditViewError, ModelCallAuditView, ReceiptPrivateExtras,

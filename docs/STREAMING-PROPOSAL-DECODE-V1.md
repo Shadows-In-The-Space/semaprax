@@ -184,11 +184,15 @@ outcome (`a_refusal_is_sticky_across_further_pushes`).
 
 ## What this document does not claim
 
-- **Not wired into `live_invocation` or `model_invoke::ProposalDecoder`.**
-  Both are this round's read-only lease. A later issue that owns that
-  wiring can drive provider chunk bytes through `ProposalStreamDecoder::push`
-  and call `finish` when the transport signals end-of-response, without
-  either module changing.
+The checked-schema bridge now exists: `CompiledProposalDecoder` supplies the
+ordinary `ProposalDecoder` seam, while
+`provider_adapter_sdk::StreamingModelHandler` feeds adapter `Delta` events
+through this decoder before the generic kernel can authorize a proposal.
+The bridge waits for `Completed` and the matching adapter settlement before
+calling `finish`; an early streaming refusal requests adapter cancellation and
+does not poll again. This is an offline adapter seam, not a Direct Runtime or
+generated-client integration.
+
 - **Not a JSON parser.** The incremental scanner validates only what it
   needs to bound work and detect the terminal byte early: container
   nesting, string-literal well-formedness, the absence of disallowed raw

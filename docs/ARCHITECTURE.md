@@ -127,6 +127,16 @@ charged replay reservations, optional usage observations, and terminal snapshots
 `source_journal/io_v5` owns additive cumulative request/response reservations
 and their nonrefundable migration carry; [Source Live I/O v5](SOURCE-LIVE-IO-V5.md)
 defines the bound limits and the private CLI v3 projection.
+`provider_adapter_sdk/bridge` implements the generic `ModelHandler` seam over
+explicit adapter capabilities. It streams deltas through the existing compiled
+Proposal decoder before the kernel's independent compiled-schema decode and
+authorization. `model_budget_policy/live_hook` composes explicit request-bound
+host token/cost estimates with the existing work hook, retaining conservative
+charges in memory without claiming generic-journal crash recovery.
+`embedding_api/project_session` exposes caller-owned source admission and the
+existing semantic service through opaque handles and canonical reports. It
+retains the service's staged refresh and replay boundaries; caught stateful
+panics poison the facade rather than presenting its state as reusable.
 `model_call_receipt/journal_projection` validates generic journal inputs and
 folds per-attempt evidence; `model_call_receipt/source_projection` folds opaque
 recovered source checkpoints. Both bind the complete journal chain, preserve

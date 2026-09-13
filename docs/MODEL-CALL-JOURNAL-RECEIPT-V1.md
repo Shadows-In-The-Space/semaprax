@@ -47,7 +47,9 @@ independently retained `LiveInvocationId`, checks recorded response bytes agains
 their digest, and bounds input before journal encoding. It deliberately does
 not accept `ValidatedJournal` as a trust token because that type's fields are
 public. Empty journals emit no calls. Oversized inputs and unknown failure tags
-fail closed. Both projectors cap receipt count before allocation and enforce a
+fail closed. The closed failure vocabulary includes the kernel's local
+budget/deadline/clock/reservation refusals and the model-policy hook's quote and
+ceiling refusals; they are not mislabeled provider-reported failures. Both projectors cap receipt count before allocation and enforce a
 4 MiB total rendered-byte limit. Generic input has a conservative 4 MiB escaped
 encoding budget as well. `LiveKernelRun::model_call_receipts` uses that same path.
 

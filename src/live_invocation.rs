@@ -36,6 +36,7 @@
 
 pub mod alternate_fixture;
 pub mod budget;
+pub mod compiled_decoder;
 pub mod fixture;
 pub mod identity;
 pub mod journal;
@@ -52,6 +53,7 @@ mod neutrality_tests;
 mod tests;
 
 pub use budget::{CumulativeBudgetLedger, InvocationClock, SourceInvocationClock};
+pub use compiled_decoder::CompiledProposalDecoder;
 pub use identity::{LiveInvocationId, LiveInvocationSeed};
 pub use journal::{
     receipt_projection, DecodeError, JournalEntry, JournalError, ReceiptProjection,

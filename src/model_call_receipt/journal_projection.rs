@@ -212,6 +212,14 @@ pub fn project_kernel_calls(
                         | "provider_error"
                         | "malformed_response"
                         | "refused"
+                        | "budget_exhausted"
+                        | "deadline_exceeded"
+                        | "negative_request"
+                        | "clock_domain_mismatch"
+                        | "clock_regressed"
+                        | "reservation_mismatch"
+                        | "model_policy_exhausted"
+                        | "model_policy_invalid_quote"
                 ) {
                     return Err(ProjectionError::InvalidJournal);
                 }

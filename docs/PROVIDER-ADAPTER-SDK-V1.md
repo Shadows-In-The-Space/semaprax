@@ -120,6 +120,13 @@ adapter used only to prove nothing it holds ever appears in a report.
 
 ## Nonclaims
 
+`StreamingModelHandler` is the optional generic-kernel bridge for an adapter
+and one `CompiledInteractionSchema`. It negotiates streaming raw-text support
+before `start`, incrementally validates `Delta` bytes, requests cancellation
+on an early refusal, and returns canonical schema bytes only after both a
+`Completed` event and matching settlement. It does not implement a live
+provider transport, generated clients, or Direct Runtime wiring.
+
 - **No live network, no real provider, no key.** Every adapter this crate
   ships is pure, in-memory, scripted data. A real provider transport is
   downstream integration work maintained outside this crate's core
@@ -140,17 +147,36 @@ adapter used only to prove nothing it holds ever appears in a report.
   provider adapter are downstream integration work this module does not
   ship, matching the human-gated, network-off scope of this session.
 
-## Relationship to read-only modules
+## Live-kernel streaming bridge
 
-`src/live_invocation/`, `src/model_budget_policy/`, `src/model_call_receipt/`,
-`src/streaming_proposal_decode*`, and `src/agent_interaction_schema/` are
-read-only from this module's perspective; it only imports their existing
-public surface (`ModelFailure`, `AttemptOutcomeClass`/`retry_is_permitted`,
-`CompiledInteractionSchema`/`compile_agent_interaction_schema`) rather than
-duplicating any of it. It defines no new wire format for the existing
-Proposal grammar: an adapter's assembled response bytes are still decoded,
-end to end, by the exact same `CompiledInteractionSchema::decode` the
-whole-document path uses (`provider_adapter_sdk::tests::
-an_adapter_response_assembled_from_a_split_multi_byte_character_decodes_via_the_real_compiled_schema`
-and its negative control,
-`a_field_tampered_after_reassembly_is_refused_by_the_real_compiled_schema_not_by_this_sdk`).
+`StreamingModelHandler` implements the generic kernel's `ModelHandler` using an
+explicitly supplied adapter and adapter invocation capability. It checks the
+request's grammar identity, projects task and observation bytes losslessly as
+`task_hex`/`observation_hex` with the unchanged compiler-derived provider schema,
+and negotiates the bounded prompt and response sizes before adapter start.
+Task plus observation are limited to 65,536 bytes; provider-schema output is
+limited to 262,144 bytes. Response capacity is capped at the existing streaming
+decoder's 65,536-byte limit, including before copying a hostile delta.
+
+Every delta is fed to `ProposalStreamDecoder` before another poll. A malformed
+prefix cancels the adapter and stops reading. Completed must occur exactly once,
+with no subsequent deltas or usage; settlement bytes must match the entire
+stream. Negative/regressing usage refuses. Only a completed, compiler-admitted
+canonical document is returned. `CompiledProposalDecoder` then applies that
+same checked schema at the generic kernel's separate decode boundary, before
+any authorization grant can be minted. No provider-native tool events execute.
+
+`with_cancellation_and_deadline` binds an explicit cancellation signal, clock
+and original absolute deadline. It checks before adapter start and every poll,
+including Pending; controls cannot interrupt a host adapter blocked inside its
+own poll. Without explicit controls, the hard 10,000-poll bound still applies.
+A cancel request is best-effort and does not prove the provider stopped work.
+The SDK contract gives each adapter instance one start; hosts must provide a
+fresh adapter for a new attempt. This bridge does not select providers, retry,
+or provide a network transport.
+
+The focused bridge tests include the actual live kernel with streaming compiled
+decode, model-policy reservation and journal receipt projection together;
+malformed first-chunk refusal with no further reads or authorization; and
+pre-dispatch/pending deadline, cancellation, schema and hostile byte-cap cases.
+These are offline injected adapters, not evidence for two live vendors.

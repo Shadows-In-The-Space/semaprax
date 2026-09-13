@@ -42,12 +42,11 @@
 //!
 //! # What this module is not
 //!
-//! It is not a session or a handle: there is no `open`/`close` lifecycle,
-//! no persisted state between calls, and no `Project`/multi-file workspace
-//! load (`docs/PERSISTENT-INCREMENTAL-SEMANTIC-SERVICE-V1.md`'s
-//! `SemanticWorkspaceService` already owns that, for its own operation
-//! surface). It is not a C ABI. It does not do candidate validate/replay. See
-//! `docs/EMBEDDING-API-V1.md` for the complete scope statement and
+//! Its stateless unit operations do not retain a handle. For an explicit,
+//! multi-file Project handle, [`open_project_session`] owns only an in-memory
+//! [`ProjectSession`] backed by the existing semantic service; it accepts no
+//! ambient source provider and exposes no compiler internals. It is not a C
+//! ABI. See `docs/EMBEDDING-API-V1.md` for the complete scope statement and
 //! nonclaims this module is honestly bounded by.
 //!
 //! # Panic normalization
@@ -69,10 +68,16 @@
 use crate::diagnostic::{Diagnostic, Severity};
 
 mod execution;
+mod project_session;
 
 pub use execution::{
     execute_entry_source, ExecutionCancellation, ExecutionCapability, ExecutionOptions,
     ExecutionOutcome, ExecutionReport,
+};
+pub use project_session::{
+    open_project_session, ProjectCandidateOutcome, ProjectQueryOutcome, ProjectSession,
+    ProjectSessionInput, ProjectSessionOpenOutcome, ProjectSessionRefreshOutcome,
+    ProjectSourceInput,
 };
 
 /// A diagnostic code reserved for [`check_source`]'s panic-normalization
@@ -85,7 +90,7 @@ pub const PANIC_NORMALIZED_DIAGNOSTIC_CODE: &str = "SPX-EMB001";
 /// `docs/EMBEDDING-API-V1.md`.
 pub const EMBEDDING_API_VERSION: EmbeddingApiVersion = EmbeddingApiVersion {
     major: 1,
-    minor: 5,
+    minor: 6,
     patch: 0,
 };
 

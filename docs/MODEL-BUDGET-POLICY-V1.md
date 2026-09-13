@@ -202,3 +202,44 @@ documentation names (#178–#181): this module ships the policy/ledger types
 and their tests, not a kernel change. `src/model_call_receipt/**` billing
 reconciliation (provider invoice vs. local accounting) is a separate,
 already-shipped concern this module does not touch or duplicate.
+
+## Live generic-kernel composition
+
+`model_budget_policy::live_hook::LiveModelPolicyHook` implements the existing
+`InvocationBudgetHook`. The host supplies intersected limits, one explicitly
+authorized provider, the original start instant and clock, an inner work-budget
+hook, a `ModelAttemptQuoter`, and the same cancellation signal used by the run.
+The duration ceiling is converted once to an absolute deadline with checked
+addition; `i64::MAX` explicitly leaves latency unbounded. Deadline and cancellation
+are checked both before quoting and again before reservation, and at the
+kernel's existing settlement/authorization/effect boundaries.
+
+A quote binds the exact `ModelInvocationRequest::digest()` and supplies context
+and maximum-output token estimates plus estimated micro-unit cost. The host
+must account for the selected tokenizer, prompt projection and maximum response;
+byte counts are not silently treated as tokens. Stale, negative-cost and
+overflowing quotes fail with `model_policy_invalid_quote` before reservation.
+Policy ceiling refusal is `model_policy_exhausted`; deadline and cancellation
+keep their existing distinct tags. Provider selection remains host-owned: the
+handler and quoter must name the same deployed provider as the hook.
+
+The policy reservation commits first, then the inner work hook reserves. If the
+second gate refuses, the first conservative reservation remains spent. If it
+changes the request's effective budget, `reservation_mismatch` refuses dispatch
+rather than sending a request differing from its quote commitment. The hook
+retains bounded read-only request/reservation pairs (at most 4096), forwards
+settlement byte observations to the inner hook, and never invents actual token
+usage or actual cost from those bytes.
+
+The generic kernel makes one fresh attempt per turn, so this wrapper cannot
+perform retries or provider failover. Existing standalone retry/failover policy
+remains separate. The same hook must remain alive to retain model-policy
+charges across subsequent in-process calls. Constructing a new hook resets its
+state; generic v1 journals lack token/cost reservation fields and cannot
+reconstruct it after a crash. No durable recovery or real billing claim follows
+from its reservation list. Source V4/V5 priced recovery remains unchanged.
+
+Focused `model_budget_policy::live_hook` tests execute the actual kernel until
+the second dispatch is refused, verify cumulative call/token/cost charges and
+journal receipt projection, reject stale quotes and cancellation before charge,
+and preserve a charge after inner refusal through the original deadline.

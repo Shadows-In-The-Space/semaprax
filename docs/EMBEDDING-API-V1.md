@@ -40,16 +40,16 @@ Issue #203's "In scope" list, mapped to real code, as of this tranche:
 
 | In-scope bullet | Status before this tranche | Status after this tranche |
 | --- | --- | --- |
-| Compiler/session creation | Not exposed as a small stable API. `src/project/semantic_service.rs`'s `SemanticWorkspaceService::open` exists but requires an already-built `Arc<ProjectRevision>` — a Project-level session, not a single-unit embedding entry point, and not documented as issue #203's answer. | Still not attempted here. [`embedding_api::check_source`](../src/embedding_api.rs) is deliberately stateless (no handle, no `open`/`close`) — see "What this tranche does not do" below. |
-| Source/Project load and authenticated refresh | `SemanticWorkspaceService`/`ProjectSnapshot` do this for a full Project (multi-file, manifest-driven). No single-compilation-unit, dependency-free load entry point existed as a named public embedding surface. | [`check_source(unit_name, source)`](../src/embedding_api.rs) loads exactly one caller-supplied unit from explicit bytes; no manifest, no multi-file Project. |
+| Compiler/session creation | Not exposed as a small stable API. `src/project/semantic_service.rs`'s `SemanticWorkspaceService::open` exists but requires an already-built `Arc<ProjectRevision>`. | [`open_project_session(input)`](../src/embedding_api/project_session.rs) opens an opaque, caller-owned in-memory Project session. Compiler revisions, cache, service, and candidates remain private. |
+| Source/Project load and authenticated refresh | `SemanticWorkspaceService`/`ProjectSnapshot` do this for a full Project (multi-file, manifest-driven). No embedding-facing Project input existed. | [`ProjectSessionInput`](../src/embedding_api/project_session.rs) accepts only owned manifest/source bytes; [`ProjectSession::refresh`](../src/embedding_api/project_session.rs) delegates exact stale checking and staged adoption to the existing service. It never opens a source label as a host path. |
 | Check | `crate::check` (crate root) and the CLI `check` command both exist, but neither is documented as a stable embedding surface, and `crate::check` silently discards non-error diagnostics on a successful check. | `check_source` is that documented surface for one unit, and deliberately keeps every diagnostic (warnings included) on success — see "Diagnostics are never discarded on success" below. |
 | Format, graph/query/context | `format::canonical`, `graph::to_json`, `graph::context_json`, `graph::agent_context_json`, and `graph::agent_context_v2_json` already exist as public functions. | [`format_source(unit_name, source)`](../src/embedding_api.rs) re-exposes canonical formatting; [`graph_source(unit_name, source)`](../src/embedding_api.rs) re-exposes `graph::to_json`; [`context_source(unit_name, source, symbol, options)`](../src/embedding_api.rs) wraps bounded forward v1 context; and [`context_v2_source(unit_name, source, symbol, options)`](../src/embedding_api.rs) wraps bounded forward, reverse, or bidirectional v2 context through facade-owned options. Each has the same panic-normalization and no-ambient-authority guarantees. The legacy unbounded-depth `graph::context_json` remains outside this facade. |
-| Candidate validate/replay | `src/project/candidate/**` implements this for the Project workspace transaction path (out of this tranche's lease: `src/live_invocation/**`, `src/agent_runtime_v2/**` are explicitly off-limits). | Not attempted; out of lease. |
+| Candidate validate/replay | `src/project/candidate/**` implements this for the Project workspace transaction path. | [`ProjectSession::validate_candidate_v2`](../src/embedding_api/project_session.rs) and [`ProjectSession::replay_candidate_v2`](../src/embedding_api/project_session.rs) return canonical authority-free reports over the active generation. |
 | Deterministic interpreter execution for admitted profiles | `interpreter`/`hosted_interpreter` exist. | [`execute_entry_source(capability, unit_name, source, options, cancellation)`](../src/embedding_api/execution.rs) executes only the existing prepared, zero-argument `i64` entrypoint profile. It requires [`ExecutionCapability`](../src/embedding_api/execution.rs), caller bounds, and a cooperative cancellation token; no source-native host effect receives a provider or ambient fallback. |
 | Explicit provider/capability injection | Done, for the vector-embedding effect only, by `semantic_embedding::EmbeddingCapability`/`EmbeddingProvider` (see above). | `check_source` needs no capability because checking is pure and effect-free; this bullet is satisfied for *this* operation by construction (nothing to inject authority into), not by adding an unnecessary capability type. |
-| Memory/resource ownership and cancellation | Not documented for any embedding surface. | Stateless analysis calls hold no resource across calls. [`ExecutionCancellation`](../src/embedding_api/execution.rs) provides monotonic cooperative cancellation for the bounded interpreter call; its report distinguishes cancellation from admission diagnostics and settled language outcomes. |
+| Memory/resource ownership and cancellation | Not documented for any embedding surface. | Stateless analysis calls hold no resource across calls. A `ProjectSession` owns only in-memory compiler cache/service state and normal Rust drop releases it. [`ExecutionCancellation`](../src/embedding_api/execution.rs) provides monotonic cooperative cancellation for the bounded interpreter call. Project-service operations currently provide no cancellation kernel, so the session facade does not falsely advertise one. |
 | Version/feature negotiation | Not present for any embedding surface. | [`EMBEDDING_API_VERSION`](../src/embedding_api.rs) and `EmbeddingApiVersion::is_compatible_with` exist and are tested against both a matching and two non-matching major versions. |
-| Thread-safety and reentrancy contract | Not documented. | `check_source` takes no shared or mutable state; every call is independent and safe to run from any number of threads concurrently (ordinary Rust `&str`-in, owned-value-out; no interior mutability, no global, no lock). |
+| Thread-safety and reentrancy contract | Not documented. | `check_source` takes no shared or mutable state. `ProjectSession` makes no `Sync`, clone, reentrancy, or simultaneous-refresh promise; refresh/candidate validation take `&mut self`. A caught stateful-operation panic poisons the handle, requiring callers to drop and reopen it from explicit bytes. |
 
 ## The `CheckOutcome` contract
 
@@ -207,9 +207,10 @@ option types or traversal state.
 
 ## Compatibility policy
 
-`EMBEDDING_API_VERSION` (currently `1.5.0`; `1.1.0` after `format_source`,
+`EMBEDDING_API_VERSION` (currently `1.6.0`; `1.1.0` after `format_source`,
 `1.2.0` after `graph_source`, `1.3.0` after `context_source`, and `1.4.0`
-after `context_v2_source`, then `1.5.0` after `execute_entry_source`) names
+after `context_v2_source`, then `1.5.0` after `execute_entry_source`, and
+`1.6.0` after the Project session facade) names
 this Rust surface's own version,
 independent of any checked SEMAPRAX program's semantics.
 `EmbeddingApiVersion::is_compatible_with(requested_major)` returns `true`
@@ -233,17 +234,11 @@ existing type or function's shape.
 Naming every nonclaim explicitly, per this repository's honesty-bar
 convention:
 
-- **No opaque session/compiler handle.** `check_source` is a stateless
-  function; there is no `open`, `close`, handle type, or lifecycle to get
-  wrong. A real multi-call embedding session (reusing parsed state across
-  checks, incremental reparse) is future work and would need its own handle
-  type, `Send`/`Sync` contract, and destruction rule — none of which are
-  invented here ahead of a real use case that needs them.
-- **No multi-file Project load.** One caller-supplied unit only. Building a
-  Project (manifest, multiple files, dependency resolution) is
-  `src/project/**`'s job, already versioned and documented separately
-  (`docs/PERSISTENT-INCREMENTAL-SEMANTIC-SERVICE-V1.md`); this module does
-  not wrap or re-expose it.
+- **No ambient source provider.** `ProjectSessionInput` owns manifest and
+  source bytes. Its source labels are inventory labels only; the facade accepts
+  no filesystem, environment, network, or callback provider. Full Project
+  admission remains in `src/project/**` and occurs before a session opens or a
+  refresh adopts.
 - **No general execution or host-effect provider.** `execute_entry_source`
   admits only the existing deterministic, zero-argument `i64` entrypoint
   profile. It does not execute arbitrary functions, Project test closures,
@@ -253,8 +248,9 @@ convention:
 - **No C ABI.** Issue #203 explicitly sequences a C ABI after "stable owned
   string/record/result conventions are selected" for the Rust surface. This
   tranche is that Rust surface's first slice, not the ABI.
-- **No candidate validate/replay facade.** The Project candidate kernels exist,
-  but their lifecycle and authority boundaries are not wrapped by this facade.
+- **No publication from a candidate report.** Candidate JSON/evidence returned
+  by the session is authority-free. The facade provides no commit, publication,
+  Git, filesystem, or generated-artifact authority.
 - **No legacy depth-only context facade.** `context_source` and
   `context_v2_source` expose the bounded graph contracts with closed options.
   They do not expose the older `graph::context_json` route, whose output and
@@ -270,6 +266,11 @@ revision; a program missing `@id` still checks `ok` while keeping its
 only `source` is read; a deliberately panicking test double is normalized to
 `SPX-EMB001` rather than unwinding; and version negotiation accepts a
 matching major version while refusing two different ones — plus, for
+`ProjectSession`: caller-owned calculator manifest/source bytes open an
+in-memory service, stale and invalid refreshes retain the old workspace
+revision, malformed query/candidate bytes return closed diagnostics, and a
+valid canonical query plus v2 transaction replay to identical candidate and
+result reports — plus, for
 `format_source`: a valid program formats to its own canonical projection and
 reformatting that output is idempotent; a program missing `@id` still
 formats `ok` (formatting needs no HIR validity); a module with no function

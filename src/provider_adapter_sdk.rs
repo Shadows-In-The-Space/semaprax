@@ -56,6 +56,7 @@
 //! widen its own authority merely by claiming to.
 
 pub mod adapter;
+pub mod bridge;
 pub mod capability;
 pub mod conformance;
 pub mod fixture_adapters;
@@ -66,6 +67,7 @@ pub use adapter::{
     AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterRefusal, AdapterRequest,
     AdapterSettlement, AdapterUsage, ProviderAdapter,
 };
+pub use bridge::StreamingModelHandler;
 pub use capability::{
     negotiate, AdapterCapabilities, CancellationSemantics, EndpointPolicy, NegotiationRefusal,
     RequiredCapabilities, StructuredOutputMode, TokenAccountingSource,

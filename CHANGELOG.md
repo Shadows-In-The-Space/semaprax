@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Connect the streaming Proposal decoder to the provider adapter and generic
+  live-kernel seams (#178), and compose token/cost/call policy with the live
+  work-budget hook (#179). Extend the embedding facade with opaque in-memory
+  Project sessions, atomic refresh, semantic query, and candidate replay (#203).
+
 - Add journal-derived model-call receipts (#180) for generic live runs and
   authenticated source checkpoints, including exact replay and Audit Capsule
   object references. Unrecorded timing and billing stay unknown. Harden enriched

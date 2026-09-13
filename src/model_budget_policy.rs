@@ -15,7 +15,7 @@
 //! dimensions, nonrefundably, with crash-safe resume, and five cancellation
 //! checkpoints across the kernel's model/authorization/effect dispatch
 //! points. None of that is duplicated here — this crate's
-//! `src/live_invocation/**` is read-only for this module by design; the
+//! existing kernel keeps its journal contract unchanged; the
 //! monetary/deadline ledger stays there.
 //!
 //! What #113 does not add, and what this module is scoped to, is the rest
@@ -34,6 +34,11 @@
 //! (or an equivalent [`crate::live_invocation::model_invoke::
 //! InvocationBudgetHook`]) still separately charges the monetary/deadline
 //! cost of the one attempt this ledger admits.
+//!
+//! [`live_hook::LiveModelPolicyHook`] now composes this ledger with the actual
+//! generic kernel budget seam using explicit request-bound host token/cost
+//! quotes and the existing work hook. That retained single-provider route
+//! covers fresh turns; it is not a durable retry/failover journal.
 //!
 //! # No live network, no real provider, no key
 //!
@@ -65,6 +70,7 @@
 pub mod classification;
 pub mod ledger;
 pub mod limits;
+pub mod live_hook;
 pub mod provider_policy;
 
 pub use classification::{retry_is_permitted, AttemptOutcomeClass};

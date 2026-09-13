@@ -284,6 +284,19 @@ impl<'a> ModelPolicyLedger<'a> {
         &self.usage
     }
 
+    /// Check the original absolute deadline without charging or refunding an
+    /// attempt. Live hooks use this at post-dispatch and publication boundaries.
+    pub fn check_deadline(&self) -> Result<(), AttemptRefusal> {
+        if self
+            .deadline_millis
+            .is_some_and(|deadline| self.clock.now_millis() >= deadline)
+        {
+            Err(AttemptRefusal::DeadlineExceeded)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Admits or refuses one attempt against every #179 budget dimension
     /// this ledger tracks, committing nonrefundably on admission.
     /// Cancellation is checked strictly first: a cancelled call costs
@@ -296,11 +309,7 @@ impl<'a> ModelPolicyLedger<'a> {
         if cancellation.is_cancelled() {
             return Err(AttemptRefusal::Cancelled);
         }
-        if let Some(deadline) = self.deadline_millis {
-            if self.clock.now_millis() >= deadline {
-                return Err(AttemptRefusal::DeadlineExceeded);
-            }
-        }
+        self.check_deadline()?;
 
         let limits = self.limits.limits();
 

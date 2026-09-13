@@ -460,6 +460,65 @@ fn acknowledged_model_response_followed_by_deadline_keeps_deadline_status() {
     );
 }
 
+#[test]
+fn priced_deadline_before_dispatch_and_after_settlement_preserve_charge_boundary() {
+    for after_settlement in [false, true] {
+        let compiled = lifecycle();
+        let task = task();
+        let policy = policy(1);
+        let pricing = SourceLivePricing {
+            currency: "USD".into(),
+            minor_unit_exponent: 6,
+            price_per_work_unit_minor: 7,
+            money_ceiling_minor: 7,
+        };
+        let clock = MutableClock(Rc::new(Cell::new(1)));
+        let cancellation = AgentCancellation::default();
+        let mut source = scripted(&compiled, 1);
+        let mut read = Read { calls: 0 };
+        let mut store = AdvancingStore {
+            document: String::new(),
+            clock: clock.clone(),
+            trigger: if after_settlement {
+                "\"kind\":\"attempt_settled\""
+            } else {
+                "\"kind\":\"run_opened\""
+            },
+            deadline: policy.deadline_millis,
+        };
+        let failure = compiled
+            .run_live_durable_priced(
+                request(&task, &policy, &clock, &cancellation),
+                &pricing,
+                &mut source,
+                &mut read,
+                &mut store,
+            )
+            .err()
+            .expect("the acknowledged clock advance stops execution");
+        assert_eq!(clock.now_millis(), policy.deadline_millis);
+        assert_eq!(
+            failure.selected,
+            Some(SourceTerminalStatus::DeadlineExceeded)
+        );
+        let dispatched = usize::from(after_settlement);
+        assert_eq!((source.calls, read.calls), (dispatched, 0));
+        let checkpoint = failure.checkpoint.unwrap();
+        assert_eq!(checkpoint.committed_reserved_units(), dispatched as i64);
+        let totals = checkpoint.priced_totals().unwrap();
+        assert_eq!(totals.reserved_minor, dispatched as i64 * 7);
+        assert_eq!(
+            totals.unknown_charge_reservation_minor,
+            totals.reserved_minor
+        );
+        assert_eq!(totals.observed_charge_minor, 0);
+        assert_eq!(
+            checkpoint.terminal_snapshot().unwrap().status(),
+            SourceTerminalStatus::DeadlineExceeded
+        );
+    }
+}
+
 #[derive(Clone)]
 struct MutableClock(Rc<Cell<i64>>);
 

@@ -1374,3 +1374,6 @@ mod log_redact_backend_audit;
 
 #[path = "standard_library/metrics_backend_audit.rs"]
 mod metrics_backend_audit;
+
+#[path = "standard_library/imported_view_composition.rs"]
+mod imported_view_composition;

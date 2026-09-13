@@ -220,7 +220,7 @@ fn task() -> LifecycleTask {
 fn request<'a>(
     task: &'a LifecycleTask,
     policy: &'a SourceLivePolicy,
-    clock: &'a Clock,
+    clock: &'a dyn SourceInvocationClock,
     cancellation: &'a AgentCancellation,
 ) -> SourceLiveRequest<'a> {
     SourceLiveRequest {

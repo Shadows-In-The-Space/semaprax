@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Extend #113's priced adapter regressions with exact retained retry I/O,
+  invalid quote preflight, and deadlines reached at journal acknowledgements.
+  Add #103's imported `std.bytes` view-composition oracle across the Project
+  interpreter, native C11 O0/O2, and Core Wasm, including temporary cleanup.
+
 - Add an explicit priced source-journal v4 route and private CLI config/receipt
   v2 (#113). Integer currency-bound reservations remain separate from work
   quotas and provider observations; replay retains unknown exposure and refuses

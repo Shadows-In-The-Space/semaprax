@@ -320,8 +320,32 @@ Checkpoint failure poisons that runtime instance: further mutation refuses
 until the caller recovers from storage. Evidence grants no authority; recovery
 requires explicit storage and the current schema. The revision byte follows
 the fixture's known-revision range, not a cryptographic handler identity.
-This runtime currently drives one job; heartbeat/current-lease APIs, physical
-database integration and source-handler binding remain follow-on work.
+This runtime currently drives one job; heartbeat/current-lease APIs and
+physical database integration remain follow-on work.
+
+### Retained source-handler binding v1
+
+`src/job_runtime/source_handler.rs` provides the one checked route for a
+source job: it derives `SourceJobHandlerBinding` from an immutable retained
+`ProjectRevision`, an exact program-root digest, retained source revision,
+explicit non-`main` callable ID, exact nominal payload type, and bounded
+interpreter fuel. The binding rechecks the retained source, derives its
+payload schema and typed carrier graph, and admits the callable through the
+existing effect-free retained-call interpreter. Its domain-separated identity
+also commits the `i64-status-v1` result profile: `0` succeeds, `1` is a
+retryable failure, and `2` is permanent; every other source result or
+interpreter failure is a terminal permanent failure. This source seam never
+manufactures `UNCERTAIN` from an effect-free evaluation.
+
+`SourceJobHandlerBinding::bind_submission` writes that exact identity into the
+already persisted, bounded opaque `payload_descriptor`. Before
+`drive_checked_source_job` can claim a lease, it requires byte-for-byte
+descriptor equality, the caller-retained binding identity, and the exact
+runtime payload-schema digest. A same-schema job cannot therefore resume with
+a different handler identity. This uses the existing checkpoint v1 submission
+field without changing its wire format; callers must retain the expected
+binding digest and use the checked drive route rather than implementing
+`HostJobHandler` directly.
 
 ## Job evidence: `src/job_evidence.rs`
 
@@ -375,11 +399,12 @@ touches no file under `src/hir`, `src/wasm`, `src/codegen`,
 `src/interpreter*`, `src/cleanup*`, or `src/cli`. Concretely, it does **not**:
 
 - **Run autonomously.** There is no scheduler thread, worker pool, timer, or
-  source evaluator. A host explicitly drives each claim with a worker ID,
-  tick, lease duration, checked schema, handler, and explicit checkpoint store.
-  The current handler seam admits payload bytes against a real compiled schema,
-  but does not itself prove a trait implementation dispatches compiled
-  SEMAPRAX code.
+  ambient source evaluation. A host explicitly drives each claim with a worker
+  ID, tick, lease duration, checked schema, handler, and explicit checkpoint
+  store. The retained source-handler binding is an in-process, effect-free
+  callable evaluator only; arbitrary `HostJobHandler` implementations remain
+  unchecked and no handler gains filesystem, process, network, clock, or
+  scheduler authority.
 - **Claim physical database durability.** `DatabaseFixture` remains an
   in-memory transaction model. The physical checkpoint stores runtime/evidence
   bytes only; it is not a database driver or an atomic application-data join.
@@ -441,3 +466,7 @@ see the accompanying change's report — so this document's local-evidence
 list can be checked incrementally, exactly as
 [Database Access v1](DATABASE-ACCESS-V1.md#local-evidence) records for the
 same reason).
+
+The checked source binding resolves the selected retained source module. Imported
+callable closures that require linked Project resolution are refused; the
+current route does not claim general imported-handler execution.

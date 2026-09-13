@@ -33,6 +33,12 @@ use crate::job_fixture::{
     Schedule,
 };
 
+mod source_handler;
+pub use source_handler::{
+    drive_checked_source_job, SourceJobDriveError, SourceJobHandlerBinding,
+    SourceJobHandlerRefusal,
+};
+
 pub const JOB_RUNTIME_CHECKPOINT_SCHEMA: &str = "semaprax.job-runtime-checkpoint.v1";
 pub const MAX_JOB_RUNTIME_PAYLOAD_BYTES: usize = 4096;
 pub const MAX_JOB_RUNTIME_KEY_BYTES: usize = 256;
@@ -417,6 +423,21 @@ impl<'schema> JobRuntime<'schema> {
 
     pub fn evidence(&self) -> &JobEvidenceLog {
         &self.evidence
+    }
+
+    /// The exact compiled payload-schema digest this runtime was admitted
+    /// against. Checked source handlers compare it before claiming a job.
+    #[must_use]
+    pub fn schema_digest(&self) -> &str {
+        self.schema.schema().digest()
+    }
+
+    /// The opaque descriptor persisted with this submission. Checked source
+    /// handlers bind it to their exact retained deployment identity before a
+    /// job can be claimed.
+    #[must_use]
+    pub fn payload_descriptor(&self) -> &[u8] {
+        &self.submission.payload_descriptor
     }
 
     /// Persists an explicit cancellation through the canonical JobStore

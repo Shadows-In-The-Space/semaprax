@@ -169,6 +169,11 @@ host; no source operation or generated backend authority is added. See
 `job_fixture` owns lifecycle decisions and `job_evidence` owns replay validation.
 Payload admission uses a supplied compiled schema; handler implementation and
 checkpoint storage authority remain explicit host responsibilities.
+`job_runtime/source_handler` binds a retained, effect-free source callable to
+a domain-separated deployment identity stored in the existing job descriptor.
+Its checked drive verifies descriptor and schema before the existing runtime
+claims work; evaluation uses the retained-call interpreter without adding host
+authority. Imported callable closures remain outside this bounded source route.
 `provider_adapter_sdk/source_bridge` adapts the ordinary source `ProposalSource`
 with explicit fresh adapter factories, bounded canonical retained context, and
 `streaming_proposal_decode/source` admission against the authoritative source

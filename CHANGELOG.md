@@ -8,6 +8,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Bind effect-free retained source job handlers to persisted deployment
+  descriptors before claim, using the existing durable job runtime and
+  checked interpreter; refuse stale roots and handler substitutions (#192).
+
 - Complete the ten-row feature-composition inventory, exact ownership-profile
   refusal regression, and provisioned strict differential campaign route
   with explicit CI selections and nonzero-case enforcement (#103).

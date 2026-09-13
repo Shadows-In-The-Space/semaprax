@@ -124,6 +124,9 @@ The source-specific checkpoint grammar lives under
 recovery data supplies the existing cumulative ledger's source restoration
 route. The v2 execution profile additionally owns full stage-fuel reservations,
 charged replay reservations, optional usage observations, and terminal snapshots.
+`source_journal/io_v5` owns additive cumulative request/response reservations
+and their nonrefundable migration carry; [Source Live I/O v5](SOURCE-LIVE-IO-V5.md)
+defines the bound limits and the private CLI v3 projection.
 `agent_lifecycle/iterative/source_live` owns the one ledger and replay cursor;
 its optional session hooks reuse the checked loop in `iterative/driver/live`
 for fresh and recovered execution. Replayed stages reserve fresh fuel before

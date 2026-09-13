@@ -71,6 +71,17 @@ missing, extra, malformed, zero-price, negative, or noncanonical pricing
 field, is refused before checkpoint or provider activity; it cannot downgrade
 to the unpriced route.
 
+Version 3 is an additive priced-I/O route. It uses schema
+`semaprax.source-live-cli.config.v3`, retains every v2 key and requires one
+additional exact `io_limits` object with nonnegative integer
+`max_request_bytes`, `max_total_request_bytes`, and
+`max_total_response_bytes`. The per-attempt request field is capped at 65,536
+bytes and may be zero; the cumulative fields are `u64` ceilings. V3 does not
+widen v1/v2 keys, and a missing, extra, malformed, negative or noncanonical
+I/O field is refused before a checkpoint or provider call. Its exact
+reservation, recovery and migration semantics are in
+[Source Live I/O v5](SOURCE-LIVE-IO-V5.md).
+
 The host authenticates the retained Project, selects and checks its Agent
 role closure, derives its actual `ProgramRoot`, and derives the proposal
 grammar from the compiled source. The read snapshot bytes and fixed model are

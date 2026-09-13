@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use semaprax::agent_lifecycle::iterative::source_live::SourceLivePricing;
+use semaprax::agent_lifecycle::iterative::source_live::{SourceIoLimits, SourceLivePricing};
 use serde_json::{Map, Value};
 
 use super::{checkpoint::bounded_read, CliError};
@@ -30,6 +30,7 @@ pub(super) struct SessionConfig {
     pub max_total_steps: usize,
     pub response_limit: usize,
     pub pricing: Option<SourceLivePricing>,
+    pub io_limits: Option<SourceIoLimits>,
 }
 
 impl SessionConfig {
@@ -89,28 +90,60 @@ impl SessionConfig {
             "response_limit",
             "pricing",
         ];
+        const V3_KEYS: [&str; 18] = [
+            "schema",
+            "manifest",
+            "source_path",
+            "agent_id",
+            "step_id",
+            "task_path",
+            "task_budget",
+            "read_path",
+            "deadline_millis",
+            "ceiling",
+            "reservation_units",
+            "max_iterations",
+            "max_stages",
+            "max_steps_per_stage",
+            "max_total_steps",
+            "response_limit",
+            "pricing",
+            "io_limits",
+        ];
         let schema = text(map, "schema")?;
-        let pricing = match schema {
+        let (pricing, io_limits) = match schema {
             "semaprax.source-live-cli.config.v1"
                 if map.len() == V1_KEYS.len()
                     && V1_KEYS.iter().all(|key| map.contains_key(*key)) =>
             {
-                None
+                (None, None)
             }
             "semaprax.source-live-cli.config.v2"
                 if map.len() == V2_KEYS.len()
                     && V2_KEYS.iter().all(|key| map.contains_key(*key)) =>
             {
-                Some(pricing(map)?)
+                (Some(pricing(map)?), None)
             }
-            "semaprax.source-live-cli.config.v1" | "semaprax.source-live-cli.config.v2" => {
+            "semaprax.source-live-cli.config.v3"
+                if map.len() == V3_KEYS.len()
+                    && V3_KEYS.iter().all(|key| map.contains_key(*key)) =>
+            {
+                (Some(pricing(map)?), Some(io_limits(map)?))
+            }
+            "semaprax.source-live-cli.config.v1"
+            | "semaprax.source-live-cli.config.v2"
+            | "semaprax.source-live-cli.config.v3" => {
                 return Err(CliError::refused(
                     "configuration has missing or unknown keys",
                 ));
             }
             _ => return Err(CliError::refused("configuration schema is unsupported")),
         };
-        if matches!(schema, "semaprax.source-live-cli.config.v2") && pricing.is_none() {
+        if matches!(
+            schema,
+            "semaprax.source-live-cli.config.v2" | "semaprax.source-live-cli.config.v3"
+        ) && pricing.is_none()
+        {
             return Err(CliError::refused(
                 "configuration has missing or unknown keys",
             ));
@@ -167,8 +200,35 @@ impl SessionConfig {
             max_total_steps,
             response_limit,
             pricing,
+            io_limits,
         })
     }
+}
+
+fn io_limits(map: &Map<String, Value>) -> Result<SourceIoLimits, CliError> {
+    const KEYS: [&str; 3] = [
+        "max_request_bytes",
+        "max_total_request_bytes",
+        "max_total_response_bytes",
+    ];
+    let value = map
+        .get("io_limits")
+        .and_then(Value::as_object)
+        .ok_or(CliError::refused("io limits must be an object"))?;
+    if value.len() != KEYS.len() || !KEYS.iter().all(|key| value.contains_key(*key)) {
+        return Err(CliError::refused("io limits have missing or unknown keys"));
+    }
+    let max_request_bytes = nonnegative_usize(value, "max_request_bytes")?;
+    if max_request_bytes > 65_536 {
+        return Err(CliError::refused(
+            "io request limit exceeds source journal limits",
+        ));
+    }
+    Ok(SourceIoLimits {
+        max_request_bytes,
+        max_total_request_bytes: nonnegative_u64(value, "max_total_request_bytes")?,
+        max_total_response_bytes: nonnegative_u64(value, "max_total_response_bytes")?,
+    })
 }
 
 fn pricing(map: &Map<String, Value>) -> Result<SourceLivePricing, CliError> {
@@ -257,6 +317,19 @@ fn positive_usize(map: &Map<String, Value>, key: &str) -> Result<usize, CliError
     (value > 0)
         .then_some(value)
         .ok_or(CliError::refused("configuration capacity must be positive"))
+}
+
+fn nonnegative_usize(map: &Map<String, Value>, key: &str) -> Result<usize, CliError> {
+    map.get(key)
+        .and_then(Value::as_u64)
+        .and_then(|number| usize::try_from(number).ok())
+        .ok_or(CliError::refused("configuration capacity is invalid"))
+}
+
+fn nonnegative_u64(map: &Map<String, Value>, key: &str) -> Result<u64, CliError> {
+    map.get(key)
+        .and_then(Value::as_u64)
+        .ok_or(CliError::refused("configuration capacity is invalid"))
 }
 
 pub(super) enum Command {

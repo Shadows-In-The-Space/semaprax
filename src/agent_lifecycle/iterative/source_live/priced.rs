@@ -63,3 +63,37 @@ impl CompiledIterativeLifecycle {
         self.run_live_durable_bound(request, source, read, store, binding)
     }
 }
+
+impl SourceLivePolicy {
+    pub fn binding_with_io_limits(
+        &self,
+        compiled: &CompiledIterativeLifecycle,
+        task: &LifecycleTask,
+        budget: IterativeBudget,
+        pricing: Option<&SourceLivePricing>,
+        limits: &SourceIoLimits,
+    ) -> Result<SourceInvocationBinding, SourceJournalError> {
+        let binding = match pricing {
+            Some(price) => self.binding_priced(compiled, task, budget, price)?,
+            None => self.binding(compiled, task, budget)?,
+        };
+        binding.with_io_limits(limits.clone(), None)
+    }
+}
+impl CompiledIterativeLifecycle {
+    pub fn run_live_durable_with_io_limits(
+        &self,
+        request: SourceLiveRequest<'_>,
+        pricing: Option<&SourceLivePricing>,
+        limits: &SourceIoLimits,
+        source: &mut dyn driver::ProposalSource,
+        read: &mut dyn AgentReadOperation,
+        store: &mut dyn CheckpointStore,
+    ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
+        let binding = request
+            .policy
+            .binding_with_io_limits(self, request.task, request.budget, pricing, limits)
+            .map_err(|error| SourceLiveFailure::initial(error, None))?;
+        self.run_live_durable_bound(request, source, read, store, binding)
+    }
+}

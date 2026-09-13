@@ -20,6 +20,7 @@ pub(super) struct ExecutionFold {
     pub effects: u32,
     pub attempts: u32,
     pub priced: Option<super::priced_v4::PricedTotalsV4>,
+    pub io: Option<SourceIoTotals>,
     roles: Vec<SourceStageRole>,
 }
 
@@ -370,6 +371,7 @@ pub(super) fn validate(
     if priced.is_some() {
         fold.priced = Some(super::priced_v4::fold(binding, entries)?);
     }
+    fold.io = super::io_v5::fold(binding, entries)?;
     Ok(fold)
 }
 

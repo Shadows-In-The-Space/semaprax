@@ -222,7 +222,9 @@ pub(super) fn encode_envelope(
     }
     let entries = encode_entries(journal.entries())?;
     let link = digest(
-        if journal.binding.is_priced_migrated_profile() {
+        if journal.binding.io_limits().is_some() {
+            b"semaprax.live-invocation.source-chain.v5\0"
+        } else if journal.binding.is_priced_migrated_profile() {
             PRICED_MIGRATED_CHAIN_DOMAIN
         } else if journal.binding.is_priced_profile() {
             PRICED_CHAIN_DOMAIN

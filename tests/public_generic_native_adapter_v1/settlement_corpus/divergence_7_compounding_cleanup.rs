@@ -175,3 +175,6 @@ fn compare_case_rejects_an_interpreter_divergence_7_overwrite_count_that_is_no_l
         &o2[index].outcome,
     );
 }
+
+#[path = "allocation_rejection_order.rs"]
+mod allocation_rejection_order;

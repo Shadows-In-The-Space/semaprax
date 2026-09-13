@@ -207,7 +207,7 @@ fn selected_project_program(
 pub fn prepare_source_live_migration<'a>(
     request: SourceLiveMigrationRequest<'a>,
 ) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
-    prepare_source_live_migration_inner(request, None)
+    prepare_source_live_migration_inner(request, None, None)
 }
 
 /// Preserves checked monetary history through the existing migration evaluator.
@@ -216,15 +216,43 @@ pub fn prepare_source_live_priced_migration<'a>(
     previous_pricing: &SourceLivePricing,
     destination_pricing: &SourceLivePricing,
 ) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
-    prepare_source_live_migration_inner(request, Some((previous_pricing, destination_pricing)))
+    prepare_source_live_migration_inner(
+        request,
+        Some((previous_pricing, destination_pricing)),
+        None,
+    )
+}
+
+/// Carries acknowledged provider I/O reservations through checked migration.
+pub fn prepare_source_live_migration_with_io_limits<'a>(
+    request: SourceLiveMigrationRequest<'a>,
+    previous_pricing: Option<&SourceLivePricing>,
+    destination_pricing: Option<&SourceLivePricing>,
+    previous_limits: &SourceIoLimits,
+    destination_limits: &SourceIoLimits,
+) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    let pricing = match (previous_pricing, destination_pricing) {
+        (Some(previous), Some(destination)) => Some((previous, destination)),
+        (None, None) => None,
+        _ => return Err(refused("migration.pricing_profile")),
+    };
+    prepare_source_live_migration_inner(
+        request,
+        pricing,
+        Some((previous_limits, destination_limits)),
+    )
 }
 
 fn prepare_source_live_migration_inner<'a>(
     request: SourceLiveMigrationRequest<'a>,
     pricing: Option<(&SourceLivePricing, &SourceLivePricing)>,
+    io: Option<(&SourceIoLimits, &SourceIoLimits)>,
 ) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
     if request.previous_binding.priced_binding().is_some() != pricing.is_some() {
         return Err(refused("migration.pricing_profile"));
+    }
+    if request.previous_binding.io_limits() != io.map(|(previous, _)| previous) {
+        return Err(refused("migration.io_profile"));
     }
     let (previous_root, _) = selected_project_program(&request.previous)?;
     let (destination_root, destination_definition) =
@@ -246,6 +274,13 @@ fn prepare_source_live_migration_inner<'a>(
         ),
     }
     .map_err(|error| SourceLiveFailure::initial(error, None))?;
+    let previous_expected = if let Some((limits, _)) = io {
+        previous_expected
+            .with_io_limits(limits.clone(), None)
+            .map_err(|error| SourceLiveFailure::initial(error, None))?
+    } else {
+        previous_expected
+    };
     if request
         .previous_binding
         .priced_binding()
@@ -438,13 +473,31 @@ fn prepare_source_live_migration_inner<'a>(
                 destination_pricing.clone(),
             )
             .map_err(|error| SourceLiveFailure::initial(error, None))?;
-            SourceInvocationBinding::bind_priced_migrated_execution(
-                seed,
-                &SourceLivePolicy::evaluator_profile(),
-                priced_carry,
-                destination_pricing,
-            )
+            if let Some((_, limits)) = io {
+                SourceInvocationBinding::bind_io_priced_migrated_execution(
+                    seed,
+                    &SourceLivePolicy::evaluator_profile(),
+                    priced_carry,
+                    destination_pricing,
+                    limits.clone(),
+                    &previous,
+                )
+            } else {
+                SourceInvocationBinding::bind_priced_migrated_execution(
+                    seed,
+                    &SourceLivePolicy::evaluator_profile(),
+                    priced_carry,
+                    destination_pricing,
+                )
+            }
         }
+        None if io.is_some() => SourceInvocationBinding::bind_io_migrated_execution(
+            seed,
+            &SourceLivePolicy::evaluator_profile(),
+            carry.clone(),
+            io.expect("checked").1.clone(),
+            &previous,
+        ),
         None => SourceInvocationBinding::bind_migrated_execution(
             seed,
             &SourceLivePolicy::evaluator_profile(),

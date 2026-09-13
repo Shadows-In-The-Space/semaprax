@@ -12,6 +12,8 @@ use crate::diagnostic::quote_json;
 use super::identity::{digest, hex, looks_like_digest};
 
 mod execution;
+mod io_v5;
+pub use io_v5::{SourceIoLimits, SourceIoTotals};
 mod migration;
 mod priced_v4;
 mod validate;
@@ -39,6 +41,8 @@ pub const SOURCE_MIGRATED_JOURNAL_SCHEMA: &str =
     "semaprax.live-invocation.source-persisted-journal.v3";
 pub(crate) const SOURCE_PRICED_JOURNAL_SCHEMA: &str =
     "semaprax.live-invocation.source-persisted-journal.v4";
+pub(crate) const SOURCE_IO_JOURNAL_SCHEMA: &str =
+    "semaprax.live-invocation.source-persisted-journal.v5";
 pub const MAX_SOURCE_ENTRIES: usize = 65_536;
 pub const MAX_SOURCE_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_SOURCE_RESPONSE_BYTES: usize = 65_536;
@@ -98,6 +102,7 @@ pub struct SourceInvocationBinding {
     initial_millis: i64,
     deadline_millis: i64,
     profile: SourceProfile,
+    io: Option<io_v5::IoBindingV5>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -222,6 +227,7 @@ impl SourceInvocationBinding {
             initial_millis: seed.initial_millis,
             deadline_millis: seed.deadline_millis,
             profile: SourceProfile::PrimitiveV1,
+            io: None,
         })
     }
 
@@ -316,6 +322,9 @@ impl SourceInvocationBinding {
         }
     }
     pub(crate) fn migration_handoff_digest(&self) -> Option<&str> {
+        if let Some(handoff) = self.io.as_ref().and_then(|io| io.handoff.as_deref()) {
+            return Some(handoff);
+        }
         match &self.profile {
             SourceProfile::MigratedV3 { carry, .. } => Some(&carry.handoff_digest),
             SourceProfile::PricedMigratedV4 { carry, .. } => Some(&carry.handoff_digest),
@@ -376,6 +385,9 @@ impl SourceInvocationBinding {
         self.max_stages
     }
     pub(crate) fn schema(&self) -> &'static str {
+        if self.io.is_some() {
+            return SOURCE_IO_JOURNAL_SCHEMA;
+        }
         match &self.profile {
             SourceProfile::PrimitiveV1 => SOURCE_JOURNAL_SCHEMA,
             SourceProfile::ExecutionV2 { .. } => SOURCE_EXECUTION_JOURNAL_SCHEMA,
@@ -1122,6 +1134,12 @@ impl<'a> SourceCheckpointSink<'a> {
             Ok(0)
         }
     }
+    pub fn io_totals(&self) -> Result<Option<SourceIoTotals>, SourceJournalError> {
+        if self.journal.binding.io.is_none() {
+            return Ok(None);
+        }
+        Ok(execution::validate(&self.journal.binding, self.journal.entries())?.io)
+    }
     pub fn priced_totals(&self) -> Result<Option<PricedTotalsV4>, SourceJournalError> {
         if !self.journal.binding.is_priced_profile() {
             return Ok(None);
@@ -1146,6 +1164,7 @@ pub struct RecoveredSourceCheckpoint {
     committed_reserved_units: i64,
     committed_stage_fuel: u64,
     priced_totals: Option<PricedTotalsV4>,
+    io_totals: Option<SourceIoTotals>,
 }
 
 impl RecoveredSourceCheckpoint {
@@ -1184,6 +1203,9 @@ impl RecoveredSourceCheckpoint {
     }
     pub const fn committed_stage_fuel(&self) -> u64 {
         self.committed_stage_fuel
+    }
+    pub fn io_totals(&self) -> Option<&SourceIoTotals> {
+        self.io_totals.as_ref()
     }
     pub fn priced_totals(&self) -> Option<&PricedTotalsV4> {
         self.priced_totals.as_ref()
@@ -1253,12 +1275,17 @@ pub fn recover_source_checkpoint(
     expected: &SourceInvocationBinding,
 ) -> Result<RecoveredSourceCheckpoint, SourceJournalError> {
     let (journal, generation, chain) = wire::decode_envelope(document, expected)?;
-    let (committed_reserved_units, committed_stage_fuel, priced_totals) =
+    let (committed_reserved_units, committed_stage_fuel, priced_totals, io_totals) =
         if expected.is_execution_profile() {
             let fold = execution::validate(expected, journal.entries())?;
-            (fold.model_units, fold.stage_fuel, fold.priced)
+            (fold.model_units, fold.stage_fuel, fold.priced, fold.io)
         } else {
-            (validate::validate(expected, journal.entries())?, 0, None)
+            (
+                validate::validate(expected, journal.entries())?,
+                0,
+                None,
+                None,
+            )
         };
     Ok(RecoveredSourceCheckpoint {
         journal,
@@ -1267,5 +1294,6 @@ pub fn recover_source_checkpoint(
         committed_reserved_units,
         committed_stage_fuel,
         priced_totals,
+        io_totals,
     })
 }

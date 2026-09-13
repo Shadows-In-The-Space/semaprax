@@ -25,6 +25,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+#[path = "source_migration_io.rs"]
+mod source_migration_io;
 #[path = "source_migration_priced.rs"]
 mod source_migration_priced;
 

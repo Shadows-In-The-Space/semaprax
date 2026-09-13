@@ -8,6 +8,14 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add additive source-journal I/O v5 accounting and private CLI config/receipt
+  v3 (#113). Authenticated attempt rows reserve exact prompt bytes and bounded
+  response capacity cumulatively; recovery and compatible migration retain
+  reservations without profile conversion. Legacy source journal and CLI
+  profiles remain unchanged. Add #103's result-allocation rejection case with
+  ordered input release in interpreter/Wasm and status/resource parity in
+  native C11 O0/O2, including a wrong-order oracle control.
+
 - Extend #113's priced adapter regressions with exact retained retry I/O,
   invalid quote preflight, and deadlines reached at journal acknowledgements.
   Add #103's imported `std.bytes` view-composition oracle across the Project

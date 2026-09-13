@@ -274,6 +274,11 @@ impl<'a> SourceExecutionSession<'a> {
                 );
             }
         }
+        if self.sink.journal().binding().io_limits().is_some() {
+            self.sink
+                .preflight_at(&intent, self.clock.now_millis())
+                .map_err(|error| self.journal_failure(error))?;
+        }
         let start = self.sink.journal().entries().len();
         let result =
             source.propose_checkpointed(request, &mut self.sink, &mut self.ledger, self.clock);

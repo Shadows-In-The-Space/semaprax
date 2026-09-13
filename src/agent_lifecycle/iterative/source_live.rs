@@ -1,5 +1,7 @@
 //! Checked source execution over the source checkpoint journal.
 //! The ordinary live API remains separate; unsupported sources fail closed.
+pub use crate::live_invocation::source_journal::{SourceIoLimits, SourceIoTotals};
+
 use super::*;
 mod migration;
 mod priced;
@@ -15,8 +17,9 @@ use crate::live_invocation::{
     CumulativeBudgetLedger, SourceInvocationClock,
 };
 pub use migration::{
-    prepare_source_live_migration, prepare_source_live_priced_migration,
-    PreparedSourceLiveMigration, SourceLiveMigrationEndpoint, SourceLiveMigrationRequest,
+    prepare_source_live_migration, prepare_source_live_migration_with_io_limits,
+    prepare_source_live_priced_migration, PreparedSourceLiveMigration, SourceLiveMigrationEndpoint,
+    SourceLiveMigrationRequest,
 };
 pub(crate) use session::SourceExecutionSession;
 

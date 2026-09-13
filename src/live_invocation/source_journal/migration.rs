@@ -318,6 +318,26 @@ impl SourceInvocationBinding {
         evaluator_profile: &str,
         carry: SourceMigrationCarry,
     ) -> Result<Self, SourceJournalError> {
+        Self::bind_migrated_execution_inner(seed, evaluator_profile, carry, false)
+    }
+
+    pub(crate) fn bind_io_migrated_execution(
+        seed: SourceInvocationSeed,
+        evaluator_profile: &str,
+        carry: SourceMigrationCarry,
+        limits: SourceIoLimits,
+        previous: &RecoveredSourceCheckpoint,
+    ) -> Result<Self, SourceJournalError> {
+        Self::bind_migrated_execution_inner(seed, evaluator_profile, carry, true)?
+            .with_io_limits(limits, Some(previous))
+    }
+
+    fn bind_migrated_execution_inner(
+        seed: SourceInvocationSeed,
+        evaluator_profile: &str,
+        carry: SourceMigrationCarry,
+        io: bool,
+    ) -> Result<Self, SourceJournalError> {
         let prior_task = task_digest(&seed.task, seed.task_budget);
         if carry.handoff_digest != carry.digest()
             || ![
@@ -331,10 +351,14 @@ impl SourceInvocationBinding {
             ]
             .into_iter()
             .all(|value| looks_like_digest(value))
-            || !matches!(
-                carry.previous_schema.as_str(),
-                SOURCE_EXECUTION_JOURNAL_SCHEMA | SOURCE_MIGRATED_JOURNAL_SCHEMA
-            )
+            || !(if io {
+                carry.previous_schema == SOURCE_IO_JOURNAL_SCHEMA
+            } else {
+                matches!(
+                    carry.previous_schema.as_str(),
+                    SOURCE_EXECUTION_JOURNAL_SCHEMA | SOURCE_MIGRATED_JOURNAL_SCHEMA
+                )
+            })
             || ![
                 &carry.old_state_id,
                 &carry.new_state_id,
@@ -397,11 +421,38 @@ impl SourceInvocationBinding {
         carry: PricedMigrationCarryV4,
         pricing: crate::live_invocation::pricing::ValidatedPricing,
     ) -> Result<Self, SourceJournalError> {
+        Self::bind_priced_migrated_execution_inner(seed, evaluator_profile, carry, pricing, false)
+    }
+
+    pub(crate) fn bind_io_priced_migrated_execution(
+        seed: SourceInvocationSeed,
+        evaluator_profile: &str,
+        carry: PricedMigrationCarryV4,
+        pricing: crate::live_invocation::pricing::ValidatedPricing,
+        limits: SourceIoLimits,
+        previous: &RecoveredSourceCheckpoint,
+    ) -> Result<Self, SourceJournalError> {
+        Self::bind_priced_migrated_execution_inner(seed, evaluator_profile, carry, pricing, true)?
+            .with_io_limits(limits, Some(previous))
+    }
+
+    fn bind_priced_migrated_execution_inner(
+        seed: SourceInvocationSeed,
+        evaluator_profile: &str,
+        carry: PricedMigrationCarryV4,
+        pricing: crate::live_invocation::pricing::ValidatedPricing,
+        io: bool,
+    ) -> Result<Self, SourceJournalError> {
         let base = &carry.base;
         let prior_task = task_digest(&seed.task, seed.task_budget);
         if carry.handoff_digest != carry.digest()
             || base.handoff_digest != base.digest()
-            || !matches!(base.previous_schema.as_str(), SOURCE_PRICED_JOURNAL_SCHEMA)
+            || base.previous_schema
+                != if io {
+                    SOURCE_IO_JOURNAL_SCHEMA
+                } else {
+                    SOURCE_PRICED_JOURNAL_SCHEMA
+                }
             || ![
                 &base.handoff_digest,
                 &base.previous_invocation,

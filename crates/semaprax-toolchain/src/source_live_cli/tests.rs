@@ -691,3 +691,6 @@ mod priced_migration_tests;
 
 #[path = "priced_adapter_boundaries.rs"]
 mod priced_adapter_boundaries;
+
+#[path = "io_tests.rs"]
+mod io_tests;

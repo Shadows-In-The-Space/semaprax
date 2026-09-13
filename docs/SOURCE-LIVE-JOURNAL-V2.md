@@ -48,6 +48,11 @@ dispatch. Its paired `PricedAttemptUsage` closes usage and charge evidence as
 `Unknown` or typed `Observed`; missing receipts and untyped provider costs stay
 `Unknown`, never inferred zero or float conversions.
 
+The additive v5 profile binds cumulative provider request and response
+reservations around the existing authenticated attempt rows. It changes no
+V1--V4 bytes and may compose with V4 pricing. Its counters, recovery and
+migration rules are specified in [Source Live I/O v5](SOURCE-LIVE-IO-V5.md).
+
 ## One checked loop, one journal, one ledger
 
 `run_live_durable` invokes the same checked source-loop stages as the ordinary
@@ -164,7 +169,9 @@ restart-stable clock guarantee.
 The private CLI's v2 priced configuration selects the v4 route; direct resume
 of v1/v2/v3 under that configuration is refused. Its one-hop priced migration
 route derives the v4 carry only after binding and recovery validate the priced
-predecessor. Unsupported profile conversion remains refused.
+predecessor. Unsupported profile conversion remains refused. The private CLI's
+v3 configuration selects V5 I/O limits and requires the same profile at both
+sides of a migration; V4/V5 conversion is refused.
 Local executable gates:
 
 - `cargo test --locked -p semaprax --lib agent_lifecycle::iterative::` exercises

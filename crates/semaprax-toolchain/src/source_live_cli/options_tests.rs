@@ -2,6 +2,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::*;
+use semaprax::agent_lifecycle::iterative::source_live::SourceIoLimits;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -88,4 +89,36 @@ fn v2_refuses_absent_or_malformed_pricing_without_downgrade() {
         "provider_cost": 1.5,
     });
     assert!(load(&unknown).is_err());
+}
+
+#[test]
+fn v3_requires_an_exact_priced_io_policy_without_widening_v2() {
+    let mut v3 = config("semaprax.source-live-cli.config.v3");
+    v3["pricing"] = serde_json::json!({
+        "currency": "USD", "minor_unit_exponent": 6,
+        "price_per_work_unit_minor": 7, "money_ceiling_minor": 70,
+    });
+    v3["io_limits"] = serde_json::json!({
+        "max_request_bytes": 0,
+        "max_total_request_bytes": 0,
+        "max_total_response_bytes": 0,
+    });
+    assert_eq!(
+        load(&v3).unwrap().io_limits,
+        Some(SourceIoLimits {
+            max_request_bytes: 0,
+            max_total_request_bytes: 0,
+            max_total_response_bytes: 0,
+        })
+    );
+
+    let mut missing = v3.clone();
+    missing.as_object_mut().unwrap().remove("io_limits");
+    assert!(load(&missing).is_err());
+    let mut unknown = v3.clone();
+    unknown["io_limits"]["provider_bytes"] = serde_json::json!(1);
+    assert!(load(&unknown).is_err());
+    let mut oversized = v3;
+    oversized["io_limits"]["max_request_bytes"] = serde_json::json!(65_537);
+    assert!(load(&oversized).is_err());
 }

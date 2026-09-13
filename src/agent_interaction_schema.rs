@@ -51,6 +51,7 @@ mod provider;
 pub(crate) mod shape;
 
 mod render;
+pub(crate) mod stream_grammar;
 
 pub use decode::{DecodedField, DecodedInteractionValue, FieldValue, ScalarValue, TypedValue};
 
@@ -157,6 +158,10 @@ impl CompiledInteractionSchema {
             crate::diagnostic::quote_json(&self.graph.root_type_id),
             crate::diagnostic::quote_json(&self.schema.digest),
         )
+    }
+
+    pub(crate) fn stream_grammar(&self) -> crate::streaming_proposal_decode::grammar::Grammar {
+        stream_grammar::lower(&self.graph, self.stream_envelope_prefix())
     }
 }
 

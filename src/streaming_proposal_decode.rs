@@ -7,31 +7,21 @@
 //! amount of untrusted data first, and without ever mistaking an
 //! unterminated prefix for a complete value.
 //!
-//! This module adds **no** admission rule of its own for what a Proposal
-//! document may contain: every semantic acceptance or refusal (unknown or
-//! missing fields, wrong variant tags, integer bounds, canonical-rendering
-//! equality) is the exact same call to
-//! [`agent_interaction_schema::CompiledInteractionSchema::decode`] the
-//! whole-document path already uses and already tests. This module only
-//! adds the streaming-safety layer around that call: a bounded byte buffer,
-//! an incremental UTF-8/JSON-structural scanner that can refuse a
-//! malformed or oversized prefix *before* the document completes, and the
-//! exact single-newline framing the compiled decoder's canonical documents
-//! use. Because the terminal "typed Proposal" case is produced by literally
-//! invoking the same function the whole-document caller would invoke, the
-//! two paths cannot disagree on what they accept — there is no second,
-//! hand-written grammar to drift out of sync with the checked type.
+//! A bounded structural scanner handles UTF-8, strings, depth and framing.
+//! The incremental grammar lowers from the compiled schema's type tables and
+//! checks canonical field/case identities, order and scalar bounds as bytes
+//! arrive. Its stack, partial tokens and work are bounded independently of
+//! provider behavior. Neither partial state nor an early refusal is authority.
 //!
-//! `src/live_invocation/` and `src/agent_interaction_schema/` are read-only
-//! from this module's perspective: it depends only on the latter's already
-//! public [`agent_interaction_schema::CompiledInteractionSchema`] surface
-//! and introduces no new source syntax, HIR node, or wire format of its own
-//! beyond the existing `semaprax.agent-interaction-value.v1` document this
-//! module streams.
+//! Only the owning whole-document decoder can produce the final typed value.
+//! Conformance tests independently compare generated-client and chunked output;
+//! delegating final acceptance alone would not prove absence of false refusal.
+//! No source syntax or Proposal wire format is added by these streaming APIs.
 
 use crate::agent_interaction_schema::{CompiledInteractionSchema, DecodedInteractionValue};
 
-mod schema_prefix;
+pub(crate) mod grammar;
+pub use grammar::{ExpectedNext, MAX_GRAMMAR_WORK, STREAM_GRAMMAR};
 pub mod source;
 pub use source::{SourceProposalStreamDecoder, SourcePushOutcome};
 
@@ -327,7 +317,7 @@ pub struct ProposalStreamDecoder<'a> {
     buffer: Vec<u8>,
     confirmed_len: usize,
     scan: Scanner,
-    prefix: schema_prefix::SchemaPrefix,
+    grammar: grammar::GrammarState,
     terminal: Option<TerminalResult>,
 }
 
@@ -339,7 +329,7 @@ impl<'a> ProposalStreamDecoder<'a> {
             buffer: Vec::new(),
             confirmed_len: 0,
             scan: Scanner::default(),
-            prefix: schema_prefix::SchemaPrefix::new(schema.stream_envelope_prefix()),
+            grammar: grammar::GrammarState::new(schema.stream_grammar()),
             terminal: None,
         }
     }
@@ -358,6 +348,17 @@ impl<'a> ProposalStreamDecoder<'a> {
     #[must_use]
     pub fn buffered_len(&self) -> usize {
         self.buffer.len()
+    }
+
+    /// Read-only grammar states the next streamed token may satisfy.
+    #[must_use]
+    pub fn expected_next(&self) -> &[ExpectedNext] {
+        self.grammar.expected_next()
+    }
+
+    /// Work charged by incremental grammar transitions and case matching.
+    pub fn grammar_work(&self) -> usize {
+        self.grammar.work()
     }
 
     /// Feeds the next chunk of untrusted provider bytes.
@@ -400,7 +401,7 @@ impl<'a> ProposalStreamDecoder<'a> {
             if let Err(refusal) = self.scan.step(byte, base + offset) {
                 return self.finalize(TerminalResult::Refused(refusal));
             }
-            if let Err(refusal) = self.prefix.step(byte, base + offset) {
+            if let Err(refusal) = self.grammar.step(byte, base + offset) {
                 return self.finalize(TerminalResult::Refused(refusal));
             }
         }

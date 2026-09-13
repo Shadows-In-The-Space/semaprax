@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Validate streamed nested Proposal fields, variant cases, exact scalars and
+  text/byte bounds from compiled type tables before final decode (#178).
+  Expose read-only grammar states and bounded work counters; extend the
+  generated TypeScript/Python/Rust client harness with adversarial chunking.
+
 - Add versioned selective-dictionary model-text projections to CLI, retained
   service and compatibility negotiation (#201). Connect streaming proposals to
   Direct Runtime v2 typed effects and reject mismatched compiled schema envelopes

@@ -1,10 +1,10 @@
 //! Incremental framing for the authoritative flat source Proposal grammar.
 
 use crate::agent_proposal::{CompiledAgentProposalSchema, DecodedProposal};
+use crate::streaming_proposal_decode::grammar::{ExpectedNext, GrammarState};
 
 use super::{
-    schema_prefix::SchemaPrefix, Scanner, StreamRefusal, MAX_STREAM_BYTES, STREAM_BYTES,
-    STREAM_SEMANTIC, STREAM_TRUNCATED,
+    Scanner, StreamRefusal, MAX_STREAM_BYTES, STREAM_BYTES, STREAM_SEMANTIC, STREAM_TRUNCATED,
 };
 
 /// Source-proposal streaming outcome. It deliberately has its own typed
@@ -29,14 +29,14 @@ enum SourceTerminal {
     Refused(StreamRefusal),
 }
 
-/// Shares the bounded UTF-8 and canonical JSON/LF scanner with the interaction
-/// route, then delegates final admission to `CompiledAgentProposalSchema`.
+/// Shares bounded framing and the checked schema-derived grammar with the
+/// interaction route; final admission still replays `CompiledAgentProposalSchema`.
 pub struct SourceProposalStreamDecoder<'a> {
     schema: &'a CompiledAgentProposalSchema,
     buffer: Vec<u8>,
     confirmed_len: usize,
     scan: Scanner,
-    prefix: SchemaPrefix,
+    grammar: GrammarState,
     terminal: Option<SourceTerminal>,
 }
 
@@ -51,13 +51,23 @@ impl<'a> SourceProposalStreamDecoder<'a> {
             buffer: Vec::new(),
             confirmed_len: 0,
             scan: Scanner::default(),
-            prefix: SchemaPrefix::new(schema.stream_envelope_prefix()),
+            grammar: GrammarState::new(schema.stream_grammar()),
             terminal: None,
         }
     }
     #[must_use]
     pub fn schema_digest(&self) -> &str {
         self.schema.schema().digest()
+    }
+    /// The shared checked-grammar cursor categories. This is diagnostic-only;
+    /// final source admission remains the authoritative schema decode.
+    #[must_use]
+    pub fn expected_next(&self) -> &[ExpectedNext] {
+        self.grammar.expected_next()
+    }
+    /// Work charged by incremental grammar transitions and case matching.
+    pub fn grammar_work(&self) -> usize {
+        self.grammar.work()
     }
     pub fn push(&mut self, chunk: &[u8]) -> SourcePushOutcome {
         if let Some(terminal) = &self.terminal {
@@ -87,7 +97,7 @@ impl<'a> SourceProposalStreamDecoder<'a> {
             if let Err(refusal) = self.scan.step(byte, base + offset) {
                 return self.finalize(SourceTerminal::Refused(refusal));
             }
-            if let Err(refusal) = self.prefix.step(byte, base + offset) {
+            if let Err(refusal) = self.grammar.step(byte, base + offset) {
                 return self.finalize(SourceTerminal::Refused(refusal));
             }
         }

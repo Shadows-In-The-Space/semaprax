@@ -11,6 +11,9 @@ use semaprax::agent_proposal::{compile_agent_proposal_schema, ProposalValue};
 use super::agent_definition_v1::definition;
 use super::profile;
 
+#[path = "agent_proposal_client_execution/streaming.rs"]
+mod streaming;
+
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 const MODULE_PATH: &str = "generated-proposal-client.spx";
@@ -73,6 +76,7 @@ function rejected(action: () => unknown): void {
 
 switch (process.argv[2]) {
   case "record": process.stdout.write(record.encodeProposal(recordValue)); break;
+  case "escapes": process.stdout.write(record.encodeProposal({...recordValue, "fixture.agent.type.proposal.text": "quote\"slash\\line\n\u0000 😀"})); break;
   case "finish": process.stdout.write(variant.encodeProposal({case: "fixture.agent.type.proposal.finish", fields: {"fixture.agent.type.proposal.finish.code": -9223372036854775808n}})); break;
   case "call": process.stdout.write(variant.encodeProposal({case: "fixture.agent.type.proposal.call", fields: {"fixture.agent.type.proposal.call.attempts": 18446744073709551615n, "fixture.agent.type.proposal.call.urgent": false}})); break;
   case "reject-text": rejected(() => record.encodeProposal({...recordValue, "fixture.agent.type.proposal.text": text + "x"})); break;
@@ -111,6 +115,8 @@ def rejected(action):
 mode = sys.argv[1]
 if mode == "record":
     sys.stdout.write(record.encode_proposal(record_value))
+elif mode == "escapes":
+    sys.stdout.write(record.encode_proposal({**record_value, "fixture.agent.type.proposal.text": "quote\"slash\\line\n\u0000 😀"}))
 elif mode == "finish":
     sys.stdout.write(variant.encode_proposal({"case":"fixture.agent.type.proposal.finish","fields":{"fixture.agent.type.proposal.finish.code":-9223372036854775808}}))
 elif mode == "call":
@@ -143,6 +149,7 @@ fn main() {
     };
     match mode.as_str() {
         "record" => print!("{}", record::encode_proposal(&record_value).unwrap()),
+        "escapes" => print!("{}", record::encode_proposal(&record::ProposalFields { field_0: "quote\"slash\\line\n\0 😀".into(), ..record_value }).unwrap()),
         "finish" => print!("{}", variant::encode_proposal(&variant::ProposalValue::Case0(variant::Case0Fields { field_0: i64::MIN })).unwrap()),
         "call" => print!("{}", variant::encode_proposal(&variant::ProposalValue::Case1(variant::Case1Fields { field_0: u64::MAX, field_1: false })).unwrap()),
         "reject-text" => {
@@ -426,7 +433,10 @@ impl ExecutableClients {
             )
             .stdout,
         ];
-        if matches!(mode, "record" | "finish" | "call" | "reject-text") {
+        if matches!(
+            mode,
+            "record" | "escapes" | "finish" | "call" | "reject-text"
+        ) {
             outputs.push(run(&self.rust, [mode], &rust).stdout);
         }
         outputs
@@ -457,6 +467,7 @@ fn generated_proposal_clients_compile_execute_and_round_trip() {
     for document in clients.outputs("record") {
         let document = String::from_utf8(document).unwrap();
         let decoded = record.decode(&document).unwrap();
+        streaming::check(&record, document.as_bytes());
         assert_eq!(decoded.canonical_json(), document);
         assert_eq!(
             decoded.field("fixture.agent.type.proposal.text"),
@@ -499,9 +510,16 @@ fn generated_proposal_clients_compile_execute_and_round_trip() {
         for document in clients.outputs(mode) {
             let document = String::from_utf8(document).unwrap();
             let decoded = variant.decode(&document).unwrap();
+            streaming::check(&variant, document.as_bytes());
             assert_eq!(decoded.canonical_json(), document);
             assert_eq!(decoded.case(), Some(expected_case));
         }
+    }
+
+    let escaped_outputs = clients.outputs("escapes");
+    assert!(escaped_outputs.windows(2).all(|pair| pair[0] == pair[1]));
+    for document in escaped_outputs {
+        streaming::check(&record, &document);
     }
 
     for mode in ["reject-text", "reject-integer", "reject-case"] {

@@ -136,7 +136,11 @@ charges in memory without claiming generic-journal crash recovery.
 `provider_adapter_sdk/source_bridge` adapts the ordinary source `ProposalSource`
 with explicit fresh adapter factories, bounded canonical retained context, and
 `streaming_proposal_decode/source` admission against the authoritative source
-Proposal schema. `AgentRuntimeV2::run_live` consumes that ordinary source
+Proposal schema. `streaming_proposal_decode/grammar` consumes a bounded
+DAG lowered by both schema owners, enforcing nested identity/order/scalar
+rules while retaining final whole-decoder admission. Sorted auxiliary case
+lookups narrow candidates per byte without changing declaration order.
+`AgentRuntimeV2::run_live` consumes that ordinary source
 through Direct Runtime v2 only after canonical proposal admission and at the
 typed-effect boundary; submitted proposal inventories are refused on this live
 route. It does not advertise durable checkpoint policy, create a provider

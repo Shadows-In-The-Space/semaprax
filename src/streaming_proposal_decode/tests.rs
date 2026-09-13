@@ -264,30 +264,17 @@ fn streaming_outcome_agrees_with_the_whole_document_decoder_for_every_case() {
     }
 }
 
-/// The one document this decoder's own scanner refuses purely for delegated
-/// semantic reasons (a legally-shaped, oversized text field) carries the
-/// exact underlying diagnostic code in its refusal message, matching
-/// `live_bridge::SourceInteractionProposalDecoder`'s own refusal-reason
-/// convention: a caller sees which admission rule failed, not a generic tag.
+/// Incremental bound refusal names the exact checked field identity, while
+/// the authoritative whole decoder independently refuses the same bytes.
 #[test]
-fn semantic_refusal_carries_the_underlying_diagnostic_code() {
+fn semantic_refusal_carries_the_checked_field_identity() {
     let outer = compile_outer();
-    let oversized = "x".repeat(5_000);
-    let bytes = outer_document(&outer, "7", "true", &oversized).into_bytes();
-
-    let whole_err = outer
-        .decode(&bytes)
-        .expect_err("an oversized text field must be refused by the whole decoder too");
-    let expected_code = whole_err.first().expect("one diagnostic").code;
-
+    let bytes = outer_document(&outer, "7", "true", &"x".repeat(5_000)).into_bytes();
+    assert!(outer.decode(&bytes).is_err());
     match push_all_at_once(&outer, &bytes) {
         PushOutcome::Refused(refusal) => {
-            assert_eq!(refusal.code, STREAM_SEMANTIC);
-            assert!(
-                refusal.message.contains(expected_code),
-                "refusal message {:?} must name the underlying diagnostic {expected_code}",
-                refusal.message
-            );
+            assert_eq!(refusal.code, STREAM_GRAMMAR);
+            assert!(refusal.message.contains("inner.note"));
         }
         other => panic!("expected a semantic refusal, got {other:?}"),
     }
@@ -357,6 +344,8 @@ fn incomplete_and_refused_are_never_textually_confusable() {
         STREAM_TRUNCATED,
         STREAM_CANCELLED,
         STREAM_SEMANTIC,
+        STREAM_SCHEMA_PREFIX,
+        STREAM_GRAMMAR,
     ];
     for code in all_codes {
         assert!(
@@ -440,13 +429,32 @@ fn identical_bytes_produce_identical_outcomes_regardless_of_chunk_boundaries() {
 /// remains `Incomplete`; the very next byte is refused, never buffered.
 #[test]
 fn byte_bound_is_enforced_at_its_exact_limit() {
-    let outer = compile_outer();
+    // This actual checked type admits enough bounded text fields to reach
+    // the transport bound without first violating an individual field bound.
+    let path = write_temp("large-record");
+    let fields = (0..20)
+        .map(|i| format!("@id(\"large.field{i}\") field{i}: string,\n"))
+        .collect::<String>();
+    let module = format!("module test.large;\n@id(\"large.type\") record Large {{ {fields} }}\n@id(\"app.main\") fn main() -> i64 {{ 0 }}\n");
+    std::fs::write(&path, module).unwrap();
+    let outer = compile_agent_interaction_schema(&path, "large.type").unwrap();
+    std::fs::remove_file(path).unwrap();
+    let fields = (0..20)
+        .map(|i| {
+            format!(
+                "{}:{}",
+                quote_json(&format!("large.field{i}")),
+                quote_json(&"a".repeat(4096))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let document = format!(
+        "{}{{\"fields\":{{{fields}}}}}}}\n",
+        outer.stream_envelope_prefix()
+    );
+    let filler = &document.as_bytes()[..MAX_STREAM_BYTES];
     let mut decoder = ProposalStreamDecoder::new(&outer);
-
-    let mut filler = outer.stream_envelope_prefix().into_bytes();
-    filler.push(b'"');
-    filler.resize(MAX_STREAM_BYTES, b'a');
-    assert_eq!(filler.len(), MAX_STREAM_BYTES);
 
     let outcome = decoder.push(&filler);
     assert_eq!(
@@ -471,46 +479,33 @@ fn byte_bound_is_enforced_at_its_exact_limit() {
 /// `Incomplete`; the next nested open is refused.
 #[test]
 fn depth_bound_is_enforced_at_its_exact_limit() {
-    let outer = compile_outer();
-    let mut decoder = ProposalStreamDecoder::new(&outer);
-
-    // The schema envelope retains its opening object at depth 1.
-    let mut bytes = outer.stream_envelope_prefix().into_bytes();
-    bytes.extend(std::iter::repeat_n(b'[', MAX_STREAM_DEPTH - 1));
-    assert_eq!(
-        decoder.push(&bytes),
-        PushOutcome::Incomplete,
-        "exactly the depth bound must still be an in-progress stream"
-    );
-
-    match decoder.push(b"[") {
-        PushOutcome::Refused(refusal) => assert_eq!(refusal.code, STREAM_DEPTH),
-        other => panic!("one level past the depth bound must be refused, got {other:?}"),
+    let mut scanner = Scanner::default();
+    for (offset, byte) in std::iter::once(b'{')
+        .chain(std::iter::repeat_n(b'[', MAX_STREAM_DEPTH - 1))
+        .enumerate()
+    {
+        assert!(scanner.step(byte, offset).is_ok());
     }
+    assert_eq!(
+        scanner.step(b'[', MAX_STREAM_DEPTH).unwrap_err().code,
+        STREAM_DEPTH
+    );
 }
 
 /// Exactly [`MAX_STREAM_STRING_TOKENS`] complete empty-string tokens remains
 /// `Incomplete`; the next string token is refused.
 #[test]
 fn string_token_bound_is_enforced_at_its_exact_limit() {
-    let outer = compile_outer();
-    let mut decoder = ProposalStreamDecoder::new(&outer);
-
-    let mut bytes = outer.stream_envelope_prefix().into_bytes();
-    // Seven completed envelope strings precede its value.
-    for _ in 0..(MAX_STREAM_STRING_TOKENS - 7) {
-        bytes.extend_from_slice(b"\"\"");
+    let mut scanner = Scanner::default();
+    scanner.step(b'{', 0).unwrap();
+    let mut offset = 1;
+    for _ in 0..MAX_STREAM_STRING_TOKENS {
+        scanner.step(b'"', offset).unwrap();
+        offset += 1;
+        scanner.step(b'"', offset).unwrap();
+        offset += 1;
     }
-    assert_eq!(
-        decoder.push(&bytes),
-        PushOutcome::Incomplete,
-        "exactly the token bound must still be an in-progress stream"
-    );
-
-    match decoder.push(b"\"\"") {
-        PushOutcome::Refused(refusal) => assert_eq!(refusal.code, STREAM_TOKENS),
-        other => panic!("one token past the bound must be refused, got {other:?}"),
-    }
+    assert_eq!(scanner.step(b'"', offset).unwrap_err().code, STREAM_TOKENS);
 }
 
 // ---------------------------------------------------------------------
@@ -577,7 +572,7 @@ fn an_invalid_unicode_escape_hex_digit_is_refused() {
 fn a_mismatched_closing_bracket_is_refused() {
     let outer = compile_outer();
     let valid = outer_document(&outer, "1", "true", "ok");
-    let tampered = valid.replacen("{\"fields\"", "[\"fields\"", 1);
+    let tampered = valid.replacen("\"ok\"}", "\"ok\"]", 1);
     match push_all_at_once(&outer, tampered.as_bytes()) {
         PushOutcome::Refused(refusal) => assert_eq!(refusal.code, STREAM_BRACKET),
         other => panic!("expected STREAM-BRACKET, got {other:?}"),
@@ -861,5 +856,107 @@ fn interaction_schema_prefix_refuses_wrong_identity_duplicate_or_reordered_keys_
             matches!(decoder.push(prefix), PushOutcome::Refused(refusal) if refusal.code == STREAM_SCHEMA_PREFIX),
             "prefix {prefix:?} must refuse before finish"
         );
+    }
+}
+
+#[test]
+fn generic_grammar_refuses_nested_identity_and_case_mutations_during_push() {
+    let outer = compile_outer();
+    let valid = outer_document(&outer, "7", "true", "ok");
+    let choice = compile_choice();
+    let variant = choice_document(&choice, "choice.yes");
+    for (schema, bytes) in [
+        (&outer, valid.replacen("inner.note", "inner.unknown", 1)),
+        (
+            &outer,
+            valid.replacen(
+                "\"outer.id\":\"7\"",
+                "\"outer.id\":\"7\",\"outer.id\":\"7\"",
+                1,
+            ),
+        ),
+        (&choice, variant.replacen("choice.yes", "choice.unknown", 1)),
+    ] {
+        assert!(
+            schema.decode(bytes.as_bytes()).is_err(),
+            "mutation must be semantically hostile"
+        );
+        let mut decoder = ProposalStreamDecoder::new(schema);
+        assert!(matches!(
+            decoder.push(bytes.as_bytes()),
+            PushOutcome::Refused(_)
+        ));
+    }
+}
+
+#[test]
+fn shared_long_case_prefixes_remain_within_work_bound_for_admitted_documents() {
+    let path = write_temp("shared-case-prefix");
+    let prefix = "case".to_owned() + &"a".repeat(512);
+    let cases = (0..100)
+        .map(|i| format!("@id(\"{prefix}.{i}\") C{i},\n"))
+        .collect::<String>();
+    let fields = (0..64)
+        .map(|i| format!("@id(\"wide.f{i}\") f{i}: Choice,\n"))
+        .collect::<String>();
+    let module = format!("module test.shared_prefix;\n@id(\"choice\") variant Choice {{ {cases} }}\n@id(\"wide\") record Wide {{ {fields} }}\n@id(\"app.main\") fn main() -> i64 {{ 0 }}\n");
+    std::fs::write(&path, module).unwrap();
+    let schema = compile_agent_interaction_schema(&path, "wide").unwrap();
+    std::fs::remove_file(path).unwrap();
+    let value = format!(
+        "{{\"case\":{},\"fields\":{{}}}}",
+        quote_json(&format!("{prefix}.99"))
+    );
+    let fields = (0..64)
+        .map(|i| format!("{}:{value}", quote_json(&format!("wide.f{i}"))))
+        .collect::<Vec<_>>()
+        .join(",");
+    let document = format!(
+        "{}{{\"fields\":{{{fields}}}}}}}\n",
+        schema.stream_envelope_prefix()
+    );
+    let expected = schema.decode(document.as_bytes()).unwrap();
+    let mut decoder = ProposalStreamDecoder::new(&schema);
+    for chunk in document.as_bytes().chunks(1) {
+        assert_eq!(decoder.push(chunk), PushOutcome::Incomplete);
+    }
+    assert_eq!(decoder.expected_next(), &[ExpectedNext::Complete]);
+    assert!(decoder.grammar_work() < MAX_GRAMMAR_WORK);
+    assert_eq!(decoder.finish(), PushOutcome::Accepted(expected));
+}
+
+#[test]
+fn byte_arrays_use_compiled_element_bounds_and_canonical_numbers() {
+    let path = write_temp("bytes-grammar");
+    std::fs::write(&path, "module test.byte_grammar;\n@id(\"blob\") record Blob { @id(\"blob.data\") data: Bytes, }\n@id(\"app.main\") fn main() -> i64 { 0 }\n").unwrap();
+    let schema = compile_agent_interaction_schema(&path, "blob").unwrap();
+    std::fs::remove_file(path).unwrap();
+    for (payload, valid) in [
+        ("[]".into(), true),
+        ("[0,1,255]".into(), true),
+        (format!("[{}]", vec!["255"; 4096].join(",")), true),
+        ("[256]".into(), false),
+        ("[01]".into(), false),
+        ("[1,]".into(), false),
+        (format!("[{}]", vec!["0"; 4097].join(",")), false),
+    ] {
+        let document = format!(
+            "{}{{\"fields\":{{\"blob.data\":{payload}}}}}}}\n",
+            schema.stream_envelope_prefix()
+        );
+        assert_eq!(schema.decode(document.as_bytes()).is_ok(), valid);
+        let mut decoder = ProposalStreamDecoder::new(&schema);
+        let mut refused = false;
+        for byte in document.bytes() {
+            if let PushOutcome::Refused(refusal) = decoder.push(&[byte]) {
+                assert_eq!(refusal.code, STREAM_GRAMMAR);
+                refused = true;
+                break;
+            }
+        }
+        assert_eq!(!refused, valid);
+        if valid {
+            assert!(matches!(decoder.finish(), PushOutcome::Accepted(_)));
+        }
     }
 }

@@ -3,13 +3,16 @@
 Status: **LOCAL** bounded implementation with an executable reference and
 focused regression corpus, implemented in `src/streaming_proposal_decode.rs`.
 This is issue #178 ("Derive streaming structured-output decoding from the
-checked Proposal type"). No hosted evidence exists for this document; every
-claim below is a local `cargo test` run against the fixture schema built in
+checked Proposal type"). No hosted evidence exists for this document; the
+focused unit claims are local tests against fixture schemas in
 `src/streaming_proposal_decode/tests.rs`.
 
 Audience: implementers wiring a provider transport's chunked response bytes
-into a decoded Proposal, and reviewers of the streaming-safety layer this
-document adds around the existing whole-document decoder.
+into a decoded Proposal, and reviewers of the streaming grammar and safety
+layer around the existing whole-document decoder. Generated-client streaming
+consistency was exercised locally through the existing TypeScript, Python,
+and Rust execution harness, including one-byte delivery of exact integers,
+UTF-8, escapes and mutated object keys.
 
 ## Why a new module instead of extending `agent_interaction_schema`
 
@@ -24,51 +27,50 @@ the `ProposalDecoder` seam a real deployment binds a whole-document decoder
 to) is leased to other issues' ownership for this round and is read-only
 here regardless.
 
-This document does not change either module's admission rules, wire format,
-or public surface. It adds one new, independent module that depends only on
-`agent_interaction_schema`'s already-public `CompiledInteractionSchema` type
-and introduces a streaming-safety layer *around* the exact same `decode`
-call: a bounded byte buffer, an incremental structural scanner that can
-refuse a malformed or oversized prefix before the document completes, and
-the explicit incomplete/invalid/accepted three-way state a chunked provider
-transport needs. It is not wired into `live_invocation::kernel` or
-`model_invoke::ProposalDecoder` — those files are this round's read-only
-lease boundary; a later issue that owns that wiring can adapt
-`ProposalStreamDecoder` behind that seam without this module changing.
+This document does not change either module's admitted source language or
+canonical wire format. The streaming module uses the schema's compiled
+stream grammar: it incrementally checks the closed envelope and the admitted
+inside-`value` field and case order, scalar forms and scalar bounds, while a
+bounded structural scanner checks bytes, UTF-8, depth, strings, and framing.
+The grammar exposes read-only `ExpectedNext` categories and `grammar_work()`;
+`STREAM-GRAMMAR` is the closed refusal for a grammar mismatch or work limit.
+It retains the explicit incomplete/accepted/refused state a chunked transport
+needs. Existing SDK bridges use it before model invocation or Direct Runtime
+can authorize a proposal.
 
-## Why the streaming and whole-document decoders cannot disagree
+## Compiled grammar and final admission
 
-`ProposalStreamDecoder` adds **no new admission rule** of its own for what a
-Proposal document may contain. The only way it ever produces `Accepted` is
-by calling `CompiledInteractionSchema::decode` on the complete buffered
-bytes — the identical function, on the identical bytes, that the
-whole-document path already calls and already tests
-(`src/agent_interaction_schema/tests.rs`,
-`src/agent_interaction_schema/live_bridge.rs`). There is no second,
-hand-written grammar for unknown/duplicate/missing fields, variant tags,
-integer bounds, or canonical-rendering equality to drift out of sync with
-the checked type: every one of those rules is decided exactly once, by the
-compiled decoder, regardless of which path (whole-document or streaming)
-reached it.
+Both incremental grammars lower from the same opaque compiled schema objects
+that own the whole decoder and provider/client projections. The interaction
+schema retains a DAG of record/variant types; the source schema currently
+admits scalar record/variant fields. Lowering preserves stable identities,
+declaration order, exact integer representations and schema-owned text/byte
+bounds. No nested types are expanded recursively at construction.
 
-The streaming layer's own incremental scanner (see below) only ever
-*refuses earlier* than the whole-document path would — it never accepts
-(i.e. reaches the terminal `decode` call on) a document shape that path
-would reject, because every early-refusal rule it enforces is a strict
-subset of a rule the whole-document decoder already requires of a complete
-document:
+The incremental machine rejects mismatches early and final acceptance still
+requires the owning whole-document decoder on the exact buffered bytes. Thus
+an incremental parser defect cannot authorize a value the whole decoder would
+reject. Valid-stream conformance is exercised by the deterministic corpus,
+adversarial chunking and generated-client executions; final delegation alone
+would not prove absence of false early refusals.
+
+The incremental scanner and grammar are intended to
+refuse malformed documents before completion. Transport and work bounds are
+explicit; the final decoder independently checks semantic legality:
+
 
 | Streaming rule | Whole-document rule it is a subset of |
 |---|---|
 | Buffered bytes ≤ `MAX_STREAM_BYTES` (65536) | `source.len() > MAX_DOCUMENT_BYTES` (65536) is already refused |
 | First byte must be `{` | A non-object top level already fails `value.as_object()` |
-| Exact compiled outer-envelope prefix through `value` | Canonical rendering emits exactly this closed envelope; unknown, duplicate, reordered, or mismatched outer identities cannot replay canonically |
+| Exact compiled envelope and incremental inside-`value` field/case order, scalar forms, and scalar bounds | The compiled stream grammar is derived from the checked schema; unknown, duplicate, reordered, or mismatched identities cannot replay canonically |
 | No raw whitespace/control byte outside a string, other than the single terminal `\n` | Canonical rendering never emits whitespace; any inserted whitespace already fails the exact byte-for-byte canonical-replay check |
 | Exactly one trailing `\n`, nothing after | `text.strip_suffix('\n')` plus "no other `\n`/`\r`" is already required |
 | UTF-8 validity | Uses `std::str::from_utf8` — the identical stdlib check the whole decoder itself runs |
 | String/escape/`\u`-hex well-formedness | Already required for the JSON parse to succeed |
-| Container nesting ≤ `MAX_STREAM_DEPTH` (64, generous relative to the compiled schema's own 16-level `MAX_DEPTH`) | A legal document's worst-case bracket depth is well under 64 (2 JSON object opens per semantic nesting level, plus the envelope) |
-| String-literal token count ≤ `MAX_STREAM_STRING_TOKENS` (8192) | A minimal string token costs 2 bytes, so this bound is unreachable by any document within `MAX_STREAM_BYTES` unless it is almost entirely empty-string filler |
+| Container nesting ≤ `MAX_STREAM_DEPTH` (64) and grammar stack ≤ `MAX_STREAM_DEPTH * 4` | Both structural and schema-driven work are bounded before completion |
+| String-literal token count ≤ `MAX_STREAM_STRING_TOKENS` (8192) | Token work is bounded independently of byte and grammar work |
+| Grammar work ≤ `MAX_GRAMMAR_WORK` (`MAX_STREAM_BYTES * 64`) | Each incremental grammar transition is charged against a fixed work cap |
 
 This table is the "prove they agree, don't assert it" evidence: every early
 refusal is provably conservative, and the accept path is the same function
@@ -126,6 +128,7 @@ feeds every strict prefix of a valid document and asserts each is
 | `STREAM-DEPTH` | Container nesting exceeded `MAX_STREAM_DEPTH`. |
 | `STREAM-TOKENS` | String-literal token count exceeded `MAX_STREAM_STRING_TOKENS`. |
 | `STREAM-BYTES` | Buffered byte count exceeded `MAX_STREAM_BYTES`. |
+| `STREAM-GRAMMAR` | The compiled stream grammar rejected an envelope, field/case order, scalar form/bound, or exceeded its grammar work/stack bound. |
 | `STREAM-TRAILING` | A byte arrived after the document's terminal newline, or the top-level value closed without one immediately following. |
 | `STREAM-TRUNCATED` | `finish` was called before the document reached its terminal newline. |
 | `STREAM-CANCELLED` | The caller explicitly cancelled the stream via `cancel`. |
@@ -136,16 +139,21 @@ Every code is distinct from every other, and none overlaps the vocabulary
 all) — `incomplete_and_refused_are_never_textually_confusable` asserts both
 the pairwise distinctness and the absence of "incomplete" text in any code.
 
-## Bounds, each driven to its exact limit
+## Bounded buffering and work
 
 No unbounded buffering: each bound below is checked as bytes arrive, not
-only once a document completes, and each has a dedicated test that proves
-the bound is enforced *at* the declared limit (not one before, not one
-after) — `byte_bound_is_enforced_at_its_exact_limit`,
+only once a document completes, and the scanner's byte, depth, and token
+limits have focused unit checks at their declared boundaries. Grammar
+transitions and binary case-table comparisons charge `MAX_GRAMMAR_WORK` and
+cap the parser stack at
+`MAX_STREAM_DEPTH * 4`; these are separate from the structural scanner's
+bounds. `byte_bound_is_enforced_at_its_exact_limit`,
 `depth_bound_is_enforced_at_its_exact_limit`, and
 `string_token_bound_is_enforced_at_its_exact_limit` each construct a stream
-that reaches the bound exactly (still `Incomplete`) and then push one more
-unit past it (refused with the bound's own code). The byte bound is the
+that reaches the bound exactly and then supplies one more unit (refused with
+the bound's own code). The byte test uses an actual checked large record;
+the depth/token tests address the structural scanner directly, since typed
+shape validation can reject their deliberately untyped payloads earlier. The byte bound is the
 primary "no unbounded buffering" guarantee — the buffer literally never
 grows past `MAX_STREAM_BYTES`, the bound is checked before appending a
 chunk, not after — and it structurally caps the streaming scanner's total
@@ -155,17 +163,20 @@ work, since every scanner step is a single O(1) transition over at most
 ## Determinism across chunk boundaries
 
 `SourceProposalStreamDecoder` applies this same bounded framing to the
-source-live route's distinct `CompiledAgentProposalSchema` grammar. It does
-not translate that grammar into the interaction-value wire: after a terminal
-LF it calls the source schema's own `decode` and returns `DecodedProposal`.
+source-live route's distinct `CompiledAgentProposalSchema` grammar. Its
+incremental grammar is limited to the source schema's existing flat envelope
+and scalar forms; it adds no new source-language admission. It does not
+translate that grammar into the interaction-value wire: after a terminal LF
+it calls the source schema's own `decode` and returns `DecodedProposal`.
 
 The single most valuable property this document proves: the same total
 byte sequence produces the identical final outcome no matter how it is
 split into chunks. `ProposalStreamDecoder` has no chunk-boundary-dependent
-logic anywhere — every state transition (UTF-8 confirmation, container
-depth, string/escape state, byte/token counters) is a per-byte decision
-carried across `push` calls, never re-derived from where a chunk happened to
-end. `identical_bytes_produce_identical_outcomes_regardless_of_chunk_boundaries`
+logic anywhere — every scanner and grammar transition (UTF-8 confirmation,
+container depth, string/escape state, byte/token counters, expected
+field/case/scalar state) is carried across `push` calls, never re-derived from
+where a chunk happened to end.
+`identical_bytes_produce_identical_outcomes_regardless_of_chunk_boundaries`
 drives one valid document, one document with a multi-byte-UTF-8 text value
 (covering split UTF-8 continuation bytes), one document with an unknown
 field (a semantic refusal), and one document with a corrupted UTF-8 byte
@@ -202,22 +213,22 @@ the ordinary `ProposalSource` seam. `bind_agent_runtime_v2_live` binds an empty
 frozen proposal inventory and `AgentRuntimeV2::run_live` refuses any runtime
 that was bound with submitted proposal bytes. It reuses the checked typed
 effect dispatcher, so malformed streamed bytes fail before authorization or
-effect dispatch. These are offline injected adapters, not a live provider or
-generated-client integration.
+effect dispatch. Adapter integration uses offline injected fixtures. Generated
+client bytes are additionally checked against whole and streaming decoders.
 
-- **Not a JSON parser.** The incremental scanner validates only what it
-  needs to bound work and detect the terminal byte early: container
-  nesting, string-literal well-formedness, the absence of disallowed raw
-  bytes outside strings, exact compiled outer-envelope bytes through `value`,
-  and the exact single-newline framing. It does not incrementally validate
-  nested field names, case tags, object commas, number lexical form, or
-  `true`/`false` spelling — full nested semantic legality is always decided
-  by the one delegated `CompiledInteractionSchema::decode` call, never by
-  this scanner accepting or rejecting on its own authority.
+- **The scanner is not the typed grammar.** The structural scanner validates
+  container nesting, string-literal well-formedness, disallowed raw bytes,
+  UTF-8, byte/token bounds, and framing. The compiled `GrammarState` validates
+  the closed envelope plus inside-`value` field and case order, scalar lexical
+  forms, and scalar bounds incrementally, returning `ExpectedNext` categories
+  for read-only inspection. Neither layer is final authority: only the
+  complete buffered bytes passed to `CompiledInteractionSchema::decode` can
+  produce the accepted typed value and final semantic decision.
 - **No provider prompt/schema projection change.** `provider_json_schema`
   is unchanged, untouched, and out of this module's scope.
-- **No hosted evidence.** Every claim above is local
-  `cargo test --locked -p semaprax --lib streaming_proposal_decode`.
+- **No hosted evidence.** The focused unit corpus and scanner bounds are local
+  evidence. Generated-client consistency also passed locally with provisioned
+  TypeScript 5.8.3, Node 24.3, Python 3.14 and offline Rust dependencies.
 
 ## Executable reference
 

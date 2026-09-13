@@ -27,6 +27,7 @@ mod clients;
 pub(crate) mod decode;
 mod runtime_v1;
 pub(crate) mod shape;
+pub(crate) mod stream_grammar;
 
 pub use clients::{
     verify_agent_proposal_client_bundle, AgentProposalClientBundle,
@@ -155,6 +156,13 @@ impl CompiledAgentProposalSchema {
             quote_json(&self.schema.agent_id),
             quote_json(&self.schema.digest),
         )
+    }
+
+    /// Lower the checked Proposal role's actual admitted scalar shape into
+    /// the shared incremental grammar. This is read-only derived state: the
+    /// streaming decoder still delegates final acceptance to [`Self::decode`].
+    pub(crate) fn stream_grammar(&self) -> crate::streaming_proposal_decode::grammar::Grammar {
+        stream_grammar::lower(&self.shape, self.stream_envelope_prefix())
     }
 }
 

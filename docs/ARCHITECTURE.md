@@ -161,6 +161,16 @@ refusal echoes for stateless operations, with shared hard caps for execution.
 existing semantic service through opaque handles and canonical reports. It
 retains the service's staged refresh and replay boundaries; caught stateful
 panics poison the facade rather than presenting its state as reusable.
+`model_call_receipt/receipt_decode` owns the bounded canonical v1 inverse.
+`model_call_receipt/generic_enrichment` reconstructs rich host-bound receipts
+from validated journals and independently compiled decode outcomes; observed
+adapter joins retain separate logical and transport byte counts.
+`model_call_receipt/source_enrichment` binds recovered source attempts to
+independent host facts and canonical observation/prompt preimages. Recovery
+retains the already-committed optional ProgramRoot for read-only comparison;
+identity and journal wire formats remain unchanged.
+`model_call_receipt/observed_usage` projects only declared provider accounting
+into the existing reconciliation vocabulary, preserving missing dimensions.
 `model_call_receipt/journal_projection` validates generic journal inputs and
 folds per-attempt evidence; `model_call_receipt/source_projection` folds opaque
 recovered source checkpoints. Both bind the complete journal chain, preserve

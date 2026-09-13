@@ -328,3 +328,56 @@ actual input tokens, output tokens, and monetary cost separately against an
 invoice. Exact call identity and account matching precede duplicate consumption;
 negative costs are invalid and absent usage remains uncertain. Mixed discrepancy
 directions are explicit. The older byte-proxy reconciliation API is unchanged.
+
+## Bounded canonical decoding and live enrichment
+
+`receipt_decode::decode_receipt` parses at most 65,536 bytes and bounds each
+string to 4096 UTF-8 bytes. Commitment fields require canonical lowercase
+SHA-256 digests; historical root and policy labels remain opaque bindings.
+It validates numeric ranges, positive attempts, known timestamp ordering,
+response/proposal lifecycle consistency and embedded provider call identity.
+The parsed object must render to exactly the submitted bytes, rejecting
+unknown/duplicate/reordered fields and alternate JSON encodings. Parsing alone
+neither authenticates root labels nor recomputes retained payload commitments.
+
+`generic_enrichment::enrich_generic_call` reconstructs rich v1 receipts from
+validated live journals, the independently retained invocation seed and exact
+logical request, the checked interaction schema and independent host bindings.
+The host must supply required reservation time, cost estimate, model/provider
+identity and invoice reference; the function does not fill absent facts with
+zero. ProgramRoot, policy, invocation and grammar additionally match the seed.
+Agent, DeploymentRoot and InstanceRoot are the host's independently retained
+binding and are compared again during exact-byte replay.
+
+Accepted and refused decode outcomes are independently reproduced with the
+compiled decoder. Responses, attempted-byte counts, reserved units and failures
+come from journal entries. Unresolved intents remain `uncertain`. A known
+provider failure retains its closed failure reason and the furthest known
+`dispatched` or `intent_persisted` stage; `cancelled` stays distinct. A refused
+reservation preserves the actual zero reservation alongside the original
+request commitment. `ModelInvocationRequest::canonical_json` exposes the same
+logical bytes its existing digest already commits; receipt request length is
+that document's length. Generic local input counters count task and observation
+bytes; the observed-adapter variant instead records actual transport input
+length. These are distinct quantities, not interchangeable token estimates.
+
+`enrich_observed_generic_call` also checks the immutable adapter observation,
+exact transport request, declared provider/adapter identity and retained events.
+Captured timestamps are used only when supplied by an explicit clock, and must
+agree with any retained host values. Only complete, settled, explicitly
+provider-reported usage enters the complete-only v1 field. The
+`observed_usage` helpers preserve independently missing dimensions for billing
+reconciliation and never promote local estimates to provider observations.
+Both enrichment variants have exact-byte replay APIs without live dispatch.
+
+`source_enrichment::enrich_source_calls` reconstructs rich receipts from an
+opaque authenticated source checkpoint. It checks ProgramRoot and invocation,
+rechecks the original source/task/policy/grammar binding, and requires the exact
+retained canonical observation and provider-prompt preimages. Decoded outcomes
+are reproduced with the compiler-derived Agent Proposal schema; lifecycle-only
+refusal tags retain their journal meaning. Source retry ordinals are zero-based
+in the journal and become one-based in rich receipts. At most 1024 attempts,
+65,536 bytes per receipt and 4 MiB total receipt bytes are emitted. Exact replay
+compares their canonical documents concatenated in causal order. A checkpoint
+without a bound ProgramRoot remains eligible for the journal projection, but
+cannot manufacture a root-bound rich receipt.

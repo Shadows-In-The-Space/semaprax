@@ -93,7 +93,14 @@ impl ModelInvocationRequest {
     /// any differing field (including the turn number) changes it.
     #[must_use]
     pub fn digest(&self) -> String {
-        let body = format!(
+        digest(REQUEST_DOMAIN, self.canonical_json().as_bytes())
+    }
+
+    /// Exact logical request document committed by `digest`. This is not the
+    /// provider transport envelope, which is supplied by an explicit adapter.
+    #[must_use]
+    pub fn canonical_json(&self) -> String {
+        format!(
             "{{\"schema\":\"semaprax.live-invocation.model-request.v1\",\"turn\":{},\"task\":{},\"observation\":{},\"proposal_grammar_digest\":{},\"deployment_binding\":{},\"max_response_bytes\":{},\"effective_budget\":{}}}",
             self.turn,
             quote_json(&super::identity::hex(&self.task)),
@@ -102,8 +109,7 @@ impl ModelInvocationRequest {
             quote_json(&self.deployment_binding),
             self.max_response_bytes,
             self.effective_budget,
-        );
-        digest(REQUEST_DOMAIN, body.as_bytes())
+        )
     }
 }
 

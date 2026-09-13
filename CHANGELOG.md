@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Decode canonical model receipts with strict bounds and enrich actual generic
+  and source attempt journals using retained root, request and host metadata (#180).
+  Join explicit adapter observations and provider usage without inventing
+  missing measurements; preserve failure and unresolved lifecycle evidence.
+
 - Capture ordered provider adapter attempts and replay retained chunks against
   actual generic/source runtime schemas (#178/#180). Bind generic settlements
   to validated journal requests and responses; compare provider token and cost

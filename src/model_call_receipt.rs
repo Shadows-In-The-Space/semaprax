@@ -30,10 +30,14 @@
 
 pub mod adapter_projection;
 pub mod audit_view;
+pub mod generic_enrichment;
 pub mod journal_projection;
+pub mod observed_usage;
 pub mod receipt;
+pub mod receipt_decode;
 pub mod reconciliation;
 pub mod replay;
+pub mod source_enrichment;
 pub mod source_projection;
 
 pub use audit_view::{
@@ -45,6 +49,9 @@ pub use receipt::{
     verify_root_binding, BindingError, ModelCallReceipt, PayloadPrivacyClaim,
     ProviderReportedUsage, ReceiptRootBinding, ReceiptStage, RootBindingContext,
     LOW_ENTROPY_BYTE_THRESHOLD, RECEIPT_SCHEMA,
+};
+pub use receipt_decode::{
+    decode_receipt, DecodeError, MAX_RECEIPT_BYTES, MAX_RECEIPT_STRING_BYTES,
 };
 pub use reconciliation::{
     BillingReconciler, ProviderInvoiceRow, ProviderReportedSource, ProviderUsageDiscrepancy,

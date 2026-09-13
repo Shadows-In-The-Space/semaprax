@@ -414,7 +414,7 @@ pub fn verify_root_binding(
     if receipt.deployment_policy_digest != context.deployment_policy_digest {
         return Err(BindingError::WrongPolicy);
     }
-    if receipt.attempt != context.previous_attempt + 1 {
+    if Some(receipt.attempt) != context.previous_attempt.checked_add(1) {
         return Err(BindingError::AttemptOutOfOrder);
     }
     Ok(())

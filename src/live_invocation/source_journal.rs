@@ -103,6 +103,7 @@ pub struct SourceInvocationBinding {
     deadline_millis: i64,
     profile: SourceProfile,
     io: Option<io_v5::IoBindingV5>,
+    program_root: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -228,6 +229,7 @@ impl SourceInvocationBinding {
             deadline_millis: seed.deadline_millis,
             profile: SourceProfile::PrimitiveV1,
             io: None,
+            program_root: seed.program_root,
         })
     }
 
@@ -1168,6 +1170,25 @@ pub struct RecoveredSourceCheckpoint {
 }
 
 impl RecoveredSourceCheckpoint {
+    pub fn program_root(&self) -> Option<&str> {
+        self.journal.binding.program_root.as_deref()
+    }
+    pub fn matches_proposal_source(
+        &self,
+        source_revision: &str,
+        deployment_binding: &str,
+        task: &[u8],
+        task_budget: i64,
+        proposal_schema_digest: &str,
+    ) -> bool {
+        self.journal.binding.matches_proposal_source(
+            source_revision,
+            deployment_binding,
+            task,
+            task_budget,
+            proposal_schema_digest,
+        )
+    }
     pub fn entries(&self) -> &[SourceJournalEntry] {
         self.journal.entries()
     }

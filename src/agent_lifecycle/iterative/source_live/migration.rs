@@ -2,6 +2,8 @@
 //! A destination store acknowledges the pure-evaluation reservation before
 //! any migration code runs. This module does not authenticate store freshness.
 
+#![allow(clippy::items_after_test_module)]
+
 use super::*;
 use crate::execution_revision::typed::migration::{
     evaluate_migration, flat_state, prepare_migration_call,

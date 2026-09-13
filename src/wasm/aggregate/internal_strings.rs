@@ -1,6 +1,8 @@
 //! Standalone module assembly and String operations. Existing emitters never
 //! select this mode; its drop index deliberately agrees with the reused ledger.
 
+#![allow(clippy::items_after_test_module)]
+
 use super::*;
 // This standalone profile retains its own diagnostic namespace even when it
 // reuses the private owned-data planner.

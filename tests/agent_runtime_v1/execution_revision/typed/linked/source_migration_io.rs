@@ -248,7 +248,7 @@ fn io_source_migration_a_to_b_to_c_preserves_totals_and_rejects_widening() {
                 SourceJournalEntry::PricedAttemptIntent(intent) => Some(intent.money_ordinal),
                 _ => None,
             })
-            .last(),
+            .next_back(),
         Some(8)
     );
 

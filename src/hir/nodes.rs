@@ -403,6 +403,7 @@ pub(super) fn resolver_admits_flat_owned_string_variant(
     super::type_reachability::is_admitted_owned_string_variant(declarations, ty)
 }
 
+#[allow(dead_code)]
 pub(super) fn resolver_admits_owned_variant(
     declarations: &DeclarationIndex,
     ty: &ResolvedType,

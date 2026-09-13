@@ -513,7 +513,8 @@ fn wire_data_types_follow_the_extended_copy_variant_and_nested_generic_source_pr
         "case_field",
         Some("data.added.some"),
     );
-    for ty in [nominal("data.existing-choice", &[])] {
+    {
+        let ty = nominal("data.existing-choice", &[]);
         code(
             apply(
                 &base,

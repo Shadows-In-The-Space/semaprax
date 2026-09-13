@@ -14,7 +14,7 @@ pub(crate) use semaprax::{ast, cleanup, cleanup_plan, diagnostic, hir, lexer};
 pub(crate) use semaprax::{parse, parse_with_comments};
 #[path = "../../../src/private_capacity_contract.rs"]
 pub(crate) mod private_capacity_contract;
-#[allow(dead_code, clippy::all)]
+#[allow(dead_code, clippy::all, unexpected_cfgs)]
 #[path = "../../../src/format.rs"]
 pub(crate) mod private_format;
 use semaprax_native_rust_interop_platform as platform;

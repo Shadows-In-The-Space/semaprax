@@ -39,6 +39,7 @@ impl CompiledIterativeLifecycle {
         self.run_with_driver_live_seed(task, source, driver, budget, cancellation, session, None)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn run_with_driver_live_seed(
         &self,
         task: &LifecycleTask,

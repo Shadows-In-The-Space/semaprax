@@ -1,5 +1,8 @@
 //! Unpublished physical hosts for the standalone compiler's checked subjects.
 //! This crate has no registry distribution and introduces no compiler fork.
+
+#![allow(clippy::duplicate_mod)]
+
 use std::path::Path;
 
 use semaprax::diagnostic::Diagnostic;

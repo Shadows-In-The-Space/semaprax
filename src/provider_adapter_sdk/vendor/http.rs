@@ -171,7 +171,7 @@ pub enum ProviderHttpsTlsPolicy {
     WebPkiRoots,
     /// Use an explicit caller-supplied Rustls configuration, useful for a
     /// private host or deterministic TLS loopback fixture.
-    Explicit(rustls::ClientConfig),
+    Explicit(Box<rustls::ClientConfig>),
 }
 
 impl fmt::Debug for ProviderHttpsTlsPolicy {
@@ -246,7 +246,7 @@ impl HttpsBufferedTransport {
                 .with_root_certificates(roots)
                 .with_no_client_auth()
             }
-            ProviderHttpsTlsPolicy::Explicit(tls) => tls,
+            ProviderHttpsTlsPolicy::Explicit(tls) => *tls,
         };
         // `no_proxy` and `https_only` are both deliberate: environment proxy
         // discovery and cleartext downgrade are absent from this authority.
@@ -568,7 +568,7 @@ mod tests {
         HttpsBufferedTransport::new(ProviderHttpsTransportConfig {
             origin: ProviderHttpsOrigin::parse(&format!("https://localhost:{port}/")).unwrap(),
             authentication: auth(),
-            tls: ProviderHttpsTlsPolicy::Explicit(test_client_tls()),
+            tls: ProviderHttpsTlsPolicy::Explicit(Box::new(test_client_tls())),
             proxy_policy: ProviderProxyPolicy::Disabled,
             timeout,
             max_response_bytes,

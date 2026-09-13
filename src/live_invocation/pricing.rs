@@ -149,6 +149,7 @@ pub(crate) struct PricedMonetaryCarry {
 }
 
 impl MonetaryCarry {
+    #[allow(dead_code)]
     pub(crate) fn from_legacy_work(
         pricing: &ValidatedPricing,
         work_units: i64,
@@ -444,6 +445,7 @@ impl MonetaryAccounting {
         Ok(accounting)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn pricing(&self) -> &ValidatedPricing {
         &self.pricing
     }
@@ -470,6 +472,7 @@ impl MonetaryAccounting {
 
     /// Commits the maximum price before physical dispatch. The current source
     /// work ledger remains separate until the v4 integration joins boundaries.
+    #[allow(dead_code)]
     pub(crate) fn reserve(
         &mut self,
         work_unit: &str,
@@ -587,6 +590,7 @@ impl MonetaryAccounting {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn attempts(&self) -> &[MonetaryAttempt] {
         &self.attempts
     }
@@ -645,6 +649,7 @@ impl MonetaryAccounting {
     pub(crate) const fn observed_over_reservation_minor(&self) -> i64 {
         self.observed_over_reservation_minor
     }
+    #[allow(dead_code)]
     pub(crate) const fn failure(&self) -> Option<&'static str> {
         self.failure
     }

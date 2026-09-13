@@ -42,6 +42,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Options, u8> {
         2
     })
 }
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn parse_inner(args: &[String]) -> Result<Options, &'static str> {
     let [profile, input, rest @ ..] = args else {
         return Err("requires <profile> <input> [selection] [options]");

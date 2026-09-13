@@ -148,6 +148,7 @@ fn io_limits() -> GenericIoLimits {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handlers<'a>(
     capability: &'a ModelInvokeCapability,
     handler: &'a mut FixtureModelHandler,

@@ -348,6 +348,7 @@ fn suspended(a: &Fixture) -> Suspended {
 }
 
 #[test]
+#[allow(clippy::result_large_err)]
 fn source_migration_refuses_wrong_project_task_function_handoff_and_limits_before_dispatch() {
     let a = durable::first();
     let b = durable::successor(&a, "State", "StateB", "b", &["marker"], false);

@@ -116,11 +116,7 @@ impl PasswordHasherHost {
         policy: PasswordPolicy,
         approved_migrations: &[PasswordPolicy],
     ) -> Result<Self, AuthError> {
-        if approved_migrations.len() > MAX_MIGRATIONS
-            || approved_migrations
-                .iter()
-                .any(|candidate| *candidate == policy)
-        {
+        if approved_migrations.len() > MAX_MIGRATIONS || approved_migrations.contains(&policy) {
             return Err(AuthError::InvalidPolicy);
         }
         Ok(Self {
@@ -161,12 +157,7 @@ impl PasswordHasherHost {
     ) -> Result<(), AuthError> {
         ensure_password_size(password)?;
         let stored_policy = validate_record(stored.expose_for_storage())?;
-        if stored_policy != self.policy
-            && !self
-                .approved_migrations
-                .iter()
-                .any(|candidate| *candidate == stored_policy)
-        {
+        if stored_policy != self.policy && !self.approved_migrations.contains(&stored_policy) {
             return Err(AuthError::InvalidPolicy);
         }
         let parsed = PasswordHash::new(stored.expose_for_storage())
@@ -213,7 +204,8 @@ fn validate_record(encoded: &str) -> Result<PasswordPolicy, AuthError> {
     ) else {
         return Err(AuthError::InvalidCredential);
     };
-    if fields.next().is_some() || prefix != "" || algorithm != "argon2id" || version != "v=19" {
+    if fields.next().is_some() || !prefix.is_empty() || algorithm != "argon2id" || version != "v=19"
+    {
         return Err(AuthError::InvalidCredential);
     }
     let policy = parse_params(params)?;

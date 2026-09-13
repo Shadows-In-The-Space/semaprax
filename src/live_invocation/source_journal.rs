@@ -118,7 +118,7 @@ enum SourceProfile {
         evaluator: String,
         max_steps_per_stage: usize,
         max_total_steps: usize,
-        carry: SourceMigrationCarry,
+        carry: Box<SourceMigrationCarry>,
     },
     PricedV4 {
         evaluator: String,
@@ -131,7 +131,7 @@ enum SourceProfile {
         max_steps_per_stage: usize,
         max_total_steps: usize,
         pricing: priced_v4::PricedSourceBindingV4,
-        carry: PricedMigrationCarryV4,
+        carry: Box<PricedMigrationCarryV4>,
     },
 }
 
@@ -312,14 +312,14 @@ impl SourceInvocationBinding {
     }
     pub(crate) fn migration(&self) -> Option<&SourceMigrationCarry> {
         match &self.profile {
-            SourceProfile::MigratedV3 { carry, .. } => Some(carry),
+            SourceProfile::MigratedV3 { carry, .. } => Some(carry.as_ref()),
             SourceProfile::PricedMigratedV4 { carry, .. } => Some(&carry.base),
             _ => None,
         }
     }
     pub(crate) fn priced_migration_carry(&self) -> Option<&PricedMigrationCarryV4> {
         match &self.profile {
-            SourceProfile::PricedMigratedV4 { carry, .. } => Some(carry),
+            SourceProfile::PricedMigratedV4 { carry, .. } => Some(carry.as_ref()),
             _ => None,
         }
     }

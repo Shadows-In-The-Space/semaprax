@@ -80,7 +80,7 @@ impl AnthropicMessagesAdapter {
                 max_output_tokens: max_tokens,
             },
             model: model.into(),
-            max_tokens: max_tokens,
+            max_tokens,
             transport,
             stream: None,
             decoder: SseDecoder::default(),
@@ -356,6 +356,7 @@ impl AnthropicMessagesAdapter {
         );
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn from_transport_failure(&mut self, failure: TransportFailure) {
         let (normalized, class) = match failure.kind {
             TransportFailureKind::NotDispatched => {

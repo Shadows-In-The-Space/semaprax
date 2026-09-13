@@ -1,3 +1,5 @@
+#![allow(clippy::duplicate_mod)]
+
 use std::path::{Path, PathBuf};
 
 #[path = "documentation/benchmark_fixtures.rs"]

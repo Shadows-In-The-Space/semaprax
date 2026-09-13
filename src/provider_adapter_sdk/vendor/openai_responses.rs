@@ -73,10 +73,10 @@ impl OpenAiResponsesAdapter {
                 max_request_bytes: MAX_REQUEST_BYTES,
                 max_response_bytes: MAX_RESPONSE_BYTES,
                 max_context_tokens: 200_000,
-                max_output_tokens: max_output_tokens,
+                max_output_tokens,
             },
             model: model.into(),
-            max_output_tokens: max_output_tokens,
+            max_output_tokens,
             transport,
             stream: None,
             decoder: SseDecoder::default(),
@@ -214,15 +214,16 @@ impl OpenAiResponsesAdapter {
                         AttemptOutcomeClass::CompletedWithResponse,
                     );
                 }
-                if self.usage.tokens_in.is_some()
-                    && self.usage.tokens_out.is_some()
-                    && self.usage.cost_micros.is_some()
-                {
+                if let (Some(tokens_in), Some(tokens_out), Some(cost_micros)) = (
+                    self.usage.tokens_in,
+                    self.usage.tokens_out,
+                    self.usage.cost_micros,
+                ) {
                     self.queued
                         .push_back(AdapterPoll::Event(AdapterEvent::Usage {
-                            tokens_in: self.usage.tokens_in.unwrap(),
-                            tokens_out: self.usage.tokens_out.unwrap(),
-                            cost_micros: self.usage.cost_micros.unwrap(),
+                            tokens_in,
+                            tokens_out,
+                            cost_micros,
                         }));
                 }
                 self.queued
@@ -272,6 +273,7 @@ impl OpenAiResponsesAdapter {
         );
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn from_transport_failure(&mut self, failure: TransportFailure) {
         let (normalized, class) = match failure.kind {
             TransportFailureKind::NotDispatched => {

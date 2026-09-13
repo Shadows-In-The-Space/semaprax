@@ -298,6 +298,7 @@ pub fn replay_generic_call(
 /// Logical request size remains distinct from transport byte accounting.
 /// Partial/provider-unavailable usage stays absent in the complete-only v1
 /// field and remains available in the separately retained observation.
+#[allow(clippy::too_many_arguments)]
 pub fn enrich_observed_generic_call(
     entries: &[JournalEntry],
     seed: &LiveInvocationSeed,
@@ -379,6 +380,7 @@ pub fn enrich_observed_generic_call(
 }
 
 /// Exact-byte replay including the independently retained adapter observation.
+#[allow(clippy::too_many_arguments)]
 pub fn replay_observed_generic_call(
     submitted: &[u8],
     entries: &[JournalEntry],

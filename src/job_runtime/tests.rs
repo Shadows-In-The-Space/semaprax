@@ -194,10 +194,11 @@ impl ScriptedHandler {
 
 impl HostJobHandler for ScriptedHandler {
     fn execute(&mut self, _admitted_payload: &[u8]) -> HostJobOutcome {
-        self.outcomes
-            .is_empty()
-            .then_some(HostJobOutcome::Uncertain)
-            .unwrap_or_else(|| self.outcomes.remove(0))
+        if self.outcomes.is_empty() {
+            HostJobOutcome::Uncertain
+        } else {
+            self.outcomes.remove(0)
+        }
     }
 }
 

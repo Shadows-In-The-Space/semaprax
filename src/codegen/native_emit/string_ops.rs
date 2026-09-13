@@ -24,9 +24,11 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         // A runtime helper writes its out-parameter only on success and the
         // caller jumps to the epilogue first, but a compiler that cannot prove
         // that across the status check reports the slot as maybe-uninitialized.
-        // Zero it the way the function result slot already is.
+        // Zero it the way the function result slot already is. Mark as unused
+        // to avoid -Werror=unused-but-set-variable when the String path is
+        // later optimized away and the slot remains set but not read.
         self.line(&format!(
-            "{} {name} = {{0}};",
+            "{} __attribute__((unused)) {name} = {{0}};",
             c_value_type(self.program, self.resource_abi, ty)?
         ));
         Ok(name)

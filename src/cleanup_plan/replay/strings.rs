@@ -1,4 +1,7 @@
 //! Independent source-derived replay of literal/place String allocation.
+
+#![allow(clippy::items_after_test_module)]
+
 use super::*;
 use crate::hir::ResolvedTypeDeclarationKind;
 pub(super) fn owns_clone(expression: &ResolvedExpr) -> bool {

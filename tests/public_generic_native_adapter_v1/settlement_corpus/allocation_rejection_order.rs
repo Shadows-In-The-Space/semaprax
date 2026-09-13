@@ -82,7 +82,7 @@ fn result_allocation_rejection_preserves_ordered_input_release() {
     wasm.close();
 
     for optimization in ["-O0", "-O2"] {
-        let native = compile_and_run_native(&[case.clone()], optimization);
+        let native = compile_and_run_native(std::slice::from_ref(&case), optimization);
         assert_eq!(native.len(), 1);
         assert!(!native[0].outcome.accepted);
         assert_eq!(native[0].outcome.primary_status, case.expected_status);

@@ -1,0 +1,6 @@
+schema = "semaprax.project.v1"
+name = "module-import-refactor"
+entry = "bench.import.app"
+sources = ["src/app.spx", "src/candidate.spx", "src/helper.spx", "src/tests.spx"]
+web_exports = ["bench.import.invoice_total"]
+tests = ["bench.import.tests"]

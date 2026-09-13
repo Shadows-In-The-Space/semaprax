@@ -1,0 +1,7 @@
+module bench.import.helper;
+
+@id("bench.import.tax_for_subtotal")
+fn tax_for_subtotal(subtotal: i32, tax_rate: i32) -> i32
+{
+    subtotal * tax_rate / 100i32
+}

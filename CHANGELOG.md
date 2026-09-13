@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a fourth cross-language benchmark family for a multi-module invoice
+  calculation (#106). Candidate-preserving hidden entry modules distinguish
+  whole-subtotal rounding from per-item rounding in Rust, TypeScript, and
+  SEMAPRAX Project execution. This adds corpus coverage, not coding-agent trials.
+
 - Separate native public-generic allocation accounting from the 16 MiB
   logical carrier limit (#250), allowing metadata and overlapping full input
   and result payloads. Exercise exact-byte boundaries across local native,

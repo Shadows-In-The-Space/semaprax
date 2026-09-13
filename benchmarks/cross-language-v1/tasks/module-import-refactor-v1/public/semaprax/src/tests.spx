@@ -1,0 +1,7 @@
+module bench.import.tests;
+
+@id("bench.import.tests")
+fn main() -> i64
+{
+    0
+}

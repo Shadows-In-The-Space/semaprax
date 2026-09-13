@@ -698,6 +698,112 @@ pub fn validate(kind: i64, version: i64, payload_len: i64) -> i64 {
     assert_eq!(record["hidden"]["passed"], false);
 }
 
+#[test]
+fn module_import_invoice_wrong_candidate_passes_public_but_fails_hidden_on_all_three_ports() {
+    let directory = scratch("module-import-wrong-candidate");
+    let source = root().join(SUITE).join("tasks/module-import-refactor-v1");
+    let task_dir = directory.join("task");
+    for language in ["rust", "typescript", "semaprax"] {
+        copy_fixture_tree(
+            &source.join(format!("public/{language}")),
+            &task_dir.join(format!("public/{language}")),
+        );
+        copy_fixture_tree(
+            &source.join(format!("hidden/{language}")),
+            &task_dir.join(format!("hidden/{language}")),
+        );
+    }
+    let mutations = [
+        (
+            task_dir.join("public/rust/candidate.rs"),
+            "tax_for_subtotal(subtotal, tax_rate) + shipping",
+            "tax_for_subtotal(price, tax_rate) * quantity + shipping",
+        ),
+        (
+            task_dir.join("public/typescript/candidate.ts"),
+            "taxForSubtotal(subtotal, taxRate) + shipping",
+            "taxForSubtotal(price, taxRate) * quantity + shipping",
+        ),
+        (
+            task_dir.join("public/semaprax/src/candidate.spx"),
+            "subtotal + tax_for_subtotal(subtotal, tax_rate) + shipping",
+            "subtotal + tax_for_subtotal(price, tax_rate) * quantity + shipping",
+        ),
+    ];
+    for (path, expected, replacement) in mutations {
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains(expected),
+            "mutation target missing: {}",
+            path.display()
+        );
+        std::fs::write(path, text.replacen(expected, replacement, 1)).unwrap();
+    }
+    let tasks = serde_json::json!({
+        "schema": "benchmark.cross_language.tasks.v1",
+        "tasks": [{
+            "id": "module-import-invoice-wrong-candidate",
+            "category": "greenfield",
+            "split": "held_out",
+            "summary": "three-port wrong imported-helper negative control",
+            "equivalence": "task/EQUIVALENCE.md",
+            "languages": {
+                "rust": {"public": "task/public/rust", "hidden": "task/hidden/rust"},
+                "typescript": {"public": "task/public/typescript", "hidden": "task/hidden/typescript"},
+                "semaprax-project": {"public": "task/public/semaprax", "hidden": "task/hidden/semaprax"}
+            }
+        }]
+    });
+    std::fs::copy(
+        source.join("EQUIVALENCE.md"),
+        task_dir.join("EQUIVALENCE.md"),
+    )
+    .unwrap();
+    let tasks_path = directory.join("tasks.json");
+    write_json(&tasks_path, &tasks);
+    let output = directory.join("result.json");
+    let result = runner()
+        .arg("--root")
+        .arg(&directory)
+        .arg("--tasks")
+        .arg(&tasks_path)
+        .arg("--adapters")
+        .arg(root().join(SUITE).join("adapters.json"))
+        .arg("--semaprax")
+        .arg(env!("CARGO_BIN_EXE_semaprax"))
+        .arg("--only")
+        .arg("module-import-invoice-wrong-candidate")
+        .arg("--language")
+        .arg("rust")
+        .arg("--language")
+        .arg("typescript")
+        .arg("--language")
+        .arg("semaprax-project")
+        .arg("--output")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1), "{result:?}");
+    let document = document(&output);
+    for (language, id) in [
+        ("rust", "module-import-invoice-wrong-candidate::rust"),
+        (
+            "typescript",
+            "module-import-invoice-wrong-candidate::typescript",
+        ),
+        (
+            "semaprax-project",
+            "module-import-invoice-wrong-candidate::semaprax-project",
+        ),
+    ] {
+        let record = result_for(&document, id);
+        assert_eq!(record["public"]["passed"], true, "{language}: {record}");
+        assert_eq!(record["hidden"]["passed"], false, "{language}: {record}");
+        assert_eq!(record["leak_check"], "ok", "{language}: {record}");
+        assert_eq!(record["status"], "failed", "{language}: {record}");
+    }
+}
+
 fn copy_fixture_tree(source: &Path, destination: &Path) {
     std::fs::create_dir_all(destination).unwrap();
     for entry in std::fs::read_dir(source).unwrap() {

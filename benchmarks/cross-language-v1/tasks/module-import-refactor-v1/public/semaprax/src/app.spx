@@ -1,0 +1,8 @@
+module bench.import.app;
+use function @id("bench.import.invoice_total") from bench.import.candidate as invoice_total;
+
+@id("bench.import.main")
+fn main() -> i64
+{
+    if invoice_total(10i32, 2i32, 10i32, 5i32) == 27i32 { if invoice_total(40i32, 2i32, 25i32, 0i32) == 100i32 { if invoice_total(25i32, 4i32, 20i32, 10i32) == 130i32 { 0 } else { 1 } } else { 1 } } else { 1 }
+}

@@ -1,0 +1,9 @@
+module bench.import.candidate;
+use function @id("bench.import.tax_for_subtotal") from bench.import.helper as tax_for_subtotal;
+
+@id("bench.import.invoice_total")
+fn invoice_total(price: i32, quantity: i32, tax_rate: i32, shipping: i32) -> i32
+{
+    let subtotal = price * quantity;
+    subtotal + tax_for_subtotal(subtotal, tax_rate) + shipping
+}

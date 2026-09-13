@@ -1,7 +1,9 @@
 """Fail-closed extraction of counters from archived OpenCode pilot evidence."""
 
 import base64
+import hashlib
 import json
+from pathlib import Path
 
 
 def _bytes(value, label):
@@ -131,3 +133,89 @@ def provider_usage(body, model):
         "model_output_tokens": sum(row["output_tokens"] for row in rows),
         "messages": rows,
     }
+
+
+def stream_provider_usage(body, expected_session, configured_model):
+    """Derive provider-reported usage from exact OpenCode JSONL step finishes.
+
+    This is an offline fallback when the exported session is truncated. It binds
+    every counted finish to the caller's session identifier and configured
+    provider/model; it never estimates tokens from stream bytes.
+    """
+    if not isinstance(body, bytes) or len(body) > 1_048_576 or not isinstance(expected_session, str) or not expected_session:
+        return {"status": "unavailable", "reason": "stream usage inputs are invalid"}
+    if (not isinstance(configured_model, str) or configured_model.count("/") != 1 or not all(configured_model.split("/"))
+            or any(character.isspace() for character in configured_model)):
+        return {"status": "unavailable", "reason": "configured model is invalid"}
+    rows = []
+    part_ids = set()
+    message_ids = set()
+    for line in body.splitlines():
+        try:
+            event = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {"status": "unavailable", "reason": "stream is not JSONL"}
+        if not isinstance(event, dict) or event.get("sessionID") != expected_session:
+            return {"status": "unavailable", "reason": "stream session differs"}
+        if event.get("type") != "step_finish":
+            continue
+        part = event.get("part")
+        if (not isinstance(part, dict) or part.get("type") != "step-finish"
+                or part.get("sessionID") != expected_session):
+            return {"status": "unavailable", "reason": "step finish is malformed"}
+        part_id, message_id = part.get("id"), part.get("messageID")
+        if (not isinstance(part_id, str) or not part_id or not isinstance(message_id, str)
+                or not message_id or part_id in part_ids or message_id in message_ids):
+            return {"status": "unavailable", "reason": "step finish identity is invalid"}
+        tokens = part.get("tokens")
+        if not isinstance(tokens, dict):
+            return {"status": "unavailable", "reason": "step finish token counters are absent"}
+        cache = tokens.get("cache")
+        if not isinstance(cache, dict):
+            return {"status": "unavailable", "reason": "step finish cache counters are absent"}
+        counters = [tokens.get("input"), tokens.get("output"), tokens.get("reasoning"),
+                    cache.get("read"), cache.get("write")]
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0
+               for value in counters):
+            return {"status": "unavailable", "reason": "step finish token counters are invalid"}
+        # OpenCode 1.18.27 Session.getUsage subtracts cache from input and
+        # reasoning from output; reconstruct the full provider counters.
+        input_tokens = counters[0] + counters[3] + counters[4]
+        output_tokens = counters[1] + counters[2]
+        part_ids.add(part_id)
+        message_ids.add(message_id)
+        rows.append({"message_id": message_id, "step_id": part_id,
+                     "input_tokens": input_tokens, "output_tokens": output_tokens,
+                     "uncached_input_tokens": counters[0], "text_output_tokens": counters[1],
+                     "reasoning_tokens": counters[2], "cache_read_tokens": counters[3],
+                     "cache_write_tokens": counters[4]})
+    if not rows:
+        return {"status": "unavailable", "reason": "stream has no matching step finishes"}
+    return {
+        "status": "observed",
+        "method": "configured-model CLI stream report",
+        "configured_model": configured_model,
+        "session_id": expected_session,
+        "model_input_tokens": sum(row["input_tokens"] for row in rows),
+        "model_output_tokens": sum(row["output_tokens"] for row in rows),
+        "messages": rows,
+    }
+
+
+def write_stream_provider_usage_derivation(evidence_dir, expected_session, configured_model):
+    """Write a new offline stream-usage artifact without altering raw evidence."""
+    evidence = Path(evidence_dir)
+    stream = evidence / "stdout.jsonl"
+    record = evidence / "record.json"
+    output = evidence / "provider-usage-stream-v2.json"
+    if not evidence.is_dir() or not stream.is_file() or not record.is_file() or output.exists():
+        raise ValueError("stream usage derivation requires untouched pilot evidence")
+    if stream.is_symlink() or stream.stat().st_nlink != 1 or stream.stat().st_size > 1_048_576:
+        raise ValueError("stream usage source is not bounded regular evidence")
+    body = stream.read_bytes()
+    derived = stream_provider_usage(body, expected_session, configured_model)
+    derived["source"] = {"path": "stdout.jsonl", "bytes": len(body),
+                         "sha256": hashlib.sha256(body).hexdigest()}
+    with output.open("x", encoding="utf-8") as destination:
+        destination.write(json.dumps(derived, sort_keys=True, separators=(",", ":")) + "\n")
+    return output

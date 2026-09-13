@@ -10,6 +10,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest import mock
+from opencode_agent_task_pilot.evidence import stream_provider_usage
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location(
@@ -53,6 +54,31 @@ class PilotTests(unittest.TestCase):
         counters = pilot.provider_usage(body, pilot.MODEL)
         self.assertEqual(counters["status"], "observed")
         self.assertEqual((counters["model_input_tokens"], counters["model_output_tokens"]), (4437, 18))
+
+    def test_stream_provider_usage_binds_each_finish_to_session_and_model(self):
+        session = "ses_observed"
+        event = lambda step, message, input_tokens, output_tokens: {
+            "type": "step_finish", "sessionID": session,
+            "part": {"type": "step-finish", "id": step, "messageID": message,
+                     "sessionID": session,
+                     "tokens": {"input": input_tokens, "output": output_tokens,
+                                "reasoning": 2, "cache": {"read": 3, "write": 1}}},
+        }
+        body = b"\n".join(json.dumps(item).encode() for item in (
+            {"type": "step_start", "sessionID": session, "part": {}},
+            event("prt_one", "msg_one", 7, 3), event("prt_two", "msg_two", 11, 5),
+        ))
+        counters = stream_provider_usage(body, session, pilot.MODEL)
+        self.assertEqual(counters["status"], "observed")
+        self.assertEqual(counters["method"], "configured-model CLI stream report")
+        self.assertEqual((counters["model_input_tokens"], counters["model_output_tokens"]), (26, 12))
+        duplicate = stream_provider_usage(
+            body + b"\n" + json.dumps(event("prt_two", "msg_three", 1, 1)).encode(),
+            session, pilot.MODEL,
+        )
+        self.assertEqual(duplicate["status"], "unavailable")
+        wrong_session = stream_provider_usage(body, "ses_other", pilot.MODEL)
+        self.assertEqual(wrong_session["status"], "unavailable")
 
     def test_gateway_counter_excludes_harness_drift(self):
         event = lambda argv, out, err, code: {

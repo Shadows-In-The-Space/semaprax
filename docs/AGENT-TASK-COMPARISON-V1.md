@@ -369,3 +369,15 @@ Hostile library regressions have HOSTED GREEN v0.4.0 evidence. The framework
 records no comparative model observations or productivity/superiority result.
 Its external trials and the reserved Zero lane have not been executed; passing
 framework tests does not supply those missing experimental observations.
+
+### Offline OpenCode stream counters
+
+When OpenCode session export is truncated, a separate write-once derivation may
+use session-bound JSONL `step_finish` reports. It rejects duplicate step/message
+identities and missing or malformed counters, and authenticates the raw stream
+by digest. OpenCode 1.18.27 separates cache tokens from `input` and reasoning
+tokens from `output`; the derivation adds them back and retains every component
+([normalization source](https://github.com/anomalyco/opencode/blob/v1.18.27/packages/opencode/src/session/session.ts)).
+The configured model identifies the CLI invocation; stream fields alone do not
+independently authenticate a provider identity. This supplementary report does
+not rewrite the original trial record or supply missing review/context metrics.

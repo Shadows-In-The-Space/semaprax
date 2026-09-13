@@ -419,6 +419,27 @@ impl<'schema> JobRuntime<'schema> {
         &self.evidence
     }
 
+    /// Persists an explicit cancellation through the canonical JobStore
+    /// reducer. A running job is refused by that reducer and no checkpoint is
+    /// written; a successful cancellation is immediately checkpointed.
+    pub fn cancel(
+        &mut self,
+        checkpoints: &mut impl JobCheckpointStore,
+    ) -> Result<JobState, JobRuntimeError> {
+        if self.poisoned {
+            return Err(JobRuntimeError::Poisoned);
+        }
+        let state = self
+            .store
+            .cancel(self.job_id)
+            .map_err(JobRuntimeError::Store)?;
+        self.evidence
+            .append(JobEvidenceEntry::Cancelled, state.code());
+        self.replay_facts.push(ReplayFact::default());
+        self.persist(checkpoints)?;
+        Ok(state)
+    }
+
     /// Performs one host-selected attempt. It checkpoints after claim and
     /// before handler execution, so a crash in the handler window recovers to
     /// `UNCERTAIN`; it cannot cause an unsafe blind retry.
@@ -444,6 +465,11 @@ impl<'schema> JobRuntime<'schema> {
         self.store
             .revision_check(self.job_id)
             .map_err(JobRuntimeError::Store)?;
+        if let Some(schedule) = self.submission.schedule {
+            self.store
+                .recurring_advance_is_safe(self.job_id, now_tick, schedule.max_catch_up)
+                .map_err(JobRuntimeError::Store)?;
+        }
         let (_, lease_generation, _) =
             match self
                 .store
@@ -489,7 +515,7 @@ impl<'schema> JobRuntime<'schema> {
             .store
             .attempt_of(self.job_id)
             .ok_or(JobRuntimeError::Store(JobFixtureError::UnknownJob))?;
-        let state = self
+        let mut state = self
             .store
             .complete_durable(
                 &mut self.ledger,
@@ -518,6 +544,39 @@ impl<'schema> JobRuntime<'schema> {
             worker_id,
             ..ReplayFact::default()
         });
+        if outcome == OutcomeKind::Success
+            && state == JobState::Succeeded
+            && self.submission.schedule.is_some()
+        {
+            let next_run_tick = self
+                .store
+                .advance_recurring_schedule(
+                    self.job_id,
+                    now_tick,
+                    self.submission
+                        .schedule
+                        .expect("checked recurring schedule")
+                        .max_catch_up,
+                )
+                .map_err(JobRuntimeError::Store)?;
+            let occurrences_run = self
+                .store
+                .occurrences_run_of(self.job_id)
+                .ok_or(JobRuntimeError::Store(JobFixtureError::UnknownJob))?;
+            state = self.state();
+            self.evidence.append(
+                JobEvidenceEntry::RecurringAdvanced {
+                    next_run_tick,
+                    occurrences_run,
+                },
+                state.code(),
+            );
+            self.replay_facts.push(ReplayFact {
+                tick: now_tick,
+                worker_id,
+                ..ReplayFact::default()
+            });
+        }
         self.persist(checkpoints)?;
         Ok(DriveOutcome::Completed(state))
     }
@@ -726,6 +785,20 @@ impl<'schema> JobRuntime<'schema> {
                     store
                         .cancel(job_id)
                         .map_err(|_| JobRuntimeError::Evidence)?;
+                }
+                JobEvidenceEntry::RecurringAdvanced {
+                    next_run_tick,
+                    occurrences_run,
+                } => {
+                    let schedule = submission.schedule.ok_or(JobRuntimeError::Evidence)?;
+                    let advanced = store
+                        .advance_recurring_schedule(job_id, fact.tick, schedule.max_catch_up)
+                        .map_err(|_| JobRuntimeError::Evidence)?;
+                    if advanced != next_run_tick
+                        || store.occurrences_run_of(job_id) != Some(occurrences_run)
+                    {
+                        return Err(JobRuntimeError::Evidence);
+                    }
                 }
                 JobEvidenceEntry::LeaseExpired => {
                     if store.expire_stale_leases(fact.tick).as_slice() != &[job_id] {

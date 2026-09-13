@@ -20,6 +20,10 @@ why and what would be required to lift each one, and
 [Acceptance-criteria mapping](#acceptance-criteria-mapping) for a line-by-line
 status against issue #191.
 
+The separate [Authentication host v1](AUTHENTICATION-HOST-V1.md) now supplies
+actual password hashing and authenticated sessions for Rust embeddings. The
+policy-only scope and source-language non-claims below still apply to `std.auth`.
+
 ## Objective
 
 [Database Access v1](DATABASE-ACCESS-V1.md) and [Durable Jobs

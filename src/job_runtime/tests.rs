@@ -124,6 +124,17 @@ fn submission(schema: &CompiledInteractionSchema, key: &[u8]) -> JobSubmission {
     }
 }
 
+fn recurring_submission(schema: &CompiledInteractionSchema, key: &[u8]) -> JobSubmission {
+    let mut job = submission(schema, key);
+    job.schedule = Some(Schedule {
+        next_run_tick: 10,
+        interval_tick: 5,
+        max_occurrences: 2,
+        max_catch_up: 2,
+    });
+    job
+}
+
 #[derive(Default)]
 struct MemoryCheckpointStore {
     current: Option<StoredJobCheckpoint>,
@@ -220,6 +231,83 @@ fn retryable_drive_recovery_honors_backoff_before_later_success() {
     );
     let recovered = JobRuntime::recover(&mut checkpoints, &schema, 1).unwrap();
     assert_eq!(recovered.state(), JobState::Succeeded);
+}
+
+#[test]
+fn cancellation_is_checkpointed_and_recovered_without_reopening_the_job() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut runtime = JobRuntime::enqueue(
+        &mut checkpoints,
+        &schema,
+        1,
+        submission(&schema, b"cancel-recovery"),
+    )
+    .unwrap();
+    assert_eq!(runtime.cancel(&mut checkpoints), Ok(JobState::Cancelled));
+    let recovered = JobRuntime::recover(&mut checkpoints, &schema, 1).unwrap();
+    assert_eq!(recovered.state(), JobState::Cancelled);
+    assert!(matches!(
+        recovered.evidence().entries().last(),
+        Some(JobEvidenceEntry::Cancelled)
+    ));
+}
+
+#[test]
+fn recurring_success_advances_exact_due_tick_across_recovery() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut runtime = JobRuntime::enqueue(
+        &mut checkpoints,
+        &schema,
+        1,
+        recurring_submission(&schema, b"recurring-recovery"),
+    )
+    .unwrap();
+    let mut handler = ScriptedHandler::new([HostJobOutcome::Succeeded, HostJobOutcome::Succeeded]);
+    assert_eq!(
+        runtime.drive_once(&mut checkpoints, &mut handler, 2, 10, 2),
+        Ok(DriveOutcome::Completed(JobState::Scheduled))
+    );
+    let mut recovered = JobRuntime::recover(&mut checkpoints, &schema, 1).unwrap();
+    assert_eq!(recovered.state(), JobState::Scheduled);
+    assert_eq!(
+        recovered.drive_once(&mut checkpoints, &mut handler, 2, 14, 2),
+        Ok(DriveOutcome::NoWork)
+    );
+    assert_eq!(
+        recovered.drive_once(&mut checkpoints, &mut handler, 2, 15, 2),
+        Ok(DriveOutcome::Completed(JobState::Succeeded))
+    );
+    assert_eq!(
+        JobRuntime::recover(&mut checkpoints, &schema, 1)
+            .unwrap()
+            .state(),
+        JobState::Succeeded
+    );
+}
+
+#[test]
+fn recurring_overflow_is_refused_before_claim_or_handler_dispatch() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut job = recurring_submission(&schema, b"recurring-overflow");
+    job.schedule = Some(Schedule {
+        next_run_tick: u64::MAX - 3,
+        interval_tick: 4,
+        max_occurrences: 2,
+        max_catch_up: 0,
+    });
+    job.base_backoff_ticks = 0;
+    job.max_backoff_ticks = 0;
+    let mut runtime = JobRuntime::enqueue(&mut checkpoints, &schema, 1, job).unwrap();
+    let mut handler = ScriptedHandler::new([HostJobOutcome::Succeeded]);
+    assert_eq!(
+        runtime.drive_once(&mut checkpoints, &mut handler, 2, u64::MAX - 3, 1),
+        Err(JobRuntimeError::Store(JobFixtureError::ScheduleOverflow))
+    );
+    assert_eq!(runtime.state(), JobState::Scheduled);
+    assert_eq!(runtime.evidence().entries().len(), 1);
 }
 
 #[test]

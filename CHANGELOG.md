@@ -8,6 +8,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add explicit Rust-host Argon2id password hashing, authenticated sessions and
+  signup/login/logout composition (#191). Persist job cancellation and recurring
+  schedule advancement with checked arithmetic and replay evidence (#192).
+
 - Add checked-source HTTPS POST across explicit provider, native C11 and
   Core-Wasm/npm fixture paths (#193), with bounded body/response bytes, explicit
   destination authorization and no automatic retry or redirect for POST.

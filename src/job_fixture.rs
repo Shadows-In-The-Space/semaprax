@@ -214,6 +214,8 @@ pub enum JobFixtureError {
     NotUncertain,
     RetryNotPermitted,
     RevisionRefused,
+    ScheduleOverflow,
+    ScheduleNotAdvanceable,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -731,20 +733,59 @@ impl JobStore {
         max_catch_up: u64,
     ) -> Result<Option<u64>, JobFixtureError> {
         let job = self.job_mut(id)?;
+        if job.state != JobState::Succeeded {
+            return Err(JobFixtureError::ScheduleNotAdvanceable);
+        }
         let (Some(next_run_tick), Some(interval_tick), Some(max_occurrences)) =
             (job.next_run_tick, job.interval_tick, job.max_occurrences)
         else {
             return Ok(None);
         };
-        job.occurrences_run += 1;
-        if job.occurrences_run >= max_occurrences {
+        let occurrences_run = job
+            .occurrences_run
+            .checked_add(1)
+            .ok_or(JobFixtureError::ScheduleOverflow)?;
+        if occurrences_run >= max_occurrences {
+            job.occurrences_run = occurrences_run;
             job.next_run_tick = None;
             return Ok(None);
         }
-        let next = schedule_catch_up_next_run(now_tick, next_run_tick, interval_tick, max_catch_up);
+        let next = recurring_next_run(next_run_tick, interval_tick, now_tick, max_catch_up)?;
+        job.occurrences_run = occurrences_run;
+        // A scheduled recurrence is a fresh occurrence. Failures from the
+        // prior one must not consume the next occurrence's attempt ceiling.
+        job.attempt = 0;
         job.next_run_tick = Some(next);
         job.state = JobState::Scheduled;
         Ok(Some(next))
+    }
+
+    pub fn occurrences_run_of(&self, id: u64) -> Option<u64> {
+        self.jobs.get(&id).map(|job| job.occurrences_run)
+    }
+
+    /// Checks the same bounded recurrence arithmetic `advance_recurring_schedule`
+    /// will use, before an execution is dispatched.
+    pub fn recurring_advance_is_safe(
+        &self,
+        id: u64,
+        now_tick: u64,
+        max_catch_up: u64,
+    ) -> Result<(), JobFixtureError> {
+        let job = self.jobs.get(&id).ok_or(JobFixtureError::UnknownJob)?;
+        let (Some(next_run_tick), Some(interval_tick), Some(max_occurrences)) =
+            (job.next_run_tick, job.interval_tick, job.max_occurrences)
+        else {
+            return Ok(());
+        };
+        let occurrences_run = job
+            .occurrences_run
+            .checked_add(1)
+            .ok_or(JobFixtureError::ScheduleOverflow)?;
+        if occurrences_run < max_occurrences {
+            let _ = recurring_next_run(next_run_tick, interval_tick, now_tick, max_catch_up)?;
+        }
+        Ok(())
     }
 
     /// Refuses a job bound to an unknown handler/schema revision (below `1`
@@ -759,6 +800,29 @@ impl JobStore {
             Err(JobFixtureError::RevisionRefused)
         }
     }
+}
+
+fn recurring_next_run(
+    next_run_tick: u64,
+    interval_tick: u64,
+    now_tick: u64,
+    max_catch_up: u64,
+) -> Result<u64, JobFixtureError> {
+    if interval_tick == 0 {
+        return Err(JobFixtureError::ScheduleOverflow);
+    }
+    let missed = now_tick.saturating_sub(next_run_tick) / interval_tick;
+    let steps = missed
+        .min(max_catch_up)
+        .checked_add(1)
+        .ok_or(JobFixtureError::ScheduleOverflow)?;
+    next_run_tick
+        .checked_add(
+            interval_tick
+                .checked_mul(steps)
+                .ok_or(JobFixtureError::ScheduleOverflow)?,
+        )
+        .ok_or(JobFixtureError::ScheduleOverflow)
 }
 
 #[cfg(test)]
@@ -1068,6 +1132,37 @@ mod tests {
         let state = store.cancel(id).unwrap();
         assert_eq!(state, JobState::Cancelled);
         assert!(store.compensation_is_required(id).unwrap());
+    }
+
+    #[test]
+    fn recurring_advance_refuses_to_revive_a_cancelled_job() {
+        let mut ledger = DatabaseFixture::new();
+        JobStore::install_ledger_schema(&mut ledger);
+        let mut store = JobStore::new(1);
+        let EnqueueOutcome::Created(id) = store
+            .enqueue(
+                &mut ledger,
+                b"cancelled-recurring".to_vec(),
+                descriptor(),
+                Some(Schedule {
+                    next_run_tick: 10,
+                    interval_tick: 5,
+                    max_occurrences: 2,
+                    max_catch_up: 1,
+                }),
+                2,
+                true,
+            )
+            .unwrap()
+        else {
+            panic!("expected fresh job");
+        };
+        store.cancel(id).unwrap();
+        assert_eq!(
+            store.advance_recurring_schedule(id, 10, 1),
+            Err(JobFixtureError::ScheduleNotAdvanceable)
+        );
+        assert_eq!(store.state_of(id), Some(JobState::Cancelled));
     }
 
     #[test]

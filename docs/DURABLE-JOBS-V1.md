@@ -310,13 +310,18 @@ transaction with application state.
 Execution checkpoints a claim and then `Running` before invoking the handler.
 Recovery replays the original attempt times, expires an unstarted lease at its
 recorded deadline, and turns a retained `Running` attempt into `Uncertain`.
+An explicit runtime cancellation uses the same `JobStore::cancel` reducer and
+checkpoints `Cancelled`. A successful recurring occurrence advances through
+the existing bounded skip-missed reducer before its drive returns; evidence
+records the exact next due tick and occurrence count, so recovery restores the
+same future due time. Overflow in that recurrence arithmetic is refused before
+the handler is dispatched.
 Checkpoint failure poisons that runtime instance: further mutation refuses
 until the caller recovers from storage. Evidence grants no authority; recovery
 requires explicit storage and the current schema. The revision byte follows
 the fixture's known-revision range, not a cryptographic handler identity.
-This runtime currently drives one job; automatic recurrence advancement,
-heartbeat/cancellation APIs, physical database integration and source-handler
-binding remain follow-on work.
+This runtime currently drives one job; heartbeat/current-lease APIs, physical
+database integration and source-handler binding remain follow-on work.
 
 ## Job evidence: `src/job_evidence.rs`
 
@@ -375,9 +380,6 @@ touches no file under `src/hir`, `src/wasm`, `src/codegen`,
   The current handler seam admits payload bytes against a real compiled schema,
   but does not itself prove a trait implementation dispatches compiled
   SEMAPRAX code.
-- **Advance recurring runtime jobs.** The adapter persists and replays the
-  existing lifecycle transitions, but does not yet invoke
-  `advance_recurring_schedule` after a successful occurrence.
 - **Claim physical database durability.** `DatabaseFixture` remains an
   in-memory transaction model. The physical checkpoint stores runtime/evidence
   bytes only; it is not a database driver or an atomic application-data join.

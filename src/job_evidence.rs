@@ -41,9 +41,9 @@
 //! disagrees with what the recorded entries recompute to (see
 //! [`JobEvidenceLog::replay`]'s `FinalStateMismatch`), and any entry that is
 //! illegal given the state the prior entries already established — a
-//! terminal state (`SUCCEEDED`, `PERMANENT_FAILURE`, `CANCELLED`,
-//! `DEAD_LETTERED`) can never be reopened by a later entry, matching this
-//! repository's sticky-failure-selection invariant.
+//! failed or cancelled terminal state cannot be reopened. A successful
+//! occurrence may be followed by explicit `RecurringAdvanced` evidence; the
+//! runtime checkpoint replay additionally validates its schedule and count.
 
 use sha2::{Digest, Sha256};
 
@@ -100,6 +100,12 @@ pub enum JobEvidenceEntry {
     /// begun. No handler effect is possible in this state, so expiry safely
     /// returns it to `PENDING` for a later explicit claim.
     LeaseExpired,
+    /// Mirrors one successful recurring occurrence advancing to its exact
+    /// next due tick, or reaching its bounded occurrence ceiling.
+    RecurringAdvanced {
+        next_run_tick: Option<u64>,
+        occurrences_run: u64,
+    },
 }
 
 impl JobEvidenceEntry {
@@ -114,6 +120,7 @@ impl JobEvidenceEntry {
             Self::Cancelled => 6,
             Self::DurableCompleted { .. } => 7,
             Self::LeaseExpired => 8,
+            Self::RecurringAdvanced { .. } => 9,
         }
     }
 
@@ -164,6 +171,14 @@ impl JobEvidenceEntry {
                 bytes.push(max_attempts);
             }
             Self::Cancelled | Self::LeaseExpired => {}
+            Self::RecurringAdvanced {
+                next_run_tick,
+                occurrences_run,
+            } => {
+                bytes.push(u8::from(next_run_tick.is_some()));
+                bytes.extend_from_slice(&next_run_tick.unwrap_or_default().to_le_bytes());
+                bytes.extend_from_slice(&occurrences_run.to_le_bytes());
+            }
         }
         bytes
     }
@@ -211,6 +226,14 @@ impl JobEvidenceEntry {
                 commit_confirmed: bool_field(&fields[10..])?,
             }),
             8 if fields.is_empty() => Some(Self::LeaseExpired),
+            9 if fields.len() == 17 => Some(Self::RecurringAdvanced {
+                next_run_tick: match fields[0] {
+                    0 => None,
+                    1 => Some(u64::from_le_bytes(fields[1..9].try_into().ok()?)),
+                    _ => return None,
+                },
+                occurrences_run: u64::from_le_bytes(fields[9..17].try_into().ok()?),
+            }),
             _ => None,
         }
     }
@@ -419,6 +442,9 @@ impl JobEvidenceLog {
                 Some(7)
             }
             (JobEvidenceEntry::LeaseExpired, Some(2)) => Some(0),
+            (JobEvidenceEntry::RecurringAdvanced { next_run_tick, .. }, Some(4)) => {
+                Some(if next_run_tick.is_some() { 1 } else { 4 })
+            }
             _ => None,
         }
     }
@@ -730,6 +756,15 @@ mod tests {
             ),
             Some(JobEvidenceEntry::LeaseExpired)
         );
+        let recurring = JobEvidenceEntry::RecurringAdvanced {
+            next_run_tick: Some(42),
+            occurrences_run: 3,
+        };
+        assert_eq!(
+            JobEvidenceEntry::from_canonical_bytes(&recurring.canonical_bytes()),
+            Some(recurring)
+        );
+        assert_eq!(JobEvidenceEntry::from_canonical_bytes(&[9, 2]), None);
     }
 
     #[test]

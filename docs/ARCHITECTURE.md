@@ -143,6 +143,11 @@ remains in the streaming/schema owners.
 `provider_adapter_sdk/vendor/http` implements the native HTTPS seam with
 explicit origin, TLS and credential configuration, disabled redirects/proxies,
 and bounded buffered responses. It does not provide incremental network polling.
+`authentication` owns explicit Rust-host secrets, bounded Argon2id password
+hashing, authenticated session transitions and account/session composition.
+Storage, entropy, clock and signing authority remain supplied by the embedding
+host; no source operation or generated backend authority is added. See
+[Authentication host v1](AUTHENTICATION-HOST-V1.md).
 `job_runtime` owns single-job checkpoint persistence and host-driven execution;
 `job_fixture` owns lifecycle decisions and `job_evidence` owns replay validation.
 Payload admission uses a supplied compiled schema; handler implementation and

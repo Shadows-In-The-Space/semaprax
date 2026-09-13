@@ -490,124 +490,41 @@ one deterministic clock implementation this crate ships.
   one complete response before calling this same boundary, so a richer
   grammar (#109) needs nothing from a streaming transport (#178) to exist.
 
-## Issue #177 acceptance-criteria audit
+## Issue #177 integration status
 
-Issue #177 ("Add a provider-independent `model.invoke` effect to the
-source-native Agent runtime") named five acceptance criteria against a
-kernel that, per its own audit baseline, was already landed and tested for
-#108. This section maps each one to what `src/live_invocation/` provides
-today, so a later reader does not have to reconstruct the mapping from the
-issue thread. It distinguishes what this module's trait boundary provides
-from what still requires wiring this document already scopes to downstream
-issues (see "What downstream issues implement against" above) — closing a
-gap that belongs to another issue's owning module is not this audit's job,
-and is called out as such rather than claimed.
+The source integration now lives in [Source Model Operation v1](SOURCE-MODEL-OPERATION-V1.md)
+and [Direct Runtime v2](AGENT-RUNTIME-V2.md). The earlier audit described only
+this generic kernel's original fixture boundary; its statements that source
+model roles, compiled Proposal decoding, and real authorization were missing
+are superseded by those implementations.
 
-| # | Criterion | Status | Evidence / gap |
-|---|---|---|---|
-| 1 | A source-native Agent can perform a live provider-neutral propose step through Direct Runtime v2. | **Not met** | No parser/HIR/source syntax exists for `model.invoke` (declared non-goal, below), and this module does not touch `agent_lifecycle` or `agent_runtime_v2`. The trait boundary a compiled `propose` role would call through exists (`model_invoke::ModelHandler`, `kernel::run_live_invocation`); wiring a source Agent's `propose` role to dispatch through it is #109–#116's scope. |
-| 2 | Model invocation is declared, capability-gated, bounded, cancellable, and evidence-bearing. | **Met at the trait-boundary level; not met at the source-declaration level** | Capability-gated: `ModelInvokeCapability` has no `Default` and no ambient constructor (`model_invoke.rs`). Bounded: `InvocationBudgetHook::reserve`/`record` plus `max_response_bytes`/`max_turns` (`kernel::run_live_invocation`). Cancellable: three checkpoints as of this audit's #177 baseline, each with a dedicated test — `tests::cancellation_before_any_turn_opens_stops_cleanly_with_an_empty_journal` (checkpoint 1), `tests::cancellation_after_turn_opened_stops_cleanly_before_any_request_intent` (checkpoint 2), `tests::cancellation_after_request_intent_is_committed_folds_into_a_recorded_cancelled_failure` (checkpoint 3) — issue #113 later added checkpoints 4 and 5 (before authorize, before the effect dispatch); see "Cancellation point" above for the current five. Evidence-bearing: the causal journal and `journal::receipt_projection`. "Declared" only holds as a Rust trait boundary — there is no `.spx` source syntax to declare a `propose` role against this effect (see criterion 1 and the non-goals below). |
-| 3 | No provider name or credential becomes part of core language semantics. | **Met** | `ModelInvocationRequest` structurally has no credential, path, environment, or unchecked dynamic-map field (`model_invoke.rs` doc comment and field list). `ModelFailure` is a closed six-variant enum with no provider-shaped variant. The only implementations this crate ships are `fixture::*`, so no provider name appears anywhere in this module's non-test code. |
-| 4 | Model output cannot mint or bypass authorization. | **Met** | `kernel::run_live_invocation` passes only the *decoded* proposal (`ProposalOutcome::Admitted` bytes) to `AuthorizationGate::authorize` and to `TurnPolicy::reduce`; raw response bytes never reach either. Negative case: `tests::a_malformed_response_is_refused_before_authorize`, `tests::a_closed_model_failure_ends_the_attempt_without_decoding_or_authorizing`, `tests::an_oversized_response_is_treated_as_malformed_before_decode` (each asserts `gate.granted == 0`). Positive case, closing what was previously an evidence gap because every other test's fixture decoder admits its input unchanged: `tests::authorize_and_completion_see_the_decoded_proposal_never_the_raw_response_bytes` uses a decoder that actually transforms the bytes and proves both the authorization digest and the completion payload reflect the decoded value, never the raw response. `AuthorizationGrant` is itself opaque (carries a digest only, `model_invoke.rs`), so a journal reader cannot forge one even having read every recorded byte. The real mint (`agent_lifecycle::authorization::run_authorize_stage`) is not wired — `fixture::FixtureAuthorizationGate` always grants within a ceiling — but that does not weaken this criterion: the boundary structurally prevents raw model output from ever being the value authorized, independent of which `AuthorizationGate` is bound. |
-| 5 | The new route has a versioned contract and hosted evidence before support claims. | **Partially met** | Versioned contract: this document, status **LOCAL**. Hosted evidence: **not met** — every one of the 39 `live_invocation` lib tests runs against `fixture::FixtureModelHandler`'s scripted queue; none has run in a hosted environment against a real provider, and none is claimed to. This is the same declared nonclaim as "No live network call, no real provider credential, no model spend" below, restated against this specific criterion so it cannot be read as satisfied by a passing local `cargo test`. |
+| Criterion | Current implementation and evidence |
+|---|---|
+| Source-native provider-neutral propose | Checked `model fn propose` roles use the compiler-derived Proposal schema through `StreamingSourceProposalAdapter` and `run_live_bound_model`; the separate durable entry reuses Source Live Journal v2. |
+| Declared, capability-gated, bounded, cancellable, evidence-bearing | Exact deployment/provider/model binding, explicit adapter and model capabilities, bounded context/response and call policy, redacted model evidence roots, and cancellation/deadline checks before start, during polling, and settlement. Durable intent ACK precedes physical dispatch. |
+| No provider credential in language semantics | Deployment selects the provider/model; the host injects transport and credentials. Source Agent semantic identity remains unchanged on eligible model substitution. |
+| Model output cannot mint authorization | Only compiler-decoded proposals enter the checked source authorization stage and deployed typed registry. Raw provider bytes remain settlement evidence. |
+| Versioned route and support evidence | Versioned source-model/runtime contracts and focused local scripted/injected-host tests are present. This update makes no hosted or public provider-support claim. |
 
-Required-evidence checklist, same audit:
+Executable coverage is in `tests/agent_runtime_v1/execution_revision/typed/live_streaming`
+(ordinary live success, policy refusal, durable success and idle terminal replay,
+uncertain intent recovery, cancellation at ACK), `agent_deployment_v1` (eligible
+model substitution), and `provider_adapter_sdk::source_bridge::tests`
+(cancellation, deadlines, stale binding, capacity and pre-factory refusal).
+Existing generic-kernel tests continue to own closed failure normalization,
+raw-versus-decoded authorization, and generic journal replay.
 
-- **Deterministic scripted provider success, malformed proposal, refusal,
-  timeout, cancellation, capacity, and provider-error cases.** Met: success
-  (`tests::a_three_turn_fixture_invocation_completes_with_one_dispatch_per_turn_and_one_effect`),
-  malformed proposal / decode refusal
-  (`tests::a_malformed_response_is_refused_before_authorize`), refusal
-  (`tests::a_refused_failure_ends_the_attempt_without_decoding_or_authorizing`),
-  timeout (`tests::a_timeout_failure_ends_the_attempt_without_decoding_or_authorizing`),
-  cancellation (the three checkpoint tests named in row 2 above), capacity —
-  both the budget-hook path
-  (`tests::a_refused_budget_reservation_fails_the_turn_without_dispatching_the_handler`)
-  and the distinct handler-reported path
-  (`tests::a_handler_reported_capacity_exceeded_failure_ends_the_attempt_without_decoding_or_authorizing`)
-  — and provider-error
-  (`tests::a_closed_model_failure_ends_the_attempt_without_decoding_or_authorizing`).
-- **Provider/model substitution preserves Agent semantic identity but
-  changes DeploymentRoot/ExecutionRevision.** Not met here, and not this
-  module's to close: "Agent semantic identity", `DeploymentRoot` and
-  `ExecutionRevision` are concepts owned by `agent_lifecycle`/
-  `execution_revision` (the latter frozen and out of this lease's reach).
-  This module can only show that its own `deployment_policy` seed field
-  changes `LiveInvocationId` on substitution
-  (`tests::identity_binds_program_root_deployment_and_task_so_a_changed_input_changes_the_chain`)
-  — necessary but not sufficient evidence for this criterion, which needs
-  the cross-module binding #109–#116 own.
-- **Source or Proposal type changes stale an existing deployment and
-  invocation.** Not met, not this module's to close: there is no compiled
-  Proposal type yet (`fixture::FixtureProposalDecoder` is a toy, #109's
-  scope), so nothing exists to change or stale.
-- **No handler call occurs on missing capability, stale ProgramRoot, invalid
-  deployment, exhausted budget, or cancelled invocation.** Missing
-  capability is met by construction, not by a runtime test: `ModelHandler::invoke`
-  takes `&ModelInvokeCapability` as a required parameter with no `Default`
-  and no ambient constructor, so there is no code path that reaches the
-  handler without one — the case cannot be exercised because it cannot be
-  constructed. Exhausted budget and cancelled invocation are met
-  (`tests::a_refused_budget_reservation_fails_the_turn_without_dispatching_the_handler`;
-  the three cancellation-checkpoint tests, all of which assert `handler.calls == 0`
-  or `dispatched == 0`). Stale ProgramRoot and invalid deployment are **not
-  met here**: this kernel takes `program_root`/`deployment_binding` as
-  trusted caller-supplied strings and does not itself consult a
-  ProgramRoot/deployment registry to judge staleness or validity — that
-  registry lookup is downstream integration work, not a gap in this
-  boundary's own logic.
-- **Decoded proposal is the only value passed to authorize; raw model
-  output never reaches effect dispatch.** Met, per criterion 4 above.
-- **Existing one-pass/scripted compatibility routes remain unchanged.** Met:
-  this round changed no production code path apart from adding one
-  `#[cfg(test)]`-only helper (`kernel::proposal_digest_for_test`); every
-  existing test still passes unmodified.
+## Boundaries and known limitations
 
-## Non-goals and known limitations (this round)
-
-- **No live network call, no real provider credential, no model spend.**
-  Every test in `src/live_invocation/tests.rs` uses `fixture::FixtureModelHandler`
-  with a scripted response queue.
-- **No parser/HIR/source syntax.** `model.invoke` is not yet a declarable
-  Agent role or effect in `.spx` source; this contract only fixes the Rust
-  trait boundary and journal a future syntax lowers to.
-- **No real compiled proposal grammar.** `fixture::FixtureProposalDecoder`
-  checks a toy JSON shape, not the compiler-derived
-  `CompiledAgentProposalSchema` from `agent_proposal`. Binding the real one
-  is #109's scope.
-- **No real authorization mint.** `fixture::FixtureAuthorizationGate` always
-  grants within a call ceiling; it does not call
-  `agent_lifecycle::authorization::run_authorize_stage`. Wiring that is
-  downstream integration, not a change to this contract's shape.
-- **Resume is bounded.** The kernel resumes only from a journal ending
-  cleanly between turns; a journal stuck mid-turn (decode/authorize/effect
-  pending) returns `LiveKernelError::UnresolvedPrefix` rather than being
-  automatically reconciled. Automatic reconciliation of that state is
-  unimplemented and is not claimed here.
-- **No receipt document, no streaming transport, no multi-provider
-  selection.** These are the explicit hooks named above; implementing the
-  policy behind each is the named downstream issue's scope, not this one's.
-  (Cumulative budget/deadline policy — the fourth item this list used to
-  name — landed as `budget::CumulativeBudgetLedger`, issue #113; see
-  "Budget and deadline accounting" above. It operates entirely against the
-  fixture provider, opaque caller-defined budget units, and an injected,
-  test-controlled `InvocationClock` — no live model call, no real provider
-  pricing, no real wall-clock wiring into a compiled Agent's deployment.
-  Issue #179 may still extend this, e.g. with real provider pricing.)
-- **Persistence across a process boundary is a separate document.** This
-  contract's kernel and journal are exercised purely in memory here.
-  [Live Invocation Persistence v1](LIVE-INVOCATION-PERSISTENCE-V1.md) (issue
-  #114) adds the write-side seam (`LiveInvocationHandlers::sink`), the
-  caller-owned store adapter, and the recovery envelope/checks a process
-  restart needs, reusing this document's kernel and journal unchanged.
-- **Migrating onto a new identity is a separate document.** [Live
-  Invocation Migration v1](LIVE-INVOCATION-MIGRATION-V1.md) (issue #115)
-  adds `migration::migrate_live_invocation`: a checked pure function that
-  moves a suspended invocation onto a new ProgramRoot/schema/policy with
-  journal history (by never touching it) and cumulative budget (by folding
-  the predecessor's committed total forward) intact. This document's
-  kernel and journal are reused unchanged; nothing here is rewritten to add
-  that boundary.
+Generic journal recovery and Source Live Journal recovery remain separate
+versioned profiles. An uncertain non-idempotent intent never grants redispatch.
+The durable typed source-model route currently refuses the in-memory quoted
+`ModelPolicyLedger` profile; durable quote/usage recovery is remaining #113
+work. Nondurable policy accounting retains its existing invocation-local
+semantics. Retries, failover, network transport support and provider billing
+reconciliation are owned by their respective profiles, not implied by a source
+model operation or by a passing scripted test. Host evidence carries no
+capability or publication authority.
 
 ## Executable reference
 
@@ -635,6 +552,7 @@ live fixture, and its canonical ExecutionRevision, EvidenceRoot, and lifecycle
 evidence digest remain byte-identical. The production execution-revision
 implementation is unchanged from issue #108's `ae25c6a4` baseline.
 
-This accepts #108's design/reference deliverable. It does not accept #177's
-source/HIR/Direct Runtime integration, a real provider run, hosted execution,
-or public support; those remain the downstream issues' deliverables.
+This records #108's design/reference deliverable at its original checkpoint.
+The source/HIR/Direct Runtime integration is documented in the current #177
+status above; this historical reference gate proves no real provider run,
+hosted execution, or public support.

@@ -82,7 +82,11 @@ has local checked-driver and injected-host recovery gates, including cumulative
 replay fuel and model reservations. [Source live migration v3](SOURCE-LIVE-MIGRATION-V3.md)
 has seven local retained-Project integration gates plus source journal/runtime
 regressions: checked A→B→C State migration, cumulative accounting, bound schemas,
-and refusal before redispatch. A durable source CLI remains pending. Distributed coordination, broader provider
+and refusal before redispatch. The bound typed [source-model operation](SOURCE-MODEL-OPERATION-V1.md)
+now also has local ordinary and durable integration gates: decoded proposals
+enter typed authorization, model intent ACK precedes provider start, and
+uncertain/terminal recovery performs no model redispatch. Durable quoted model
+policy accounting remains separate #113 work. A durable source CLI remains pending. Distributed coordination, broader provider
 profiles and native/Wasm Agent-stage execution remain separate functionality.
 
 The generic implementation includes [argument inference v3](GENERIC-ARGUMENT-INFERENCE-V3.md),

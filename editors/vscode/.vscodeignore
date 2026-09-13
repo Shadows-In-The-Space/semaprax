@@ -1,0 +1,14 @@
+# Development/test-only files
+.vscode/**
+test/**
+**/*.test.js
+
+# Local/package artifacts
+*.vsix
+.vscode-test/**
+node_modules/**
+npm-debug.log*
+
+# Repository-only metadata not needed by the installed extension
+.gitignore
+.gitattributes

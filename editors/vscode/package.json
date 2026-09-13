@@ -1,21 +1,78 @@
 {
-  "name": "semaprax-saved-source",
-  "displayName": "SEMAPRAX Saved Source",
-  "description": "SEMAPRAX syntax highlighting and check-on-save diagnostics for .spx files, plus explicit, read-only source previews and semantic candidates through a host-selected local MCP session.",
+  "name": "semaprax",
+  "displayName": "Semaprax",
+  "description": "Official Visual Studio Code support for Semaprax: .spx syntax highlighting, compiler diagnostics, semantic navigation, typed-hole workflows, safe refactoring, and agent-native development.",
   "version": "0.1.0",
-  "publisher": "semaprax",
-  "engines": { "vscode": "^1.85.0" },
+  "publisher": "wavect",
+  "author": {
+    "name": "Wavect GmbH",
+    "url": "https://wavect.io"
+  },
+  "license": "Apache-2.0",
+  "preview": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wavect/semaprax.git",
+    "directory": "editors/vscode"
+  },
+  "homepage": "https://github.com/wavect/semaprax",
+  "bugs": {
+    "url": "https://github.com/wavect/semaprax/issues"
+  },
+  "icon": "assets/icon.png",
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "semaprax",
+    "spx",
+    "programming language",
+    "systems programming",
+    "ai agents",
+    "ai native",
+    "compiler",
+    "semantic programming",
+    "static analysis",
+    "typed holes"
+  ],
+  "galleryBanner": {
+    "color": "#0c0c12",
+    "theme": "dark"
+  },
+  "pricing": "Free",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
   "main": "./extension.js",
-  "extensionKind": ["workspace"],
-  "capabilities": { "untrustedWorkspaces": { "supported": false }, "virtualWorkspaces": false },
-  "activationEvents": ["onCommand:semaprax.start", "onLanguage:semaprax", "onCommand:semaprax.checkProject"],
-  "scripts": { "test": "node --test test/*.test.js" },
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": [
+    "onCommand:semaprax.start",
+    "onLanguage:semaprax",
+    "onCommand:semaprax.checkProject"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
   "contributes": {
     "languages": [
       {
         "id": "semaprax",
-        "aliases": ["SEMAPRAX", "semaprax"],
-        "extensions": [".spx"],
+        "aliases": [
+          "SEMAPRAX",
+          "semaprax"
+        ],
+        "extensions": [
+          ".spx"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -66,7 +123,7 @@
       { "command": "semaprax.runAgentTranscript", "title": "SEMAPRAX: Run Agent Transcript (Trace/Evidence)" }
     ],
     "configuration": {
-      "title": "SEMAPRAX Saved Source",
+      "title": "SEMAPRAX",
       "properties": {
         "semaprax.compilerPath": { "type": "string", "default": "", "scope": "machine", "description": "User-selected absolute compiler binary path. Never read from workspace settings." },
         "semaprax.checkOnSave": { "type": "boolean", "default": true, "scope": "machine", "description": "Run the selected compiler's read-only `check --json` on the saved file's project and show its diagnostics. Effective only when semaprax.compilerPath is set." },

@@ -70,7 +70,7 @@ async function run() {
     assert.equal(inspected.workspaceFolderValue, undefined, `${key} must not be selected by the workspace folder`);
   }
 
-  const extension = vscode.extensions.getExtension('semaprax.semaprax-saved-source');
+  const extension = vscode.extensions.getExtension('wavect.semaprax');
   assert.ok(extension, 'development extension must be installed');
   assert.equal(extension.packageJSON.version, '0.1.0');
   const api = await extension.activate();

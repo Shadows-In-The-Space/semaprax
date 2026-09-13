@@ -355,3 +355,27 @@ fn identity_prebound_production_core_retry_preserves_phase_debit_and_nested_refu
     );
     assert_eq!(CORE_BUILD_ATTEMPTS.with(Cell::get), 1);
 }
+
+#[test]
+fn retained_output_carrier_charges_only_selected_entries_and_loan_plans() {
+    // The input carrier stays live until the move has completed. Its existing
+    // charge belongs to resolution; this helper reserves the new retained
+    // carrier and only the loan plans which move into it.
+    let input = || vec![1usize, 2, 3, 4];
+    let (legacy, overflowed, debit) = crate::bounded_output::with_limit_usage(38, || {
+        filter_owned_vec_accounted(input(), 7, |item| Ok(*item), |item| item % 2 == 0, false)
+    });
+    assert!(!overflowed);
+    assert_eq!(legacy.unwrap(), vec![2, 4]);
+    assert_eq!(
+        debit, 38,
+        "legacy attempts retain their established receipt"
+    );
+
+    let (retained, overflowed, debit) = crate::bounded_output::with_limit_usage(20, || {
+        filter_owned_vec_accounted(input(), 7, |item| Ok(*item), |item| item % 2 == 0, true)
+    });
+    assert!(!overflowed);
+    assert_eq!(retained.unwrap(), vec![2, 4]);
+    assert_eq!(debit, 20, "two entries plus their retained loan plans");
+}

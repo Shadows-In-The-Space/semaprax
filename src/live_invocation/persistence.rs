@@ -85,6 +85,13 @@ use crate::diagnostic::quote_json;
 use super::identity::LiveInvocationId;
 use super::journal::{self, JournalEntry};
 
+mod priced;
+pub(crate) use priced::encode_priced_envelope_with_handoff;
+pub use priced::{
+    recover_priced_journal, PricedCheckpointJournalSink, PricedRecoveryError,
+    RecoveredPricedJournal, PERSISTED_PRICED_JOURNAL_SCHEMA,
+};
+
 #[cfg(test)]
 mod tests;
 

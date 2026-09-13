@@ -7,11 +7,19 @@
 use crate::agent_lifecycle::iterative::driver::{ProposalRequest, ProposalSource};
 use crate::agent_proposal::CompiledAgentProposalSchema;
 use crate::agent_runtime::AgentCancellation;
+use crate::agent_runtime_v2::source_model::source_request_digest;
 use crate::agent_runtime_v2::{
     SourceModelBinding, SourceModelEvidence, SourceModelInvocationCapability,
+    SourceModelPolicyBinding,
 };
 use crate::diagnostic::{quote_json, Diagnostic};
+use crate::live_invocation::model_invoke::BudgetRefusal;
 use crate::live_invocation::InvocationClock;
+use crate::model_budget_policy::live_hook::ModelAttemptQuote;
+use crate::model_budget_policy::{
+    AttemptKind, AttemptRequest, AttemptReservation, ModelPolicyLedger, ProviderPolicy,
+    ProviderSlot,
+};
 use crate::streaming_proposal_decode::{
     SourceProposalStreamDecoder, SourcePushOutcome, MAX_STREAM_BYTES,
 };
@@ -28,6 +36,45 @@ const MAX_SOURCE_POLLS: usize = 10_000;
 /// contract, so the factory is explicit rather than hidden inside the source.
 pub trait SourceAdapterFactory {
     fn create(&mut self) -> Box<dyn ProviderAdapter>;
+}
+
+/// Host-owned, request-bound tokenizer and pricing quote for the existing
+/// [`ModelAttemptQuote`] carrier. It grants no provider authority and does
+/// not decode model data.
+pub trait SourceModelAttemptQuoter {
+    fn quote(
+        &mut self,
+        request: &AdapterRequest,
+        binding: &SourceModelBinding,
+    ) -> Result<ModelAttemptQuote, BudgetRefusal>;
+}
+
+struct SourceModelPolicySession<'a> {
+    binding: SourceModelPolicyBinding,
+    ledger: ModelPolicyLedger<'a>,
+    quoter: &'a mut dyn SourceModelAttemptQuoter,
+    cancellation: &'a AgentCancellation,
+}
+
+impl SourceModelPolicySession<'_> {
+    fn reserve(
+        &mut self,
+        quote: ModelAttemptQuote,
+    ) -> Result<AttemptReservation, crate::model_budget_policy::AttemptRefusal> {
+        let provider_id = self.binding.provider_id().to_owned();
+        let cancellation = self.cancellation;
+        self.ledger.reserve_attempt(
+            cancellation,
+            &AttemptRequest {
+                kind: AttemptKind::Fresh,
+                provider_id,
+                context_tokens: quote.context_tokens,
+                requested_output_tokens: quote.output_tokens,
+                estimated_cost_micros: quote.estimated_cost_micros,
+                prior_classification: None,
+            },
+        )
+    }
 }
 
 impl<F> SourceAdapterFactory for F
@@ -48,6 +95,8 @@ pub struct StreamingSourceProposalAdapter<'a> {
     deadline_millis: Option<i64>,
     binding: Option<SourceModelBinding>,
     binding_capability: Option<SourceModelInvocationCapability>,
+    policy: Option<SourceModelPolicySession<'a>>,
+    pending_reservation: Option<AttemptReservation>,
     evidence: SourceModelEvidence,
 }
 
@@ -67,6 +116,8 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
             deadline_millis: None,
             binding: None,
             binding_capability: None,
+            policy: None,
+            pending_reservation: None,
             evidence: SourceModelEvidence::default(),
         }
     }
@@ -96,8 +147,57 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
             deadline_millis: None,
             binding: Some(binding),
             binding_capability: Some(binding_capability),
+            policy: None,
+            pending_reservation: None,
             evidence: SourceModelEvidence::default(),
         })
+    }
+
+    /// Constructs the opt-in source route whose model calls are admitted by
+    /// the existing #179 ledger before adapter construction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_bound_with_policy(
+        factory: &'a mut dyn SourceAdapterFactory,
+        capability: AdapterInvocationCapability,
+        schema: &'a CompiledAgentProposalSchema,
+        binding: SourceModelBinding,
+        binding_capability: SourceModelInvocationCapability,
+        policy_binding: SourceModelPolicyBinding,
+        quoter: &'a mut dyn SourceModelAttemptQuoter,
+        cancellation: &'a AgentCancellation,
+        clock: &'a dyn InvocationClock,
+        started_at_millis: i64,
+    ) -> Result<Self, Vec<Diagnostic>> {
+        if !policy_binding.matches(&binding) {
+            return Err(Self::refusal("source.model_policy"));
+        }
+        let limits = policy_binding.effective().limits();
+        let deadline_millis = if limits.max_latency_millis == i64::MAX {
+            None
+        } else {
+            Some(
+                started_at_millis
+                    .checked_add(limits.max_latency_millis)
+                    .ok_or_else(|| Self::refusal("source.model_policy"))?,
+            )
+        };
+        let mut source = Self::new_bound(factory, capability, schema, binding, binding_capability)?;
+        source.cancellation = Some(cancellation);
+        source.clock = Some(clock);
+        source.deadline_millis = deadline_millis;
+        let provider = ProviderSlot::authorized(policy_binding.provider_id().to_owned());
+        source.policy = Some(SourceModelPolicySession {
+            ledger: ModelPolicyLedger::new(
+                policy_binding.effective(),
+                ProviderPolicy::new(vec![provider]),
+                deadline_millis,
+                clock,
+            ),
+            binding: policy_binding,
+            quoter,
+            cancellation,
+        });
+        Ok(source)
     }
 
     /// Checks that this adapter is still attached to the exact runtime
@@ -131,6 +231,11 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
     #[must_use]
     pub fn model_binding(&self) -> Option<&SourceModelBinding> {
         self.binding.as_ref()
+    }
+
+    #[must_use]
+    pub fn model_policy_binding(&self) -> Option<&SourceModelPolicyBinding> {
+        self.policy.as_ref().map(|policy| &policy.binding)
     }
     #[must_use]
     pub fn with_cancellation(mut self, cancellation: &'a AgentCancellation) -> Self {
@@ -166,6 +271,7 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
         cost_micros: Option<i64>,
     ) {
         if self.binding.is_some() {
+            let reservation = self.pending_reservation.take();
             self.evidence.record(
                 request,
                 response,
@@ -173,6 +279,7 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
                 tokens_in,
                 tokens_out,
                 cost_micros,
+                reservation.as_ref(),
             );
         }
     }
@@ -230,11 +337,49 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
         if self.binding.is_some() && !self.evidence.can_record() {
             return Err(Self::refusal("source.model_evidence_capacity"));
         }
-        let mut adapter = self.factory.create();
         let adapter_request = AdapterRequest {
             request_bytes: prompt.into_bytes(),
             max_response_bytes,
         };
+        let policy_attempt =
+            if let (Some(policy), Some(binding)) = (self.policy.as_mut(), self.binding.as_ref()) {
+                match policy.quoter.quote(&adapter_request, binding) {
+                    Err(_) => Err("policy_quote_refused"),
+                    Ok(quote)
+                        if quote.request_digest
+                            != source_request_digest(&adapter_request.request_bytes)
+                            || quote.estimated_cost_micros < 0
+                            || quote
+                                .context_tokens
+                                .checked_add(quote.output_tokens)
+                                .is_none() =>
+                    {
+                        Err("policy_quote_refused")
+                    }
+                    Ok(quote) => policy
+                        .reserve(quote)
+                        .map(Some)
+                        .map_err(|_| "policy_reservation_refused"),
+                }
+            } else {
+                Ok(None)
+            };
+        let policy_reservation = match policy_attempt {
+            Ok(reservation) => reservation,
+            Err(terminal) => {
+                self.record(
+                    &adapter_request.request_bytes,
+                    None,
+                    terminal,
+                    None,
+                    None,
+                    None,
+                );
+                return Err(Self::refusal("source.model_policy"));
+            }
+        };
+        self.pending_reservation = policy_reservation;
+        let mut adapter = self.factory.create();
         if self
             .binding
             .as_ref()
@@ -267,7 +412,17 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
             );
             return Err(Self::refusal("source.adapter_negotiation"));
         }
-        self.check_deadline()?;
+        if let Err(diagnostics) = self.check_deadline() {
+            self.record(
+                &adapter_request.request_bytes,
+                None,
+                "cancelled_or_timed_out",
+                None,
+                None,
+                None,
+            );
+            return Err(diagnostics);
+        }
         if adapter.start(&self.capability, &adapter_request).is_err() {
             adapter.cancel("source start refusal");
             self.record(

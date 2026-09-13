@@ -128,6 +128,7 @@ pub struct DeploymentModelSelection {
     provider_id: String,
     model_id: String,
     capabilities: Vec<String>,
+    max_context_tokens: u64,
 }
 
 impl DeploymentModelSelection {
@@ -144,6 +145,11 @@ impl DeploymentModelSelection {
     #[must_use]
     pub fn capabilities(&self) -> &[String] {
         &self.capabilities
+    }
+
+    #[must_use]
+    pub fn max_context_tokens(&self) -> u64 {
+        self.max_context_tokens
     }
 }
 
@@ -259,6 +265,10 @@ impl BoundAgentDeployment {
                             .to_owned()
                     })
                     .collect(),
+                max_context_tokens: row
+                    .get("max_context_tokens")
+                    .and_then(serde_json::Value::as_u64)
+                    .expect("admitted model retains max_context_tokens"),
             })
             .collect()
     }

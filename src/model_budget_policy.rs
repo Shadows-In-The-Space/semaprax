@@ -74,6 +74,8 @@ pub mod live_hook;
 pub mod provider_policy;
 pub mod retry;
 
+pub use live_hook::ModelAttemptQuote;
+
 pub use classification::{retry_is_permitted, AttemptOutcomeClass};
 pub use ledger::{
     AttemptKind, AttemptRefusal, AttemptRequest, AttemptReservation, AttemptUsage,

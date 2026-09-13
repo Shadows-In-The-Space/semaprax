@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Pair generic live work reservations with durable monetary accounting (#113),
+  and enforce opt-in source-model ceilings before adapter construction (#177,
+  #179). Add a final uncached graph retry that charges retained output vectors
+  while preserving earlier successful budget receipts (#124).
+
 - Bind typed live model operations to deployment selection and commit their
   redacted attempt evidence in an additive execution root (#177). Propagate
   remaining host deadlines and distinguish reserved, observed and unknown

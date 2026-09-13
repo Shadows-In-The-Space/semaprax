@@ -86,6 +86,10 @@ pub enum LiveInvocationOutcome {
 /// what a handler, decoder, or policy would otherwise decide.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LiveKernelError {
+    /// A recovered or migrated priced state was bound to a different
+    /// invocation identity than the configuration offered to run it. Refused
+    /// before observation, store I/O, reservation, or dispatch.
+    InvocationIdentityDrift,
     /// The supplied journal does not causally validate against `identity`.
     InvalidJournal(journal::JournalError),
     /// The journal ends with an uncertain, undelivered request. Refused

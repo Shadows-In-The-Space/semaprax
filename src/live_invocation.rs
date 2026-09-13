@@ -44,6 +44,7 @@ pub mod kernel;
 pub mod migration;
 pub mod model_invoke;
 pub mod persistence;
+pub mod priced;
 pub(crate) mod pricing;
 pub mod source_journal;
 
@@ -78,6 +79,12 @@ pub use model_invoke::{
     ProposalOutcome, ReservedBudget,
 };
 pub use persistence::{
-    encode_envelope, recover_journal, CheckpointJournalSink, JournalSink, RecoveredJournal,
-    RecoveryError, PERSISTED_JOURNAL_SCHEMA,
+    encode_envelope, recover_journal, recover_priced_journal, CheckpointJournalSink, JournalSink,
+    PricedCheckpointJournalSink, PricedRecoveryError, RecoveredJournal, RecoveredPricedJournal,
+    RecoveryError, PERSISTED_JOURNAL_SCHEMA, PERSISTED_PRICED_JOURNAL_SCHEMA,
 };
+pub use priced::{
+    run_priced_live_invocation, GenericPricing, PricedInvocationState,
+    PricedLiveInvocationHandlers, PricedLiveKernelRun, PricedMigrationError, PricedWorkBudgetHook,
+};
+pub use pricing::{PricingConfigError, ValidatedPricing};

@@ -9,12 +9,15 @@ use sha2::{Digest, Sha256};
 
 use crate::agent_deployment::DeploymentModelSelection;
 use crate::diagnostic::quote_json;
+use crate::model_budget_policy::AttemptReservation;
+use crate::model_budget_policy::{intersect, EffectiveModelBudget, ModelBudgetLimits};
 use crate::provider_adapter_sdk::AdapterCapabilities;
 
 const DOMAIN: &[u8] = b"semaprax.agent-runtime-v2.source-model-binding.v1\0";
 const EVIDENCE_DOMAIN: &[u8] = b"semaprax.agent-runtime-v2.source-model-evidence.v1\0";
 const REQUEST_DOMAIN: &[u8] = b"semaprax.agent-runtime-v2.source-model-request.v1\0";
 const RESPONSE_DOMAIN: &[u8] = b"semaprax.agent-runtime-v2.source-model-response.v1\0";
+const POLICY_DOMAIN: &[u8] = b"semaprax.agent-runtime-v2.source-model-policy.v1\0";
 const MAX_ID_BYTES: usize = 256;
 const MAX_ATTEMPTS: usize = 4096;
 
@@ -56,6 +59,9 @@ pub struct SourceModelBinding {
     adapter: SourceModelAdapterIdentity,
     max_request_bytes: usize,
     max_response_bytes: usize,
+    selected_max_context_tokens: u64,
+    source_policy_document: String,
+    deployment_policy_document: String,
     digest: String,
 }
 
@@ -72,6 +78,8 @@ pub(crate) struct SourceModelContract {
     selections: Vec<DeploymentModelSelection>,
     max_request_bytes: usize,
     max_response_bytes: usize,
+    source_policy_document: String,
+    deployment_policy_document: String,
 }
 
 impl SourceModelContract {
@@ -86,6 +94,8 @@ impl SourceModelContract {
         selections: Vec<DeploymentModelSelection>,
         max_request_bytes: usize,
         max_response_bytes: usize,
+        source_policy_document: &str,
+        deployment_policy_document: &str,
     ) -> Result<Self, &'static str> {
         if deployment_digest.is_empty()
             || bound_deployment_digest.is_empty()
@@ -107,6 +117,8 @@ impl SourceModelContract {
             selections,
             max_request_bytes,
             max_response_bytes,
+            source_policy_document: source_policy_document.to_owned(),
+            deployment_policy_document: deployment_policy_document.to_owned(),
         })
     }
 
@@ -129,6 +141,8 @@ impl SourceModelContract {
             adapter,
             self.max_request_bytes,
             self.max_response_bytes,
+            &self.source_policy_document,
+            &self.deployment_policy_document,
         )
     }
 }
@@ -148,6 +162,8 @@ impl SourceModelBinding {
         adapter: SourceModelAdapterIdentity,
         max_request_bytes: usize,
         max_response_bytes: usize,
+        source_policy_document: &str,
+        deployment_policy_document: &str,
     ) -> Result<Self, &'static str> {
         if !adapter.valid()
             || deployment_root.is_empty()
@@ -198,6 +214,9 @@ impl SourceModelBinding {
             adapter,
             max_request_bytes,
             max_response_bytes,
+            selected_max_context_tokens: selection.max_context_tokens(),
+            source_policy_document: source_policy_document.to_owned(),
+            deployment_policy_document: deployment_policy_document.to_owned(),
             digest,
         })
     }
@@ -227,9 +246,47 @@ impl SourceModelBinding {
         self.max_response_bytes
     }
 
+    /// Digest the exact provider envelope that a host quoter is pricing.
+    /// This is a commitment only; it never exposes prompt bytes.
+    #[must_use]
+    pub fn request_digest(&self, request_bytes: &[u8]) -> String {
+        source_request_digest(request_bytes)
+    }
+
     #[must_use]
     pub fn adapter_identity(&self) -> &SourceModelAdapterIdentity {
         &self.adapter
+    }
+
+    /// Derives the effective #179 policy for this exact invocation. The
+    /// invocation may only narrow the retained source/deployment ceilings.
+    pub fn policy_binding(
+        &self,
+        invocation_policy: ModelBudgetLimits,
+    ) -> Result<SourceModelPolicyBinding, &'static str> {
+        let mut source = model_budget_limits(&self.source_policy_document, "ceilings")?;
+        let mut deployment = model_budget_limits(&self.deployment_policy_document, "limits")?;
+        source.max_context_tokens = source
+            .max_context_tokens
+            .min(self.selected_max_context_tokens);
+        deployment.max_context_tokens = deployment
+            .max_context_tokens
+            .min(self.selected_max_context_tokens);
+        let effective =
+            intersect(source, deployment, invocation_policy).map_err(|_| "source.model_policy")?;
+        let limits = effective.limits();
+        let canonical = format!(
+            "{{\"schema\":\"semaprax.agent-runtime-v2.source-model-policy.v1\",\"binding\":{},\"max_calls\":{},\"max_retries\":{},\"max_providers\":{},\"max_context_tokens\":{},\"max_output_tokens\":{},\"max_aggregate_tokens\":{},\"max_cost_micros\":{},\"max_latency_millis\":{}}}",
+            quote_json(&self.digest), limits.max_calls, limits.max_retries,
+            limits.max_providers, limits.max_context_tokens, limits.max_output_tokens,
+            limits.max_aggregate_tokens, limits.max_cost_micros, limits.max_latency_millis,
+        );
+        Ok(SourceModelPolicyBinding {
+            source_model_binding: self.digest.clone(),
+            effective,
+            provider_id: self.adapter.provider_id.clone(),
+            digest: digest(POLICY_DOMAIN, canonical.as_bytes()),
+        })
     }
 
     /// Derives the non-ambient binding token an adapter must present to the
@@ -272,6 +329,39 @@ pub struct SourceModelInvocationCapability {
     binding_digest: String,
 }
 
+/// Opaque effective policy for one source-model binding and one invocation.
+/// Current deployment documents have no ordered confidential failover list, so
+/// its effective `max_providers` is zero: the selected primary remains usable,
+/// while every provider switch is refused.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceModelPolicyBinding {
+    source_model_binding: String,
+    effective: EffectiveModelBudget,
+    provider_id: String,
+    digest: String,
+}
+
+impl SourceModelPolicyBinding {
+    #[must_use]
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+
+    #[must_use]
+    pub fn effective(&self) -> EffectiveModelBudget {
+        self.effective
+    }
+
+    pub(crate) fn matches(&self, binding: &SourceModelBinding) -> bool {
+        self.source_model_binding == binding.digest
+            && self.provider_id == binding.adapter.provider_id
+    }
+
+    pub(crate) fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
+}
+
 /// One bounded, redacted model attempt observation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceModelAttemptEvidence {
@@ -283,6 +373,51 @@ pub struct SourceModelAttemptEvidence {
     tokens_in: Option<u64>,
     tokens_out: Option<u64>,
     cost_micros: Option<i64>,
+    reservation: Option<SourceModelReservationEvidence>,
+}
+
+/// One nonrefundable #179 admission recorded beside its redacted attempt.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceModelReservationEvidence {
+    ordinal: u64,
+    kind: String,
+    provider_id: String,
+    context_tokens: u64,
+    output_tokens: u64,
+    cost_micros: i64,
+}
+
+impl From<&AttemptReservation> for SourceModelReservationEvidence {
+    fn from(value: &AttemptReservation) -> Self {
+        Self {
+            ordinal: value.ordinal,
+            kind: match value.kind {
+                crate::model_budget_policy::AttemptKind::Fresh => "fresh",
+                crate::model_budget_policy::AttemptKind::Retry => "retry",
+                crate::model_budget_policy::AttemptKind::Failover => "failover",
+            }
+            .to_owned(),
+            provider_id: value.provider_id.clone(),
+            context_tokens: value.reserved_context_tokens,
+            output_tokens: value.reserved_output_tokens,
+            cost_micros: value.reserved_cost_micros,
+        }
+    }
+}
+
+impl SourceModelReservationEvidence {
+    #[must_use]
+    pub fn ordinal(&self) -> u64 {
+        self.ordinal
+    }
+    #[must_use]
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+    #[must_use]
+    pub fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
 }
 
 impl SourceModelAttemptEvidence {
@@ -318,6 +453,10 @@ impl SourceModelAttemptEvidence {
     pub fn cost_micros(&self) -> Option<i64> {
         self.cost_micros
     }
+    #[must_use]
+    pub fn reservation(&self) -> Option<&SourceModelReservationEvidence> {
+        self.reservation.as_ref()
+    }
 }
 
 /// Canonical redacted observations for a bound live model source.
@@ -338,15 +477,31 @@ impl SourceModelEvidence {
     }
 
     fn canonical_json(&self) -> String {
-        let attempts = self.attempts.iter().map(|attempt| format!(
-            "{{\"request\":{},\"request_bytes\":{},\"response\":{},\"response_bytes\":{},\"terminal\":{},\"tokens_in\":{},\"tokens_out\":{},\"cost_micros\":{}}}",
-            quote_json(&attempt.request_digest), attempt.request_bytes,
-            attempt.response_digest.as_deref().map(quote_json).unwrap_or_else(|| "null".to_owned()),
-            attempt.response_bytes, quote_json(&attempt.terminal),
-            attempt.tokens_in.map_or_else(|| "null".to_owned(), |value| value.to_string()),
-            attempt.tokens_out.map_or_else(|| "null".to_owned(), |value| value.to_string()),
-            attempt.cost_micros.map_or_else(|| "null".to_owned(), |value| value.to_string()),
-        )).collect::<Vec<_>>().join(",");
+        let attempts = self
+            .attempts
+            .iter()
+            .map(|attempt| {
+                let old = format!(
+                    "{{\"request\":{},\"request_bytes\":{},\"response\":{},\"response_bytes\":{},\"terminal\":{},\"tokens_in\":{},\"tokens_out\":{},\"cost_micros\":{}}}",
+                    quote_json(&attempt.request_digest), attempt.request_bytes,
+                    attempt.response_digest.as_deref().map(quote_json).unwrap_or_else(|| "null".to_owned()),
+                    attempt.response_bytes, quote_json(&attempt.terminal),
+                    attempt.tokens_in.map_or_else(|| "null".to_owned(), |value| value.to_string()),
+                    attempt.tokens_out.map_or_else(|| "null".to_owned(), |value| value.to_string()),
+                    attempt.cost_micros.map_or_else(|| "null".to_owned(), |value| value.to_string()),
+                );
+                match attempt.reservation.as_ref() {
+                    None => old,
+                    Some(value) => format!(
+                        "{},\"reservation\":{{\"ordinal\":{},\"kind\":{},\"provider\":{},\"context_tokens\":{},\"output_tokens\":{},\"cost_micros\":{}}}}}",
+                        old.strip_suffix('}').expect("attempt JSON closes"),
+                        value.ordinal, quote_json(&value.kind), quote_json(&value.provider_id),
+                        value.context_tokens, value.output_tokens, value.cost_micros,
+                    ),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         format!("{{\"schema\":\"semaprax.agent-runtime-v2.source-model-evidence.v1\",\"attempts\":[{attempts}]}}\n")
     }
 
@@ -362,6 +517,7 @@ impl SourceModelEvidence {
         tokens_in: Option<u64>,
         tokens_out: Option<u64>,
         cost_micros: Option<i64>,
+        reservation: Option<&AttemptReservation>,
     ) {
         assert!(
             self.can_record(),
@@ -376,8 +532,40 @@ impl SourceModelEvidence {
             tokens_in,
             tokens_out,
             cost_micros,
+            reservation: reservation.map(SourceModelReservationEvidence::from),
         });
     }
+}
+
+pub(crate) fn source_request_digest(bytes: &[u8]) -> String {
+    digest(REQUEST_DOMAIN, bytes)
+}
+
+fn model_budget_limits(source: &str, key: &str) -> Result<ModelBudgetLimits, &'static str> {
+    let document: serde_json::Value =
+        serde_json::from_str(source).map_err(|_| "source.model_policy")?;
+    let limits = document
+        .get(key)
+        .and_then(serde_json::Value::as_object)
+        .ok_or("source.model_policy")?;
+    let value = |name: &str| {
+        limits
+            .get(name)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or("source.model_policy")
+    };
+    let input = value("max_reported_model_input_tokens")?;
+    let output = value("max_reported_model_output_tokens")?;
+    Ok(ModelBudgetLimits {
+        max_calls: u32::try_from(value("max_provider_attempts")?).unwrap_or(u32::MAX),
+        max_retries: u32::try_from(value("max_retries_per_turn")?).unwrap_or(u32::MAX),
+        max_providers: 0,
+        max_context_tokens: input,
+        max_output_tokens: output,
+        max_aggregate_tokens: input.checked_add(output).ok_or("source.model_policy")?,
+        max_cost_micros: i64::try_from(value("max_usd_microunits")?).unwrap_or(i64::MAX),
+        max_latency_millis: i64::try_from(value("max_elapsed_ms")?).unwrap_or(i64::MAX),
+    })
 }
 
 fn digest(domain: &[u8], bytes: &[u8]) -> String {

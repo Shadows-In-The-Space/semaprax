@@ -12,7 +12,8 @@ pub mod source_model;
 
 pub use source_model::{
     SourceModelAdapterIdentity, SourceModelAttemptEvidence, SourceModelBinding,
-    SourceModelEvidence, SourceModelInvocationCapability,
+    SourceModelEvidence, SourceModelInvocationCapability, SourceModelPolicyBinding,
+    SourceModelReservationEvidence,
 };
 
 pub use crate::execution_revision::typed::{

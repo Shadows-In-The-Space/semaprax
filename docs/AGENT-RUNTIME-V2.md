@@ -72,6 +72,12 @@ surface and its v3 root remain the compatibility route. This is a local,
 nondurable adapter binding; it makes no hosted-provider or target-runtime
 claim.
 
+Its opt-in `new_bound_with_policy` route composes the existing
+`ModelPolicyLedger` with a host request-bound `ModelAttemptQuote`: source and
+deployment ceilings plus an invocation ceiling are intersected before a fresh
+attempt can construct an adapter. Current deployment documents bind one
+provider only; retry and failover transitions remain unavailable here.
+
 `run_durable` consumes the same bound producer and a caller-owned single-writer
 checkpoint store. A retained snapshot must come from that authorized trusted
 store; hashes do not authenticate host observations. The private producer

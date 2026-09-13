@@ -86,7 +86,9 @@ pub use observation::{
     MAX_OBSERVED_METADATA_BYTES, MAX_REPLAY_RESPONSE_BYTES,
 };
 pub use report::{ConformanceReport, ReportCaseResult};
-pub use source_bridge::{SourceAdapterFactory, StreamingSourceProposalAdapter};
+pub use source_bridge::{
+    SourceAdapterFactory, SourceModelAttemptQuoter, StreamingSourceProposalAdapter,
+};
 pub use vendor::{
     AnthropicMessagesAdapter, HostHttpStream, HostHttpStreamTransport, OpenAiResponsesAdapter,
     ProviderHttpRequest, TransportFailure, TransportFailureKind, TransportPoll,

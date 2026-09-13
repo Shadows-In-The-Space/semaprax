@@ -253,6 +253,37 @@ not a sentinel invented here. This document deliberately does not invent
 one, matching the same restraint `docs/DURABLE-JOBS-V1.md`'s own "#228
 boundary" section already exercises for its structurally identical problem.
 
+## Additive generic priced envelope (local only)
+
+`priced::run_priced_live_invocation` is an opt-in wrapper over the same
+kernel and causal journal. It does not alter `persisted-journal.v1`, journal
+entries, request bytes, or the ordinary `JournalSink` route. Its separate
+`semaprax.live-invocation.persisted-priced-journal.v1` envelope commits the
+same journal prefix together with one validated operator quote, a checked
+money carry, and one attempt record for every positive durable
+`RequestIntent` reservation. The envelope is canonical and independently
+decoded before its journal reaches the kernel; unknown fields, changed field
+order, wrong identity/chain, malformed money totals, and a mismatched quote
+are refused.
+
+The priced wrapper admits only a `PricedWorkBudgetHook`, whose explicit quote
+must equal its subsequent work reservation. It prepares the monetary ledger
+before that work reservation and commits both in the envelope before model
+dispatch. Ordinary budget hooks and ordinary sinks therefore cannot silently
+opt into priced execution. Generic `ModelHandler` has no typed currency usage
+channel, so every generic settlement is deliberately recorded as **unknown
+charge exposure**. This is conservative reservation evidence, not a provider
+invoice, zero-cost inference, conversion service, or billing authority.
+
+A constrained `PricedInvocationState::successor` exists only for a terminal,
+identity-distinct predecessor. It carries the predecessor's exact chain,
+generation, quote and conservative totals into a digest-bound handoff; the
+destination may keep or narrow the same work-unit/currency/scale/rate/ceiling
+contract, never loosen or rewrite predecessor bytes. Recovery verifies that
+handoff against the destination identity and carry. This local reference has
+no public/hosted support claim, real store, provider pricing lookup, or typed
+generic charge observation.
+
 ## Non-goals and known limitations (this round)
 
 - **No real filesystem, database, or network-backed `CheckpointStore`.**

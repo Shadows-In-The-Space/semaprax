@@ -11,6 +11,10 @@ pub(super) fn fixture() -> Fixture {
     // Explicit source ceilings admit the three-turn success fixture.
     let source = source
         .replace(r#"\"max_turns\":2"#, r#"\"max_turns\":3"#)
+        .replace(
+            r#"\"max_provider_attempts\":2"#,
+            r#"\"max_provider_attempts\":3"#,
+        )
         .replace(r#"\"max_tool_calls\":1"#, r#"\"max_tool_calls\":3"#);
 
     let reducer = r#"

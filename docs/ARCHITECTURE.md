@@ -118,6 +118,10 @@ nonblocking output bounds and transport receipt binding. Its source adapter
 implements the existing lifecycle `ProposalSource`; compiler-owned `run_live`
 retains canonical proposal admission and checked deterministic stages. The
 core exposes only the existing read-only retained-value encoding for context.
+`live_invocation/priced` wraps the generic kernel with paired work and money
+reservations. `live_invocation/persistence/priced` commits both in one additive
+checkpoint envelope; recovery preserves unknown charges and never authorizes
+redispatch. Existing generic journal bytes remain unchanged.
 The source-specific checkpoint grammar lives under
 `src/live_invocation/source_journal`; it uses the existing caller-owned
 `CheckpointStore` and keeps the generic journal wire unchanged. Its validated
@@ -214,7 +218,9 @@ additive schema separately from the enriched host-metadata receipt contract.
 redacted attempt observations. The bound streaming adapter checks deployment
 selection and compiler schema before dispatch; `execution_revision/typed`
 joins that exact binding, attempt digest and closed outcome into EvidenceRoot
-v4. The compatibility live route retains v3 roots. This addition is nondurable;
+v4. Its opt-in policy path reuses `model_budget_policy` admission before
+adapter construction and commits nonrefundable reservations. The compatibility
+live route retains v3 roots. This addition is nondurable;
 [Source Model Operation v1](SOURCE-MODEL-OPERATION-V1.md) owns its scope.
 `agent_lifecycle/iterative/source_live` owns the one ledger and replay cursor;
 its optional session hooks reuse the checked loop in `iterative/driver/live`

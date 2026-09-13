@@ -70,6 +70,26 @@ attribute a reused source's earlier observations to the current invocation.
 Existing EvidenceRoot v3 bytes and the ordinary
 `run_live` API are unchanged.
 
+## Effective model policy
+
+`source_model_policy_binding` intersects the retained source ceilings, the
+validated deployment limits, and one caller-supplied invocation ceiling using
+the existing `ModelPolicyLedger` limit type. The selected model's declared
+context limit narrows the result. `new_bound_with_policy` requires a
+host-injected `SourceModelAttemptQuoter` that returns the existing
+request-digest-bound `ModelAttemptQuote`; it rejects a mismatched digest,
+negative cost or token overflow, then reserves a fresh attempt before adapter
+factory construction. Reservations are nonrefundable and appear as redacted
+reservation facts in attempt evidence.
+
+The current deployment document has no ordered, confidentiality-cleared
+fallback list. This route therefore binds exactly its selected primary provider
+and an effective `max_providers == 0`: the primary remains available, while
+every provider switch is refused. It does not invent a provider order from
+model rows. The iterative source lifecycle also has no automatic retry
+transition, so retries and failovers remain refused until a checked lifecycle
+transition and deployment policy admit them.
+
 ## Security and nonclaims
 
 - A model response remains untrusted Proposal text. Compiler decode precedes
@@ -78,9 +98,10 @@ Existing EvidenceRoot v3 bytes and the ordinary
   exact checked host commitments, not core-language provider names.
 - Cancellation asks the adapter to stop but does not claim remote cancellation,
   no provider processing, or no billing.
-- This v1 route has no retry/failover/token-policy composition. The existing
-  #179 policy types remain separate until their source/deployment/invocation
-  policy wire is explicitly bound.
+- The opt-in bound-policy route admits one selected primary through the
+  source/deployment/invocation token and cost ceilings. It has no checked
+  lifecycle retry transition, ordered failover provider list, or durable
+  reservation state; retries, provider switches, and recovery remain refused.
 - This v1 route is nondurable. `Source Live Journal v2` and checkpointed host
   sources keep their own contract; this change does not claim a Direct Runtime
   v2 durable model path.

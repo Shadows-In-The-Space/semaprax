@@ -1,4 +1,4 @@
-//! Pure, conservative operator pricing for the source-journal v4 route.
+//! Pure, conservative operator pricing shared by priced live routes.
 //!
 //! The pricing identity is explicit and immutable for one invocation. The
 //! existing work-unit ledger remains authoritative for its own quota. This
@@ -27,7 +27,7 @@ pub(crate) const PRICING_RATE_MISMATCH: &str = "pricing_rate_mismatch";
 pub(crate) const PRICING_NEGATIVE_OBSERVATION: &str = "pricing_negative_observation";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum PricingConfigError {
+pub enum PricingConfigError {
     InvalidWorkUnit,
     InvalidCurrency,
     InvalidMinorUnitExponent,
@@ -41,7 +41,7 @@ pub(crate) enum PricingConfigError {
 /// is neither a token price nor proof of a provider invoice. Currency is only
 /// an exact binding; this core performs no conversion or lookup.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ValidatedPricing {
+pub struct ValidatedPricing {
     work_unit: String,
     currency: String,
     minor_unit_exponent: u8,
@@ -50,7 +50,7 @@ pub(crate) struct ValidatedPricing {
 }
 
 impl ValidatedPricing {
-    pub(crate) fn new(
+    pub fn new(
         work_unit: String,
         currency: String,
         minor_unit_exponent: u8,
@@ -81,24 +81,24 @@ impl ValidatedPricing {
         })
     }
 
-    pub(crate) fn work_unit(&self) -> &str {
+    pub fn work_unit(&self) -> &str {
         &self.work_unit
     }
-    pub(crate) fn currency(&self) -> &str {
+    pub fn currency(&self) -> &str {
         &self.currency
     }
-    pub(crate) const fn minor_unit_exponent(&self) -> u8 {
+    pub const fn minor_unit_exponent(&self) -> u8 {
         self.minor_unit_exponent
     }
-    pub(crate) const fn price_per_work_unit_minor(&self) -> i64 {
+    pub const fn price_per_work_unit_minor(&self) -> i64 {
         self.price_per_work_unit_minor
     }
-    pub(crate) const fn ceiling_minor(&self) -> i64 {
+    pub const fn ceiling_minor(&self) -> i64 {
         self.ceiling_minor
     }
 
     /// Quotes exact bound work. The caller still reserves against the total.
-    pub(crate) fn quote(&self, work_unit: &str, work_units: i64) -> Result<i64, BudgetRefusal> {
+    pub fn quote(&self, work_unit: &str, work_units: i64) -> Result<i64, BudgetRefusal> {
         if work_unit != self.work_unit {
             return Err(refusal(PRICING_UNIT_MISMATCH));
         }
@@ -232,6 +232,7 @@ impl PricedMonetaryCarry {
     pub(crate) fn pricing(&self) -> &ValidatedPricing {
         &self.pricing
     }
+
     pub(crate) const fn reserved_minor(&self) -> i64 {
         self.reserved_minor
     }
@@ -275,8 +276,14 @@ impl PricedMonetaryCarry {
 }
 
 impl MonetaryReservation {
-    pub(crate) const fn ordinal(self) -> u32 {
+    pub const fn ordinal(self) -> u32 {
         self.ordinal
+    }
+    pub(crate) const fn work_units(self) -> i64 {
+        self.work_units
+    }
+    pub(crate) const fn reserved_minor(self) -> i64 {
+        self.reserved_minor
     }
 
     pub(crate) fn recover(
@@ -441,6 +448,26 @@ impl MonetaryAccounting {
         &self.pricing
     }
 
+    pub(crate) fn preflight_reserve(
+        &self,
+        work_unit: &str,
+        work_units: i64,
+    ) -> Result<(), BudgetRefusal> {
+        self.ensure_live()?;
+        let reserved_minor = self.pricing.quote(work_unit, work_units)?;
+        self.ensure_capacity()?;
+        let prior_exposure = self
+            .reserved_minor
+            .checked_add(self.observed_over_reservation_minor)
+            .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?;
+        let admission_exposure = prior_exposure
+            .checked_add(reserved_minor)
+            .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?;
+        (admission_exposure <= self.pricing.ceiling_minor())
+            .then_some(())
+            .ok_or_else(|| refusal(PRICING_BUDGET_EXHAUSTED))
+    }
+
     /// Commits the maximum price before physical dispatch. The current source
     /// work ledger remains separate until the v4 integration joins boundaries.
     pub(crate) fn reserve(
@@ -562,6 +589,49 @@ impl MonetaryAccounting {
 
     pub(crate) fn attempts(&self) -> &[MonetaryAttempt] {
         &self.attempts
+    }
+    pub(crate) fn persisted_carry(&self) -> Result<PricedMonetaryCarry, BudgetRefusal> {
+        let base_next = self
+            .next_ordinal
+            .checked_sub(
+                u32::try_from(self.attempts.len()).map_err(|_| refusal(PRICING_TOTAL_OVERFLOW))?,
+            )
+            .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?;
+        let replayed = Self::resume_with_priced_carry(
+            self.pricing.clone(),
+            PricedMonetaryCarry::from_validated(self.pricing.clone(), 0, 0, 0, 0, base_next)?,
+            &self.attempts,
+        )?;
+        PricedMonetaryCarry::from_validated(
+            self.pricing.clone(),
+            self.reserved_minor
+                .checked_sub(replayed.reserved_minor)
+                .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?,
+            self.observed_minor
+                .checked_sub(replayed.observed_minor)
+                .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?,
+            self.unknown_reservation_minor
+                .checked_sub(replayed.unknown_reservation_minor)
+                .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?,
+            self.observed_over_reservation_minor
+                .checked_sub(replayed.observed_over_reservation_minor)
+                .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?,
+            // `next_ordinal` is a sequence coordinate rather than an
+            // additive amount.  The destination attempts begin at this
+            // exact base; subtracting the replayed end would silently reset
+            // a migrated/previously recovered sequence to zero.
+            base_next,
+        )
+    }
+    pub(crate) fn total_carry(&self) -> Result<PricedMonetaryCarry, BudgetRefusal> {
+        PricedMonetaryCarry::from_validated(
+            self.pricing.clone(),
+            self.reserved_minor,
+            self.observed_minor,
+            self.unknown_reservation_minor,
+            self.observed_over_reservation_minor,
+            self.next_ordinal,
+        )
     }
     pub(crate) const fn reserved_minor(&self) -> i64 {
         self.reserved_minor

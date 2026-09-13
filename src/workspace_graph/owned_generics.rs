@@ -94,6 +94,7 @@ pub(super) fn retain_module_instances(
     programs: &[Program],
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     instances: Vec<hir::ResolvedFunctionInstance>,
+    retained_output_only: bool,
 ) -> Result<
     (
         Vec<hir::ResolvedFunctionInstance>,
@@ -115,6 +116,7 @@ pub(super) fn retain_module_instances(
                             || imported_box_wrapper(programs, module_use).is_some())
                 })
         },
+        retained_output_only,
     )?;
     Ok(retained.into_iter().partition(|item| {
         authored

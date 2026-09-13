@@ -2,6 +2,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use semaprax::agent_deployment::migrate_agent_definition_v1;
 use semaprax::agent_lifecycle::iterative::effects::EffectBudget;
@@ -12,14 +13,17 @@ use semaprax::agent_lifecycle::LifecycleTask;
 use semaprax::agent_runtime::AgentCancellation;
 use semaprax::agent_runtime_v2::{bind_agent_runtime_v2_live, SourceModelAdapterIdentity};
 use semaprax::execution_revision::ProgramRootRef;
+use semaprax::live_invocation::fixture::StepClock;
+use semaprax::model_budget_policy::{ModelAttemptQuote, ModelBudgetLimits};
 use semaprax::project::with_authenticated_project;
 use semaprax::provider_adapter_sdk::fixture_adapters::{
     usage, ScriptedAdapter, ScriptedStreamingAdapter,
 };
 use semaprax::provider_adapter_sdk::{
-    AdapterCapabilities, AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterSettlement,
-    CancellationSemantics, EndpointPolicy, ProviderAdapter, SourceAdapterFactory,
-    StreamingSourceProposalAdapter, StructuredOutputMode, TokenAccountingSource,
+    AdapterCapabilities, AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterRefusal,
+    AdapterSettlement, CancellationSemantics, EndpointPolicy, ProviderAdapter,
+    SourceAdapterFactory, SourceModelAttemptQuoter, StreamingSourceProposalAdapter,
+    StructuredOutputMode, TokenAccountingSource,
 };
 
 use super::{operations, typed_fixture, Handler};
@@ -96,6 +100,96 @@ fn streaming_capabilities() -> AdapterCapabilities {
     }
 }
 
+struct ExactPolicyQuoter;
+
+impl SourceModelAttemptQuoter for ExactPolicyQuoter {
+    fn quote(
+        &mut self,
+        request: &semaprax::provider_adapter_sdk::AdapterRequest,
+        binding: &semaprax::agent_runtime_v2::SourceModelBinding,
+    ) -> Result<ModelAttemptQuote, semaprax::live_invocation::model_invoke::BudgetRefusal> {
+        Ok(ModelAttemptQuote {
+            request_digest: binding.request_digest(&request.request_bytes),
+            context_tokens: 1,
+            output_tokens: 1,
+            estimated_cost_micros: 0,
+        })
+    }
+}
+
+struct BadDigestQuoter;
+
+impl SourceModelAttemptQuoter for BadDigestQuoter {
+    fn quote(
+        &mut self,
+        _request: &semaprax::provider_adapter_sdk::AdapterRequest,
+        _binding: &semaprax::agent_runtime_v2::SourceModelBinding,
+    ) -> Result<ModelAttemptQuote, semaprax::live_invocation::model_invoke::BudgetRefusal> {
+        Ok(ModelAttemptQuote {
+            request_digest: "sha256:wrong-request".to_owned(),
+            context_tokens: 1,
+            output_tokens: 1,
+            estimated_cost_micros: 0,
+        })
+    }
+}
+
+struct CountingStreamingAdapter {
+    inner: ScriptedStreamingAdapter,
+    starts: Rc<Cell<usize>>,
+}
+
+impl ProviderAdapter for CountingStreamingAdapter {
+    fn capabilities(&self) -> &AdapterCapabilities {
+        self.inner.capabilities()
+    }
+
+    fn start(
+        &mut self,
+        capability: &AdapterInvocationCapability,
+        request: &semaprax::provider_adapter_sdk::AdapterRequest,
+    ) -> Result<(), AdapterRefusal> {
+        self.starts.set(self.starts.get() + 1);
+        self.inner.start(capability, request)
+    }
+
+    fn poll(&mut self) -> AdapterPoll {
+        self.inner.poll()
+    }
+
+    fn cancel(&mut self, reason: &str) {
+        self.inner.cancel(reason);
+    }
+}
+
+fn counted_factory(
+    documents: Vec<String>,
+    constructions: Rc<Cell<usize>>,
+    starts: Rc<Cell<usize>>,
+) -> impl SourceAdapterFactory {
+    let documents = RefCell::new(VecDeque::from(documents));
+    move || {
+        constructions.set(constructions.get() + 1);
+        let document = documents
+            .borrow_mut()
+            .pop_front()
+            .expect("one fresh adapter per attempted source proposal");
+        Box::new(CountingStreamingAdapter {
+            inner: ScriptedStreamingAdapter::new(
+                document
+                    .as_bytes()
+                    .chunks(5)
+                    .map(ToOwned::to_owned)
+                    .collect(),
+                document.into_bytes(),
+                usage(1, 1, 1),
+                true,
+            ),
+            starts: Rc::clone(&starts),
+        }) as Box<dyn ProviderAdapter>
+    }
+}
+
 fn mismatch_factory(document: String) -> impl SourceAdapterFactory {
     move || {
         Box::new(ScriptedAdapter::new(
@@ -150,19 +244,29 @@ fn direct_runtime_v2_streams_checked_source_proposals_before_effect_authorizatio
             adapter_version: "1.0.0".to_owned(),
             provider_profile: "fixture".to_owned(),
         })?;
-        let mut source = StreamingSourceProposalAdapter::new_bound(
+        let cancellation = AgentCancellation::new();
+        let clock = StepClock::new(0);
+        let policy =
+            runtime.source_model_policy_binding(&binding, ModelBudgetLimits::unbounded())?;
+        let mut quoter = ExactPolicyQuoter;
+        let mut source = StreamingSourceProposalAdapter::new_bound_with_policy(
             &mut adapter_factory,
             AdapterInvocationCapability::grant("offline direct-runtime fixture"),
             schema,
             binding.clone(),
             binding.invocation_capability(),
+            policy,
+            &mut quoter,
+            &cancellation,
+            &clock,
+            0,
         )?;
         let mut handler = Handler {
             calls: Vec::new(),
             wrong: false,
         };
         let evidence = runtime
-            .run_live_bound_model(&mut source, &mut handler, &AgentCancellation::new())
+            .run_live_bound_model(&mut source, &mut handler, &cancellation)
             .map_err(|failure| failure.diagnostics().to_vec())?;
         assert_eq!(
             evidence.run().lifecycle().status(),
@@ -176,6 +280,13 @@ fn direct_runtime_v2_streams_checked_source_proposals_before_effect_authorizatio
         assert_eq!(
             evidence.model_evidence().attempts()[0].terminal(),
             "admitted"
+        );
+        assert_eq!(
+            evidence.model_evidence().attempts()[0]
+                .reservation()
+                .expect("policy reservation")
+                .ordinal(),
+            0
         );
         let admitted_root = evidence.evidence_root().digest().to_owned();
 
@@ -282,6 +393,175 @@ fn direct_runtime_v2_streams_checked_source_proposals_before_effect_authorizatio
             .run_live(&mut source, &mut never, &AgentCancellation::new())
             .is_err());
         assert!(never.calls.is_empty());
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn bound_model_policy_refuses_before_factory_and_keeps_prior_reservations() {
+    let fixture = typed_fixture();
+    with_authenticated_project(&fixture.0.join("semaprax.toml"), |snapshot| {
+        let project = snapshot.retain_revision();
+        let root = project.program_root()?;
+        let compiled = compile_source_agent_lifecycle_v2(
+            project.sources()[0].source(),
+            project.sources()[0].path(),
+            "fixture.agent",
+            "fixture.agent.type.step",
+        )?;
+        let schema = compiled.proposal_schema();
+        let identity = || SourceModelAdapterIdentity {
+            provider_id: "fake.local".to_owned(),
+            model_id: "fake-basic".to_owned(),
+            adapter_identity: "scripted-streaming-adapter".to_owned(),
+            adapter_version: "1.0.0".to_owned(),
+            provider_profile: "fixture".to_owned(),
+        };
+        let document = |sequence| {
+            crate::agent_lifecycle_v1::proposal(schema.schema().digest(), "5", false, sequence)
+        };
+
+        // A quote for different request bytes must never construct or start
+        // a provider adapter.
+        let runtime = bind(project.clone(), &root)?;
+        let binding = runtime.source_model_binding(identity())?;
+        let policy =
+            runtime.source_model_policy_binding(&binding, ModelBudgetLimits::unbounded())?;
+        let constructions = Rc::new(Cell::new(0));
+        let starts = Rc::new(Cell::new(0));
+        let mut factory = counted_factory(
+            vec![document("0")],
+            Rc::clone(&constructions),
+            Rc::clone(&starts),
+        );
+        let cancellation = AgentCancellation::new();
+        let clock = StepClock::new(0);
+        let mut quoter = BadDigestQuoter;
+        let mut source = StreamingSourceProposalAdapter::new_bound_with_policy(
+            &mut factory,
+            AdapterInvocationCapability::grant("bad quote fixture"),
+            schema,
+            binding.clone(),
+            binding.invocation_capability(),
+            policy,
+            &mut quoter,
+            &cancellation,
+            &clock,
+            0,
+        )?;
+        let mut handler = Handler {
+            calls: Vec::new(),
+            wrong: false,
+        };
+        let result = runtime.run_live_bound_model(&mut source, &mut handler, &cancellation);
+        assert!(result.is_err());
+        let failure = result.err().expect("mismatched quote is refused");
+        assert_eq!(constructions.get(), 0);
+        assert_eq!(starts.get(), 0);
+        assert_eq!(failure.model_evidence().attempts().len(), 1);
+        assert_eq!(
+            failure.model_evidence().attempts()[0].terminal(),
+            "policy_quote_refused"
+        );
+
+        // Invocation policy can narrow an otherwise admitted selected model
+        // to no context tokens; reserve then refuses before construction.
+        let runtime = bind(project.clone(), &root)?;
+        let binding = runtime.source_model_binding(identity())?;
+        let mut narrowed = ModelBudgetLimits::unbounded();
+        narrowed.max_context_tokens = 0;
+        narrowed.max_aggregate_tokens = 0;
+        let policy = runtime.source_model_policy_binding(&binding, narrowed)?;
+        let constructions = Rc::new(Cell::new(0));
+        let starts = Rc::new(Cell::new(0));
+        let mut factory = counted_factory(
+            vec![document("0")],
+            Rc::clone(&constructions),
+            Rc::clone(&starts),
+        );
+        let cancellation = AgentCancellation::new();
+        let clock = StepClock::new(0);
+        let mut quoter = ExactPolicyQuoter;
+        let mut source = StreamingSourceProposalAdapter::new_bound_with_policy(
+            &mut factory,
+            AdapterInvocationCapability::grant("narrowed quote fixture"),
+            schema,
+            binding.clone(),
+            binding.invocation_capability(),
+            policy,
+            &mut quoter,
+            &cancellation,
+            &clock,
+            0,
+        )?;
+        let mut handler = Handler {
+            calls: Vec::new(),
+            wrong: false,
+        };
+        let result = runtime.run_live_bound_model(&mut source, &mut handler, &cancellation);
+        assert!(result.is_err());
+        let failure = result.err().expect("narrowed token ceiling is refused");
+        assert_eq!(constructions.get(), 0);
+        assert_eq!(starts.get(), 0);
+        assert_eq!(
+            failure.model_evidence().attempts()[0].terminal(),
+            "policy_reservation_refused"
+        );
+
+        // The first attempt's reservation remains spent. The second source
+        // attempt is refused before adapter construction rather than refunded.
+        let runtime = bind(project, &root)?;
+        let binding = runtime.source_model_binding(identity())?;
+        let mut one_call = ModelBudgetLimits::unbounded();
+        one_call.max_calls = 1;
+        let policy = runtime.source_model_policy_binding(&binding, one_call)?;
+        let constructions = Rc::new(Cell::new(0));
+        let starts = Rc::new(Cell::new(0));
+        let mut factory = counted_factory(
+            vec![document("0"), document("1")],
+            Rc::clone(&constructions),
+            Rc::clone(&starts),
+        );
+        let cancellation = AgentCancellation::new();
+        let clock = StepClock::new(0);
+        let mut quoter = ExactPolicyQuoter;
+        let mut source = StreamingSourceProposalAdapter::new_bound_with_policy(
+            &mut factory,
+            AdapterInvocationCapability::grant("one attempt fixture"),
+            schema,
+            binding.clone(),
+            binding.invocation_capability(),
+            policy,
+            &mut quoter,
+            &cancellation,
+            &clock,
+            0,
+        )?;
+        let mut handler = Handler {
+            calls: Vec::new(),
+            wrong: false,
+        };
+        let result = runtime.run_live_bound_model(&mut source, &mut handler, &cancellation);
+        assert!(result.is_err());
+        let failure = result.err().expect("second attempt must remain charged");
+        assert_eq!(constructions.get(), 1);
+        assert_eq!(starts.get(), 1);
+        assert_eq!(failure.model_evidence().attempts().len(), 2);
+        assert_eq!(
+            failure.model_evidence().attempts()[0]
+                .reservation()
+                .unwrap()
+                .ordinal(),
+            0
+        );
+        assert_eq!(
+            failure.model_evidence().attempts()[1].terminal(),
+            "policy_reservation_refused"
+        );
+        assert!(failure.model_evidence().attempts()[1]
+            .reservation()
+            .is_none());
         Ok(())
     })
     .unwrap();

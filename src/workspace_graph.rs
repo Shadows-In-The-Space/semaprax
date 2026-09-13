@@ -19,6 +19,7 @@ mod package;
 mod prelude_binding;
 mod project_render;
 mod retained_validation;
+mod retained_vectors;
 pub(crate) mod source_callables;
 use crate::ast::{
     Expr, ExprKind, Function, ModuleUse, ModuleUseKind, ParamMode, Program, Span, Type,
@@ -40,6 +41,7 @@ use project_render::render_project_graph_json;
 #[cfg(test)]
 use retained_validation::validate_effect_and_capability_edges;
 use retained_validation::validate_retained_facts;
+use retained_vectors::{filter_owned_vec, filter_owned_vec_accounted};
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -3927,6 +3929,7 @@ fn build_owned_inner(
                     &dependency_depths,
                     &authored,
                     frontend.as_deref_mut(),
+                    fallback_mode == 6,
                 )
             });
         core_builder_bytes = core_builder_bytes.max(consumed);
@@ -3936,8 +3939,15 @@ fn build_owned_inner(
         // Drop every partial checked tree before computing or allocating the
         // next phase. Its debit remains in the maximum phase receipt.
         drop(core);
-        if fallback_mode >= if allow_uncached_peak { 5 } else { 4 } || !retry_allowed {
+        if fallback_mode >= if allow_uncached_peak { 6 } else { 4 } || !retry_allowed {
             return Err(vec![limit_error("builder_bytes", active_builder_limit())]);
+        }
+        // Mode six is the bounded final retry: mode five's uncached receipt
+        // already fits, but its full retained output carrier overflowed.
+        // No frontend may reach it, so no cached source lifetime is elided.
+        if fallback_mode == 5 {
+            fallback_mode = 6;
+            continue;
         }
         if let (Some(cache), Some(saved)) = (frontend.as_deref_mut(), checkpoint.take()) {
             cache.rollback_core_attempt(saved);
@@ -4060,6 +4070,7 @@ fn build_resolved_core(
     dependency_depths: &BTreeMap<&str, usize>,
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     mut frontend: Option<&mut crate::project::incremental::FrontendPass>,
+    retained_output_only: bool,
 ) -> Result<ResolvedCore, Vec<Diagnostic>> {
     let mut expected_edges = Vec::new();
     for program in programs {
@@ -4175,11 +4186,15 @@ fn build_resolved_core(
         let program = programs_by_module
             .get(module.as_str())
             .expect("every resolved module has authenticated source");
-        let types = filter_owned_vec(resolved.types, |item| {
-            authored
-                .get(item.id.as_str())
-                .is_some_and(|owner| owner.module == program.module)
-        })?;
+        let types = filter_owned_vec(
+            resolved.types,
+            |item| {
+                authored
+                    .get(item.id.as_str())
+                    .is_some_and(|owner| owner.module == program.module)
+            },
+            retained_output_only,
+        )?;
         let functions = filter_owned_vec_accounted(
             resolved.functions,
             GRAPH_ACCOUNTED_RESOLVED_FUNCTION_BYTES,
@@ -4189,24 +4204,30 @@ fn build_resolved_core(
                     .get(item.id.as_str())
                     .is_some_and(|owner| owner.module == program.module)
             },
+            retained_output_only,
         )?;
-        let function_templates = filter_owned_vec(resolved.function_templates, |item| {
-            authored
-                .get(item.id.as_str())
-                .is_some_and(|owner| owner.module == program.module)
-        })?;
+        let function_templates = filter_owned_vec(
+            resolved.function_templates,
+            |item| {
+                authored
+                    .get(item.id.as_str())
+                    .is_some_and(|owner| owner.module == program.module)
+            },
+            retained_output_only,
+        )?;
         let (function_instances, imported_instances) = owned_generics::retain_module_instances(
             program,
             programs,
             authored,
             resolved.function_instances,
+            retained_output_only,
         )?;
         owned_generics::merge_imported_vec_instances(
             &mut imported_vec_instances,
             imported_instances,
         )?;
         let signature_types = retained_signature_type_facts(&functions, &resolved.declarations)?;
-        let agents = filter_owned_vec(resolved.agents, |_| true)?;
+        let agents = filter_owned_vec(resolved.agents, |_| true, retained_output_only)?;
         modules.push(WorkspaceResolvedModule {
             path: crate::bounded_output::budgeted_clone(&program.path),
             module,
@@ -4568,39 +4589,6 @@ fn retain_checked_nominal_type(
     reserve_builder_structure(bytes)?;
     retained.insert(key, (kind, facts));
     Ok(())
-}
-
-fn filter_owned_vec<T>(
-    items: Vec<T>,
-    mut keep: impl FnMut(&T) -> bool,
-) -> Result<Vec<T>, Vec<Diagnostic>> {
-    reserve_builder_structure(
-        items
-            .len()
-            .checked_mul(std::mem::size_of::<T>())
-            .ok_or_else(|| vec![limit_error("builder_bytes", active_builder_limit())])?,
-    )?;
-    Ok(items.into_iter().filter(|item| keep(item)).collect())
-}
-
-fn filter_owned_vec_accounted<T>(
-    items: Vec<T>,
-    fixed_element_bytes: usize,
-    mut extra_owned_bytes: impl FnMut(&T) -> Result<usize, Vec<Diagnostic>>,
-    mut keep: impl FnMut(&T) -> bool,
-) -> Result<Vec<T>, Vec<Diagnostic>> {
-    let fixed = items
-        .len()
-        .checked_mul(fixed_element_bytes)
-        .ok_or_else(|| vec![limit_error("builder_bytes", active_builder_limit())])?;
-    let mut bytes = fixed;
-    for item in &items {
-        bytes = bytes
-            .checked_add(extra_owned_bytes(item)?)
-            .ok_or_else(|| vec![limit_error("builder_bytes", active_builder_limit())])?;
-    }
-    reserve_builder_structure(bytes)?;
-    Ok(items.into_iter().filter(|item| keep(item)).collect())
 }
 
 fn resolved_loan_bytes(program: &hir::ResolvedProgram) -> Result<usize, Vec<Diagnostic>> {

@@ -11,8 +11,9 @@ use crate::agent_lifecycle::iterative::effects::{
 };
 use crate::agent_runtime_v2::source_model::SourceModelContract;
 use crate::agent_runtime_v2::{
-    SourceModelAdapterIdentity, SourceModelBinding, SourceModelEvidence,
+    SourceModelAdapterIdentity, SourceModelBinding, SourceModelEvidence, SourceModelPolicyBinding,
 };
+use crate::model_budget_policy::ModelBudgetLimits;
 use crate::provider_adapter_sdk::StreamingSourceProposalAdapter;
 
 pub const MAX_ITERATIVE_PROPOSAL_BYTES: usize = 2 * 1024 * 1024;
@@ -124,6 +125,26 @@ impl AgentRuntimeV2 {
             .map_err(|detail| refused(detail))
     }
 
+    /// Narrows the retained source/deployment policy for one invocation. The
+    /// supplied invocation ceiling can never widen either retained ceiling.
+    pub fn source_model_policy_binding(
+        &self,
+        binding: &SourceModelBinding,
+        invocation_policy: ModelBudgetLimits,
+    ) -> Result<SourceModelPolicyBinding> {
+        if !binding.runtime_matches(
+            self.deployment.digest(),
+            self.instance.digest(),
+            self.lifecycle.proposal_schema().source_revision(),
+            self.lifecycle.proposal_schema().schema().digest(),
+        ) {
+            return Err(refused("source.model_binding"));
+        }
+        binding
+            .policy_binding(invocation_policy)
+            .map_err(|detail| refused(detail))
+    }
+
     /// Consumes the bound streaming source-model route. It is additive to the
     /// ordinary `run_live` API, which remains the compatibility seam for an
     /// arbitrary caller-owned proposal source.
@@ -143,6 +164,7 @@ impl AgentRuntimeV2 {
                 SourceModelEvidence::default(),
                 &self,
                 None,
+                None,
                 "preflight.proposal_inventory",
             ));
         }
@@ -151,6 +173,7 @@ impl AgentRuntimeV2 {
                 refused("source.model_evidence_reused"),
                 SourceModelEvidence::default(),
                 &self,
+                None,
                 None,
                 "preflight.evidence_reused",
             ));
@@ -168,6 +191,7 @@ impl AgentRuntimeV2 {
                 SourceModelEvidence::default(),
                 &self,
                 None,
+                None,
                 "preflight.binding",
             ));
         }
@@ -176,6 +200,9 @@ impl AgentRuntimeV2 {
             .expect("checked source model binding")
             .digest()
             .to_owned();
+        let policy_digest = source
+            .model_policy_binding()
+            .map(|policy| policy.digest().to_owned());
         let run = self.lifecycle.run_live(
             &self.task,
             source,
@@ -192,6 +219,7 @@ impl AgentRuntimeV2 {
                     run.evidence_digest(),
                     &model_evidence,
                     Some(&binding_digest),
+                    policy_digest.as_deref(),
                     "completed",
                 );
                 Ok(AgentRuntimeV2ModelEvidence {
@@ -206,6 +234,7 @@ impl AgentRuntimeV2 {
                 source.model_evidence().clone(),
                 &self,
                 Some(&binding_digest),
+                policy_digest.as_deref(),
                 "lifecycle_failed",
             )),
         }
@@ -265,9 +294,17 @@ impl AgentRuntimeV2ModelFailure {
         model_evidence: SourceModelEvidence,
         runtime: &AgentRuntimeV2,
         binding_digest: Option<&str>,
+        policy_digest: Option<&str>,
         status: &'static str,
     ) -> Self {
-        let evidence = model_evidence_root(runtime, "", &model_evidence, binding_digest, status);
+        let evidence = model_evidence_root(
+            runtime,
+            "",
+            &model_evidence,
+            binding_digest,
+            policy_digest,
+            status,
+        );
         Self {
             diagnostics,
             model_evidence,
@@ -294,10 +331,21 @@ fn model_evidence_root(
     typed_effect_evidence: &str,
     model_evidence: &SourceModelEvidence,
     binding_digest: Option<&str>,
+    policy_digest: Option<&str>,
     status: &str,
 ) -> ExecutionRoot {
-    root(
-        "semaprax.evidence-root.v4",
+    let facts = if let Some(policy_digest) = policy_digest {
+        json!({
+            "execution_revision": runtime.revision.digest(),
+            "instance_root": runtime.instance.digest(),
+            "typed_effect_evidence": if typed_effect_evidence.is_empty() { None } else { Some(typed_effect_evidence) },
+            "source_model_binding": binding_digest,
+            "source_model_policy": policy_digest,
+            "source_model_evidence": model_evidence.digest(),
+            "source_model_status": status,
+        })
+    } else {
+        // Preserve the established v4 bytes for the unpriced constructor.
         json!({
             "execution_revision": runtime.revision.digest(),
             "instance_root": runtime.instance.digest(),
@@ -305,8 +353,9 @@ fn model_evidence_root(
             "source_model_binding": binding_digest,
             "source_model_evidence": model_evidence.digest(),
             "source_model_status": status,
-        }),
-    )
+        })
+    };
+    root("semaprax.evidence-root.v4", facts)
 }
 
 /// Compile the deployed Step reducer directly from the selected retained source.
@@ -561,6 +610,8 @@ fn bind_runtime(
         bound.model_selections(),
         deployed_model_request_bytes,
         deployed_model_response_bytes,
+        &semantic,
+        deployment_source,
     )
     .map_err(|detail| refused(detail))?;
     let proposal_digests: Vec<_> = proposals

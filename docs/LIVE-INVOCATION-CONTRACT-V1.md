@@ -469,6 +469,7 @@ one deterministic clock implementation this crate ships.
 | `ProposalDecoder` | The real compiler-derived proposal grammar (#109 owns the rich schema) |
 | `AuthorizationGate` | `agent_lifecycle::authorization`'s real mint site |
 | `InvocationBudgetHook` | Cumulative budget/deadline policy: `budget::CumulativeBudgetLedger` (#113); further extension (e.g. real provider pricing) is #179's scope |
+| `PricedWorkBudgetHook` | Local opt-in exact reservation quote for the generic priced envelope; it remains operator pricing plus unknown generic provider charge, not a provider billing API |
 | `TurnObserver` / `TurnPolicy` | The compiled Agent's `observe`/`reduce` stages (source/HIR wiring, #109–#116) |
 | `TurnEffect` | A deployed tool call via `agent_lifecycle::iterative::effects::TypedEffectHandler` |
 | `journal::receipt_projection` | The richer receipt document (#180) |

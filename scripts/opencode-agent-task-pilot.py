@@ -428,6 +428,17 @@ def apply_drift(args):
 args = sys.argv[1:]
 if not args: denied("missing semaprax command")
 allowed = graph if cfg["lane"] == "semaprax-graph-operational" else source
+if args == ["--help"]:
+    reserve_log()
+    helper = ("pilot-write <.pilot/name.json|.spatch|.wspatch> <base64> writes a bounded patch artifact.\n"
+              if cfg["lane"] == "semaprax-graph-operational" else
+              "pilot-read <relative .spx> reads source with its SHA-256.\n"
+              "pilot-write-source <relative .spx> <expected lowercase sha256> <base64> replaces source conditionally.\n")
+    output = ("Allowed commands: " + ", ".join(sorted(allowed)) + "\n" + helper
+              + "Use <command> --help for compiler command syntax.\n").encode()
+    record(args, output, b"", 0)
+    sys.stdout.buffer.write(output)
+    raise SystemExit(0)
 if args[0] not in allowed: denied("command denied by pilot lane")
 for value in args[1:]:
     path = Path(value)
@@ -448,7 +459,7 @@ if args[0] == "pilot-write":
     if len(args) != 3: denied("pilot-write expects relative path and base64 bytes")
     target = Path(args[1])
     if target.is_absolute() or target.parts[:1] != (".pilot",) or ".." in target.parts:
-        denied("pilot-write target denied")
+        denied("pilot-write target denied; use .pilot/name.json, .spatch or .wspatch")
     if target.suffix not in {".json", ".spatch", ".wspatch"}: denied("pilot-write artifact suffix denied")
     try: body = base64.b64decode(args[2], validate=True)
     except Exception: denied("pilot-write body is not canonical base64")

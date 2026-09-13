@@ -123,3 +123,13 @@ are retained locally and are not implied to be publicly hosted by these paths.
 Issue #105 remains open for eligible measurement/review and the follow-up to the
 reproduced harness blockers. Execution of this cohort does not make an
 ineligible observation eligible or complete the full comparative-report goal.
+
+## Post-cohort corrections
+
+After all 18 records were closed, the gateway gained lane-specific `--help`,
+and the MCP description and write-path refusal now identify the required
+`.pilot/` artifact directory. A no-model two-lane regression exercises that
+help without dispatching the compiler. Export counter extraction now includes
+cache and reasoning components. These corrections apply to a future separately
+frozen run; no original trial, counter record or candidate was rewritten, and
+no rerun is claimed here.

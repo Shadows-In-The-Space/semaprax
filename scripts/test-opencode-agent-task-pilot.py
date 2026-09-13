@@ -120,6 +120,24 @@ class PilotTests(unittest.TestCase):
 
 
 class SubprocessBoundaryTests(unittest.TestCase):
+    def test_lane_help_explains_exact_artifact_and_source_write_routes(self):
+        for lane, expected in [("semaprax-graph-operational", b".pilot/name.json"),
+                               ("semaprax-source-first", b"expected lowercase sha256")]:
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory(prefix="spx-help-test-") as temp:
+                state = Path(temp)
+                candidate = state / "candidate"
+                candidate.mkdir()
+                compiler = state / "compiler"
+                compiler.write_text("#!/bin/sh\nexit 75\n")
+                compiler.chmod(0o700)
+                gateway, _, _, configuration = pilot.install_gateway(compiler, state, candidate, lane)
+                completed = subprocess.run([gateway, "--help"],
+                    env=dict(os.environ, SEMAPRAX_PILOT_GATEWAY=configuration),
+                    capture_output=True, check=False)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertIn(expected, completed.stdout)
+                self.assertIn(b"<command> --help", completed.stdout)
+
     def test_gateway_rejects_embedded_absolute_output_path(self):
         with tempfile.TemporaryDirectory(prefix="spx-gateway-test-") as temp:
             state = Path(temp)

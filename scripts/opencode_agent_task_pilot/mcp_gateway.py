@@ -17,7 +17,7 @@ import time
 CAP = 1_048_576
 TOOL = {
     "name": "command",
-    "description": "Run the lane-approved SEMAPRAX compiler gateway using an argv array, without a shell. For source-first use pilot-read for raw source, pilot-write-source <relative .spx> <expected lowercase sha256> <base64> for source replacement, and ordinary compiler commands. For graph-operational use separate graph, context, or query subcommands for semantic inspection, pilot-write for bounded patch artifacts, and admitted workspace/candidate operations. The gateway enforces the selected lane.",
+    "description": "Run the lane-approved SEMAPRAX compiler gateway using an argv array, without a shell. For source-first use pilot-read for raw source, pilot-write-source <relative .spx> <expected lowercase sha256> <base64> for source replacement, and ordinary compiler commands. For graph-operational use separate graph, context, or query subcommands for semantic inspection, pilot-write <.pilot/name.json|.spatch|.wspatch> <base64> for bounded patch artifacts, and admitted workspace/candidate operations. Use --help to list the exact lane-approved commands and helper syntax. The gateway enforces the selected lane.",
     "inputSchema": {"type": "object", "properties": {
         "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 64}},
         "required": ["argv"], "additionalProperties": False},

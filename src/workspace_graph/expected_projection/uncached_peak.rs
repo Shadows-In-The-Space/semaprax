@@ -10,14 +10,81 @@ use super::{
     AuthoredDeclaration,
 };
 
+/// Mode six retains a filtered module and compact cross-module proof after
+/// each resolution.  Its peak is the already-retained output/proof plus one
+/// complete synthetic AST/HIR, never every complete resolved program.
+pub(in crate::workspace_graph) fn uncached_output_peak_prebound(
+    programs: &[Program],
+    authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
+) -> Result<(usize, usize), Vec<Diagnostic>> {
+    let mut retained_output = 0usize;
+    let mut validation = 0usize;
+    let mut peak = 0usize;
+    for program in programs {
+        let maximum = Some(dependency_identity_max(program, authored, programs)?);
+        let full = synthetic_builder_bytes_scoped(program, authored, programs, maximum, 4)?;
+        let mut owned = program.clone();
+        owned.module_uses.clear();
+        let retained = synthetic_builder_bytes_scoped(&owned, authored, programs, maximum, 4)?;
+        let live = checked_usage(
+            checked_usage(
+                retained_output,
+                validation,
+                "builder_bytes",
+                active_builder_limit(),
+            )?,
+            checked_usage(
+                full.retained_hir,
+                full.synthetic_ast,
+                "builder_bytes",
+                active_builder_limit(),
+            )?,
+            "builder_bytes",
+            active_builder_limit(),
+        )?;
+        peak = peak.max(live);
+        // The compact index carries no bodies/contracts.  Its source-shaped
+        // carrier is bounded by the full synthetic AST it projects from; the
+        // live builder separately reserves each exact output/index entry.
+        validation = checked_usage(
+            validation,
+            full.synthetic_ast,
+            "builder_bytes",
+            active_builder_limit(),
+        )?;
+        retained_output = checked_usage(
+            retained_output,
+            retained.retained_hir,
+            "builder_bytes",
+            active_builder_limit(),
+        )?;
+    }
+    let total = peak.max(checked_usage(
+        retained_output,
+        validation,
+        "builder_bytes",
+        active_builder_limit(),
+    )?);
+    Ok((total, total))
+}
+
 /// Select the only receipt a core without a retained frontend may use.
 pub(in crate::workspace_graph) fn initial_core_prebound(
     programs: &[Program],
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     frontend_is_absent: bool,
 ) -> Result<(usize, usize, bool), Vec<Diagnostic>> {
-    let receipt =
-        checked_retention_prebound_with_uncached_peak(programs, authored, frontend_is_absent)?;
+    let receipt = match checked_retention_prebound_with_uncached_peak(
+        programs,
+        authored,
+        frontend_is_absent,
+    ) {
+        Ok(receipt) => receipt,
+        Err(errors) if frontend_is_absent && cost::is_builder_refusal(&errors) => {
+            uncached_output_peak_prebound(programs, authored)?
+        }
+        Err(errors) => return Err(errors),
+    };
     Ok((receipt.0, receipt.1, frontend_is_absent))
 }
 

@@ -13,6 +13,7 @@ use crate::agent_lifecycle::CheckpointStore;
 use crate::agent_runtime::AgentCancellation;
 
 use super::identity::{digest, LiveInvocationId};
+use super::io::{GenericIoAccounting, GenericIoLimits};
 use super::journal::{self, JournalEntry};
 use super::kernel::{
     run_live_invocation, LiveInvocationConfig, LiveInvocationHandlers, LiveKernelError,
@@ -23,8 +24,9 @@ use super::model_invoke::{
     ModelInvocationRequest, ModelInvokeCapability, ProposalDecoder, ReservedBudget,
 };
 use super::persistence::{
-    encode_priced_envelope_with_handoff, recover_priced_journal, PricedCheckpointJournalSink,
-    PricedRecoveryError, RecoveredPricedJournal,
+    encode_priced_envelope_with_handoff, encode_priced_io_envelope, recover_priced_io_journal,
+    recover_priced_journal, PricedCheckpointJournalSink, PricedRecoveryError,
+    RecoveredPricedIoJournal, RecoveredPricedJournal,
 };
 use super::pricing::{MonetaryAccounting, ValidatedPricing};
 
@@ -58,6 +60,7 @@ pub struct PricedInvocationState {
     generation: u64,
     bound_invocation: Option<String>,
     handoff: Option<PricedSuccessorHandoff>,
+    io: Option<GenericIoAccounting>,
 }
 
 impl PricedInvocationState {
@@ -70,6 +73,21 @@ impl PricedInvocationState {
             generation: 0,
             bound_invocation: None,
             handoff: None,
+            io: None,
+        }
+    }
+
+    /// Starts the additive v2 priced-I/O profile. Its limits are explicit and
+    /// its journal remains the frozen generic v1 causal vocabulary.
+    #[must_use]
+    pub fn fresh_with_io(pricing: GenericPricing, limits: GenericIoLimits) -> Self {
+        Self {
+            journal: Vec::new(),
+            accounting: MonetaryAccounting::new(pricing.pricing),
+            generation: 0,
+            bound_invocation: None,
+            handoff: None,
+            io: Some(GenericIoAccounting::new(limits)),
         }
     }
 
@@ -89,6 +107,28 @@ impl PricedInvocationState {
             generation: recovered.generation,
             bound_invocation: Some(identity.to_owned()),
             handoff: recovered.handoff,
+            io: None,
+        }
+    }
+
+    /// Restores only the additive v2 priced-I/O envelope.
+    pub fn recover_with_io(
+        document: &str,
+        identity: &LiveInvocationId,
+    ) -> Result<Self, PricedRecoveryError> {
+        let recovered = recover_priced_io_journal(document, identity)?;
+        Ok(Self::from_recovered_io(recovered, identity.digest()))
+    }
+
+    fn from_recovered_io(recovered: RecoveredPricedIoJournal, identity: &str) -> Self {
+        let RecoveredPricedIoJournal { priced, io } = recovered;
+        Self {
+            journal: priced.entries,
+            accounting: priced.accounting,
+            generation: priced.generation,
+            bound_invocation: Some(identity.to_owned()),
+            handoff: priced.handoff,
+            io: Some(io),
         }
     }
 
@@ -103,6 +143,9 @@ impl PricedInvocationState {
     ) -> Result<Self, PricedMigrationError> {
         if predecessor_identity == destination_identity {
             return Err(PricedMigrationError::IdentityCollision);
+        }
+        if predecessor.io.is_some() {
+            return Err(PricedMigrationError::IoProfileRequired);
         }
         if predecessor.bound_invocation.as_deref() != Some(predecessor_identity.digest())
             || !journal::validate(&predecessor.journal, predecessor_identity.digest())
@@ -134,7 +177,48 @@ impl PricedInvocationState {
             generation: 0,
             bound_invocation: Some(destination_identity.digest().to_owned()),
             handoff: Some(handoff),
+            io: None,
         })
+    }
+
+    /// Starts a successor of the priced-I/O profile with only non-loosening
+    /// I/O limits and the full preceding unknown exposure carried forward.
+    pub fn successor_with_io(
+        predecessor: &Self,
+        predecessor_identity: &LiveInvocationId,
+        destination_identity: &LiveInvocationId,
+        destination_pricing: GenericPricing,
+        destination_io: GenericIoLimits,
+    ) -> Result<Self, PricedMigrationError> {
+        let previous_io = predecessor
+            .io
+            .as_ref()
+            .ok_or(PricedMigrationError::IoProfileRequired)?;
+        let shadow = Self {
+            journal: predecessor.journal.clone(),
+            accounting: predecessor.accounting.clone(),
+            generation: predecessor.generation,
+            bound_invocation: predecessor.bound_invocation.clone(),
+            handoff: predecessor.handoff.clone(),
+            io: None,
+        };
+        let carried_io = previous_io
+            .successor_bound(
+                predecessor_identity.digest(),
+                destination_identity.digest(),
+                predecessor.generation,
+                journal::chain(&predecessor.journal),
+                destination_io,
+            )
+            .map_err(|_| PricedMigrationError::Io)?;
+        let mut successor = Self::successor(
+            &shadow,
+            predecessor_identity,
+            destination_identity,
+            destination_pricing,
+        )?;
+        successor.io = Some(carried_io);
+        Ok(successor)
     }
 
     #[must_use]
@@ -156,13 +240,17 @@ pub enum PricedMigrationError {
     InvalidPredecessor(journal::JournalError),
     PredecessorNotTerminal,
     Pricing,
+    IoProfileRequired,
+    Io,
 }
 
 /// A work ledger that can quote the exact amount it will reserve for this
 /// request. The priced route refuses ordinary hooks because it must prepare
 /// monetary admission before mutating the work ledger; an implementation
 /// returning a different amount from `reserve` violates this explicit host
-/// contract and is failed closed before model dispatch.
+/// contract. The runner retains the admitted quote, durably closes that
+/// intent, and fails closed before model dispatch; it cannot roll an opaque
+/// host ledger back.
 pub trait PricedWorkBudgetHook: InvocationBudgetHook {
     fn quote_priced_reservation(
         &self,
@@ -294,15 +382,19 @@ pub fn run_priced_live_invocation(
         return Err(LiveKernelError::InvocationIdentityDrift);
     }
     let accounting = Rc::new(RefCell::new(state.accounting));
+    let io = state.io.map(|value| Rc::new(RefCell::new(value)));
     let mut budget = PairedBudgetHook {
         work: &mut *handlers.work_budget,
         accounting: Rc::clone(&accounting),
+        io: io.as_ref().map(Rc::clone),
+        post_reservation_refusal: None,
     };
     let mut sink = if state.generation == 0 {
         PricedCheckpointJournalSink::new(
             &mut *handlers.store,
             config.identity.digest(),
             Rc::clone(&accounting),
+            io.as_ref().map(Rc::clone),
             state.handoff.clone(),
         )
     } else {
@@ -311,6 +403,7 @@ pub fn run_priced_live_invocation(
             config.identity.digest(),
             state.generation,
             Rc::clone(&accounting),
+            io.as_ref().map(Rc::clone),
             state.handoff.clone(),
         )
     };
@@ -343,13 +436,30 @@ pub fn run_priced_live_invocation(
             dispatched: run.dispatched,
         })?
         .into_inner();
-    let receipt = encode_priced_envelope_with_handoff(
-        config.identity.digest(),
-        state.generation,
-        &state.journal,
-        &state.accounting,
-        state.handoff.as_ref(),
-    )
+    state.io = io
+        .map(Rc::try_unwrap)
+        .transpose()
+        .map_err(|_| LiveKernelError::PersistenceFailed {
+            dispatched: run.dispatched,
+        })?
+        .map(RefCell::into_inner);
+    let receipt = match state.io.as_ref() {
+        Some(io) => encode_priced_io_envelope(
+            config.identity.digest(),
+            state.generation,
+            &state.journal,
+            &state.accounting,
+            state.handoff.as_ref(),
+            io,
+        ),
+        None => encode_priced_envelope_with_handoff(
+            config.identity.digest(),
+            state.generation,
+            &state.journal,
+            &state.accounting,
+            state.handoff.as_ref(),
+        ),
+    }
     .map_err(|_| LiveKernelError::PersistenceFailed {
         dispatched: run.dispatched,
     })?;
@@ -363,10 +473,23 @@ pub fn run_priced_live_invocation(
 struct PairedBudgetHook<'a> {
     work: &'a mut dyn PricedWorkBudgetHook,
     accounting: Rc<RefCell<MonetaryAccounting>>,
+    io: Option<Rc<RefCell<GenericIoAccounting>>>,
+    /// A dishonest host may mutate its ledger and return an amount different
+    /// from its prior quote. The generic kernel must first durably retain the
+    /// quoted reservation, then refuse before dispatch; it cannot roll an
+    /// arbitrary host ledger back.
+    post_reservation_refusal: Option<BudgetRefusal>,
 }
 
 impl InvocationBudgetHook for PairedBudgetHook<'_> {
     fn check_deadline(&self) -> Result<(), BudgetRefusal> {
+        self.work.check_deadline()
+    }
+
+    fn check_pre_dispatch(&self) -> Result<(), BudgetRefusal> {
+        if let Some(refusal) = &self.post_reservation_refusal {
+            return Err(refusal.clone());
+        }
         self.work.check_deadline()
     }
 
@@ -386,16 +509,53 @@ impl InvocationBudgetHook for PairedBudgetHook<'_> {
         // without a matching money reservation.
         let mut prepared = self.accounting.borrow().clone();
         prepared.reserve(&work_unit, quoted.amount)?;
+        let mut committed_request = request.clone();
+        committed_request.effective_budget = quoted.amount;
+        let canonical_request = committed_request.canonical_json();
+        let request_digest = committed_request.digest();
+        let mut prepared_io = match &self.io {
+            Some(io) => {
+                let mut prepared = io.borrow().clone();
+                prepared.reserve(
+                    request.turn,
+                    request_digest,
+                    canonical_request,
+                    request.max_response_bytes,
+                )?;
+                Some(prepared)
+            }
+            None => None,
+        };
         let reserved = self.work.reserve(request)?;
         if reserved.amount != quoted.amount {
-            return Err(BudgetRefusal(PRICED_RESERVATION_MISMATCH.to_owned()));
+            // The quoted reservation is the only amount whose admission and
+            // request binding were checked before the host mutation. Retain
+            // it conservatively and make the kernel close the durable intent
+            // before it can dispatch. A host that charged a different amount
+            // has violated `PricedWorkBudgetHook`; generic code has no
+            // authority to invent a rollback for that external ledger.
+            *self.accounting.borrow_mut() = prepared;
+            if let (Some(io), Some(prepared)) = (&self.io, prepared_io.take()) {
+                *io.borrow_mut() = prepared;
+            }
+            self.post_reservation_refusal =
+                Some(BudgetRefusal(PRICED_RESERVATION_MISMATCH.to_owned()));
+            return Ok(quoted);
         }
         *self.accounting.borrow_mut() = prepared;
+        if let (Some(io), Some(prepared)) = (&self.io, prepared_io.take()) {
+            *io.borrow_mut() = prepared;
+        }
         Ok(reserved)
     }
 
     fn record(&mut self, usage: &InvocationUsage) {
         self.work.record(usage);
+        if let Some(io) = &self.io {
+            let _ = io
+                .borrow_mut()
+                .observe(usage.turn, usage.response_bytes, usage.failed);
+        }
     }
 }
 

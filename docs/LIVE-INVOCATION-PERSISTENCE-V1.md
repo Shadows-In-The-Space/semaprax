@@ -269,11 +269,17 @@ are refused.
 The priced wrapper admits only a `PricedWorkBudgetHook`, whose explicit quote
 must equal its subsequent work reservation. It prepares the monetary ledger
 before that work reservation and commits both in the envelope before model
-dispatch. Ordinary budget hooks and ordinary sinks therefore cannot silently
-opt into priced execution. Generic `ModelHandler` has no typed currency usage
-channel, so every generic settlement is deliberately recorded as **unknown
-charge exposure**. This is conservative reservation evidence, not a provider
-invoice, zero-cost inference, conversion service, or billing authority.
+dispatch. A host that mutates its opaque work ledger and returns a different
+amount violates that contract: the runner retains the admitted quoted
+reservation, durably closes the intent before model dispatch, and never
+pretends it can roll an arbitrary host ledger back. The retained amount is
+conservative only for a contract-compliant host quote; a violating host can
+have charged a different external amount and requires operator remediation.
+Ordinary budget hooks and ordinary sinks therefore cannot silently opt into
+priced execution. Generic `ModelHandler` has no typed currency usage channel,
+so every generic settlement is deliberately recorded as **unknown charge
+exposure**. This is conservative reservation evidence, not a provider invoice,
+zero-cost inference, conversion service, or billing authority.
 
 A constrained `PricedInvocationState::successor` exists only for a terminal,
 identity-distinct predecessor. It carries the predecessor's exact chain,
@@ -283,6 +289,29 @@ contract, never loosen or rewrite predecessor bytes. Recovery verifies that
 handoff against the destination identity and carry. This local reference has
 no public/hosted support claim, real store, provider pricing lookup, or typed
 generic charge observation.
+
+### Additive priced-I/O v2
+
+`PricedInvocationState::fresh_with_io` adds bounded generic request and
+worst-case-response reservations. It writes the separate
+`persisted-priced-io-journal.v2` outer document, whose `priced_document` is
+the complete canonical v1 priced envelope as a string. V1 bytes, its decoder,
+and the causal journal therefore stay frozen. The v2 `io` projection records
+the exact canonical `model-request.v1` bytes and digest, response limit, and either an
+observed response length or an unknown reservation for every charged intent.
+Recovery reconstructs every typed request field and requires its exact
+canonical `model-request.v1` bytes before replaying those facts against the
+embedded v1 journal; altered, extra, malformed, or noncanonical sidecar
+requests are refused. It retains an
+unknown response reservation across the acknowledged intent/settlement crash
+window. `successor_with_io` accepts only non-loosening I/O limits and carries
+all prior exposure; its v2 handoff binds predecessor identity, generation,
+chain, limits and totals, which recovery checks before accepting a destination
+carry. The paired monetary and I/O handoffs must also name the same immutable
+predecessor identity, generation, and chain, preventing a sidecar from
+splicing either carry from another completed invocation. This remains local
+fixture-backed accounting, not a
+provider transport-byte or billing claim.
 
 ## Non-goals and known limitations (this round)
 

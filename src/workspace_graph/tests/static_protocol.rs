@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn compact_validation_index_preserves_cross_module_signature_and_identity_proof() {
+    let sources = super::identity_fact_sources();
+    let programs = super::parsed_sources(&sources);
+    let authored = index_authored(&programs).unwrap();
+    let mut compact = WorkspaceValidationIndex::new(&programs).unwrap();
+    let mut resolved_modules = Vec::new();
+    for program in &programs {
+        let synthetic = synthetic_program(program, &authored, &programs).unwrap();
+        let resolved = hir::resolve(&synthetic).unwrap();
+        compact
+            .record_module(&program.module, &resolved, &programs)
+            .unwrap();
+        resolved_modules.push((program.module.clone(), resolved));
+    }
+    compact.validate_stub_signatures(&programs).unwrap();
+    let compact_facts = compact.finish(&programs).unwrap();
+    let retained = build_owned(sources).unwrap();
+    assert_eq!(
+        compact_facts,
+        workspace_declaration_facts(&resolved_modules, &retained.hir.modules, &programs).unwrap()
+    );
+}
+
+#[test]
 fn dependencies_and_implementations_stay_out_of_runtime_graph_and_operations() {
     let provider = canonical_source(
         "iface/core.spx",

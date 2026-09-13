@@ -47,7 +47,10 @@ use identity_slots::{
     ast_type_identity_slots,
 };
 use uncached_peak::uncached_peak_prebound;
-pub(super) use uncached_peak::{initial_core_prebound, next_retention_prebound_with_uncached_peak};
+pub(super) use uncached_peak::{
+    initial_core_prebound, next_retention_prebound_with_uncached_peak,
+    uncached_output_peak_prebound,
+};
 
 pub(super) struct SyntheticBuilderCosts {
     pub(super) raw_clone_and_hir: usize,

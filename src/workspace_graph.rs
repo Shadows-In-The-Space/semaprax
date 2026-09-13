@@ -21,6 +21,7 @@ mod project_render;
 mod retained_validation;
 mod retained_vectors;
 pub(crate) mod source_callables;
+mod validation;
 use crate::ast::{
     Expr, ExprKind, Function, ModuleUse, ModuleUseKind, ParamMode, Program, Span, Type,
     TypeDeclaration, TypeDeclarationKind,
@@ -46,6 +47,7 @@ use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use validation::{expected_declaration_facts, validate_stub_signatures, WorkspaceValidationIndex};
 const MAX_FILES: usize = 16;
 const MAX_TOTAL_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DECLARATIONS: usize = 4096;
@@ -457,6 +459,16 @@ struct WorkspaceDeclarationFact {
     path: Option<String>,
     module: Option<String>,
 }
+
+fn insert_expected_compiler_declaration(
+    facts: &mut BTreeMap<String, WorkspaceDeclarationFact>,
+    id: &str,
+    kind: hir::DeclarationKind,
+    owner: Option<&str>,
+) -> Result<(), Vec<Diagnostic>> {
+    validation::insert_expected_compiler_declaration(facts, id, kind, owner)
+}
+
 struct WorkspaceResolvedModule {
     path: String,
     module: String,
@@ -3943,9 +3955,17 @@ fn build_owned_inner(
             return Err(vec![limit_error("builder_bytes", active_builder_limit())]);
         }
         // Mode six is the bounded final retry: mode five's uncached receipt
-        // already fits, but its full retained output carrier overflowed.
-        // No frontend may reach it, so no cached source lifetime is elided.
+        // already fits, but its full retained output carrier overflowed. Its
+        // existing final profile replaces the all-HIR receipt with the exact
+        // sequential filtered-output/index plus one-full-HIR peak; no frontend
+        // may reach it, so no cached source lifetime is elided.
         if fallback_mode == 5 {
+            let (tighter, _) =
+                expected_projection::uncached_output_peak_prebound(&programs, &authored)?;
+            if tighter >= resolve_builder_bytes {
+                return Err(vec![limit_error("builder_bytes", active_builder_limit())]);
+            }
+            resolve_builder_bytes = tighter;
             fallback_mode = 6;
             continue;
         }
@@ -4082,7 +4102,20 @@ fn build_resolved_core(
             .checked_mul(std::mem::size_of::<String>() + GRAPH_ACCOUNTED_RESOLVED_PROGRAM_BYTES)
             .ok_or_else(|| vec![limit_error("builder_bytes", active_builder_limit())])?,
     )?;
+    // Legacy receipts retain the complete synthetic HIR vector until all
+    // cross-module checks finish.  The final uncached output-carrier attempt
+    // instead keeps this compact evidence index and filters one module before
+    // resolving the next, so its live peak matches its sequential receipt.
+    let mut validation = retained_output_only
+        .then(|| WorkspaceValidationIndex::new(programs))
+        .transpose()?;
     let mut synthetic_modules = Vec::with_capacity(programs.len());
+    let mut modules = Vec::new();
+    let mut imported_vec_instances = BTreeMap::new();
+    if retained_output_only {
+        reserve_workspace_module_carrier(programs.len())?;
+        modules = Vec::with_capacity(programs.len());
+    }
     for program in programs {
         let synthetic = synthetic_program(program, authored, programs)?;
         // Exact stubs/spans and the unconditional prebound govern hits.
@@ -4156,91 +4189,54 @@ fn build_resolved_core(
             resolved
         };
         verify_resolved_call_edges(program, &resolved, authored)?;
-        synthetic_modules.push((
-            crate::bounded_output::budgeted_clone(&program.module),
-            resolved,
-        ));
+        if let Some(validation) = validation.as_mut() {
+            validation.record_module(&program.module, &resolved, programs)?;
+            let (module, imported_instances) = retain_workspace_module(
+                program,
+                crate::bounded_output::budgeted_clone(&program.module),
+                resolved,
+                programs,
+                authored,
+                true,
+            )?;
+            owned_generics::merge_imported_vec_instances(
+                &mut imported_vec_instances,
+                imported_instances,
+            )?;
+            modules.push(module);
+        } else {
+            synthetic_modules.push((
+                crate::bounded_output::budgeted_clone(&program.module),
+                resolved,
+            ));
+        }
     }
-    validate_stub_signatures(programs, &synthetic_modules)?;
-    let declarations = reconstruct_workspace_declaration_facts(&synthetic_modules, programs)?;
-    let programs_by_module = programs
-        .iter()
-        .map(|program| (program.module.as_str(), program))
-        .collect::<BTreeMap<_, _>>();
-    reserve_builder_structure(
-        synthetic_modules
-            .len()
-            // Empty private signature and Agent facts must not change frozen
-            // scalar graph accounting. Nonempty carriers are charged separately.
-            .checked_mul(
-                std::mem::size_of::<WorkspaceResolvedModule>()
-                    - std::mem::size_of::<BTreeMap<String, (hir::DeclarationKind, hir::TypeFacts)>>(
-                    )
-                    - std::mem::size_of::<Vec<hir::ResolvedAgentDeclaration>>(),
-            )
-            .ok_or_else(|| vec![limit_error("builder_bytes", active_builder_limit())])?,
-    )?;
-    let mut modules = Vec::with_capacity(synthetic_modules.len());
-    let mut imported_vec_instances = BTreeMap::new();
-    for (module, resolved) in synthetic_modules {
-        let program = programs_by_module
-            .get(module.as_str())
-            .expect("every resolved module has authenticated source");
-        let types = filter_owned_vec(
-            resolved.types,
-            |item| {
-                authored
-                    .get(item.id.as_str())
-                    .is_some_and(|owner| owner.module == program.module)
-            },
-            retained_output_only,
-        )?;
-        let functions = filter_owned_vec_accounted(
-            resolved.functions,
-            GRAPH_ACCOUNTED_RESOLVED_FUNCTION_BYTES,
-            |item| retained_loan_plan_bytes(&item.loan_plan),
-            |item| {
-                authored
-                    .get(item.id.as_str())
-                    .is_some_and(|owner| owner.module == program.module)
-            },
-            retained_output_only,
-        )?;
-        let function_templates = filter_owned_vec(
-            resolved.function_templates,
-            |item| {
-                authored
-                    .get(item.id.as_str())
-                    .is_some_and(|owner| owner.module == program.module)
-            },
-            retained_output_only,
-        )?;
-        let (function_instances, imported_instances) = owned_generics::retain_module_instances(
-            program,
-            programs,
-            authored,
-            resolved.function_instances,
-            retained_output_only,
-        )?;
-        owned_generics::merge_imported_vec_instances(
-            &mut imported_vec_instances,
-            imported_instances,
-        )?;
-        let signature_types = retained_signature_type_facts(&functions, &resolved.declarations)?;
-        let agents = filter_owned_vec(resolved.agents, |_| true, retained_output_only)?;
-        modules.push(WorkspaceResolvedModule {
-            path: crate::bounded_output::budgeted_clone(&program.path),
-            module,
-            permits: resolved.permits,
-            agents,
-            types,
-            interfaces: resolved.interfaces,
-            functions,
-            function_templates,
-            function_instances,
-            signature_types,
-        });
-    }
+    let declarations = if let Some(validation) = validation {
+        validation.validate_stub_signatures(programs)?;
+        validation.finish(programs)?
+    } else {
+        validate_stub_signatures(programs, &synthetic_modules)?;
+        let declarations = reconstruct_workspace_declaration_facts(&synthetic_modules, programs)?;
+        let programs_by_module = programs
+            .iter()
+            .map(|program| (program.module.as_str(), program))
+            .collect::<BTreeMap<_, _>>();
+        reserve_workspace_module_carrier(synthetic_modules.len())?;
+        modules = Vec::with_capacity(synthetic_modules.len());
+        for (module, resolved) in synthetic_modules {
+            let program = programs_by_module
+                .get(module.as_str())
+                .expect("every resolved module has authenticated source");
+            let (module, imported_instances) =
+                retain_workspace_module(program, module, resolved, programs, authored, false)?;
+            owned_generics::merge_imported_vec_instances(
+                &mut imported_vec_instances,
+                imported_instances,
+            )?;
+            modules.push(module);
+        }
+        declarations
+    };
     owned_generics::attach_imported_vec_instances(&mut modules, imported_vec_instances)?;
     validate_retained_facts(programs, &modules, &expected_edges)?;
     validate_retained_declaration_shapes(&modules, &declarations)?;
@@ -4274,6 +4270,84 @@ fn build_resolved_core(
         owned_dependency_depths,
         declarations,
         expected_edges,
+    ))
+}
+
+fn reserve_workspace_module_carrier(count: usize) -> Result<(), Vec<Diagnostic>> {
+    reserve_builder_structure(
+        count
+            // Empty private signature and Agent facts must not change frozen
+            // scalar graph accounting. Nonempty carriers are charged separately.
+            .checked_mul(
+                std::mem::size_of::<WorkspaceResolvedModule>()
+                    - std::mem::size_of::<BTreeMap<String, (hir::DeclarationKind, hir::TypeFacts)>>(
+                    )
+                    - std::mem::size_of::<Vec<hir::ResolvedAgentDeclaration>>(),
+            )
+            .ok_or_else(|| vec![limit_error("builder_bytes", active_builder_limit())])?,
+    )
+}
+
+fn retain_workspace_module(
+    program: &Program,
+    module: String,
+    resolved: hir::ResolvedProgram,
+    programs: &[Program],
+    authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
+    retained_output_only: bool,
+) -> Result<(WorkspaceResolvedModule, Vec<hir::ResolvedFunctionInstance>), Vec<Diagnostic>> {
+    let types = filter_owned_vec(
+        resolved.types,
+        |item| {
+            authored
+                .get(item.id.as_str())
+                .is_some_and(|owner| owner.module == program.module)
+        },
+        retained_output_only,
+    )?;
+    let functions = filter_owned_vec_accounted(
+        resolved.functions,
+        GRAPH_ACCOUNTED_RESOLVED_FUNCTION_BYTES,
+        |item| retained_loan_plan_bytes(&item.loan_plan),
+        |item| {
+            authored
+                .get(item.id.as_str())
+                .is_some_and(|owner| owner.module == program.module)
+        },
+        retained_output_only,
+    )?;
+    let function_templates = filter_owned_vec(
+        resolved.function_templates,
+        |item| {
+            authored
+                .get(item.id.as_str())
+                .is_some_and(|owner| owner.module == program.module)
+        },
+        retained_output_only,
+    )?;
+    let (function_instances, imported_instances) = owned_generics::retain_module_instances(
+        program,
+        programs,
+        authored,
+        resolved.function_instances,
+        retained_output_only,
+    )?;
+    let signature_types = retained_signature_type_facts(&functions, &resolved.declarations)?;
+    let agents = filter_owned_vec(resolved.agents, |_| true, retained_output_only)?;
+    Ok((
+        WorkspaceResolvedModule {
+            path: crate::bounded_output::budgeted_clone(&program.path),
+            module,
+            permits: resolved.permits,
+            agents,
+            types,
+            interfaces: resolved.interfaces,
+            functions,
+            function_templates,
+            function_instances,
+            signature_types,
+        },
+        imported_instances,
     ))
 }
 
@@ -5516,114 +5590,6 @@ fn budgeted_edge_clone(edge: &WorkspaceEdge) -> WorkspaceEdge {
 
 use source_callables::visit_ast_call_sites;
 
-fn validate_stub_signatures(
-    programs: &[Program],
-    modules: &[(String, hir::ResolvedProgram)],
-) -> Result<(), Vec<Diagnostic>> {
-    for caller in programs {
-        let caller_hir = modules
-            .iter()
-            .find(|(module, _)| module == &caller.module)
-            .map(|(_, resolved)| resolved)
-            .ok_or_else(|| {
-                vec![graph_error(
-                    "SPX-G173",
-                    "resolved caller module is absent from the workspace HIR",
-                )]
-            })?;
-        for module_use in &caller.module_uses {
-            if module_use.kind == ModuleUseKind::Protocol {
-                continue;
-            }
-            let target_hir = modules
-                .iter()
-                .find(|(module, _)| module == &module_use.target_module)
-                .map(|(_, resolved)| resolved)
-                .ok_or_else(|| {
-                    vec![graph_error(
-                        "SPX-G173",
-                        "resolved target module is absent from the workspace HIR",
-                    )]
-                })?;
-            let id = hir::DeclarationId::new(crate::bounded_output::budgeted_clone(
-                &module_use.persistent_id,
-            ));
-            match module_use.kind {
-                ModuleUseKind::Function => {
-                    let stub = caller_hir.functions.iter().find(|item| item.id == id);
-                    let authority = target_hir.functions.iter().find(|item| item.id == id);
-                    let monomorphic_matches =
-                        stub.zip(authority).is_some_and(|(stub, authority)| {
-                            stub.params == authority.params
-                                && stub.return_type == authority.return_type
-                                && stub.effects == authority.effects
-                        });
-                    let transparent_vec_wrapper_matches = || {
-                        let stub = caller_hir
-                            .function_templates
-                            .iter()
-                            .find(|item| item.id == id)?;
-                        let authority = target_hir
-                            .function_templates
-                            .iter()
-                            .find(|item| item.id == id)?;
-                        let operation = crate::vec_ops::hir_wrapper_in_program(caller_hir, stub)?;
-                        (crate::vec_ops::hir_wrapper_in_program(target_hir, authority)
-                            == Some(operation)
-                            && stub.type_parameters == authority.type_parameters
-                            && stub.params == authority.params
-                            && stub.return_type == authority.return_type
-                            && stub.effects == authority.effects)
-                            .then_some(())
-                    };
-                    let transparent_box_wrapper_matches = || {
-                        let stub = caller_hir
-                            .function_templates
-                            .iter()
-                            .find(|item| item.id == id)?;
-                        let authority = target_hir
-                            .function_templates
-                            .iter()
-                            .find(|item| item.id == id)?;
-                        let operation = crate::box_ops::hir_wrapper_in_program(caller_hir, stub)?;
-                        (crate::box_ops::hir_wrapper_in_program(target_hir, authority)
-                            == Some(operation)
-                            && stub.type_parameters == authority.type_parameters
-                            && stub.params == authority.params
-                            && stub.return_type == authority.return_type
-                            && stub.effects == authority.effects)
-                            .then_some(())
-                    };
-                    if !monomorphic_matches
-                        && transparent_vec_wrapper_matches().is_none()
-                        && transparent_box_wrapper_matches().is_none()
-                    {
-                        return Err(vec![graph_error(
-                            "SPX-G173",
-                            "workspace function signature stub disagrees with authored HIR authority",
-                        )]);
-                    }
-                }
-                ModuleUseKind::Type => {
-                    let stub = caller_hir.types.iter().find(|item| item.id == id);
-                    let authority = target_hir.types.iter().find(|item| item.id == id);
-                    if !stub.zip(authority).is_some_and(|(stub, authority)| {
-                        stub.type_parameters == authority.type_parameters
-                            && stub.kind == authority.kind
-                    }) {
-                        return Err(vec![graph_error(
-                            "SPX-G173",
-                            "workspace type signature stub disagrees with authored HIR authority",
-                        )]);
-                    }
-                }
-                ModuleUseKind::Protocol => unreachable!(),
-            }
-        }
-    }
-    Ok(())
-}
-
 fn workspace_declaration_facts(
     modules: &[(String, hir::ResolvedProgram)],
     retained_modules: &[WorkspaceResolvedModule],
@@ -5800,192 +5766,6 @@ fn reconstruct_workspace_declaration_facts(
         }
     }
     Ok(facts)
-}
-
-fn expected_declaration_facts(
-    programs: &[Program],
-) -> Result<BTreeMap<String, WorkspaceDeclarationFact>, Vec<Diagnostic>> {
-    let mut facts = BTreeMap::new();
-    for program in programs {
-        for declaration in &program.types {
-            let kind = match declaration.kind {
-                TypeDeclarationKind::Resource { .. } => hir::DeclarationKind::Resource,
-                TypeDeclarationKind::Record { .. } => hir::DeclarationKind::Record,
-                TypeDeclarationKind::Class { .. } => hir::DeclarationKind::Class,
-                TypeDeclarationKind::Variant { .. } => hir::DeclarationKind::Variant,
-            };
-            insert_expected_declaration(
-                &mut facts,
-                program,
-                &declaration.stable_id,
-                kind,
-                identity_origin(declaration.explicit_id),
-                None,
-            )?;
-            match &declaration.kind {
-                TypeDeclarationKind::Resource { lifecycles } => {
-                    let [lifecycle] = lifecycles.as_slice() else {
-                        return Err(vec![graph_error(
-                            "SPX-G173",
-                            "authored workspace resource has no exact lifecycle identity",
-                        )]);
-                    };
-                    let id = lifecycle.stable_id.as_deref().ok_or_else(|| {
-                        vec![graph_error(
-                            "SPX-G173",
-                            "authored workspace resource lifecycle identity is missing",
-                        )]
-                    })?;
-                    insert_expected_declaration(
-                        &mut facts,
-                        program,
-                        id,
-                        hir::DeclarationKind::ResourceDrop,
-                        hir::IdentityOrigin::Explicit,
-                        Some(&declaration.stable_id),
-                    )?;
-                }
-                TypeDeclarationKind::Record { fields }
-                | TypeDeclarationKind::Class { fields, .. } => {
-                    for field in fields {
-                        insert_expected_declaration(
-                            &mut facts,
-                            program,
-                            &field.stable_id,
-                            hir::DeclarationKind::Field,
-                            identity_origin(field.explicit_id),
-                            Some(&declaration.stable_id),
-                        )?;
-                    }
-                    if let TypeDeclarationKind::Class { methods, .. } = &declaration.kind {
-                        for method in methods {
-                            insert_expected_declaration(
-                                &mut facts,
-                                program,
-                                &method.stable_id,
-                                hir::DeclarationKind::Function,
-                                identity_origin(method.explicit_id),
-                                Some(&declaration.stable_id),
-                            )?;
-                        }
-                    }
-                }
-                TypeDeclarationKind::Variant { cases } => {
-                    for case in cases {
-                        insert_expected_declaration(
-                            &mut facts,
-                            program,
-                            &case.stable_id,
-                            hir::DeclarationKind::VariantCase,
-                            identity_origin(case.explicit_id),
-                            Some(&declaration.stable_id),
-                        )?;
-                        for field in &case.fields {
-                            insert_expected_declaration(
-                                &mut facts,
-                                program,
-                                &field.stable_id,
-                                hir::DeclarationKind::CaseField,
-                                identity_origin(field.explicit_id),
-                                Some(&case.stable_id),
-                            )?;
-                        }
-                    }
-                }
-            }
-        }
-        for interface in &program.interfaces {
-            insert_expected_declaration(
-                &mut facts,
-                program,
-                &interface.stable_id,
-                hir::DeclarationKind::Interface,
-                identity_origin(interface.explicit_id),
-                None,
-            )?;
-            for import in &interface.imports {
-                insert_expected_declaration(
-                    &mut facts,
-                    program,
-                    &import.stable_id,
-                    hir::DeclarationKind::Import,
-                    identity_origin(import.explicit_id),
-                    Some(&interface.stable_id),
-                )?;
-            }
-        }
-        for function in &program.functions {
-            insert_expected_declaration(
-                &mut facts,
-                program,
-                &function.stable_id,
-                hir::DeclarationKind::Function,
-                identity_origin(function.explicit_id),
-                None,
-            )?;
-        }
-    }
-    Ok(facts)
-}
-
-fn insert_expected_compiler_declaration(
-    facts: &mut BTreeMap<String, WorkspaceDeclarationFact>,
-    id: &str,
-    kind: hir::DeclarationKind,
-    owner: Option<&str>,
-) -> Result<(), Vec<Diagnostic>> {
-    let fact = WorkspaceDeclarationFact {
-        kind,
-        origin: hir::IdentityOrigin::CompilerOwned,
-        owner: owner.map(crate::bounded_output::budgeted_clone),
-        path: None,
-        module: None,
-    };
-    if facts
-        .insert(crate::bounded_output::budgeted_clone(id), fact)
-        .is_some()
-    {
-        return Err(vec![graph_error(
-            "SPX-G173",
-            "independent compiler prelude declaration identity is duplicated",
-        )]);
-    }
-    Ok(())
-}
-
-fn identity_origin(explicit: bool) -> hir::IdentityOrigin {
-    if explicit {
-        hir::IdentityOrigin::Explicit
-    } else {
-        hir::IdentityOrigin::Automatic
-    }
-}
-
-fn insert_expected_declaration(
-    facts: &mut BTreeMap<String, WorkspaceDeclarationFact>,
-    program: &Program,
-    id: &str,
-    kind: hir::DeclarationKind,
-    origin: hir::IdentityOrigin,
-    owner: Option<&str>,
-) -> Result<(), Vec<Diagnostic>> {
-    let fact = WorkspaceDeclarationFact {
-        kind,
-        origin,
-        owner: owner.map(crate::bounded_output::budgeted_clone),
-        path: Some(crate::bounded_output::budgeted_clone(&program.path)),
-        module: Some(crate::bounded_output::budgeted_clone(&program.module)),
-    };
-    if facts
-        .insert(crate::bounded_output::budgeted_clone(id), fact)
-        .is_some()
-    {
-        return Err(vec![graph_error(
-            "SPX-G173",
-            "independent authored workspace declaration identity is duplicated",
-        )]);
-    }
-    Ok(())
 }
 
 fn validate_retained_declaration_shapes(

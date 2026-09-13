@@ -93,7 +93,7 @@ impl ModelInvocationRequest {
     /// any differing field (including the turn number) changes it.
     #[must_use]
     pub fn digest(&self) -> String {
-        digest(REQUEST_DOMAIN, self.canonical_json().as_bytes())
+        digest_canonical_request(&self.canonical_json())
     }
 
     /// Exact logical request document committed by `digest`. This is not the
@@ -111,6 +111,13 @@ impl ModelInvocationRequest {
             self.effective_budget,
         )
     }
+}
+
+/// Recomputes the exact request identity for a retained canonical request
+/// document. The additive priced-I/O envelope uses this only to verify its
+/// bounded retained bytes against the frozen `RequestIntent` digest.
+pub(crate) fn digest_canonical_request(canonical: &str) -> String {
+    digest(REQUEST_DOMAIN, canonical.as_bytes())
 }
 
 /// The closed `model.invoke` failure domain.
@@ -287,10 +294,17 @@ pub struct InvocationUsage {
 /// cumulative-budget reference implementation.
 pub trait InvocationBudgetHook {
     /// Check the invocation's existing absolute deadline without reserving or
-    /// refunding work. Called at settlement and dispatch/publication boundaries.
+    /// refunding work. Called at settlement and publication boundaries.
     /// Policies without a deadline retain their existing behavior.
     fn check_deadline(&self) -> Result<(), BudgetRefusal> {
         Ok(())
+    }
+
+    /// Refuse after the request reservation is durable but before dispatch.
+    /// The default preserves the existing deadline check at that boundary;
+    /// composed hooks may add a fail-closed post-reservation condition.
+    fn check_pre_dispatch(&self) -> Result<(), BudgetRefusal> {
+        self.check_deadline()
     }
 
     fn reserve(

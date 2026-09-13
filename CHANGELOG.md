@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Retain exact generic model request/response reservations in the additive
+  priced I/O envelope, cross-bind successor carry, and reject noncanonical
+  recovery requests (#113). Add store-backed typed source-model execution with
+  acknowledged intents, exact raw settlements, and no uncertain redispatch
+  (#177). Release full sequential workspace HIR after compact validation facts
+  and selected output carriers are extracted (#124).
+
 - Pair generic live work reservations with durable monetary accounting (#113),
   and enforce opt-in source-model ceilings before adapter construction (#177,
   #179). Add a final uncached graph retry that charges retained output vectors

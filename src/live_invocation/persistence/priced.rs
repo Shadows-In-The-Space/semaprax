@@ -7,12 +7,14 @@ use crate::agent_lifecycle::{CheckpointStore, CheckpointStoreError};
 use crate::diagnostic::quote_json;
 
 use super::super::identity::LiveInvocationId;
+use super::super::io::GenericIoAccounting;
 use super::super::journal::{self, JournalEntry, MAX_JOURNAL_ENTRIES};
 use super::super::priced::PricedSuccessorHandoff;
 use super::super::pricing::{
     MonetaryAccounting, MonetaryAttempt, MonetaryReservation, PricedMonetaryCarry,
     ProviderChargeObservation, ValidatedPricing,
 };
+use super::encode_priced_io_envelope;
 use super::JournalSink;
 
 /// Schema of the additive generic priced envelope. Older persisted-journal.v1
@@ -27,6 +29,7 @@ pub struct PricedCheckpointJournalSink<'a> {
     invocation: String,
     generation: u64,
     accounting: Rc<RefCell<MonetaryAccounting>>,
+    io: Option<Rc<RefCell<GenericIoAccounting>>>,
     handoff: Option<PricedSuccessorHandoff>,
 }
 
@@ -35,6 +38,7 @@ impl<'a> PricedCheckpointJournalSink<'a> {
         store: &'a mut dyn CheckpointStore,
         invocation: impl Into<String>,
         accounting: Rc<RefCell<MonetaryAccounting>>,
+        io: Option<Rc<RefCell<GenericIoAccounting>>>,
         handoff: Option<PricedSuccessorHandoff>,
     ) -> Self {
         Self {
@@ -42,6 +46,7 @@ impl<'a> PricedCheckpointJournalSink<'a> {
             invocation: invocation.into(),
             generation: 0,
             accounting,
+            io,
             handoff,
         }
     }
@@ -51,6 +56,7 @@ impl<'a> PricedCheckpointJournalSink<'a> {
         invocation: impl Into<String>,
         generation: u64,
         accounting: Rc<RefCell<MonetaryAccounting>>,
+        io: Option<Rc<RefCell<GenericIoAccounting>>>,
         handoff: Option<PricedSuccessorHandoff>,
     ) -> Self {
         Self {
@@ -58,6 +64,7 @@ impl<'a> PricedCheckpointJournalSink<'a> {
             invocation: invocation.into(),
             generation,
             accounting,
+            io,
             handoff,
         }
     }
@@ -70,13 +77,23 @@ impl<'a> PricedCheckpointJournalSink<'a> {
 impl JournalSink for PricedCheckpointJournalSink<'_> {
     fn persist(&mut self, journal: &[JournalEntry]) -> Result<(), CheckpointStoreError> {
         let generation = self.generation.checked_add(1).ok_or(CheckpointStoreError)?;
-        let document = encode_priced_envelope_with_handoff(
-            &self.invocation,
-            generation,
-            journal,
-            &self.accounting.borrow(),
-            self.handoff.as_ref(),
-        )
+        let document = match &self.io {
+            Some(io) => encode_priced_io_envelope(
+                &self.invocation,
+                generation,
+                journal,
+                &self.accounting.borrow(),
+                self.handoff.as_ref(),
+                &io.borrow(),
+            ),
+            None => encode_priced_envelope_with_handoff(
+                &self.invocation,
+                generation,
+                journal,
+                &self.accounting.borrow(),
+                self.handoff.as_ref(),
+            ),
+        }
         .map_err(|_| CheckpointStoreError)?;
         self.store.commit(generation, &document)?;
         self.generation = generation;

@@ -53,6 +53,17 @@ fn a_zero_amount_request_is_admitted_and_commits_nothing() {
 }
 
 #[test]
+fn priced_quote_and_reserve_share_the_exact_cumulative_admission_rule() {
+    let mut clock = StepClock::new(0);
+    let mut ledger = CumulativeBudgetLedger::new(10, &mut clock);
+    let quoted = ledger.quote_priced_reservation(&request(10)).unwrap();
+    assert_eq!(quoted.amount, 10);
+    assert_eq!(ledger.committed(), 0, "a quote does not reserve work");
+    assert_eq!(ledger.reserve(&request(10)).unwrap(), quoted);
+    assert_eq!(ledger.committed(), 10);
+}
+
+#[test]
 fn a_request_at_exactly_the_remaining_ceiling_is_admitted_and_exhausts_it() {
     let mut clock = StepClock::new(0);
     let mut ledger = CumulativeBudgetLedger::new(100, &mut clock);

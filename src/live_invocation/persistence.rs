@@ -86,10 +86,15 @@ use super::identity::LiveInvocationId;
 use super::journal::{self, JournalEntry};
 
 mod priced;
+mod priced_io;
 pub(crate) use priced::encode_priced_envelope_with_handoff;
 pub use priced::{
     recover_priced_journal, PricedCheckpointJournalSink, PricedRecoveryError,
     RecoveredPricedJournal, PERSISTED_PRICED_JOURNAL_SCHEMA,
+};
+pub use priced_io::PERSISTED_PRICED_IO_JOURNAL_SCHEMA;
+pub(crate) use priced_io::{
+    encode_priced_io_envelope, recover_priced_io_journal, RecoveredPricedIoJournal,
 };
 
 #[cfg(test)]

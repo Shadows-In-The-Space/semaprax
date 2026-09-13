@@ -345,7 +345,7 @@ fn expected_projection_source_boundary_is_pure_and_keeps_shared_helpers_in_root(
     // file: a helper relocated into a sibling submodule must still count as
     // present in the root and absent from the projection.
     let root = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         include_str!("../../src/workspace_graph.rs"),
         include_str!("../../src/workspace_graph/diagnostics.rs"),
         include_str!("../../src/workspace_graph/generic_type_import.rs"),
@@ -358,6 +358,7 @@ fn expected_projection_source_boundary_is_pure_and_keeps_shared_helpers_in_root(
         include_str!("../../src/workspace_graph/retained_validation/dependency_closure.rs"),
         include_str!("../../src/workspace_graph/retained_validation/scalar_link.rs"),
         include_str!("../../src/workspace_graph/retained_vectors.rs"),
+        include_str!("../../src/workspace_graph/validation.rs"),
     );
     let root = root.as_str();
     let projection_root = include_str!("../../src/workspace_graph/expected_projection.rs");
@@ -1004,27 +1005,74 @@ fn public_workspace_analysis_cli_hostiles_and_mode_separation_are_exact() {
             "workspace-context requires <root> <entry-module> <declaration|capability> <target> [--direction forward|reverse|both] [--depth N] [--max-bytes N] [--max-nodes N]\nhint: run `semaprax workspace-context --help` for usage\n",
         ),
         (
-            vec!["workspace-context", root, "public.app", "other", "public.work"],
+            vec![
+                "workspace-context",
+                root,
+                "public.app",
+                "other",
+                "public.work",
+            ],
             "workspace-context target kind must be `declaration` or `capability`\nhint: run `semaprax workspace-context --help` for usage\n",
         ),
         (
-            vec!["workspace-context", root, "public.app", "declaration", "public.work", "--unknown", "1"],
+            vec![
+                "workspace-context",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "--unknown",
+                "1",
+            ],
             "unknown workspace-context option `--unknown`\nhint: run `semaprax workspace-context --help` for usage\n",
         ),
         (
-            vec!["workspace-context", root, "public.app", "declaration", "public.work", "--depth", "1", "--depth", "2"],
+            vec![
+                "workspace-context",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "--depth",
+                "1",
+                "--depth",
+                "2",
+            ],
             "duplicate workspace-context option `--depth`\nhint: run `semaprax workspace-context --help` for usage\n",
         ),
         (
-            vec!["workspace-context", root, "public.app", "declaration", "public.work", "--depth"],
+            vec![
+                "workspace-context",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "--depth",
+            ],
             "workspace-context option `--depth` requires a value\nhint: run `semaprax workspace-context --help` for usage\n",
         ),
         (
-            vec!["workspace-context", root, "public.app", "declaration", "public.work", "--direction", "sideways"],
+            vec![
+                "workspace-context",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "--direction",
+                "sideways",
+            ],
             "unknown workspace-context direction `sideways`\nhint: run `semaprax workspace-context --help` for usage\n",
         ),
         (
-            vec!["workspace-context", root, "public.app", "declaration", "public.work", "--max-nodes", "01"],
+            vec![
+                "workspace-context",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "--max-nodes",
+                "01",
+            ],
             "workspace-context option `--max-nodes` requires a canonical nonnegative integer\nhint: run `semaprax workspace-context --help` for usage\n",
         ),
         (
@@ -1032,19 +1080,51 @@ fn public_workspace_analysis_cli_hostiles_and_mode_separation_are_exact() {
             "workspace-impact requires <root> <entry-module> <declaration|capability> <target> [--depth N] [--max-bytes N] [--max-nodes N]\nhint: run `semaprax workspace-impact --help` for usage\n",
         ),
         (
-            vec!["workspace-impact", root, "public.app", "declaration", "public.work", "--unknown", "1"],
+            vec![
+                "workspace-impact",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "--unknown",
+                "1",
+            ],
             "unknown workspace-impact option `--unknown`\nhint: run `semaprax workspace-impact --help` for usage\n",
         ),
         (
-            vec!["workspace-impact", root, "public.app", "declaration", "public.work", "--depth", "1", "--depth", "2"],
+            vec![
+                "workspace-impact",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "--depth",
+                "1",
+                "--depth",
+                "2",
+            ],
             "duplicate workspace-impact option `--depth`\nhint: run `semaprax workspace-impact --help` for usage\n",
         ),
         (
-            vec!["workspace-impact", root, "public.app", "declaration", "public.work", "--max-bytes"],
+            vec![
+                "workspace-impact",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "--max-bytes",
+            ],
             "workspace-impact option `--max-bytes` requires a value\nhint: run `semaprax workspace-impact --help` for usage\n",
         ),
         (
-            vec!["workspace-review", root, "public.app", "declaration", "public.work", "extra"],
+            vec![
+                "workspace-review",
+                root,
+                "public.app",
+                "declaration",
+                "public.work",
+                "extra",
+            ],
             "workspace-review requires exactly <root> <entry-module> <declaration|capability> <target>\nhint: run `semaprax workspace-review --help` for usage\n",
         ),
     ] {

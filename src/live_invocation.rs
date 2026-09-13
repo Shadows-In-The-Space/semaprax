@@ -39,6 +39,7 @@ pub mod budget;
 pub mod compiled_decoder;
 pub mod fixture;
 pub mod identity;
+pub mod io;
 pub mod journal;
 pub mod kernel;
 pub mod migration;
@@ -56,6 +57,7 @@ mod tests;
 pub use budget::{CumulativeBudgetLedger, InvocationClock, SourceInvocationClock};
 pub use compiled_decoder::CompiledProposalDecoder;
 pub use identity::{LiveInvocationId, LiveInvocationSeed};
+pub use io::{GenericIoLimits, GenericIoTotals};
 pub use journal::{
     receipt_projection, DecodeError, JournalEntry, JournalError, ReceiptProjection,
     ValidatedJournal,
@@ -81,7 +83,8 @@ pub use model_invoke::{
 pub use persistence::{
     encode_envelope, recover_journal, recover_priced_journal, CheckpointJournalSink, JournalSink,
     PricedCheckpointJournalSink, PricedRecoveryError, RecoveredJournal, RecoveredPricedJournal,
-    RecoveryError, PERSISTED_JOURNAL_SCHEMA, PERSISTED_PRICED_JOURNAL_SCHEMA,
+    RecoveryError, PERSISTED_JOURNAL_SCHEMA, PERSISTED_PRICED_IO_JOURNAL_SCHEMA,
+    PERSISTED_PRICED_JOURNAL_SCHEMA,
 };
 pub use priced::{
     run_priced_live_invocation, GenericPricing, PricedInvocationState,

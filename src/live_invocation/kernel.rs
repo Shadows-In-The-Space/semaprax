@@ -302,6 +302,27 @@ pub fn run_live_invocation(
         // the model handler is never called this turn.
         persist(&mut handlers.sink, &journal, dispatched)?;
 
+        // Recheck after the reservation has a durable causal record and
+        // immediately before the irreversible model call. Besides exact
+        // deadline expiry, a composed budget hook may use this boundary to
+        // fail closed after an acknowledged host-side reservation anomaly.
+        if let Err(refusal) = handlers.budget.check_pre_dispatch() {
+            journal.push(JournalEntry::ResponseFailed {
+                turn,
+                failure: refusal.0,
+                attempted_bytes: 0,
+            });
+            persist(&mut handlers.sink, &journal, dispatched)?;
+            let mut run = finish(
+                journal,
+                turn,
+                TurnTransition::Fail(b"budget_refused".to_vec()),
+            );
+            run.dispatched = dispatched;
+            persist(&mut handlers.sink, &run.journal, dispatched)?;
+            return Ok(run);
+        }
+
         let mut outcome = if cancellation.is_cancelled() {
             ModelInvocationOutcome::Failed {
                 failure: ModelFailure::Cancelled,

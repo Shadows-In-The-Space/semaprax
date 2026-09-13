@@ -108,6 +108,7 @@ use super::journal::JournalEntry;
 use super::model_invoke::{
     BudgetRefusal, InvocationBudgetHook, InvocationUsage, ModelInvocationRequest, ReservedBudget,
 };
+use super::priced::PricedWorkBudgetHook;
 
 #[cfg(test)]
 mod source_tests;
@@ -380,6 +381,27 @@ impl<'a> CumulativeBudgetLedger<'a> {
     pub fn usage(&self) -> &[InvocationUsage] {
         &self.usage
     }
+
+    fn quoted_reservation(
+        &self,
+        request: &ModelInvocationRequest,
+    ) -> Result<ReservedBudget, BudgetRefusal> {
+        self.check_deadline()?;
+        let requested = request.effective_budget;
+        if requested < 0 {
+            return Err(BudgetRefusal(NEGATIVE_REQUEST.to_owned()));
+        }
+        if self
+            .source_reservation_units
+            .is_some_and(|units| units != requested)
+        {
+            return Err(BudgetRefusal(RESERVATION_MISMATCH.to_owned()));
+        }
+        if requested > self.remaining() {
+            return Err(BudgetRefusal(BUDGET_EXHAUSTED.to_owned()));
+        }
+        Ok(ReservedBudget { amount: requested })
+    }
 }
 
 impl InvocationBudgetHook for CumulativeBudgetLedger<'_> {
@@ -403,32 +425,27 @@ impl InvocationBudgetHook for CumulativeBudgetLedger<'_> {
         &mut self,
         request: &ModelInvocationRequest,
     ) -> Result<ReservedBudget, BudgetRefusal> {
-        self.check_deadline()?;
-        let requested = request.effective_budget;
-        if requested < 0 {
-            return Err(BudgetRefusal(NEGATIVE_REQUEST.to_owned()));
-        }
-        if self
-            .source_reservation_units
-            .is_some_and(|units| units != requested)
-        {
-            return Err(BudgetRefusal(RESERVATION_MISMATCH.to_owned()));
-        }
-        let remaining = self.remaining();
-        if requested > remaining {
-            return Err(BudgetRefusal(BUDGET_EXHAUSTED.to_owned()));
-        }
+        let reserved = self.quoted_reservation(request)?;
         // The nonrefundable decrement: committed the instant this call
         // decides to admit the request, strictly before the kernel's own
         // dispatch to `ModelHandler::invoke` can happen (see the module
         // documentation's "where the decrement happens" section).
-        self.committed = self.committed.saturating_add(requested);
-        Ok(ReservedBudget { amount: requested })
+        self.committed = self.committed.saturating_add(reserved.amount);
+        Ok(reserved)
     }
 
     fn record(&mut self, usage: &InvocationUsage) {
         // Observational only. Never adjusts `committed` — see "`record`
         // never refunds" above.
         self.usage.push(*usage);
+    }
+}
+
+impl PricedWorkBudgetHook for CumulativeBudgetLedger<'_> {
+    fn quote_priced_reservation(
+        &self,
+        request: &ModelInvocationRequest,
+    ) -> Result<ReservedBudget, BudgetRefusal> {
+        self.quoted_reservation(request)
     }
 }

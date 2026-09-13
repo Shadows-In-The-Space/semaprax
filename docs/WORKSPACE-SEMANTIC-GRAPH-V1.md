@@ -229,10 +229,16 @@ Only an uncached core may use this final sequential-AST peak. The builder
 receipt begins after the authored source programs have been parsed and retained,
 and covers the core's synthetic AST/HIR construction; it does not re-charge
 those pre-existing authored ASTs. Each synthetic AST, including its generated
-default-expression bodies, is live only while its own HIR resolves, whereas all
-resolved HIR remains live until filtering. A semantic frontend stages both
-synthetic AST and HIR in its checked-module cache, so it stops at the earlier
-summed receipts and never selects this final fallback.
+default-expression bodies, is live only while its own HIR resolves. On the
+final output-carrier fallback, that HIR yields exact declaration facts plus
+function/type signatures (including generic parameters, effects, and checked
+Vec/Box wrapper identity), then drops before the next module resolves; only
+the filtered `WorkspaceResolvedModule` and those compact facts remain. The
+mode-six receipt charges the accumulated filtered output and compact evidence
+beside one current full synthetic AST/HIR, rather than summing full HIR for
+every completed module. The cross-module checks compare that extracted evidence exactly. A semantic
+frontend stages both synthetic AST and HIR in its checked-module cache, so it
+stops at the earlier summed receipts and never selects this final fallback.
 
 At the production default builder limit, an unnested core phase that exceeds
 its budget after accepting an earlier estimate may retry with the raw-AST

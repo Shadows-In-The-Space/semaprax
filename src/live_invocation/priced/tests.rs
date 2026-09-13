@@ -54,6 +54,33 @@ impl PricedWorkBudgetHook for ExactBudget {
     }
 }
 
+/// Deliberately violates the priced host contract after mutating its own
+/// counter. The runner has no authority to roll that opaque counter back.
+struct MutatingMismatchedBudget {
+    reserves: usize,
+}
+
+impl InvocationBudgetHook for MutatingMismatchedBudget {
+    fn reserve(
+        &mut self,
+        _request: &ModelInvocationRequest,
+    ) -> Result<ReservedBudget, BudgetRefusal> {
+        self.reserves += 1;
+        Ok(ReservedBudget { amount: 11 })
+    }
+
+    fn record(&mut self, _usage: &InvocationUsage) {}
+}
+
+impl PricedWorkBudgetHook for MutatingMismatchedBudget {
+    fn quote_priced_reservation(
+        &self,
+        _request: &ModelInvocationRequest,
+    ) -> Result<ReservedBudget, BudgetRefusal> {
+        Ok(ReservedBudget { amount: 10 })
+    }
+}
+
 impl crate::agent_lifecycle::CheckpointStore for Store {
     fn commit(&mut self, _: u64, document: &str) -> Result<(), CheckpointStoreError> {
         self.calls += 1;
@@ -107,6 +134,18 @@ fn pricing_with_ceiling(ceiling_minor: i64) -> GenericPricing {
         )
         .unwrap(),
     )
+}
+
+fn io_limits() -> GenericIoLimits {
+    GenericIoLimits {
+        // The priced-I/O profile counts the full canonical model request,
+        // including task, grammar and deployment digests. These fixture
+        // limits deliberately admit that complete bounded carrier; the
+        // separate request-bound test exercises refusal below that size.
+        max_request_bytes: 4_096,
+        max_total_request_bytes: 4_096,
+        max_total_response_bytes: 2_048,
+    }
 }
 
 fn handlers<'a>(
@@ -233,6 +272,109 @@ fn priced_generic_recovery_of_durable_intent_never_redispatches() {
 }
 
 #[test]
+fn priced_io_v2_reserves_before_dispatch_and_recovers_observed_bytes() {
+    let id = identity();
+    let capability = ModelInvokeCapability::grant("priced io fixture");
+    let response = fixture_response(0, "io");
+    let mut handler =
+        FixtureModelHandler::scripted(vec![ModelInvocationOutcome::Settled(response)]);
+    let mut decoder = FixtureProposalDecoder::new(SCHEMA);
+    let mut gate = FixtureAuthorizationGate::new(1);
+    let mut budget = ExactBudget(FixtureBudgetHook::new(10));
+    let mut observer = FixtureObserver;
+    let mut policy = FixturePolicy { total_turns: 1 };
+    let mut store = Store::default();
+    let run = run_priced_live_invocation(
+        &config(&id),
+        PricedInvocationState::fresh_with_io(pricing(), io_limits()),
+        &mut handlers(
+            &capability,
+            &mut handler,
+            &mut decoder,
+            &mut gate,
+            &mut budget,
+            &mut observer,
+            &mut policy,
+            &mut store,
+        ),
+        &AgentCancellation::new(),
+    )
+    .unwrap();
+    assert!(run.receipt().contains("persisted-priced-io-journal.v2"));
+    let recovered = PricedInvocationState::recover_with_io(store.documents.last().unwrap(), &id)
+        .expect("exact v2 I/O envelope must independently replay");
+    assert_eq!(recovered.journal(), run.state.journal());
+    let tampered = store.documents.last().unwrap().replacen(
+        "\"response_limit\":1024",
+        "\"response_limit\":1023",
+        1,
+    );
+    assert!(matches!(
+        PricedInvocationState::recover_with_io(&tampered, &id),
+        Err(PricedRecoveryError::Pricing)
+    ));
+
+    let mut noncanonical: serde_json::Value =
+        serde_json::from_str(store.documents.last().unwrap()).unwrap();
+    let canonical = noncanonical["io"]["attempts"][0]["canonical_request"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    noncanonical["io"]["attempts"][0]["canonical_request"] =
+        serde_json::Value::String(format!("{canonical} "));
+    assert!(matches!(
+        PricedInvocationState::recover_with_io(&serde_json::to_string(&noncanonical).unwrap(), &id),
+        Err(PricedRecoveryError::Pricing)
+    ));
+}
+
+#[test]
+fn priced_io_counts_the_complete_canonical_request_before_dispatch() {
+    let id = identity();
+    let capability = ModelInvokeCapability::grant("priced io request bound");
+    let mut handler = FixtureModelHandler::must_not_be_called();
+    let mut decoder = FixtureProposalDecoder::new(SCHEMA);
+    let mut gate = FixtureAuthorizationGate::new(1);
+    let mut budget = ExactBudget(FixtureBudgetHook::new(10));
+    let mut observer = FixtureObserver;
+    let mut policy = FixturePolicy { total_turns: 1 };
+    let mut store = Store::default();
+    let large_task = vec![b'x'; 256];
+    let config = LiveInvocationConfig {
+        identity: &id,
+        task: &large_task,
+        deployment_binding: "sha256:priced-deploy",
+        interaction_schema_digest: SCHEMA,
+        max_turns: 1,
+        max_response_bytes: 16,
+        requested_budget_per_turn: 10,
+    };
+    let limits = GenericIoLimits {
+        max_request_bytes: 64,
+        max_total_request_bytes: 64,
+        max_total_response_bytes: 16,
+    };
+    let run = run_priced_live_invocation(
+        &config,
+        PricedInvocationState::fresh_with_io(pricing(), limits),
+        &mut handlers(
+            &capability,
+            &mut handler,
+            &mut decoder,
+            &mut gate,
+            &mut budget,
+            &mut observer,
+            &mut policy,
+            &mut store,
+        ),
+        &AgentCancellation::new(),
+    )
+    .unwrap();
+    assert_eq!(run.run.dispatched, 0);
+    assert_eq!(handler.calls, 0);
+}
+
+#[test]
 fn priced_successor_dispatch_then_recovery_preserves_immutable_carry() {
     let predecessor_id = identity();
     let destination_id = identity_for(b"priced successor task");
@@ -248,7 +390,7 @@ fn priced_successor_dispatch_then_recovery_preserves_immutable_carry() {
     let mut predecessor_store = Store::default();
     let predecessor = run_priced_live_invocation(
         &config(&predecessor_id),
-        PricedInvocationState::fresh(pricing_with_ceiling(60)),
+        PricedInvocationState::fresh_with_io(pricing_with_ceiling(60), io_limits()),
         &mut handlers(
             &capability,
             &mut first_handler,
@@ -263,11 +405,12 @@ fn priced_successor_dispatch_then_recovery_preserves_immutable_carry() {
     )
     .unwrap()
     .state;
-    let successor = PricedInvocationState::successor(
+    let successor = PricedInvocationState::successor_with_io(
         &predecessor,
         &predecessor_id,
         &destination_id,
         pricing_with_ceiling(60),
+        io_limits(),
     )
     .unwrap();
     let mut second_handler = FixtureModelHandler::scripted(vec![ModelInvocationOutcome::Settled(
@@ -296,10 +439,74 @@ fn priced_successor_dispatch_then_recovery_preserves_immutable_carry() {
     )
     .unwrap();
     assert_eq!(successor.run.dispatched, 1);
-    let recovered = PricedInvocationState::recover(
+    let recovered = PricedInvocationState::recover_with_io(
         destination_store.documents.last().unwrap(),
         &destination_id,
     )
     .expect("successor handoff and its original carry recover after a new attempt");
     assert_eq!(recovered.generation(), successor.state.generation());
+
+    let mut cross_bound: serde_json::Value =
+        serde_json::from_str(destination_store.documents.last().unwrap()).unwrap();
+    let mut spliced_handoff = successor
+        .state
+        .io
+        .as_ref()
+        .unwrap()
+        .handoff()
+        .unwrap()
+        .clone();
+    spliced_handoff.predecessor_chain = "sha256:spliced".to_owned();
+    spliced_handoff.handoff_digest = spliced_handoff.digest();
+    cross_bound["io"]["handoff"]["predecessor_chain"] =
+        serde_json::Value::String(spliced_handoff.predecessor_chain);
+    cross_bound["io"]["handoff"]["handoff_digest"] =
+        serde_json::Value::String(spliced_handoff.handoff_digest);
+    assert!(matches!(
+        PricedInvocationState::recover_with_io(
+            &serde_json::to_string(&cross_bound).unwrap(),
+            &destination_id
+        ),
+        Err(PricedRecoveryError::Pricing)
+    ));
+}
+
+#[test]
+fn priced_host_quote_violation_keeps_the_quoted_reservation_and_never_dispatches() {
+    let id = identity();
+    let capability = ModelInvokeCapability::grant("priced mismatch fixture");
+    let mut handler = FixtureModelHandler::must_not_be_called();
+    let mut decoder = FixtureProposalDecoder::new(SCHEMA);
+    let mut gate = FixtureAuthorizationGate::new(1);
+    let mut budget = MutatingMismatchedBudget { reserves: 0 };
+    let mut observer = FixtureObserver;
+    let mut policy = FixturePolicy { total_turns: 1 };
+    let mut store = Store::default();
+    let run = run_priced_live_invocation(
+        &config(&id),
+        PricedInvocationState::fresh_with_io(pricing(), io_limits()),
+        &mut PricedLiveInvocationHandlers {
+            capability: &capability,
+            handler: &mut handler,
+            decoder: &mut decoder,
+            gate: &mut gate,
+            work_budget: &mut budget,
+            observer: &mut observer,
+            policy: &mut policy,
+            effect: None,
+            store: &mut store,
+        },
+        &AgentCancellation::new(),
+    )
+    .unwrap();
+    assert_eq!(budget.reserves, 1);
+    assert_eq!(handler.calls, 0);
+    assert_eq!(run.run.dispatched, 0);
+    assert!(run.receipt().contains("priced_reservation_mismatch"));
+    let receipt: serde_json::Value = serde_json::from_str(run.receipt()).unwrap();
+    assert!(receipt["priced_document"]
+        .as_str()
+        .is_some_and(|priced| priced.contains("\"reserved_minor\":30")));
+    PricedInvocationState::recover_with_io(store.documents.last().unwrap(), &id)
+        .expect("the retained quoted reservation remains independently recoverable");
 }

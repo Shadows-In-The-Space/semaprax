@@ -121,7 +121,10 @@ core exposes only the existing read-only retained-value encoding for context.
 `live_invocation/priced` wraps the generic kernel with paired work and money
 reservations. `live_invocation/persistence/priced` commits both in one additive
 checkpoint envelope; recovery preserves unknown charges and never authorizes
-redispatch. Existing generic journal bytes remain unchanged.
+redispatch. `live_invocation/io` and `persistence/priced_io` own the opt-in v2
+outer envelope's exact logical request bytes, maximum response reservations,
+and successor I/O carry. Monetary and I/O handoffs share one predecessor
+identity, generation, and chain. Existing generic journal bytes remain unchanged.
 The source-specific checkpoint grammar lives under
 `src/live_invocation/source_journal`; it uses the existing caller-owned
 `CheckpointStore` and keeps the generic journal wire unchanged. Its validated
@@ -166,8 +169,13 @@ lookups narrow candidates per byte without changing declaration order.
 `AgentRuntimeV2::run_live` consumes that ordinary source
 through Direct Runtime v2 only after canonical proposal admission and at the
 typed-effect boundary; submitted proposal inventories are refused on this live
-route. It does not advertise durable checkpoint policy, create a provider
-transport, or add ambient authority.
+route. The separate `run_live_bound_model_durable` entry in
+`execution_revision/typed_durable` reuses Source Live Journal v2. It binds the
+typed registry and effect ceilings into the program-root commitment, ACKs model
+intent before adapter dispatch, and restores typed effect accounting from exact
+acknowledged observations without redispatch. The source adapter retains raw
+settlement bytes for that journal; canonical decoded proposals alone enter
+source authorization. It adds no provider transport or ambient authority.
 `compact_semantic_projection/selected` wraps existing task, public API, candidate,
 and Agent graph producers and independently regenerates selected content on
 replay; encoded evidence cannot replace the owning compiler object.
@@ -2672,3 +2680,10 @@ Wasm lookup and action emission live in `wasm/aggregate/cleanup`.
 `wasm/aggregate/string_runtime` owns optional aggregate String intrinsic imports;
 `wasm/browser_runtime.js` owns their generated web adapter and byte-carrier
 validation. It is included verbatim by the browser runtime renderer.
+
+The final uncached workspace graph path extracts cross-module declaration and
+signature proof in `workspace_graph/validation` while each full resolved HIR is
+live. It then retains only the selected output carrier before resolving the
+next module. Compact proof storage and the single live resolver peak remain
+charged within the existing builder cap; earlier successful paths keep their
+existing receipts.

@@ -1,0 +1,79 @@
+# Provisioned, bounded #103 feature-composition campaign.
+#
+# Dispatch-only: this authorizes a maintained Linux evidence route without
+# presenting an unrun hosted job as evidence.  The test itself is ignored in
+# ordinary PR runs because it executes every backend for 256 generated cases.
+name: Feature-composition corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed_count:
+        description: Number of deterministic generated cases (1..256)
+        default: "256"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feature-composition-corpus-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bounded-differential-campaign:
+    name: Bounded differential campaign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_TARGET_DIR: target/feature-composition-corpus
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          fetch-tags: false
+          lfs: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.97.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Provision and require every backend tool
+        env:
+          SEED_COUNT: ${{ inputs.seed_count }}
+        run: |
+          set -euo pipefail
+          cargo fetch --locked
+          command -v clang
+          clang --version
+          command -v node
+          node --version
+          case "$SEED_COUNT" in
+            ''|*[!0-9]*) echo "seed_count must be decimal" >&2; exit 2 ;;
+          esac
+          test "$SEED_COUNT" -ge 1
+          test "$SEED_COUNT" -le 256
+      - name: Run every backend for the bounded seeded campaign
+        env:
+          SEMAPRAX_DIFFERENTIAL_SEEDS: ${{ inputs.seed_count }}
+          SEMAPRAX_DIFFERENTIAL_REQUIRE_ALL: "1"
+        run: |
+          set -euo pipefail
+          cargo test --locked --offline -p semaprax \
+            --test scalar_status_backend_equivalence \
+            differential::bounded_campaign_agrees_across_every_available_lane \
+            -- --ignored --exact --test-threads=1 --nocapture 2>&1 | tee campaign.log
+          grep -F 'test result: ok. 1 passed; 0 failed;' campaign.log
+      - name: Retain campaign log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: feature-composition-campaign
+          path: campaign.log
+          if-no-files-found: error

@@ -853,6 +853,27 @@ fn ownership_route_agrees_across_interpreter_and_native() {
     let _ = fs::remove_dir_all(root);
 }
 
+/// The native/interpreter ownership-transfer row is intentionally not counted
+/// as Core-Wasm execution support.  The Public Scalar Export Profile rejects
+/// the same admitted source before code generation because its helper takes
+/// an owned `Bytes` parameter.  Pin that boundary on the actual corpus source
+/// so a future profile change becomes an explicit matrix decision rather than
+/// an undocumented missing lane.
+#[test]
+fn scalar_export_profile_refuses_ownership_transfer_with_spx_w115() {
+    let program = parse(
+        OWNERSHIP_SOURCE,
+        Path::new("view-ownership-composition-transfer.spx"),
+    )
+    .unwrap();
+    let error = wasm::emit_module_with_scalar_exports(
+        &program,
+        &["voc.case_transfer".to_owned()],
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "SPX-W115");
+}
+
 /// Negative control (issue #103's own required test): proves
 /// `assert_case_agrees` is a real, failable comparison by feeding it a
 /// deliberately wrong observed value -- not a compiler-source mutation, per

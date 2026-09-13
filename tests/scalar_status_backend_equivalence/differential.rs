@@ -71,6 +71,17 @@ const PR_SEEDS: [u64; 16] = [
     0xffff_ffff_ffff_ffff,
 ];
 
+/// The dispatch-only corpus workflow opts into this stricter campaign
+/// contract.  Ordinary fixed-seed routes retain their explicit
+/// available-lane reporting: a developer without a provisioned native or
+/// Wasm tool still gets frontend/interpreter evidence, never a false parity
+/// claim.  The provisioned campaign instead requires every generated backend
+/// observer to have actually answered every seed.
+const REQUIRE_ALL_CAMPAIGN_LANES_ENV: &str = "SEMAPRAX_DIFFERENTIAL_REQUIRE_ALL";
+const CAMPAIGN_MIN_SEEDS: u64 = 1;
+const CAMPAIGN_MAX_SEEDS: u64 = 256;
+const GENERATED_BACKEND_LANES: [Lane; 3] = [Lane::NativeO0, Lane::NativeO2, Lane::CoreWasm];
+
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
 
 fn temporary_root(label: &str) -> PathBuf {
@@ -213,6 +224,43 @@ fn candidate_digest(module: &Module) -> u64 {
 
 fn generate(seed: u64) -> Module {
     Generator::new(seed, Shape::default()).module()
+}
+
+fn campaign_seed_count() -> u64 {
+    let count = std::env::var("SEMAPRAX_DIFFERENTIAL_SEEDS")
+        .ok()
+        .and_then(|text| text.parse::<u64>().ok())
+        .unwrap_or(CAMPAIGN_MAX_SEEDS);
+    assert!(
+        (CAMPAIGN_MIN_SEEDS..=CAMPAIGN_MAX_SEEDS).contains(&count),
+        "SEMAPRAX_DIFFERENTIAL_SEEDS must be {CAMPAIGN_MIN_SEEDS}..={CAMPAIGN_MAX_SEEDS}, got {count}"
+    );
+    count
+}
+
+fn campaign_requires_all_generated_lanes() -> bool {
+    std::env::var_os(REQUIRE_ALL_CAMPAIGN_LANES_ENV).is_some()
+}
+
+fn assert_required_campaign_lanes(module: &Module, run: &Run, root: &Path) {
+    if !campaign_requires_all_generated_lanes() {
+        return;
+    }
+    assert!(
+        run.comparison.unavailable.is_empty()
+            && run.comparison.compared.len() == GENERATED_BACKEND_LANES.len()
+            && run
+                .comparison
+                .compared
+                .iter()
+                .copied()
+                .eq(GENERATED_BACKEND_LANES),
+        "provisioned campaign requires all generated backend lanes {:?}; compared {:?}; unavailable {:?}: {}",
+        GENERATED_BACKEND_LANES,
+        run.comparison.compared,
+        run.comparison.unavailable,
+        describe(module, run, root, Lanes::Every)
+    );
 }
 
 /// A deliberately small witness for the feature combination that aggregate
@@ -376,10 +424,7 @@ fn the_frontend_and_reference_interpreter_agree_on_a_wider_seed_sweep() {
 #[test]
 #[ignore = "bounded campaign; run separately from PR CI"]
 fn bounded_campaign_agrees_across_every_available_lane() {
-    let count = std::env::var("SEMAPRAX_DIFFERENTIAL_SEEDS")
-        .ok()
-        .and_then(|text| text.parse::<u64>().ok())
-        .unwrap_or(256);
+    let count = campaign_seed_count();
     let root = temporary_root("campaign");
     for ordinal in 0..count {
         let seed = 0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(ordinal.wrapping_add(1));
@@ -387,6 +432,7 @@ fn bounded_campaign_agrees_across_every_available_lane() {
         let seed_root = root.join(format!("seed-{seed:016x}"));
         std::fs::create_dir_all(&seed_root).expect("a seed root is creatable");
         let run = run_module(&module, &seed_root, Lanes::Every);
+        assert_required_campaign_lanes(&module, &run, &seed_root);
         assert!(
             run.agrees(),
             "{}",
@@ -394,6 +440,11 @@ fn bounded_campaign_agrees_across_every_available_lane() {
         );
         let _ = std::fs::remove_dir_all(&seed_root);
     }
+    println!(
+        "campaign manifest: seeds={count} expected_generated_backend_lanes={} strict_all_lanes={}",
+        GENERATED_BACKEND_LANES.len(),
+        campaign_requires_all_generated_lanes()
+    );
     println!("campaign agreed on {count} seeds");
     let _ = std::fs::remove_dir_all(root);
 }

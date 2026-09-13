@@ -8,6 +8,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Complete the ten-row feature-composition inventory, exact ownership-profile
+  refusal regression, and provisioned strict differential campaign route
+  with explicit CI selections and nonzero-case enforcement (#103).
+
 - Add exact SDK-envelope byte reservations to durable retries with frozen V2
   journal preservation, canonical V3 recovery, and post-poll cancellation
   checks (#179). Tighten provider conformance around request admission,

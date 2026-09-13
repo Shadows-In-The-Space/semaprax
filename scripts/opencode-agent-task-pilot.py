@@ -548,6 +548,9 @@ raise SystemExit(code)
 
 def graph_mcp_config(state, gateway, gateway_config):
     """Copy the stdlib-only MCP process into private state for graph trials."""
+    gateway = Path(gateway).resolve(strict=True)
+    if not gateway.is_file() or not os.access(gateway, os.X_OK):
+        raise PilotFailure("MCP gateway must be an executable file")
     source = ROOT / "scripts/opencode_agent_task_pilot/mcp_gateway.py"
     server = Path(state) / "mcp_gateway.py"
     body = source.read_bytes()
@@ -662,7 +665,7 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             compiler, real_compiler, gateway, gateway_config = install_gateway(
                 compiler, host, candidate, lane, drift
             )
-            mcp, wire = graph_mcp_config(host, gateway, gateway_config)
+            mcp, wire = graph_mcp_config(host, compiler, gateway_config)
             config.write_text(json.dumps(policy(lane, mcp), sort_keys=True))
             env = private_environment(host, config, compiler.parent)
             env["SEMAPRAX_PILOT_GATEWAY"] = gateway_config

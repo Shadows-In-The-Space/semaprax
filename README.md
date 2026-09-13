@@ -18,6 +18,12 @@ graph designed for humans and software agents.
 
 </div>
 
+
+
+https://github.com/user-attachments/assets/8768f221-86c3-40a8-ad62-e75ee74ee66c
+
+
+
 > [!WARNING]
 > SEMAPRAX is pre-alpha research software. Its language, graph schemas,
 > diagnostics, and ABIs can change. Do not use it for production or

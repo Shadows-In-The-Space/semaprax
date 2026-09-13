@@ -1,0 +1,7 @@
+module bench.owned.tests;
+
+@id("bench.owned.tests.main")
+fn main() -> i64
+{
+    0
+}

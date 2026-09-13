@@ -1,8 +1,8 @@
 # Provider Adapter SDK v1
 
-Status: **LOCAL** bounded design + reference implementation, fixture-backed
-only. No live network call, no real provider, and no credential were used to
-produce any evidence this document or its implementation cites.
+Status: **LOCAL** bounded SDK, fixture/recording evidence, and two real
+provider *protocol normalizers*. No live credential, endpoint, or network call
+was used to produce the local evidence cited here.
 
 Audience: implementers of issue #181 ("Create a provider adapter SDK and
 deterministic model-provider conformance suite") and reviewers of the
@@ -118,6 +118,42 @@ capability declaration) per named violation above, plus an ambient-endpoint
 declaration, an unsafe-retryable-class declaration, and a credential-holding
 adapter used only to prove nothing it holds ever appears in a report.
 
+### Concrete provider protocols (`vendor/`)
+
+`vendor::OpenAiResponsesAdapter` and `vendor::AnthropicMessagesAdapter` are
+separate implementations over one deliberately narrow host-injected HTTP/SSE
+seam. The seam receives only a fixed relative path, public protocol headers and
+a bounded request body. It owns the absolute endpoint, proxy/TLS policy and
+credential attachment, so neither adapter has a URL, secret, environment
+lookup, or socket implementation. No new HTTP dependency is introduced.
+
+The OpenAI adapter sends `POST /v1/responses` with `stream: true`, maps
+`response.output_text.delta` to raw `Delta`, receives final usage from
+`response.completed`, and waits for host stream end before settlement. The
+Anthropic adapter sends `POST /v1/messages` with `stream: true`, maps
+`content_block_delta` `text_delta` events, observes `message_start` and
+cumulative `message_delta` usage, and likewise requires `message_stop` plus
+host end. Arbitrary transport chunks are framed as bounded SSE before JSON is
+decoded; truncated, overlarge, malformed, or post-completion data fails closed.
+
+Provider-native OpenAI function/MCP calls and Anthropic client/server tool-use
+events are refused and request best-effort stream cancellation. They never
+become an `AdapterEvent::Delta`, cannot execute a host tool, and still pass the
+unchanged compiler-derived proposal decoder only as ordinary raw text.
+
+The wire shapes were checked against the current primary documentation:
+[OpenAI Responses streaming](https://platform.openai.com/docs/api-reference/responses-streaming)
+and [Anthropic streaming Messages](https://platform.claude.com/docs/en/build-with-claude/streaming)
+(accessed 2026-09-13). These are protocol implementations and hostile raw-wire
+fixtures, not proof of live-provider support, billing, or hosted conformance.
+
+The protocol adapters cap total HTTP/SSE wire input at 8 MiB, including ignored
+comments, with at most 1 MiB retained undecoded bytes and 4,096 frames per poll.
+Decoded Proposal bytes retain the caller's separate response bound. Framing
+uses one scan and one buffer compaction per poll. Model labels must contain
+1–256 bytes and configured output limits must be 1–1,048,576 tokens before
+host access; these are local admission bounds, not vendor support guarantees.
+
 ## Nonclaims
 
 `StreamingModelHandler` is the optional generic-kernel bridge for an adapter
@@ -127,10 +163,10 @@ on an early refusal, and returns canonical schema bytes only after both a
 `Completed` event and matching settlement. It does not implement a live
 provider transport, generated clients, or Direct Runtime wiring.
 
-- **No live network, no real provider, no key.** Every adapter this crate
-  ships is pure, in-memory, scripted data. A real provider transport is
-  downstream integration work maintained outside this crate's core
-  semantics, per this issue's own "Explicitly out of scope".
+- **No live call, key, endpoint, or support claim.** The concrete adapters
+  normalize real vendor protocols but require a host-injected transport; their
+  fixture tests do not contact a vendor. Endpoint selection and authentication
+  remain host authority, outside source semantics and this SDK.
 - **Cancellation is a request, not proof.** `CancellationSemantics` has no
   `Guaranteed` variant. `AdapterPoll::Failed { failure: ModelFailure::Cancelled, .. }`
   proves only that this process observed cancellation, never that a
@@ -141,11 +177,9 @@ provider transport, generated clients, or Direct Runtime wiring.
 - **A passing report is not a support decision.** Generating a report, even
   a fully passing one, is not itself a decision to describe an adapter as
   supported — that remains a separate, human, out-of-band decision.
-- **Two materially different *fixture* adapters, not two live providers.**
-  This module proves the ABI is not provider-shaped using two offline
-  transport styles (batch and streaming). A first and second *live*
-  provider adapter are downstream integration work this module does not
-  ship, matching the human-gated, network-off scope of this session.
+- **Protocol normalization is not hosted evidence.** The two vendor modules
+  prove that two materially different documented protocols fit the neutral
+  seam. A passing local wire fixture does not establish live-provider support.
 
 ## Live-kernel streaming bridge
 
@@ -171,6 +205,10 @@ and original absolute deadline. It checks before adapter start and every poll,
 including Pending; controls cannot interrupt a host adapter blocked inside its
 own poll. Without explicit controls, the hard 10,000-poll bound still applies.
 A cancel request is best-effort and does not prove the provider stopped work.
+The bridge rechecks cancellation and deadline after a settlement poll returns
+and before publishing response bytes; it retains the adapter's attempted-byte
+measurement on that refusal. The corresponding source bridge applies the same
+post-settlement control check before proposal publication.
 The SDK contract gives each adapter instance one start; hosts must provide a
 fresh adapter for a new attempt. This bridge does not select providers, retry,
 or provide a network transport.

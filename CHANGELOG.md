@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Drive bounded retries and ordered failover through injected provider adapters
+  (#179), preserving charged attempts and stopping on uncertain outcomes.
+  Add host-transport protocol adapters for Responses and Messages (#181).
+  Recheck cancellation and deadlines when streaming settlement returns.
+  Add an eighth cross-language task family exercising owned byte mapping and
+  hidden-oracle rejection in Rust, TypeScript and SEMAPRAX (#106).
+
 - Import bounded provider invoice evidence through explicit verifiers and retain
   reconciliation results (#180). Enforce source usage consistency and complete
   audit-view disclosure, payload association and truthful privacy claims; add

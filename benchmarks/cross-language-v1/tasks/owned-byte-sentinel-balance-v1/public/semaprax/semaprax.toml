@@ -1,0 +1,8 @@
+schema = "semaprax.project.v8"
+name = "owned-byte-sentinel-balance"
+version = "0.1.0"
+profile = "owned-data-api.v1"
+entry = "bench.owned.entry"
+sources = ["src/app.spx", "src/entry.spx", "src/tests.spx"]
+web_exports = []
+tests = ["bench.owned.tests"]

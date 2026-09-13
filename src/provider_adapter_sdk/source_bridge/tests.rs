@@ -222,3 +222,5 @@ fn settlement_bytes_and_regressing_usage_are_refused() {
         assert_eq!(counts.borrow().cancels, 1);
     }
 }
+
+mod settlement_boundary;

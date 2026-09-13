@@ -159,6 +159,7 @@ pub struct ModelPolicyLedger<'a> {
     retries_committed: u32,
     providers_committed: u32,
     next_provider_index: usize,
+    current_provider_id: Option<String>,
     aggregate_tokens_committed: u64,
     cost_committed_micros: i64,
     next_ordinal: u64,
@@ -180,6 +181,7 @@ impl<'a> ModelPolicyLedger<'a> {
         deadline_millis: Option<i64>,
         clock: &'a dyn InvocationClock,
     ) -> Self {
+        let current_provider_id = providers.primary().map(|slot| slot.id.clone());
         Self {
             limits,
             providers,
@@ -192,6 +194,7 @@ impl<'a> ModelPolicyLedger<'a> {
             // use before any failover — the first failover targets index
             // 1, the first fallback alternative.
             next_provider_index: 1,
+            current_provider_id,
             aggregate_tokens_committed: 0,
             cost_committed_micros: 0,
             next_ordinal: 0,
@@ -224,6 +227,7 @@ impl<'a> ModelPolicyLedger<'a> {
                 AttemptKind::Failover => {
                     ledger.providers_committed = ledger.providers_committed.saturating_add(1);
                     ledger.next_provider_index = ledger.next_provider_index.saturating_add(1);
+                    ledger.current_provider_id = Some(reservation.provider_id.clone());
                 }
             }
             ledger.aggregate_tokens_committed = ledger
@@ -327,9 +331,11 @@ impl<'a> ModelPolicyLedger<'a> {
                         class: request.prior_classification,
                     });
                 }
+                self.require_primary_provider(request)?;
             }
             AttemptKind::Retry => {
                 self.require_retry_permitted(request)?;
+                self.require_current_provider(request)?;
                 if self.retries_committed >= limits.max_retries {
                     return Err(AttemptRefusal::RetriesExhausted {
                         max_retries: limits.max_retries,
@@ -363,7 +369,11 @@ impl<'a> ModelPolicyLedger<'a> {
         }
         let requested_tokens = request
             .context_tokens
-            .saturating_add(request.requested_output_tokens);
+            .checked_add(request.requested_output_tokens)
+            .ok_or(AttemptRefusal::AggregateTokensExhausted {
+                requested: u64::MAX,
+                remaining: self.remaining_aggregate_tokens(),
+            })?;
         let remaining_tokens = self.remaining_aggregate_tokens();
         if requested_tokens > remaining_tokens {
             return Err(AttemptRefusal::AggregateTokensExhausted {
@@ -401,14 +411,17 @@ impl<'a> ModelPolicyLedger<'a> {
             AttemptKind::Failover => {
                 self.providers_committed = self.providers_committed.saturating_add(1);
                 self.next_provider_index = self.next_provider_index.saturating_add(1);
+                self.current_provider_id = Some(request.provider_id.clone());
             }
         }
         self.aggregate_tokens_committed = self
             .aggregate_tokens_committed
-            .saturating_add(requested_tokens);
+            .checked_add(requested_tokens)
+            .expect("checked against the effective aggregate-token ceiling before commit");
         self.cost_committed_micros = self
             .cost_committed_micros
-            .saturating_add(request.estimated_cost_micros);
+            .checked_add(request.estimated_cost_micros)
+            .expect("checked against the effective cost ceiling before commit");
 
         Ok(AttemptReservation {
             ordinal,
@@ -428,6 +441,48 @@ impl<'a> ModelPolicyLedger<'a> {
                 class: other,
             }),
         }
+    }
+
+    fn require_primary_provider(&self, request: &AttemptRequest) -> Result<(), AttemptRefusal> {
+        let Some(primary) = self.providers.primary() else {
+            // The standalone ledger historically allowed an empty policy so
+            // callers could use it only for non-provider dimensions. The
+            // runtime scheduler requires a nonempty policy at construction.
+            return Ok(());
+        };
+        if primary.id != request.provider_id {
+            return Err(AttemptRefusal::ProviderRefused(
+                ProviderRefusal::OutOfOrder {
+                    next_index: 0,
+                    expected: primary.id.clone(),
+                    requested: request.provider_id.clone(),
+                },
+            ));
+        }
+        if !primary.authorized {
+            return Err(AttemptRefusal::ProviderRefused(
+                ProviderRefusal::NotAuthorized {
+                    provider: primary.id.clone(),
+                },
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_current_provider(&self, request: &AttemptRequest) -> Result<(), AttemptRefusal> {
+        let Some(current) = &self.current_provider_id else {
+            return Ok(());
+        };
+        if current != &request.provider_id {
+            return Err(AttemptRefusal::ProviderRefused(
+                ProviderRefusal::OutOfOrder {
+                    next_index: self.next_provider_index.saturating_sub(1),
+                    expected: current.clone(),
+                    requested: request.provider_id.clone(),
+                },
+            ));
+        }
+        Ok(())
     }
 
     /// Records evidence about an already-admitted attempt's settlement.
@@ -724,6 +779,41 @@ mod tests {
             2,
             "failover still counts as a call"
         );
+    }
+
+    #[test]
+    fn primary_and_retry_provider_identity_are_bound_to_the_deployment_order() {
+        let clock = StepClock::new(0);
+        let cancellation = AgentCancellation::new();
+        let policy = ProviderPolicy::new(vec![
+            super::super::provider_policy::ProviderSlot::authorized("primary"),
+            super::super::provider_policy::ProviderSlot::authorized("fallback"),
+        ]);
+        let mut ledger = ModelPolicyLedger::new(unrestricted_limits(), policy, None, &clock);
+        let wrong_primary = AttemptRequest {
+            provider_id: "fallback".into(),
+            ..fresh(1, 1, 1)
+        };
+        assert!(matches!(
+            ledger.reserve_attempt(&cancellation, &wrong_primary),
+            Err(AttemptRefusal::ProviderRefused(
+                ProviderRefusal::OutOfOrder { next_index: 0, .. }
+            ))
+        ));
+        ledger
+            .reserve_attempt(&cancellation, &fresh(1, 1, 1))
+            .unwrap();
+        let wrong_retry = AttemptRequest {
+            provider_id: "fallback".into(),
+            ..retry_of(AttemptOutcomeClass::ProviderReportedRetryable)
+        };
+        assert!(matches!(
+            ledger.reserve_attempt(&cancellation, &wrong_retry),
+            Err(AttemptRefusal::ProviderRefused(
+                ProviderRefusal::OutOfOrder { .. }
+            ))
+        ));
+        assert_eq!(ledger.calls_committed(), 1);
     }
 
     #[test]

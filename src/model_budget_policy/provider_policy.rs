@@ -82,6 +82,14 @@ impl ProviderPolicy {
         self.ordered.first()
     }
 
+    /// Returns the slot at `index` in the immutable deployment order.  A
+    /// scheduler uses this only to request the exact next alternative; final
+    /// failover admission still belongs to [`Self::admit_failover`].
+    #[must_use]
+    pub fn slot(&self, index: usize) -> Option<&ProviderSlot> {
+        self.ordered.get(index)
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.ordered.len()

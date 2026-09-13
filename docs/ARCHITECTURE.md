@@ -133,6 +133,13 @@ Proposal decoder before the kernel's independent compiled-schema decode and
 authorization. `model_budget_policy/live_hook` composes explicit request-bound
 host token/cost estimates with the existing work hook, retaining conservative
 charges in memory without claiming generic-journal crash recovery.
+`model_budget_policy/retry` owns bounded in-process adapter attempt scheduling
+and the reservation trail. It consumes an explicit provider factory and host
+backoff/classification seams; it adds no durable journal or deployment authority.
+`provider_adapter_sdk/vendor` owns Responses and Messages wire normalization
+behind the explicit `HostHttpStreamTransport` seam. The host retains origin,
+TLS, proxy and credential configuration; compiler-derived Proposal admission
+remains in the streaming/schema owners.
 `provider_adapter_sdk/source_bridge` adapts the ordinary source `ProposalSource`
 with explicit fresh adapter factories, bounded canonical retained context, and
 `streaming_proposal_decode/source` admission against the authoritative source

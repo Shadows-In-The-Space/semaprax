@@ -1,0 +1,11 @@
+module bench.owned.entry;
+use function @id("bench.owned.evaluate") from bench.owned.app as evaluate;
+
+@id("bench.owned.entry.main")
+fn main() -> i64
+{
+    let one = [255u8];
+    let two = [255u8, 7u8, 255u8];
+    let other = [1u8, 2u8, 127u8];
+    if evaluate(array_as_slice(one)) == 0usize { if evaluate(array_as_slice(two)) == 2usize { if evaluate(array_as_slice(other)) == 6usize { 0 } else { 1 } } else { 1 } } else { 1 }
+}

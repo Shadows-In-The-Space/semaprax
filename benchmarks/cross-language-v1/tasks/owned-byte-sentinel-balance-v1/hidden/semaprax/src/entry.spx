@@ -1,0 +1,10 @@
+module bench.owned.entry;
+use function @id("bench.owned.evaluate") from bench.owned.app as evaluate;
+
+@id("bench.owned.entry.main")
+fn main() -> i64
+{
+    let mixed = [0u8, 255u8, 0u8, 9u8];
+    let two_zeroes = [9u8, 0u8, 255u8, 0u8, 9u8];
+    if evaluate(array_as_slice(mixed)) == 1024usize { if evaluate(array_as_slice(two_zeroes)) == 1536usize { 0 } else { 1 } } else { 1 }
+}

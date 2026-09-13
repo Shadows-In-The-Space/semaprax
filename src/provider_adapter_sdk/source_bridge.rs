@@ -192,6 +192,10 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                     usage = Some((tokens_in, tokens_out, cost_micros));
                 }
                 AdapterPoll::Settled(settlement) => {
+                    if let Err(diagnostics) = self.check_deadline() {
+                        adapter.cancel("source cancellation or deadline at settlement");
+                        return Err(diagnostics);
+                    }
                     if !completed
                         || settlement.response_bytes != bytes
                         || settlement.usage.cost_micros.is_some_and(|cost| cost < 0)

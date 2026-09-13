@@ -243,3 +243,49 @@ Focused `model_budget_policy::live_hook` tests execute the actual kernel until
 the second dispatch is refused, verify cumulative call/token/cost charges and
 journal receipt projection, reject stale quotes and cancellation before charge,
 and preserve a charge after inner refusal through the original deadline.
+
+## Adapter retry and failover scheduler
+
+`model_budget_policy::retry::RetryFailoverScheduler::run_compiled` is the
+bounded in-process route that derives the adapter envelope from the exact
+`ModelInvocationRequest` and `CompiledInteractionSchema`, then drives the
+SDK's actual `ProviderAdapter::start` and `poll` interface. It is constructed
+only with an explicitly injected provider-id factory, adapter invocation
+capability, cancellation signal, clock, effective limits and immutable
+`ProviderPolicy`. It rejects grammar drift before factory creation, uses the
+SDK's canonical provider-schema projection, validates the selected adapter's
+declared provider profile, and bounds each attempt to 10,000 polls (or a
+smaller host-supplied limit) and its declared response-byte capacity.
+`AdapterAttemptPlan::for_compiled` derives the matching streaming/RawText
+capability requirement and exact prompt bound from the same schema/request;
+the host supplies only conservative token/cost estimates and a poll ceiling.
+
+It reserves an ordinal before factory creation and before adapter start. Each
+safe retry and each failover receives a distinct reservation and remains
+charged even when a later local factory/start/backoff failure prevents a
+provider dispatch. Start refusal is `RejectedBeforeProcessing`; factory and
+capability refusal are `NotDispatched`. Any failure after `start` is
+`Uncertain` by default. A trusted injected `FailureClassifier` may produce
+`ProviderReportedRetryable` only from out-of-band provider evidence; response
+bytes cannot select that class. Uncertain, deadline, cancellation, poll-bound,
+and adapter-protocol failures cancel best-effort and terminate without a
+retry/failover claim.
+
+For a safe failure the scheduler first attempts the same provider as a retry.
+Only an admitted retry ceiling refusal advances it to the exact next
+deployment slot as `AttemptKind::Failover`; that transition is still checked
+by `ModelPolicyLedger`'s ordered/confidentiality policy. Each terminal
+settlement requires one `Completed` event, exactly the accumulated deltas,
+non-regressing usage, and final compiled-schema decode before it is returned.
+The injected
+`RetryBackoff` seam is called only after that next attempt is admitted. It
+allows a host to implement deterministic declared backoff while this policy
+module neither sleeps nor gains ambient timing/runtime authority.
+
+The returned `RetryFailoverRun` carries the ordered in-process reservation
+trail, one terminal evidence record per charged attempt, and terminal
+settlement/refusal. It is not a durable journal and cannot
+recover an interrupted adapter attempt after a crash. Focused offline tests
+use real SDK scripted adapters to prove a safe failure has a separately
+charged retry ordinal, retry exhaustion selects the exact fallback adapter,
+and an uncertain post-start timeout never constructs a fallback adapter.

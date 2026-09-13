@@ -64,6 +64,9 @@ pub mod hostile;
 pub mod observation;
 pub mod report;
 pub mod source_bridge;
+/// Concrete protocol adapters whose endpoint and credentials remain in a
+/// host-supplied transport.  These adapters do not open sockets themselves.
+pub mod vendor;
 
 pub use adapter::{
     AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterRefusal, AdapterRequest,
@@ -84,6 +87,10 @@ pub use observation::{
 };
 pub use report::{ConformanceReport, ReportCaseResult};
 pub use source_bridge::{SourceAdapterFactory, StreamingSourceProposalAdapter};
+pub use vendor::{
+    AnthropicMessagesAdapter, HostHttpStream, HostHttpStreamTransport, OpenAiResponsesAdapter,
+    ProviderHttpRequest, TransportFailure, TransportFailureKind, TransportPoll,
+};
 
 #[cfg(test)]
 mod tests;

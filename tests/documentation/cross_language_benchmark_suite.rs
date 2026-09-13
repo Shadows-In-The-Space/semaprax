@@ -29,6 +29,8 @@ static SERIAL: AtomicUsize = AtomicUsize::new(0);
 mod booking_window_conflict;
 #[path = "cross_language_benchmark_suite/cold_chain_release_gate.rs"]
 mod cold_chain_release_gate;
+#[path = "cross_language_benchmark_suite/owned_byte_sentinel_balance.rs"]
+mod owned_byte_sentinel_balance;
 #[path = "cross_language_benchmark_suite/stable_dispatch_order.rs"]
 mod stable_dispatch_order;
 

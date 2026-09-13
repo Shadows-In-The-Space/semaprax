@@ -224,6 +224,26 @@ impl ModelHandler for StreamingModelHandler<'_> {
                     completed = true;
                 }
                 AdapterPoll::Settled(settlement) => {
+                    // Poll may block or signal cancellation while returning completion.
+                    // Recheck before publishing a locally accepted response.
+                    if self.cancellation.is_some_and(|value| value.is_cancelled()) {
+                        self.adapter.cancel("bridge cancellation at settlement");
+                        return ModelInvocationOutcome::Failed {
+                            failure: ModelFailure::Cancelled,
+                            attempted_bytes: bytes.len(),
+                        };
+                    }
+                    if self
+                        .clock
+                        .zip(self.deadline_millis)
+                        .is_some_and(|(clock, deadline)| clock.now_millis() >= deadline)
+                    {
+                        self.adapter.cancel("bridge deadline at settlement");
+                        return ModelInvocationOutcome::Failed {
+                            failure: ModelFailure::Timeout,
+                            attempted_bytes: bytes.len(),
+                        };
+                    }
                     if !completed || settlement.response_bytes != bytes {
                         return self
                             .refuse(bytes.len(), "adapter settlement disagreed with stream");

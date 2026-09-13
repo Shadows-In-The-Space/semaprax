@@ -1,0 +1,31 @@
+module bench.owned.app;
+
+@id("bench.owned.sentinel-checksum")
+fn sentinel_checksum(input: own Bytes) -> usize
+{
+    let source = bytes_as_slice(input);
+    let mut output = bytes_zeroed(8usize);
+    let mut index = 0usize;
+    while index < byte_len(source) {
+        let mapped = match byte_get(source, index) { Option::Some { value: byte } => if byte == 255u8 { 0u8 } else { if byte == 0u8 { 255u8 } else { 1u8 } }, Option::None {} => 0u8, };
+        output = bytes_set(output, index, mapped);
+        index = index + 1usize;
+        index < byte_len(source)
+    }
+    let transformed = bytes_as_slice(output);
+    let mut checksum = 0usize;
+    let mut position = 0usize;
+    while position < byte_len(source) {
+        let value = match byte_get(transformed, position) { Option::Some { value: byte } => if byte == 255u8 { 255usize } else { if byte == 1u8 { 1usize } else { 0usize } }, Option::None {} => 0usize, };
+        checksum = checksum + (position + 1usize) * value;
+        position = position + 1usize;
+        position < byte_len(source)
+    }
+    checksum
+}
+
+@id("bench.owned.evaluate")
+fn evaluate(input: borrow Slice<u8>) -> usize
+{
+    sentinel_checksum(bytes_copy(input))
+}

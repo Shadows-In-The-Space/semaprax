@@ -324,3 +324,5 @@ fn pending_polls_stop_at_deadline_and_oversized_delta_is_bounded() {
     ));
     assert_eq!(adapter.polls, 1);
 }
+
+mod settlement_boundary;

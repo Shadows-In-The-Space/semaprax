@@ -67,7 +67,16 @@ class PilotTests(unittest.TestCase):
         body = (ROOT / "scripts/fixtures/opencode-provider-smoke-v1/session.json").read_bytes()
         counters = pilot.provider_usage(body, pilot.MODEL)
         self.assertEqual(counters["status"], "observed")
-        self.assertEqual((counters["model_input_tokens"], counters["model_output_tokens"]), (4437, 18))
+        self.assertEqual((counters["model_input_tokens"], counters["model_output_tokens"]), (4437, 214))
+
+    def test_exported_usage_keeps_cached_and_reasoning_tokens(self):
+        exported = json.loads((ROOT / "scripts/fixtures/opencode-provider-smoke-v1/session.json").read_bytes())
+        tokens = exported["messages"][1]["info"]["tokens"]
+        tokens["cache"] = {"read": 7, "write": 3}
+        usage = pilot.provider_usage(json.dumps(exported).encode(), pilot.MODEL)
+        self.assertEqual((usage["model_input_tokens"], usage["model_output_tokens"]), (4447, 214))
+        del tokens["reasoning"]
+        self.assertEqual(pilot.provider_usage(json.dumps(exported).encode(), pilot.MODEL)["status"], "unavailable")
 
     def test_stream_provider_usage_binds_each_finish_to_session_and_model(self):
         session = "ses_observed"

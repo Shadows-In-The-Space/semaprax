@@ -120,11 +120,20 @@ def provider_usage(body, model):
         tokens = info.get("tokens")
         if not isinstance(tokens, dict):
             return {"status": "unavailable", "reason": "assistant token counters are absent"}
-        input_tokens, output_tokens = tokens.get("input"), tokens.get("output")
+        cache = tokens.get("cache")
+        if not isinstance(cache, dict):
+            return {"status": "unavailable", "reason": "assistant cache counters are absent"}
+        raw_input, raw_output = tokens.get("input"), tokens.get("output")
+        cache_read, cache_write = cache.get("read"), cache.get("write")
+        reasoning = tokens.get("reasoning")
         if any(isinstance(value, bool) or not isinstance(value, int) or value < 0
-               for value in (input_tokens, output_tokens)):
+               for value in (raw_input, raw_output, cache_read, cache_write, reasoning)):
             return {"status": "unavailable", "reason": "assistant token counters are invalid"}
-        rows.append({"input_tokens": input_tokens, "output_tokens": output_tokens})
+        rows.append({"input_tokens": raw_input + cache_read + cache_write,
+                     "output_tokens": raw_output + reasoning,
+                     "uncached_input_tokens": raw_input, "text_output_tokens": raw_output,
+                     "cache_read_tokens": cache_read, "cache_write_tokens": cache_write,
+                     "reasoning_tokens": reasoning})
     if not rows:
         return {"status": "unavailable", "reason": "export has no matching assistant usage"}
     return {

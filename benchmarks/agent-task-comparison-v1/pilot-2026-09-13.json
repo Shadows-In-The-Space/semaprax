@@ -1,0 +1,756 @@
+{
+  "schema": "semaprax.private-pilot-descriptive-summary.v1",
+  "runner_revision": "b8e7ccca19c715c1c835268e22c5cbdfbac3e365",
+  "compiler_revision": "06bec1c29adc0cc9c28671ba64bb2e7975a3381f",
+  "model": "opencode/muse-spark-1.3-contributor-free",
+  "expected_tuples": 18,
+  "retained_tuples": 18,
+  "eligible_observations": 0,
+  "task_acceptance_passes": 0,
+  "rows": [
+    {
+      "index": 1,
+      "task": "signature-migration-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 1,
+      "transport": "completed",
+      "wall_ms": 117342,
+      "calls": 61,
+      "failed_calls": 32,
+      "reported_input": 421767,
+      "reported_output": 11758,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "89a29fb874f48dadd0e3104a09eaa5a42f3719d1deb41e96f549a3ba62172400",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-01"
+    },
+    {
+      "index": 2,
+      "task": "signature-migration-v1",
+      "lane": "semaprax-source-first",
+      "trial": 1,
+      "transport": "failed",
+      "wall_ms": 180037,
+      "calls": 22,
+      "failed_calls": 14,
+      "reported_input": 53317,
+      "reported_output": 2664,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "eeaf3644fa3b18ca8690559c25f82ac28f1f6364e069121bd88b59e639d9dd9f",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-02"
+    },
+    {
+      "index": 3,
+      "task": "stale-signature-recovery-v1",
+      "lane": "semaprax-source-first",
+      "trial": 1,
+      "transport": "failed",
+      "wall_ms": 180029,
+      "calls": 54,
+      "failed_calls": 39,
+      "reported_input": 111912,
+      "reported_output": 13443,
+      "acceptance": [
+        {
+          "id": "stale-detection",
+          "outcome": "passed"
+        },
+        {
+          "id": "recovery",
+          "outcome": "failed"
+        },
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "fda6e990768c5b5ce5759c300c061a8aec7f8fe45d3c952b5684913bda865580",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-03"
+    },
+    {
+      "index": 4,
+      "task": "stale-signature-recovery-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 1,
+      "transport": "completed",
+      "wall_ms": 172010,
+      "calls": 87,
+      "failed_calls": 51,
+      "reported_input": 862795,
+      "reported_output": 17444,
+      "acceptance": [
+        {
+          "id": "stale-detection",
+          "outcome": "passed"
+        },
+        {
+          "id": "recovery",
+          "outcome": "failed"
+        },
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "dad0fe6d17cd75d53ee15086a2a70d581f759d6ba043fa8b5a49a7f61dd38910",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-04"
+    },
+    {
+      "index": 5,
+      "task": "owned-signature-migration-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 1,
+      "transport": "failed",
+      "wall_ms": 180020,
+      "calls": 129,
+      "failed_calls": 91,
+      "reported_input": 1066157,
+      "reported_output": 20488,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "ownership",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "passed"
+        },
+        {
+          "id": "review",
+          "outcome": "failed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "fadaddc86f4fbcdeaaab758a12b353847af8145864ac063e27f1c2565490f795",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-05"
+    },
+    {
+      "index": 6,
+      "task": "owned-signature-migration-v1",
+      "lane": "semaprax-source-first",
+      "trial": 1,
+      "transport": "failed",
+      "wall_ms": 180040,
+      "calls": 47,
+      "failed_calls": 28,
+      "reported_input": 122494,
+      "reported_output": 6808,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "ownership",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "passed"
+        },
+        {
+          "id": "review",
+          "outcome": "failed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "d63370e8f4ab11c4ea7bc61b1ccdf9b076bd713a27aad28cd90312e72ee19a07",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-06"
+    },
+    {
+      "index": 7,
+      "task": "stale-signature-recovery-v1",
+      "lane": "semaprax-source-first",
+      "trial": 2,
+      "transport": "failed",
+      "wall_ms": 180031,
+      "calls": 38,
+      "failed_calls": 22,
+      "reported_input": 152904,
+      "reported_output": 14706,
+      "acceptance": [
+        {
+          "id": "stale-detection",
+          "outcome": "passed"
+        },
+        {
+          "id": "recovery",
+          "outcome": "failed"
+        },
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "cdfc7bcb5477b896f2cda18f682f288514ba6462d707c7be6802f0a152c6e49d",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-07"
+    },
+    {
+      "index": 8,
+      "task": "stale-signature-recovery-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 2,
+      "transport": "failed",
+      "wall_ms": 180020,
+      "calls": 119,
+      "failed_calls": 89,
+      "reported_input": 842918,
+      "reported_output": 18732,
+      "acceptance": [
+        {
+          "id": "stale-detection",
+          "outcome": "passed"
+        },
+        {
+          "id": "recovery",
+          "outcome": "failed"
+        },
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "a16c0728a7c83c9f7197f5a1a0f5db11b96ef6a3a40582ccc2f541f310d083e0",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-08"
+    },
+    {
+      "index": 9,
+      "task": "owned-signature-migration-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 2,
+      "transport": "completed",
+      "wall_ms": 137149,
+      "calls": 56,
+      "failed_calls": 22,
+      "reported_input": 528043,
+      "reported_output": 12627,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "ownership",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "passed"
+        },
+        {
+          "id": "review",
+          "outcome": "failed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "d76058929ce03f749bcb4abb097b15329f0beb440b1461982184600e28d0c014",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-09"
+    },
+    {
+      "index": 10,
+      "task": "owned-signature-migration-v1",
+      "lane": "semaprax-source-first",
+      "trial": 2,
+      "transport": "failed",
+      "wall_ms": 180033,
+      "calls": 48,
+      "failed_calls": 32,
+      "reported_input": 158367,
+      "reported_output": 24685,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "ownership",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "failed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "91541889b676dffa0b631f06c49feb9beb286af98192dc5594cdf6ec0fccc1dd",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-10"
+    },
+    {
+      "index": 11,
+      "task": "signature-migration-v1",
+      "lane": "semaprax-source-first",
+      "trial": 2,
+      "transport": "failed",
+      "wall_ms": 180025,
+      "calls": 46,
+      "failed_calls": 33,
+      "reported_input": 81969,
+      "reported_output": 6053,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "c86f8cac54eaa07852af46867f27b8173d13009947744a77fa49eb3f10eb6cec",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-11"
+    },
+    {
+      "index": 12,
+      "task": "signature-migration-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 2,
+      "transport": "failed",
+      "wall_ms": 180032,
+      "calls": 89,
+      "failed_calls": 52,
+      "reported_input": 687657,
+      "reported_output": 14180,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "4aa68dc455277b3db117e4282474d08f317550c23f05cc22bc3731f8d89af9dc",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-12"
+    },
+    {
+      "index": 13,
+      "task": "owned-signature-migration-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 3,
+      "transport": "failed",
+      "wall_ms": 180039,
+      "calls": 120,
+      "failed_calls": 84,
+      "reported_input": 931833,
+      "reported_output": 20687,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "ownership",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "passed"
+        },
+        {
+          "id": "review",
+          "outcome": "failed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "cf82d5949b2f97a4fb7a8bf9811a14d17e2935b3dbd55005bb7d3aff4b5069d6",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-13"
+    },
+    {
+      "index": 14,
+      "task": "owned-signature-migration-v1",
+      "lane": "semaprax-source-first",
+      "trial": 3,
+      "transport": "failed",
+      "wall_ms": 180021,
+      "calls": 54,
+      "failed_calls": 40,
+      "reported_input": 85764,
+      "reported_output": 8072,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "ownership",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "passed"
+        },
+        {
+          "id": "review",
+          "outcome": "failed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "e378e00af21ebe743b2b6287ecb2a7f1b505b98e992705c06acf370723d8c053",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-14"
+    },
+    {
+      "index": 15,
+      "task": "signature-migration-v1",
+      "lane": "semaprax-source-first",
+      "trial": 3,
+      "transport": "failed",
+      "wall_ms": 180028,
+      "calls": 51,
+      "failed_calls": 35,
+      "reported_input": 232202,
+      "reported_output": 10828,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "1c6d073a9a208b8c1c78ccdb19a34241fff345e21b2c8f6516a84fa93defdc84",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-15"
+    },
+    {
+      "index": 16,
+      "task": "signature-migration-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 3,
+      "transport": "failed",
+      "wall_ms": 180027,
+      "calls": 24,
+      "failed_calls": 15,
+      "reported_input": 39583,
+      "reported_output": 2968,
+      "acceptance": [
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "callers",
+          "outcome": "failed"
+        },
+        {
+          "id": "meaning",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "5cee84f2d0ea714442f41cf1655b38361ddfae69643f186408804d662f29367e",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-16"
+    },
+    {
+      "index": 17,
+      "task": "stale-signature-recovery-v1",
+      "lane": "semaprax-graph-operational",
+      "trial": 3,
+      "transport": "completed",
+      "wall_ms": 141317,
+      "calls": 89,
+      "failed_calls": 48,
+      "reported_input": 719631,
+      "reported_output": 16050,
+      "acceptance": [
+        {
+          "id": "stale-detection",
+          "outcome": "passed"
+        },
+        {
+          "id": "recovery",
+          "outcome": "failed"
+        },
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "ff81f5361149b8199f717c98cd29b7a8b07b38d9f0d84538b1f82fe0a35822ba",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-17"
+    },
+    {
+      "index": 18,
+      "task": "stale-signature-recovery-v1",
+      "lane": "semaprax-source-first",
+      "trial": 3,
+      "transport": "failed",
+      "wall_ms": 180031,
+      "calls": 46,
+      "failed_calls": 30,
+      "reported_input": 119375,
+      "reported_output": 24291,
+      "acceptance": [
+        {
+          "id": "stale-detection",
+          "outcome": "passed"
+        },
+        {
+          "id": "recovery",
+          "outcome": "failed"
+        },
+        {
+          "id": "signature",
+          "outcome": "failed"
+        },
+        {
+          "id": "identity",
+          "outcome": "failed"
+        },
+        {
+          "id": "review",
+          "outcome": "passed"
+        },
+        {
+          "id": "authority",
+          "outcome": "unavailable"
+        }
+      ],
+      "record_sha256": "b003fd7767aa1dbbb1d9e5a71cd780d25f3992a6b25c5ccf939a9c2eda625eeb",
+      "artifact": "benchmarks/agent-task-comparison-v1/evidence/pilot-b8e7ccca-18"
+    }
+  ]
+}

@@ -366,9 +366,11 @@ filesystem, network or runtime operation and grants no source or publication
 authority.
 
 Hostile library regressions have HOSTED GREEN v0.4.0 evidence. The framework
-records no comparative model observations or productivity/superiority result.
-Its external trials and the reserved Zero lane have not been executed; passing
-framework tests does not supply those missing experimental observations.
+records no eligible comparative model observations or productivity/superiority
+result. The [13 September private pilot](AGENT-TASK-PILOT-2026-09-13.md) retains
+18 real-model tuples across the two available lanes; all remain ineligible.
+The reserved Zero lane remains unrun. Passing framework tests does not supply
+missing experimental measurements.
 
 ### Offline OpenCode stream counters
 
@@ -389,3 +391,7 @@ the existing task oracle in a separate, exclusive derivative. Original timeout
 records remain unchanged. Authority replay, blinded review time, and missing
 context or recovery measurements remain unavailable; this derivative does not
 make a pilot observation eligible.
+
+After that frozen cohort completed, export-counter extraction was corrected to
+include cache and reasoning components, matching stream-v2 derivation. Original
+trial records and prior counter derivatives remain unchanged.

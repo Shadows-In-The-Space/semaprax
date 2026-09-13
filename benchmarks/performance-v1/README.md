@@ -29,6 +29,12 @@ cargo bench --bench project
 # all microbenchmarks
 cargo bench
 
+# opt-in workflow stage observations (experimental, local evidence)
+cargo build --locked --bench workflow_observer --features unstable-workflow-profiling
+python3 benchmarks/performance-v1/observe-workflows.py \
+  --observer target/debug/deps/workflow_observer \
+  --profile dev --output /tmp/workflow-campaign.json
+
 # macrobenchmarks (CLI, JSON + markdown)
 python3 benchmarks/performance-v1/run.py --output benchmarks/performance-v1/results/local.json
 python3 benchmarks/performance-v1/run.py --with-build --output benchmarks/performance-v1/results/local-with-build.json
@@ -44,6 +50,13 @@ python3 benchmarks/performance-v1/run.py --dry-run --output /tmp/plan.json
 python3 benchmarks/performance-v1/run.py --semaprax target/debug/semaprax \
   --only check-meaning --output /tmp/one.json
 ```
+
+The workflow observer's contract, bounds, and non-claims are documented in
+[`docs/WORKFLOW-PROFILING-V1.md`](../../docs/WORKFLOW-PROFILING-V1.md). The
+observer binary path above may include Cargo's platform-specific executable
+suffix or a hash suffix under `target/debug/deps`; pass the exact executable
+produced by the build. The profiling feature is intentionally not enabled by
+default.
 
 **One baseline is committed.** [`results/baseline.json`](results/baseline.json)
 records a single run of the committed inventory on an idle host, with the host

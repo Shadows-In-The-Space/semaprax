@@ -45,6 +45,9 @@ impl ProjectSemanticImage {
         revision: Arc<ProjectRevision>,
         expected_revision: &str,
     ) -> Result<Self, Vec<Diagnostic>> {
+        #[cfg(feature = "unstable-workflow-profiling")]
+        let _workflow_span =
+            crate::workflow_profile::span(crate::workflow_profile::Stage::ImageDerivation);
         validate_digest(expected_revision)?;
         if expected_revision != revision.project_revision() {
             return Err(stale("semantic image Project revision is stale"));

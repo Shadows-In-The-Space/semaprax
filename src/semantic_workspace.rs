@@ -225,6 +225,9 @@ fn preflight_owned_inner_mode(
     graph_builder_limit: Option<usize>,
     mut frontend: Option<&mut crate::project::incremental::FrontendPass>,
 ) -> Result<SemanticWorkspacePreflight, Vec<Diagnostic>> {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span =
+        crate::workflow_profile::span(crate::workflow_profile::Stage::WorkspacePreflight);
     let path_set = parse_path_set(path_set_source)?;
     if sources.len() != path_set.len() {
         return Err(grammar(

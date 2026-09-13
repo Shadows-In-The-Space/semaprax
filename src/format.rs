@@ -295,6 +295,9 @@ pub(crate) fn write_canonical_commented(
     placement: &comments::Placement,
     output: &mut impl std::fmt::Write,
 ) {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span =
+        crate::workflow_profile::span(crate::workflow_profile::Stage::Canonicalize);
     placement.header(output);
     writeln!(output, "module {};", program.module).unwrap();
     for module_use in &program.module_uses {

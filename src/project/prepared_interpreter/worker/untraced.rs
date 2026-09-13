@@ -43,6 +43,9 @@ impl PreparedProjectInterpreter {
         max_steps: usize,
         cancellation: &ProjectExecutionCancellation,
     ) -> Result<UntracedPreparedProjectExecution, Vec<Diagnostic>> {
+        #[cfg(feature = "unstable-workflow-profiling")]
+        let _workflow_span =
+            crate::workflow_profile::span(crate::workflow_profile::Stage::PreparedExecution);
         let _admission = ExecutionAdmission::acquire(&self.executing)?;
         if !(1..=interpreter::MAX_STEPS_LIMIT).contains(&max_steps) {
             return Err(vec![request_error(format!(

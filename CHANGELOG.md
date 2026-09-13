@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add opt-in, bounded current-thread workflow stage observations and an offline
+  campaign runner; compare exact cold/warm frontend products and prepared
+  traced/untraced products before timing. Measurements remain local evidence,
+  separate from canonical artifacts and authority (Refs #85).
+
 - Pin cumulative durable source reservation boundaries at zero, exact, and
   one-unit-over ceilings; terminal recovery retains accounting with zero
   new proposal, model, or effect dispatches (Refs #113).

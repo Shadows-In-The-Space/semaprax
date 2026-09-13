@@ -78,6 +78,7 @@ Audience: all documentation readers.
 - [RFC 0003: Cleanup and resource ABI](RFC-0003-CLEANUP-AND-RESOURCE-ABI.md)
 - [Semantic Kernel v1](SEMANTIC-KERNEL-V1.md)
 - [Standard Library v1](STANDARD-LIBRARY-V1.md)
+- [Workflow Profiling v1](WORKFLOW-PROFILING-V1.md)
 - [Format Writer v1](FORMAT-WRITER-V1.md)
 - [Log Writer v1](LOG-WRITER-V1.md)
 - [Test Byte Assertions v1](TEST-BYTE-ASSERTIONS-V1.md)

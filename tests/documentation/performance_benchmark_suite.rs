@@ -827,3 +827,16 @@ fn one_committed_scenario_is_measurable_from_an_unrelated_working_directory() {
         "examples/meaning.spx"
     );
 }
+
+#[test]
+fn workflow_observer_campaign_admission_contract() {
+    let output = Command::new("python3")
+        .arg(root().join(SUITE).join("test_observe_workflows.py"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

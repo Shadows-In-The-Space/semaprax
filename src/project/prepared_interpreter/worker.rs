@@ -92,6 +92,9 @@ impl PreparedProjectInterpreter {
         options: &PreparedProjectExecutionOptions,
         cancellation: &ProjectExecutionCancellation,
     ) -> Result<PreparedProjectExecution, Vec<Diagnostic>> {
+        #[cfg(feature = "unstable-workflow-profiling")]
+        let _workflow_span =
+            crate::workflow_profile::span(crate::workflow_profile::Stage::PreparedExecution);
         let _admission = ExecutionAdmission::acquire(&self.executing)?;
         PreparedProjectExecutionOptions::new(
             options.max_steps,
@@ -207,6 +210,9 @@ pub fn prepare_project_interpreter(
     revision: Arc<ProjectRevision>,
     options: PreparedProjectInterpreterOptions,
 ) -> Result<PreparedProjectInterpreter, Vec<Diagnostic>> {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span =
+        crate::workflow_profile::span(crate::workflow_profile::Stage::InterpreterPreparation);
     PreparedProjectInterpreterOptions::new(options.max_trace_bytes, options.max_trace_events)
         .map_err(|diagnostic| vec![diagnostic])?;
     let worker_permit = PreparedWorkerPermit::acquire(

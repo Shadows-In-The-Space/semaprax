@@ -63,16 +63,26 @@ impl ProjectSemanticState {
                 }
             }
         }
-        let graph = workspace_graph::render_project_semantic_graph(
-            &projection,
-            project_schema,
-            project_name,
-            project_revision,
-            test_module,
-        )?;
+        let graph = {
+            #[cfg(feature = "unstable-workflow-profiling")]
+            let _workflow_span =
+                crate::workflow_profile::span(crate::workflow_profile::Stage::GraphRender);
+            workspace_graph::render_project_semantic_graph(
+                &projection,
+                project_schema,
+                project_name,
+                project_revision,
+                test_module,
+            )?
+        };
         let graph_json = graph.json().to_owned();
         let graph_digest = graph.digest().to_owned();
-        let analysis = WorkspaceAnalysis::build_project(projection, &graph_digest)?;
+        let analysis = {
+            #[cfg(feature = "unstable-workflow-profiling")]
+            let _workflow_span =
+                crate::workflow_profile::span(crate::workflow_profile::Stage::AnalysisIndex);
+            WorkspaceAnalysis::build_project(projection, &graph_digest)?
+        };
         Ok(Self {
             project_schema,
             graph_json,

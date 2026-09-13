@@ -205,6 +205,8 @@ pub mod semantic_workspace_operations;
 pub mod semantic_workspace_structural_change;
 pub mod session_protocol;
 mod source_verify;
+#[cfg(feature = "unstable-workflow-profiling")]
+pub mod workflow_profile;
 pub mod workspace_analysis;
 pub mod workspace_graph;
 
@@ -221,6 +223,8 @@ thread_local! {
 
 #[cfg_attr(test, track_caller)]
 pub fn parse(source: &str, path: impl AsRef<Path>) -> Result<Program, Diagnostic> {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span = crate::workflow_profile::span(crate::workflow_profile::Stage::Parse);
     #[cfg(test)]
     TEST_PUBLIC_PARSE_CALLS.with(|calls| calls.set(calls.get() + 1));
     #[cfg(test)]
@@ -242,6 +246,8 @@ pub fn parse_with_comments(
     source: &str,
     path: impl AsRef<Path>,
 ) -> Result<(Program, lexer::Comments), Diagnostic> {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span = crate::workflow_profile::span(crate::workflow_profile::Stage::Parse);
     parser::Parser::parse_with_comments(source, path.as_ref())
 }
 

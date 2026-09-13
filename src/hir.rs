@@ -121,6 +121,8 @@ pub(crate) use workspace_link::compiler_prelude_declarations;
 /// Validate resolved HIR and independently replay its canonical shared-loan
 /// proof attachment before any semantic consumer may trust it.
 pub fn validate(program: &ResolvedProgram) -> Result<(), Diagnostic> {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span = crate::workflow_profile::span(crate::workflow_profile::Stage::HirValidate);
     agent_validation::validate(program)?;
     inspection::validate(program)?;
     crate::loan_plan::validate_program(program)
@@ -427,6 +429,8 @@ impl Drop for ValidationScopePublication<'_> {
 /// Verification errors are returned unchanged. This makes the HIR boundary
 /// fail closed: no backend can accidentally resolve and execute an invalid AST.
 pub fn resolve(program: &Program) -> Result<ResolvedProgram, Vec<Diagnostic>> {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span = crate::workflow_profile::span(crate::workflow_profile::Stage::Resolve);
     let Analysis {
         diagnostics,
         resolved,
@@ -446,6 +450,8 @@ pub(crate) fn resolve_with_function_reuse(
     previous_resolved: Option<&ResolvedProgram>,
     previous_costs: Option<&BTreeMap<String, usize>>,
 ) -> Result<(ResolvedProgram, FunctionResolutionWork), Vec<Diagnostic>> {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span = crate::workflow_profile::span(crate::workflow_profile::Stage::Resolve);
     let diagnostics = source_verify::verify(program);
     if diagnostics
         .iter()

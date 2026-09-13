@@ -14,6 +14,8 @@
 //! cannot silently measure a failing operation, and nothing here bypasses
 //! admission.
 
+#[path = "support/project_equivalence.rs"]
+mod project_equivalence;
 #[path = "support/project_fixture.rs"]
 mod project_fixture;
 
@@ -133,12 +135,66 @@ fn bench_project_retained(c: &mut Criterion) {
         let cancellation = ProjectExecutionCancellation::new();
         let prepared = revision.prepare_interpreter(ceilings).unwrap();
         let first = prepared.execute_entry(&options, &cancellation).unwrap();
-        std::hint::black_box(&first);
+        let first_untraced = prepared
+            .execute_entry_untraced(options.max_steps, &cancellation)
+            .unwrap();
+        let cold_traced = project::with_authenticated_project(&manifest, |snapshot| {
+            let worker = snapshot.prepare_interpreter(ceilings)?;
+            worker.execute_entry(&options, &cancellation)
+        })
+        .unwrap();
+        let cold_untraced = project::with_authenticated_project(&manifest, |snapshot| {
+            let worker = snapshot.prepare_interpreter(ceilings)?;
+            worker.execute_entry_untraced(options.max_steps, &cancellation)
+        })
+        .unwrap();
+        assert_eq!(
+            cold_traced, first,
+            "{id} cold and retained prepared traced products must match"
+        );
+        assert_eq!(
+            cold_untraced, first_untraced,
+            "{id} cold and retained prepared untraced products must match"
+        );
         group.bench_function(
             BenchmarkId::new(format!("{id}/prepared-run"), &parameter),
             |b| {
                 b.iter(|| {
                     let execution = prepared.execute_entry(&options, &cancellation);
+                    std::hint::black_box(execution).unwrap();
+                })
+            },
+        );
+        group.bench_function(
+            BenchmarkId::new(format!("{id}/prepared-run-untraced"), &parameter),
+            |b| {
+                b.iter(|| {
+                    let execution =
+                        prepared.execute_entry_untraced(options.max_steps, &cancellation);
+                    std::hint::black_box(execution).unwrap();
+                })
+            },
+        );
+        group.bench_function(
+            BenchmarkId::new(format!("{id}/cold-prepared-run"), &parameter),
+            |b| {
+                b.iter(|| {
+                    let execution = project::with_authenticated_project(&manifest, |snapshot| {
+                        let worker = snapshot.prepare_interpreter(ceilings)?;
+                        worker.execute_entry(&options, &cancellation)
+                    });
+                    std::hint::black_box(execution).unwrap();
+                })
+            },
+        );
+        group.bench_function(
+            BenchmarkId::new(format!("{id}/cold-prepared-run-untraced"), &parameter),
+            |b| {
+                b.iter(|| {
+                    let execution = project::with_authenticated_project(&manifest, |snapshot| {
+                        let worker = snapshot.prepare_interpreter(ceilings)?;
+                        worker.execute_entry_untraced(options.max_steps, &cancellation)
+                    });
                     std::hint::black_box(execution).unwrap();
                 })
             },
@@ -187,6 +243,20 @@ fn bench_project_frontend_cache(c: &mut Criterion) {
         ProjectFrontendCache::new()
             .build(&manifest, &original)
             .unwrap();
+
+        // Each source variant has a cold and a warmed build compared before
+        // timing. This proves that the benchmark's cache hit preserves the
+        // complete semantic product; work reports remain free to differ.
+        for sources in [&original, &leaf_edited, &core_edited] {
+            let cold = ProjectFrontendCache::new()
+                .build(&manifest, sources)
+                .unwrap()
+                .into_revision();
+            let mut cache = ProjectFrontendCache::new();
+            cache.build(&manifest, &original).unwrap();
+            let warm = cache.build(&manifest, sources).unwrap().into_revision();
+            project_equivalence::assert_revision_equivalent(&warm, cold);
+        }
 
         group.bench_function(BenchmarkId::new("cold", &parameter), |b| {
             b.iter(|| {

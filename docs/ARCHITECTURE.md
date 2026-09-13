@@ -18,6 +18,12 @@ design (v0.2 remains the first archived tag milestone). The architecture keeps
 human source, verified meaning, agent projections, mutation authority, and
 target execution distinct.
 
+`src/workflow_profile.rs` and its `enabled` submodule own the optional
+[current-thread workflow observer](WORKFLOW-PROFILING-V1.md). Instrumentation
+is absent without its Cargo feature; observations never enter canonical
+products or acquire authority. `benches/workflow_observer.rs` and the performance
+campaign runner own measurement, exact product comparisons, and host metadata.
+
 ## System shape
 
 ```text

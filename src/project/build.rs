@@ -65,6 +65,8 @@ fn finish_build(
     preflight: semantic_workspace::SemanticWorkspacePreflight,
     frontend: Option<&super::incremental::FrontendPass>,
 ) -> Result<BuiltProject, Vec<Diagnostic>> {
+    #[cfg(feature = "unstable-workflow-profiling")]
+    let _workflow_span = crate::workflow_profile::span(crate::workflow_profile::Stage::ProjectLink);
     let (files, workspace_manifest, workspace_revision, graph) = preflight.into_snapshot_parts();
     // The frontend pass already owns exact, authenticated source ASTs. Reuse
     // those for Agent extraction instead of reparsing outside its work counters.
@@ -137,17 +139,22 @@ fn finish_build(
     // This is the complete public target admission gate used by ordinary
     // Project loading. Candidate planning must not validate a weaker profile,
     // and every additive schema must pass this one exhaustive dispatcher.
-    let profile_admission = admission::prepare(
-        manifest,
-        &semantic_parts.web_program,
-        PublicApiSubject {
-            project_schema: manifest.schema(),
-            project_revision: &project_revision,
-            workspace_revision: &workspace_revision,
-            project_graph_digest: semantic.graph_digest(),
-        },
-    )
-    .map_err(|error| vec![error])?;
+    let profile_admission = {
+        #[cfg(feature = "unstable-workflow-profiling")]
+        let _workflow_span =
+            crate::workflow_profile::span(crate::workflow_profile::Stage::TargetAdmission);
+        admission::prepare(
+            manifest,
+            &semantic_parts.web_program,
+            PublicApiSubject {
+                project_schema: manifest.schema(),
+                project_revision: &project_revision,
+                workspace_revision: &workspace_revision,
+                project_graph_digest: semantic.graph_digest(),
+            },
+        )
+        .map_err(|error| vec![error])?
+    };
     let agent_interaction_contract_facts = if agent_definitions.is_empty() {
         None
     } else {

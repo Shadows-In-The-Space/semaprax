@@ -2,10 +2,15 @@ use std::path::{Path, PathBuf};
 
 #[path = "documentation/benchmark_fixtures.rs"]
 mod benchmark_fixtures;
+#[path = "documentation/benchmark_project_equivalence.rs"]
+mod benchmark_project_equivalence;
 #[path = "documentation/cross_language_benchmark_suite.rs"]
 mod cross_language_benchmark_suite;
 #[path = "documentation/performance_benchmark_suite.rs"]
 mod performance_benchmark_suite;
+#[cfg(feature = "unstable-workflow-profiling")]
+#[path = "documentation/workflow_profile.rs"]
+mod workflow_profile;
 
 #[test]
 fn local_markdown_links_resolve() {

@@ -59,8 +59,14 @@ harness = false
 name = "project"
 harness = false
 
+[[bench]]
+name = "workflow_observer"
+harness = false
+required-features = ["unstable-workflow-profiling"]
+
 [features]
 default = []
+unstable-workflow-profiling = []
 unstable-native-host-internal = []
 unstable-wit-component-harness = []
 

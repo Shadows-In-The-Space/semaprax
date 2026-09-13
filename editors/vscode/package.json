@@ -1,9 +1,13 @@
 {
-  "name": "semaprax-saved-source",
+  "name": "semaprax",
   "displayName": "Semaprax",
   "description": "Official Visual Studio Code support for Semaprax: .spx syntax highlighting, compiler diagnostics, semantic navigation, typed-hole workflows, safe refactoring, and agent-native development.",
   "version": "0.1.0",
-  "publisher": "semaprax",
+  "publisher": "wavect",
+  "author": {
+    "name": "Wavect GmbH",
+    "url": "https://wavect.io"
+  },
   "license": "Apache-2.0",
   "preview": true,
   "repository": {
@@ -23,6 +27,7 @@
   "keywords": [
     "semaprax",
     "spx",
+    "wavect",
     "programming language",
     "systems programming",
     "ai agents",

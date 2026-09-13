@@ -98,3 +98,13 @@ The local gates and coordinator semantic review do not establish cross-store
 single-consumer handoff, hosted/provider execution, or nested State support.
 A failed or unacknowledged model/effect intent remains uncertain; recovery
 never treats an opaque receipt as physical exactly-once proof.
+
+## Priced successor boundary
+
+This v3 handoff carries work reservations only. The private priced source
+profile uses a distinct v4 journal and integer operator quote; it must carry
+legacy reservations as explicit unknown monetary exposure, bind the exact
+rate/currency/scale, and prevent ceiling widening before it can admit a priced
+successor. That handoff is not implemented here. The CLI therefore refuses a
+priced migration rather than treating prior attempts as free, observed, or
+zero-priced.

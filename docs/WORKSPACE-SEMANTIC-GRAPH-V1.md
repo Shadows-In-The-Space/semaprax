@@ -211,12 +211,28 @@ imported bodies retain their prior charges. Successful receipts from either
 earlier attempt remain byte-for-byte unchanged.
 
 If the raw-AST estimate also refuses, the final fallback sums retained
-synthetic AST/HIR costs across modules but charges one maximum transient
-full-function import clone across the sequential module loop. Each imported
-body and both contract-vector backing allocations are dropped before the
-next clone; completed modules retain only stubs with zero-capacity contract
-vectors. No clone is omitted from the peak bound. Earlier accepted estimates
-and receipts remain unchanged.
+synthetic AST/HIR costs across modules and retains the historical charge for
+one maximum transient full-function import clone across the sequential module
+loop. This remains a conservative estimate after signature-only stub creation;
+completed ordinary imports have zero-capacity contract vectors. Earlier
+accepted estimates and receipts remain unchanged.
+
+If that sequential-peak estimate also refuses, one further fallback omits
+that historical transient-body peak. Ordinary imported stubs now clone only
+their signature: their provider bodies and contracts are never allocated in
+the consumer. Checked compiler wrappers still retain their full implementations
+and their existing runtime charges. The new fallback keeps all retained
+structure, string, identity, and runtime costs, and the same 18 MiB limit;
+earlier successful receipts remain unchanged.
+
+Only an uncached core may use this final sequential-AST peak. The builder
+receipt begins after the authored source programs have been parsed and retained,
+and covers the core's synthetic AST/HIR construction; it does not re-charge
+those pre-existing authored ASTs. Each synthetic AST, including its generated
+default-expression bodies, is live only while its own HIR resolves, whereas all
+resolved HIR remains live until filtering. A semantic frontend stages both
+synthetic AST and HIR in its checked-module cache, so it stops at the earlier
+summed receipts and never selects this final fallback.
 
 At the production default builder limit, an unnested core phase that exceeds
 its budget after accepting an earlier estimate may retry with the raw-AST

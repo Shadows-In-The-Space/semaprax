@@ -30,7 +30,9 @@ fn role(value: &str) -> Result<SourceStageRole, Vec<Diagnostic>> {
 fn sideband(entry: &SourceJournalEntry) -> bool {
     matches!(
         entry,
-        SourceJournalEntry::ReplayStageReservation { .. } | SourceJournalEntry::AttemptUsage { .. }
+        SourceJournalEntry::ReplayStageReservation { .. }
+            | SourceJournalEntry::AttemptUsage { .. }
+            | SourceJournalEntry::PricedAttemptUsage(_)
     )
 }
 fn migration_preamble(entry: &SourceJournalEntry) -> bool {
@@ -225,23 +227,26 @@ impl<'a> SourceExecutionSession<'a> {
         let identity = source.checkpoint_attempt_identity(&request)?;
         let turn = request.turn as u32;
         let attempt = request.attempt as u32;
-        let binding = self.sink.journal().binding();
-        let intent = SourceJournalEntry::AttemptIntent {
-            turn,
-            attempt,
-            attempt_digest: binding.attempt_digest(
+        let reservation_units = self.sink.journal().binding().reservation_units();
+        let intent = if let Some(SourceJournalEntry::PricedAttemptIntent(prior)) = self.next() {
+            self.sink.journal().binding().attempt_intent_at_ordinal(
                 turn,
                 attempt,
-                &identity.request_digest,
-                &identity.prompt_digest,
+                identity.request_digest,
+                identity.prompt_digest,
                 identity.request_bytes,
-            ),
-            request_digest: identity.request_digest,
-            prompt_digest: identity.prompt_digest,
-            request_bytes: identity.request_bytes,
-            reserved_units: binding.reservation_units(),
-            response_limit: binding.response_limit(),
-        };
+                prior.money_ordinal,
+            )
+        } else {
+            self.sink.attempt_intent(
+                turn,
+                attempt,
+                identity.request_digest,
+                identity.prompt_digest,
+                identity.request_bytes,
+            )
+        }
+        .map_err(|_| self.refuse(SourceTerminalStatus::Rejected, "source.attempt_identity"))?;
         if self.next().is_some() {
             self.expect(intent)?;
             let settled = self.next().cloned().ok_or_else(|| {
@@ -250,8 +255,24 @@ impl<'a> SourceExecutionSession<'a> {
             self.cursor += 1;
             return self.response(settled, turn, attempt);
         }
-        if self.ledger.remaining() < binding.reservation_units() {
+        if self.ledger.remaining() < reservation_units {
             return Err(self.refuse(SourceTerminalStatus::BudgetExhausted, "source.model_budget"));
+        }
+        if let SourceJournalEntry::PricedAttemptIntent(priced) = &intent {
+            let totals = self
+                .sink
+                .priced_totals()
+                .map_err(|_| {
+                    self.refuse(SourceTerminalStatus::Rejected, "source.priced_accounting")
+                })?
+                .ok_or_else(|| {
+                    self.refuse(SourceTerminalStatus::Rejected, "source.priced_accounting")
+                })?;
+            if priced.reserved_minor > totals.remaining_admission_minor {
+                return Err(
+                    self.refuse(SourceTerminalStatus::BudgetExhausted, "source.money_budget")
+                );
+            }
         }
         let start = self.sink.journal().entries().len();
         let result =

@@ -3809,7 +3809,6 @@ fn build_owned_inner(
             MAX_TOTAL_SOURCE_BYTES,
         )?;
     }
-
     let mut programs = Vec::with_capacity(sources.len());
     let mut declarations = 0usize;
     let mut callables = 0usize;
@@ -3897,8 +3896,8 @@ fn build_owned_inner(
     validate_synthetic_main_id_collisions(&programs, &authored)?;
     validate_uses(&programs, &module_paths, &authored)?;
     let dependency_depths = validate_dependency_dag(&programs)?;
-    let (mut resolve_builder_bytes, checked_retention_prebound) =
-        expected_projection::checked_retention_prebound(&programs, &authored)?;
+    let (mut resolve_builder_bytes, checked_retention_prebound, allow_uncached_peak) =
+        expected_projection::initial_core_prebound(&programs, &authored, frontend.is_none())?;
     if let Some(cache) = frontend.as_deref() {
         cache.checked_retention_prebound(checked_retention_prebound)?;
     }
@@ -3937,18 +3936,19 @@ fn build_owned_inner(
         // Drop every partial checked tree before computing or allocating the
         // next phase. Its debit remains in the maximum phase receipt.
         drop(core);
-        if fallback_mode >= 3 || !retry_allowed {
+        if fallback_mode >= if allow_uncached_peak { 5 } else { 4 } || !retry_allowed {
             return Err(vec![limit_error("builder_bytes", active_builder_limit())]);
         }
         if let (Some(cache), Some(saved)) = (frontend.as_deref_mut(), checkpoint.take()) {
             cache.rollback_core_attempt(saved);
             checkpoint = cache.checkpoint_core_attempt();
         }
-        let (tighter, total) = expected_projection::next_retention_prebound(
+        let (tighter, total) = expected_projection::next_retention_prebound_with_uncached_peak(
             &programs,
             &authored,
             resolve_builder_bytes,
             &mut fallback_mode,
+            allow_uncached_peak,
         )?;
         if let Some(cache) = frontend.as_deref() {
             cache.checked_retention_prebound(total)?;

@@ -1,11 +1,16 @@
 use std::path::{Path, PathBuf};
 
+use semaprax::agent_lifecycle::iterative::source_live::SourceLivePricing;
 use serde_json::{Map, Value};
 
 use super::{checkpoint::bounded_read, CliError};
 
 const MAX_CONFIG_BYTES: usize = 8192;
 const MAX_TOKEN_BYTES: usize = 240;
+
+#[cfg(test)]
+#[path = "options_tests.rs"]
+mod tests;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct SessionConfig {
@@ -24,6 +29,7 @@ pub(super) struct SessionConfig {
     pub max_steps_per_stage: usize,
     pub max_total_steps: usize,
     pub response_limit: usize,
+    pub pricing: Option<SourceLivePricing>,
 }
 
 impl SessionConfig {
@@ -46,7 +52,7 @@ impl SessionConfig {
         let map = value
             .as_object()
             .ok_or(CliError::refused("configuration must be an object"))?;
-        const KEYS: [&str; 16] = [
+        const V1_KEYS: [&str; 16] = [
             "schema",
             "manifest",
             "source_path",
@@ -64,13 +70,50 @@ impl SessionConfig {
             "max_total_steps",
             "response_limit",
         ];
-        if map.len() != KEYS.len() || !KEYS.iter().all(|key| map.contains_key(*key)) {
+        const V2_KEYS: [&str; 17] = [
+            "schema",
+            "manifest",
+            "source_path",
+            "agent_id",
+            "step_id",
+            "task_path",
+            "task_budget",
+            "read_path",
+            "deadline_millis",
+            "ceiling",
+            "reservation_units",
+            "max_iterations",
+            "max_stages",
+            "max_steps_per_stage",
+            "max_total_steps",
+            "response_limit",
+            "pricing",
+        ];
+        let schema = text(map, "schema")?;
+        let pricing = match schema {
+            "semaprax.source-live-cli.config.v1"
+                if map.len() == V1_KEYS.len()
+                    && V1_KEYS.iter().all(|key| map.contains_key(*key)) =>
+            {
+                None
+            }
+            "semaprax.source-live-cli.config.v2"
+                if map.len() == V2_KEYS.len()
+                    && V2_KEYS.iter().all(|key| map.contains_key(*key)) =>
+            {
+                Some(pricing(map)?)
+            }
+            "semaprax.source-live-cli.config.v1" | "semaprax.source-live-cli.config.v2" => {
+                return Err(CliError::refused(
+                    "configuration has missing or unknown keys",
+                ));
+            }
+            _ => return Err(CliError::refused("configuration schema is unsupported")),
+        };
+        if matches!(schema, "semaprax.source-live-cli.config.v2") && pricing.is_none() {
             return Err(CliError::refused(
                 "configuration has missing or unknown keys",
             ));
-        }
-        if text(map, "schema")? != "semaprax.source-live-cli.config.v1" {
-            return Err(CliError::refused("configuration schema is unsupported"));
         }
         let manifest = absolute(map, "manifest")?;
         let task_path = absolute(map, "task_path")?;
@@ -123,8 +166,41 @@ impl SessionConfig {
             max_steps_per_stage,
             max_total_steps,
             response_limit,
+            pricing,
         })
     }
+}
+
+fn pricing(map: &Map<String, Value>) -> Result<SourceLivePricing, CliError> {
+    const KEYS: [&str; 4] = [
+        "currency",
+        "minor_unit_exponent",
+        "price_per_work_unit_minor",
+        "money_ceiling_minor",
+    ];
+    let value = map
+        .get("pricing")
+        .and_then(Value::as_object)
+        .ok_or(CliError::refused("pricing must be an object"))?;
+    if value.len() != KEYS.len() || !KEYS.iter().all(|key| value.contains_key(*key)) {
+        return Err(CliError::refused("pricing has missing or unknown keys"));
+    }
+    let currency = text(value, "currency")?;
+    if currency.len() != 3 || !currency.bytes().all(|byte| byte.is_ascii_uppercase()) {
+        return Err(CliError::refused("pricing currency is invalid"));
+    }
+    let minor_unit_exponent = value
+        .get("minor_unit_exponent")
+        .and_then(Value::as_u64)
+        .and_then(|number| u8::try_from(number).ok())
+        .filter(|number| *number <= 9)
+        .ok_or(CliError::refused("pricing minor unit exponent is invalid"))?;
+    Ok(SourceLivePricing {
+        currency: currency.to_owned(),
+        minor_unit_exponent,
+        price_per_work_unit_minor: positive_i64(value, "price_per_work_unit_minor")?,
+        money_ceiling_minor: nonnegative_i64(value, "money_ceiling_minor")?,
+    })
 }
 
 fn text<'a>(map: &'a Map<String, Value>, key: &str) -> Result<&'a str, CliError> {

@@ -43,6 +43,7 @@ pub mod kernel;
 pub mod migration;
 pub mod model_invoke;
 pub mod persistence;
+pub(crate) mod pricing;
 pub mod source_journal;
 
 #[cfg(test)]

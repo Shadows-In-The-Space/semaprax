@@ -13,11 +13,16 @@ use super::identity::{digest, hex, looks_like_digest};
 
 mod execution;
 mod migration;
+mod priced_v4;
 mod validate;
 mod wire;
+pub use crate::live_invocation::pricing::ProviderChargeObservation;
 pub(crate) use migration::{
     state_digest as source_migration_state_digest, task_digest as source_migration_task_digest,
     SourceMigrationCarry,
+};
+pub use priced_v4::{
+    PricedAttemptIntentV4, PricedAttemptUsageV4, PricedTotalsV4, SourceUsageObservationV4,
 };
 
 #[cfg(test)]
@@ -32,6 +37,8 @@ pub const SOURCE_EXECUTION_JOURNAL_SCHEMA: &str =
     "semaprax.live-invocation.source-persisted-journal.v2";
 pub const SOURCE_MIGRATED_JOURNAL_SCHEMA: &str =
     "semaprax.live-invocation.source-persisted-journal.v3";
+pub(crate) const SOURCE_PRICED_JOURNAL_SCHEMA: &str =
+    "semaprax.live-invocation.source-persisted-journal.v4";
 pub const MAX_SOURCE_ENTRIES: usize = 65_536;
 pub const MAX_SOURCE_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_SOURCE_RESPONSE_BYTES: usize = 65_536;
@@ -105,6 +112,12 @@ enum SourceProfile {
         max_steps_per_stage: usize,
         max_total_steps: usize,
         carry: SourceMigrationCarry,
+    },
+    PricedV4 {
+        evaluator: String,
+        max_steps_per_stage: usize,
+        max_total_steps: usize,
+        pricing: priced_v4::PricedSourceBindingV4,
     },
 }
 
@@ -230,11 +243,51 @@ impl SourceInvocationBinding {
         Ok(binding)
     }
 
+    /// Binds an additive V4 price policy around the already distinct V2
+    /// execution identity.  Legacy binders remain byte-identical; callers
+    /// must use the V4 journal route, never this binding with old entries.
+    pub(crate) fn bind_priced_execution(
+        seed: SourceInvocationSeed,
+        evaluator_profile: &str,
+        pricing: crate::live_invocation::pricing::ValidatedPricing,
+    ) -> Result<Self, SourceJournalError> {
+        let mut binding = Self::bind_execution(seed, evaluator_profile)?;
+        let priced = priced_v4::PricedSourceBindingV4::new(
+            binding.invocation.clone(),
+            &binding.unit,
+            binding.reservation_units,
+            pricing,
+        )?;
+        binding.invocation = priced.invocation().to_owned();
+        binding.profile = SourceProfile::PricedV4 {
+            evaluator: evaluator_profile.to_owned(),
+            max_steps_per_stage: binding
+                .max_steps_per_stage()
+                .ok_or(SourceJournalError::Binding)?,
+            max_total_steps: binding
+                .max_total_steps()
+                .ok_or(SourceJournalError::Binding)?,
+            pricing: priced,
+        };
+        Ok(binding)
+    }
+
     pub fn is_execution_profile(&self) -> bool {
         matches!(
             &self.profile,
-            SourceProfile::ExecutionV2 { .. } | SourceProfile::MigratedV3 { .. }
+            SourceProfile::ExecutionV2 { .. }
+                | SourceProfile::MigratedV3 { .. }
+                | SourceProfile::PricedV4 { .. }
         )
+    }
+    pub(crate) fn priced_binding(&self) -> Option<&priced_v4::PricedSourceBindingV4> {
+        match &self.profile {
+            SourceProfile::PricedV4 { pricing, .. } => Some(pricing),
+            _ => None,
+        }
+    }
+    pub(crate) fn is_priced_profile(&self) -> bool {
+        self.priced_binding().is_some()
     }
     pub(crate) fn migration(&self) -> Option<&SourceMigrationCarry> {
         match &self.profile {
@@ -246,7 +299,8 @@ impl SourceInvocationBinding {
         match &self.profile {
             SourceProfile::PrimitiveV1 => None,
             SourceProfile::ExecutionV2 { evaluator, .. }
-            | SourceProfile::MigratedV3 { evaluator, .. } => Some(evaluator),
+            | SourceProfile::MigratedV3 { evaluator, .. }
+            | SourceProfile::PricedV4 { evaluator, .. } => Some(evaluator),
         }
     }
     pub fn max_steps_per_stage(&self) -> Option<usize> {
@@ -259,6 +313,10 @@ impl SourceInvocationBinding {
             | SourceProfile::MigratedV3 {
                 max_steps_per_stage,
                 ..
+            }
+            | SourceProfile::PricedV4 {
+                max_steps_per_stage,
+                ..
             } => Some(*max_steps_per_stage),
         }
     }
@@ -269,6 +327,9 @@ impl SourceInvocationBinding {
                 max_total_steps, ..
             }
             | SourceProfile::MigratedV3 {
+                max_total_steps, ..
+            }
+            | SourceProfile::PricedV4 {
                 max_total_steps, ..
             } => Some(*max_total_steps),
         }
@@ -284,6 +345,7 @@ impl SourceInvocationBinding {
             SourceProfile::PrimitiveV1 => SOURCE_JOURNAL_SCHEMA,
             SourceProfile::ExecutionV2 { .. } => SOURCE_EXECUTION_JOURNAL_SCHEMA,
             SourceProfile::MigratedV3 { .. } => SOURCE_MIGRATED_JOURNAL_SCHEMA,
+            SourceProfile::PricedV4 { .. } => SOURCE_PRICED_JOURNAL_SCHEMA,
         }
     }
 
@@ -356,6 +418,66 @@ impl SourceInvocationBinding {
             self.deadline_millis,
         );
         digest(ATTEMPT_DOMAIN, canonical.as_bytes())
+    }
+
+    /// Reconstructs a persisted intent at its durable money ordinal.  Legacy
+    /// profiles deliberately ignore the ordinal and retain their exact V1/V2
+    /// attempt rendering and digest.
+    pub(crate) fn attempt_intent_at_ordinal(
+        &self,
+        turn: u32,
+        attempt: u32,
+        request_digest: String,
+        prompt_digest: String,
+        request_bytes: usize,
+        money_ordinal: u32,
+    ) -> Result<SourceJournalEntry, SourceJournalError> {
+        if let Some(pricing) = self.priced_binding() {
+            let attempt_digest = pricing.attempt_digest(
+                turn,
+                attempt,
+                money_ordinal,
+                &request_digest,
+                &prompt_digest,
+                request_bytes,
+                self.response_limit,
+            )?;
+            let reserved_minor = pricing
+                .pricing()
+                .quote(pricing.pricing().work_unit(), self.reservation_units)
+                .map_err(|_| SourceJournalError::Binding)?;
+            Ok(SourceJournalEntry::PricedAttemptIntent(
+                PricedAttemptIntentV4 {
+                    turn,
+                    attempt,
+                    money_ordinal,
+                    attempt_digest,
+                    request_digest,
+                    prompt_digest,
+                    request_bytes,
+                    reserved_units: self.reservation_units,
+                    reserved_minor,
+                    response_limit: self.response_limit,
+                },
+            ))
+        } else {
+            Ok(SourceJournalEntry::AttemptIntent {
+                turn,
+                attempt,
+                attempt_digest: self.attempt_digest(
+                    turn,
+                    attempt,
+                    &request_digest,
+                    &prompt_digest,
+                    request_bytes,
+                ),
+                request_digest,
+                prompt_digest,
+                request_bytes,
+                reserved_units: self.reservation_units,
+                response_limit: self.response_limit,
+            })
+        }
     }
 }
 
@@ -567,6 +689,12 @@ pub enum SourceJournalEntry {
         attempt: u32,
         reported: Option<SourceReportedUsage>,
     },
+    /// V4 commits the paired work and integer-money reservation before the
+    /// provider is dispatched.  It is never accepted by legacy profiles.
+    PricedAttemptIntent(PricedAttemptIntentV4),
+    /// V4 closes usage/charge evidence explicitly; Unknown is durable
+    /// evidence, not a missing value or an inferred zero charge.
+    PricedAttemptUsage(PricedAttemptUsageV4),
     ProposalRefused {
         turn: u32,
         attempt: u32,
@@ -691,6 +819,77 @@ impl SourceJournal {
         }
         Ok(next)
     }
+
+    pub fn attempt_intent(
+        &self,
+        turn: u32,
+        attempt: u32,
+        request_digest: String,
+        prompt_digest: String,
+        request_bytes: usize,
+    ) -> Result<SourceJournalEntry, SourceJournalError> {
+        if self.binding.is_priced_profile() {
+            let money_ordinal = u32::try_from(
+                self.entries
+                    .iter()
+                    .filter(|entry| matches!(entry, SourceJournalEntry::PricedAttemptIntent(_)))
+                    .count(),
+            )
+            .map_err(|_| SourceJournalError::Capacity)?;
+            self.binding.attempt_intent_at_ordinal(
+                turn,
+                attempt,
+                request_digest,
+                prompt_digest,
+                request_bytes,
+                money_ordinal,
+            )
+        } else {
+            self.binding.attempt_intent_at_ordinal(
+                turn,
+                attempt,
+                request_digest,
+                prompt_digest,
+                request_bytes,
+                0,
+            )
+        }
+    }
+
+    pub fn priced_attempt_usage(
+        &self,
+        turn: u32,
+        attempt: u32,
+        reported: Option<SourceReportedUsage>,
+        charge: crate::live_invocation::pricing::ProviderChargeObservation,
+    ) -> Result<SourceJournalEntry, SourceJournalError> {
+        if !self.binding.is_priced_profile() {
+            return Err(SourceJournalError::Binding);
+        }
+        let money_ordinal = self
+            .entries
+            .iter()
+            .find_map(|entry| match entry {
+                SourceJournalEntry::PricedAttemptIntent(intent)
+                    if intent.turn == turn && intent.attempt == attempt =>
+                {
+                    Some(intent.money_ordinal)
+                }
+                _ => None,
+            })
+            .ok_or(SourceJournalError::Order)?;
+        Ok(SourceJournalEntry::PricedAttemptUsage(
+            priced_v4::PricedAttemptUsageV4 {
+                turn,
+                attempt,
+                money_ordinal,
+                usage: reported.map_or(priced_v4::SourceUsageObservationV4::Unknown, |value| {
+                    priced_v4::SourceUsageObservationV4::Observed(value)
+                }),
+                charge,
+            },
+        ))
+    }
 }
 
 /// Owns the sole source journal write cursor. Any failed store acknowledgement
@@ -751,6 +950,35 @@ impl<'a> SourceCheckpointSink<'a> {
         self.prepare_append(entry.clone(), now).map(|_| ())
     }
 
+    /// Constructs the profile-specific durable model intent.  The caller must
+    /// still append it and await the checkpoint acknowledgement before dispatch.
+    pub fn attempt_intent(
+        &self,
+        turn: u32,
+        attempt: u32,
+        request_digest: String,
+        prompt_digest: String,
+        request_bytes: usize,
+    ) -> Result<SourceJournalEntry, SourceJournalError> {
+        self.journal
+            .attempt_intent(turn, attempt, request_digest, prompt_digest, request_bytes)
+    }
+
+    /// Constructs explicit V4 settlement evidence for a prior priced intent.
+    /// `None` is serialized as `usage: unknown`; callers must pass
+    /// `ProviderChargeObservation::Unknown` unless they hold exact bound
+    /// currency/minor-unit evidence.
+    pub fn priced_attempt_usage(
+        &self,
+        turn: u32,
+        attempt: u32,
+        reported: Option<SourceReportedUsage>,
+        charge: crate::live_invocation::pricing::ProviderChargeObservation,
+    ) -> Result<SourceJournalEntry, SourceJournalError> {
+        self.journal
+            .priced_attempt_usage(turn, attempt, reported, charge)
+    }
+
     /// Constructs the final v2 event from validated causal commitments.
     /// The caller still must pass it to `append_at` and await its store ACK.
     pub fn terminal_snapshot_entry(
@@ -793,6 +1021,13 @@ impl<'a> SourceCheckpointSink<'a> {
             Some(SourceJournalEntry::AttemptIntent { response_limit, .. }) => {
                 (response_limit.saturating_mul(2).saturating_add(4_096), 5)
             }
+            Some(SourceJournalEntry::PricedAttemptIntent(intent)) => (
+                intent
+                    .response_limit
+                    .saturating_mul(2)
+                    .saturating_add(4_096),
+                5,
+            ),
             Some(SourceJournalEntry::EffectIntent { .. }) => (
                 MAX_SOURCE_EFFECT_BYTES
                     .saturating_mul(2)
@@ -843,6 +1078,12 @@ impl<'a> SourceCheckpointSink<'a> {
             Ok(0)
         }
     }
+    pub fn priced_totals(&self) -> Result<Option<PricedTotalsV4>, SourceJournalError> {
+        if !self.journal.binding.is_priced_profile() {
+            return Ok(None);
+        }
+        Ok(execution::validate(&self.journal.binding, self.journal.entries())?.priced)
+    }
     pub const fn generation(&self) -> u64 {
         self.generation
     }
@@ -860,6 +1101,7 @@ pub struct RecoveredSourceCheckpoint {
     chain: String,
     committed_reserved_units: i64,
     committed_stage_fuel: u64,
+    priced_totals: Option<PricedTotalsV4>,
 }
 
 impl RecoveredSourceCheckpoint {
@@ -899,6 +1141,9 @@ impl RecoveredSourceCheckpoint {
     pub const fn committed_stage_fuel(&self) -> u64 {
         self.committed_stage_fuel
     }
+    pub fn priced_totals(&self) -> Option<&PricedTotalsV4> {
+        self.priced_totals.as_ref()
+    }
     pub fn evaluator_profile(&self) -> Option<&str> {
         self.journal.binding.evaluator_profile()
     }
@@ -926,7 +1171,9 @@ impl RecoveredSourceCheckpoint {
         matches!(
             self.journal.entries.last(),
             Some(
-                SourceJournalEntry::AttemptIntent { .. } | SourceJournalEntry::EffectIntent { .. }
+                SourceJournalEntry::AttemptIntent { .. }
+                    | SourceJournalEntry::PricedAttemptIntent(_)
+                    | SourceJournalEntry::EffectIntent { .. }
             )
         )
     }
@@ -962,17 +1209,19 @@ pub fn recover_source_checkpoint(
     expected: &SourceInvocationBinding,
 ) -> Result<RecoveredSourceCheckpoint, SourceJournalError> {
     let (journal, generation, chain) = wire::decode_envelope(document, expected)?;
-    let (committed_reserved_units, committed_stage_fuel) = if expected.is_execution_profile() {
-        let fold = execution::validate(expected, journal.entries())?;
-        (fold.model_units, fold.stage_fuel)
-    } else {
-        (validate::validate(expected, journal.entries())?, 0)
-    };
+    let (committed_reserved_units, committed_stage_fuel, priced_totals) =
+        if expected.is_execution_profile() {
+            let fold = execution::validate(expected, journal.entries())?;
+            (fold.model_units, fold.stage_fuel, fold.priced)
+        } else {
+            (validate::validate(expected, journal.entries())?, 0, None)
+        };
     Ok(RecoveredSourceCheckpoint {
         journal,
         generation,
         chain,
         committed_reserved_units,
         committed_stage_fuel,
+        priced_totals,
     })
 }

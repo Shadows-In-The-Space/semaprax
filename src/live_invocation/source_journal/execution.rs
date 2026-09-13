@@ -19,6 +19,7 @@ pub(super) struct ExecutionFold {
     pub stages: u32,
     pub effects: u32,
     pub attempts: u32,
+    pub priced: Option<super::priced_v4::PricedTotalsV4>,
     roles: Vec<SourceStageRole>,
 }
 
@@ -311,8 +312,68 @@ fn check_terminal(
     Ok(())
 }
 
-/// Validates one v2 prefix and returns its one checked model/fuel fold.
+/// Validates one execution prefix.  V4 first folds its typed monetary rows,
+/// then projects only their causal work/usage shape into the unchanged V2
+/// execution grammar.  This preserves the legacy validator and wire exactly.
 pub(super) fn validate(
+    binding: &SourceInvocationBinding,
+    entries: &[SourceJournalEntry],
+) -> Result<ExecutionFold, SourceJournalError> {
+    let priced = binding.priced_binding();
+    let mut projected = Vec::with_capacity(entries.len());
+    for entry in entries {
+        match entry {
+            SourceJournalEntry::PricedAttemptIntent(intent) if priced.is_some() => {
+                projected.push(SourceJournalEntry::AttemptIntent {
+                    turn: intent.turn,
+                    attempt: intent.attempt,
+                    attempt_digest: binding.attempt_digest(
+                        intent.turn,
+                        intent.attempt,
+                        &intent.request_digest,
+                        &intent.prompt_digest,
+                        intent.request_bytes,
+                    ),
+                    request_digest: intent.request_digest.clone(),
+                    prompt_digest: intent.prompt_digest.clone(),
+                    request_bytes: intent.request_bytes,
+                    reserved_units: intent.reserved_units,
+                    response_limit: intent.response_limit,
+                });
+            }
+            SourceJournalEntry::PricedAttemptUsage(usage) if priced.is_some() => {
+                let reported = match &usage.usage {
+                    super::priced_v4::SourceUsageObservationV4::Unknown => None,
+                    super::priced_v4::SourceUsageObservationV4::Observed(value) => {
+                        Some(value.clone())
+                    }
+                };
+                projected.push(SourceJournalEntry::AttemptUsage {
+                    turn: usage.turn,
+                    attempt: usage.attempt,
+                    reported,
+                });
+            }
+            SourceJournalEntry::PricedAttemptIntent(_)
+            | SourceJournalEntry::PricedAttemptUsage(_) => {
+                return Err(SourceJournalError::Order);
+            }
+            SourceJournalEntry::AttemptIntent { .. } | SourceJournalEntry::AttemptUsage { .. }
+                if priced.is_some() =>
+            {
+                return Err(SourceJournalError::Order)
+            }
+            _ => projected.push(entry.clone()),
+        }
+    }
+    let mut fold = validate_inner(binding, &projected)?;
+    if let Some(pricing) = priced {
+        fold.priced = Some(super::priced_v4::fold(pricing, entries)?);
+    }
+    Ok(fold)
+}
+
+fn validate_inner(
     binding: &SourceInvocationBinding,
     entries: &[SourceJournalEntry],
 ) -> Result<ExecutionFold, SourceJournalError> {

@@ -18,8 +18,8 @@ use semaprax::agent_lifecycle::{AgentReadOperation, AuthorizedRequest, Lifecycle
 use semaprax::agent_runtime::AgentCancellation;
 use semaprax::digest_hex::LowerHex;
 use semaprax::live_invocation::source_journal::{
-    recover_source_checkpoint, RecoveredSourceCheckpoint, MAX_SOURCE_EFFECT_BYTES,
-    MAX_SOURCE_REQUEST_BYTES,
+    recover_source_checkpoint, RecoveredSourceCheckpoint, SourceInvocationBinding,
+    MAX_SOURCE_EFFECT_BYTES, MAX_SOURCE_REQUEST_BYTES,
 };
 use semaprax::live_invocation::{InvocationClock, ModelInvokeCapability, SourceInvocationClock};
 use semaprax::project::{with_authenticated_project, ProjectRevision};
@@ -115,9 +115,11 @@ impl Endpoint {
             max_total_steps: config.max_total_steps,
             program_root: Some(program_root),
         };
-        policy
-            .binding(&compiled, &task, budget)
-            .map_err(|_| CliError::refused("source execution policy refused"))?;
+        match config.pricing.as_ref() {
+            Some(pricing) => policy.binding_priced(&compiled, &task, budget, pricing),
+            None => policy.binding(&compiled, &task, budget),
+        }
+        .map_err(|_| CliError::refused("source execution policy refused"))?;
         Ok(Self {
             project_root,
             project,
@@ -128,6 +130,17 @@ impl Endpoint {
             budget,
             policy,
         })
+    }
+
+    fn binding(&self) -> Result<SourceInvocationBinding, CliError> {
+        match self.config.pricing.as_ref() {
+            Some(pricing) => {
+                self.policy
+                    .binding_priced(&self.compiled, &self.task, self.budget, pricing)
+            }
+            None => self.policy.binding(&self.compiled, &self.task, self.budget),
+        }
+        .map_err(|_| CliError::refused("source execution binding refused"))
     }
 
     fn migration_endpoint(&self) -> SourceLiveMigrationEndpoint<'_> {
@@ -171,8 +184,11 @@ fn source_error(failure: SourceLiveFailure) -> CliError {
         .checkpoint
         .as_ref()
         .map_or(0, RecoveredSourceCheckpoint::committed_stage_fuel);
+    let money = failure.checkpoint.as_ref().and_then(RecoveredSourceCheckpoint::priced_totals)
+        .map(|totals| format!("; currency={}; minor_unit_exponent={}; reserved_minor={}; observed_charge_minor={}; unknown_charge_reservation_minor={}; observed_over_reservation_minor={}; remaining_admission_minor={}", totals.currency, totals.minor_unit_exponent, totals.reserved_minor, totals.observed_charge_minor, totals.unknown_charge_reservation_minor, totals.observed_over_reservation_minor, totals.remaining_admission_minor))
+        .unwrap_or_default();
     CliError::detail(format!(
-        "checked source run failed; code={diagnostic_code}; selected={status}; acknowledged_generation={generation}; committed_model_units={units}; committed_stage_fuel={fuel}"
+        "checked source run failed; code={diagnostic_code}; selected={status}; acknowledged_generation={generation}; committed_model_units={units}; committed_stage_fuel={fuel}{money}"
     ))
 }
 
@@ -181,6 +197,29 @@ fn receipt(outcome: SourceLiveOutcome) -> Result<String, CliError> {
         .checkpoint
         .terminal_snapshot()
         .ok_or(CliError::refused("checked run has no terminal checkpoint"))?;
+    if let Some(money) = outcome.checkpoint.priced_totals() {
+        let receipt = serde_json::json!({
+            "schema": "semaprax.source-live-cli.receipt.v2",
+            "status": terminal.status().as_str(),
+            "invocation": outcome.checkpoint.invocation(),
+            "generation": outcome.checkpoint.generation(),
+            "chain": outcome.checkpoint.chain(),
+            "committed_model_units": outcome.checkpoint.committed_reserved_units(),
+            "committed_stage_fuel": outcome.checkpoint.committed_stage_fuel(),
+            "model_dispatches": outcome.model_dispatches,
+            "effect_dispatches": outcome.effect_dispatches,
+            "money": {
+                "currency": money.currency,
+                "minor_unit_exponent": money.minor_unit_exponent,
+                "reserved_minor": money.reserved_minor,
+                "observed_charge_minor": money.observed_charge_minor,
+                "unknown_charge_reservation_minor": money.unknown_charge_reservation_minor,
+                "observed_over_reservation_minor": money.observed_over_reservation_minor,
+                "remaining_admission_minor": money.remaining_admission_minor,
+            },
+        });
+        return Ok(format!("{receipt}\n"));
+    }
     Ok(format!(
         "{{\"schema\":\"semaprax.source-live-cli.receipt.v1\",\"status\":{},\"invocation\":{},\"generation\":{},\"chain\":{},\"committed_model_units\":{},\"committed_stage_fuel\":{},\"model_dispatches\":{},\"effect_dispatches\":{}}}\n",
         serde_json::to_string(terminal.status().as_str()).expect("static status"),
@@ -282,10 +321,7 @@ fn execute_run<R: OpenCodeRunner>(
     runner: R,
 ) -> Result<String, CliError> {
     let endpoint = Endpoint::load(SessionConfig::load(&config)?)?;
-    let binding = endpoint
-        .policy
-        .binding(&endpoint.compiled, &endpoint.task, endpoint.budget)
-        .map_err(|_| CliError::refused("source execution binding refused"))?;
+    let binding = endpoint.binding()?;
     let mut store = if fresh {
         CheckpointDir::fresh(&checkpoint, &endpoint.project_root)?
     } else {
@@ -324,19 +360,26 @@ fn execute_run<R: OpenCodeRunner>(
     .map_err(|_| CliError::refused("durable OpenCode source refused"))?;
     let mut read = ReadSnapshot(endpoint.read.clone());
     let cancellation = AgentCancellation::new();
-    let result = endpoint.compiled.run_live_durable(
-        SourceLiveRequest {
-            task: &endpoint.task,
-            budget: endpoint.budget,
-            policy: &endpoint.policy,
-            clock: &clock,
-            cancellation: &cancellation,
-            checkpoint: latest.as_deref(),
-        },
-        &mut source,
-        &mut read,
-        &mut store,
-    );
+    let request = SourceLiveRequest {
+        task: &endpoint.task,
+        budget: endpoint.budget,
+        policy: &endpoint.policy,
+        clock: &clock,
+        cancellation: &cancellation,
+        checkpoint: latest.as_deref(),
+    };
+    let result = match endpoint.config.pricing.as_ref() {
+        Some(pricing) => endpoint.compiled.run_live_durable_priced(
+            request,
+            pricing,
+            &mut source,
+            &mut read,
+            &mut store,
+        ),
+        None => endpoint
+            .compiled
+            .run_live_durable(request, &mut source, &mut read, &mut store),
+    };
     drop(source);
     result.map_err(source_error).and_then(receipt)
 }
@@ -355,6 +398,11 @@ fn execute_migrate<R: OpenCodeRunner>(
 ) -> Result<String, CliError> {
     let previous = Endpoint::load(SessionConfig::load(&previous_config)?)?;
     let mut destination = Endpoint::load(SessionConfig::load(&destination_config)?)?;
+    if previous.config.pricing.is_some() || destination.config.pricing.is_some() {
+        return Err(CliError::refused(
+            "priced checkpoint migration is not yet admitted",
+        ));
+    }
     if previous.task.objective != destination.task.objective
         || previous.task.budget != destination.task.budget
     {

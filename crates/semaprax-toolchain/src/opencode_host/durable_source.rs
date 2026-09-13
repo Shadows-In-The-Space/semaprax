@@ -144,12 +144,20 @@ impl<R: OpenCodeRunner> ProposalSource for OpenCodeDurableProposalSource<'_, R> 
                     if *entry_turn == turn && *entry_attempt == attempt
             );
         if settled_or_failed && !sink.poisoned() {
-            let usage_entry = SourceJournalEntry::AttemptUsage {
-                turn,
-                attempt,
-                reported: usage.map(source_usage),
-            };
-            if let Err(_) = sink.append_at(usage_entry, clock.now_millis()) {
+            // OpenCode's untyped cost number has no currency/scale binding.
+            // Retain explicit unknown monetary evidence rather than infer one.
+            let usage_entry = sink.priced_totals().and_then(|totals| {
+                if totals.is_some() {
+                    sink.priced_attempt_usage(turn, attempt, usage.map(source_usage),
+                        semaprax::live_invocation::source_journal::ProviderChargeObservation::Unknown)
+                } else {
+                    Ok(SourceJournalEntry::AttemptUsage { turn, attempt, reported: usage.map(source_usage) })
+                }
+            });
+            if usage_entry
+                .and_then(|entry| sink.append_at(entry, clock.now_millis()))
+                .is_err()
+            {
                 if result.is_ok() {
                     result = Err(vec![Diagnostic::io(
                         "SPX-I239",

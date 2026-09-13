@@ -1,4 +1,5 @@
 use super::*;
+use crate::live_invocation::pricing::ValidatedPricing;
 
 #[derive(Default)]
 struct Store(String);
@@ -36,6 +37,14 @@ fn seed() -> SourceInvocationSeed {
 }
 fn binding() -> SourceInvocationBinding {
     SourceInvocationBinding::bind_execution(seed(), &hash("evaluator-profile")).unwrap()
+}
+fn priced_binding() -> SourceInvocationBinding {
+    SourceInvocationBinding::bind_priced_execution(
+        seed(),
+        &hash("evaluator-profile"),
+        ValidatedPricing::new("operator_unit_v1".into(), "USD".into(), 2, 5, 30).unwrap(),
+    )
+    .unwrap()
 }
 fn stage(role: SourceStageRole, attempt: Option<u32>) -> SourceJournalEntry {
     SourceJournalEntry::StageReservation {
@@ -402,6 +411,179 @@ fn final_snapshot_binds_partial_progress_and_replays_as_opaque_receipt() {
     assert!(std::str::from_utf8(terminal.evidence())
         .unwrap()
         .contains("\"omitted_stage_rows\":1"));
+}
+
+#[test]
+fn priced_v4_full_checkpoint_round_trip_is_profile_bound_and_ordinal_strict() {
+    let binding = priced_binding();
+    let mut store = Store::default();
+    {
+        let mut sink = SourceCheckpointSink::new(&mut store, binding.clone());
+        begin(&mut sink);
+        let intent = sink
+            .attempt_intent(0, 0, hash("priced-request"), hash("priced-prompt"), 12)
+            .unwrap();
+        sink.append_at(intent, 4).unwrap();
+        sink.append_at(
+            SourceJournalEntry::AttemptSettled {
+                turn: 0,
+                attempt: 0,
+                response: b"proposal".to_vec(),
+                response_digest: source_response_digest(b"proposal"),
+            },
+            5,
+        )
+        .unwrap();
+        let usage = sink
+            .priced_attempt_usage(
+                0,
+                0,
+                Some(SourceReportedUsage {
+                    total: Some(11),
+                    input: Some(7),
+                    output: Some(4),
+                    reasoning: None,
+                    cache_read: None,
+                    cache_write: None,
+                }),
+                ProviderChargeObservation::Unknown,
+            )
+            .unwrap();
+        sink.append_at(usage, 5).unwrap();
+        sink.append_at(
+            SourceJournalEntry::ProposalAdmitted {
+                turn: 0,
+                attempt: 0,
+                proposal_digest: hash("priced-admitted"),
+            },
+            6,
+        )
+        .unwrap();
+        sink.append_at(stage(SourceStageRole::Authorize, Some(0)), 7)
+            .unwrap();
+        sink.append_at(
+            SourceJournalEntry::AuthorizationConsumed {
+                turn: 0,
+                attempt: 0,
+                grant_digest: hash("priced-grant"),
+            },
+            8,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::EffectIntent {
+                turn: 0,
+                attempt: 0,
+                operation: "read.fixture".into(),
+                request_digest: hash("priced-effect"),
+            },
+            9,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::EffectObserved {
+                turn: 0,
+                attempt: 0,
+                operation: "read.fixture".into(),
+                observation: b"result".to_vec(),
+                observation_digest: source_effect_digest(b"result"),
+            },
+            10,
+        )
+        .unwrap();
+        sink.append_at(stage(SourceStageRole::Reduce, Some(0)), 11)
+            .unwrap();
+        let carrier = b"true".to_vec();
+        sink.append_at(
+            SourceJournalEntry::Transition {
+                turn: 0,
+                attempt: 0,
+                case: SourceTransitionCase::Complete,
+                carrier_digest: digest(b"semaprax.agent-step.value.v2\0", &carrier),
+            },
+            12,
+        )
+        .unwrap();
+        let terminal = sink
+            .terminal_snapshot_entry(
+                Some(0),
+                SourceTerminalStatus::Complete,
+                Some(carrier),
+                SourceTerminalEvidenceInput {
+                    completed_stages: 4,
+                    omitted_stage_rows: 1,
+                    stage_rows: vec![
+                        summary(SourceStageRole::Initialize),
+                        summary(SourceStageRole::Observe),
+                        summary(SourceStageRole::Authorize),
+                    ],
+                    checked_run_evidence: None,
+                },
+            )
+            .unwrap();
+        sink.append_at(terminal, 12).unwrap();
+    }
+    let recovered = recover_source_checkpoint(&store.0, &binding).unwrap();
+    assert_eq!(recovered.committed_reserved_units(), 3);
+    assert_eq!(
+        recovered
+            .priced_totals()
+            .unwrap()
+            .unknown_charge_reservation_minor,
+        15
+    );
+    assert_eq!(
+        recover_source_checkpoint(&store.0, &self::binding()).unwrap_err(),
+        SourceJournalError::Malformed
+    );
+
+    let mut ordinal_store = Store::default();
+    let mut ordinal_sink = SourceCheckpointSink::new(&mut ordinal_store, binding.clone());
+    begin(&mut ordinal_sink);
+    assert_eq!(
+        ordinal_sink.append_at(
+            binding
+                .attempt_intent_at_ordinal(
+                    0,
+                    0,
+                    hash("priced-request"),
+                    hash("priced-prompt"),
+                    12,
+                    1
+                )
+                .unwrap(),
+            4,
+        ),
+        Err(SourceJournalError::Order)
+    );
+    let valid = ordinal_sink
+        .attempt_intent(0, 0, hash("priced-request"), hash("priced-prompt"), 12)
+        .unwrap();
+    ordinal_sink.append_at(valid, 4).unwrap();
+    ordinal_sink
+        .append_at(
+            SourceJournalEntry::AttemptSettled {
+                turn: 0,
+                attempt: 0,
+                response: b"proposal".to_vec(),
+                response_digest: source_response_digest(b"proposal"),
+            },
+            5,
+        )
+        .unwrap();
+    let wrong_currency = ordinal_sink
+        .priced_attempt_usage(
+            0,
+            0,
+            None,
+            ProviderChargeObservation::Observed {
+                currency: "EUR".into(),
+                minor_unit_exponent: 2,
+                amount_minor: 15,
+            },
+        )
+        .unwrap();
+    assert!(ordinal_sink.append_at(wrong_currency, 5).is_err());
 }
 
 #[test]

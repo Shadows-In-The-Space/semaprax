@@ -2,6 +2,8 @@
 //! The ordinary live API remains separate; unsupported sources fail closed.
 use super::*;
 mod migration;
+mod priced;
+pub use priced::SourceLivePricing;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -189,13 +191,24 @@ impl CompiledIterativeLifecycle {
         read: &mut dyn AgentReadOperation,
         store: &mut dyn CheckpointStore,
     ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
-        use crate::live_invocation::source_journal::{
-            recover_source_checkpoint, SourceJournalEntry,
-        };
         let binding = request
             .policy
             .binding(self, request.task, request.budget)
             .map_err(|error| SourceLiveFailure::initial(error, None))?;
+        self.run_live_durable_bound(request, source, read, store, binding)
+    }
+
+    fn run_live_durable_bound(
+        &self,
+        request: SourceLiveRequest<'_>,
+        source: &mut dyn driver::ProposalSource,
+        read: &mut dyn AgentReadOperation,
+        store: &mut dyn CheckpointStore,
+        binding: SourceInvocationBinding,
+    ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
+        use crate::live_invocation::source_journal::{
+            recover_source_checkpoint, SourceJournalEntry,
+        };
         let recovered = request
             .checkpoint
             .map(|document| recover_source_checkpoint(document, &binding))

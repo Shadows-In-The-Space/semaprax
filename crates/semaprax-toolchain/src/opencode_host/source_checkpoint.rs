@@ -66,22 +66,9 @@ impl<R: OpenCodeRunner> OpenCodeProposalSource<'_, R> {
         let turn = request.turn;
         let request_digest = request.digest();
         let prompt_digest = source_prompt_digest(prompt.as_bytes());
-        let intent = SourceJournalEntry::AttemptIntent {
-            turn,
-            attempt,
-            attempt_digest: binding.attempt_digest(
-                turn,
-                attempt,
-                &request_digest,
-                &prompt_digest,
-                prompt.len(),
-            ),
-            request_digest,
-            prompt_digest,
-            request_bytes: prompt.len(),
-            reserved_units: reservation_units,
-            response_limit: self.max_response_bytes,
-        };
+        let intent = sink
+            .attempt_intent(turn, attempt, request_digest, prompt_digest, prompt.len())
+            .map_err(|_| vec![checkpoint_diagnostic("intent_binding")])?;
         // Check causal phase and future capacity before charging the shared
         // ledger. `append_at` repeats this validation before its store write.
         sink.preflight_at(&intent, now)

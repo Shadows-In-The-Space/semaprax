@@ -29,13 +29,17 @@ every process attempt uses the fixed
 `opencode/muse-spark-1.3-contributor-free` profile without a paid fallback.
 Scratch must be a new empty absolute directory for each CLI invocation.
 
+Priced v2 migration is currently refused. It must not reinterpret an unpriced
+v2/v3 predecessor as zero-priced or silently shed unknown monetary exposure
+while the explicit priced handoff is incomplete.
+
 A crash after fresh directory creation but before its first journal ACK can
 leave an empty directory. Both `run` (existing directory) and `resume` (no
 latest journal) refuse it. An operator may use a different new directory
 only after independently establishing that no journal or provider work began;
 the CLI does not infer that fact from an empty directory.
 
-`CONFIG` is one canonical JSON object, at most 8192 bytes, with exactly these
+`CONFIG` is one canonical JSON object, at most 8192 bytes. Version 1 has exactly these
 keys: `schema` (`semaprax.source-live-cli.config.v1`), `manifest`,
 `source_path`, `agent_id`, `step_id`, `task_path`, `task_budget`, `read_path`,
 `deadline_millis`, `ceiling`, `reservation_units`, `max_iterations`,
@@ -49,6 +53,18 @@ are bounded to 65,536 bytes each. The observation file is an explicit fixed
 read snapshot, returned by the one injected `AgentReadOperation`; it is not a
 shell, test runner, candidate editor, or semantic validation tool.
 
+Version 2 is an additive priced route. It uses schema
+`semaprax.source-live-cli.config.v2`, retains every v1 key, and requires one
+additional exact `pricing` object with `currency` (three uppercase ASCII
+letters), `minor_unit_exponent` (`0..=9`), positive integer
+`price_per_work_unit_minor`, and nonnegative integer `money_ceiling_minor`.
+These are an operator quote in bound integer minor units for the fixed source
+work unit, never a provider price lookup, currency conversion, float-cost
+parser, or invoice. A v1 document with `pricing`, or a v2 document with a
+missing, extra, malformed, zero-price, negative, or noncanonical pricing
+field, is refused before checkpoint or provider activity; it cannot downgrade
+to the unpriced route.
+
 The host authenticates the retained Project, selects and checks its Agent
 role closure, derives its actual `ProgramRoot`, and derives the proposal
 grammar from the compiled source. The read snapshot bytes and fixed model are
@@ -59,6 +75,10 @@ are bound by the existing `SourceInvocationBinding`. Neither submitted model
 text nor the checkpoint document supplies those host facts. The unit is
 `fixed_model_attempt_units.v1`, charged once per acknowledged attempt intent;
 provider-reported counters remain optional observations, never billing proof.
+For v2, the paired price reservation is also acknowledged before dispatch.
+Current OpenCode cost JSON has no bound currency/minor-unit representation, so
+the host records explicit `Unknown` charge evidence instead of converting a
+float or manufacturing zero cost.
 
 ## Latest store, clock and migration claim
 
@@ -103,7 +123,7 @@ State is schema-checked before first Observe. No Initialize is repeated.
 
 ## Output and scope
 
-A completed run returns a bounded JSON receipt with terminal status,
+A completed unpriced run returns the v1 bounded JSON receipt with terminal status,
 invocation, generation, chain, acknowledged model units and stage fuel, and
 this traversal's model/effect dispatch counts. It does not include raw model
 text, credentials, provider stderr, or a publication grant. A failure reports
@@ -114,7 +134,20 @@ preview, repair feedback, and approval-bound publication remain issue #116's
 separate vertical-slice work. No live provider, hosted CI, durable power-loss,
 or exactly-once physical delivery claim follows from local injected tests.
 
-The selected `source_live_cli::tests` suite passed nine tests locally. Its
+A completed priced run returns
+`semaprax.source-live-cli.receipt.v2` with the same top-level status,
+invocation, generation, chain, `committed_model_units`,
+`committed_stage_fuel`, `model_dispatches`, and `effect_dispatches`, plus a
+`money` object containing exactly `currency`, `minor_unit_exponent`,
+`reserved_minor`, `observed_charge_minor`,
+`unknown_charge_reservation_minor`, `observed_over_reservation_minor`, and
+`remaining_admission_minor`. These values are replay-derived bound
+reservations and provider observations. They are neither a reconciled invoice
+nor a refund or payment authorization. A priced failure reports the same
+acknowledged monetary counters in its error detail. Terminal recovery returns
+the bound receipt without another provider call.
+
+The focused `source_live_cli` tests exercise local recorded execution. The
 retained-Project fixture sends a recorded OpenCode run/export through the
 actual source adapter, then checks terminal resume and changed read, task,
 or policy refusal with zero further calls. A second fixture executes checked

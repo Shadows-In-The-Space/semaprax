@@ -9,6 +9,7 @@ use crate::live_invocation::identity::unhex;
 const CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v1\0";
 const EXECUTION_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v2\0";
 const MIGRATED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v3\0";
+const PRICED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v4\0";
 
 fn kind(entry: &SourceJournalEntry) -> &'static str {
     match entry {
@@ -24,6 +25,8 @@ fn kind(entry: &SourceJournalEntry) -> &'static str {
         SourceJournalEntry::AttemptSettled { .. } => "attempt_settled",
         SourceJournalEntry::AttemptFailed { .. } => "attempt_failed",
         SourceJournalEntry::AttemptUsage { .. } => "attempt_usage",
+        SourceJournalEntry::PricedAttemptIntent(_) => "priced_attempt_intent",
+        SourceJournalEntry::PricedAttemptUsage(_) => "priced_attempt_usage",
         SourceJournalEntry::ProposalRefused { .. } => "proposal_refused",
         SourceJournalEntry::ProposalAdmitted { .. } => "proposal_admitted",
         SourceJournalEntry::AuthorizationConsumed { .. } => "authorization_consumed",
@@ -63,6 +66,10 @@ fn turn_attempt(entry: &SourceJournalEntry) -> (Option<u32>, Option<u32>) {
         | SourceJournalEntry::EffectObserved { turn, attempt, .. }
         | SourceJournalEntry::EffectFailed { turn, attempt, .. }
         | SourceJournalEntry::Transition { turn, attempt, .. } => (Some(*turn), Some(*attempt)),
+        SourceJournalEntry::PricedAttemptIntent(intent) => {
+            (Some(intent.turn), Some(intent.attempt))
+        }
+        SourceJournalEntry::PricedAttemptUsage(usage) => (Some(usage.turn), Some(usage.attempt)),
     }
 }
 
@@ -82,6 +89,11 @@ fn encode_usage(usage: &Option<SourceReportedUsage>) -> String {
 }
 
 fn encode_entry(entry: &SourceJournalEntry, seq: usize) -> String {
+    match entry {
+        SourceJournalEntry::PricedAttemptIntent(intent) => return intent.render(seq),
+        SourceJournalEntry::PricedAttemptUsage(usage) => return usage.render(seq),
+        _ => {}
+    }
     let (turn, attempt) = turn_attempt(entry);
     let mut output = format!("{{\"seq\":{},\"kind\":{}", seq, quote_json(kind(entry)));
     if let Some(turn) = turn {
@@ -91,6 +103,11 @@ fn encode_entry(entry: &SourceJournalEntry, seq: usize) -> String {
         output.push_str(&format!(",\"attempt\":{attempt}"));
     }
     let fields = match entry {
+        // Returned above so the typed V4 renderer remains the sole canonical
+        // encoding authority for its closed payloads.
+        SourceJournalEntry::PricedAttemptIntent(_) | SourceJournalEntry::PricedAttemptUsage(_) => {
+            unreachable!("priced entries returned from encode_entry before field rendering")
+        }
         SourceJournalEntry::MigrationOpened { handoff_digest } =>
             format!(",\"handoff_digest\":{}", quote_json(handoff_digest)),
         SourceJournalEntry::MigrationEvaluationIntent { fuel, .. } =>
@@ -204,7 +221,9 @@ pub(super) fn encode_envelope(
     }
     let entries = encode_entries(journal.entries())?;
     let link = digest(
-        if journal.binding.migration().is_some() {
+        if journal.binding.is_priced_profile() {
+            PRICED_CHAIN_DOMAIN
+        } else if journal.binding.migration().is_some() {
             MIGRATED_CHAIN_DOMAIN
         } else if journal.binding.is_execution_profile() {
             EXECUTION_CHAIN_DOMAIN
@@ -334,7 +353,11 @@ fn tag<T>(
     .ok_or(SourceJournalError::Malformed)
 }
 
-fn decode_entry(value: &Value, seq: usize) -> Result<SourceJournalEntry, SourceJournalError> {
+fn decode_entry(
+    value: &Value,
+    seq: usize,
+    expected: &SourceInvocationBinding,
+) -> Result<SourceJournalEntry, SourceJournalError> {
     let map = object(value)?;
     if usize_field(map, "seq")? != seq {
         return Err(SourceJournalError::Order);
@@ -377,7 +400,7 @@ fn decode_entry(value: &Value, seq: usize) -> Result<SourceJournalEntry, SourceJ
             observation: string(map, "observation")?,
             feedback: string(map, "feedback")?,
         },
-        "attempt_intent" => SourceJournalEntry::AttemptIntent {
+        "attempt_intent" if !expected.is_priced_profile() => SourceJournalEntry::AttemptIntent {
             turn: turn()?,
             attempt: attempt()?,
             attempt_digest: string(map, "attempt_digest")?,
@@ -399,11 +422,31 @@ fn decode_entry(value: &Value, seq: usize) -> Result<SourceJournalEntry, SourceJ
             reason: tag(map, "reason", SourceAttemptFailure::parse)?,
             attempted_bytes: usize_field(map, "attempted_bytes")?,
         },
-        "attempt_usage" => SourceJournalEntry::AttemptUsage {
+        "attempt_usage" if !expected.is_priced_profile() => SourceJournalEntry::AttemptUsage {
             turn: turn()?,
             attempt: attempt()?,
             reported: decode_usage(map)?,
         },
+        "priced_attempt_intent" if expected.is_priced_profile() => {
+            SourceJournalEntry::PricedAttemptIntent(
+                super::priced_v4::PricedAttemptIntentV4::decode(
+                    value,
+                    seq,
+                    expected
+                        .priced_binding()
+                        .ok_or(SourceJournalError::Binding)?,
+                )?,
+            )
+        }
+        "priced_attempt_usage" if expected.is_priced_profile() => {
+            SourceJournalEntry::PricedAttemptUsage(super::priced_v4::PricedAttemptUsageV4::decode(
+                value,
+                seq,
+                expected
+                    .priced_binding()
+                    .ok_or(SourceJournalError::Binding)?,
+            )?)
+        }
         "proposal_refused" => SourceJournalEntry::ProposalRefused {
             turn: turn()?,
             attempt: attempt()?,
@@ -531,7 +574,7 @@ pub(super) fn decode_envelope(
     }
     let mut entries = Vec::with_capacity(raw_entries.len());
     for (seq, item) in raw_entries.iter().enumerate() {
-        entries.push(decode_entry(item, seq)?);
+        entries.push(decode_entry(item, seq, expected)?);
     }
     let journal = SourceJournal {
         binding: expected.clone(),

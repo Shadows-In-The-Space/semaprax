@@ -373,8 +373,12 @@ fn expected_projection_source_boundary_is_pure_and_keeps_shared_helpers_in_root(
         include_str!("../../src/workspace_graph/expected_projection/statement_segment.rs");
     let projection_defaults =
         include_str!("../../src/workspace_graph/expected_projection/defaults.rs");
+    let projection_import_stub =
+        include_str!("../../src/workspace_graph/expected_projection/import_stub.rs");
+    let projection_uncached_peak =
+        include_str!("../../src/workspace_graph/expected_projection/uncached_peak.rs");
     let projection = format!(
-        "{projection_root}\n{projection_local_identity}\n{projection_call_identity}\n{projection_cost}\n{projection_declaration_cost}\n{projection_identity_slots}\n{projection_statement_segment}\n{projection_defaults}"
+        "{projection_import_stub}\n{projection_uncached_peak}\n{projection_root}\n{projection_local_identity}\n{projection_call_identity}\n{projection_cost}\n{projection_declaration_cost}\n{projection_identity_slots}\n{projection_statement_segment}\n{projection_defaults}"
     );
 
     assert!(root.contains("mod expected_projection;"));
@@ -384,11 +388,13 @@ fn expected_projection_source_boundary_is_pure_and_keeps_shared_helpers_in_root(
         // were exposed on `main`; the inventory had not been updated with them, so
         // this contract was already failing before this branch.
         "pub(super) mod cost;",
+        "pub(super) use uncached_peak::{initial_core_prebound, next_retention_prebound_with_uncached_peak};",
         "pub(super) struct SyntheticBuilderCosts {",
         "pub(super) raw_clone_and_hir: usize,",
         "pub(super) runtime: usize,",
         "pub(super) fn synthetic_builder_bytes(",
         "pub(super) fn checked_retention_prebound(",
+        "pub(super) fn checked_retention_prebound_with_uncached_peak(",
         "pub(super) fn retention_prebound_mode(",
         "pub(super) fn next_retention_prebound(",
         "pub(super) fn checked_builder_sum(left: usize, right: usize) -> Result<usize, Vec<Diagnostic>> {",

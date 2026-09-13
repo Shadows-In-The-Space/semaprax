@@ -682,3 +682,6 @@ fn suspended_retained_project_migrates_once_and_recovers_destination_without_dis
     .is_err());
     assert_eq!(new_calls.get(), 1);
 }
+
+#[path = "priced_tests.rs"]
+mod priced_tests;

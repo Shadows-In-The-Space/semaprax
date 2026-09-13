@@ -9,6 +9,8 @@
 mod adversarial_tests;
 #[path = "budget_boundaries.rs"]
 mod budget_boundaries;
+#[path = "priced_tests.rs"]
+mod priced_tests;
 
 use super::*;
 use crate::agent_lifecycle::iterative::driver::{ProposalRequest, ProposalSource};
@@ -127,7 +129,6 @@ impl ProposalSource for Source {
             .cloned()
             .unwrap_or_else(|| panic!("fixture source called beyond its scripted responses"));
         let identity = Self::identity(&request);
-        let binding = sink.journal().binding();
         let model_request = ModelInvocationRequest {
             turn: request.turn as u32,
             task: request.task.objective.clone(),
@@ -144,22 +145,15 @@ impl ProposalSource for Source {
                 model_dispatches: 0,
             };
         }
-        let intent = SourceJournalEntry::AttemptIntent {
-            turn: request.turn as u32,
-            attempt: request.attempt as u32,
-            attempt_digest: binding.attempt_digest(
+        let intent = sink
+            .attempt_intent(
                 request.turn as u32,
                 request.attempt as u32,
-                &identity.request_digest,
-                &identity.prompt_digest,
+                identity.request_digest,
+                identity.prompt_digest,
                 identity.request_bytes,
-            ),
-            request_digest: identity.request_digest,
-            prompt_digest: identity.prompt_digest,
-            request_bytes: identity.request_bytes,
-            reserved_units: binding.reservation_units(),
-            response_limit: binding.response_limit(),
-        };
+            )
+            .unwrap();
         let result = sink.append_at(intent, clock.now_millis()).and_then(|_| {
             sink.append_at(
                 SourceJournalEntry::AttemptSettled {

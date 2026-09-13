@@ -8,6 +8,17 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add an explicit priced source-journal v4 route and private CLI config/receipt
+  v2 (#113). Integer currency-bound reservations remain separate from work
+  quotas and provider observations; replay retains unknown exposure and refuses
+  quote drift. Legacy source profiles remain unchanged. Priced migration is
+  explicitly refused pending its cumulative monetary carry implementation.
+
+- Construct ordinary imported function stubs from signatures without cloning
+  discarded bodies (#124). Preserve fitting graph receipts and add an uncached
+  fallback charging retained HIR plus the peak of sequential synthetic ASTs,
+  within the existing builder limit; cached frontends retain summed charges.
+
 - Add opt-in, bounded current-thread workflow stage observations and an offline
   campaign runner; compare exact cold/warm frontend products and prepared
   traced/untraced products before timing. Measurements remain local evidence,

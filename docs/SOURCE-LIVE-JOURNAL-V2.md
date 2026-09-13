@@ -39,6 +39,15 @@ V2 uses the source execution schema
 generic live-invocation v1 wire and Source Live Journal v1's primitive schema.
 There is no implicit migration between these documents.
 
+The additive private v4 profile uses
+`semaprax.live-invocation.source-persisted-journal.v4` and distinct binding
+and chain domains. It leaves v1, v2, and v3 canonical bytes and decoders
+unchanged. V4 `PricedAttemptIntent` binds the existing work reservation with
+an exact integer minor-unit reservation and global money ordinal before
+dispatch. Its paired `PricedAttemptUsage` closes usage and charge evidence as
+`Unknown` or typed `Observed`; missing receipts and untyped provider costs stay
+`Unknown`, never inferred zero or float conversions.
+
 ## One checked loop, one journal, one ledger
 
 `run_live_durable` invokes the same checked source-loop stages as the ordinary
@@ -62,6 +71,14 @@ malformed proposals, provider failures, cancellation, deadline refusal, and
 unknown provider usage retain their committed amount. Provider usage is
 observational only; it does not establish billing, refund a reservation, or
 grant authority. Missing usage remains explicitly unknown.
+
+V4 replays pricing from validated durable intents and usages only.
+Reservations remain nonrefundable. An exact matching observed charge can
+expose overage but cannot credit capacity; later admission includes it.
+Recovery rejects changed pricing identity, mismatched ordinal or
+turn/attempt scope, duplicate usage, malformed currency/scale, and overflow.
+Its returned priced totals distinguish reserved, observed, and unknown
+reservation minor units; none is settlement or payment authority.
 
 ## Checkpoint-before-dispatch boundaries
 
@@ -136,6 +153,9 @@ filesystem, power-loss behavior, multi-writer coordination, remote-provider
 delivery proof, provider reconciliation, price lookup, exact billing, or hosted
 or live-provider evidence. Its correctness depends on a trusted latest-store
 load, exclusive writer control, and the host's restart-stable clock guarantee.
+The private CLI's v2 priced configuration selects the v4 route; direct resume
+of v1/v2/v3 under that configuration is refused. Priced migration remains
+explicitly unavailable pending its separate carry/handoff contract.
 Local executable gates:
 
 - `cargo test --locked -p semaprax --lib agent_lifecycle::iterative::` exercises

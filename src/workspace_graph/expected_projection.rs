@@ -28,10 +28,14 @@ mod declaration_cost;
 mod defaults;
 #[path = "expected_projection/identity_slots.rs"]
 mod identity_slots;
+#[path = "expected_projection/import_stub.rs"]
+mod import_stub;
 #[path = "expected_projection/local_identity.rs"]
 mod local_identity;
 #[path = "expected_projection/statement_segment.rs"]
 mod statement_segment;
+#[path = "expected_projection/uncached_peak.rs"]
+mod uncached_peak;
 use cost::{ExpandedDefaultCost, GenericInstanceCost, StructuralCost};
 use declaration_cost::{
     ast_field_cost, ast_function_contract_cost, ast_function_cost, ast_function_signature_cost,
@@ -42,12 +46,16 @@ use identity_slots::{
     ast_function_identity_slots, ast_program_identity_slots, ast_type_declaration_identity_slots,
     ast_type_identity_slots,
 };
+use uncached_peak::uncached_peak_prebound;
+pub(super) use uncached_peak::{initial_core_prebound, next_retention_prebound_with_uncached_peak};
 
 pub(super) struct SyntheticBuilderCosts {
     pub(super) raw_clone_and_hir: usize,
     retained_clone_and_hir: usize,
     transient_import_clone: usize,
     pub(super) runtime: usize,
+    retained_hir: usize,
+    synthetic_ast: usize,
 }
 
 pub(super) fn synthetic_builder_bytes(
@@ -86,11 +94,11 @@ fn synthetic_builder_bytes_scoped(
             // body reach the resolver exactly once, through the defining
             // module's own `ast_program_cost`.
             ast_function_signature_cost(function, &mut raw)?;
-            // The stub is built from `target_function.clone()`, so one
-            // provider contract and body are materialized transiently before
-            // the body is replaced. Only one such clone is live at a time, so
-            // the peak is the largest single import, charged once as raw AST
-            // bytes: no node of it ever becomes HIR.
+            // Preserve old fitting receipts even though ordinary stubs now
+            // clone only their signature. The historical transient-body debit
+            // remains conservative; only mode 4 removes its peak after all
+            // older estimates refuse. Intrinsic wrapper bodies are separately
+            // charged as retained runtime structures below.
             transient_import_clone =
                 transient_import_clone.max(ast_function_contract_cost(function)?.total);
             if programs
@@ -233,6 +241,13 @@ fn synthetic_builder_bytes_scoped(
         retained_clone_and_hir,
         transient_import_clone,
         runtime: runtime.total,
+        retained_hir: hir_upper,
+        synthetic_ast: checked_usage(
+            raw.total,
+            runtime.total,
+            "builder_bytes",
+            active_builder_limit(),
+        )?,
     })
 }
 
@@ -241,6 +256,18 @@ fn synthetic_builder_bytes_scoped(
 pub(super) fn checked_retention_prebound(
     programs: &[Program],
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
+) -> Result<(usize, usize), Vec<Diagnostic>> {
+    checked_retention_prebound_with_uncached_peak(programs, authored, false)
+}
+
+/// Modes zero through four preserve existing receipts. The uncached core
+/// builds and drops one synthetic AST per source, so only that construction
+/// work may use the final peak-only receipt. A semantic frontend stages those
+/// synthetic ASTs and must retain the ordinary summed receipts.
+pub(super) fn checked_retention_prebound_with_uncached_peak(
+    programs: &[Program],
+    authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
+    allow_uncached_peak: bool,
 ) -> Result<(usize, usize), Vec<Diagnostic>> {
     match retention_prebound(programs, authored, false) {
         Ok(costs) => Ok(costs),
@@ -251,7 +278,20 @@ pub(super) fn checked_retention_prebound(
                     match retention_prebound_mode(programs, authored, true, 2) {
                         Ok(costs) => Ok(costs),
                         Err(errors) if cost::is_builder_refusal(&errors) => {
-                            retention_prebound_mode(programs, authored, true, 3)
+                            match retention_prebound_mode(programs, authored, true, 3) {
+                                Err(errors) if cost::is_builder_refusal(&errors) => {
+                                    match retention_prebound_mode(programs, authored, true, 4) {
+                                        Err(errors)
+                                            if cost::is_builder_refusal(&errors)
+                                                && allow_uncached_peak =>
+                                        {
+                                            uncached_peak_prebound(programs, authored)
+                                        }
+                                        result => result,
+                                    }
+                                }
+                                result => result,
+                            }
                         }
                         Err(errors) => Err(errors),
                     }
@@ -262,6 +302,7 @@ pub(super) fn checked_retention_prebound(
         Err(errors) => Err(errors),
     }
 }
+
 fn retention_prebound(
     programs: &[Program],
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
@@ -312,7 +353,7 @@ pub(super) fn retention_prebound_mode(
             active_builder_limit(),
         )?;
     }
-    if layout_mode >= 3 {
+    if layout_mode == 3 {
         resolve = checked_usage(
             resolve,
             transient_peak,
@@ -328,23 +369,14 @@ pub(super) fn retention_prebound_mode(
 /// overflow. A refusal in one fallback is not authority to retry the same
 /// reservation or to skip an unrelated diagnostic. The caller owns attempt
 /// rollback and uses `layout_mode = 1` before the first retry, so modes 2
-/// and 3 are considered in order.
+/// through 4 are considered in order.
 pub(super) fn next_retention_prebound(
     programs: &[Program],
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     current: usize,
     layout_mode: &mut u8,
 ) -> Result<(usize, usize), Vec<Diagnostic>> {
-    while *layout_mode < 3 {
-        *layout_mode += 1;
-        match retention_prebound_mode(programs, authored, true, *layout_mode) {
-            Ok((resolve, total)) if resolve < current => return Ok((resolve, total)),
-            Ok(_) => continue,
-            Err(errors) if cost::is_builder_refusal(&errors) => continue,
-            Err(errors) => return Err(errors),
-        }
-    }
-    Err(vec![limit_error("builder_bytes", active_builder_limit())])
+    next_retention_prebound_with_uncached_peak(programs, authored, current, layout_mode, false)
 }
 
 /// A synthetic module retains its own declarations and explicit imported
@@ -830,16 +862,20 @@ pub(super) fn synthetic_program(
     {
         let target = &authored[module_use.persistent_id.as_str()];
         let target_function = target.function.expect("validated function target");
-        let mut function = target_function.clone();
-        function.name = crate::bounded_output::budgeted_clone(&module_use.alias);
-        if programs
+        let retain_body = programs
             .iter()
             .find(|provider| provider.module == target.module)
             .is_some_and(|provider| {
                 crate::vec_ops::source_wrapper(provider, target_function).is_some()
                     || crate::box_ops::source_wrapper(provider, target_function).is_some()
-            })
-        {
+            });
+        let mut function = if retain_body {
+            target_function.clone()
+        } else {
+            import_stub::signature(target_function)
+        };
+        function.name = crate::bounded_output::budgeted_clone(&module_use.alias);
+        if retain_body {
             synthetic.functions.push(function);
             continue;
         }

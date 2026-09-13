@@ -1,6 +1,7 @@
 use super::{
     checked_retention_prebound, dependency_identity_max, next_retention_prebound,
-    retention_prebound, retention_prebound_mode,
+    next_retention_prebound_with_uncached_peak, retention_prebound, retention_prebound_mode,
+    uncached_peak_prebound,
 };
 use crate::ast::Program;
 fn fixture(count: usize, padding: usize, reverse: bool) -> Vec<Program> {
@@ -132,6 +133,13 @@ fn transient_import_clones_have_one_sequential_peak_only_in_final_fallback() {
             .iter()
             .find(|function| function.name == "compute")
             .unwrap();
+        assert!(matches!(stub.body.kind, crate::ast::ExprKind::Int(0)));
+        let mut expected = programs[0].functions[0].clone();
+        expected.name = stub.name.clone();
+        expected.requires = Vec::new();
+        expected.ensures = Vec::new();
+        expected.body = stub.body.clone();
+        assert_eq!(*stub, expected, "ordinary import changed a signature field");
         assert!(stub.requires.is_empty() && stub.ensures.is_empty());
         assert_eq!(stub.requires.capacity(), 0);
         assert_eq!(stub.ensures.capacity(), 0);
@@ -166,10 +174,22 @@ fn transient_import_clones_have_one_sequential_peak_only_in_final_fallback() {
     super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(peak.1 - 1));
     let refusal = retention_prebound_mode(&programs, &authored, true, 3).unwrap_err();
     assert!(refusal.iter().all(|error| error.code == "SPX-G171"));
+    let signature_only = retention_prebound_mode(&programs, &authored, true, 4).unwrap();
+    assert!(signature_only.1 < peak.1);
+    super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(signature_only.1));
+    assert_eq!(
+        retention_prebound_mode(&programs, &authored, true, 4).unwrap(),
+        signature_only
+    );
+    super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(signature_only.1 - 1));
+    assert!(retention_prebound_mode(&programs, &authored, true, 4)
+        .unwrap_err()
+        .iter()
+        .all(|error| error.code == "SPX-G171"));
 }
 
 #[test]
-fn next_prebound_skips_non_tighter_receipts_and_exhausts_at_mode_three() {
+fn next_prebound_skips_non_tighter_receipts_and_exhausts_at_mode_four() {
     let programs = transient_fixture();
     let authored = super::super::index_authored(&programs).unwrap();
     let mode_two = retention_prebound_mode(&programs, &authored, true, 2).unwrap();
@@ -181,8 +201,75 @@ fn next_prebound_skips_non_tighter_receipts_and_exhausts_at_mode_three() {
         mode_three
     );
     assert_eq!(mode, 3);
+    let mode_four = retention_prebound_mode(&programs, &authored, true, 4).unwrap();
+    assert!(mode_four.0 < mode_three.0);
+    assert_eq!(
+        next_retention_prebound(&programs, &authored, mode_three.0, &mut mode).unwrap(),
+        mode_four
+    );
     let exhausted =
-        next_retention_prebound(&programs, &authored, mode_three.0, &mut mode).unwrap_err();
-    assert_eq!(mode, 3);
+        next_retention_prebound(&programs, &authored, mode_four.0, &mut mode).unwrap_err();
+    assert_eq!(mode, 4);
     assert!(exhausted.iter().all(|error| error.code == "SPX-G171"));
+}
+
+#[test]
+fn uncached_ast_peak_is_final_only_and_has_an_exact_bound() {
+    let programs = transient_fixture();
+    let authored = super::super::index_authored(&programs).unwrap();
+    let mode_four = retention_prebound_mode(&programs, &authored, true, 4).unwrap();
+    let peak = uncached_peak_prebound(&programs, &authored).unwrap();
+    assert!(peak.0 < mode_four.0);
+
+    let mut semantic_mode = 4;
+    assert!(
+        next_retention_prebound(&programs, &authored, mode_four.0, &mut semantic_mode).is_err()
+    );
+    assert_eq!(semantic_mode, 4);
+
+    let mut uncached_mode = 4;
+    assert_eq!(
+        next_retention_prebound_with_uncached_peak(
+            &programs,
+            &authored,
+            mode_four.0,
+            &mut uncached_mode,
+            true,
+        )
+        .unwrap(),
+        peak,
+    );
+    assert_eq!(uncached_mode, 5);
+
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(self.0));
+        }
+    }
+    let previous = super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.replace(peak.0));
+    let _restore = Restore(previous);
+    assert_eq!(uncached_peak_prebound(&programs, &authored).unwrap(), peak);
+    assert_eq!(
+        super::checked_retention_prebound_with_uncached_peak(&programs, &authored, true).unwrap(),
+        peak,
+    );
+    let ordinary_refusal = super::checked_retention_prebound(&programs, &authored).unwrap_err();
+    let cached_refusal =
+        super::checked_retention_prebound_with_uncached_peak(&programs, &authored, false)
+            .unwrap_err();
+    assert_eq!(
+        ordinary_refusal
+            .iter()
+            .map(|error| error.code)
+            .collect::<Vec<_>>(),
+        cached_refusal
+            .iter()
+            .map(|error| error.code)
+            .collect::<Vec<_>>(),
+    );
+    assert!(cached_refusal.iter().all(|error| error.code == "SPX-G171"));
+    super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(peak.0 - 1));
+    let refusal = uncached_peak_prebound(&programs, &authored).unwrap_err();
+    assert!(refusal.iter().all(|error| error.code == "SPX-G171"));
 }

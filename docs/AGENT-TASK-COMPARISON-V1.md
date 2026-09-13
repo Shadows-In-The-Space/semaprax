@@ -381,3 +381,11 @@ tokens from `output`; the derivation adds them back and retains every component
 The configured model identifies the CLI invocation; stream fields alone do not
 independently authenticate a provider identity. This supplementary report does
 not rewrite the original trial record or supply missing review/context metrics.
+
+Offline acceptance replay (`scripts/opencode_agent_task_pilot/replay.py`) binds
+the complete archived source inventory to its original run record and the frozen
+compiler hash. It restores the candidate in a temporary directory and records
+the existing task oracle in a separate, exclusive derivative. Original timeout
+records remain unchanged. Authority replay, blinded review time, and missing
+context or recovery measurements remain unavailable; this derivative does not
+make a pilot observation eligible.

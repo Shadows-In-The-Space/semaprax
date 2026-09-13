@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -11,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 from opencode_agent_task_pilot.evidence import stream_provider_usage
+from opencode_agent_task_pilot.replay import decode_sources
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location(
@@ -21,6 +24,17 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_replay_source_archive_rejects_escape_and_changed_bytes(self):
+        body = b"fn main() {}"
+        row = {"base64": base64.b64encode(body).decode(), "bytes": len(body),
+               "sha256": hashlib.sha256(body).hexdigest()}
+        self.assertEqual(decode_sources({"src/main.spx": row}), {"src/main.spx": body})
+        for path in ("../main.spx", "/main.spx", "src/../main.spx", "src//main.spx"):
+            with self.assertRaises(ValueError):
+                decode_sources({path: row})
+        with self.assertRaises(ValueError):
+            decode_sources({"src/main.spx": dict(row, sha256="0" * 64)})
+
     def test_policy_denies_network_subagents_and_external_paths(self):
         config = pilot.policy()
         self.assertEqual(config["model"], pilot.MODEL)

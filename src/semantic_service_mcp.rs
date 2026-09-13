@@ -298,6 +298,20 @@ fn tools() -> Vec<Value> {
             "required":["steps"],
             "additionalProperties":false
         })),
+        tool("workspace__compact_projection", "Compact one existing authoritative projection selected from the exact retained workspace generation. Source labels select retained Project bytes only; they are not host paths.", json!({
+            "type":"object",
+            "properties":{
+                "expected_workspace_revision":{"type":"string","maxLength":4096},
+                "profile":{"type":"string","maxLength":4096,"enum":["full-graph","agent-context-v2","task-context-v1","api-surface-v8-owned-data","candidate-semantic-delta-catalog","agent-definition-graph"]},
+                "encoding":{"type":"string","enum":["text","binary"]},
+                "source_path":{"type":"string","maxLength":4096},
+                "root":{"type":"string","maxLength":4096},
+                "candidate_capsule":{"type":"string","maxLength":67108864},
+                "agent_id":{"type":"string","maxLength":4096}
+            },
+            "required":["expected_workspace_revision","profile","encoding"],
+            "additionalProperties":false
+        })),
         tool("workspace__refresh", "Refresh from caller-owned canonical manifest and source bytes. Source paths are Project-relative identities, never host path selectors.", json!({
             "type":"object",
             "properties":{
@@ -332,6 +346,7 @@ fn tool_method(name: &str) -> Option<&'static str> {
         "workspace__validate_transaction_v2_workflow" => {
             Some("workspace/validate-transaction-v2-workflow")
         }
+        "workspace__compact_projection" => Some("workspace/compact-projection"),
         "workspace__refresh" => Some("workspace/refresh"),
         _ => None,
     }

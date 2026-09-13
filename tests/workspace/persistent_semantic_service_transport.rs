@@ -191,6 +191,7 @@ fn one_session_retains_one_generation_and_delegates_exact_query_and_transaction_
             "workspace/history-query",
             "workspace/validate-transaction",
             "workspace/validate-transaction-v2-workflow",
+            "workspace/compact-projection",
             "workspace/refresh",
             "shutdown"
         ])

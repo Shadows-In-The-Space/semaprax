@@ -13,7 +13,10 @@ use crate::interpreter::{
     self, PreparedCancellation, PreparedResolvedEvaluationOutcome, MAX_STEPS_LIMIT,
 };
 
-use super::PANIC_NORMALIZED_DIAGNOSTIC_CODE;
+use super::{
+    analysis_request::{bounded_hard_unit_name, preflight_hard_source_and_label},
+    PANIC_NORMALIZED_DIAGNOSTIC_CODE,
+};
 
 /// Explicit host authority to evaluate an admitted source entrypoint.
 ///
@@ -127,7 +130,7 @@ fn failure_report(
     max_steps: usize,
 ) -> ExecutionReport {
     ExecutionReport {
-        unit_name: unit_name.to_owned(),
+        unit_name: bounded_hard_unit_name(unit_name),
         ok: false,
         diagnostics,
         outcome: None,
@@ -138,7 +141,7 @@ fn failure_report(
 
 fn cancelled_report(unit_name: &str, max_steps: usize, before_step: usize) -> ExecutionReport {
     ExecutionReport {
-        unit_name: unit_name.to_owned(),
+        unit_name: bounded_hard_unit_name(unit_name),
         ok: true,
         diagnostics: Vec::new(),
         outcome: Some(ExecutionOutcome::Cancelled { before_step }),
@@ -165,6 +168,9 @@ pub fn execute_entry_source(
     let max_steps = options.max_steps;
     if cancellation.is_cancelled() {
         return cancelled_report(unit_name, max_steps, 0);
+    }
+    if let Err(diagnostic) = preflight_hard_source_and_label(unit_name, source) {
+        return failure_report(unit_name, vec![diagnostic], max_steps);
     }
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let program = crate::parse(source, unit_name).map_err(|item| vec![item])?;
@@ -235,7 +241,7 @@ pub fn execute_entry_source(
                 }
             };
             ExecutionReport {
-                unit_name: unit_name.to_owned(),
+                unit_name: bounded_hard_unit_name(unit_name),
                 ok: true,
                 diagnostics: Vec::new(),
                 outcome: Some(outcome),
@@ -306,6 +312,40 @@ mod tests {
             report.outcome,
             Some(ExecutionOutcome::Cancelled { before_step: 0 })
         );
+    }
+
+    #[test]
+    fn execution_preflights_source_and_label_caps_before_parsing() {
+        let oversized_label = "é".repeat(super::super::MAX_ANALYSIS_UNIT_NAME_BYTES + 1);
+        let label = execute_entry_source(
+            &ExecutionCapability::grant("embedded test"),
+            &oversized_label,
+            "not parseable source",
+            &ExecutionOptions::default(),
+            &ExecutionCancellation::new(),
+        );
+        assert!(!label.ok);
+        assert_eq!(
+            label.diagnostics[0].code,
+            super::super::SOURCE_LIMIT_DIAGNOSTIC_CODE
+        );
+        assert!(label.unit_name.len() <= super::super::MAX_ANALYSIS_UNIT_NAME_BYTES);
+        assert!(label.unit_name.is_char_boundary(label.unit_name.len()));
+
+        let oversized_source = "x".repeat(super::super::MAX_ANALYSIS_SOURCE_BYTES + 1);
+        let source = execute_entry_source(
+            &ExecutionCapability::grant("embedded test"),
+            "unit.spx",
+            &oversized_source,
+            &ExecutionOptions::default(),
+            &ExecutionCancellation::new(),
+        );
+        assert!(!source.ok);
+        assert_eq!(
+            source.diagnostics[0].code,
+            super::super::SOURCE_LIMIT_DIAGNOSTIC_CODE
+        );
+        assert_eq!(source.unit_name, "unit.spx");
     }
 
     #[test]

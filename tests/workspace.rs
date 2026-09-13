@@ -44,6 +44,8 @@ mod interface_artifact_facts;
 mod next_construct_query;
 #[path = "workspace/persistent_incremental_semantic_service.rs"]
 mod persistent_incremental_semantic_service;
+#[path = "workspace/persistent_semantic_service_compact_projection.rs"]
+mod persistent_semantic_service_compact_projection;
 #[path = "workspace/persistent_semantic_service_mcp.rs"]
 mod persistent_semantic_service_mcp;
 #[path = "workspace/persistent_semantic_service_transport.rs"]

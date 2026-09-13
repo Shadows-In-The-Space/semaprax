@@ -1,0 +1,241 @@
+{
+  "cases": [
+    {
+      "case": "examples/banking_ledger.spx",
+      "full": {
+        "bytes": 139770,
+        "sha256": "sha256:ed56d26ae5cedd7ee8d019646eafe023909d63020bf3d5c4b0077076dd834f14"
+      },
+      "projections": [
+        {
+          "compact": {
+            "bytes": 88586,
+            "sha256": "sha256:d73cb49cc4a44286505b65b74459841bba718861a0aea11d4f71a665084b8ca8"
+          },
+          "encoding": "text",
+          "replay": {
+            "bytes": 139770,
+            "sha256": "sha256:ed56d26ae5cedd7ee8d019646eafe023909d63020bf3d5c4b0077076dd834f14"
+          }
+        },
+        {
+          "compact": {
+            "bytes": 139129,
+            "sha256": "sha256:9ece9aa329a4595d4181ab6b81b16f42214d5c06cfb3f8bbd7f15b3397d9480c"
+          },
+          "encoding": "binary",
+          "replay": {
+            "bytes": 139770,
+            "sha256": "sha256:ed56d26ae5cedd7ee8d019646eafe023909d63020bf3d5c4b0077076dd834f14"
+          }
+        }
+      ],
+      "tokenizers": {
+        "cl100k_base": {
+          "encoding": "cl100k_base",
+          "token_ratios": {
+            "compact_text": 1.2360883580827564
+          },
+          "tokens": {
+            "compact_text": 46781,
+            "full": 37846
+          },
+          "version": "0.12.0",
+          "vocab_fingerprint": "sha256:a86973639e26516c66f95cab5ff8b9f16ccdf898968ea6bcd89d3e54f2042f3f",
+          "vocab_size": 100277
+        },
+        "o200k_base": {
+          "encoding": "o200k_base",
+          "token_ratios": {
+            "compact_text": 1.215193790453596
+          },
+          "tokens": {
+            "compact_text": 47124,
+            "full": 38779
+          },
+          "version": "0.12.0",
+          "vocab_fingerprint": "sha256:4b1a9844f30e3055f22aa578137518c8529991e55c12c8d7e25a81010617ccab",
+          "vocab_size": 200019
+        }
+      }
+    },
+    {
+      "case": "examples/http_app_routing.spx",
+      "full": {
+        "bytes": 610864,
+        "sha256": "sha256:5bed00626ae3547960aece42fbd2ee579d1903c2f80f7bbe4212ae31684380f5"
+      },
+      "projections": [
+        {
+          "compact": {
+            "bytes": 399030,
+            "sha256": "sha256:e606d2697afff2d3290e6ed7384fcb31a99192ce3eb2fa213516fd2dae6c2e75"
+          },
+          "encoding": "text",
+          "replay": {
+            "bytes": 610864,
+            "sha256": "sha256:5bed00626ae3547960aece42fbd2ee579d1903c2f80f7bbe4212ae31684380f5"
+          }
+        },
+        {
+          "compact": {
+            "bytes": 566677,
+            "sha256": "sha256:ae43f83bfe2af6c34d784c17192edd7b3318e60b7702f32accc1aeb0f9cb07d1"
+          },
+          "encoding": "binary",
+          "replay": {
+            "bytes": 610864,
+            "sha256": "sha256:5bed00626ae3547960aece42fbd2ee579d1903c2f80f7bbe4212ae31684380f5"
+          }
+        }
+      ],
+      "tokenizers": {
+        "cl100k_base": {
+          "encoding": "cl100k_base",
+          "token_ratios": {
+            "compact_text": 1.3622243777067977
+          },
+          "tokens": {
+            "compact_text": 220491,
+            "full": 161861
+          },
+          "version": "0.12.0",
+          "vocab_fingerprint": "sha256:a86973639e26516c66f95cab5ff8b9f16ccdf898968ea6bcd89d3e54f2042f3f",
+          "vocab_size": 100277
+        },
+        "o200k_base": {
+          "encoding": "o200k_base",
+          "token_ratios": {
+            "compact_text": 1.3401460118914408
+          },
+          "tokens": {
+            "compact_text": 221565,
+            "full": 165329
+          },
+          "version": "0.12.0",
+          "vocab_fingerprint": "sha256:4b1a9844f30e3055f22aa578137518c8529991e55c12c8d7e25a81010617ccab",
+          "vocab_size": 200019
+        }
+      }
+    },
+    {
+      "case": "examples/calculator-project/semaprax.toml",
+      "full": {
+        "bytes": 9893,
+        "sha256": "sha256:42b4e8300a4ffa0f42bca996d20210c3aca0f2899345b3ef948adc248e78069e"
+      },
+      "projections": [
+        {
+          "compact": {
+            "bytes": 7474,
+            "sha256": "sha256:264292caa0f0e303042d61e088f15112e32a22517b3a598fc3d1c72bf3cf7539"
+          },
+          "encoding": "text",
+          "replay": {
+            "bytes": 9893,
+            "sha256": "sha256:42b4e8300a4ffa0f42bca996d20210c3aca0f2899345b3ef948adc248e78069e"
+          }
+        },
+        {
+          "compact": {
+            "bytes": 11513,
+            "sha256": "sha256:c81e157b1d70a48996d5d4eca89536de23433ee9902f63145ae7ddf695b1c3eb"
+          },
+          "encoding": "binary",
+          "replay": {
+            "bytes": 9893,
+            "sha256": "sha256:42b4e8300a4ffa0f42bca996d20210c3aca0f2899345b3ef948adc248e78069e"
+          }
+        }
+      ],
+      "tokenizers": {
+        "cl100k_base": {
+          "encoding": "cl100k_base",
+          "token_ratios": {
+            "compact_text": 1.4424
+          },
+          "tokens": {
+            "compact_text": 3606,
+            "full": 2500
+          },
+          "version": "0.12.0",
+          "vocab_fingerprint": "sha256:a86973639e26516c66f95cab5ff8b9f16ccdf898968ea6bcd89d3e54f2042f3f",
+          "vocab_size": 100277
+        },
+        "o200k_base": {
+          "encoding": "o200k_base",
+          "token_ratios": {
+            "compact_text": 1.4383181277270924
+          },
+          "tokens": {
+            "compact_text": 3626,
+            "full": 2521
+          },
+          "version": "0.12.0",
+          "vocab_fingerprint": "sha256:4b1a9844f30e3055f22aa578137518c8529991e55c12c8d7e25a81010617ccab",
+          "vocab_size": 200019
+        }
+      }
+    },
+    {
+      "case": "examples/frame-payload-project/semaprax.toml",
+      "full": {
+        "bytes": 6615,
+        "sha256": "sha256:9399cfebe191b9a3182c2b73dc7beb4d6ea2ced87f0ab37000d6b2f6bb9d0926"
+      },
+      "projections": [
+        {
+          "compact": {
+            "bytes": 5471,
+            "sha256": "sha256:a2adb287f00de3636cd9e640c57eb7a7afca49140af6a8a3fa72d4d60ded45ad"
+          },
+          "encoding": "text",
+          "replay": {
+            "bytes": 6615,
+            "sha256": "sha256:9399cfebe191b9a3182c2b73dc7beb4d6ea2ced87f0ab37000d6b2f6bb9d0926"
+          }
+        },
+        {
+          "compact": {
+            "bytes": 8203,
+            "sha256": "sha256:4f507b19e0ab6ce8efe4a5196a8c2e700bd6e5957233b8e5a19b448e02aca1fd"
+          },
+          "encoding": "binary",
+          "replay": {
+            "bytes": 6615,
+            "sha256": "sha256:9399cfebe191b9a3182c2b73dc7beb4d6ea2ced87f0ab37000d6b2f6bb9d0926"
+          }
+        }
+      ],
+      "tokenizers": {
+        "cl100k_base": {
+          "encoding": "cl100k_base",
+          "token_ratios": {
+            "compact_text": 1.5169875424688561
+          },
+          "tokens": {
+            "compact_text": 2679,
+            "full": 1766
+          },
+          "version": "0.12.0",
+          "vocab_fingerprint": "sha256:a86973639e26516c66f95cab5ff8b9f16ccdf898968ea6bcd89d3e54f2042f3f",
+          "vocab_size": 100277
+        },
+        "o200k_base": {
+          "encoding": "o200k_base",
+          "token_ratios": {
+            "compact_text": 1.5100896860986548
+          },
+          "tokens": {
+            "compact_text": 2694,
+            "full": 1784
+          },
+          "version": "0.12.0",
+          "vocab_fingerprint": "sha256:4b1a9844f30e3055f22aa578137518c8529991e55c12c8d7e25a81010617ccab",
+          "vocab_size": 200019
+        }
+      }
+    }
+  ],
+  "schema": "semaprax.compact-projection-benchmark.v1"
+}

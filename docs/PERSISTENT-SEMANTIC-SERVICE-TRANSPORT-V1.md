@@ -60,6 +60,7 @@ workspace/query
 workspace/index-query
 workspace/history-query
 workspace/validate-transaction
+workspace/compact-projection
 workspace/refresh
 shutdown
 ```
@@ -100,6 +101,19 @@ containing canonical Universal Semantic Transaction v1 JSON. It returns the
 exact core impact, review, result, and evidence values and their existing
 digests plus the candidate revision. Validation does not adopt the candidate
 or change the service generation.
+
+`workspace/compact-projection` accepts `expected_workspace_revision`, one
+closed Compact Semantic Projection v1 profile, and `encoding` (`text` or
+`binary`). The only optional selectors are a retained `source_path` label and
+`root` for source-derived profiles, canonical candidate recovery bytes for the
+candidate-delta profile, and an admitted `agent_id` for the Agent Definition
+profile. The exact expected revision is selected before parsing or recovery.
+Source labels match only exact bytes already retained in that Project generation;
+they never select host paths. Full graph without a source label compacts the
+retained Project semantic graph. The route delegates to existing graph,
+task-context, Project API, candidate-delta, and Agent Definition producers,
+then returns text or hexadecimal binary with exact metadata. It adds no
+semantic producer or authority.
 
 `workspace/refresh` accepts exactly:
 
@@ -158,12 +172,14 @@ them.
 
 ## Focused evidence
 
-`tests/workspace/persistent_semantic_service_transport.rs`, registered only in
-the existing Workspace harness, covers one retained generation across repeated
+`tests/workspace/persistent_semantic_service_transport.rs` and
+`tests/workspace/persistent_semantic_service_compact_projection.rs`, registered
+only in the existing Workspace harness, cover one retained generation across repeated
 open/status/query/transaction calls; exact direct-core query and transaction
 parity; unchanged and changed refresh with cold equivalence; stale/failed
 refresh rollback and old-query staleness; closed protocol/lifecycle,
-malformed/unknown/oversized rejection and shutdown; a real long-running
+malformed/unknown/oversized rejection and shutdown; retained Project API compact
+projection parity; stale/unknown compact projection refusal; a real long-running
 `semaprax service` subprocess; bounded responses; complete unchanged fixture
 inventory; and continued frozen v5 protocol identity.
 

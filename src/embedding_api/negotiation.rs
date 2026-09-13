@@ -1,7 +1,7 @@
 //! Bounded, authority-free host feature negotiation.
 
 use super::{
-    cancelled_context_outcome, context_v2_source, ContextOutcome, ContextV2Options,
+    context_v2_source_with_request, AnalysisRequest, ContextOutcome, ContextV2Options,
     EmbeddingApiVersion, EmbeddingCancellation, EMBEDDING_API_VERSION,
 };
 use crate::diagnostic::Diagnostic;
@@ -18,6 +18,7 @@ pub const SUPPORTED_FEATURES: &[&str] = &[
     "project-candidate-v2",
     "deterministic-i64-entry-v1",
     "context-cancellation-v1",
+    "bounded-analysis-request-v1",
     "project-pre-cancellation-v1",
 ];
 
@@ -68,8 +69,9 @@ pub fn negotiate_features(
     })
 }
 
-/// Sample cancellation before analysis and before returning a successful v2
-/// context report. Graph traversal itself has no interruption hook.
+/// Backward-compatible v2 context cancellation wrapper. New callers can use
+/// [`AnalysisRequest`] with every stateless analysis operation. Graph traversal
+/// itself has no interruption hook.
 pub fn context_v2_source_with_cancellation(
     unit_name: &str,
     source: &str,
@@ -77,15 +79,11 @@ pub fn context_v2_source_with_cancellation(
     options: &ContextV2Options,
     cancellation: &EmbeddingCancellation,
 ) -> ContextOutcome {
-    if cancellation.is_cancelled() {
-        return cancelled_context_outcome(unit_name, symbol);
-    }
-    let outcome = context_v2_source(unit_name, source, symbol, options);
-    if outcome.ok && cancellation.is_cancelled() {
-        cancelled_context_outcome(unit_name, symbol)
-    } else {
-        outcome
-    }
+    context_v2_source_with_request(
+        AnalysisRequest::new(unit_name, source).with_cancellation(cancellation),
+        symbol,
+        options,
+    )
 }
 
 #[cfg(test)]
@@ -94,22 +92,23 @@ mod tests {
 
     #[test]
     fn feature_negotiation_refuses_unknown_profiles_and_newer_versions() {
-        let selected = negotiate_features(1, 7, SUPPORTED_FEATURES).unwrap();
+        let selected = negotiate_features(2, 0, SUPPORTED_FEATURES).unwrap();
         assert_eq!(selected.version(), EMBEDDING_API_VERSION);
         assert!(selected.supports("project-candidate-v2"));
+        assert!(selected.supports("bounded-analysis-request-v1"));
         assert!(!selected.supports("ambient-network-v1"));
         for required in [&["project-candidate-v3"][..], &["context-v2"; 33][..]] {
             assert_eq!(
-                negotiate_features(1, 0, required).unwrap_err().code,
+                negotiate_features(2, 0, required).unwrap_err().code,
                 UNSUPPORTED_FEATURE_DIAGNOSTIC_CODE
             );
         }
         assert_eq!(
-            negotiate_features(1, u16::MAX, &[]).unwrap_err().code,
+            negotiate_features(2, u16::MAX, &[]).unwrap_err().code,
             super::super::VERSION_MISMATCH_DIAGNOSTIC_CODE
         );
         assert_eq!(
-            negotiate_features(2, 0, &[]).unwrap_err().code,
+            negotiate_features(1, 0, &[]).unwrap_err().code,
             super::super::VERSION_MISMATCH_DIAGNOSTIC_CODE
         );
     }

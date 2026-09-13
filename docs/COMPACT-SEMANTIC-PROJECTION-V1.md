@@ -95,15 +95,30 @@ revision, retained Project revision, candidate revision plus expected candidate
 digest, and AgentGraph digest; they do not accept a self-rehashed envelope as
 replay evidence.
 
-## Deliberately out of scope
+## Negotiation and transport
 
-Issue #201 additionally asks for byte/token benchmarks across multiple *model*
-tokenizer versions, version *negotiation* (as opposed to version *refusal*,
-which this module does implement), and CLI/MCP exposure. Those are not in this
-module. The selected profiles reuse existing authoritative producers and the
-unchanged bounded dictionary/text/binary codec. Selected replay adds exact
-regeneration equality (`SPX-Z910` on disagreement) to envelope integrity and
-profile/root/revision checks. It grants no candidate commit or runtime authority.
+`compact_semantic_projection::negotiation` selects only existing v1 text or
+binary encodings and the six implemented profile names. Both parties provide
+at most 16 explicit offers; an unknown version or profile refuses
+the exchange rather than falling back. The encoding is a closed Rust enum. Selection is deterministic across
+offer ordering: it chooses the lexicographically earliest common profile,
+then binary before text. Negotiation changes no codec or wire format.
+
+The CLI and retained semantic service expose these projections through the
+existing compiler producers. `compact graph <project>` also wraps the full
+retained Project graph with profile `full-graph`, root `*`, and Project revision;
+its reconstructed graph schema distinguishes it from a single-source graph.
+`semaprax compact ... --replay <wire>` reconstructs only after comparison with
+freshly selected content. MCP `workspace__compact_projection` uses the same
+`workspace/compact-projection` dispatcher and requires the exact active
+workspace revision. Caller source labels select retained Project sources;
+they cannot open host paths. See [Unified CLI v1](UNIFIED-CLI-V1.md) and
+[Semantic Service Transport v1](PERSISTENT-SEMANTIC-SERVICE-TRANSPORT-V1.md).
+
+The library exposes explicit format/encoding/profile negotiation, and the
+host-side `scripts/benchmark_compact_projection.py` measures actual tokenizer
+counts using cached, versioned encodings. Measurement evidence and its
+limitations are recorded below; byte compaction alone is not a token claim.
 
 ## Honesty bar: what "lossless" means here, exactly
 
@@ -123,9 +138,8 @@ dropped, summarized, or approximated.
 This module claims a materially smaller wire size **only where measured**
 below, not as a universal property, and it does not claim:
 
-- a real model tokenizer's token count (only wire bytes are measured here;
-  `crate::semantic_task_context` owns this repository's honestly-labeled
-  token-accounting units);
+- a universal token reduction or provider billing equivalence; the host-side
+  measurements below name exact encoding versions and vocabulary fingerprints;
 - that every profile or content shape compacts (a selected view with few
   repeated strings could compact only slightly, or -- for the binary
   form specifically -- not at all, see the measurements below);
@@ -224,3 +238,33 @@ network.
 `crate::graph::to_json`/`agent_context_v2_json`. [`decode_text`] and
 [`decode_binary`] take only byte/string slices. Nothing in this module
 opens a file, spawns a process, or contacts a network.
+
+## Offline model-token measurements (2026-09-13)
+
+The reproducible helper runs the actual CLI encoder and replay for both wire
+forms, compares reconstructed bytes with the ordinary graph command (allowing
+its one display newline), then measures UTF-8 text with cached `tiktoken 0.12.0`
+encodings. Socket connections are disabled while tokenizer assets load. The
+[complete local report](../benchmarks/compact-semantic-projection-v1/local-token-measurements.json)
+records exact content hashes and tokenizer vocabulary/pattern fingerprints.
+Binary bytes are measured as transport bytes, never decoded as model text.
+
+| Input | Full bytes | Text bytes | Binary bytes | cl100k full → text tokens | o200k full → text tokens |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `examples/banking_ledger.spx` | 139,770 | 88,586 | 139,129 | 37,846 → 46,781 | 38,779 → 47,124 |
+| `examples/http_app_routing.spx` | 610,864 | 399,030 | 566,677 | 161,861 → 220,491 | 165,329 → 221,565 |
+| `examples/calculator-project/semaprax.toml` | 9,893 | 7,474 | 11,513 | 2,500 → 3,606 | 2,521 → 3,626 |
+| `examples/frame-payload-project/semaprax.toml` | 6,615 | 5,471 | 8,203 | 1,766 → 2,679 | 1,784 → 2,694 |
+
+Text saves bytes on all four examples but **increases model tokens by 21–52%**.
+Binary is larger than ordinary JSON on both measured Projects. These results
+are a negative control against assuming byte savings imply token savings.
+Issue #201 remains open for a measured token-efficient representation; the
+current text form is a byte-compaction option, not a recommended model-token
+optimization. Neither measurement implies provider billing or model quality.
+
+Reproduce with an already installed `tiktoken` and cached encoding assets:
+
+```sh
+python3 scripts/benchmark_compact_projection.py --semaprax target/debug/semaprax --root . --output compact-measurements.json
+```

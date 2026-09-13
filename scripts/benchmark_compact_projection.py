@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Benchmark compact graph projections against full canonical graph output.
+
+This is measurement tooling only. It invokes an explicitly selected Semaprax
+CLI, replays each emitted wire document, and records byte/token measurements;
+it does not authorize, publish, or make billing decisions. Token counts come
+only from locally cached ``tiktoken`` encodings and are reported as evidence.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import socket
+import subprocess
+import sys
+import tempfile
+from typing import Any
+
+MAX_OUTPUT = 64 * 1024 * 1024
+CASES = (
+    "examples/banking_ledger.spx",
+    "examples/http_app_routing.spx",
+    "examples/calculator-project/semaprax.toml",
+    "examples/frame-payload-project/semaprax.toml",
+)
+ENCODINGS = ("cl100k_base", "o200k_base")
+
+
+def sha256(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def run_bounded(command: list[str], cwd: pathlib.Path, timeout: float) -> bytes:
+    with tempfile.TemporaryFile() as output:
+        try:
+            process = subprocess.Popen(command, cwd=cwd, stdout=output, stderr=subprocess.PIPE)
+        except OSError as error:
+            raise RuntimeError(f"failed to start CLI: {error}") from error
+        try:
+            _, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            process.kill()
+            process.communicate()
+            raise RuntimeError(f"CLI timed out after {timeout:g}s: {' '.join(command)}") from error
+        if process.returncode != 0:
+            detail = stderr.decode("utf-8", "replace")[:4096]
+            raise RuntimeError(f"CLI failed ({process.returncode}): {detail}")
+        output.seek(0, os.SEEK_END)
+        size = output.tell()
+        if size > MAX_OUTPUT:
+            raise RuntimeError(f"CLI output exceeded {MAX_OUTPUT} bytes")
+        output.seek(0)
+        return output.read()
+
+
+def tokenizer_fingerprint(encoding: Any) -> str:
+    ranks = getattr(encoding, "_mergeable_ranks", None)
+    specials = getattr(encoding, "_special_tokens", None)
+    pat_str = getattr(encoding, "_pat_str", None)
+    if ranks is None or specials is None or pat_str is None:
+        raise RuntimeError(f"encoding {encoding.name} does not expose stable rank tables")
+    rows = [[key.hex(), int(value)] for key, value in sorted(ranks.items())]
+    special_rows = [[key, int(value)] for key, value in sorted(specials.items())]
+    payload = json.dumps([pat_str, rows, special_rows], separators=(",", ":"), ensure_ascii=True).encode()
+    return sha256(payload)
+
+
+def tokenize_all(payloads: dict[str, bytes]) -> dict[str, dict[str, Any]]:
+    original_socket = socket.socket
+    class OfflineSocket(original_socket):
+        def connect(self, address: Any) -> None:
+            raise RuntimeError("network access is disabled for tokenizer loading")
+        def connect_ex(self, address: Any) -> int:
+            raise RuntimeError("network access is disabled for tokenizer loading")
+    socket.socket = OfflineSocket
+    try:
+        try:
+            import tiktoken
+        except ImportError as error:
+            raise RuntimeError("tiktoken is required and must already be installed") from error
+        result: dict[str, dict[str, Any]] = {}
+        for name in ENCODINGS:
+            try:
+                encoding = tiktoken.get_encoding(name)
+            except Exception as error:
+                raise RuntimeError(f"cached tokenizer asset unavailable for {name}: {error}") from error
+            result[name] = {
+                "version": getattr(tiktoken, "__version__", "unknown"),
+                "encoding": name,
+                "vocab_size": encoding.n_vocab,
+                "vocab_fingerprint": tokenizer_fingerprint(encoding),
+                "tokens": {label: len(encoding.encode(data.decode("utf-8"), disallowed_special=())) for label, data in payloads.items()},
+            }
+        return result
+    finally:
+        socket.socket = original_socket
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--semaprax", required=True, type=pathlib.Path, help="explicit Semaprax CLI executable")
+    parser.add_argument("--root", required=True, type=pathlib.Path, help="repository root containing benchmark cases")
+    parser.add_argument("--output", required=True, type=pathlib.Path, help="result JSON path")
+    parser.add_argument("--timeout", type=float, default=30.0, help="per CLI subprocess timeout in seconds")
+    args = parser.parse_args()
+    cli = args.semaprax.resolve()
+    root = args.root.resolve()
+    if not cli.is_file() or not os.access(cli, os.X_OK):
+        parser.error(f"--semaprax is not an executable file: {cli}")
+    if not root.is_dir():
+        parser.error(f"--root is not a directory: {root}")
+    rows = []
+    for relative in CASES:
+        case = root / relative
+        if not case.is_file():
+            raise RuntimeError(f"benchmark case is missing: {case}")
+        case_rows = []
+        payloads = {}
+        full = None
+        for encoding in ("text", "binary"):
+            encoded = run_bounded([str(cli), "compact", "graph", str(case), "--encoding", encoding], root, args.timeout)
+            with tempfile.NamedTemporaryFile(prefix="semaprax-compact-", suffix=".wire", delete=False) as wire:
+                wire_path = pathlib.Path(wire.name)
+                wire.write(encoded)
+            try:
+                replay = run_bounded([str(cli), "compact", "graph", str(case), "--encoding", encoding, "--replay", str(wire_path)], root, args.timeout)
+            finally:
+                wire_path.unlink(missing_ok=True)
+            if full is not None and full != replay:
+                raise RuntimeError(f"text and binary replay disagree for {relative}")
+            full = replay
+            case_rows.append({"encoding": encoding, "compact": {"sha256": sha256(encoded), "bytes": len(encoded)}, "replay": {"sha256": sha256(replay), "bytes": len(replay)}})
+            if encoding == "text":
+                payloads["compact_text"] = encoded
+        ordinary = run_bounded([str(cli), "graph", str(case)], root, args.timeout)
+        # The ordinary graph CLI adds one display LF after the canonical report.
+        if ordinary != full and ordinary != full + b"\n":
+            raise RuntimeError(f"compact replay differs from ordinary graph for {relative}")
+        payloads["full"] = full
+        token_data = tokenize_all(payloads)
+        for tokenizer in token_data.values():
+            full_tokens = tokenizer["tokens"]["full"]
+            tokenizer["token_ratios"] = {
+                label: (count / full_tokens if full_tokens else None)
+                for label, count in tokenizer["tokens"].items()
+                if label != "full"
+            }
+        rows.append({"case": relative, "full": {"sha256": sha256(full), "bytes": len(full)}, "projections": case_rows, "tokenizers": token_data})
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps({"schema": "semaprax.compact-projection-benchmark.v1", "cases": rows}, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except RuntimeError as error:
+        print(f"benchmark error: {error}", file=sys.stderr)
+        raise SystemExit(2)

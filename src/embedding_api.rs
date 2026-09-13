@@ -46,7 +46,7 @@
 //! multi-file Project handle, [`open_project_session`] owns only an in-memory
 //! [`ProjectSession`] backed by the existing semantic service; it accepts no
 //! ambient source provider and exposes no compiler internals. It is not a C
-//! ABI. See `docs/EMBEDDING-API-V1.md` for the complete scope statement and
+//! ABI. See `docs/EMBEDDING-API-V2.md` for the complete scope statement and
 //! nonclaims this module is honestly bounded by.
 //!
 //! # Panic normalization
@@ -69,6 +69,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::diagnostic::{Diagnostic, Severity};
 
+mod analysis_request;
 mod execution;
 mod negotiation;
 pub use negotiation::{
@@ -77,6 +78,12 @@ pub use negotiation::{
 };
 mod project_session;
 
+pub use analysis_request::{
+    check_source_with_request, context_source_with_request, context_v2_source_with_request,
+    format_source_with_request, graph_source_with_request, AnalysisOptions, AnalysisRequest,
+    MAX_ANALYSIS_SOURCE_BYTES, MAX_ANALYSIS_SYMBOL_BYTES, MAX_ANALYSIS_UNIT_NAME_BYTES,
+    SOURCE_LIMIT_DIAGNOSTIC_CODE,
+};
 pub use execution::{
     execute_entry_source, ExecutionCancellation, ExecutionCapability, ExecutionOptions,
     ExecutionOutcome, ExecutionReport,
@@ -98,9 +105,9 @@ pub const CANCELLATION_DIAGNOSTIC_CODE: &str = "SPX-EMB003";
 
 /// Monotonic host-owned cancellation signal for pure embedding requests.
 ///
-/// The compiler samples it before work and, for the cancellable context calls,
-/// again before returning a successful report. It is not a promise to interrupt
-/// parser/resolver internals mid-operation.
+/// An [`AnalysisRequest`] samples it before every stateless analysis operation
+/// and again before returning a successful report. It is not a promise to
+/// interrupt parser/resolver internals mid-operation.
 #[derive(Default)]
 pub struct EmbeddingCancellation {
     cancelled: AtomicBool,
@@ -126,10 +133,10 @@ impl EmbeddingCancellation {
 
 /// This embedding surface's own compatibility version — unrelated to any
 /// checked program's semantics. See "Compatibility policy" in
-/// `docs/EMBEDDING-API-V1.md`.
+/// `docs/EMBEDDING-API-V2.md`.
 pub const EMBEDDING_API_VERSION: EmbeddingApiVersion = EmbeddingApiVersion {
-    major: 1,
-    minor: 7,
+    major: 2,
+    minor: 0,
     patch: 0,
 };
 
@@ -148,7 +155,7 @@ impl EmbeddingApiVersion {
     /// this build's `check_source` contract. Only the major version is
     /// checked: `minor`/`patch` differences never change accepted inputs or
     /// [`CheckOutcome`]'s shape (see the compatibility policy in
-    /// `docs/EMBEDDING-API-V1.md`), while a differing major version is
+    /// `docs/EMBEDDING-API-V2.md`), while a differing major version is
     /// explicitly refused rather than silently assumed compatible.
     pub fn is_compatible_with(&self, requested_major: u16) -> bool {
         self.major == requested_major
@@ -283,7 +290,7 @@ fn check_with(checker: &dyn SourceChecker, unit_name: &str, source: &str) -> Che
 /// this call). See the module documentation for what this deliberately does
 /// not do (session lifecycle, multi-file Project load, execution, a C ABI).
 pub fn check_source(unit_name: &str, source: &str) -> CheckOutcome {
-    check_with(&StandardChecker, unit_name, source)
+    analysis_request::check_source(unit_name, source)
 }
 
 /// The closed outcome of canonically formatting one caller-supplied
@@ -379,7 +386,7 @@ fn format_with(formatter: &dyn SourceFormatter, unit_name: &str, source: &str) -
 /// [`crate::format::canonical`] renders the parsed AST directly and performs
 /// no HIR resolution.
 pub fn format_source(unit_name: &str, source: &str) -> FormatOutcome {
-    format_with(&StandardFormatter, unit_name, source)
+    analysis_request::format_source(unit_name, source)
 }
 
 /// The closed outcome of rendering one caller-supplied compilation unit's
@@ -489,7 +496,7 @@ fn graph_with(grapher: &dyn SourceGrapher, unit_name: &str, source: &str) -> Gra
 /// for why — so a host that also wants warnings should call [`check_source`]
 /// on the same `source`.
 pub fn graph_source(unit_name: &str, source: &str) -> GraphOutcome {
-    graph_with(&StandardGrapher, unit_name, source)
+    analysis_request::graph_source(unit_name, source)
 }
 
 /// One closed semantic facet admitted by [`ContextOptions`]. The names and
@@ -717,7 +724,7 @@ pub fn context_source(
     symbol: &str,
     options: &ContextOptions,
 ) -> ContextOutcome {
-    context_with(&StandardContexter, unit_name, source, symbol, options)
+    analysis_request::context_source(unit_name, source, symbol, options)
 }
 
 /// Run a bounded v1 context request with explicit cooperative cancellation.
@@ -733,28 +740,13 @@ pub fn context_source_with_cancellation(
     options: &ContextOptions,
     cancellation: &EmbeddingCancellation,
 ) -> ContextOutcome {
-    if cancellation.is_cancelled() {
-        return cancelled_context_outcome(unit_name, symbol);
-    }
-    let outcome = context_source(unit_name, source, symbol, options);
-    if outcome.ok && cancellation.is_cancelled() {
-        cancelled_context_outcome(unit_name, symbol)
-    } else {
-        outcome
-    }
-}
-
-fn cancelled_context_outcome(unit_name: &str, symbol: &str) -> ContextOutcome {
-    ContextOutcome {
-        unit_name: unit_name.to_owned(),
-        symbol: symbol.to_owned(),
-        ok: false,
-        diagnostics: vec![Diagnostic::io(
-            CANCELLATION_DIAGNOSTIC_CODE,
-            "embedding context request was cancelled before a report was returned",
-        )],
-        context_json: None,
-    }
+    analysis_request::context_source_with_cancellation(
+        unit_name,
+        source,
+        symbol,
+        options,
+        cancellation,
+    )
 }
 
 /// Closed traversal direction admitted by [`ContextV2Options`].
@@ -938,7 +930,7 @@ pub fn context_v2_source(
     symbol: &str,
     options: &ContextV2Options,
 ) -> ContextOutcome {
-    context_v2_with(&StandardV2Contexter, unit_name, source, symbol, options)
+    analysis_request::context_v2_source(unit_name, source, symbol, options)
 }
 
 #[cfg(test)]
@@ -1040,11 +1032,11 @@ mod tests {
 
     #[test]
     fn version_negotiation_accepts_matching_major_and_refuses_a_different_one() {
-        assert!(EMBEDDING_API_VERSION.is_compatible_with(1));
-        assert!(!EMBEDDING_API_VERSION.is_compatible_with(2));
+        assert!(EMBEDDING_API_VERSION.is_compatible_with(2));
+        assert!(!EMBEDDING_API_VERSION.is_compatible_with(1));
         assert!(!EMBEDDING_API_VERSION.is_compatible_with(0));
-        assert!(EMBEDDING_API_VERSION.require_compatible(1).is_ok());
-        let refusal = EMBEDDING_API_VERSION.require_compatible(2).unwrap_err();
+        assert!(EMBEDDING_API_VERSION.require_compatible(2).is_ok());
+        let refusal = EMBEDDING_API_VERSION.require_compatible(1).unwrap_err();
         assert_eq!(refusal.code, VERSION_MISMATCH_DIAGNOSTIC_CODE);
     }
 

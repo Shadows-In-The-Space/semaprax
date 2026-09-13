@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Expose compact projections through CLI replay and retained service/MCP routes,
+  with explicit format/profile negotiation and offline model-token measurement
+  tooling (#201). Introduce Rust embedding API v2 for mandatory analysis/execution input caps, add
+  cooperative request cancellation, and verify opaque session release (#203).
+
 - Add authoritative task-context, Project API, candidate-diff, and Agent graph
   compact profiles with regeneration-bound replay (#201). Extend Rust embedding
   negotiation, cancellation, and the external consumer (#203). Connect the

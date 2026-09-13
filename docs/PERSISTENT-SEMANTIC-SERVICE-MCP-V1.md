@@ -67,6 +67,7 @@ authority-free instructions.
 | `workspace__index_query` | `workspace/index-query` | `{query: string}` |
 | `workspace__history_query` | `workspace/history-query` | `{query: string}` |
 | `workspace__validate_transaction` | `workspace/validate-transaction` | `{transaction: string}` |
+| `workspace__compact_projection` | `workspace/compact-projection` | `{expected_workspace_revision: string, profile: closed compact-v1 profile, encoding: text|binary, source_path?: retained source label, root?: string, candidate_capsule?: canonical bytes, agent_id?: string}` |
 | `workspace__refresh` | `workspace/refresh` | `{expected_workspace_revision: string, manifest: string, sources: [{path: string, source: string}]}` |
 
 Each input schema is closed. The query and transaction strings retain their
@@ -75,6 +76,13 @@ Project source-count, source identity, source-byte, expected-revision, staged
 validation, and atomic generation/cache/index replacement rules. Its `path`
 members are Project-relative source identities interpreted by the core, not
 filesystem selectors exposed to the MCP host.
+
+Compact projection forwards unchanged through the same inner service
+dispatcher. It binds the supplied workspace revision before projection work.
+Its source label only selects exact bytes already retained in that
+generation, never a host path; its candidate capsule is restored against the
+same retained revision. It returns an authority-free compact envelope over
+existing kernels, as text or binary hex.
 
 `tools/call` forwards one private inner request with ID zero. Its MCP result has
 one text content item containing the complete existing service JSON-RPC
@@ -99,7 +107,7 @@ Service Transport v1 method boundary.
 ## Focused evidence
 
 `tests/workspace/persistent_semantic_service_mcp.rs`, registered in the existing
-Workspace harness, covers the lifecycle gate, exact seven-tool catalogue, retained
+Workspace harness, covers the lifecycle gate, exact eight-tool catalogue, retained
 revision across protocol/status/query, unavailable tools, and a real
 `semaprax service <project> --mcp` NDJSON subprocess.
 

@@ -6,6 +6,7 @@ use std::process::ExitCode;
 pub(crate) enum CommandId {
     Check,
     Graph,
+    Compact,
     Doc,
     Verify,
     Agent,
@@ -146,6 +147,7 @@ struct CommandSpec {
 }
 static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: CommandId::Check, canonical: "check", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax check [<file>|<dir>|semaprax.toml|--manifest-path path] [--json]"] },
+    CommandSpec { id: CommandId::Compact, canonical: "compact", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax compact graph|agent-definition <file> [--encoding text|binary] [--replay <encoded>]", "semaprax compact context|task-context <file> <stable-id> [--max-bytes N] [--max-tokens N (task-context only)] [--encoding text|binary] [--replay <encoded>]", "semaprax compact api-surface <project> [--encoding text|binary] [--replay <encoded>]", "semaprax compact candidate-diff <project> <capsule> [--encoding text|binary] [--replay <encoded>]"] },
     CommandSpec { id: CommandId::Graph, canonical: "graph", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax graph <file>"] },
     CommandSpec { id: CommandId::Doc, canonical: "doc", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax doc <file> [--json]"] },
     CommandSpec { id: CommandId::Verify, canonical: "verify", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax verify <file> <patch.spatch> <evidence.json>", "semaprax verify <root> <patch.wspatch>|<proposal.json> <evidence.json>", "semaprax verify <definition.json> <profile.json> <graph.json>", "semaprax verify <manifest> <image.json>"] },

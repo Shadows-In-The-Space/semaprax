@@ -114,6 +114,7 @@ use crate::diagnostic::Diagnostic;
 use crate::digest_hex::LowerHex;
 use crate::graph::{self, AgentContextV2Options};
 
+pub mod negotiation;
 mod selected;
 
 pub use selected::{

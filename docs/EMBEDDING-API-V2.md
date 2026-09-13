@@ -1,11 +1,7 @@
-# Embedding API v1
+# Embedding API v2
 
-Historical compatibility reference. Current bounded hosts use
-[Embedding API v2](EMBEDDING-API-V2.md); mandatory input caps require an explicit
-major-version migration.
-
-Status: versioned bounded reference; the completion matrix owns product
-status. First real slice of issue #203's compiler-embedding surface.
+Status: documented bounded Rust compiler-embedding facade, with local
+executable evidence. The completion matrix owns broader product status.
 
 Audience: host authors (editors, build systems, services, applications)
 embedding SEMAPRAX analysis in-process, and compiler contributors extending
@@ -51,9 +47,34 @@ Issue #203's "In scope" list, mapped to real code, as of this tranche:
 | Candidate validate/replay | `src/project/candidate/**` implements this for the Project workspace transaction path. | [`ProjectSession::validate_candidate_v2`](../src/embedding_api/project_session.rs) and [`ProjectSession::replay_candidate_v2`](../src/embedding_api/project_session.rs) return canonical authority-free reports over the active generation. |
 | Deterministic interpreter execution for admitted profiles | `interpreter`/`hosted_interpreter` exist. | [`execute_entry_source(capability, unit_name, source, options, cancellation)`](../src/embedding_api/execution.rs) executes only the existing prepared, zero-argument `i64` entrypoint profile. It requires [`ExecutionCapability`](../src/embedding_api/execution.rs), caller bounds, and a cooperative cancellation token; no source-native host effect receives a provider or ambient fallback. |
 | Explicit provider/capability injection | Done, for the vector-embedding effect only, by `semantic_embedding::EmbeddingCapability`/`EmbeddingProvider` (see above). | `check_source` needs no capability because checking is pure and effect-free; this bullet is satisfied for *this* operation by construction (nothing to inject authority into), not by adding an unnecessary capability type. |
-| Memory/resource ownership and cancellation | Not documented for any embedding surface. | Stateless analysis calls hold no resource across calls. A `ProjectSession` owns only in-memory compiler cache/service state and normal Rust drop releases it. [`EmbeddingCancellation`](../src/embedding_api.rs) pre-cancels Project opening/refresh and samples bounded context before work and before returning a successful report; it does not promise an unsafe mid-refresh interruption. [`ExecutionCancellation`](../src/embedding_api/execution.rs) cooperatively cancels the bounded interpreter call. |
+| Memory/resource ownership and cancellation | Not documented for any embedding surface. | Stateless analysis calls hold no resource across calls. Every check, format, graph, and context call has a fixed source/label admission cap; [`AnalysisRequest`](../src/embedding_api/analysis_request.rs) permits stricter caller caps and cooperative cancellation before work and before a successful report returns. A `ProjectSession` owns only in-memory compiler cache/service state and normal Rust drop releases it. [`EmbeddingCancellation`](../src/embedding_api.rs) pre-cancels Project opening/refresh. [`ExecutionCancellation`](../src/embedding_api/execution.rs) cooperatively cancels the bounded interpreter call. |
 | Version/feature negotiation | Not present for any embedding surface. | [`EMBEDDING_API_VERSION`](../src/embedding_api.rs), `EmbeddingApiVersion::is_compatible_with`, `require_compatible`, and `negotiate_features` check major/minimum minor and exact operation/profile names. Unknown features fail closed with `SPX-EMB004`. |
 | Thread-safety and reentrancy contract | Not documented. | `check_source` takes no shared or mutable state. `ProjectSession` makes no `Sync`, clone, reentrancy, or simultaneous-refresh promise; refresh/candidate validation take `&mut self`. A caught stateful-operation panic poisons the handle, requiring callers to drop and reopen it from explicit bytes. |
+
+## Bounded stateless analysis requests
+
+The convenience functions (`check_source`, `format_source`, `graph_source`,
+`context_source`, and `context_v2_source`) all first admit their caller bytes
+through fixed caps: at most 16 MiB of source and 4 KiB each of `unit_name`
+label and a context symbol selector. They return the stable `SPX-EMB005`
+capacity diagnostic before parsing when an input exceeds a bound. Refusal
+outcomes truncate echoed labels and symbols at their admitted UTF-8 boundary,
+so rejected caller strings cannot defeat those caps through report allocation.
+Labels remain diagnostic data only; this admission never treats one as a host
+path.
+
+A host that needs tighter per-request bounds or cooperative cancellation uses
+[`AnalysisRequest`](../src/embedding_api/analysis_request.rs) and
+[`AnalysisOptions`](../src/embedding_api/analysis_request.rs), then the matching
+`*_with_request` operation. Options may only tighten the fixed caps; an attempt
+to widen them fails with `SPX-EMB005`. `AnalysisRequest` borrows caller bytes,
+retains no compiler state, and is `Copy`, so it may be reused concurrently.
+
+Cancellation is sampled before parser work and once more before a successful
+report is returned. `SPX-EMB003` is then returned as a closed outcome. The
+existing parse, resolution, and graph kernels have no safe mid-operation
+cancellation callback; cancellation that races after work begins can discard a
+completed pure report, but does not claim to interrupt compiler internals.
 
 ## The `CheckOutcome` contract
 
@@ -211,13 +232,18 @@ option types or traversal state.
 
 ## Compatibility policy
 
-`EMBEDDING_API_VERSION` (currently `1.7.0`; `1.1.0` after `format_source`,
-`1.2.0` after `graph_source`, `1.3.0` after `context_source`, and `1.4.0`
-after `context_v2_source`, then `1.5.0` after `execute_entry_source`, and
-`1.6.0` after the Project session facade, and `1.7.0` after explicit
-version-refusal and pre-cancelled request entry points) names
-this Rust surface's own version,
-independent of any checked SEMAPRAX program's semantics.
+`EMBEDDING_API_VERSION` is `2.0.0`. Version 2 adds mandatory hard source,
+label, and context-symbol caps to every existing convenience call, including
+execution. Oversized inputs that version 1 did not explicitly refuse now
+return `SPX-EMB005`, and oversized refused labels/symbols are truncated safely.
+This narrows accepted inputs and changes refusal echoes, so it is a major
+compatibility change. A host requiring major 1 is refused with `SPX-EMB002`;
+there is no silent fallback to uncapped operations. Hosts can migrate to major
+2 and negotiate `bounded-analysis-request-v1` for the bounded request profile.
+
+The historical [v1 reference](EMBEDDING-API-V1.md) records the earlier additive
+check/format/graph/context/execution/session work. The Rust facade's version is
+independent of checked-program semantics and semantic report schema versions.
 `EmbeddingApiVersion::is_compatible_with(requested_major)` returns `true`
 only when `requested_major` equals this build's `major`; `require_compatible`
 turns a mismatch into the stable `SPX-EMB002` diagnostic rather than silently
@@ -226,19 +252,19 @@ when it was observed before a request starts, or (for pure context) before its
 successful report is returned; it never claims the graph/project kernels were
 interrupted mid-operation.
 `version_negotiation_accepts_matching_major_and_refuses_a_different_one`
-tests both a match (`1`) and two refusals (`0` and `2`). Within one major
+tests both a match (`2`) and two refusals (`0` and `1`). Within one major
 version, each existing function's accepted inputs and each existing outcome
-and options type's fields are additive-only: a future `1.x` may add a field
+and options type's fields are additive-only: a future `2.x` may add a field
 to an outcome type or a new function alongside them, but will not remove or
 repurpose an existing field, and will not change any existing function's
 signature. A breaking change to any of those requires bumping `major` and updating
 `EMBEDDING_API_VERSION` in the same change. Adding `graph_source` and then
 `context_source`, `context_v2_source`, and `execute_entry_source` are additive
-`1.x` changes: each
+historical `1.x` changes: each
 adds a new function and closed outcome/options type without changing an
 existing type or function's shape.
 
-## What this tranche deliberately does not do
+## Scope boundaries
 
 Naming every nonclaim explicitly, per this repository's honesty-bar
 convention:
@@ -256,7 +282,7 @@ convention:
   operation is admitted by this slice.
 - **No C ABI.** Issue #203 explicitly sequences a C ABI after "stable owned
   string/record/result conventions are selected" for the Rust surface. This
-  tranche is that Rust surface's first slice, not the ABI.
+  reference documents the Rust surface; no C ABI is claimed.
 - **No publication from a candidate report.** Candidate JSON/evidence returned
   by the session is authority-free. The facade provides no commit, publication,
   Git, filesystem, or generated-artifact authority.
@@ -310,7 +336,8 @@ historical count.
 [The standalone Rust consumer](../examples/embedding-api/README.md) imports
 only `semaprax::embedding_api` and exercises successful checking, exact
 canonical formatting and idempotence, graph identity, malformed-source
-diagnostics, retained warnings, and API-major rejection. Run it with
+diagnostics, retained warnings, bounded request options, API-major rejection,
+context, explicit execution, and an opaque Project session. Run it with
 `cargo run --locked --offline --manifest-path examples/embedding-api/Cargo.toml`.
 It has its own Cargo workspace and lockfile. Its dependency is a local path
 to the compiler checkout; this is local consumer evidence, not validation
@@ -325,9 +352,21 @@ capacity violation returns `SPX-EMB004`. The returned read-only `EmbeddingFeatur
 is availability information. Execution still requires `ExecutionCapability`.
 There is no implicit profile fallback or authority in this result.
 
-Both `context_source_with_cancellation` and
-`context_v2_source_with_cancellation` sample the monotonic host signal before
-analysis and before returning a successful report. Project open and refresh
-sample only before starting; cancellation never reports an uncommitted state
-after the persistent service has adopted a generation. A pre-cancelled refresh
-leaves its handle usable and its old revision intact.
+`AnalysisRequest::with_cancellation` samples the monotonic host signal before
+all stateless analysis operations and before returning a successful report.
+`context_source_with_cancellation` and `context_v2_source_with_cancellation`
+remain equivalent convenience wrappers for their context profiles. Project open
+and refresh sample only before starting; cancellation never reports an
+uncommitted state after the persistent service has adopted a generation. A
+pre-cancelled refresh leaves its handle usable and its old revision intact.
+
+Embedded execution also checks the fixed source and label caps before parsing,
+using `SPX-EMB005`. Pre-cancelled execution preserves its documented
+`Cancelled { before_step: 0 }` outcome and echoes only a bounded UTF-8 label.
+The fuel limit remains independent of input admission.
+
+The focused lifecycle regression observes an actual `Weak<ProjectRevision>`
+become unavailable after dropping its sole owning `ProjectSession`. The
+concurrent request regression requires two successful analyses with equal
+revision results. These are local Rust ownership/reentrancy checks, not FFI
+sanitizer or supported-platform evidence.

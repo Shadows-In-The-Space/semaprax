@@ -139,6 +139,7 @@ fn lifecycle_catalogue_and_tools_share_the_retained_authority_free_generation() 
             "workspace__history_query",
             "workspace__validate_transaction",
             "workspace__validate_transaction_v2_workflow",
+            "workspace__compact_projection",
             "workspace__refresh",
         ]
     );
@@ -152,6 +153,22 @@ fn lifecycle_catalogue_and_tools_share_the_retained_authority_free_generation() 
     let status = inner(&tool(&mut session, 4, "workspace__status", json!({})));
     assert_eq!(status["result"]["workspace_revision"], before);
     assert_eq!(status["result"]["payload"]["opened"], true);
+
+    let compact = tool(
+        &mut session,
+        40,
+        "workspace__compact_projection",
+        json!({
+            "expected_workspace_revision":&before,
+            "profile":"full-graph",
+            "encoding":"text",
+        }),
+    );
+    assert_eq!(compact["result"]["isError"], false);
+    let compact = inner(&compact);
+    assert_eq!(compact["result"]["authority"], false);
+    assert_eq!(compact["result"]["payload"]["authority"], false);
+    assert_eq!(compact["result"]["payload"]["profile"], "full-graph");
 
     let query = SemanticQuery::symbol(&before, "calculator.add").unwrap();
     let queried = tool(

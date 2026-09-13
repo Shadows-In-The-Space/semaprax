@@ -140,6 +140,11 @@ Proposal schema. It does not advertise durable checkpoint policy.
 `compact_semantic_projection/selected` wraps existing task, public API, candidate,
 and Agent graph producers and independently regenerates selected content on
 replay; encoded evidence cannot replace the owning compiler object.
+`semantic_service_transport/compact` selects from exact retained service
+snapshots and feeds the same codec; MCP forwards to that dispatcher.
+`cli/compact` owns explicit host input/replay paths and writes only stdout.
+`embedding_api/analysis_request` owns source/label/symbol preflight and bounded
+refusal echoes for stateless operations, with shared hard caps for execution.
 `embedding_api/project_session` exposes caller-owned source admission and the
 existing semantic service through opaque handles and canonical reports. It
 retains the service's staged refresh and replay boundaries; caught stateful

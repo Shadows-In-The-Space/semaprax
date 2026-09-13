@@ -313,6 +313,17 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
             print!("{output}");
             Ok(())
         }
+        CommandId::Compact => {
+            let options = cli::compact::parse(&args[1..])?;
+            let output = cli::compact::output(&options).map_err(|errors| report(&errors, false))?;
+            std::io::stdout()
+                .lock()
+                .write_all(&output)
+                .map_err(|error| {
+                    eprintln!("cannot write compact projection: {error}");
+                    1
+                })
+        }
         CommandId::Graph => {
             let path = cli::graph::parse(&args[1..])?;
             if let Some(output) =

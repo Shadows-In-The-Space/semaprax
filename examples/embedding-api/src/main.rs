@@ -5,8 +5,9 @@
 //! internals, the CLI, or the filesystem.
 
 use semaprax::embedding_api::{
-    check_source, context_source_with_cancellation, execute_entry_source, format_source,
-    graph_source, negotiate_features, open_project_session, EmbeddingCancellation, ExecutionCancellation,
+    check_source, check_source_with_request, context_source_with_cancellation,
+    execute_entry_source, format_source, graph_source, negotiate_features, open_project_session,
+    AnalysisOptions, AnalysisRequest, EmbeddingCancellation, ExecutionCancellation,
     ExecutionCapability, ExecutionOptions, ProjectSessionInput, ProjectSourceInput,
     EMBEDDING_API_VERSION,
 };
@@ -15,17 +16,27 @@ const SOURCE: &str =
     "module host.demo;\n\n@id(\"host.demo.main\")\nfn main() -> i64\n{\n    42\n}\n";
 
 fn main() {
-    assert!(EMBEDDING_API_VERSION.is_compatible_with(1));
+    assert!(EMBEDDING_API_VERSION.is_compatible_with(2));
     assert!(!EMBEDDING_API_VERSION.is_compatible_with(0));
-    assert!(!EMBEDDING_API_VERSION.is_compatible_with(2));
+    assert!(!EMBEDDING_API_VERSION.is_compatible_with(1));
     EMBEDDING_API_VERSION
-        .require_compatible(1)
-        .expect("the example is written for embedding API v1");
+        .require_compatible(2)
+        .expect("the example is written for embedding API v2");
 
-    negotiate_features(1, 7, &["context-v1", "project-session-v1", "deterministic-i64-entry-v1"])
-        .expect("the host supports every required operation profile");
+    negotiate_features(
+        2,
+        0,
+        &[
+            "context-v1",
+            "project-session-v1",
+            "deterministic-i64-entry-v1",
+        ],
+    )
+    .expect("the host supports every required operation profile");
 
-    let checked = check_source("host-demo.spx", SOURCE);
+    let request = AnalysisRequest::new("host-demo.spx", SOURCE)
+        .with_options(AnalysisOptions::new(4096, 128).expect("host analysis limits"));
+    let checked = check_source_with_request(request);
     assert!(
         checked.ok,
         "valid source was rejected: {:?}",
@@ -96,7 +107,11 @@ fn main() {
         &ExecutionOptions::default(),
         &ExecutionCancellation::new(),
     );
-    assert!(execution.ok, "execution failed: {:?}", execution.diagnostics);
+    assert!(
+        execution.ok,
+        "execution failed: {:?}",
+        execution.diagnostics
+    );
 
     let project_input = ProjectSessionInput::new(
         include_str!("../../../examples/calculator-project/semaprax.toml"),

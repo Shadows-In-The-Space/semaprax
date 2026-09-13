@@ -4,6 +4,7 @@ pub(crate) mod build;
 pub(crate) mod candidate_archive;
 pub(crate) mod candidate_git;
 pub(crate) mod change;
+pub(crate) mod compact;
 pub(crate) mod context;
 pub(crate) mod doc;
 pub(crate) mod draft_archive;

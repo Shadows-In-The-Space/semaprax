@@ -1,5 +1,7 @@
 //! Bounded authority-free JSON-lines adapter for one persistent semantic service.
 
+mod compact;
+
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 
@@ -176,6 +178,10 @@ impl SemanticWorkspaceStdioSession {
                     "value": exact_json(workflow.to_json())?,
                 }))
             }
+            "workspace/compact-projection" => {
+                self.require_open()?;
+                self.wrap(compact::project(&self.service, request.params)?)
+            }
             "workspace/refresh" => self.refresh(request.params),
             "shutdown" => {
                 require_no_params(request.params)?;
@@ -340,7 +346,8 @@ fn protocol() -> Value {
         "methods": [
             "service/protocol", "workspace/open", "workspace/status", "workspace/query",
             "workspace/index-query", "workspace/history-query", "workspace/validate-transaction",
-            "workspace/validate-transaction-v2-workflow", "workspace/refresh", "shutdown"
+            "workspace/validate-transaction-v2-workflow", "workspace/compact-projection",
+            "workspace/refresh", "shutdown"
         ],
         "nonclaims": [
             "no_filesystem_network_process_or_publication_authority",

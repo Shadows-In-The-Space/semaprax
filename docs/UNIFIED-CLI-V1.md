@@ -339,3 +339,39 @@ opens a socket. The fixture is limited to 1 MiB and eight connections;
 combined argv/stdin remains limited to 65,536 bytes. Successful `true` writes
 the settled success-only transcripts and exits zero; `false` exits one, and
 all failed outcomes publish no transcript.
+
+### Compact semantic views
+
+`semaprax compact` provides read-only dictionary projections and independently
+checked reconstruction through the existing compact projection codec:
+
+```sh
+semaprax compact graph <file|project> [--encoding text|binary]
+semaprax compact context <file> <stable-id> [--max-bytes N]
+semaprax compact task-context <file> <stable-id> [--max-bytes N] [--max-tokens N]
+semaprax compact api-surface <project>
+semaprax compact candidate-diff <project> <recovery-capsule.json>
+semaprax compact agent-definition <definition.json>
+```
+
+Every form admits `--encoding text|binary` (text by default) and
+`--replay <encoded-file>`. Without replay, stdout contains exactly the compact
+wire bytes. With replay, the command regenerates the selected view, verifies
+wire integrity and exact profile/root/revision binding, compares reconstructed
+content, then writes the full ordinary semantic view. Stale or self-rehashed
+alternate content fails closed; replay grants no write or commit authority.
+The encoding flag describes both the emitted format and the replay input.
+
+`graph` accepts either a single checked source or an authenticated Project's
+full graph. Both use the `full-graph` profile; the reconstructed graph's schema
+identifies its original semantic object, and its source revision is respectively
+the graph revision or Project revision. `api-surface` is specifically the
+Project v8 owned-data descriptor. Candidate capsules are restored against the
+live authenticated Project before selection. Agent definitions are compiled
+from explicitly supplied bytes. No compact index becomes an operation identity.
+
+Context uses forward depth one and at most 256 nodes; its default byte limit
+is 65,536. Task context creates one explicit root seed and delegates selection
+to the goal-aware compiler. Its default budget is 65,536 **byte-v1 units**, not
+model tokens. CLI `--max-tokens` changes that explicitly named accounting budget;
+model-token savings are measured separately by the benchmark helper.

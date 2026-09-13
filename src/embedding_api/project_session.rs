@@ -505,6 +505,20 @@ mod tests {
     }
 
     #[test]
+    fn dropping_session_releases_its_active_project_revision() {
+        let revision = {
+            let (session, outcome) = open_project_session(&input(APP));
+            assert!(outcome.ok, "{:?}", outcome.diagnostics);
+            let session = session.unwrap();
+            let revision =
+                std::sync::Arc::downgrade(session.service.active_generation().revision());
+            assert!(revision.upgrade().is_some());
+            revision
+        };
+        assert!(revision.upgrade().is_none());
+    }
+
+    #[test]
     fn refresh_keeps_the_old_generation_on_stale_or_invalid_input() {
         let (session, opened) = open_project_session(&input(APP));
         assert!(opened.ok, "{:?}", opened.diagnostics);

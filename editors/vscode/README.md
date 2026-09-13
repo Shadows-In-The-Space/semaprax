@@ -1,6 +1,9 @@
 # Semaprax for Visual Studio Code
 
-Official Visual Studio Code support for the Semaprax programming language.
+Official Visual Studio Code support for the Semaprax programming language, published by [Wavect GmbH](https://wavect.io).
+
+**Marketplace publisher:** Wavect  
+**Extension ID:** `wavect.semaprax`
 
 Semaprax is an experimental AI-agent-native systems programming language built around stable semantic identity, compiler-checked meaning, explicit effects, ownership, contracts, typed transformations, and reproducible source review.
 
@@ -127,6 +130,7 @@ Open the VS Code command palette and search for `SEMAPRAX:`. The extension curre
 - [Installation guide](https://github.com/wavect/semaprax/blob/main/docs/INSTALL.md)
 - [Agent quick reference](https://github.com/wavect/semaprax/blob/main/docs/AGENT-QUICK-REFERENCE.md)
 - [Issue tracker](https://github.com/wavect/semaprax/issues)
+- [Wavect GmbH](https://wavect.io)
 
 ## Deep technical notes and verification evidence
 

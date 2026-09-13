@@ -210,6 +210,16 @@ fn mismatch_factory(document: String) -> impl SourceAdapterFactory {
 #[test]
 fn direct_runtime_v2_streams_checked_source_proposals_before_effect_authorization() {
     let fixture = typed_fixture();
+    // The policy-enabled success run reports cost 1 per call; give its
+    // source policy explicit room for all three nonrefundable observations.
+    let path = fixture.0.join("src/app.spx");
+    let source = std::fs::read_to_string(&path).unwrap();
+    let priced = source.replace(
+        r#"\"max_usd_microunits\":0"#,
+        r#"\"max_usd_microunits\":10"#,
+    );
+    assert_ne!(priced, source);
+    std::fs::write(&path, priced).unwrap();
     with_authenticated_project(&fixture.0.join("semaprax.toml"), |snapshot| {
         let project = snapshot.retain_revision();
         let root = project.program_root()?;

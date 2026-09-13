@@ -22,6 +22,7 @@ mod data_exports;
 pub(crate) mod environment_io;
 mod filesystem_ops;
 mod filesystem_v2;
+mod filesystem_v3;
 mod function_value;
 #[cfg(any(test, feature = "unstable-wit-component-harness"))]
 mod generic_function_component_v9;
@@ -54,13 +55,6 @@ mod vec_ops;
 pub(crate) use vec_ops::program_uses_vec;
 mod box_ops;
 pub(crate) use box_ops::program_uses_box;
-
-pub use owned_data_public::{
-    emit_resolved_module_with_flat_owned_record_exports,
-    emit_resolved_module_with_nested_owned_record_exports,
-    emit_resolved_module_with_owned_data_exports,
-};
-
 #[cfg(any(test, feature = "unstable-wit-component-harness"))]
 pub(crate) use generic_function_component_v9::{
     emit_private_generic_function_core_v9,
@@ -85,6 +79,11 @@ pub(crate) use option_propagation_component_v10::{
     CANONICAL_EXPORT as OPTION_PROPAGATION_COMPONENT_CANONICAL_EXPORT_V10,
     SOURCE_V10 as OPTION_PROPAGATION_SOURCE_V10,
     STATUS_OUT_EXPORT as OPTION_PROPAGATION_COMPONENT_STATUS_OUT_EXPORT_V10,
+};
+pub use owned_data_public::{
+    emit_resolved_module_with_flat_owned_record_exports,
+    emit_resolved_module_with_nested_owned_record_exports,
+    emit_resolved_module_with_owned_data_exports,
 };
 #[cfg(any(test, feature = "unstable-wit-component-harness"))]
 pub(crate) use record_pattern_component_v8::{
@@ -990,6 +989,7 @@ pub(crate) fn emit_resolved_https_command_io_v1(
 
 pub use filesystem_ops::emit_resolved_filesystem_ops_v1;
 pub use filesystem_v2::emit_resolved_filesystem_ops_v2;
+pub use filesystem_v3::emit_resolved_filesystem_ops_v3;
 
 /// Emit the additive Project-v7 line-command boundary. Admission remains in
 /// the shared command profile; the backend adds range descriptors and the

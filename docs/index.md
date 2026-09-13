@@ -96,7 +96,8 @@ feature to targets or shapes excluded by its owning specification.
 - [Project Manifest v1](PROJECT-MANIFEST-V1.md): bounded multi-file input and
   build contract. Later manifest versions are additive specialized profiles,
   including [Useful Data v2 / Project v16](PROJECT-MANIFEST-V16.md) and
-  [Process I/O / Project v18](PROJECT-MANIFEST-V18.md).
+  [Process I/O / Project v18](PROJECT-MANIFEST-V18.md) and
+  [Checked filesystem outcomes / Project v19](PROJECT-MANIFEST-V19.md).
 - [Wasm Scalar Exports v1](WASM-SCALAR-EXPORTS-V1.md): generated JavaScript and
   TypeScript boundary for selected stable-ID scalar functions.
 - [Useful Text Consumer v1](USEFUL-TEXT-CONSUMER-V1.md) and

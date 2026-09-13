@@ -2188,47 +2188,8 @@ use nested_owned::{
     record_update_is_admitted, take_owned_place, update_owned_record,
 };
 
-/// Exact non-Copy sum profile admitted by Owned Byte Variant Algebra v1 plus
-/// the bounded concrete authored generic extension. Backend selection consumes
-/// the shared HIR classifier so it cannot reinterpret generic ownership.
-fn is_admitted_owned_byte_variant(declarations: &hir::DeclarationIndex, ty: &ResolvedType) -> bool {
-    if crate::iterator_ops::step_shape(declarations, ty) {
-        return true;
-    }
-    let ResolvedType::Nominal {
-        declaration,
-        arguments,
-    } = ty
-    else {
-        return false;
-    };
-    let Some(item) = declarations.declaration(declaration) else {
-        return false;
-    };
-    if item.kind != hir::DeclarationKind::Variant {
-        return false;
-    }
-    if (item.identity_origin == hir::IdentityOrigin::CompilerOwned
-        && hir::admitted_owned_byte_prelude_instance(declaration, arguments))
-        || hir::is_admitted_concrete_owned_byte_variant(declarations, ty)
-    {
-        return true;
-    }
-    if !arguments.is_empty() {
-        return false;
-    }
-    declarations
-        .variant_cases(declaration)
-        .is_some_and(|cases| {
-            cases
-                .iter()
-                .flat_map(|case| &case.fields)
-                .any(|field| field.ty == ResolvedType::Bytes)
-                && cases.iter().flat_map(|case| &case.fields).all(|field| {
-                    field.ty == ResolvedType::Bytes || is_admitted_resolved_scalar(&field.ty)
-                })
-        })
-}
+mod variant_admission;
+use variant_admission::{is_admitted_fieldless_variant, is_admitted_owned_byte_variant};
 
 fn concrete_variant_case_fields(
     declarations: &hir::DeclarationIndex,
@@ -2262,7 +2223,9 @@ fn variant_constructor_is_admitted(
     expression: &ResolvedExpr,
 ) -> bool {
     if !is_admitted_owned_byte_variant(declarations, &expression.ty)
-        || expression.ownership != hir::OwnershipMode::Own
+        || !(expression.ownership == hir::OwnershipMode::Own
+            || (expression.ownership == hir::OwnershipMode::Value
+                && is_admitted_fieldless_variant(declarations, &expression.ty)))
     {
         return false;
     }
@@ -2319,10 +2282,11 @@ fn variant_pattern_is_admitted(
     arms: &[hir::ResolvedMatchArm],
 ) -> bool {
     if !is_admitted_owned_byte_variant(declarations, ty)
-        || !matches!(
+        || !(matches!(
             mode,
             hir::ResolvedMatchMode::Own | hir::ResolvedMatchMode::Borrow
-        )
+        ) || (mode == hir::ResolvedMatchMode::Value
+            && is_admitted_fieldless_variant(declarations, ty)))
         || arms.is_empty()
     {
         return false;
@@ -4925,9 +4889,14 @@ impl Evaluator<'_> {
                             }
                         }
                         hir::ResolvedMatchMode::Value => {
-                            return Err(Flow::Guard(
-                                "owned byte variant reached a plain value match",
-                            ));
+                            if !is_admitted_fieldless_variant(self.declarations, &variant.ty)
+                                || !fields.is_empty()
+                                || !variant.fields.is_empty()
+                            {
+                                return Err(Flow::Guard(
+                                    "owned byte variant reached a plain value match",
+                                ));
+                            }
                         }
                     }
                     let base = environment.len();

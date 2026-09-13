@@ -1328,7 +1328,8 @@ pub(super) fn project_linker_name(profile: crate::project::ProjectProfile) -> &'
         crate::project::ProjectProfile::EnvironmentIoV1 => "Environment I/O v1 linker",
         crate::project::ProjectProfile::ProcessIoV1 => "Process I/O v1 linker",
         crate::project::ProjectProfile::FilesystemIoV1
-        | crate::project::ProjectProfile::FilesystemIoV2 => "Filesystem I/O v1 linker",
+        | crate::project::ProjectProfile::FilesystemIoV2
+        | crate::project::ProjectProfile::FilesystemIoV3 => "Filesystem I/O v1 linker",
         crate::project::ProjectProfile::ScalarV1 => "pure scalar linker",
         crate::project::ProjectProfile::UsefulTextConsumerV1 => "Useful Text Consumer linker",
         crate::project::ProjectProfile::UsefulDataV1

@@ -25,10 +25,9 @@ use super::{
     PROJECT_SCHEMA_V3, PROJECT_SCHEMA_V4, PROJECT_SCHEMA_V5, PROJECT_SCHEMA_V6, PROJECT_SCHEMA_V7,
     PROJECT_SCHEMA_V8, PROJECT_SCHEMA_V9,
 };
-use super::{PROJECT_SCHEMA_V14, PROJECT_SCHEMA_V15, PROJECT_SCHEMA_V16};
+use super::{PROJECT_SCHEMA_V14, PROJECT_SCHEMA_V15, PROJECT_SCHEMA_V16, PROJECT_SCHEMA_V19};
 use crate::diagnostic::Diagnostic;
 use crate::package_range;
-use crate::project::profile::PROJECT_PROFILE_FILESYSTEM_IO_V2;
 use crate::project::profile::PROJECT_PROFILE_USEFUL_DATA_V2;
 use crate::project::profile::{
     ProjectProfile, PROJECT_COMMAND_ADAPTER_CAPABILITIES_V2, PROJECT_COMMAND_INPUT_V1,
@@ -45,6 +44,7 @@ use crate::project::profile::{
 use crate::project::profile::{
     PROJECT_FILESYSTEM_CAPABILITIES_V1, PROJECT_PROFILE_FILESYSTEM_IO_V1,
 };
+use crate::project::profile::{PROJECT_PROFILE_FILESYSTEM_IO_V2, PROJECT_PROFILE_FILESYSTEM_IO_V3};
 
 /// The schema string of the extensible table layout.
 pub const PACKAGE_MANIFEST_SCHEMA: &str = "semaprax.manifest.v1";
@@ -433,6 +433,7 @@ fn structural_diagnostics(tables: &[Table<'_>]) -> Vec<Diagnostic> {
             | PROJECT_PROFILE_HTTPS_COMMAND_IO_V1
             | PROJECT_PROFILE_FILESYSTEM_IO_V1
             | PROJECT_PROFILE_FILESYSTEM_IO_V2
+            | PROJECT_PROFILE_FILESYSTEM_IO_V3
             | PROJECT_PROFILE_ENVIRONMENT_IO_V1
             | PROJECT_PROFILE_PROCESS_IO_V1
     );
@@ -487,6 +488,7 @@ fn structural_diagnostics(tables: &[Table<'_>]) -> Vec<Diagnostic> {
             PROJECT_PROFILE_ENVIRONMENT_IO_V1 => &PROJECT_ENVIRONMENT_CAPABILITIES_V1,
             PROJECT_PROFILE_PROCESS_IO_V1 => &PROJECT_PROCESS_CAPABILITIES_V1,
             PROJECT_PROFILE_FILESYSTEM_IO_V2 => &PROJECT_FILESYSTEM_CAPABILITIES_V1,
+            PROJECT_PROFILE_FILESYSTEM_IO_V3 => &PROJECT_FILESYSTEM_CAPABILITIES_V1,
             PROJECT_PROFILE_FILESYSTEM_IO_V1 => &PROJECT_FILESYSTEM_CAPABILITIES_V1,
             _ => &PROJECT_COMMAND_ADAPTER_CAPABILITIES_V2,
         };
@@ -557,6 +559,7 @@ fn structural_diagnostics(tables: &[Table<'_>]) -> Vec<Diagnostic> {
                     profile,
                     PROJECT_PROFILE_FILESYSTEM_IO_V1
                         | PROJECT_PROFILE_FILESYSTEM_IO_V2
+                        | PROJECT_PROFILE_FILESYSTEM_IO_V3
                         | PROJECT_PROFILE_ENVIRONMENT_IO_V1
                         | PROJECT_PROFILE_PROCESS_IO_V1
                 ))
@@ -584,6 +587,7 @@ fn structural_diagnostics(tables: &[Table<'_>]) -> Vec<Diagnostic> {
                 profile,
                 PROJECT_PROFILE_FILESYSTEM_IO_V1
                     | PROJECT_PROFILE_FILESYSTEM_IO_V2
+                    | PROJECT_PROFILE_FILESYSTEM_IO_V3
                     | PROJECT_PROFILE_ENVIRONMENT_IO_V1
                     | PROJECT_PROFILE_PROCESS_IO_V1
             )
@@ -688,6 +692,11 @@ fn lower_profile(
             ),
             ProjectProfile::FilesystemIoV2 => (
                 PROJECT_SCHEMA_V15,
+                None,
+                &PROJECT_FILESYSTEM_CAPABILITIES_V1,
+            ),
+            ProjectProfile::FilesystemIoV3 => (
+                PROJECT_SCHEMA_V19,
                 None,
                 &PROJECT_FILESYSTEM_CAPABILITIES_V1,
             ),
@@ -1333,6 +1342,7 @@ fn profile_by_name(name: &str) -> Option<ProjectProfile> {
         PROJECT_PROFILE_ENVIRONMENT_IO_V1 => ProjectProfile::EnvironmentIoV1,
         PROJECT_PROFILE_PROCESS_IO_V1 => ProjectProfile::ProcessIoV1,
         PROJECT_PROFILE_FILESYSTEM_IO_V2 => ProjectProfile::FilesystemIoV2,
+        PROJECT_PROFILE_FILESYSTEM_IO_V3 => ProjectProfile::FilesystemIoV3,
         PROJECT_PROFILE_FILESYSTEM_IO_V1 => ProjectProfile::FilesystemIoV1,
         _ => return None,
     })

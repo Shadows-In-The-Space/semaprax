@@ -279,6 +279,7 @@ impl ProjectRevision {
                 ProjectProfile::HttpsCommandIoV1 => "v13",
                 ProjectProfile::FilesystemIoV1 => "v14",
                 ProjectProfile::FilesystemIoV2 => "v15",
+                ProjectProfile::FilesystemIoV3 => "v19",
                 ProjectProfile::EnvironmentIoV1 => "v17",
                 ProjectProfile::ProcessIoV1 => "v18",
             };

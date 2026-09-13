@@ -42,6 +42,7 @@ pub const PROJECT_PROFILE_LANGUAGE_COMMAND_IO_V1: &str = "language-command-io.v1
 pub const PROJECT_PROFILE_LINE_COMMAND_IO_V1: &str = "line-command-io.v1";
 pub const PROJECT_PROFILE_NETWORK_COMMAND_IO_V1: &str = "network-command-io.v1";
 pub const PROJECT_PROFILE_FILESYSTEM_IO_V2: &str = "filesystem-io.v2";
+pub const PROJECT_PROFILE_FILESYSTEM_IO_V3: &str = "filesystem-io.v3";
 pub const PROJECT_PROFILE_FILESYSTEM_IO_V1: &str = "filesystem-io.v1";
 pub const PROJECT_FILESYSTEM_CAPABILITIES_V1: [&str; 2] = ["fs.read", "fs.write"];
 pub const PROJECT_PROFILE_HTTPS_COMMAND_IO_V1: &str = "https-command-io.v1";
@@ -107,6 +108,7 @@ pub enum ProjectProfile {
     HttpsCommandIoV1,
     FilesystemIoV1,
     FilesystemIoV2,
+    FilesystemIoV3,
     EnvironmentIoV1,
     ProcessIoV1,
     OwnedDataApiV1,
@@ -117,7 +119,10 @@ pub enum ProjectProfile {
 
 impl ProjectProfile {
     pub(crate) const fn is_filesystem(self) -> bool {
-        matches!(self, Self::FilesystemIoV1 | Self::FilesystemIoV2)
+        matches!(
+            self,
+            Self::FilesystemIoV1 | Self::FilesystemIoV2 | Self::FilesystemIoV3
+        )
     }
     pub(crate) const fn uses_useful_data_exports(self) -> bool {
         matches!(self, Self::UsefulDataV1 | Self::UsefulDataV2)
@@ -128,6 +133,7 @@ impl ProjectProfile {
             Self::UsefulDataV2
                 | Self::FilesystemIoV1
                 | Self::FilesystemIoV2
+                | Self::FilesystemIoV3
                 | Self::EnvironmentIoV1
                 | Self::ProcessIoV1
                 | Self::OwnedDataApiV1
@@ -151,6 +157,7 @@ impl ProjectProfile {
             Self::EnvironmentIoV1 => Some(PROJECT_PROFILE_ENVIRONMENT_IO_V1),
             Self::ProcessIoV1 => Some(PROJECT_PROFILE_PROCESS_IO_V1),
             Self::FilesystemIoV2 => Some(PROJECT_PROFILE_FILESYSTEM_IO_V2),
+            Self::FilesystemIoV3 => Some(PROJECT_PROFILE_FILESYSTEM_IO_V3),
             Self::FilesystemIoV1 => Some(PROJECT_PROFILE_FILESYSTEM_IO_V1),
             Self::HttpsCommandIoV1 => Some(PROJECT_PROFILE_HTTPS_COMMAND_IO_V1),
             Self::OwnedDataApiV1 => Some(PROJECT_PROFILE_OWNED_DATA_API_V1),

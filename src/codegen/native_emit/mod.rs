@@ -25,6 +25,7 @@ mod compiler;
 mod expression;
 mod filesystem_io;
 mod filesystem_io_v2;
+mod filesystem_io_v3;
 mod function_value;
 mod generic_record;
 mod generic_variant;
@@ -45,6 +46,7 @@ pub(super) use compiler::{
 };
 pub use filesystem_io::{emit_c_with_filesystem_io, emit_hir_c_with_filesystem_io};
 pub use filesystem_io_v2::{emit_c_with_filesystem_io_v2, emit_hir_c_with_filesystem_io_v2};
+pub use filesystem_io_v3::{emit_c_with_filesystem_io_v3, emit_hir_c_with_filesystem_io_v3};
 pub use http_io::{emit_c_with_https_io, emit_hir_c_with_https_io};
 pub(super) use literals::c_string;
 use nested_owned::{borrowed_aggregate_byte_paths, borrowed_aggregate_path_suffix};
@@ -105,6 +107,8 @@ pub(super) fn emit_hir_c_with_labels(
         filesystem_io::emit_runtime(&mut output, program);
     } else if output_profile == NativeOutputProfile::FilesystemCommandIoV2 {
         filesystem_io_v2::emit_runtime(&mut output, program);
+    } else if output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+        filesystem_io_v3::emit_runtime(&mut output, program);
     } else if output_profile == NativeOutputProfile::HttpsCommandIo {
         http_io::emit_runtime(&mut output, program);
     } else if output_profile == NativeOutputProfile::ProcessCommandIo {
@@ -186,6 +190,8 @@ pub(super) fn emit_hir_c_with_labels(
             filesystem_io::emit_runner(&mut output, symbol);
         } else if output_profile == NativeOutputProfile::FilesystemCommandIoV2 {
             filesystem_io_v2::emit_runner(&mut output, symbol);
+        } else if output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+            filesystem_io_v3::emit_runner(&mut output, symbol);
         } else if output_profile == NativeOutputProfile::HttpsCommandIo {
             http_io::emit_runner(&mut output, symbol);
             native_command_io::emit_process_adapter(&mut output);
@@ -330,7 +336,6 @@ fn emit_fixed_byte_array_declarations(
     }
     Ok(())
 }
-
 #[cfg_attr(
     not(test),
     allow(dead_code, reason = "resource preflight seam is exercised by tests")
@@ -349,7 +354,6 @@ pub(super) fn emit_native_prelude(
         StringRuntimeSelection::FROZEN,
     );
 }
-
 fn emit_native_prelude_profile(
     output: &mut impl COutput,
     resource_abi: &native_resource::NativeResourceAbi,
@@ -358,7 +362,6 @@ fn emit_native_prelude_profile(
 ) {
     emit_native_prelude_inner(output, resource_abi, program, false, false, strings);
 }
-
 fn emit_native_prelude_without_public_failure(
     output: &mut impl COutput,
     resource_abi: &native_resource::NativeResourceAbi,
@@ -374,7 +377,6 @@ fn emit_native_prelude_without_public_failure(
         StringRuntimeSelection::FROZEN,
     );
 }
-
 fn emit_native_prelude_inner(
     output: &mut impl COutput,
     resource_abi: &native_resource::NativeResourceAbi,
@@ -467,7 +469,6 @@ fn emit_native_prelude_inner(
         native_box::emit_runtime(output, program);
     }
 }
-
 fn program_uses_byte_data(program: &ResolvedProgram) -> bool {
     if crate::iterator_ops::resolved_program_uses_owned_iterator(program) {
         return true;
@@ -510,7 +511,6 @@ fn program_uses_byte_data(program: &ResolvedProgram) -> bool {
     crate::box_ops::resolved_program_uses_owned_payload(program)
         || crate::vec_ops::resolved_program_uses_owned_payload(program)
 }
-
 /// Whether any resolved signature, body, or contract admits an owned string
 /// value that lowers through the string runtime helpers.
 fn program_uses_strings(program: &ResolvedProgram, include_instances: bool) -> bool {

@@ -64,6 +64,7 @@ impl Emitter<'_> {
                 self.output,
                 if crate::environment_ops::is_environment(call.operation)
                     || crate::process_ops::is_process(call.operation)
+                    || call.operation == Op::FileWriteAtomicChecked
                 {
                     -1
                 } else {

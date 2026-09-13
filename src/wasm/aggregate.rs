@@ -17,6 +17,7 @@ pub(in crate::wasm) use function_value::{
     box_import_base, program_uses_owned_buffer, vec_import_base,
 };
 use function_value::{executable_functions, hex_execution_identity, program_uses_byte_range};
+mod filesystem_checked;
 mod filesystem_ops;
 mod filesystem_v2;
 mod generic_record;
@@ -1721,9 +1722,8 @@ fn emit_byte_exports_profile(
         http_io.then(|| super::http_io::intern_import_type(&mut types, &mut type_indexes));
     let filesystem_import_types = filesystem_ops
         .then(|| super::filesystem_ops::intern_import_types(&mut types, &mut type_indexes));
-    let filesystem_v2_types = command_io
-        .is_some_and(super::command_io::CommandPlan::is_filesystem_v2)
-        .then(|| super::filesystem_v2::intern_import_types(&mut types, &mut type_indexes));
+    let filesystem_versions =
+        super::filesystem_v3::ImportTypes::new(command_io, &mut types, &mut type_indexes);
     let process_import_types =
         process_io.then(|| super::process_io::intern_import_types(&mut types, &mut type_indexes));
     let environment_import_types = environment_io
@@ -1826,9 +1826,7 @@ fn emit_byte_exports_profile(
     if let Some(types) = &filesystem_import_types {
         super::filesystem_ops::emit_imports(&mut imports, types);
     }
-    if let Some(types) = &filesystem_v2_types {
-        super::filesystem_v2::emit_imports(&mut imports, types);
-    }
+    filesystem_versions.emit(&mut imports);
     if let Some(types) = &environment_import_types {
         super::environment_io::emit_imports(&mut imports, types);
     }

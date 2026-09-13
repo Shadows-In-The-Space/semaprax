@@ -38,16 +38,24 @@ pub(super) fn admit(
     crate::command_io_ops::validate_operation_profile(
         program,
         &function.id,
-        if manifest.project_profile() == ProjectProfile::FilesystemIoV2 {
-            crate::command_io_ops::CommandOperationProfile::FilesystemV2
-        } else {
-            crate::command_io_ops::CommandOperationProfile::FilesystemV1
+        match manifest.project_profile() {
+            ProjectProfile::FilesystemIoV3 => {
+                crate::command_io_ops::CommandOperationProfile::FilesystemV3
+            }
+            ProjectProfile::FilesystemIoV2 => {
+                crate::command_io_ops::CommandOperationProfile::FilesystemV2
+            }
+            _ => crate::command_io_ops::CommandOperationProfile::FilesystemV1,
         },
     )?;
-    if manifest.project_profile() == ProjectProfile::FilesystemIoV2 {
-        crate::wasm::emit_resolved_filesystem_ops_v2(program, entry).map(drop)
-    } else {
-        crate::wasm::emit_resolved_filesystem_ops_v1(program, entry).map(drop)
+    match manifest.project_profile() {
+        ProjectProfile::FilesystemIoV3 => {
+            crate::wasm::emit_resolved_filesystem_ops_v3(program, entry).map(drop)
+        }
+        ProjectProfile::FilesystemIoV2 => {
+            crate::wasm::emit_resolved_filesystem_ops_v2(program, entry).map(drop)
+        }
+        _ => crate::wasm::emit_resolved_filesystem_ops_v1(program, entry).map(drop),
     }
 }
 impl ProjectRevision {
@@ -57,10 +65,14 @@ impl ProjectRevision {
         max_steps: usize,
     ) -> Result<crate::interpreter::CommandEvaluation, Vec<Diagnostic>> {
         admit(&self.public_api_program, &self.manifest).map_err(|error| vec![error])?;
-        let emit = if self.manifest.project_profile() == ProjectProfile::FilesystemIoV2 {
-            crate::hosted_interpreter::execute_filesystem_command_v2
-        } else {
-            crate::hosted_interpreter::execute_filesystem_command
+        let emit = match self.manifest.project_profile() {
+            ProjectProfile::FilesystemIoV3 => {
+                crate::hosted_interpreter::execute_filesystem_command_v3
+            }
+            ProjectProfile::FilesystemIoV2 => {
+                crate::hosted_interpreter::execute_filesystem_command_v2
+            }
+            _ => crate::hosted_interpreter::execute_filesystem_command,
         };
         emit(
             &self.public_api_program,
@@ -72,10 +84,10 @@ impl ProjectRevision {
     }
     pub fn filesystem_c_source(&self) -> Result<String, Vec<Diagnostic>> {
         admit(&self.public_api_program, &self.manifest).map_err(|error| vec![error])?;
-        let emit = if self.manifest.project_profile() == ProjectProfile::FilesystemIoV2 {
-            crate::codegen::emit_hir_c_with_filesystem_io_v2
-        } else {
-            crate::codegen::emit_hir_c_with_filesystem_io
+        let emit = match self.manifest.project_profile() {
+            ProjectProfile::FilesystemIoV3 => crate::codegen::emit_hir_c_with_filesystem_io_v3,
+            ProjectProfile::FilesystemIoV2 => crate::codegen::emit_hir_c_with_filesystem_io_v2,
+            _ => crate::codegen::emit_hir_c_with_filesystem_io,
         };
         emit(
             &self.public_api_program,
@@ -85,10 +97,10 @@ impl ProjectRevision {
     }
     pub fn filesystem_wasm_module(&self) -> Result<Vec<u8>, Vec<Diagnostic>> {
         admit(&self.public_api_program, &self.manifest).map_err(|error| vec![error])?;
-        let emit = if self.manifest.project_profile() == ProjectProfile::FilesystemIoV2 {
-            crate::wasm::emit_resolved_filesystem_ops_v2
-        } else {
-            crate::wasm::emit_resolved_filesystem_ops_v1
+        let emit = match self.manifest.project_profile() {
+            ProjectProfile::FilesystemIoV3 => crate::wasm::emit_resolved_filesystem_ops_v3,
+            ProjectProfile::FilesystemIoV2 => crate::wasm::emit_resolved_filesystem_ops_v2,
+            _ => crate::wasm::emit_resolved_filesystem_ops_v1,
         };
         emit(
             &self.public_api_program,
@@ -114,7 +126,8 @@ mod tests {
     #[test]
     fn filesystem_v2_manifest_is_separate_from_frozen_v1() {
         let text = include_str!("../../std/fs/semaprax.toml")
-            .replace("filesystem-io.v1", "filesystem-io.v2");
+            .replace("semaprax.project.v19", "semaprax.project.v15")
+            .replace("filesystem-io.v3", "filesystem-io.v2");
         let manifest = ProjectManifest::parse(&text).unwrap();
         assert_eq!(manifest.schema(), super::super::PROJECT_SCHEMA_V15);
         assert_eq!(manifest.project_profile(), ProjectProfile::FilesystemIoV2);
@@ -124,7 +137,8 @@ mod tests {
     #[test]
     fn filesystem_manifest_retains_explicit_authority_without_web_exports() {
         let text = include_str!("../../std/fs/semaprax.toml")
-            .replace("filesystem-io.v2", "filesystem-io.v1");
+            .replace("semaprax.project.v19", "semaprax.project.v14")
+            .replace("filesystem-io.v3", "filesystem-io.v1");
         let manifest = ProjectManifest::parse(&text).expect("filesystem package manifest");
         assert_eq!(manifest.project_profile(), ProjectProfile::FilesystemIoV1);
         assert_eq!(manifest.schema(), super::super::PROJECT_SCHEMA_V14);
@@ -139,5 +153,16 @@ mod tests {
             &text.replace("web = []", "web = [\"std.fs.examples.roundtrip\"]")
         )
         .is_err());
+    }
+    #[test]
+    fn filesystem_v3_manifest_is_canonical_and_distinct() {
+        let text = include_str!("../../std/fs/semaprax.toml");
+        let manifest = ProjectManifest::parse(text).unwrap();
+        assert_eq!(manifest.schema(), super::super::PROJECT_SCHEMA_V19);
+        assert_eq!(manifest.project_profile(), ProjectProfile::FilesystemIoV3);
+        assert_eq!(manifest.to_canonical_toml(), text);
+        let prior =
+            ProjectManifest::parse(&text.replace("filesystem-io.v3", "filesystem-io.v2")).unwrap();
+        assert_eq!(prior.project_profile(), ProjectProfile::FilesystemIoV2);
     }
 }

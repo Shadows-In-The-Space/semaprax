@@ -2,10 +2,6 @@
 //!
 //! Human source supplies the revision. Resolved HIR supplies every semantic
 //! identity and fact in graph v10-v14; spans and display names are metadata only.
-
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt::Write;
-
 use crate::ast::{BinaryOp, Program, UnaryOp};
 use crate::bounded_output::BudgetedJoin as _;
 use crate::call_index::PersistentCallIndex;
@@ -18,6 +14,8 @@ use crate::hir::{
     ResolvedResourceDropKind, ResolvedStatement, ResolvedType, ResolvedTypeDeclarationKind,
     TypeFacts, ValueId,
 };
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fmt::Write;
 macro_rules! format {
     ($($argument:tt)*) => {
         crate::bounded_output::budgeted_format(format_args!($($argument)*))
@@ -28,6 +26,7 @@ mod agent_instances;
 mod environment;
 mod expression;
 mod filesystem;
+mod filesystem_outcome;
 mod function_values;
 mod owned_iterator;
 mod process;
@@ -35,11 +34,11 @@ use expression::expr_json;
 mod generic_instances;
 mod generic_mapping;
 use filesystem::string_array;
+use filesystem_outcome::graph_json;
 use generic_instances::legacy_graph_json;
 pub(crate) use generic_instances::to_legacy_hir_json;
 pub use generic_instances::{legacy_context_json, to_legacy_json, verify_json};
 pub(crate) use generic_mapping::requires_v35;
-use owned_iterator::graph_json;
 
 #[path = "graph/native_import.rs"]
 mod native_import;
@@ -1290,6 +1289,7 @@ pub(crate) fn reject_while_loop_evidence_schema(schema: &str) -> Result<(), Diag
             | "semaprax.graph.v43"
             | "semaprax.graph.v44"
             | "semaprax.graph.v45"
+            | "semaprax.graph.v46"
     ) {
         return Err(Diagnostic::io(
             "SPX-G410",

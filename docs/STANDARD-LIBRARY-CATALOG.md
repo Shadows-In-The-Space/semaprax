@@ -2370,7 +2370,7 @@ fn append_usize_right(value: usize, width: usize, fill: u8, output: own Writer) 
 
 ## `std.fs`
 
-Package `std/fs`, tier `hosted`, status partial. Required project profile: `filesystem-io.v2`. Dependency: `std.fs = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
+Package `std/fs`, tier `hosted`, status partial. Required project profile: `filesystem-io.v3`. Dependency: `std.fs = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
 
 ### `std.fs.file-info`
 
@@ -2378,6 +2378,19 @@ Package `std/fs`, tier `hosted`, status partial. Required project profile: `file
 record FileInfo {
     kind: usize,
     size: usize,
+}
+```
+
+### `std.fs.write-outcome`
+
+/ Publication outcome of one checked atomic replacement. Uncertain is not
+/ permission to retry: the host must resolve the attempted publication.
+
+```semaprax
+variant WriteOutcome {
+    Published,
+    NotPublished,
+    Uncertain,
 }
 ```
 
@@ -2433,6 +2446,17 @@ fn remove(path: own Path) -> usize
 
 ```semaprax
 fn write_atomic(path: own Path, writer: own Writer) -> usize
+    uses { fs.write }
+    requires path_valid(path)
+```
+
+### `std.fs.write-atomic-checked`
+
+/ Replace the target with the writer's logical prefix and retain the
+/ provider's closed publication outcome. ABI defects still fail closed.
+
+```semaprax
+fn write_atomic_checked(path: own Path, writer: own Writer) -> WriteOutcome
     uses { fs.write }
     requires path_valid(path)
 ```

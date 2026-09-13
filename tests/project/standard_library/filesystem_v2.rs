@@ -13,6 +13,29 @@ fn package(command: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn filesystem_v3_project_routes_retained_revision_to_all_backends() {
+    let manifest = filesystem::package("fs-v3-routing", "std.fs.tests.directory", false);
+    let text = std::fs::read_to_string(&manifest)
+        .unwrap()
+        .replace("filesystem-io.v1", "filesystem-io.v3");
+    std::fs::write(&manifest, &text).unwrap();
+    assert!(text.contains("filesystem-io.v3"));
+    let mut provider = FixtureFileProvider::new([], true).unwrap();
+    project::with_authenticated_project(&manifest, |snapshot| {
+        let run = snapshot.execute_filesystem_command(&mut provider, 1_000_000)?;
+        assert!(matches!(
+            run.outcome,
+            CommandEvaluationOutcome::ReturnedBool(true)
+        ));
+        assert!(!snapshot.filesystem_c_source()?.is_empty());
+        assert!(!snapshot.filesystem_wasm_module()?.is_empty());
+        Ok(())
+    })
+    .unwrap();
+    std::fs::remove_dir_all(manifest.parent().unwrap()).unwrap();
+}
+
+#[test]
 fn filesystem_v2_typed_fixture_transitions_and_raw_names() {
     for command in ["std.fs.tests.directory", "std.fs.tests.raw-names"] {
         let manifest = package(command);

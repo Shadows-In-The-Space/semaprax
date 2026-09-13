@@ -131,7 +131,15 @@ fn every_public_declaration_has_a_std_identity_contracts_examples_and_conformanc
         assert_eq!(entry, format!("{}.examples", package.module));
         assert_eq!(tests, format!("{}.tests", package.module));
         let package_root = root().join("std").join(&package.directory);
-        let conformance = std::fs::read_to_string(package_root.join("src/tests.spx")).unwrap();
+        let mut conformance = std::fs::read_to_string(package_root.join("src/tests.spx")).unwrap();
+        // The V3 execution gate uses a compact separate source closure so the
+        // default std.fs Project stays within its graph construction budget.
+        // Include that actual conformance source in this declaration audit.
+        if package.module == "std.fs" {
+            conformance.push_str(include_str!(
+                "standard_library/filesystem_v3_sources/tests.spx"
+            ));
+        }
         let examples = std::fs::read_to_string(package_root.join("src/examples.spx")).unwrap();
         assert!(
             !library.program.functions.is_empty(),
@@ -155,6 +163,7 @@ fn every_public_declaration_has_a_std_identity_contracts_examples_and_conformanc
                         "std.fs",
                         "std.fs.write-new"
                         | "std.fs.write-atomic"
+                        | "std.fs.write-atomic-checked"
                         | "std.fs.create-dir"
                         | "std.fs.remove",
                     ) => vec!["fs.write".into()],
@@ -204,7 +213,7 @@ fn every_public_declaration_has_a_std_identity_contracts_examples_and_conformanc
         );
         let expected_permits: Vec<String> = if package.module == "std.fs" {
             assert_eq!(package.tier, "hosted");
-            assert_eq!(required_consumer_profile(&package), "filesystem-io.v2");
+            assert_eq!(required_consumer_profile(&package), "filesystem-io.v3");
             vec!["fs.read".into(), "fs.write".into()]
         } else if package.module == "std.env" {
             assert_eq!(package.tier, "hosted");
@@ -420,6 +429,8 @@ fn run_examples_and_conformance(selected: Vec<PackageMetadata>) {
         if package.module == "std.fs" {
             filesystem::run_conformance();
             filesystem_v2::run_conformance();
+            #[cfg(unix)]
+            filesystem_v3::run_conformance();
             continue;
         }
         if package.module == "std.env" {
@@ -1330,6 +1341,10 @@ mod typed_paths;
 mod filesystem;
 #[path = "standard_library/filesystem_v2.rs"]
 mod filesystem_v2;
+#[path = "standard_library/filesystem_v3.rs"]
+mod filesystem_v3;
+#[path = "standard_library/filesystem_v3_core.rs"]
+mod filesystem_v3_core;
 
 #[path = "standard_library/json_cursors.rs"]
 mod json_cursors;

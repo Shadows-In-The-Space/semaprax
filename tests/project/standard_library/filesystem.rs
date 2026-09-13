@@ -22,7 +22,7 @@ pub(super) fn package(label: &str, command: &str, bundled: bool) -> PathBuf {
     let mut manifest = std::fs::read_to_string(root().join("std/fs/semaprax.toml"))
         .unwrap()
         .replace("std.fs.examples.roundtrip", command)
-        .replace("filesystem-io.v2", "filesystem-io.v1");
+        .replace("filesystem-io.v3", "filesystem-io.v1");
     if bundled {
         manifest = manifest
             .replace("name = \"std-fs\"", "name = \"std-fs-consumer\"")

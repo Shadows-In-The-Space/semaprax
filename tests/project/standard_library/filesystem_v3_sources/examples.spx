@@ -1,0 +1,27 @@
+module std.fs.examples;
+use type @id("std.path.value.path") from std.path.value as Path;
+use type @id("std.io.writer") from std.io as Writer;
+use function @id("std.path.value.from-bytes") from std.path.value as path_from_bytes;
+use type @id("std.fs.write-outcome") from std.fs as WriteOutcome;
+use function @id("std.fs.write-atomic-checked") from std.fs as write_atomic_checked;
+use function @id("std.io.writer.from-bytes") from std.io as writer_from_bytes;
+use function @id("std.io.writer.write-u8") from std.io as writer_write_u8;
+
+permit { fs.write }
+
+/// Handle all three outcomes explicitly. An uncertain write stops this
+/// example; it is never automatically retried.
+@id("std.fs.examples.checked-replace")
+fn checked_replace() -> bool
+    uses { fs.write }
+{
+    let path = path_from_bytes(bytes_set(bytes_zeroed(1usize), 0usize, 99u8));
+    let writer = writer_write_u8(writer_from_bytes(bytes_zeroed(2usize)), 65u8);
+    match write_atomic_checked(path, writer) { WriteOutcome::Published {} => true, WriteOutcome::NotPublished {} => false, WriteOutcome::Uncertain {} => false, }
+}
+
+@id("std.fs.examples.main")
+fn main() -> i64
+{
+    0
+}

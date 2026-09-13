@@ -525,7 +525,6 @@ impl WorkspaceGraphProjection {
         });
     }
 }
-
 impl WorkspaceGraphProjectionModule {
     /// Compiler-checked facts for exact nominal parameters and returns, including functions
     /// outside the entry/test closures. Never reconstructed from source labels.
@@ -581,7 +580,6 @@ impl WorkspaceGraphProjectionModule {
         &self.function_instances
     }
 }
-
 impl WorkspaceGraphProjectionDeclaration {
     pub(crate) fn id(&self) -> &str {
         &self.id
@@ -602,7 +600,6 @@ impl WorkspaceGraphProjectionDeclaration {
         self.module.as_deref()
     }
 }
-
 impl WorkspaceGraphProjectionUsage {
     pub(crate) fn used_managed_files(self) -> usize {
         self.used_managed_files
@@ -653,7 +650,6 @@ impl WorkspaceGraphProjectionUsage {
         self.used_reachable_modules
     }
 }
-
 impl WorkspaceSemanticGraph {
     pub fn schema(&self) -> &str {
         WORKSPACE_GRAPH_SCHEMA
@@ -1445,6 +1441,7 @@ impl WorkspaceGraphBuild {
             }
             crate::project::ProjectProfile::FilesystemIoV1
             | crate::project::ProjectProfile::FilesystemIoV2
+            | crate::project::ProjectProfile::FilesystemIoV3
             | crate::project::ProjectProfile::EnvironmentIoV1
             | crate::project::ProjectProfile::ProcessIoV1
             | crate::project::ProjectProfile::OwnedDataApiV1 => {
@@ -1698,6 +1695,7 @@ impl WorkspaceGraphBuild {
             }
             crate::project::ProjectProfile::FilesystemIoV1
             | crate::project::ProjectProfile::FilesystemIoV2
+            | crate::project::ProjectProfile::FilesystemIoV3
             | crate::project::ProjectProfile::EnvironmentIoV1
             | crate::project::ProjectProfile::ProcessIoV1
             | crate::project::ProjectProfile::OwnedDataApiV1 => {
@@ -2020,6 +2018,7 @@ impl WorkspaceGraphBuild {
                     | crate::project::ProjectProfile::HttpsCommandIoV1
                     | crate::project::ProjectProfile::FilesystemIoV1
                     | crate::project::ProjectProfile::FilesystemIoV2
+                    | crate::project::ProjectProfile::FilesystemIoV3
                     | crate::project::ProjectProfile::EnvironmentIoV1
                     | crate::project::ProjectProfile::ProcessIoV1
                     | crate::project::ProjectProfile::OwnedDataApiV1
@@ -2052,6 +2051,7 @@ impl WorkspaceGraphBuild {
                     }
                     crate::project::ProjectProfile::FilesystemIoV1
                     | crate::project::ProjectProfile::FilesystemIoV2
+                    | crate::project::ProjectProfile::FilesystemIoV3
                     | crate::project::ProjectProfile::EnvironmentIoV1
                     | crate::project::ProjectProfile::ProcessIoV1
                     | crate::project::ProjectProfile::OwnedDataApiV1 => {

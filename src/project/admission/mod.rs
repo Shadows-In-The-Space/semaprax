@@ -43,6 +43,7 @@ pub(super) enum PreparedProjectAdmission {
     HttpsCommandIoV1,
     FilesystemIoV1,
     FilesystemIoV2,
+    FilesystemIoV3,
     EnvironmentIoV1,
     ProcessIoV1,
     /// An authenticated no-export alloc-tier standard package retains its
@@ -70,6 +71,7 @@ impl PreparedProjectAdmission {
             Self::EnvironmentIoV1 => ProjectProfile::EnvironmentIoV1,
             Self::ProcessIoV1 => ProjectProfile::ProcessIoV1,
             Self::FilesystemIoV2 => ProjectProfile::FilesystemIoV2,
+            Self::FilesystemIoV3 => ProjectProfile::FilesystemIoV3,
             Self::HttpsCommandIoV1 => ProjectProfile::HttpsCommandIoV1,
             Self::OwnedDataNoExports | Self::OwnedDataApiV1(_) => ProjectProfile::OwnedDataApiV1,
             Self::FlatOwnedRecordApiV1(_descriptor) => ProjectProfile::FlatOwnedRecordApiV1,
@@ -191,6 +193,10 @@ pub(super) fn prepare(
         ProjectProfile::FilesystemIoV2 => {
             super::filesystem::admit(program, manifest)?;
             Ok(PreparedProjectAdmission::FilesystemIoV2)
+        }
+        ProjectProfile::FilesystemIoV3 => {
+            super::filesystem::admit(program, manifest)?;
+            Ok(PreparedProjectAdmission::FilesystemIoV3)
         }
         ProjectProfile::FilesystemIoV1 => {
             super::filesystem::admit(program, manifest)?;

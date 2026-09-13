@@ -170,6 +170,23 @@ pub fn execute_filesystem_command_v2(
     )
 }
 
+/// Execute the additive v3 publication-outcome operation inventory with an
+/// explicitly injected provider.
+pub fn execute_filesystem_command_v3(
+    program: &ResolvedProgram,
+    entry_id: &str,
+    provider: &mut dyn crate::filesystem_provider::FileProvider,
+    max_steps: usize,
+) -> Result<CommandEvaluation, Diagnostic> {
+    crate::interpreter::filesystem::command::evaluate_profile(
+        program,
+        entry_id,
+        provider,
+        max_steps,
+        crate::command_io_ops::CommandOperationProfile::FilesystemV3,
+    )
+}
+
 /// Execute a private process command through a caller-supplied provider and
 /// immutable parent command/environment input. No ambient process authority.
 pub fn execute_process_command(

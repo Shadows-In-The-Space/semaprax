@@ -167,6 +167,29 @@ fn fixture_atomic_write_missing_parent_refuses_before_target_publication() {
     assert_eq!(provider.list(b"", 64), Ok(b"keep\0".to_vec()));
 }
 
+#[test]
+fn checked_atomic_fixture_reports_explicit_phase_outcomes_without_source_forgery() {
+    use super::{CheckedAtomicWriteFault, CheckedAtomicWriteOutcome};
+    let mut provider =
+        FixtureFileProvider::new([(b"target".to_vec(), b"old".to_vec())], true).unwrap();
+    provider.set_checked_atomic_fault(Some(CheckedAtomicWriteFault::BeforeCommit));
+    assert_eq!(
+        provider.write_atomic_checked(b"target", b"new"),
+        Ok(CheckedAtomicWriteOutcome::NotPublished)
+    );
+    assert_eq!(provider.read(b"target", 3), Ok(b"old".to_vec()));
+    provider.set_checked_atomic_fault(Some(CheckedAtomicWriteFault::CommitOutcomeUnknown));
+    assert_eq!(
+        provider.write_atomic_checked(b"target", b"new"),
+        Ok(CheckedAtomicWriteOutcome::Uncertain)
+    );
+    assert_eq!(provider.read(b"target", 3), Ok(b"new".to_vec()));
+    assert_eq!(
+        provider.write_atomic_checked(b"missing/target", b"new"),
+        Ok(CheckedAtomicWriteOutcome::NotPublished)
+    );
+}
+
 #[cfg(unix)]
 mod physical {
     use super::*;
@@ -193,6 +216,37 @@ mod physical {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn checked_physical_replace_and_precommit_refusals_preserve_inventory() {
+        let root = Scratch::new();
+        std::fs::write(root.0.join("target"), b"old").unwrap();
+        std::fs::create_dir(root.0.join("directory")).unwrap();
+        symlink("target", root.0.join("link")).unwrap();
+        let mut provider = ScopedFileProvider::open(&root.0, FileAccess::ReadWrite).unwrap();
+        assert_eq!(
+            provider.write_atomic_checked(b"target", b"new"),
+            Ok(CheckedAtomicWriteOutcome::Published)
+        );
+        for path in [
+            b"missing/target".as_slice(),
+            b"directory",
+            b"link",
+            b"../escape",
+        ] {
+            assert_eq!(
+                provider.write_atomic_checked(path, b"refused"),
+                Ok(CheckedAtomicWriteOutcome::NotPublished)
+            );
+        }
+        let mut readonly = ScopedFileProvider::open(&root.0, FileAccess::ReadOnly).unwrap();
+        assert_eq!(
+            readonly.write_atomic_checked(b"target", b"denied"),
+            Ok(CheckedAtomicWriteOutcome::NotPublished)
+        );
+        assert_eq!(std::fs::read(root.0.join("target")).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(&root.0).unwrap().count(), 3);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use super::profile::{
 mod tables;
 use super::profile::{
     PROJECT_FILESYSTEM_CAPABILITIES_V1, PROJECT_PROFILE_FILESYSTEM_IO_V1,
-    PROJECT_PROFILE_FILESYSTEM_IO_V2,
+    PROJECT_PROFILE_FILESYSTEM_IO_V2, PROJECT_PROFILE_FILESYSTEM_IO_V3,
 };
 
 pub use tables::{
@@ -63,6 +63,7 @@ pub const PROJECT_SCHEMA_V12: &str = "semaprax.project.v12";
 pub const PROJECT_SCHEMA_V17: &str = "semaprax.project.v17";
 /// Additive Project Manifest v18 schema for explicit bounded process commands.
 pub const PROJECT_SCHEMA_V18: &str = "semaprax.project.v18";
+pub const PROJECT_SCHEMA_V19: &str = "semaprax.project.v19";
 pub const PROJECT_SCHEMA_V16: &str = "semaprax.project.v16";
 pub const PROJECT_SCHEMA_V15: &str = "semaprax.project.v15";
 pub const PROJECT_SCHEMA_V14: &str = "semaprax.project.v14";
@@ -651,8 +652,9 @@ impl ProjectManifest {
                         parse_array_assignment(lines[10], "tests")?,
                     )
                 }
-                PROJECT_SCHEMA_V14 | PROJECT_SCHEMA_V15 => {
+                PROJECT_SCHEMA_V14 | PROJECT_SCHEMA_V15 | PROJECT_SCHEMA_V19 => {
                     let v2 = schema == PROJECT_SCHEMA_V15;
+                    let v3 = schema == PROJECT_SCHEMA_V19;
                     if lines.len() != 11 || lines.last() != Some(&"") {
                         return Err(grammar(
                             "Project v14 manifest must contain exactly ten ordered assignments and one terminal LF",
@@ -665,7 +667,7 @@ impl ProjectManifest {
                         ));
                     }
                     if parse_string_assignment(lines[3], "profile")?
-                        != if v2 { PROJECT_PROFILE_FILESYSTEM_IO_V2 } else { PROJECT_PROFILE_FILESYSTEM_IO_V1 }
+                        != if v3 { PROJECT_PROFILE_FILESYSTEM_IO_V3 } else if v2 { PROJECT_PROFILE_FILESYSTEM_IO_V2 } else { PROJECT_PROFILE_FILESYSTEM_IO_V1 }
                     {
                         return Err(grammar("Project v14 profile is not filesystem-io.v1"));
                     }
@@ -681,10 +683,10 @@ impl ProjectManifest {
                         ));
                     }
                     (
-                        if v2 { PROJECT_SCHEMA_V15 } else { PROJECT_SCHEMA_V14 },
+                        if v3 { PROJECT_SCHEMA_V19 } else if v2 { PROJECT_SCHEMA_V15 } else { PROJECT_SCHEMA_V14 },
                         parse_string_assignment(lines[1], "name")?,
                         Some(version),
-                        if v2 { ProjectProfile::FilesystemIoV2 } else { ProjectProfile::FilesystemIoV1 },
+                        if v3 { ProjectProfile::FilesystemIoV3 } else if v2 { ProjectProfile::FilesystemIoV2 } else { ProjectProfile::FilesystemIoV1 },
                         parse_string_assignment(lines[4], "entry")?,
                         parse_array_assignment(lines[5], "sources")?,
                         parse_array_assignment(lines[6], "web_exports")?,
@@ -761,6 +763,7 @@ impl ProjectManifest {
             PROJECT_SCHEMA_V13 => "Project v13",
             PROJECT_SCHEMA_V14 => "Project v14",
             PROJECT_SCHEMA_V15 => "Project v15",
+            PROJECT_SCHEMA_V19 => "Project v19",
             _ => unreachable!("schema was selected by the closed parser"),
         };
         if !valid_name(&name) {
@@ -1210,7 +1213,11 @@ impl ProjectManifest {
             )
         } else if matches!(
             self.schema,
-            PROJECT_SCHEMA_V14 | PROJECT_SCHEMA_V15 | PROJECT_SCHEMA_V17 | PROJECT_SCHEMA_V18
+            PROJECT_SCHEMA_V14
+                | PROJECT_SCHEMA_V15
+                | PROJECT_SCHEMA_V17
+                | PROJECT_SCHEMA_V18
+                | PROJECT_SCHEMA_V19
         ) {
             format!("schema = \"{}\"\nname = \"{}\"\nversion = \"{}\"\nprofile = \"{}\"\nentry = \"{}\"\nsources = {}\nweb_exports = []\ncommand = \"{}\"\ncapabilities = {}\ntests = [\"{}\"]\n", self.schema, self.name, self.package_version.as_deref().unwrap(), self.profile.name().unwrap(), self.entry, render_array(&self.sources), self.command.as_deref().unwrap(), render_array(&self.capabilities), self.test_module)
         } else if self.schema == PROJECT_SCHEMA_V11 {

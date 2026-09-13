@@ -77,6 +77,7 @@ pub(super) fn flow(
         | ResolvedHostCommandOperation::FileCreateDir
         | ResolvedHostCommandOperation::FileRemove
         | ResolvedHostCommandOperation::FileWriteAtomic
+        | ResolvedHostCommandOperation::FileWriteAtomicChecked
         | ResolvedHostCommandOperation::ArgsLen
         | ResolvedHostCommandOperation::ArgUtf8
         | ResolvedHostCommandOperation::NetConnect

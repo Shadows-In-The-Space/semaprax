@@ -17,6 +17,18 @@ record FileInfo {
     size: usize,
 }
 
+/// Publication outcome of one checked atomic replacement. Uncertain is not
+/// permission to retry: the host must resolve the attempted publication.
+@id("std.fs.write-outcome")
+variant WriteOutcome {
+    @id("std.fs.write-outcome.published")
+    Published,
+    @id("std.fs.write-outcome.not-published")
+    NotPublished,
+    @id("std.fs.write-outcome.uncertain")
+    Uncertain,
+}
+
 @id("std.fs.read")
 fn read(path: own Path, max: usize) -> Reader
     uses { fs.read }
@@ -76,6 +88,19 @@ fn write_atomic(path: own Path, writer: own Writer) -> usize
     let written = writer_position(writer);
     let buffer = writer_finish(writer);
     match own path { Path { data, length } => file_write_atomic(bytes_as_slice(data), length, bytes_as_slice(buffer), written), }
+}
+
+/// Replace the target with the writer's logical prefix and retain the
+/// provider's closed publication outcome. ABI defects still fail closed.
+@id("std.fs.write-atomic-checked")
+fn write_atomic_checked(path: own Path, writer: own Writer) -> WriteOutcome
+    uses { fs.write }
+    requires path_valid(path)
+{
+    let written = writer_position(writer);
+    let buffer = writer_finish(writer);
+    let outcome = match own path { Path { data, length } => file_write_atomic_checked(bytes_as_slice(data), length, bytes_as_slice(buffer), written), };
+    if outcome == 0usize { WriteOutcome::Published {} } else { if outcome == 1usize { WriteOutcome::NotPublished {} } else { WriteOutcome::Uncertain {} } }
 }
 
 @id("std.fs.directory.entry-length")

@@ -8,7 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use rustix::fs::{self, FileType, Mode, OFlags};
 
 use super::{
-    validate_path, FileAccess, FileFailure, FileKind, FileMetadata, FileProvider, MAX_FILE_BYTES,
+    validate_path, CheckedAtomicWriteOutcome, FileAccess, FileFailure, FileKind, FileMetadata,
+    FileProvider, MAX_FILE_BYTES,
 };
 
 static NEXT_ATOMIC_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -297,6 +298,85 @@ impl FileProvider for ScopedFileProvider {
             return Err(io_failure(error));
         }
         Ok(data.len())
+    }
+
+    fn write_atomic_checked(
+        &mut self,
+        path: &[u8],
+        data: &[u8],
+    ) -> Result<CheckedAtomicWriteOutcome, FileFailure> {
+        if self.access == FileAccess::ReadOnly
+            || validate_path(path).is_err()
+            || data.len() > MAX_FILE_BYTES
+        {
+            return Ok(CheckedAtomicWriteOutcome::NotPublished);
+        }
+        let (parent, name) = match self.parent(path) {
+            Ok(value) => value,
+            Err(_) => return Ok(CheckedAtomicWriteOutcome::NotPublished),
+        };
+        match fs::statat(
+            &parent,
+            OsStr::from_bytes(&name),
+            fs::AtFlags::SYMLINK_NOFOLLOW,
+        ) {
+            Ok(metadata) if FileType::from_raw_mode(metadata.st_mode) == FileType::RegularFile => {}
+            Err(rustix::io::Errno::NOENT) => {}
+            Ok(_) => return Ok(CheckedAtomicWriteOutcome::NotPublished),
+            Err(_) => return Ok(CheckedAtomicWriteOutcome::NotPublished),
+        }
+        let mut temporary = None;
+        let mut file = None;
+        for _ in 0..ATOMIC_TEMP_ATTEMPTS {
+            let candidate = format!(
+                ".semaprax-atomic-{}-{}",
+                std::process::id(),
+                NEXT_ATOMIC_TEMP.fetch_add(1, Ordering::Relaxed)
+            );
+            if candidate.as_bytes() == name {
+                continue;
+            }
+            match fs::openat(
+                &parent,
+                OsStr::new(&candidate),
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+            ) {
+                Ok(opened) => {
+                    temporary = Some(candidate);
+                    file = Some(opened);
+                    break;
+                }
+                Err(rustix::io::Errno::EXIST) => continue,
+                Err(_) => return Ok(CheckedAtomicWriteOutcome::NotPublished),
+            }
+        }
+        let Some(temp) = temporary else {
+            return Ok(CheckedAtomicWriteOutcome::NotPublished);
+        };
+        let Some(file) = file else {
+            return Err(FileFailure::IoFailure);
+        };
+        if std::fs::File::from(file).write_all(data).is_err() {
+            let _ = fs::unlinkat(&parent, OsStr::new(&temp), fs::AtFlags::empty());
+            return Ok(CheckedAtomicWriteOutcome::NotPublished);
+        }
+        match fs::renameat(
+            &parent,
+            OsStr::new(&temp),
+            &parent,
+            OsStr::from_bytes(&name),
+        ) {
+            Ok(()) => Ok(CheckedAtomicWriteOutcome::Published),
+            Err(rustix::io::Errno::IO) => {
+                let _ = fs::unlinkat(&parent, OsStr::new(&temp), fs::AtFlags::empty());
+                Ok(CheckedAtomicWriteOutcome::Uncertain)
+            }
+            Err(_) => {
+                let _ = fs::unlinkat(&parent, OsStr::new(&temp), fs::AtFlags::empty());
+                Ok(CheckedAtomicWriteOutcome::NotPublished)
+            }
+        }
     }
 }
 

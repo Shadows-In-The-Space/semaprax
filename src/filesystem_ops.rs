@@ -4,8 +4,10 @@ use crate::hir::{OwnershipMode, ResolvedHostCommandOperation as Op, ResolvedType
 
 pub(crate) const READ_NAME: &str = "file_read";
 pub(crate) const WRITE_NEW_NAME: &str = "file_write_new";
+pub(crate) const WRITE_ATOMIC_CHECKED_NAME: &str = "file_write_atomic_checked";
 pub(crate) const READ_ID: &str = "core.host.file-read";
 pub(crate) const WRITE_NEW_ID: &str = "core.host.file-write-new";
+pub(crate) const WRITE_ATOMIC_CHECKED_ID: &str = "core.host.file-write-atomic-checked";
 pub(crate) const READ_EFFECT: &str = "fs.read";
 pub(crate) const WRITE_EFFECT: &str = "fs.write";
 pub(crate) const FILESYSTEM_EFFECTS: [&str; 2] = [READ_EFFECT, WRITE_EFFECT];
@@ -22,7 +24,7 @@ pub(crate) const MAX_PATH_BYTES: u64 = crate::filesystem_provider::MAX_PATH_BYTE
 pub(crate) const MAX_FILE_BYTES: u64 = crate::filesystem_provider::MAX_FILE_BYTES as u64;
 pub(crate) const MAX_TOTAL_BYTES: u64 = crate::filesystem_provider::MAX_TOTAL_BYTES as u64;
 pub(crate) const MAX_OPERATIONS: u64 = crate::filesystem_provider::MAX_OPERATIONS as u64;
-pub(crate) const OPERATIONS: [Op; 7] = [
+pub(crate) const OPERATIONS: [Op; 8] = [
     Op::FileRead,
     Op::FileWriteNew,
     Op::FileStat,
@@ -30,7 +32,11 @@ pub(crate) const OPERATIONS: [Op; 7] = [
     Op::FileCreateDir,
     Op::FileRemove,
     Op::FileWriteAtomic,
+    Op::FileWriteAtomicChecked,
 ];
+pub(crate) const fn is_v3(op: Op) -> bool {
+    matches!(op, Op::FileWriteAtomicChecked)
+}
 pub(crate) const fn is_v2(op: Op) -> bool {
     matches!(
         op,
@@ -41,7 +47,7 @@ pub(crate) const fn permits_root(op: Op) -> bool {
     matches!(op, Op::FileStat | Op::FileList)
 }
 pub(crate) const fn is_filesystem(op: Op) -> bool {
-    matches!(op, Op::FileRead | Op::FileWriteNew) || is_v2(op)
+    matches!(op, Op::FileRead | Op::FileWriteNew) || is_v2(op) || is_v3(op)
 }
 pub(crate) fn by_name(value: &str) -> Option<Op> {
     OPERATIONS
@@ -61,6 +67,7 @@ pub(crate) const fn name(op: Op) -> &'static str {
         Op::FileCreateDir => "file_create_dir",
         Op::FileRemove => "file_remove",
         Op::FileWriteAtomic => "file_write_atomic",
+        Op::FileWriteAtomicChecked => WRITE_ATOMIC_CHECKED_NAME,
         Op::FileWriteNew => WRITE_NEW_NAME,
         _ => panic!("not a filesystem operation"),
     }
@@ -73,6 +80,7 @@ pub(crate) const fn id(op: Op) -> &'static str {
         Op::FileCreateDir => "core.host.file-create-dir",
         Op::FileRemove => "core.host.file-remove",
         Op::FileWriteAtomic => "core.host.file-write-atomic",
+        Op::FileWriteAtomicChecked => WRITE_ATOMIC_CHECKED_ID,
         Op::FileWriteNew => WRITE_NEW_ID,
         _ => panic!("not a filesystem operation"),
     }
@@ -80,14 +88,18 @@ pub(crate) const fn id(op: Op) -> &'static str {
 pub(crate) const fn effect(op: Op) -> &'static str {
     match op {
         Op::FileRead | Op::FileStat | Op::FileList => READ_EFFECT,
-        Op::FileWriteNew | Op::FileCreateDir | Op::FileRemove | Op::FileWriteAtomic => WRITE_EFFECT,
+        Op::FileWriteNew
+        | Op::FileCreateDir
+        | Op::FileRemove
+        | Op::FileWriteAtomic
+        | Op::FileWriteAtomicChecked => WRITE_EFFECT,
         _ => panic!("not a filesystem operation"),
     }
 }
 pub(crate) const fn arity(op: Op) -> usize {
     match op {
         Op::FileRead | Op::FileList => 3,
-        Op::FileWriteNew | Op::FileWriteAtomic => 4,
+        Op::FileWriteNew | Op::FileWriteAtomic | Op::FileWriteAtomicChecked => 4,
         Op::FileStat | Op::FileCreateDir | Op::FileRemove => 2,
         _ => panic!("not a filesystem operation"),
     }
@@ -99,7 +111,8 @@ pub(crate) const fn ast_return_type(op: Op) -> Type {
         | Op::FileStat
         | Op::FileCreateDir
         | Op::FileRemove
-        | Op::FileWriteAtomic => Type::Usize,
+        | Op::FileWriteAtomic
+        | Op::FileWriteAtomicChecked => Type::Usize,
         _ => panic!("not a filesystem operation"),
     }
 }
@@ -110,7 +123,8 @@ pub(crate) const fn return_type(op: Op) -> ResolvedType {
         | Op::FileStat
         | Op::FileCreateDir
         | Op::FileRemove
-        | Op::FileWriteAtomic => ResolvedType::Usize,
+        | Op::FileWriteAtomic
+        | Op::FileWriteAtomicChecked => ResolvedType::Usize,
         _ => panic!("not a filesystem operation"),
     }
 }
@@ -121,13 +135,19 @@ pub(crate) const fn result_ownership(op: Op) -> OwnershipMode {
         | Op::FileStat
         | Op::FileCreateDir
         | Op::FileRemove
-        | Op::FileWriteAtomic => OwnershipMode::Value,
+        | Op::FileWriteAtomic
+        | Op::FileWriteAtomicChecked => OwnershipMode::Value,
         _ => panic!("not a filesystem operation"),
     }
 }
 pub(crate) fn accepts_ast(op: Op, index: usize, ty: &Type) -> bool {
     index < arity(op)
-        && if index == 0 || (matches!(op, Op::FileWriteNew | Op::FileWriteAtomic) && index == 2) {
+        && if index == 0
+            || (matches!(
+                op,
+                Op::FileWriteNew | Op::FileWriteAtomic | Op::FileWriteAtomicChecked
+            ) && index == 2)
+        {
             *ty == Type::SliceU8
         } else {
             *ty == Type::Usize
@@ -135,7 +155,12 @@ pub(crate) fn accepts_ast(op: Op, index: usize, ty: &Type) -> bool {
 }
 pub(crate) fn accepts_resolved(op: Op, index: usize, ty: &ResolvedType) -> bool {
     index < arity(op)
-        && if index == 0 || (matches!(op, Op::FileWriteNew | Op::FileWriteAtomic) && index == 2) {
+        && if index == 0
+            || (matches!(
+                op,
+                Op::FileWriteNew | Op::FileWriteAtomic | Op::FileWriteAtomicChecked
+            ) && index == 2)
+        {
             *ty == ResolvedType::SliceU8
         } else {
             *ty == ResolvedType::Usize
@@ -151,8 +176,11 @@ pub(crate) fn ast_params(op: Op) -> Vec<Param> {
         .iter()
         .enumerate()
         .map(|(index, name)| {
-            let borrowed =
-                index == 0 || (matches!(op, Op::FileWriteNew | Op::FileWriteAtomic) && index == 2);
+            let borrowed = index == 0
+                || (matches!(
+                    op,
+                    Op::FileWriteNew | Op::FileWriteAtomic | Op::FileWriteAtomicChecked
+                ) && index == 2);
             Param {
                 name: (*name).to_owned(),
                 mode: if borrowed {

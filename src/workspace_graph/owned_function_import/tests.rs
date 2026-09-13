@@ -305,3 +305,62 @@ use function @id("reader.inspect") from reader.provider as inspect;
         "generic import remains closed"
     );
 }
+
+#[test]
+fn owned_record_import_admits_only_direct_fieldless_variant_result() {
+    let provider = format!(
+        r#"{PROVIDER}
+@id("reader.outcome") variant Outcome {{ @id("reader.outcome.ok") Ok, @id("reader.outcome.no") No, }}
+@id("reader.inspect-outcome") fn inspect_outcome(value: own Reader) -> Outcome {{
+    let cursor = match own value {{ Reader {{ data, cursor }} => cursor, }};
+    if cursor == 0usize {{ Outcome::Ok {{}} }} else {{ Outcome::No {{}} }}
+}}
+"#
+    );
+    let app = r#"
+module reader.app;
+use type @id("reader.type") from reader.provider as Reader;
+use type @id("reader.outcome") from reader.provider as Outcome;
+use function @id("reader.new") from reader.provider as create;
+use function @id("reader.inspect-outcome") from reader.provider as inspect_outcome;
+@id("app.main") fn main() -> i64 {
+    let input = [65u8];
+    match inspect_outcome(create(bytes_copy(array_as_slice(input)))) {
+        Outcome::Ok {} => 1,
+        Outcome::No {} => 0,
+    }
+}
+"#;
+    let built = build_owned(sources(app, &provider)).expect("direct fieldless variant import");
+    let linked = built
+        .linked_owned_data_api_program_with_roots("reader.app", &[])
+        .expect("fieldless variant closure links");
+    hir::validate(&linked).expect("variant cleanup replay");
+    let value = crate::interpreter::evaluate_resolved_zero_arg_i64(&linked, "app.main", 100_000)
+        .expect("fieldless variant executes");
+    assert!(matches!(
+        value.outcome,
+        crate::interpreter::ResolvedEvaluationOutcome::ReturnedI64(1)
+    ));
+
+    let missing_type = app.replace(
+        "use type @id(\"reader.outcome\") from reader.provider as Outcome;",
+        "",
+    );
+    let errors = build_owned(sources(&missing_type, &provider))
+        .err()
+        .expect("variant result requires direct type import");
+    assert!(errors.iter().any(|error| error.code == "SPX-G172"));
+
+    let payload = provider
+        .replace(
+            "@id(\"reader.outcome.ok\") Ok,",
+            "@id(\"reader.outcome.ok\") Ok { @id(\"reader.outcome.ok.value\") value: usize, },",
+        )
+        .replace("Outcome::Ok {}", "Outcome::Ok { value: 0usize }");
+    let payload_app = app.replace("Outcome::Ok {} => 1", "Outcome::Ok { value } => 1");
+    let errors = build_owned(sources(&payload_app, &payload))
+        .err()
+        .expect("payload variant result stays outside owned-record import lane");
+    assert!(errors.iter().any(|error| error.code == "SPX-G172"));
+}

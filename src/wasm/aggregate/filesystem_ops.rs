@@ -17,6 +17,9 @@ impl Emitter<'_> {
         pointer: Pointer,
     ) -> Result<Value, Diagnostic> {
         use crate::hir::ResolvedHostCommandOperation as Op;
+        if call.operation == Op::FileWriteAtomicChecked {
+            return self.emit_checked_atomic_write(expr, arguments, local, pointer);
+        }
         self.require_scalar(&arguments[0], &ResolvedType::SliceU8, "filesystem path")?;
         self.require_scalar(
             &arguments[1],
@@ -73,11 +76,11 @@ impl Emitter<'_> {
             self.get_scalar(&arguments[1]);
             self.output.extend([0x50, 0x45, 0x04, 0x40]);
             self.control_depth += 1;
-            self.emit_filesystem_path_validation(local, &arguments[1], &expr.id)?;
+            self.emit_filesystem_path_validation(local, &arguments[1], &expr.id, None)?;
             self.control_depth -= 1;
             self.output.push(0x0b);
         } else {
-            self.emit_filesystem_path_validation(local, &arguments[1], &expr.id)?;
+            self.emit_filesystem_path_validation(local, &arguments[1], &expr.id, None)?;
         }
 
         match call.operation {
@@ -241,7 +244,7 @@ impl Emitter<'_> {
         })
     }
 
-    fn emit_filesystem_failure_if_code(
+    pub(super) fn emit_filesystem_failure_if_code(
         &mut self,
         expression: &ExpressionId,
         code: i32,
@@ -258,11 +261,12 @@ impl Emitter<'_> {
     /// Validate the logical path prefix in guest code before the provider is
     /// entered. Component state is 0 for empty, 1 for `.`, 2 for `..`, and 3
     /// for every admitted non-dot component.
-    fn emit_filesystem_path_validation(
+    pub(super) fn emit_filesystem_path_validation(
         &mut self,
         carrier: u32,
         logical_length: &Value,
         expression: &ExpressionId,
+        checked_exit: Option<(u32, u32)>,
     ) -> Result<(), Diagnostic> {
         let (index, component, byte) = self
             .plan
@@ -312,7 +316,7 @@ impl Emitter<'_> {
                 self.output.push(0x72); // i32.or
             }
         }
-        self.emit_filesystem_failure_if_code(expression, INVALID_PATH)?;
+        self.emit_filesystem_path_failure_if(expression, checked_exit)?;
 
         self.output.push(0x20);
         write_u32(self.output, byte);
@@ -325,7 +329,7 @@ impl Emitter<'_> {
         self.output.push(0x42);
         write_i64(self.output, 2);
         self.output.push(0x58); // i64.le_u: empty, `.` or `..`
-        self.emit_filesystem_failure_if_code(expression, INVALID_PATH)?;
+        self.emit_filesystem_path_failure_if(expression, checked_exit)?;
         self.output.extend([0x42, 0x00, 0x21]);
         write_u32(self.output, component);
         self.output.push(0x05); // else non-slash
@@ -381,11 +385,14 @@ impl Emitter<'_> {
         self.output.push(0x42);
         write_i64(self.output, 2);
         self.output.push(0x58);
-        self.emit_filesystem_failure_if_code(expression, INVALID_PATH)?;
+        self.emit_filesystem_path_failure_if(expression, checked_exit)?;
         Ok(())
     }
 
-    fn emit_filesystem_failure_if(&mut self, expression: &ExpressionId) -> Result<(), Diagnostic> {
+    pub(super) fn emit_filesystem_failure_if(
+        &mut self,
+        expression: &ExpressionId,
+    ) -> Result<(), Diagnostic> {
         self.output.extend([0x04, 0x40]);
         self.emit_filesystem_exit(expression)?;
         self.output.push(0x0b);
@@ -395,7 +402,7 @@ impl Emitter<'_> {
     /// Reserve the operation and its declared byte budget before the provider
     /// is entered. Reservations are deliberately not refunded on a provider
     /// failure, making retry cost explicit and deterministic.
-    fn reserve_filesystem_work(
+    pub(super) fn reserve_filesystem_work(
         &mut self,
         charge: &Value,
         expression: &ExpressionId,

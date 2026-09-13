@@ -482,6 +482,7 @@ pub enum ResolvedHostCommandOperation {
     FileCreateDir,
     FileRemove,
     FileWriteAtomic,
+    FileWriteAtomicChecked,
     EnvLen,
     EnvNameUtf8,
     EnvValueUtf8,

@@ -1,12 +1,8 @@
 # Host Operation Outcome v1
 
-Status: **frozen design, not implemented.** No parser, HIR, verifier, semantic
-graph, native, or Wasm change lands with this document. This is a versioned
-specification for a semantic/authority contract change that, per issue #228
-and the coordinator's own routing for the SPX-AI-019..025 series, gates behind
-an independent review checkpoint and must not be self-approved by a bounded
-worker. It exists so that checkpoint has one fixed target to review, instead
-of an evolving one.
+Status: **implemented with local executable conformance.** The additive
+filesystem v3 profile covers interpreter, native C11, and Core Wasm execution.
+It does not claim hosted-provider support.
 
 Audience: reviewers deciding whether to admit this profile, the implementing
 agent once admitted, and anyone hitting issue #228's gap in the meantime
@@ -14,34 +10,28 @@ agent once admitted, and anyone hitting issue #228's gap in the meantime
 
 ## Why this exists
 
-Issue #228 names an exact hole: every fallible host operation in this
-repository — the closed command-I/O table (`src/command_io_ops.rs`), the
-network family (`src/network_io_ops.rs`), and the filesystem family
-(`src/filesystem_ops.rs`) — **aborts the enclosing invocation on any nonzero
-provider status** rather than returning an inspectable value. Concretely, for
-`file_write_atomic`:
+Issue #228 names an exact hole in the legacy host-operation route.
+`file_write_atomic` still aborts the enclosing invocation on provider failure,
+while the additive `file_write_atomic_checked` route returns a classified
+publication outcome. The checked route is limited to the filesystem family;
+network operations remain outside this slice. For the legacy operation:
 
-- `src/filesystem_provider.rs:14-22` closes `FileFailure` over seven variants
-  (`InvalidPath`, `NotFound`, `AlreadyExists`, `CapacityExceeded`,
-  `IoFailure`, `AuthorityDenied`, `InvalidFileType`) with a `status_code`
-  (`src/filesystem_provider.rs:36-46`). This boundary distinguishes failure
-  kinds but not the commit phase: the physical provider currently reports
-  `IoFailure` both when writing its temporary file fails and when `renameat`
-  fails (`src/filesystem_provider/unix.rs`, `write_atomic`).
-- Native lowering discards that distinction before it reaches checked source:
-  `src/codegen/native_emit/expression/host_command.rs:410` emits `spx_status
-  = spx_host_file_write_atomic_v2(...); if (spx_status != SPX_STATUS_SUCCESS)
-  goto spx_epilogue;` — the same unconditional fail-stop jump every other
-  host-command call and every arithmetic/contract violation in the compiler
-  uses (`src/codegen/native_emit/expression.rs:424`, `:799`, `:1132`, and
-  eleven more sites; `src/codegen/native_emit/mod.rs:1897-1995` owns the
-  shared `spx_epilogue` label).
-- A checked handler therefore has exactly one observable bit after any
-  `file_write_atomic` failure: the whole invocation stopped. It cannot tell
-  "nothing was attempted" from "the atomic rename step may have partially
-  applied before the provider reported failure" — issue #228's own three-way
-  vocabulary: *validated and published*, *validation failed, nothing
-  published*, *published then I/O failed, outcome uncertain*.
+- `FileFailure` remains the ordinary provider-error `Result` and has no
+  `PublishUncertain` variant. The checked provider API instead returns
+  `Result<CheckedAtomicWriteOutcome, FileFailure>`, keeping provider errors
+  separate from the three valid publication outcomes. The physical provider
+  reports `NotPublished` for pre-commit failures, `Uncertain` only for an
+  `EIO` from the rename step, and `Published` for a known successful rename.
+  See the POSIX rename contract: [The Open Group `rename()`
+  specification](https://pubs.opengroup.org/onlinepubs/9799919799/functions/rename.html).
+- The checked native lowering uses a separate callback/status path and
+  writes the outcome through an out `u64` value. Invalid or unwritten checked
+  outcomes fail with status `5`; valid `0`/`1`/`2` outcomes are returned as
+  ordinary values. The legacy v2 lowering keeps its existing fail-stop behavior.
+- The checked handler now distinguishes *published* (`0`), *not published*
+  (`1`), and *uncertain* (`2`) without treating those domain outcomes as
+  invocation failure. ABI, capability, malformed-input, and invalid callback
+  results still fail closed.
 
 `docs/DURABLE-JOBS-V1.md`'s ["The #228
 boundary"](DURABLE-JOBS-V1.md#the-228-boundary-what-blocks-a-checked-semaprax-caller)
@@ -52,7 +42,7 @@ in checked SEMAPRAX source can *produce* the `kind == 3` (uncertain) input
 that procedure consumes — only a Rust-side runner can, exactly the way
 `DatabaseFixture::connection_lost` supplies `std.db`'s equivalent external
 signal. That section also names "the exact probe a follow-on tranche needs
-once #228 lands"; this document is that follow-on's design, still gated.
+once #228 lands"; this document owns the additive checked operation; downstream composition remains separate.
 
 `tests/useful_data/filesystem_v2_native.rs`'s
 `filesystem_v2_write_atomic_failure_collapses_into_undifferentiated_abort`
@@ -62,8 +52,8 @@ unknown" failure would occur produces the identical `!semantic_success &&
 status_code == 5` shape, and the identical "nothing after it runs" abort, as
 an ordinary pre-publication validation failure
 (`filesystem_v2_rejects_malformed_list_wire_before_publication`, same file).
-Nothing distinguishes them. That test must change deliberately, not by
-accident, the day this design is lowered.
+Nothing distinguishes them. That legacy regression remains required after the
+checked route is lowered; V3 has separate outcome assertions.
 
 ## Decision 1: a value-typed outcome, not exceptions or `try`/`catch`
 
@@ -74,57 +64,52 @@ lifecycle codes, the idempotent-enqueue three-way outcome
 (`DURABLE-JOBS-V1.md`, "Idempotent enqueue"), and the `provider_outcome`
 adapter in `tests/project/standard_library/provider_outcomes.rs` all follow
 this shape already, all composed entirely in checked SEMAPRAX with no new
-host operation. The gap #228 names is narrower: **no *host operation itself*
-can hand back a closed outcome that includes a genuinely uncertain case**,
-because every host-command status check is wired to the same fail-stop
-`goto spx_epilogue` (native) / trap (Wasm) path used for unrelated internal
-failures (arithmetic overflow, contract violations). Fixing that means adding
-value-returning host operations whose own domain-specific failure classes
-never reach the fail-stop path — not adding exceptions to the language.
+host operation. The gap #228 names is narrower: the legacy host-operation status path cannot
+hand back a closed outcome that includes a genuinely uncertain case. The new
+checked operation has a value-returning path whose domain-specific outcome
+classes do not reach the fail-stop path; malformed input, capability failure,
+and ABI/provider-contract defects still do.
 
 ## Decision 2: additive, not a breaking change to `file_write_atomic`
 
 `file_write_atomic` keeps its exact v2 signature, status domain, and
 abort-on-failure behavior (`docs/FILESYSTEM-IO-V2.md`, frozen). Every program
 that already depends on "any failure aborts" keeps that behavior. The
-three-way outcome is a **new, separately named operation** admitted under a
-new additive profile, exactly as issue #228's acceptance criteria frame it
-("if a new host op: define it under its owning versioned specification").
+three-way outcome is a **new, separately named operation** admitted under the
+additive `filesystem-io.v3` profile (Project v19, graph V46), exactly as issue
+#228's acceptance criteria frame it.
 This also keeps the first slice honestly scoped to one operation: nothing
 here proposes touching `net_send`/`net_recv` or any other family member.
 Extending this taxonomy to network operations (the issue's other named
 example, and `NetworkFailure::TransferFailed` in
-`src/network_provider.rs:66-67` is the closest existing analogue — "the peer
+`src/network_provider.rs` is the closest existing analogue — "the peer
 reset the connection or a transfer failed midway", exactly a candidate
 uncertain case) is explicitly **out of scope for the first slice** and left
 as a follow-on once this shape is proven on one operation.
 
 ## Scope of the first slice
 
-One operation: a new `core.host.file-write-atomic-checked` host command,
-authored as `file_write_atomic_checked`, under a new `FilesystemV3` profile
-additive to `FilesystemV2` (`src/command_io_ops.rs`'s
-`CommandOperationProfile` enum, `:49-65` as of this revision — cite the
-current definition, not this line number, since it shifts with unrelated
-edits). Same signature shape as
-`file_write_atomic` — `(borrow Slice<u8> path, usize path_length, borrow
-Slice<u8> data, usize data_length) -> usize` — but its returned `usize` is a
-closed three-code outcome instead of a byte count. Its classified publication
-outcomes become ordinary values rather than taking `spx_epilogue`; unrelated
-ABI or provider-contract defects still fail closed.
+One operation: `core.host.file-write-atomic-checked`, authored as
+`file_write_atomic_checked`, under the additive `FilesystemV3` command profile.
+The Project profile is `filesystem-io.v3` (Project v19, graph V46). It
+has the same path/data argument shape as `file_write_atomic`, and returns a
+closed three-code outcome instead of a byte count. In `std.fs`, the
+`write_atomic_checked` wrapper returns the unit variants of `WriteOutcome`
+(`Published`, `NotPublished`, and `Uncertain`). Classified publication
+outcomes are ordinary values; unrelated ABI or provider-contract defects
+still fail closed.
 
 ### Closed three-way outcome taxonomy (`HOSTOUT-001`)
 
 | Code | Name | Meaning | Maps from |
 | --- | --- | --- | --- |
-| `0` | `PUBLISHED` | The atomic replace committed. | `write_atomic` success (today's `Ok(data_length)` path, `src/filesystem_provider.rs:305` in the reference provider). |
-| `1` | `NOT_PUBLISHED` | The provider can prove the authoritative target was not published. A pre-commit failure may still have created a temporary staging file. | `FileFailure::InvalidPath`, `NotFound` for a missing parent, `AlreadyExists`, `CapacityExceeded`, `AuthorityDenied`, `InvalidFileType`, and a phase-qualified `IoFailure` when the checked provider proves no target publication. |
-| `2` | `UNCERTAIN` | The provider began the commit step and cannot confirm whether it completed. | A **new** `FileFailure::PublishUncertain` variant (this document proposes adding it under `src/filesystem_provider.rs`'s existing closed enum), raised only from the point a provider has started its atomic replace, never before. |
+| `0` | `PUBLISHED` | The atomic replace committed. | `write_atomic_checked` provider success with a known completed rename. |
+| `1` | `NOT_PUBLISHED` | The provider can prove the authoritative target was not published. A pre-commit failure may still have created a temporary staging file. | pre-commit validation/provider failures, including invalid path, missing parent, capacity, authority, file type, and other errors for which the provider proves no target publication. |
+| `2` | `UNCERTAIN` | The provider began the commit step and cannot confirm whether it completed. | `CheckedAtomicWriteOutcome::Uncertain`, returned only after the provider has started its atomic replace and cannot determine the result (currently rename `EIO`). |
 
-`NotFound` applies when the parent directory is absent: both
-`FixtureFileProvider::write_atomic` (`src/filesystem_provider.rs`) and
-`ScopedFileProvider::parent` (`src/filesystem_provider/unix.rs`) reject that
-path before attempting to publish the target. `HOSTOUT-001` retains its
+`NotFound` applies when the parent directory is absent: the fixture and
+scoped physical providers reject that path before attempting to publish the
+target. `HOSTOUT-001` retains its
 three codes; widening it (a fourth code, a different code assignment) is a
 change to this document, not to the implementation.
 
@@ -141,10 +126,9 @@ file write failure (before target commit) and `renameat` failure (at the
 commit step) to that one variant. The legacy operation retains its fail-stop
 behavior; its `Result` is insufficient to implement the new checked outcome
 by wrapping or reclassifying it. A checked provider must report the phase
-and observed result of its **own** commit attempt. It emits
-`PublishUncertain` only when that attempt was made and its outcome truly
-cannot be determined; it reports `NOT_PUBLISHED` only when it can prove the
-target was not published. A failure after a confirmed successful rename is
+and observed result of its **own** commit attempt. It returns `CheckedAtomicWriteOutcome::Uncertain` only when that attempt was
+made and its outcome truly cannot be determined; it reports `NOT_PUBLISHED`
+only when it can prove the target was not published. A failure after a confirmed successful rename is
 not automatically publication uncertainty; durability and cleanup require
 their own precise claims. This phase distinction is a provider-authoring
 discipline, and future hostile-input tests must check it rather than infer
@@ -154,7 +138,7 @@ it from a legacy error code.
 
 No new ambient authority. `file_write_atomic_checked` requires exactly the
 effect `file_write_atomic` already requires (`WRITE_EFFECT`,
-`src/filesystem_ops.rs:83`) — declaring `uses { fs.write }` is necessary and
+`src/filesystem_ops.rs`) — declaring `uses { fs.write }` is necessary and
 sufficient, identical to today. This document does not add a "may report
 uncertain outcomes" capability distinct from ordinary write authority: the
 uncertainty is a property of the *outcome*, not a distinct grant of power, and
@@ -172,7 +156,7 @@ without re-deriving it.
 1. **Undeclared effect.** Calling `file_write_atomic_checked` without `uses {
    fs.write }` produces the existing diagnostic verbatim:
    `"host-command operation requires undeclared effect `fs.write`"`
-   (`src/hir/validation/host_command.rs:20-25`, `require_effects`). No new
+   (`src/hir/validation/host_command.rs`, `require_effects`). No new
    diagnostic text — this is the same check every host-command operation
    already goes through, extended to one more operation identity.
 2. **Non-exhaustive handling.** A caller that does not dispatch on all three
@@ -182,22 +166,25 @@ without re-deriving it.
    exhaustiveness in this language, and inventing an ad hoc exhaustiveness
    check for exactly one operation's return value would be a new admission
    rule with no precedent. Instead, `HOSTOUT-003` requires the **std wrapper**
-   this document expects (`std.fs.write_atomic_checked`, analogous to
-   `std.fs.write_atomic`) to return a real three-variant closed union/enum
-   value once the language's existing closed-union facilities admit it, so a
-   `match` over it is exhaustive by the verifier's ordinary exhaustiveness
-   rule rather than by a bespoke special case for this one `usize`. Until
-   then, the raw operation returns `usize` and callers are responsible for
-   exhaustive dispatch the same way `std.jobs`'s lifecycle codes already are
-   — this is a known, explicitly stated limitation of the first slice, not a
-   silent gap.
+   exposes (`std.fs.write_atomic_checked`) returns the three-case `WriteOutcome`
+   variant. The verifier checks exhaustive `match` handling through its existing
+   variant rules. Raw builtin callers may compare or ignore the returned
+   `usize`; the raw operation does not impose exhaustive dispatch.
+
+   The source wrapper's `WriteOutcome` is a fieldless, non-generic variant.
+   Its cross-module import is admitted through the owned byte-record call lane
+   only when the caller directly imports that exact variant type and the
+   function's owned record inputs remain otherwise admitted. The result
+   carries a Copy case tag; payload variants, resources, generic variants,
+   and missing or substituted type imports remain outside this lane. This
+   does not widen public Project aggregate exports.
 3. **Hostile forgery.** A checked SEMAPRAX caller cannot supply `2` on input
    to *manufacture* an uncertain outcome — the return value is
    compiler-generated from the mapped provider status, never an argument the
    caller controls, so no new input-validation diagnostic is needed on the
    call itself. The hostile-input case this document requires instead is a
    **provider-conformance test**: a reference provider that reports
-   `PublishUncertain` for a path that was never reached (i.e. before its
+   `CheckedAtomicWriteOutcome::Uncertain` for a path that was never reached (i.e. before its
    commit step) must be treated as a provider defect to be caught by
    provider test scaffolding, not something the compiler can detect at
    compile time (the compiler has no visibility into the provider's internal
@@ -205,73 +192,33 @@ without re-deriving it.
    attempt to invent a compile-time check for a runtime provider's internal
    honesty, which is outside what a verifier can observe.
 
-## Native and Wasm lowering (not implemented; the coordinated shape both must follow)
+## Native, Wasm, and interpreter lowering
 
-Both backends currently route every host-command status check through one
-shared fail-stop mechanism:
+The checked operation is wired through the same three execution surfaces while
+retaining the legacy v2 route unchanged:
 
-- **Native**: `spx_status = <helper>(...); if (spx_status !=
-  SPX_STATUS_SUCCESS) goto spx_epilogue;` (`src/codegen/native_emit/expression/host_command.rs:410`
-  is the exact `FileWriteAtomic` site; `spx_epilogue` is defined once in
-  `src/codegen/native_emit/mod.rs` and shared with arithmetic and contract
-  fail-stops). `file_write_atomic_checked` must emit a **different** pattern
-  at this one call site: the new helper (`spx_host_file_write_atomic_checked_v1`,
-  a new native ABI symbol, not a reinterpretation of the existing one) must
-  itself return the mapped three-way code rather than a pass/fail status, and
-  the emitted C must bind that code directly to the expression's value with
-  **no** `goto spx_epilogue` for this operation's own domain — a distinct
-  native ABI failure (e.g. a null context, a capability check failing before
-  the provider is even invoked) still fails closed exactly like every other
-  operation's setup failure, since that is a different class of "did not
-  happen" than the language-level taxonomy above.
-- **Wasm**: `src/wasm/aggregate/host_command.rs` and `src/wasm/command_io.rs`
-  encode status checks as inline comparisons against `self.plan.status`
-  (e.g. `src/wasm/aggregate/host_command.rs:186-196`) that branch to the
-  function's existing fail-stop exit depth
-  (`self.control_depth + self.status_exit_extra_depth`,
-  `src/wasm/aggregate/host_command.rs:335-338` as of this revision — the
-  `br` opcode itself is emitted one line earlier, at `:334`). The new
-  operation needs its own emission arm that skips that branch for its domain
-  codes and instead writes the mapped `0`/`1`/`2` value to the result local,
-  matching the native side's "no goto" rule bit for bit — this is exactly
-  where the first non-negotiable invariant ("equivalent checked behavior on
-  every backend that claims the admitted feature") is load-bearing: if
-  native returns a value and Wasm still traps for the same provider
-  condition, the profile is not admitted on Wasm and must not be marked as
-  such.
-- **Interpreter** (a third execution surface the repository treats as a
-  reference lane, per `src/interpreter/`): confirmed dispatch point —
-  `src/interpreter.rs`'s `Evaluator::evaluate` matches
-  `ResolvedExprKind::HostCommandCall(call)` and routes any filesystem
-  operation (`fs if crate::filesystem_ops::is_filesystem(fs)`) to
-  `Evaluator::evaluate_filesystem_operation`
-  (`src/interpreter/filesystem.rs:59`). That function's `FileWriteAtomic`
-  arm (`src/interpreter/filesystem.rs:138-146`) calls
-  `state.provider.write_atomic(path, data)` and propagates any
-  `Err(FileFailure)` with ordinary Rust `?`/`map_err(failure)` — there is no
-  single `goto`-style label analogous to native's `spx_epilogue`; the
-  short-circuit is the recursive evaluator's `Result<Value, Flow>` unwind
-  through every enclosing `self.evaluate(...)` call, terminating at the
-  top-level command entry point that converts a propagated
-  `Err(Flow::Failure(status))` into the invocation's outcome (for example
-  `src/interpreter.rs:3073-3091` for the legacy hosted-command entry, or
-  `:894-924` for the owned-data entry). A lowering must add its three-way
-  mapping inside `evaluate_filesystem_operation`'s new arm for
-  `file_write_atomic_checked`, returning `Ok(Value)` for all three outcome
-  codes instead of using `failure(...)`/`?` for the `UNCERTAIN` case, so the
-  interpreter's `Result`-based unwind is bypassed for this operation's own
-  domain exactly as the native/Wasm sketches above bypass their fail-stop
-  paths.
+- **Native:** the checked callback and status are separate from the ordinary
+  `FileFailure` status. The callback writes an out `u64` outcome; valid
+  `CheckedAtomicWriteOutcome` values map to `0`/`1`/`2` and are returned as the
+  expression value. Invalid or unwritten callback outcomes fail with status
+  `5`; callback/status failures remain fail-closed.
+- **Wasm:** the new import is appended as
+  `env.spx_filesystem_write_atomic_checked_v3`, with seven `i32` parameters, an
+  `i32` status result, and an out `u64` value. The V3 status export is
+  `__spx_filesystem_status_v3`. The V2 import and
+  `__spx_filesystem_status_v2` export remain unchanged.
+- **Interpreter:** `file_write_atomic_checked` maps the provider's
+  `Result<CheckedAtomicWriteOutcome, FileFailure>` to an ordinary value, and
+  `std.fs.write_atomic_checked` wraps it in the `WriteOutcome` unit variants.
 
-None of the three lowerings above exist yet. This document fixes their target
-shape; it does not attempt to write them, per this document's own Status line
-and the review-checkpoint gate.
+Local conformance executes the three classified outcomes and callback defects
+on each backend. The physical Unix provider maps rename `EIO` using its own
+commit phase; injected syscall-failure evidence is not claimed.
 
 ## Connection to `std.jobs`
 
-Once `file_write_atomic_checked` (or any operation following this shape)
-exists, a checked SEMAPRAX job handler can call it, receive `2` (`UNCERTAIN`),
-and feed that directly as the `kind == 3` input to
+A checked SEMAPRAX job handler can now call `file_write_atomic_checked`,
+receive `2` (`UNCERTAIN`), and feed that directly as the `kind == 3` input to
 `std.jobs.uncertain.retry_next_state_after_outcome` — closing exactly the gap
 `DURABLE-JOBS-V1.md`'s "#228 boundary" section names as the tranche's one
 remaining limitation. That wiring is `std.jobs` *composition* work for the
@@ -279,7 +226,7 @@ issue that lowers this document, not part of this document's own scope.
 
 ## What is and is not covered by this document
 
-**Covered (design only):**
+**Covered:**
 - The decision to add a value-typed outcome instead of exceptions
   (Decision 1) and to do so additively (Decision 2).
 - The closed three-way taxonomy and its exact codes (`HOSTOUT-001`).
@@ -287,25 +234,18 @@ issue that lowers this document, not part of this document's own scope.
 - The three admission/diagnostic decisions (`HOSTOUT-003`), including the
   explicit limitation that exhaustive dispatch is not yet compiler-enforced
   for the raw `usize` shape.
-- The target native and Wasm lowering shape, cited to the exact status-check
-  sites both backends share today.
+- The implemented native, Wasm, and interpreter lowering shape, including the
+  V3 import/export names and separate checked callback/status handling.
 
 **Not covered / explicitly deferred:**
-- Any implementation: no parser grammar, no HIR node, no verifier rule, no
-  semantic graph projection, no native or Wasm codegen, no interpreter
-  change. `HOSTOUT-003`'s exhaustiveness item is deliberately left as a known
-  gap in the first slice rather than resolved here.
 - The network family (`net_send`/`net_recv`/etc.) — named by issue #228 but
   intentionally out of the first slice (Decision 2).
 - A general try/catch or exception language feature.
 - `std.jobs` composition wiring — left to the issue that lowers this
   document.
-- Admission into `docs/COMPLETION-MATRIX.md` — that file is coordinator-owned
-  and this document records no status-row change; per the repository's own
-  rule, no feature is "implemented" without the completion matrix's
-  executable gate, and none of this is implemented.
 
-## Tests added with this document (no lowering required)
+
+## Acceptance evidence and compatibility tests
 
 `tests/useful_data/filesystem_v2_native.rs`,
 `filesystem_v2_write_atomic_failure_collapses_into_undifferentiated_abort`:
@@ -314,30 +254,27 @@ provider failure standing in for an "uncertain" condition produces the
 identical `!semantic_success && status_code == 5` result and the identical
 "no later operation runs" abort shape as an ordinary pre-publication
 validation failure, with nothing in the generated carrier distinguishing
-them. This is a regression against the *current* (pre-lowering) behavior:
-the day `file_write_atomic_checked` lands, this specific test's assertions
-are unaffected (it tests the unmodified `file_write_atomic`, not the new
-operation), but the new operation's own success/`NOT_PUBLISHED`/`UNCERTAIN`
-tests must all exist alongside it before that lowering can be considered
-complete, per this document's `HOSTOUT-001` table and the repository's
-"add a success case and stable diagnostic regression before or with the
-implementation" change protocol rule.
+them. This remains a compatibility regression for the legacy V2 behavior: its
+assertions are intentionally unchanged and are required alongside the V3
+success/`NOT_PUBLISHED`/`UNCERTAIN` and invalid/unwritten callback tests before
+acceptance can be considered complete, per this document's `HOSTOUT-001` table
+and the repository's "add a success case and stable diagnostic regression
+before or with the implementation" change protocol rule.
 
-`src/filesystem_provider/tests.rs` additionally checks the current
-fixture and scoped physical providers' missing-parent `NotFound` result and
-unchanged target inventory. This is a pre-commit negative control for the
-taxonomy correction, not a test of the proposed checked host operation.
+`src/filesystem_provider/tests.rs` additionally checks the checked provider
+fixture and legacy scoped physical providers. Checked fixture controls prove
+pre-commit refusal preserves the target, and a commit-ambiguous fixture may
+have published. The Unix rename `EIO` mapping is phase-aware implementation,
+not evidence of an injected physical syscall failure. The `project` harness `filesystem_v3` selector passed four local tests across
+interpreter, native C11 at `-O0`/`-O2`, and Node Core Wasm, including all three
+outcomes, nested invalid-path control flow, invalid/unwritten callback values,
+provider status defects, and repeat invocation cleanup. Compact checked
+example/test sources live in `tests/project/standard_library/filesystem_v3_sources/`;
+the default `std/fs` package keeps its existing graph-construction bound.
 
-## Open questions for the review checkpoint
+## Future extensions
 
-- Should `HOSTOUT-001`'s taxonomy be a compiler-recognized closed union type
-  (once the language has one general enough) rather than a bare `usize`, to
-  make `HOSTOUT-003`'s exhaustiveness gap compile-time rather than
-  documentation-only from the first slice?
-- Should `PublishUncertain` require a distinct capability flag so a caller
-  can statically know an operation is capable of returning `2`, versus
-  inferring it from the operation identity alone (this document's Decision
-  in `HOSTOUT-002` is "no", but a reviewer may weigh this differently)?
-- Does the network family's `TransferFailed` case need its own document
-  before or after this one lowers, and should it reuse `HOSTOUT-001`'s exact
-  code assignment (`0`/`1`/`2`) or mint its own?
+The raw builtin retains its bounded `usize` ABI; the source wrapper supplies
+exhaustive variant matching. Outcome classification grants no additional
+capability. Network transfer ambiguity, additional fallible operations and
+provider-specific durability guarantees require their own reviewed contracts.

@@ -4405,6 +4405,25 @@
           "requires": 0
         },
         {
+          "description": [
+            "/ Publication outcome of one checked atomic replacement. Uncertain is not",
+            "/ permission to retry: the host must resolve the attempted publication."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "variant WriteOutcome {",
+            "    Published,",
+            "    NotPublished,",
+            "    Uncertain,",
+            "}"
+          ],
+          "id": "std.fs.write-outcome",
+          "kind": "variant",
+          "name": "WriteOutcome",
+          "requires": 0
+        },
+        {
           "description": [],
           "effects": [
             "fs.read"
@@ -4514,6 +4533,25 @@
           "id": "std.fs.write-atomic",
           "kind": "function",
           "name": "write_atomic",
+          "requires": 1
+        },
+        {
+          "description": [
+            "/ Replace the target with the writer's logical prefix and retain the",
+            "/ provider's closed publication outcome. ABI defects still fail closed."
+          ],
+          "effects": [
+            "fs.write"
+          ],
+          "ensures": 0,
+          "head": [
+            "fn write_atomic_checked(path: own Path, writer: own Writer) -> WriteOutcome",
+            "    uses { fs.write }",
+            "    requires path_valid(path)"
+          ],
+          "id": "std.fs.write-atomic-checked",
+          "kind": "function",
+          "name": "write_atomic_checked",
           "requires": 1
         },
         {
@@ -4675,7 +4713,7 @@
       "dependency": "std.fs = \"^0.1.0\"",
       "module": "std.fs",
       "package": "std/fs",
-      "required_profile": "filesystem-io.v2",
+      "required_profile": "filesystem-io.v3",
       "status": "partial",
       "targets": [
         "interpreter",

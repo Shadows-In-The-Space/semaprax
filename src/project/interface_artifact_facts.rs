@@ -338,6 +338,7 @@ fn derive_source_interface(
         | ProjectProfile::HttpsCommandIoV1
         | ProjectProfile::FilesystemIoV1
         | ProjectProfile::FilesystemIoV2
+        | ProjectProfile::FilesystemIoV3
         | ProjectProfile::EnvironmentIoV1 => return Ok(None),
         ProjectProfile::ProcessIoV1 => return Ok(None),
     };

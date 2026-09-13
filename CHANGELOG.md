@@ -8,6 +8,18 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Migrate suspended source-mode agents through checked retained-Project A→B→C
+  handoffs (#115), preserving schema provenance and cumulative charged work.
+  Acknowledged migration results resume at Observe; initialization and completed
+  effects do not repeat. Lost acknowledgements, cancellation, deadline drift,
+  and malformed recovered State fail closed under explicit host-store freshness.
+
+- Add private filesystem v3 checked atomic writes (#228), with inspectable
+  Published, NotPublished, and Uncertain outcomes and an exhaustive std.fs
+  variant wrapper. Interpreter, native C11 and Core Wasm preserve the separate
+  callback failure channel and legacy v2 behavior. Graph v46 binds the new
+  operation; compact conformance fixtures keep the existing construction limit.
+
 - Add a fourth cross-language benchmark family for a multi-module invoice
   calculation (#106). Candidate-preserving hidden entry modules distinguish
   whole-subtotal rounding from per-item rounding in Rust, TypeScript, and

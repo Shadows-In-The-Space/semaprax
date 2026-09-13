@@ -91,6 +91,7 @@ pub fn render_project_lock(snapshot: &ProjectSnapshot) -> Result<String, Vec<Dia
         | ProjectProfile::HttpsCommandIoV1
         | ProjectProfile::FilesystemIoV1
         | ProjectProfile::FilesystemIoV2
+        | ProjectProfile::FilesystemIoV3
         | ProjectProfile::EnvironmentIoV1 => ("unproven", None),
         ProjectProfile::ProcessIoV1 => ("unproven", None),
     };

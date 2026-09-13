@@ -20,6 +20,15 @@ fn function_requires_v2(function: &ResolvedFunction) -> bool {
     });
     found
 }
+pub(super) fn function_requires_v3(function: &ResolvedFunction) -> bool {
+    let mut found = false;
+    hir::function_value::walk(function, |expression| {
+        if let ResolvedExprKind::HostCommandCall(call) = &expression.kind {
+            found |= crate::filesystem_ops::is_v3(call.operation);
+        }
+    });
+    found
+}
 pub(super) fn requires(program: &ResolvedProgram) -> bool {
     program
         .functions
@@ -31,6 +40,13 @@ pub(crate) fn graph_schema(program: &ResolvedProgram) -> Result<&'static str, Di
     let old = super::nested_owned::pre_filesystem_graph_schema(program)?;
     Ok(
         if program
+            .functions
+            .iter()
+            .chain(program.function_instances.iter().map(|item| &item.function))
+            .any(function_requires_v3)
+        {
+            "semaprax.graph.v46"
+        } else if program
             .functions
             .iter()
             .chain(program.function_instances.iter().map(|item| &item.function))
@@ -56,6 +72,12 @@ pub(crate) fn graph_schema_from_parts_and_instances(
     )?;
     Ok(
         if functions
+            .iter()
+            .chain(instances.iter().map(|item| &item.function))
+            .any(function_requires_v3)
+        {
+            "semaprax.graph.v46"
+        } else if functions
             .iter()
             .chain(instances.iter().map(|item| &item.function))
             .any(function_requires_v2)
@@ -130,6 +152,17 @@ pub(super) fn graph_json(
         facts["write_mode"] = json!("create-new-or-explicit-atomic-replace");
         facts["accounting"] =
             json!("reserve-read-or-list-max-write-length-metadata-zero-before-dispatch-no-refund");
+    }
+    if graph_schema(program)? == "semaprax.graph.v46" {
+        facts["schema"] = json!("semaprax.filesystem.v3");
+        facts["root_path_operations"] = json!(["core.host.file-stat", "core.host.file-list"]);
+        facts["stat_encoding"] = json!("kind-plus-four-times-size-file1-directory2");
+        facts["list_encoding"] = json!("sorted-unique-immediate-raw-names-nul-terminated");
+        facts["write_mode"] =
+            json!("create-new-or-explicit-atomic-replace-or-checked-publication-outcome");
+        facts["checked_atomic_outcomes"] = json!([0, 1, 2]);
+        facts["accounting"] =
+            json!("reserve-read-or-list-max-write-length-before-dispatch-no-refund");
     }
     graph.pop();
     Ok(format!(

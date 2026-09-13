@@ -20,6 +20,29 @@ pub enum FileFailure {
     IoFailure,
     AuthorityDenied,
     InvalidFileType,
+    /// A physical atomic replacement was attempted but its result is unknown.
+    /// Legacy operations retain their existing `IoFailure` behavior.
+    PublishUncertain,
+}
+
+/// Closed publication result for the additive checked atomic-write operation.
+/// A provider returns all normal filesystem outcomes here; `Err(FileFailure)`
+/// is reserved for a malformed provider/ABI contract and fails closed upstream.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CheckedAtomicWriteOutcome {
+    Published,
+    NotPublished,
+    Uncertain,
+}
+
+impl CheckedAtomicWriteOutcome {
+    pub const fn code(self) -> u64 {
+        match self {
+            Self::Published => 0,
+            Self::NotPublished => 1,
+            Self::Uncertain => 2,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +67,7 @@ impl FileFailure {
             Self::IoFailure => 5,
             Self::AuthorityDenied => 6,
             Self::InvalidFileType => 7,
+            Self::PublishUncertain => 5,
         }
     }
 }
@@ -91,6 +115,13 @@ pub trait FileProvider {
     fn write_atomic(&mut self, _path: &[u8], _data: &[u8]) -> Result<usize, FileFailure> {
         Err(FileFailure::AuthorityDenied)
     }
+    fn write_atomic_checked(
+        &mut self,
+        _path: &[u8],
+        _data: &[u8],
+    ) -> Result<CheckedAtomicWriteOutcome, FileFailure> {
+        Ok(CheckedAtomicWriteOutcome::NotPublished)
+    }
     fn settle(&mut self) {}
 }
 
@@ -113,6 +144,15 @@ pub struct FixtureFileProvider {
     directories: BTreeSet<Vec<u8>>,
     writable: bool,
     settlements: usize,
+    checked_atomic_fault: Option<CheckedAtomicWriteFault>,
+}
+
+/// Explicit test-only phase injection for the checked operation. It is host
+/// fixture state, never source input, so callers cannot forge uncertainty.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CheckedAtomicWriteFault {
+    BeforeCommit,
+    CommitOutcomeUnknown,
 }
 
 impl FixtureFileProvider {
@@ -125,6 +165,7 @@ impl FixtureFileProvider {
             directories: BTreeSet::new(),
             writable,
             settlements: 0,
+            checked_atomic_fault: None,
         };
         let mut bytes = 0usize;
         for (path, data) in files {
@@ -154,6 +195,9 @@ impl FixtureFileProvider {
     pub fn settlements(&self) -> usize {
         self.settlements
     }
+    pub fn set_checked_atomic_fault(&mut self, fault: Option<CheckedAtomicWriteFault>) {
+        self.checked_atomic_fault = fault;
+    }
 
     fn add_parent_directories(&mut self, path: &[u8]) {
         for (index, byte) in path.iter().enumerate() {
@@ -161,6 +205,43 @@ impl FixtureFileProvider {
                 self.directories.insert(path[..index].to_vec());
             }
         }
+    }
+}
+
+impl FixtureFileProvider {
+    fn atomic_replace(&mut self, path: &[u8], data: &[u8]) -> Result<(), FileFailure> {
+        validate_path(path)?;
+        if !self.writable {
+            return Err(FileFailure::AuthorityDenied);
+        }
+        if data.len() > MAX_FILE_BYTES {
+            return Err(FileFailure::CapacityExceeded);
+        }
+        if self.directories.contains(path) {
+            return Err(FileFailure::InvalidFileType);
+        }
+        if let Some(parent) = parent_path(path) {
+            if self.files.contains_key(parent) {
+                return Err(FileFailure::InvalidFileType);
+            }
+            if !parent.is_empty() && !self.directories.contains(parent) {
+                return Err(FileFailure::NotFound);
+            }
+        }
+        let replaced = self.files.get(path).map_or(0, Vec::len);
+        let total = self
+            .files
+            .values()
+            .map(Vec::len)
+            .sum::<usize>()
+            .checked_sub(replaced)
+            .and_then(|total| total.checked_add(data.len()))
+            .ok_or(FileFailure::CapacityExceeded)?;
+        if total > MAX_TOTAL_BYTES || (!self.files.contains_key(path) && self.files.len() >= 1024) {
+            return Err(FileFailure::CapacityExceeded);
+        }
+        self.files.insert(path.to_vec(), data.to_vec());
+        Ok(())
     }
 }
 
@@ -303,38 +384,37 @@ impl FileProvider for FixtureFileProvider {
         Err(FileFailure::NotFound)
     }
     fn write_atomic(&mut self, path: &[u8], data: &[u8]) -> Result<usize, FileFailure> {
-        validate_path(path)?;
-        if !self.writable {
-            return Err(FileFailure::AuthorityDenied);
-        }
-        if data.len() > MAX_FILE_BYTES {
-            return Err(FileFailure::CapacityExceeded);
-        }
-        if self.directories.contains(path) {
-            return Err(FileFailure::InvalidFileType);
-        }
-        if let Some(parent) = parent_path(path) {
-            if self.files.contains_key(parent) {
-                return Err(FileFailure::InvalidFileType);
+        self.atomic_replace(path, data).map(|()| data.len())
+    }
+    fn write_atomic_checked(
+        &mut self,
+        path: &[u8],
+        data: &[u8],
+    ) -> Result<CheckedAtomicWriteOutcome, FileFailure> {
+        match self.checked_atomic_fault.take() {
+            Some(CheckedAtomicWriteFault::BeforeCommit) => {
+                return Ok(CheckedAtomicWriteOutcome::NotPublished)
             }
-            if !parent.is_empty() && !self.directories.contains(parent) {
-                return Err(FileFailure::NotFound);
+            Some(CheckedAtomicWriteFault::CommitOutcomeUnknown) => {
+                self.atomic_replace(path, data)?;
+                return Ok(CheckedAtomicWriteOutcome::Uncertain);
             }
+            None => {}
         }
-        let replaced = self.files.get(path).map_or(0, Vec::len);
-        let total = self
-            .files
-            .values()
-            .map(Vec::len)
-            .sum::<usize>()
-            .checked_sub(replaced)
-            .and_then(|total| total.checked_add(data.len()))
-            .ok_or(FileFailure::CapacityExceeded)?;
-        if total > MAX_TOTAL_BYTES || (!self.files.contains_key(path) && self.files.len() >= 1024) {
-            return Err(FileFailure::CapacityExceeded);
+        match self.atomic_replace(path, data) {
+            Ok(()) => Ok(CheckedAtomicWriteOutcome::Published),
+            Err(
+                FileFailure::InvalidPath
+                | FileFailure::NotFound
+                | FileFailure::AlreadyExists
+                | FileFailure::CapacityExceeded
+                | FileFailure::AuthorityDenied
+                | FileFailure::InvalidFileType,
+            ) => Ok(CheckedAtomicWriteOutcome::NotPublished),
+            // The fixture has no physical I/O; an unclassified error is a
+            // provider defect rather than a forged source outcome.
+            Err(error @ (FileFailure::IoFailure | FileFailure::PublishUncertain)) => Err(error),
         }
-        self.files.insert(path.to_vec(), data.to_vec());
-        Ok(data.len())
     }
     fn settle(&mut self) {
         self.settlements += 1;

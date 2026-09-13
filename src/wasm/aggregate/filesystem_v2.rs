@@ -241,7 +241,11 @@ pub(super) fn append_command_exports(
         } else if http_io {
             super::super::http_io::append_export(exports);
         } else if filesystem_ops {
-            if command_io.is_some_and(super::super::command_io::CommandPlan::is_filesystem_v2) {
+            if command_io.is_some_and(super::super::command_io::CommandPlan::is_filesystem_v3) {
+                super::super::filesystem_v3::append_export(exports);
+            } else if command_io
+                .is_some_and(super::super::command_io::CommandPlan::is_filesystem_v2)
+            {
                 super::super::filesystem_v2::append_export(exports);
             } else {
                 super::super::filesystem_ops::append_export(exports);

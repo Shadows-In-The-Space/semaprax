@@ -24,13 +24,20 @@ pub(super) fn admitted(
         (parameter.mode == ParamMode::Own && parameter.ty == Type::Bytes)
             || (matches!(parameter.mode, ParamMode::Own | ParamMode::Borrow)
                 && record(&parameter.ty))
-    }) && record_kind(
+    }) && (record_kind(
         target.module,
         &function.return_type,
         caller,
         authored,
         programs,
-    ) == Some(false);
+    ) == Some(false)
+        || fieldless_variant_result(
+            target.module,
+            &function.return_type,
+            caller,
+            authored,
+            programs,
+        ));
     uses_record
         && (copy_result
             || scalar(&function.return_type)
@@ -43,6 +50,39 @@ pub(super) fn admitted(
                 || (matches!(parameter.mode, ParamMode::Own | ParamMode::Borrow)
                     && record(&parameter.ty))
         })
+}
+/// A closed fieldless variant is a Copy result: it carries only its case tag.
+/// Keep the existing direct type-import requirement and exclude payload and
+/// resource variants from this owned-record function-import lane.
+fn fieldless_variant_result(
+    module: &str,
+    ty: &Type,
+    caller: &Program,
+    authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
+    programs: &[Program],
+) -> bool {
+    let Type::Named { name, arguments } = ty else {
+        return false;
+    };
+    if !arguments.is_empty() {
+        return false;
+    }
+    let Some(id) = resolve_type_id(module, name, programs) else {
+        return false;
+    };
+    let Some(target) = authored.get(id.as_str()) else {
+        return false;
+    };
+    let Some(TypeDeclaration {
+        kind: TypeDeclarationKind::Variant { cases },
+        ..
+    }) = target.ty
+    else {
+        return false;
+    };
+    !cases.is_empty()
+        && cases.iter().all(|case| case.fields.is_empty())
+        && signature_type_is_admitted(module, ty, caller, authored, programs, &mut BTreeSet::new())
 }
 fn scalar(ty: &Type) -> bool {
     matches!(

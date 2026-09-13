@@ -62,6 +62,8 @@ pub(crate) enum CommandOperationProfile {
     HttpV1,
     FilesystemV1,
     FilesystemV2,
+    /// Filesystem I/O v3 adds value-typed publication outcomes.
+    FilesystemV3,
     EnvironmentV1,
     ProcessV1,
 }
@@ -98,6 +100,7 @@ pub(crate) fn validate_operation_profile(
     let mut saw_http = false;
     let mut saw_filesystem = false;
     let mut saw_filesystem_v2 = false;
+    let mut saw_filesystem_v3 = false;
     let mut saw_other_host = false;
     let mut saw_environment = false;
     let mut saw_process = false;
@@ -124,6 +127,7 @@ pub(crate) fn validate_operation_profile(
                         fs if crate::filesystem_ops::is_filesystem(fs) => {
                             saw_filesystem = true;
                             saw_filesystem_v2 |= crate::filesystem_ops::is_v2(fs);
+                            saw_filesystem_v3 |= crate::filesystem_ops::is_v3(fs);
                         }
                         ResolvedHostCommandOperation::StdoutAppend
                         | ResolvedHostCommandOperation::StderrAppend => saw_append = true,
@@ -185,7 +189,9 @@ pub(crate) fn validate_operation_profile(
     if saw_filesystem
         && !matches!(
             profile,
-            CommandOperationProfile::FilesystemV1 | CommandOperationProfile::FilesystemV2
+            CommandOperationProfile::FilesystemV1
+                | CommandOperationProfile::FilesystemV2
+                | CommandOperationProfile::FilesystemV3
         )
     {
         return Err(profile_error(
@@ -194,9 +200,21 @@ pub(crate) fn validate_operation_profile(
     }
     if matches!(
         profile,
-        CommandOperationProfile::FilesystemV1 | CommandOperationProfile::FilesystemV2
+        CommandOperationProfile::FilesystemV1
+            | CommandOperationProfile::FilesystemV2
+            | CommandOperationProfile::FilesystemV3
     ) {
-        if saw_filesystem_v2 && profile != CommandOperationProfile::FilesystemV2 {
+        if saw_filesystem_v3 && profile != CommandOperationProfile::FilesystemV3 {
+            return Err(profile_error(
+                "checked filesystem publication outcomes require Filesystem I/O v3",
+            ));
+        }
+        if saw_filesystem_v2
+            && !matches!(
+                profile,
+                CommandOperationProfile::FilesystemV2 | CommandOperationProfile::FilesystemV3
+            )
+        {
             return Err(profile_error(
                 "new filesystem operations require Filesystem I/O v2",
             ));
@@ -253,6 +271,7 @@ pub(crate) fn validate_operation_profile(
         | CommandOperationProfile::HttpV1
         | CommandOperationProfile::FilesystemV1
         | CommandOperationProfile::FilesystemV2
+        | CommandOperationProfile::FilesystemV3
         | CommandOperationProfile::EnvironmentV1
         | CommandOperationProfile::ProcessV1 => Ok(()),
     }
@@ -540,7 +559,8 @@ pub(crate) const fn admitted_in_while(op: ResolvedHostCommandOperation) -> bool 
         | ResolvedHostCommandOperation::FileStat
         | ResolvedHostCommandOperation::FileCreateDir
         | ResolvedHostCommandOperation::FileRemove
-        | ResolvedHostCommandOperation::FileWriteAtomic => true,
+        | ResolvedHostCommandOperation::FileWriteAtomic
+        | ResolvedHostCommandOperation::FileWriteAtomicChecked => true,
         network => crate::network_io_ops::admitted_in_while(network),
     }
 }

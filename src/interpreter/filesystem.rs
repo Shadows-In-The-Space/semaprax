@@ -122,6 +122,31 @@ impl Evaluator<'_> {
                 }))
             }
             (
+                Op::FileWriteAtomicChecked,
+                [Value::BorrowedSlice(path), Value::Usize(length), Value::BorrowedSlice(data), Value::Usize(data_length)],
+            ) => {
+                // Reservation remains nonrefundable even where the checked
+                // operation can prove it did not publish. Budget denial is a
+                // host setup failure, not one of HOSTOUT-001's values.
+                state.reserve(*data_length)?;
+                let path = match prefix(path.bytes(), *length) {
+                    Ok(path) if crate::filesystem_provider::validate_path(path).is_ok() => path,
+                    _ => return Ok(Value::Usize(1)),
+                };
+                if *data_length > ops::MAX_FILE_BYTES {
+                    return Ok(Value::Usize(1));
+                }
+                let data = match prefix(data.bytes(), *data_length) {
+                    Ok(data) => data,
+                    Err(_) => return Ok(Value::Usize(1)),
+                };
+                let outcome = state
+                    .provider
+                    .write_atomic_checked(path, data)
+                    .map_err(failure)?;
+                Ok(Value::Usize(outcome.code()))
+            }
+            (
                 Op::FileWriteNew | Op::FileWriteAtomic,
                 [Value::BorrowedSlice(path), Value::Usize(length), Value::BorrowedSlice(data), Value::Usize(data_length)],
             ) => {
@@ -269,5 +294,48 @@ permit { fs.read }
         }
         assert_eq!(provider.calls, 4);
         assert_eq!(provider.settlements, 2);
+    }
+
+    #[test]
+    fn checked_atomic_write_returns_domain_outcome_and_v2_rejects_its_reachable_call() {
+        let text = r#"
+module fs.v3;
+permit { fs.write }
+@id("fs.main") fn main()->i64 { 0 }
+@id("fs.run") fn run()->bool uses { fs.write } {
+    let path=[116u8,97u8,114u8,103u8,101u8,116u8];
+    let data=[110u8,101u8,119u8];
+    file_write_atomic_checked(array_as_slice(path),6usize,array_as_slice(data),3usize)==2usize
+}
+"#;
+        let source = crate::check(text, "fs-v3.spx").unwrap();
+        let program = crate::hir::resolve(&source).unwrap();
+        let mut provider = crate::filesystem_provider::FixtureFileProvider::new(
+            [(b"target".to_vec(), b"old".to_vec())],
+            true,
+        )
+        .unwrap();
+        provider.set_checked_atomic_fault(Some(
+            crate::filesystem_provider::CheckedAtomicWriteFault::CommitOutcomeUnknown,
+        ));
+        assert!(crate::hosted_interpreter::execute_filesystem_command_v2(
+            &program,
+            "fs.run",
+            &mut provider,
+            1000
+        )
+        .is_err());
+        let run = crate::hosted_interpreter::execute_filesystem_command_v3(
+            &program,
+            "fs.run",
+            &mut provider,
+            1000,
+        )
+        .unwrap();
+        assert!(matches!(
+            run.outcome,
+            crate::interpreter::CommandEvaluationOutcome::ReturnedBool(true)
+        ));
+        assert_eq!(provider.read(b"target", 3), Ok(b"new".to_vec()));
     }
 }

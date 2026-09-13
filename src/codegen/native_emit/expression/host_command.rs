@@ -25,6 +25,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 if !self.output_profile.is_language_command()
                     && self.output_profile != NativeOutputProfile::FilesystemCommandIo
                     && self.output_profile != NativeOutputProfile::FilesystemCommandIoV2
+                    && self.output_profile != NativeOutputProfile::FilesystemCommandIoV3
                 {
                     return Err(backend_error(
                         "command I/O operation requires the native language-command profile",
@@ -97,7 +98,8 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     | Operation::FileList
                     | Operation::FileCreateDir
                     | Operation::FileRemove
-                    | Operation::FileWriteAtomic => {
+                    | Operation::FileWriteAtomic
+                    | Operation::FileWriteAtomicChecked => {
                         self.emit_filesystem_command_expr(expr, call)?
                     }
                     Operation::HttpsGet => self.emit_https_command_expr(expr, call)?,
@@ -331,8 +333,9 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         use crate::filesystem_ops as ops;
         use hir::ResolvedHostCommandOperation as Operation;
 
-        if (self.output_profile != NativeOutputProfile::FilesystemCommandIo
-            && self.output_profile != NativeOutputProfile::FilesystemCommandIoV2)
+        if self.output_profile != NativeOutputProfile::FilesystemCommandIo
+            && self.output_profile != NativeOutputProfile::FilesystemCommandIoV2
+            && self.output_profile != NativeOutputProfile::FilesystemCommandIoV3
             || !ops::is_filesystem(call.operation)
         {
             return Err(backend_error(
@@ -354,27 +357,65 @@ impl<'a, O: COutput> CEmitter<'a, O> {
             self.require_type(&value.ty, &expected, &format!("{name} argument {index}"))?;
             staged.push(value.code);
         }
-        let v2 = self.output_profile == NativeOutputProfile::FilesystemCommandIoV2;
+        let v2 = matches!(
+            self.output_profile,
+            NativeOutputProfile::FilesystemCommandIoV2 | NativeOutputProfile::FilesystemCommandIoV3
+        );
         let helper = match call.operation {
             Operation::FileRead => {
-                if v2 {
+                if self.output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+                    "spx_host_file_read_v3"
+                } else if v2 {
                     "spx_host_file_read_v2"
                 } else {
                     "spx_host_file_read_v1"
                 }
             }
             Operation::FileWriteNew => {
-                if v2 {
+                if self.output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+                    "spx_host_file_write_new_v3"
+                } else if v2 {
                     "spx_host_file_write_new_v2"
                 } else {
                     "spx_host_file_write_new_v1"
                 }
             }
-            Operation::FileStat => "spx_host_file_stat_v2",
-            Operation::FileList => "spx_host_file_list_v2",
-            Operation::FileCreateDir => "spx_host_file_create_dir_v2",
-            Operation::FileRemove => "spx_host_file_remove_v2",
-            Operation::FileWriteAtomic => "spx_host_file_write_atomic_v2",
+            Operation::FileStat => {
+                if self.output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+                    "spx_host_file_stat_v3"
+                } else {
+                    "spx_host_file_stat_v2"
+                }
+            }
+            Operation::FileList => {
+                if self.output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+                    "spx_host_file_list_v3"
+                } else {
+                    "spx_host_file_list_v2"
+                }
+            }
+            Operation::FileCreateDir => {
+                if self.output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+                    "spx_host_file_create_dir_v3"
+                } else {
+                    "spx_host_file_create_dir_v2"
+                }
+            }
+            Operation::FileRemove => {
+                if self.output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+                    "spx_host_file_remove_v3"
+                } else {
+                    "spx_host_file_remove_v2"
+                }
+            }
+            Operation::FileWriteAtomic => {
+                if self.output_profile == NativeOutputProfile::FilesystemCommandIoV3 {
+                    "spx_host_file_write_atomic_v3"
+                } else {
+                    "spx_host_file_write_atomic_v2"
+                }
+            }
+            Operation::FileWriteAtomicChecked => "spx_host_file_write_atomic_checked_v1",
             _ => unreachable!("filesystem operation membership was checked above"),
         };
         let arguments = staged.join(", ");

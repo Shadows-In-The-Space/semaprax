@@ -36,6 +36,7 @@ pub(super) fn prepare(
         operation_profile,
         crate::command_io_ops::CommandOperationProfile::FilesystemV1
             | crate::command_io_ops::CommandOperationProfile::FilesystemV2
+            | crate::command_io_ops::CommandOperationProfile::FilesystemV3
     ) {
         super::filesystem_ops::check_permits(&program.permits)?;
     } else if operation_profile == crate::command_io_ops::CommandOperationProfile::EnvironmentV1 {
@@ -95,10 +96,19 @@ impl CommandPlan {
             self.operation_profile,
             crate::command_io_ops::CommandOperationProfile::FilesystemV1
                 | crate::command_io_ops::CommandOperationProfile::FilesystemV2
+                | crate::command_io_ops::CommandOperationProfile::FilesystemV3
         )
     }
     pub(super) fn is_filesystem_v2(&self) -> bool {
-        self.operation_profile == crate::command_io_ops::CommandOperationProfile::FilesystemV2
+        matches!(
+            self.operation_profile,
+            crate::command_io_ops::CommandOperationProfile::FilesystemV2
+                | crate::command_io_ops::CommandOperationProfile::FilesystemV3
+        )
+    }
+
+    pub(super) fn is_filesystem_v3(&self) -> bool {
+        self.operation_profile == crate::command_io_ops::CommandOperationProfile::FilesystemV3
     }
 
     pub(super) fn is_environment_command(&self) -> bool {
@@ -127,6 +137,11 @@ impl CommandPlan {
                 + super::filesystem_ops::IMPORT_COUNT
                 + if self.is_filesystem_v2() {
                     super::filesystem_v2::IMPORT_COUNT
+                        + if self.is_filesystem_v3() {
+                            super::filesystem_v3::IMPORT_COUNT
+                        } else {
+                            0
+                        }
                 } else {
                     0
                 }

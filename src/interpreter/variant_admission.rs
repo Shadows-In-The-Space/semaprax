@@ -1,0 +1,75 @@
+//! Exact owned and fieldless variant classifiers for interpreter admission.
+use super::*;
+
+/// Exact non-Copy sum profile admitted by Owned Byte Variant Algebra v1 plus
+/// the bounded concrete authored generic extension. Backend selection consumes
+/// the shared HIR classifier so it cannot reinterpret generic ownership.
+pub(super) fn is_admitted_owned_byte_variant(
+    declarations: &hir::DeclarationIndex,
+    ty: &ResolvedType,
+) -> bool {
+    if is_admitted_fieldless_variant(declarations, ty) {
+        return true;
+    }
+    if crate::iterator_ops::step_shape(declarations, ty) {
+        return true;
+    }
+    let ResolvedType::Nominal {
+        declaration,
+        arguments,
+    } = ty
+    else {
+        return false;
+    };
+    let Some(item) = declarations.declaration(declaration) else {
+        return false;
+    };
+    if item.kind != hir::DeclarationKind::Variant {
+        return false;
+    }
+    if (item.identity_origin == hir::IdentityOrigin::CompilerOwned
+        && hir::admitted_owned_byte_prelude_instance(declaration, arguments))
+        || hir::is_admitted_concrete_owned_byte_variant(declarations, ty)
+    {
+        return true;
+    }
+    if !arguments.is_empty() {
+        return false;
+    }
+    declarations
+        .variant_cases(declaration)
+        .is_some_and(|cases| {
+            cases
+                .iter()
+                .flat_map(|case| &case.fields)
+                .any(|field| field.ty == ResolvedType::Bytes)
+                && cases.iter().flat_map(|case| &case.fields).all(|field| {
+                    field.ty == ResolvedType::Bytes || is_admitted_resolved_scalar(&field.ty)
+                })
+        })
+}
+
+/// A monomorphic fieldless variant carries only a Copy case tag. Keep this
+/// bounded value shape distinct from the owned byte-variant admission below.
+pub(super) fn is_admitted_fieldless_variant(
+    declarations: &hir::DeclarationIndex,
+    ty: &ResolvedType,
+) -> bool {
+    let ResolvedType::Nominal {
+        declaration,
+        arguments,
+    } = ty
+    else {
+        return false;
+    };
+    arguments.is_empty()
+        && declarations.declaration(declaration).is_some_and(|item| {
+            item.kind == hir::DeclarationKind::Variant
+                && item.identity_origin == hir::IdentityOrigin::Explicit
+        })
+        && declarations
+            .variant_cases(declaration)
+            .is_some_and(|cases| {
+                !cases.is_empty() && cases.iter().all(|case| case.fields.is_empty())
+            })
+}

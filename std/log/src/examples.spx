@@ -2,7 +2,24 @@ module std.log.examples;
 use type @id("std.log.event") from std.log as Event;
 use type @id("std.io.writer") from std.io as Writer;
 use function @id("std.log.append-event") from std.log as append_event;
+use function @id("std.io.writer.cursor") from std.io as writer_position;
+use function @id("std.io.writer.finish") from std.io as writer_finish;
 use function @id("std.io.writer.from-bytes") from std.io as writer_from_bytes;
+
+@id("std.log.examples.equal")
+fn equal(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool
+{
+    let mut index = 0usize;
+    let mut same = byte_len(left) == byte_len(right);
+    while same && index < byte_len(left) {
+        let a = match byte_get(left, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        let b = match byte_get(right, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        same = a == b;
+        index = index + 1usize;
+        same
+    }
+    same
+}
 
 @id("std.log.examples.main")
 fn main() -> i64
@@ -11,5 +28,8 @@ fn main() -> i64
     let message = [114u8, 101u8, 97u8, 100u8, 121u8];
     let event = Event { level: 2u8, sequence: 7usize, name: bytes_copy(array_as_slice(name)), message: bytes_copy(array_as_slice(message)) };
     let output = append_event(event, writer_from_bytes(bytes_zeroed(64usize)));
-    0
+    let position = writer_position(output);
+    let bytes = writer_finish(output);
+    let expected = [123u8, 34u8, 108u8, 101u8, 118u8, 101u8, 108u8, 34u8, 58u8, 34u8, 105u8, 110u8, 102u8, 111u8, 34u8, 44u8, 34u8, 115u8, 101u8, 113u8, 117u8, 101u8, 110u8, 99u8, 101u8, 34u8, 58u8, 55u8, 44u8, 34u8, 101u8, 118u8, 101u8, 110u8, 116u8, 34u8, 58u8, 34u8, 115u8, 116u8, 97u8, 114u8, 116u8, 34u8, 44u8, 34u8, 109u8, 101u8, 115u8, 115u8, 97u8, 103u8, 101u8, 34u8, 58u8, 34u8, 114u8, 101u8, 97u8, 100u8, 121u8, 34u8, 125u8, 10u8];
+    if position == 64usize && equal(bytes_as_slice(bytes), array_as_slice(expected)) { 0 } else { 1 }
 }

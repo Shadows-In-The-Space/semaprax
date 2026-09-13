@@ -13,5 +13,5 @@ fn main() -> i64
     let observed_count = histogram_observe_count(0);
     let observed_sum = histogram_observe_sum(0, 42);
     let outcome = try_admit_series(0);
-    0
+    if requests == 1 && queue_depth == 5 && observed_count == 1 && observed_sum == 42 && outcome == 1 { 0 } else { 1 }
 }

@@ -240,10 +240,21 @@ every completed module. The cross-module checks compare that extracted evidence 
 frontend stages both synthetic AST and HIR in its checked-module cache, so it
 stops at the earlier summed receipts and never selects this final fallback.
 
+The final output-carrier profile charges each compact signature heap clone and
+declaration map entry before allocation. Synthetic AST clones receive a
+monotonic maximum-peak reservation; the remaining HIR forecast is still
+reserved before resolution. Forecasting excludes imports for the retained
+local output without cloning an authored Program. A fixed-size index orders
+modules by descending full-minus-retained HIR overhead, with a path tie-break;
+the forecast and resolver use the same order. Completed outputs are restored
+to canonical path order before validation and publication.
+
 At the production default builder limit, an unnested core phase that exceeds
 its budget after accepting an earlier estimate may retry with the raw-AST
 estimate, then with the final transient-peak estimate, only when each is
-strictly tighter. The failed partial core is dropped and private frontend
+strictly tighter. The final output-carrier profile is a different retention
+strategy and may be selected without that numeric comparison; its complete
+charges must still fit the unchanged cap. The failed partial core is dropped and private frontend
 attempt state is rolled back before each retry. The recorded sequential-phase
 debit is the maximum of all attempts; no enclosing budget is reset or refunded.
 Explicit smaller-limit invocations and nested budgets retain their original

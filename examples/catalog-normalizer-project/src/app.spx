@@ -4,7 +4,9 @@ use function @id("std.data.json.dec.is_failure") from std.data.json.dec as is_fa
 use function @id("std.data.json.dec.emit_at") from std.data.json.dec as emit_at;
 use function @id("std.data.json.dec.emit_len") from std.data.json.dec as emit_len;
 use function @id("std.data.json.dec.token_end") from std.data.json.dec as token_end;
+use function @id("std.data.json.dec.decoded_token_eq") from std.data.json.dec as decoded_token_eq;
 use function @id("std.data.json.dec.code_byte") from std.data.json.dec as dec_code_byte;
+use function @id("catalog_normalizer.limits.max_id_bytes") from catalog_normalizer.limits as max_id_bytes;
 use function @id("catalog_normalizer.limits.max_label_bytes") from catalog_normalizer.limits as max_label_bytes;
 
 // This module owns bounded JSON string decoding and label normalization.
@@ -49,27 +51,6 @@ fn trim_end(view: borrow Slice<u8>) -> usize
     end
 }
 
-@id("catalog_normalizer.app.dec_code_byte_i64")
-fn dec_code_byte_i64(byte: u8) -> i64
-{
-    let mut probe = 0u8;
-    let mut value = 0;
-    let mut scanning = probe != byte && value < 255;
-    while scanning {
-        probe = probe + 1u8;
-        value = value + 1;
-        scanning = probe != byte && value < 255;
-        scanning
-    }
-    value
-}
-
-@id("catalog_normalizer.app.bytes_get_or")
-fn bytes_get_or(view: borrow Slice<u8>, index: usize, fallback: i64) -> i64
-{
-    match byte_get(view, index) { Option::Some { value } => dec_code_byte_i64(value), Option::None {} => fallback, }
-}
-
 @id("catalog_normalizer.app.bytes_equal")
 fn bytes_equal(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool
 {
@@ -77,7 +58,9 @@ fn bytes_equal(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool
     let mut index = 0usize;
     let mut same = length == byte_len(right);
     while index < length && same {
-        same = bytes_get_or(left, index, -1) == bytes_get_or(right, index, -1);
+        let a = match byte_get(left, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        let b = match byte_get(right, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        same = a == b;
         index = index + 1usize;
         index < length && same
     }
@@ -93,6 +76,25 @@ fn token_valid(line: borrow Slice<u8>, pos: usize) -> bool
 {
     let length = decoded_len(line, pos);
     !is_failure(line, length) && length <= max_label_bytes()
+}
+
+// CNORM-010/CNORM-011: ids use the same exact decoded-string semantics as
+// labels, but are required to contain one through 64 decoded bytes.  Keeping
+// this separate from `token_valid` prevents a future record walker from
+// accidentally accepting an empty id or applying the label's 256-byte bound.
+@id("catalog_normalizer.app.id_valid")
+fn id_token_valid(line: borrow Slice<u8>, pos: usize) -> bool
+{
+    let length = decoded_len(line, pos);
+    !is_failure(line, length) && length > 0usize && length <= max_id_bytes()
+}
+
+// CNORM-014: both ids refer into the same bounded batch input. Compare
+// the decoded tokens through the standard decoder without allocating buffers.
+@id("catalog_normalizer.app.same_id")
+fn same_decoded_id(input: borrow Slice<u8>, left_pos: usize, right_pos: usize) -> bool
+{
+    id_token_valid(input, left_pos) && id_token_valid(input, right_pos) && decoded_token_eq(input, left_pos, right_pos)
 }
 
 // Decodes the JSON string token at `pos` (escapes resolved exactly as

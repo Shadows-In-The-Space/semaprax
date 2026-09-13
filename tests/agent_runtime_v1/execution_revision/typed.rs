@@ -214,3 +214,6 @@ mod linked;
 
 #[path = "typed/live_streaming.rs"]
 mod live_streaming;
+
+#[path = "typed/repair.rs"]
+mod repair;

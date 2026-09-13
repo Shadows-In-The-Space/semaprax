@@ -3,11 +3,11 @@
 //! split into the part every retained projection keeps and the contract an
 //! imported stub discards.
 
-use crate::ast::{Expr, ExprKind, Function, Type};
+use crate::ast::{Expr, ExprKind, Function, Program, Type};
 use crate::diagnostic::Diagnostic;
 
-use super::ast_pattern_cost;
 use super::cost::StructuralCost;
+use super::{ast_pattern_cost, ast_type_declaration_cost};
 
 pub(super) fn ast_field_cost(
     field: &crate::ast::FieldDeclaration,
@@ -285,6 +285,55 @@ pub(super) fn ast_expr_cost(
                 cost.embedded_string(value)?;
             }
         }
+    }
+    Ok(())
+}
+
+pub(super) fn ast_program_cost(
+    program: &Program,
+    cost: &mut StructuralCost,
+    include_imports: bool,
+) -> Result<(), Vec<Diagnostic>> {
+    cost.program(program)?;
+    cost.embedded_string(&program.path)?;
+    cost.embedded_string(&program.module)?;
+    for module_use in program.module_uses.iter().filter(|_| include_imports) {
+        cost.value(module_use)?;
+        cost.embedded_string(&module_use.persistent_id)?;
+        cost.embedded_string(&module_use.target_module)?;
+        cost.embedded_string(&module_use.alias)?;
+    }
+    for permit in &program.permits {
+        cost.string(permit)?;
+    }
+    for declaration in &program.types {
+        ast_type_declaration_cost(declaration, cost)?;
+    }
+    for interface in &program.interfaces {
+        cost.value(interface)?;
+        cost.embedded_string(&interface.stable_id)?;
+        cost.embedded_string(&interface.name)?;
+        for permit in &interface.permits {
+            cost.string(permit)?;
+        }
+        for import in &interface.imports {
+            cost.value(import)?;
+            cost.embedded_string(&import.stable_id)?;
+            cost.embedded_string(&import.name)?;
+            for param in &import.params {
+                ast_param_cost(param, cost)?;
+            }
+            for effect in &import.effects {
+                cost.string(effect)?;
+            }
+            if let crate::ast::ImportFailure::Status { domain_id } = &import.failure {
+                cost.embedded_string(domain_id)?;
+            }
+            cost.embedded_string(&import.consumes)?;
+        }
+    }
+    for function in &program.functions {
+        ast_function_cost(function, cost)?;
     }
     Ok(())
 }

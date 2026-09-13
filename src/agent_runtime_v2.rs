@@ -7,6 +7,9 @@ pub use crate::execution_revision::typed::{
     AgentRuntimeV2DurableModelFailure, AgentRuntimeV2Evidence, AgentRuntimeV2ModelEvidence,
     AgentRuntimeV2ModelFailure,
 };
+pub use crate::execution_revision::typed_repair::{
+    OfflineRepairEnvelope, OfflineRepairHandler, OfflineRepairPreview, OfflineRepairRejection,
+};
 
 pub mod checkpoint;
 pub mod source_model;

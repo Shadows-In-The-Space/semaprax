@@ -16,6 +16,7 @@ Only the unpublished `semaprax-full` binary admits:
 semaprax-full source-live run CONFIG CHECKPOINT --opencode ABS --scratch EMPTY_ABS
 semaprax-full source-live resume CONFIG CHECKPOINT --opencode ABS --scratch EMPTY_ABS
 semaprax-full source-live migrate OLD_CONFIG OLD_CHECKPOINT NEW_CONFIG NEW_CHECKPOINT FUNCTION STEPS --opencode ABS --scratch EMPTY_ABS
+semaprax-full source-live offline-repair
 ```
 
 All operands are absolute except the stable migration function identity and
@@ -30,6 +31,19 @@ A→B→C gate. The executable is the one explicitly chosen OpenCode binary, and
 every process attempt uses the fixed
 `opencode/muse-spark-1.3-contributor-free` profile without a paid fallback.
 Scratch must be a new empty absolute directory for each CLI invocation.
+
+`offline-repair` is a separate fixed, credential-free private demonstration.
+It accepts no operands and authenticates only the bundled
+`examples/offline-repair-project` Project. It uses the checked Direct Runtime
+v2 source loop with two scripted streaming attempts: the first creates a
+malformed ephemeral candidate and the second must carry the checked diagnostic
+feedback before it can create the bounded `fixture.repair.value` replacement preview. Its
+single JSON report contains the candidate digest, source review, semantic
+delta, impact summary, model/effect counters and the in-memory source journal.
+The command neither writes source nor persists a checkpoint, publishes a
+candidate, selects a network provider, accepts a target/path/model operand, or
+claims physical recovery. It is local demonstration evidence for the checked
+repair path, not a general offline repair interface.
 
 Priced migration requires both predecessor and destination config v2 pricing
 with exactly matching work unit, currency, minor-unit exponent and integer

@@ -1,6 +1,7 @@
 //! Authority-free runtime associations derived from retained checked Project inputs.
 pub mod iterative;
 pub mod typed;
+pub mod typed_repair;
 
 use crate::agent_deployment::{
     bind_agent_deployment, migrate_agent_definition_v1, BoundAgentDeployment,

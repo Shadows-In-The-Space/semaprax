@@ -3910,7 +3910,7 @@ fn build_owned_inner(
     validate_synthetic_main_id_collisions(&programs, &authored)?;
     validate_uses(&programs, &module_paths, &authored)?;
     let dependency_depths = validate_dependency_dag(&programs)?;
-    let (mut resolve_builder_bytes, checked_retention_prebound, allow_uncached_peak) =
+    let (mut resolve_builder_bytes, checked_retention_prebound, allow_uncached_peak, initial_mode) =
         expected_projection::initial_core_prebound(&programs, &authored, frontend.is_none())?;
     if let Some(cache) = frontend.as_deref() {
         cache.checked_retention_prebound(checked_retention_prebound)?;
@@ -3928,10 +3928,15 @@ fn build_owned_inner(
     };
     retry_allowed &= frontend.is_none() || checkpoint.is_some();
     let mut core_builder_bytes = 0usize;
-    let mut fallback_mode = 1;
+    let mut fallback_mode = initial_mode;
     let core = loop {
         #[cfg(test)]
         CORE_BUILD_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
+        let compact_layout = (fallback_mode == 6)
+            .then(|| {
+                expected_projection::uncached_peak::uncached_output_layout(&programs, &authored)
+            })
+            .transpose()?;
         let (core, overflowed, consumed) =
             crate::bounded_output::with_limit_usage(active_builder_limit(), || {
                 charge_builder_prebound(resolve_builder_bytes)?;
@@ -3941,7 +3946,9 @@ fn build_owned_inner(
                     &dependency_depths,
                     &authored,
                     frontend.as_deref_mut(),
-                    fallback_mode == 6,
+                    compact_layout
+                        .as_ref()
+                        .map(|layout| &layout.order[..programs.len()]),
                 )
             });
         core_builder_bytes = core_builder_bytes.max(consumed);
@@ -3962,9 +3969,6 @@ fn build_owned_inner(
         if fallback_mode == 5 {
             let (tighter, _) =
                 expected_projection::uncached_output_peak_prebound(&programs, &authored)?;
-            if tighter >= resolve_builder_bytes {
-                return Err(vec![limit_error("builder_bytes", active_builder_limit())]);
-            }
             resolve_builder_bytes = tighter;
             fallback_mode = 6;
             continue;
@@ -4090,8 +4094,9 @@ fn build_resolved_core(
     dependency_depths: &BTreeMap<&str, usize>,
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     mut frontend: Option<&mut crate::project::incremental::FrontendPass>,
-    retained_output_only: bool,
+    compact_order: Option<&[usize]>,
 ) -> Result<ResolvedCore, Vec<Diagnostic>> {
+    let retained_output_only = compact_order.is_some();
     let mut expected_edges = Vec::new();
     for program in programs {
         collect_expected_edges(program, module_paths, authored, &mut expected_edges)?;
@@ -4109,14 +4114,28 @@ fn build_resolved_core(
     let mut validation = retained_output_only
         .then(|| WorkspaceValidationIndex::new(programs))
         .transpose()?;
-    let mut synthetic_modules = Vec::with_capacity(programs.len());
+    let mut synthetic_modules = if retained_output_only {
+        Vec::new()
+    } else {
+        Vec::with_capacity(programs.len())
+    };
     let mut modules = Vec::new();
     let mut imported_vec_instances = BTreeMap::new();
     if retained_output_only {
         reserve_workspace_module_carrier(programs.len())?;
         modules = Vec::with_capacity(programs.len());
     }
-    for program in programs {
+    let mut synthetic_ast_peak = 0usize;
+    for index in 0..programs.len() {
+        let program = &programs[compact_order.map_or(index, |order| order[index])];
+        if retained_output_only {
+            expected_projection::uncached_peak::charge_uncached_synthetic_ast(
+                program,
+                authored,
+                programs,
+                &mut synthetic_ast_peak,
+            )?;
+        }
         let synthetic = synthetic_program(program, authored, programs)?;
         // Exact stubs/spans and the unconditional prebound govern hits.
         let cached = frontend
@@ -4210,6 +4229,9 @@ fn build_resolved_core(
                 resolved,
             ));
         }
+    }
+    if retained_output_only {
+        modules.sort_unstable_by(|left, right| left.path.cmp(&right.path));
     }
     let declarations = if let Some(validation) = validation {
         validation.validate_stub_signatures(programs)?;

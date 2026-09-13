@@ -57,21 +57,6 @@ impl WorkspaceValidationIndex {
             prelude_binding::uses_box(programs),
             prelude_binding::uses_iterator(programs),
         )?;
-        reserve_builder_structure(
-            expected
-                .len()
-                .checked_add(expected_compiler.len())
-                .and_then(|entries| {
-                    entries
-                        .checked_mul(std::mem::size_of::<(String, WorkspaceDeclarationFact)>() * 2)
-                })
-                .ok_or_else(|| {
-                    vec![graph_error(
-                        "SPX-G171",
-                        "workspace validation facts exceed the builder budget",
-                    )]
-                })?,
-        )?;
         Ok(Self {
             expected,
             expected_compiler,
@@ -99,6 +84,12 @@ impl WorkspaceValidationIndex {
         let mut facts = ModuleSignatureFacts::default();
         for function in &resolved.functions {
             reserve_validation_entry::<FunctionSignature>()?;
+            reserve_validation_clone(clone_cost::function_signature(
+                &[],
+                &function.params,
+                &function.return_type,
+                &function.effects,
+            )?)?;
             facts.functions.insert(
                 crate::bounded_output::budgeted_clone(function.id.as_str()),
                 FunctionSignature {
@@ -113,6 +104,12 @@ impl WorkspaceValidationIndex {
         }
         for template in &resolved.function_templates {
             reserve_validation_entry::<FunctionSignature>()?;
+            reserve_validation_clone(clone_cost::function_signature(
+                &template.type_parameters,
+                &template.params,
+                &template.return_type,
+                &template.effects,
+            )?)?;
             facts.templates.insert(
                 crate::bounded_output::budgeted_clone(template.id.as_str()),
                 FunctionSignature {
@@ -127,6 +124,10 @@ impl WorkspaceValidationIndex {
         }
         for declaration in &resolved.types {
             reserve_validation_entry::<TypeSignature>()?;
+            reserve_validation_clone(clone_cost::type_signature(
+                &declaration.type_parameters,
+                &declaration.kind,
+            )?)?;
             facts.types.insert(
                 crate::bounded_output::budgeted_clone(declaration.id.as_str()),
                 TypeSignature {
@@ -163,11 +164,6 @@ impl WorkspaceValidationIndex {
             prelude::program_uses_box(source) || imports_box_wrapper,
             crate::iterator_ops::program_uses_iterator(source),
         )?;
-        let direct_targets = source
-            .module_uses
-            .iter()
-            .map(|module_use| module_use.persistent_id.as_str())
-            .collect::<BTreeSet<_>>();
         let synthetic_main = crate::bounded_output::budgeted_format(format_args!(
             "workspace.synthetic.main.{module}"
         ));
@@ -180,6 +176,7 @@ impl WorkspaceValidationIndex {
         let mut compiler = BTreeMap::new();
         for declaration in resolved.declarations.workspace_declarations() {
             if declaration.identity_origin == hir::IdentityOrigin::CompilerOwned {
+                reserve_validation_entry::<WorkspaceDeclarationFact>()?;
                 let fact = WorkspaceDeclarationFact {
                     kind: declaration.kind,
                     origin: declaration.identity_origin,
@@ -220,7 +217,10 @@ impl WorkspaceValidationIndex {
             };
             if top_fact.module.as_deref() != Some(module) {
                 let expected_foreign = self.expected.get(declaration.id.as_str());
-                if direct_targets.contains(top.as_str())
+                if source
+                    .module_uses
+                    .iter()
+                    .any(|item| item.persistent_id == top.as_str())
                     && expected_foreign.is_some_and(|fact| {
                         fact.kind == declaration.kind
                             && fact.origin == declaration.identity_origin
@@ -416,6 +416,195 @@ fn reserve_validation_entry<T>() -> Result<(), Vec<Diagnostic>> {
                 )]
             })?,
     )
+}
+
+/// Charge heap reachable from a compact-proof value before its raw `Clone`.
+/// The enclosing BTreeMap entry is reserved separately, while `budgeted_clone`
+/// accounts its String key at the point it allocates that key.
+fn reserve_validation_clone(payload: usize) -> Result<(), Vec<Diagnostic>> {
+    reserve_builder_structure(payload)
+}
+
+/// Exact heap accounting for the signature-only HIR retained by
+/// `WorkspaceValidationIndex`.  Every vector is cloned with one slot per
+/// source element, and every cloned `String`, `DeclarationId`, and boxed type
+/// receives its own carrier.  `ValueId` is Arc-backed, so cloning it does not
+/// allocate its shared identity bytes again.
+mod clone_cost {
+    use crate::diagnostic::Diagnostic;
+    use crate::hir;
+
+    use super::graph_error;
+
+    pub(super) fn limit_error() -> Vec<Diagnostic> {
+        vec![graph_error(
+            "SPX-G171",
+            "workspace validation facts exceed the builder budget",
+        )]
+    }
+
+    pub(super) type Cost = Result<usize, Vec<Diagnostic>>;
+
+    fn add(left: usize, right: usize) -> Cost {
+        left.checked_add(right).ok_or_else(limit_error)
+    }
+
+    fn slots<T>(len: usize) -> Cost {
+        len.checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(limit_error)
+    }
+
+    fn strings(values: &[String]) -> Cost {
+        values
+            .iter()
+            .try_fold(slots::<String>(values.len())?, |bytes, value| {
+                add(bytes, value.len())
+            })
+    }
+
+    fn declaration(id: &hir::DeclarationId) -> usize {
+        id.as_str().len()
+    }
+
+    fn type_parameters(values: &[hir::ResolvedTypeParameterDeclaration]) -> Cost {
+        values.iter().try_fold(
+            slots::<hir::ResolvedTypeParameterDeclaration>(values.len())?,
+            |bytes, parameter| add(bytes, parameter.name.len()),
+        )
+    }
+
+    fn types(values: &[hir::ResolvedType]) -> Cost {
+        values
+            .iter()
+            .try_fold(slots::<hir::ResolvedType>(values.len())?, |bytes, ty| {
+                add(bytes, resolved_type(ty)?)
+            })
+    }
+
+    fn resolved_type(ty: &hir::ResolvedType) -> Cost {
+        match ty {
+            hir::ResolvedType::Function { parameters, result } => add(
+                types(parameters)?,
+                add(
+                    std::mem::size_of::<hir::ResolvedType>(),
+                    resolved_type(result)?,
+                )?,
+            ),
+            hir::ResolvedType::TypeParameter { owner, .. } => Ok(declaration(owner)),
+            hir::ResolvedType::Nominal {
+                declaration: id,
+                arguments,
+            } => add(declaration(id), types(arguments)?),
+            hir::ResolvedType::Unit
+            | hir::ResolvedType::I64
+            | hir::ResolvedType::I32
+            | hir::ResolvedType::Char
+            | hir::ResolvedType::U8
+            | hir::ResolvedType::Usize
+            | hir::ResolvedType::ArrayU8(_)
+            | hir::ResolvedType::F32
+            | hir::ResolvedType::F64
+            | hir::ResolvedType::Bool
+            | hir::ResolvedType::String
+            | hir::ResolvedType::Bytes
+            | hir::ResolvedType::Str
+            | hir::ResolvedType::SliceU8 => Ok(0),
+        }
+    }
+
+    fn params(values: &[hir::ResolvedParam]) -> Cost {
+        values.iter().try_fold(
+            slots::<hir::ResolvedParam>(values.len())?,
+            |bytes, parameter| {
+                add(
+                    bytes,
+                    add(parameter.name.len(), resolved_type(&parameter.ty)?)?,
+                )
+            },
+        )
+    }
+
+    pub(super) fn function_signature(
+        type_parameter_values: &[hir::ResolvedTypeParameterDeclaration],
+        parameter_values: &[hir::ResolvedParam],
+        return_type: &hir::ResolvedType,
+        effects: &[String],
+    ) -> Cost {
+        add(
+            type_parameters(type_parameter_values)?,
+            add(
+                params(parameter_values)?,
+                add(resolved_type(return_type)?, strings(effects)?)?,
+            )?,
+        )
+    }
+
+    fn fields(values: &[hir::ResolvedFieldDeclaration]) -> Cost {
+        values.iter().try_fold(
+            slots::<hir::ResolvedFieldDeclaration>(values.len())?,
+            |bytes, field| {
+                add(
+                    bytes,
+                    add(
+                        declaration(&field.id),
+                        add(field.name.len(), resolved_type(&field.ty)?)?,
+                    )?,
+                )
+            },
+        )
+    }
+
+    fn cases(values: &[hir::ResolvedVariantCaseDeclaration]) -> Cost {
+        values.iter().try_fold(
+            slots::<hir::ResolvedVariantCaseDeclaration>(values.len())?,
+            |bytes, case| {
+                add(
+                    bytes,
+                    add(
+                        declaration(&case.id),
+                        add(case.name.len(), fields(&case.fields)?)?,
+                    )?,
+                )
+            },
+        )
+    }
+
+    fn resource_drop(drop: &hir::ResolvedResourceDrop) -> Cost {
+        let base = declaration(&drop.id);
+        match &drop.kind {
+            hir::ResolvedResourceDropKind::Trivial => Ok(base),
+            hir::ResolvedResourceDropKind::Imported { import, import_key } => {
+                add(base, add(declaration(import), import_key.len())?)
+            }
+        }
+    }
+
+    fn type_kind(kind: &hir::ResolvedTypeDeclarationKind) -> Cost {
+        match kind {
+            hir::ResolvedTypeDeclarationKind::Resource { drop } => resource_drop(drop),
+            hir::ResolvedTypeDeclarationKind::Record {
+                fields: field_values,
+            } => fields(field_values),
+            hir::ResolvedTypeDeclarationKind::Class {
+                fields: field_values,
+                methods,
+            } => {
+                let methods = methods.iter().try_fold(
+                    slots::<hir::DeclarationId>(methods.len())?,
+                    |bytes, method| add(bytes, declaration(method)),
+                )?;
+                add(fields(field_values)?, methods)
+            }
+            hir::ResolvedTypeDeclarationKind::Variant { cases: case_values } => cases(case_values),
+        }
+    }
+
+    pub(super) fn type_signature(
+        type_parameter_values: &[hir::ResolvedTypeParameterDeclaration],
+        kind: &hir::ResolvedTypeDeclarationKind,
+    ) -> Cost {
+        add(type_parameters(type_parameter_values)?, type_kind(kind)?)
+    }
 }
 
 pub(super) fn validate_stub_signatures(
@@ -677,6 +866,7 @@ fn insert_expected_declaration(
     origin: hir::IdentityOrigin,
     owner: Option<&str>,
 ) -> Result<(), Vec<Diagnostic>> {
+    reserve_validation_entry::<WorkspaceDeclarationFact>()?;
     let fact = WorkspaceDeclarationFact {
         kind,
         origin,
@@ -702,6 +892,7 @@ pub(super) fn insert_expected_compiler_declaration(
     kind: hir::DeclarationKind,
     owner: Option<&str>,
 ) -> Result<(), Vec<Diagnostic>> {
+    reserve_validation_entry::<WorkspaceDeclarationFact>()?;
     let fact = WorkspaceDeclarationFact {
         kind,
         origin: hir::IdentityOrigin::CompilerOwned,

@@ -1377,3 +1377,5 @@ mod metrics_backend_audit;
 
 #[path = "standard_library/imported_view_composition.rs"]
 mod imported_view_composition;
+#[path = "standard_library/owned_failure_composition.rs"]
+mod owned_failure_composition;

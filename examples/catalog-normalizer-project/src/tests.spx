@@ -1,5 +1,7 @@
 module catalog_normalizer.tests;
 use function @id("catalog_normalizer.app.token_valid") from catalog_normalizer.app as token_valid;
+use function @id("catalog_normalizer.app.id_valid") from catalog_normalizer.app as id_token_valid;
+use function @id("catalog_normalizer.app.same_id") from catalog_normalizer.app as same_decoded_id;
 use function @id("catalog_normalizer.app.trimmed_matches") from catalog_normalizer.app as trimmed_matches;
 use function @id("catalog_normalizer.app.decoded_matches") from catalog_normalizer.app as decoded_matches;
 use function @id("catalog_normalizer.batch.record-count") from catalog_normalizer.batch as record_count;
@@ -98,7 +100,33 @@ fn main() -> i64
     failed = failed + if test_unterminated_string_rejected() == 0 { 0 } else { 16 };
     failed = failed + if test_batch_boundaries() == 0 { 0 } else { 32 };
     failed = failed + if test_batch_limits() == 0 { 0 } else { 64 };
+    failed = failed + if test_decoded_id_rules() == 0 { 0 } else { 128 };
     failed
+}
+
+// CNORM-011/014. The accepted 64-byte id, rejected 65-byte id, and escaped
+// duplicate are each represented as raw JSON string tokens. The independent
+// oracle's published limits/errors cases define the same boundaries and
+// decoded-value duplicate rule.
+@id("catalog_normalizer.tests.ids")
+fn test_decoded_id_rules() -> i64
+{
+    let mut id_boundary = bytes_zeroed(67usize);
+    id_boundary = bytes_set(id_boundary, 0usize, 34u8);
+    let mut index = 1usize;
+    while index < 66usize {
+        id_boundary = bytes_set(id_boundary, index, 120u8);
+        index = index + 1usize;
+        index < 66usize
+    }
+    id_boundary = bytes_set(id_boundary, 66usize, 34u8);
+    let too_long_rejected = !id_token_valid(bytes_as_slice(id_boundary), 0usize);
+    id_boundary = bytes_set(id_boundary, 65usize, 34u8);
+    let boundary_view = bytes_as_slice(id_boundary);
+    let exact = byte_range(boundary_view, 0usize, 66usize);
+    let empty = [34u8, 34u8];
+    let duplicate_tokens = [34u8, 100u8, 117u8, 112u8, 34u8, 34u8, 100u8, 92u8, 117u8, 48u8, 48u8, 55u8, 53u8, 112u8, 34u8];
+    if id_token_valid(exact, 0usize) && too_long_rejected && !id_token_valid(array_as_slice(empty), 0usize) && same_decoded_id(array_as_slice(duplicate_tokens), 0usize, 5usize) { 0 } else { 1 }
 }
 
 @id("catalog_normalizer.tests.test-batch-boundaries")

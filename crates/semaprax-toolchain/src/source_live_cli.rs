@@ -5,6 +5,7 @@
 //! clock, and the one fixed free OpenCode provider.
 
 mod checkpoint;
+mod offline_repair_cli;
 mod options;
 mod run;
 
@@ -37,9 +38,12 @@ impl CliError {
     }
 }
 
-/// Executes `run`, `resume`, or one V2-to-V3 `migrate` handoff. No verb
-/// publishes source, launches a shell, or chooses a paid model.
+/// Executes durable source-live verbs or the fixed offline repair demonstration.
+/// Neither route publishes source or selects a paid provider.
 pub fn run(arguments: &[String]) -> Result<String, (String, u8)> {
-    let result = options::Command::parse(arguments).and_then(run::execute);
+    let result = match arguments.split_first() {
+        Some((verb, rest)) if verb == "offline-repair" => offline_repair_cli::run(rest),
+        _ => options::Command::parse(arguments).and_then(run::execute),
+    };
     result.map_err(|error| (error.reason, error.code))
 }

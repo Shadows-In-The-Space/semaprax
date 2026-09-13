@@ -35,11 +35,11 @@ mod local_identity;
 #[path = "expected_projection/statement_segment.rs"]
 mod statement_segment;
 #[path = "expected_projection/uncached_peak.rs"]
-mod uncached_peak;
+pub(super) mod uncached_peak;
 use cost::{ExpandedDefaultCost, GenericInstanceCost, StructuralCost};
 use declaration_cost::{
     ast_field_cost, ast_function_contract_cost, ast_function_cost, ast_function_signature_cost,
-    ast_param_cost,
+    ast_program_cost,
 };
 use defaults::{default_expr, default_expr_expanded_cost};
 use identity_slots::{
@@ -66,7 +66,7 @@ pub(super) fn synthetic_builder_bytes(
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     programs: &[Program],
 ) -> Result<SyntheticBuilderCosts, Vec<Diagnostic>> {
-    synthetic_builder_bytes_scoped(program, authored, programs, None, 0)
+    synthetic_builder_bytes_scoped(program, authored, programs, None, 0, true)
 }
 
 fn synthetic_builder_bytes_scoped(
@@ -75,14 +75,15 @@ fn synthetic_builder_bytes_scoped(
     programs: &[Program],
     maximum_identity: Option<usize>,
     layout_mode: u8,
+    include_imports: bool,
 ) -> Result<SyntheticBuilderCosts, Vec<Diagnostic>> {
     let mut raw = StructuralCost::raw_ast(layout_mode >= 1).with_inline_values(layout_mode >= 2);
-    ast_program_cost(program, &mut raw)?;
+    ast_program_cost(program, &mut raw, include_imports)?;
     let mut identity_slots = ast_program_identity_slots(program)?;
     let mut runtime = StructuralCost::new();
     let mut default_memo = [BTreeMap::new(), BTreeMap::new()];
     let mut transient_import_clone = 0usize;
-    for module_use in &program.module_uses {
+    for module_use in program.module_uses.iter().filter(|_| include_imports) {
         if module_use.kind == ModuleUseKind::Protocol {
             continue;
         }
@@ -177,7 +178,11 @@ fn synthetic_builder_bytes_scoped(
     }
     if layout_mode >= 2 {
         identity_slots = identity_slots
-            .checked_sub(call_identity::discount(program, authored))
+            .checked_sub(call_identity::discount_with_imports(
+                program,
+                authored,
+                include_imports,
+            ))
             .expect("scalar calls retain their expression and callee identity slots");
     }
     identity_slots = identity_slots
@@ -334,7 +339,7 @@ pub(super) fn retention_prebound_mode(
             None
         };
         let costs = if maximum.is_some() {
-            synthetic_builder_bytes_scoped(program, authored, programs, maximum, layout_mode)?
+            synthetic_builder_bytes_scoped(program, authored, programs, maximum, layout_mode, true)?
         } else {
             synthetic_builder_bytes(program, authored, programs)?
         };
@@ -561,51 +566,6 @@ fn synthetic_main_runtime_cost(module: &str) -> Result<StructuralCost, Vec<Diagn
     )?;
     cost.add_split(module.len(), module.len())?;
     Ok(cost)
-}
-
-fn ast_program_cost(program: &Program, cost: &mut StructuralCost) -> Result<(), Vec<Diagnostic>> {
-    cost.program(program)?;
-    cost.embedded_string(&program.path)?;
-    cost.embedded_string(&program.module)?;
-    for module_use in &program.module_uses {
-        cost.value(module_use)?;
-        cost.embedded_string(&module_use.persistent_id)?;
-        cost.embedded_string(&module_use.target_module)?;
-        cost.embedded_string(&module_use.alias)?;
-    }
-    for permit in &program.permits {
-        cost.string(permit)?;
-    }
-    for declaration in &program.types {
-        ast_type_declaration_cost(declaration, cost)?;
-    }
-    for interface in &program.interfaces {
-        cost.value(interface)?;
-        cost.embedded_string(&interface.stable_id)?;
-        cost.embedded_string(&interface.name)?;
-        for permit in &interface.permits {
-            cost.string(permit)?;
-        }
-        for import in &interface.imports {
-            cost.value(import)?;
-            cost.embedded_string(&import.stable_id)?;
-            cost.embedded_string(&import.name)?;
-            for param in &import.params {
-                ast_param_cost(param, cost)?;
-            }
-            for effect in &import.effects {
-                cost.string(effect)?;
-            }
-            if let crate::ast::ImportFailure::Status { domain_id } = &import.failure {
-                cost.embedded_string(domain_id)?;
-            }
-            cost.embedded_string(&import.consumes)?;
-        }
-    }
-    for function in &program.functions {
-        ast_function_cost(function, cost)?;
-    }
-    Ok(())
 }
 
 fn ast_type_declaration_cost(

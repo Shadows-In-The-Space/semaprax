@@ -8,6 +8,16 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a checked two-call offline repair loop and private CLI demo with
+  bounded candidate edits, diagnostic feedback, read-only review evidence,
+  and terminal journal replay (#116). Extend imported owned cursor failure
+  composition with exact Wasm cleanup-order and sticky-status controls (#103).
+
+- Account compact workspace validation clones before allocation and schedule
+  the final uncached graph phase by temporary HIR overhead without raising
+  its cap (#124). Add decoded ID bounds and allocation-free token equality
+  to the catalog helper application with cross-backend oracle checks.
+
 - Add generic durable retry/failover with acknowledged attempt journals,
   exact retained execution/schema/model bindings, non-widening source and
   deployment limits, request-seed checks, and conservative recovery (#179).

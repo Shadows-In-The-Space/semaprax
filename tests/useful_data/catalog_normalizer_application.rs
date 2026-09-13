@@ -1,13 +1,58 @@
 //! Executes the actual catalog-normalizer source's named application tests.
 //! The frozen oracle and its cases remain independent of this backend gate.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use semaprax::{codegen, format, parse, project};
 
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/catalog-normalizer-project")
+}
+
+fn run_oracle(input: &[u8]) -> serde_json::Value {
+    let oracle_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/oracle/catalog_normalizer");
+    let mut child = Command::new("python3")
+        .arg("oracle.py")
+        .current_dir(oracle_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start the independent catalog-normalizer oracle");
+    child
+        .stdin
+        .take()
+        .expect("piped oracle stdin")
+        .write_all(input)
+        .expect("write oracle input");
+    let output = child.wait_with_output().expect("wait for oracle");
+    assert!(
+        output.status.success(),
+        "oracle failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("oracle emits one JSON response")
+}
+
+#[test]
+fn decoded_id_bounds_and_escaped_duplicates_match_the_independent_oracle() {
+    let id64 = "x".repeat(64);
+    let accepted = format!("{{\"id\":\"{id64}\",\"label\":\"l\",\"quantity\":1}}\n");
+    assert_eq!(run_oracle(accepted.as_bytes())["status"], "ok");
+
+    let id65 = "x".repeat(65);
+    let oversized = format!("{{\"id\":\"{id65}\",\"label\":\"l\",\"quantity\":1}}\n");
+    let oversized_response = run_oracle(oversized.as_bytes());
+    assert_eq!(oversized_response["status"], "error");
+    assert_eq!(oversized_response["category"], "oversized_input");
+
+    let escaped_duplicate = b"{\"id\":\"dup\",\"label\":\"one\",\"quantity\":1}\n{\"id\":\"d\\u0075p\",\"label\":\"two\",\"quantity\":2}\n";
+    let duplicate_response = run_oracle(escaped_duplicate);
+    assert_eq!(duplicate_response["status"], "error");
+    assert_eq!(duplicate_response["category"], "duplicate_id");
+    assert_eq!(duplicate_response["record_index"], 1);
 }
 
 #[test]
@@ -36,7 +81,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         .filter(|function| function.name.starts_with("test_"))
         .count();
     assert_eq!(
-        named_cases, 7,
+        named_cases, 8,
         "catalog-normalizer application case inventory drifted"
     );
     let scratch = std::env::temp_dir().canonicalize().unwrap().join(format!(

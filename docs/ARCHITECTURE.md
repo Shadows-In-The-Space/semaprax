@@ -2690,5 +2690,15 @@ The final uncached workspace graph path extracts cross-module declaration and
 signature proof in `workspace_graph/validation` while each full resolved HIR is
 live. It then retains only the selected output carrier before resolving the
 next module. Compact proof storage and the single live resolver peak remain
-charged within the existing builder cap; earlier successful paths keep their
-existing receipts.
+charged within the existing builder cap. The final uncached path reserves the
+largest synthetic AST before cloning, retaining that monotonic peak reservation
+as each temporary AST is dropped. Compact signature clones receive explicit
+recursive heap charges before allocation; declaration maps reserve each entry
+before insertion. The remaining forecast covers retained HIR, and earlier
+fallback profiles retain their existing forecast calculations.
+
+Only that final uncached profile resolves modules in descending temporary-HIR
+overhead with a path tie-break, using a fixed-size stack index. Its forecast uses
+the identical schedule, and retained modules return to canonical path order
+before cross-module validation and publication. Earlier profiles keep their
+existing resolution order.

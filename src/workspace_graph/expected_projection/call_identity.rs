@@ -17,6 +17,14 @@ pub(super) fn discount(
     program: &Program,
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
 ) -> usize {
+    discount_with_imports(program, authored, true)
+}
+
+pub(super) fn discount_with_imports(
+    program: &Program,
+    authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
+    include_imports: bool,
+) -> usize {
     let mut declared = BTreeMap::<&str, Option<usize>>::new();
     let mut insert = |name, function: &Function| {
         let signature = (function.type_parameters.is_empty() && primitive(&function.return_type))
@@ -30,7 +38,7 @@ pub(super) fn discount(
     for function in &program.functions {
         insert(function.name.as_str(), function);
     }
-    for item in &program.module_uses {
+    for item in program.module_uses.iter().filter(|_| include_imports) {
         if item.kind != ModuleUseKind::Function {
             continue;
         }

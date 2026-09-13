@@ -379,3 +379,72 @@ fn retained_output_carrier_charges_only_selected_entries_and_loan_plans() {
     assert_eq!(retained.unwrap(), vec![2, 4]);
     assert_eq!(debit, 20, "two entries plus their retained loan plans");
 }
+
+#[test]
+fn catalog_normalizer_compact_core_fits_production_builder_cap() {
+    let manifest = crate::project::ProjectManifest::parse(include_str!(
+        "../../../examples/catalog-normalizer-project/semaprax.toml"
+    ))
+    .unwrap();
+    let mut sources = manifest
+        .sources()
+        .iter()
+        .map(|path| WorkspaceSource {
+            path: path.clone(),
+            source: match path.as_str() {
+                "src/app.spx" => {
+                    include_str!("../../../examples/catalog-normalizer-project/src/app.spx")
+                }
+                "src/batch.spx" => {
+                    include_str!("../../../examples/catalog-normalizer-project/src/batch.spx")
+                }
+                "src/limits.spx" => {
+                    include_str!("../../../examples/catalog-normalizer-project/src/limits.spx")
+                }
+                "src/tests.spx" => {
+                    include_str!("../../../examples/catalog-normalizer-project/src/tests.spx")
+                }
+                other => panic!("unexpected catalog source {other}"),
+            }
+            .to_owned(),
+        })
+        .collect::<Vec<_>>();
+    sources.extend([
+        WorkspaceSource {
+            path: "dependencies/std.data.json.dec/0.1.0/dec.spx".to_owned(),
+            source: include_str!("../../../std/data-json-dec/src/dec.spx").to_owned(),
+        },
+        WorkspaceSource {
+            path: "dependencies/std.io/0.1.0/io.spx".to_owned(),
+            source: include_str!("../../../std/io/src/io.spx").to_owned(),
+        },
+    ]);
+    sources.sort_by(|left, right| left.path.cmp(&right.path));
+    let built = build_owned_with_builder_limit(sources.clone(), MAX_BUILDER_BYTES)
+        .unwrap_or_else(|errors| {
+            let programs = parsed_sources(&sources);
+            let authored = index_authored(&programs).unwrap();
+            let module_paths = index_modules(&programs).unwrap();
+            let depths = validate_dependency_dag(&programs).unwrap();
+            let forecast = expected_projection::uncached_output_peak_prebound(&programs, &authored);
+            let layout = expected_projection::uncached_peak::uncached_output_layout(&programs, &authored).unwrap();
+            let (core, overflow, debit) = crate::bounded_output::with_limit_usage(
+                MAX_BUILDER_BYTES,
+                || build_resolved_core(&programs, &module_paths, &depths, &authored, None, Some(&layout.order[..programs.len()])),
+            );
+            panic!("catalog compact core exceeds cap: {errors:?}; forecast={forecast:?}; live debit={debit}, overflow={overflow}, core_ok={}", core.is_ok());
+        });
+    assert_eq!(built.hir.modules.len(), 6);
+    assert!(built
+        .hir
+        .modules
+        .windows(2)
+        .all(|pair| pair[0].path < pair[1].path));
+    assert!(built
+        .hir
+        .module_paths
+        .contains_key("catalog_normalizer.app"));
+    assert!(built.hir.module_paths.contains_key("std.data.json.dec"));
+    assert!(built.hir.module_paths.contains_key("std.io"));
+    assert!(built.usage.builder_bytes <= MAX_BUILDER_BYTES);
+}

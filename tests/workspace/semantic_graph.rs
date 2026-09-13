@@ -385,12 +385,14 @@ fn expected_projection_source_boundary_is_pure_and_keeps_shared_helpers_in_root(
 
     assert!(root.contains("mod expected_projection;"));
     assert!(!projection.contains("use super::*;"));
+    assert!(projection_root.contains("pub(super) use uncached_peak::{\n    initial_core_prebound, next_retention_prebound_with_uncached_peak,\n    uncached_output_peak_prebound,\n};"));
     let exact_facade = [
         // `cost` became `pub(super)` and `rewrite_type_runtime_cost`/`rewrite_type`
         // were exposed on `main`; the inventory had not been updated with them, so
         // this contract was already failing before this branch.
         "pub(super) mod cost;",
-        "pub(super) use uncached_peak::{initial_core_prebound, next_retention_prebound_with_uncached_peak};",
+        "pub(super) mod uncached_peak;",
+        "pub(super) use uncached_peak::{",
         "pub(super) struct SyntheticBuilderCosts {",
         "pub(super) raw_clone_and_hir: usize,",
         "pub(super) runtime: usize,",

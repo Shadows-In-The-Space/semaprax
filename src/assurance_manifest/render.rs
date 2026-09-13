@@ -114,7 +114,7 @@ fn render_method(method: &MethodRecord) -> String {
     )
 }
 
-fn render_obligation(
+pub(super) fn render_obligation(
     obligation: &Obligation,
     class_counts: &mut [(AssuranceClass, usize)],
 ) -> String {

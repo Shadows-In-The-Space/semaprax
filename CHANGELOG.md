@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Implement additive Project Assurance Manifest v1 (#214): a canonical,
+  integrity-bound envelope bound to one retained Project, workspace
+  revision, ProgramRoot, and complete ordered source inventory. The profile
+  deduplicates shared entry/public/test HIR obligations, records explicit
+  unselected coverage, and admits only held `forbid_reaches` architecture laws;
+  the existing single-file Assurance Manifest v1 bytes remain unchanged.
+
 - Add additive source-journal I/O v5 accounting and private CLI config/receipt
   v3 (#113). Authenticated attempt rows reserve exact prompt bytes and bounded
   response capacity cumulatively; recovery and compatible migration retain

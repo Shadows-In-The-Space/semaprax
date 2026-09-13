@@ -231,6 +231,9 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
         "semaprax assurance-manifest <file> [--max-bytes N] [--max-obligations N]\n";
     assert_eq!(current.matches(ASSURANCE_MANIFEST_LINE).count(), 1);
     current = current.replacen(ASSURANCE_MANIFEST_LINE, "", 1);
+    const PROJECT_ASSURANCE_MANIFEST_LINE: &str = "semaprax project-assurance-manifest <manifest> [--max-bytes N] [--max-obligations N] [--forbid-reaches <claim-id> <from-id> <to-id>]...\n";
+    assert_eq!(current.matches(PROJECT_ASSURANCE_MANIFEST_LINE).count(), 1);
+    current = current.replacen(PROJECT_ASSURANCE_MANIFEST_LINE, "", 1);
     const GIT_PUBLISH_LINE: &str = "semaprax project-candidate-git-publish <manifest> <capsule.json> <approved-candidate-digest> <host-policy.json>\n";
     const WORKSPACE_LINE: &str = "semaprax serve-workspace <manifest> <host-policy.json>\n";
     const PROFILE_DOCTOR_LINE: &str =

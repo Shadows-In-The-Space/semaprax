@@ -543,3 +543,17 @@ pub(super) fn run_assurance(
     print!("{policy_report}");
     Ok(())
 }
+
+/// Project assurance authenticates the manifest as a multi-module Project
+/// before deriving the same bounded assurance facts and optional architecture
+/// claims over that one retained revision.
+pub(super) fn run_project_assurance(args: &[String]) -> Result<(), u8> {
+    use semaprax::assurance_manifest::project as project_assurance;
+
+    let manifest = required_path(args, 1)?;
+    let options = project_assurance_manifest_options(args)?;
+    let envelope = project_assurance::generate(&manifest, &options)
+        .map_err(|errors| report(&errors, false))?;
+    print!("{envelope}");
+    Ok(())
+}

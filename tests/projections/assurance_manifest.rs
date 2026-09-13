@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use semaprax::assurance_manifest::project::{self as project_assurance, ProjectAssuranceOptions};
 use semaprax::assurance_manifest::{
     self, delta, public_view, verify_envelope, verify_envelope_against_source,
     AssuranceManifestOptions,
@@ -331,6 +332,14 @@ fn cli(args: &[&str]) -> Output {
         .unwrap()
 }
 
+fn project_cli(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_semaprax"))
+        .arg("project-assurance-manifest")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
 #[test]
 fn cli_subcommand_prints_the_same_envelope_the_library_generates() {
     let path = write_temp(DECLARED_SOURCE);
@@ -377,4 +386,75 @@ fn cli_subcommand_honors_max_obligations_and_fails_closed_over_budget() {
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("SPX-Z102"), "{stderr}");
+}
+
+#[test]
+fn project_cli_without_claims_prints_the_exact_library_envelope() {
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/calculator-project/semaprax.toml");
+    let expected = project_assurance::generate(&manifest, &ProjectAssuranceOptions::default())
+        .expect("project assurance library envelope");
+    let output = project_cli(&[manifest.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, expected.into_bytes());
+}
+
+#[test]
+fn project_cli_parses_a_held_forbid_reaches_claim() {
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/calculator-project/semaprax.toml");
+    let output = project_cli(&[
+        manifest.to_str().unwrap(),
+        "--max-bytes",
+        "1048576",
+        "--max-obligations",
+        "256",
+        "--forbid-reaches",
+        "app-does-not-reach-not",
+        "calculator.app.main",
+        "calculator.not",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let document: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        document["payload"]["architecture_claims"]["claims"][0]["status"],
+        "held"
+    );
+}
+
+#[test]
+fn project_cli_claim_grammar_is_closed_before_project_authentication() {
+    let missing_triple = project_cli(&["missing.toml", "--forbid-reaches", "claim"]);
+    assert_eq!(missing_triple.status.code(), Some(2));
+    assert!(missing_triple.stdout.is_empty());
+    assert!(String::from_utf8(missing_triple.stderr)
+        .unwrap()
+        .contains("requires <claim-id> <from-id> <to-id>"));
+
+    let duplicate_claim_id = project_cli(&[
+        "missing.toml",
+        "--forbid-reaches",
+        "same",
+        "from.one",
+        "to.one",
+        "--forbid-reaches",
+        "same",
+        "from.two",
+        "to.two",
+    ]);
+    assert_eq!(duplicate_claim_id.status.code(), Some(1));
+    assert!(duplicate_claim_id.stdout.is_empty());
+    assert!(String::from_utf8(duplicate_claim_id.stderr)
+        .unwrap()
+        .contains("SPX-AC601"));
 }

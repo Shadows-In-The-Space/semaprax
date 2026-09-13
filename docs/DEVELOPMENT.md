@@ -90,6 +90,7 @@ Additional required references:
 | Linking exact SEMAPRAX subjects or exposing exact Rust crates | [Project Dependencies v1](PROJECT-DEPENDENCIES-V1.md), [Package Manifest v1](PACKAGE-MANIFEST-V1.md), [Native Rust Interoperability v1](NATIVE-RUST-INTEROP-V1.md) |
 | Native Rust SDK or host integration | [Native Rust Interoperability v1](NATIVE-RUST-INTEROP-V1.md), [Project Manifest v1](PROJECT-MANIFEST-V1.md) |
 | Authenticated Project input persistence | [Project Revision Store v1](PROJECT-REVISION-STORE-V1.md), [Project Manifest v1](PROJECT-MANIFEST-V1.md), and the additive manifest profile selected by the subject |
+| Project-wide authenticated assurance evidence or architecture-law obligations | [Project Assurance Manifest v1](PROJECT-ASSURANCE-MANIFEST-V1.md), [Assurance Manifest v1](ASSURANCE-MANIFEST-V1.md), [Architecture Claims v1](ARCHITECTURE-CLAIMS-V1.md), and [Canonical Semantic Workspace Revision v1](CANONICAL-SEMANTIC-WORKSPACE-REVISION-V1.md) |
 | Offline semantic lock snapshot or fixed-inventory publication | [Published Semantic Lock Snapshot v1](OFFLINE-PUBLISHED-SEMANTIC-LOCK-SNAPSHOT-V1.md), [Offline Resolver v1](OFFLINE-PACKAGE-RESOLVER-V1.md), and [Offline Semantic Lock v2](OFFLINE-SEMANTIC-PACKAGE-LOCK-V2.md) |
 
 ## Documentation classes

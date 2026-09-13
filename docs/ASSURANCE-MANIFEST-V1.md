@@ -17,6 +17,13 @@ for. It is proof data, not permission: the manifest grants no execution,
 publication, signing, or review authority, matching the repository's evidence
 capsule invariant.
 
+For authenticated multi-file Project evidence, see the additive [Project
+Assurance Manifest v1](PROJECT-ASSURANCE-MANIFEST-V1.md). That profile binds a
+retained Project snapshot, canonical workspace revision, ProgramRoot, complete
+source inventory, shared entry/public/test HIR derivation, and optional held
+architecture claims; it leaves this single-file envelope and its bytes
+unchanged.
+
 This tranche introduces the schema, the assurance lattice, the canonical
 producer, replay, and delta. It does **not** implement or require an SMT
 solver, a model checker, or a theorem-proving kernel. A manifest that has none
@@ -193,9 +200,10 @@ materialized instances are not separately assigned these two obligations
 in this single-file manifest.
 
 Nothing else is derived automatically in this tranche.
-`architecture_law` names no existing, single checked fact at all yet;
-this repository has no producer to audit for it. Its reserved token does not
-gain a `compiler_proved` label by analogy. A caller may supply it through
+`architecture_law` has no automatic producer in this single-file profile.
+[Project Assurance Manifest v1](PROJECT-ASSURANCE-MANIFEST-V1.md) derives it
+separately from held architecture claims bound to a retained Project. This
+single-file token does not gain a `compiler_proved` label by analogy. A caller may supply it through
 `options.external_records`, which is also how `open`, `assumed`,
 `test_evidenced`, `attempt_inconclusive`, `smt_proved`, `model_checked`, and
 `theorem_proved` records reach the manifest today. A simple candidate
@@ -535,5 +543,5 @@ already supply such a record through `options.external_records`.
   covers an ordinary function's canonical target-neutral cleanup plan only
   when its inventory contains a cleanup leaf. Generic templates and
   materialized instances do not get separately inferred result or cleanup
-  obligations here. `architecture_law` remains reserved because no existing
-  single checked fact defines it.
+  obligations here. `architecture_law` remains reserved in this single-file
+  profile; the additive Project report evaluates explicit revision-bound claims.

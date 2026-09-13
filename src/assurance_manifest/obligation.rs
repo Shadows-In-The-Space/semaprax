@@ -13,8 +13,7 @@ pub enum ObligationKind {
     Precondition,
     Postcondition,
     OwnershipParameter,
-    /// Reserved: needs the resolved-HIR `result_ownership` helper, not
-    /// derived automatically by this tranche. See "Obligation derivation".
+    /// Derived from validated ordinary-function HIR result ownership.
     OwnershipResult,
     /// One per distinct effect name a function declares in `uses { ... }`;
     /// derived automatically from `source_verify`'s effect-authority checks
@@ -24,9 +23,9 @@ pub enum ObligationKind {
     /// `source_verify`'s `SPX-M101` case-coverage check. See
     /// `derive::exhaustiveness_obligations`.
     Exhaustiveness,
-    /// Reserved: not derived automatically by this tranche.
+    /// Derived when validated HIR has an owned cleanup leaf.
     ResourceCleanup,
-    /// Reserved: not derived automatically by this tranche.
+    /// Derived only by the Project report from held, explicitly selected claims.
     ArchitectureLaw,
     /// One per `interface` declaration with at least one import; derived
     /// automatically from `source_verify`'s interface/import well-formedness

@@ -54,6 +54,8 @@ mod program_root_dependency_lock;
 mod program_root_v2;
 #[path = "workspace/program_root_v3.rs"]
 mod program_root_v3;
+#[path = "workspace/project_assurance_manifest.rs"]
+mod project_assurance_manifest;
 #[path = "workspace/semantic_change.rs"]
 mod semantic_change;
 #[path = "workspace/semantic_graph.rs"]

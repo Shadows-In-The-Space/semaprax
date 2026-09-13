@@ -33,6 +33,7 @@ mod derive;
 mod lattice;
 pub mod model_checking;
 mod obligation;
+pub mod project;
 pub mod proof_certificate;
 mod render;
 pub mod smt_discharge;

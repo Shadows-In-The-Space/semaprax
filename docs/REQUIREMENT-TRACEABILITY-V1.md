@@ -274,9 +274,15 @@ envelope malformation is propagated rather than silently downgraded.
   supplied string with no cross-call registry enforcing global uniqueness;
   nothing here checks two different calls did not reuse the same id for a
   different requirement.
-- **Inherits `assurance_manifest::generate`'s narrow automatic derivation.**
-  Only `precondition`, `postcondition`, and `ownership_parameter` obligations
-  exist to reference today (`ownership_result`, `effect`, `exhaustiveness`,
-  `resource_cleanup`, `architecture_law`, and `generated_interface` need an
-  `ExternalRecords` producer that does not yet exist); see "Obligation
-  derivation" in [Assurance Manifest v1](ASSURANCE-MANIFEST-V1.md).
+- **Evidence production remains a separate responsibility.** The single-file
+  producer now derives `precondition`, `postcondition`,
+  `ownership_parameter`, `ownership_result`, `effect`, `exhaustiveness`,
+  `resource_cleanup`, and `generated_interface` when their checked facts are
+  present. `architecture_law` remains explicit evidence supplied by a held
+  architecture-claim evaluation; it is never inferred from compilation. For
+  requirements spanning a Project's sources, use the additive [Project
+  Assurance Manifest v1](PROJECT-ASSURANCE-MANIFEST-V1.md), which binds the
+  retained Project, complete source inventory, and shared entry/public/test
+  HIR views. This requirement API still evaluates the exact evidence supplied
+  to each criterion and does not discover or execute project tests; see
+  "Obligation derivation" in [Assurance Manifest v1](ASSURANCE-MANIFEST-V1.md).

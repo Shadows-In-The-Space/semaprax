@@ -639,6 +639,89 @@ pub(super) fn assurance_manifest_options(
     })
 }
 
+pub(super) fn project_assurance_manifest_options(
+    args: &[String],
+) -> Result<assurance_manifest::project::ProjectAssuranceOptions, u8> {
+    use semaprax::architecture_claims::{
+        ArchitectureClaim, ArchitectureClaimSet, MAX_ARCHITECTURE_CLAIMS_PER_SET,
+    };
+    use semaprax::assurance_manifest::project::ProjectAssuranceOptions;
+
+    let defaults = ProjectAssuranceOptions::default();
+    let mut max_bytes = defaults.max_bytes;
+    let mut max_obligations = defaults.max_obligations;
+    let mut claims = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut index = 2usize;
+    while index < args.len() {
+        let option = args[index].as_str();
+        match option {
+            "--max-bytes" | "--max-obligations" => {
+                if !seen.insert(option.to_owned()) {
+                    eprintln!("duplicate project-assurance-manifest option `{option}`");
+                    return Err(2);
+                }
+                let value = args.get(index + 1).ok_or_else(|| {
+                    eprintln!("project-assurance-manifest option `{option}` requires a value");
+                    2
+                })?;
+                match option {
+                    "--max-bytes" => max_bytes = property_number(option, value)?,
+                    "--max-obligations" => max_obligations = property_number(option, value)?,
+                    _ => unreachable!(),
+                }
+                index += 2;
+            }
+            "--forbid-reaches" => {
+                let claim_id = args.get(index + 1).ok_or_else(|| {
+                    eprintln!(
+                        "project-assurance-manifest option `--forbid-reaches` requires <claim-id> <from-id> <to-id>"
+                    );
+                    2
+                })?;
+                let from = args.get(index + 2).ok_or_else(|| {
+                    eprintln!(
+                        "project-assurance-manifest option `--forbid-reaches` requires <claim-id> <from-id> <to-id>"
+                    );
+                    2
+                })?;
+                let to = args.get(index + 3).ok_or_else(|| {
+                    eprintln!(
+                        "project-assurance-manifest option `--forbid-reaches` requires <claim-id> <from-id> <to-id>"
+                    );
+                    2
+                })?;
+                let claim = ArchitectureClaim::forbid_reaches(claim_id, from, to)
+                    .map_err(|errors| report(&errors, false))?;
+                // The claim-set constructor owns this diagnostic, but parsing
+                // retains at most its one rejected overflow claim.
+                if claims.len() >= MAX_ARCHITECTURE_CLAIMS_PER_SET {
+                    claims.push(claim);
+                    return ArchitectureClaimSet::new(claims)
+                        .map(|_| unreachable!())
+                        .map_err(|errors| report(&errors, false));
+                }
+                claims.push(claim);
+                index += 4;
+            }
+            _ => {
+                eprintln!("unknown project-assurance-manifest option `{option}`");
+                return Err(2);
+            }
+        }
+    }
+    let options = ProjectAssuranceOptions::new(max_bytes, max_obligations).map_err(|error| {
+        eprintln!("{error}");
+        2
+    })?;
+    if claims.is_empty() {
+        return Ok(options);
+    }
+    ArchitectureClaimSet::new(claims)
+        .map(|claims| options.with_claims(claims))
+        .map_err(|errors| report(&errors, false))
+}
+
 fn assurance_policy_profile(
     option: &str,
     value: &str,

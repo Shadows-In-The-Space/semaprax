@@ -7,6 +7,7 @@
 //! ordinal, so a retry and a failover are separately charged attempts rather
 //! than a replay of the previous call.
 
+use crate::agent_deployment::DeploymentModelSelection;
 use crate::agent_interaction_schema::CompiledInteractionSchema;
 use crate::agent_runtime::AgentCancellation;
 use crate::live_invocation::{
@@ -24,6 +25,9 @@ use super::{
     retry_is_permitted, AttemptKind, AttemptOutcomeClass, AttemptRefusal, AttemptRequest,
     AttemptReservation, AttemptUsage, EffectiveModelBudget, ModelPolicyLedger, ProviderPolicy,
 };
+
+#[path = "retry/durable.rs"]
+mod durable;
 
 /// A hard upper bound on host adapter polls for one model attempt. The host
 /// may request a smaller bound in [`AdapterAttemptPlan`], never a larger one.
@@ -83,6 +87,42 @@ impl FailureClassifier for ConservativeFailureClassifier {
 /// The scheduler never sleeps, reads time, or schedules runtime work itself.
 pub trait RetryBackoff {
     fn wait(&mut self, retry_ordinal: u32, provider_id: &str) -> Result<(), RetryBackoffRefusal>;
+}
+
+/// Durable observation of an admitted attempt.  The scheduler calls
+/// [`Self::intent`] after the ledger has charged an ordinal but before it
+/// constructs an adapter, and [`Self::settled`] after the adapter returns.
+/// A checkpoint refusal stops the scheduler: an intent that was written but
+/// whose settlement was not written is deliberately recovered as uncertain,
+/// never retried.
+pub trait RetryAttemptJournal {
+    fn intent(&mut self, reservation: &AttemptReservation) -> Result<(), String>;
+    fn settled(
+        &mut self,
+        reservation: &AttemptReservation,
+        result: &AdapterAttemptResult,
+    ) -> Result<(), String>;
+}
+
+/// The next admissible scheduler step after a validated durable prefix.
+/// Construction is intentionally crate-private: persistence recovery derives
+/// this from the complete ordered evidence prefix, so callers cannot skip a
+/// prior uncertain result or select a later provider themselves.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RetryCursor {
+    pub(crate) provider_index: usize,
+    pub(crate) kind: AttemptKind,
+    pub(crate) prior: Option<AttemptOutcomeClass>,
+    pub(crate) retry_ordinal: u32,
+}
+
+impl RetryCursor {
+    pub(crate) const FRESH: Self = Self {
+        provider_index: 0,
+        kind: AttemptKind::Fresh,
+        prior: None,
+        retry_ordinal: 0,
+    };
 }
 
 /// A deterministic no-delay backoff useful when a deployment's declared
@@ -171,23 +211,57 @@ impl AdapterAttemptPlan {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SchedulerRefusal {
     NoPrimaryProvider,
-    PrimaryProviderNotAuthorized { provider_id: String },
-    PollLimitOutOfRange { requested: usize, max: usize },
+    PrimaryProviderNotAuthorized {
+        provider_id: String,
+    },
+    PollLimitOutOfRange {
+        requested: usize,
+        max: usize,
+    },
     RequestBoundMismatch,
     GrammarBindingMismatch,
-    RetainedAttemptLimit { max: usize },
-    ProviderPolicyTooLarge { max: usize },
-    ProviderIdTooLong { max: usize },
-    RequestBytesExceeded { requested: usize, max: usize },
-    SchemaBytesExceeded { requested: usize, max: usize },
+    RetainedAttemptLimit {
+        max: usize,
+    },
+    ProviderPolicyTooLarge {
+        max: usize,
+    },
+    ProviderIdTooLong {
+        max: usize,
+    },
+    RequestBytesExceeded {
+        requested: usize,
+        max: usize,
+    },
+    SchemaBytesExceeded {
+        requested: usize,
+        max: usize,
+    },
     Policy(AttemptRefusal),
     Backoff(RetryBackoffRefusal),
     Factory(AdapterFactoryRefusal),
     Negotiation(NegotiationRefusal),
-    ProviderProfileMismatch { selected: String, declared: String },
+    ProviderProfileMismatch {
+        selected: String,
+        declared: String,
+    },
+    ModelIdentityUnavailable {
+        provider: String,
+    },
+    ModelIdentityMismatch {
+        provider: String,
+        model: String,
+    },
     AdapterStart(AdapterRefusal),
-    PollBudgetExceeded { max_polls: usize },
-    AdapterProtocol { code: &'static str },
+    PollBudgetExceeded {
+        max_polls: usize,
+    },
+    AdapterProtocol {
+        code: &'static str,
+    },
+    /// The durable policy journal could not commit an intent or settlement.
+    /// A previously committed intent remains an uncertain prefix on recovery.
+    Journal(String),
     CancelledAfterDispatch,
     DeadlineExceededAfterDispatch,
 }
@@ -297,6 +371,40 @@ impl<'a> RetryFailoverScheduler<'a> {
         })
     }
 
+    /// Rebuilds the scheduler ledger from a policy-journal prefix that has
+    /// already been independently checked for exact ordinals, provider order
+    /// and conservative terminality.  `ModelPolicyLedger::resume` itself is
+    /// intentionally not a hostile-input decoder, so this constructor stays
+    /// crate-private and is reachable only after that validation.
+    pub(crate) fn resume(
+        limits: EffectiveModelBudget,
+        providers: ProviderPolicy,
+        deadline_millis: Option<i64>,
+        clock: &'a dyn InvocationClock,
+        cancellation: &'a AgentCancellation,
+        capability: AdapterInvocationCapability,
+        factory: &'a mut dyn ProviderAdapterFactory,
+        reservations: &[AttemptReservation],
+    ) -> Result<Self, SchedulerRefusal> {
+        let mut scheduler = Self::new(
+            limits,
+            providers,
+            deadline_millis,
+            clock,
+            cancellation,
+            capability,
+            factory,
+        )?;
+        scheduler.ledger = ModelPolicyLedger::resume(
+            limits,
+            scheduler.providers.clone(),
+            deadline_millis,
+            clock,
+            reservations,
+        );
+        Ok(scheduler)
+    }
+
     #[must_use]
     pub fn ledger(&self) -> &ModelPolicyLedger<'a> {
         &self.ledger
@@ -312,6 +420,31 @@ impl<'a> RetryFailoverScheduler<'a> {
         plan: &AdapterAttemptPlan,
         classifier: &mut dyn FailureClassifier,
         backoff: &mut dyn RetryBackoff,
+    ) -> RetryFailoverRun {
+        self.run_compiled_from(
+            schema,
+            invocation_request,
+            plan,
+            classifier,
+            backoff,
+            RetryCursor::FRESH,
+            None,
+        )
+    }
+
+    /// Continues an independently validated durable prefix.  This is crate
+    /// internal because only the V2 policy-journal decoder may derive a
+    /// cursor; accepting caller-selected ordinal/provider state here would
+    /// let a caller bypass the ordered failover policy.
+    pub(crate) fn run_compiled_from(
+        &mut self,
+        schema: &CompiledInteractionSchema,
+        invocation_request: &ModelInvocationRequest,
+        plan: &AdapterAttemptPlan,
+        classifier: &mut dyn FailureClassifier,
+        backoff: &mut dyn RetryBackoff,
+        cursor: RetryCursor,
+        journal: Option<&mut dyn RetryAttemptJournal>,
     ) -> RetryFailoverRun {
         if invocation_request.proposal_grammar_digest != schema.schema().digest() {
             return self.refused(
@@ -359,6 +492,10 @@ impl<'a> RetryFailoverScheduler<'a> {
             plan,
             classifier,
             backoff,
+            Some(schema),
+            None,
+            cursor,
+            journal,
         );
         let invalid_settlement = match &run.outcome {
             RetryFailoverOutcome::Settled {
@@ -397,16 +534,20 @@ impl<'a> RetryFailoverScheduler<'a> {
         plan: &AdapterAttemptPlan,
         classifier: &mut dyn FailureClassifier,
         backoff: &mut dyn RetryBackoff,
+        schema: Option<&CompiledInteractionSchema>,
+        models: Option<&[DeploymentModelSelection]>,
+        cursor: RetryCursor,
+        mut journal: Option<&mut dyn RetryAttemptJournal>,
     ) -> RetryFailoverRun {
         if let Err(refusal) = Self::validate_plan(invocation_request, adapter_request, plan) {
             return self.refused(Vec::new(), Vec::new(), None, refusal);
         }
         let mut attempts = Vec::new();
         let mut evidence = Vec::new();
-        let mut provider_index = 0usize;
-        let mut kind = AttemptKind::Fresh;
-        let mut prior = None;
-        let mut retry_ordinal = 0u32;
+        let mut provider_index = cursor.provider_index;
+        let mut kind = cursor.kind;
+        let mut prior = cursor.prior;
+        let mut retry_ordinal = cursor.retry_ordinal;
 
         loop {
             if attempts.len() >= MAX_RETAINED_ATTEMPTS {
@@ -468,8 +609,60 @@ impl<'a> RetryFailoverScheduler<'a> {
                     );
                 }
             }
+            // The admission is durable before adapter construction.  A
+            // checkpoint refusal is before dispatch, so returning here is
+            // safe; a crash after this succeeds leaves this exact intent
+            // unresolved and recovery must refuse to redispatch it.
+            if let Some(journal) = journal.as_deref_mut() {
+                if let Err(detail) = journal.intent(&reservation) {
+                    attempts.push(reservation.clone());
+                    return self.refused(
+                        attempts,
+                        evidence,
+                        Some(reservation),
+                        SchedulerRefusal::Journal(detail),
+                    );
+                }
+            }
             attempts.push(reservation.clone());
-            let result = self.drive(&provider_id, adapter_request, plan, classifier);
+            let mut result = self.drive(
+                &provider_id,
+                models.and_then(|models| models.get(provider_index)),
+                adapter_request,
+                plan,
+                classifier,
+            );
+            let schema_failure = match (schema, &result) {
+                (Some(schema), AdapterAttemptResult::Settled { response_bytes, .. })
+                    if schema.decode(response_bytes).is_err() =>
+                {
+                    Some(response_bytes.len())
+                }
+                _ => None,
+            };
+            if let Some(response_bytes_len) = schema_failure {
+                result = failed(
+                    AttemptOutcomeClass::CompletedWithResponse,
+                    Some(ModelFailure::MalformedResponse),
+                    response_bytes_len,
+                    Some(SchedulerRefusal::AdapterProtocol {
+                        code: "ADAPTER-SCHEMA-DECODE",
+                    }),
+                );
+            }
+            // This write is deliberately after `drive`: a failure here does
+            // not manufacture an in-memory settlement.  The prior durable
+            // intent is the conservative recovery fact.
+            if let Some(journal) = journal.as_deref_mut() {
+                if let Err(detail) = journal.settled(&reservation, &result) {
+                    return self.refused(
+                        attempts,
+                        evidence,
+                        Some(reservation),
+                        SchedulerRefusal::Journal(detail),
+                    );
+                }
+            }
             evidence.push(RetryAttemptEvidence {
                 reservation: reservation.clone(),
                 result: result.clone(),
@@ -582,6 +775,7 @@ impl<'a> RetryFailoverScheduler<'a> {
     fn drive(
         &mut self,
         provider_id: &str,
+        expected_model: Option<&DeploymentModelSelection>,
         adapter_request: &AdapterRequest,
         plan: &AdapterAttemptPlan,
         classifier: &mut dyn FailureClassifier,
@@ -623,6 +817,13 @@ impl<'a> RetryFailoverScheduler<'a> {
                     declared: adapter.capabilities().provider_profile.clone(),
                 }),
             );
+        }
+        if let Some(expected) = expected_model {
+            if let Err(refusal) =
+                durable::require_model_identity(adapter.as_ref(), provider_id, expected)
+            {
+                return failed(AttemptOutcomeClass::NotDispatched, None, 0, Some(refusal));
+            }
         }
         if let Err(refusal) = negotiate(adapter.capabilities(), &plan.required) {
             return failed(
@@ -1005,6 +1206,10 @@ mod tests {
             &plan(),
             &mut classifier,
             &mut backoff,
+            None,
+            None,
+            RetryCursor::FRESH,
+            None,
         );
         assert_eq!(run.attempts.len(), 2);
         assert_eq!(run.attempts[0].kind, AttemptKind::Fresh);
@@ -1068,6 +1273,10 @@ mod tests {
             &plan(),
             &mut classifier,
             &mut backoff,
+            None,
+            None,
+            RetryCursor::FRESH,
+            None,
         );
         assert_eq!(
             run.attempts
@@ -1117,6 +1326,10 @@ mod tests {
             &plan(),
             &mut classifier,
             &mut backoff,
+            None,
+            None,
+            RetryCursor::FRESH,
+            None,
         );
         assert_eq!(calls.borrow().as_slice(), ["primary"]);
         assert_eq!(run.attempts.len(), 1);

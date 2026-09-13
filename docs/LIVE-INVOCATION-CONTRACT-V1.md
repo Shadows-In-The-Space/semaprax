@@ -556,3 +556,14 @@ This records #108's design/reference deliverable at its original checkpoint.
 The source/HIR/Direct Runtime integration is documented in the current #177
 status above; this historical reference gate proves no real provider run,
 hosted execution, or public support.
+
+### Additive generic model-policy durable profile
+
+The V1 causal journal remains the ordinary generic-kernel contract. The
+retry/failover profile uses a distinct V2 checkpoint document because V1 has
+one `RequestIntent` per turn and no ordered model-attempt reservation facts.
+V2 binds a retained execution-root-derived policy binding and the exact
+canonical request before persisting each adapter attempt intent. Recovery
+replays a recorded response, refuses an unresolved intent as uncertain, and
+continues only after a closed safe failure classification; it does not convert
+V2 facts into V1 entries or broaden the V1 recovery promise.

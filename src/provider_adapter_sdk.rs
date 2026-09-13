@@ -69,8 +69,8 @@ pub mod source_bridge;
 pub mod vendor;
 
 pub use adapter::{
-    AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterRefusal, AdapterRequest,
-    AdapterSettlement, AdapterUsage, ProviderAdapter,
+    AdapterEvent, AdapterInvocationCapability, AdapterModelIdentity, AdapterPoll, AdapterRefusal,
+    AdapterRequest, AdapterSettlement, AdapterUsage, ProviderAdapter,
 };
 pub use bridge::StreamingModelHandler;
 pub use capability::{

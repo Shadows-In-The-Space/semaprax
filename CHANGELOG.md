@@ -8,6 +8,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add generic durable retry/failover with acknowledged attempt journals,
+  exact retained execution/schema/model bindings, non-widening source and
+  deployment limits, request-seed checks, and conservative recovery (#179).
+  This is local host composition; checkpoints do not prove provider identity
+  or billing.
+
 - Add V6 durable source-model quote accounting with nonrefundable observed and
   unknown usage, absolute deadlines, cumulative migration carry, and optional
   request/response byte ceilings (#113). Retain observed quote overages in

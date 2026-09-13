@@ -289,3 +289,40 @@ recover an interrupted adapter attempt after a crash. Focused offline tests
 use real SDK scripted adapters to prove a safe failure has a separately
 charged retry ordinal, retry exhaustion selects the exact fallback adapter,
 and an uncertain post-start timeout never constructs a fallback adapter.
+
+## Additive generic durable policy profile v2
+
+The generic durable retry profile is a separate `v2` policy journal. It does
+not decode, reinterpret, or rewrite the frozen generic V1 journal or its
+priced envelopes. A `DurablePolicyBinding` is derived only from retained
+`ExecutionRevision` deployment, instance, and revision roots plus the
+pre-dispatch `LiveInvocationSeed`. It rederives the interaction schema from
+retained Project source and the bound definition's Proposal type. It rejects
+a provider list whose length or ordered ids differs from the seed, and rejects
+call, retry, failover, input-token, output-token, cost, or latency limits
+above either retained source ceiling or deployment limit. Aggregate tokens are
+not compared to retained provider-byte limits because they are distinct units.
+Each constructed adapter must declare the exact bound provider, model, and
+capability row before `start`; this is a host identity declaration, never
+network, dispatch, usage, or billing proof. Checkpoint bytes carry its digest, exact
+invocation identity, and the full canonical `ModelInvocationRequest`, so
+recovery rejects binding, request-field, provider-order, ordinal, or bound
+changes before a factory is called.
+
+Each charged `AttemptReservation` is checkpointed as an intent before adapter
+construction. Its terminal adapter result is checkpointed separately. A
+crash or checkpoint failure after an intent and before its outcome leaves an
+unresolved intent and recovers as `Uncertain`; it is never retried. A completed
+response is replayed from bounded retained bytes without factory creation.
+Only the closed safe failure classes may continue the existing scheduler, and
+recovery validates chronological reservations, ordered fallback position,
+limits, and nonrefundable aggregate exposure before calling the scheduler's
+ledger resume path.
+
+This local host-side profile has no provider credential, network, storage,
+real-price, reconciliation, or hosted-support claim. Checkpoint integrity and
+atomic replacement remain the caller-owned `CheckpointStore` contract. The
+profile deliberately has no migration or cross-deployment continuation route:
+a changed deployment root, instance root, provider order, policy limit, or
+absolute deadline requires a separately authorized new invocation rather than
+reusing an existing retry chain.

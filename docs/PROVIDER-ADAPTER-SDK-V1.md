@@ -293,3 +293,12 @@ fresh attempts, early stream refusal/cancellation, predispatch cancellation,
 deadline, identity and capacity refusals, and settlement/usage contradictions.
 This is an in-process adapter seam, not evidence of a network provider or a
 durable source checkpoint implementation.
+
+### Durable generic policy model identity
+
+The additive generic policy v2 route requires `ProviderAdapter::model_identity`
+to return an `AdapterModelIdentity` matching the retained deployment's exact
+provider, model, and ordered capabilities. The default returns no identity;
+that route refuses such an adapter before `start`. Existing adapter routes
+retain their current behavior. This is a host declaration checked against
+retained policy, not proof of a remote endpoint's identity or billing.

@@ -178,7 +178,29 @@ pub fn compile_agent_interaction_schema(
 ) -> Result<CompiledInteractionSchema, Vec<Diagnostic>> {
     let canonical_source_path = patch::canonical_source_path(source_path)?;
     let snapshot = patch::read_source_snapshot(&canonical_source_path)?;
-    let program = crate::check(snapshot.source(), source_path)?;
+    let compiled = compile_agent_interaction_schema_from_retained_source(
+        snapshot.source(),
+        source_path,
+        root_type_id,
+    )?;
+    patch::validate_source_unchanged(
+        &canonical_source_path,
+        source_path,
+        &snapshot,
+        compiled.source_revision(),
+    )?;
+    Ok(compiled)
+}
+
+/// Derives an interaction schema from bytes already retained by a checked
+/// project revision. This has no filesystem authority: callers must first
+/// establish that the bytes and their source identity belong to that revision.
+pub(crate) fn compile_agent_interaction_schema_from_retained_source(
+    source: &str,
+    source_path: &Path,
+    root_type_id: &str,
+) -> Result<CompiledInteractionSchema, Vec<Diagnostic>> {
+    let program = crate::check(source, source_path)?;
     let source_revision = crate::graph::revision(&program);
     let resolved = crate::hir::resolve(&program)?;
     crate::hir::validate(&resolved).map_err(|error| vec![error])?;
@@ -200,12 +222,6 @@ pub fn compile_agent_interaction_schema(
         source,
     };
 
-    patch::validate_source_unchanged(
-        &canonical_source_path,
-        source_path,
-        &snapshot,
-        &source_revision,
-    )?;
     Ok(CompiledInteractionSchema {
         schema,
         source_revision,

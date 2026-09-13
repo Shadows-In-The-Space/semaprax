@@ -32,6 +32,17 @@ use crate::live_invocation::model_invoke::ModelFailure;
 
 use super::capability::AdapterCapabilities;
 
+/// Host-declared model selection attached to one constructed adapter. This is
+/// an identity commitment only: it proves neither network dispatch nor usage
+/// or billing. Durable policy requires it before `start`; legacy adapter
+/// routes remain compatible with adapters that do not expose one.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdapterModelIdentity {
+    pub provider_id: String,
+    pub model_id: String,
+    pub capabilities: Vec<String>,
+}
+
 /// Explicit, non-ambient authority to construct and drive one adapter
 /// instance. A host wires this in once per deployment binding; nothing in
 /// source, in a request, or in a provider response can synthesize one.
@@ -138,6 +149,12 @@ pub trait ProviderAdapter {
     /// exactly once, before `start`, and a caller must be able to trust
     /// that a later call reports the same thing.
     fn capabilities(&self) -> &AdapterCapabilities;
+
+    /// The host's exact declared provider/model row for this adapter. The
+    /// default has no model proof, so durable policy refuses it before start.
+    fn model_identity(&self) -> Option<&AdapterModelIdentity> {
+        None
+    }
 
     /// Begins one request. Called at most once per instance. Refusing here
     /// (e.g. malformed request shape) means the provider was never

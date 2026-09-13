@@ -1,20 +1,36 @@
 use super::agent_lifecycle_v1::proposal;
 use super::source_agent_lifecycle::source_module;
-use semaprax::agent_deployment::migrate_agent_definition_v1;
+use semaprax::agent_deployment::{bind_agent_deployment, migrate_agent_definition_v1};
+use semaprax::agent_interaction_schema::compile_agent_interaction_schema;
 use semaprax::agent_lifecycle::{
     compile_source_agent_lifecycle, FixtureRead, LifecycleBudget, LifecycleStatus, LifecycleTask,
 };
 use semaprax::agent_runtime::AgentCancellation;
 use semaprax::execution_revision::{bind_execution_revision, ProgramRootRef};
+use semaprax::live_invocation::fixture::StepClock;
 use semaprax::live_invocation::fixture::{
     fixture_response, FixtureAuthorizationGate, FixtureBudgetHook, FixtureModelHandler,
     FixtureObserver, FixturePolicy, FixtureProposalDecoder,
 };
 use semaprax::live_invocation::{
+    run_durable_policy_invocation, DurablePolicyRun, DurablePolicyRunError, ModelInvocationRequest,
+};
+use semaprax::live_invocation::{
     run_live_invocation, LiveInvocationConfig, LiveInvocationHandlers, LiveInvocationId,
     LiveInvocationOutcome, LiveInvocationSeed, ModelInvocationOutcome, ModelInvokeCapability,
 };
+use semaprax::model_budget_policy::{
+    intersect, DurablePolicyBinding, DurablePolicyBindingRefusal, ModelBudgetLimits,
+    ProviderPolicy, ProviderSlot,
+};
 use semaprax::project::with_authenticated_project;
+use semaprax::provider_adapter_sdk::{
+    AdapterCapabilities, AdapterInvocationCapability, AdapterModelIdentity, AdapterPoll,
+    AdapterRefusal, AdapterRequest, CancellationSemantics, EndpointPolicy, ProviderAdapter,
+    StructuredOutputMode, TokenAccountingSource,
+};
+use std::cell::Cell;
+use std::rc::Rc;
 
 struct Fixture(std::path::PathBuf);
 impl Fixture {
@@ -56,6 +72,62 @@ fn build(input: borrow Slice<u8>) -> ExportPayload { ExportPayload { bytes: byte
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+struct IdentityProbeAdapter {
+    capabilities: AdapterCapabilities,
+    model: AdapterModelIdentity,
+    starts: Rc<Cell<u32>>,
+}
+
+impl ProviderAdapter for IdentityProbeAdapter {
+    fn capabilities(&self) -> &AdapterCapabilities {
+        &self.capabilities
+    }
+    fn model_identity(&self) -> Option<&AdapterModelIdentity> {
+        Some(&self.model)
+    }
+    fn start(
+        &mut self,
+        _: &AdapterInvocationCapability,
+        _: &AdapterRequest,
+    ) -> Result<(), AdapterRefusal> {
+        self.starts.set(self.starts.get() + 1);
+        Err(AdapterRefusal("fixture start refusal".to_owned()))
+    }
+    fn poll(&mut self) -> AdapterPoll {
+        unreachable!("start always refuses")
+    }
+    fn cancel(&mut self, _: &str) {}
+}
+
+struct PolicyStore;
+impl semaprax::agent_lifecycle::CheckpointStore for PolicyStore {
+    fn commit(
+        &mut self,
+        _: u64,
+        _: &str,
+    ) -> Result<(), semaprax::agent_lifecycle::CheckpointStoreError> {
+        Ok(())
+    }
+}
+
+fn probe_capabilities(provider: &str, max_context_tokens: u64) -> AdapterCapabilities {
+    AdapterCapabilities {
+        adapter_identity: "identity-probe".to_owned(),
+        adapter_version: "1".to_owned(),
+        provider_profile: provider.to_owned(),
+        structured_output_modes: vec![StructuredOutputMode::RawText],
+        supports_streaming: true,
+        token_accounting_source: TokenAccountingSource::LocalEstimate,
+        cancellation_semantics: CancellationSemantics::BestEffortRequestStop,
+        retryable_failure_classes: Vec::new(),
+        endpoint_policy: EndpointPolicy::HostInjected,
+        max_request_bytes: 65_536,
+        max_response_bytes: 65_536,
+        max_context_tokens,
+        max_output_tokens: 8_192,
     }
 }
 
@@ -205,6 +277,424 @@ fn execution_roots_bind_retained_source_and_actual_run() {
             .evidence_root()
             .canonical_json()
             .contains(evidence.run().evidence_digest()));
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn durable_policy_binding_rederives_retained_execution_seed_and_schema() {
+    let fixture = Fixture::new();
+    with_authenticated_project(&fixture.0.join("semaprax.toml"), |snapshot| {
+        let project = snapshot.retain_revision();
+        let root = project.program_root()?;
+        let (_, deployment_source) = migrate_agent_definition_v1(
+            project.agent_definitions()[0]
+                .definition()
+                .canonical_source(),
+            "fixture.deployment",
+        )?;
+        let (semantic, _) = migrate_agent_definition_v1(
+            project.agent_definitions()[0]
+                .definition()
+                .canonical_source(),
+            "fixture.deployment",
+        )?;
+        let deployment = bind_agent_deployment(&semantic, &deployment_source)?;
+        let lifecycle = compile_source_agent_lifecycle(
+            project.sources()[0].source(),
+            project.sources()[0].path(),
+            "fixture.agent",
+        )?;
+        let proposal = proposal(
+            lifecycle.proposal_schema().schema().digest(),
+            "5",
+            false,
+            "1",
+        );
+        let execution = bind_execution_revision(
+            project.clone(),
+            ProgramRootRef::V1(&root),
+            root.program_root_digest(),
+            "src/app.spx",
+            "fixture.agent",
+            &deployment_source,
+            LifecycleTask {
+                objective: b"alpha".to_vec(),
+                budget: 12,
+            },
+            &proposal,
+            LifecycleBudget::default(),
+        )?;
+        let schema = compile_agent_interaction_schema(
+            &fixture.0.join("src/app.spx"),
+            "fixture.agent.type.proposal",
+        )?;
+        let selected = deployment.model_selections();
+        let policy = ProviderPolicy::new(
+            selected
+                .iter()
+                .map(|row| ProviderSlot::authorized(row.provider_id()))
+                .collect(),
+        );
+        let seed = LiveInvocationSeed {
+            program_root: root.program_root_digest().to_owned(),
+            deployment_policy: deployment.digest().to_owned(),
+            task: b"alpha".to_vec(),
+            budget: 12,
+            interaction_schema_digest: schema.schema().digest().to_owned(),
+            approved_providers: selected
+                .iter()
+                .map(|row| row.provider_id().to_owned())
+                .collect(),
+        };
+        let limits = intersect(
+            ModelBudgetLimits {
+                max_cost_micros: 0,
+                max_latency_millis: 1_000,
+                ..ModelBudgetLimits::single_call_only(1, 1)
+            },
+            ModelBudgetLimits::unbounded(),
+            ModelBudgetLimits::unbounded(),
+        )
+        .unwrap();
+        DurablePolicyBinding::bind(
+            &execution,
+            &deployment,
+            &schema,
+            &seed,
+            policy.clone(),
+            limits,
+            0,
+        )
+        .unwrap();
+
+        let mut swapped_seed = seed.clone();
+        swapped_seed.task.push(b'!');
+        assert_eq!(
+            DurablePolicyBinding::bind(
+                &execution,
+                &deployment,
+                &schema,
+                &swapped_seed,
+                policy.clone(),
+                limits,
+                0
+            ),
+            Err(DurablePolicyBindingRefusal::ExecutionRootMismatch),
+        );
+        let mut swapped_root = seed.clone();
+        swapped_root.program_root = "sha256:swapped".to_owned();
+        assert_eq!(
+            DurablePolicyBinding::bind(
+                &execution,
+                &deployment,
+                &schema,
+                &swapped_root,
+                policy.clone(),
+                limits,
+                0
+            ),
+            Err(DurablePolicyBindingRefusal::ExecutionRootMismatch),
+        );
+        let other_schema = compile_agent_interaction_schema(
+            &fixture.0.join("src/app.spx"),
+            "fixture.agent.type.observation",
+        )?;
+        assert_eq!(
+            DurablePolicyBinding::bind(
+                &execution,
+                &deployment,
+                &other_schema,
+                &seed,
+                policy.clone(),
+                limits,
+                0
+            ),
+            Err(DurablePolicyBindingRefusal::RetainedSchemaMismatch),
+        );
+        let calls_widened = intersect(
+            ModelBudgetLimits {
+                max_calls: 3,
+                max_cost_micros: 0,
+                max_latency_millis: 1_000,
+                ..ModelBudgetLimits::unbounded()
+            },
+            ModelBudgetLimits::unbounded(),
+            ModelBudgetLimits::unbounded(),
+        )
+        .unwrap();
+        assert_eq!(
+            DurablePolicyBinding::bind(
+                &execution,
+                &deployment,
+                &schema,
+                &seed,
+                policy.clone(),
+                calls_widened,
+                0
+            ),
+            Err(DurablePolicyBindingRefusal::RetainedLimitMismatch {
+                dimension: "max_calls"
+            }),
+        );
+        let cost_widened = intersect(
+            ModelBudgetLimits {
+                max_calls: 1,
+                max_retries: 0,
+                max_providers: 0,
+                max_context_tokens: 1,
+                max_output_tokens: 1,
+                max_aggregate_tokens: 2,
+                max_cost_micros: 1,
+                max_latency_millis: 1_000,
+            },
+            ModelBudgetLimits::unbounded(),
+            ModelBudgetLimits::unbounded(),
+        )
+        .unwrap();
+        assert_eq!(
+            DurablePolicyBinding::bind(
+                &execution,
+                &deployment,
+                &schema,
+                &seed,
+                policy,
+                cost_widened,
+                0
+            ),
+            Err(DurablePolicyBindingRefusal::RetainedLimitMismatch {
+                dimension: "max_cost_micros"
+            }),
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn durable_policy_dispatch_binds_the_constructed_adapter_model_before_start() {
+    let fixture = Fixture::new();
+    with_authenticated_project(&fixture.0.join("semaprax.toml"), |snapshot| {
+        let project = snapshot.retain_revision();
+        let root = project.program_root()?;
+        let (semantic, deployment_source) = migrate_agent_definition_v1(
+            project.agent_definitions()[0]
+                .definition()
+                .canonical_source(),
+            "fixture.deployment",
+        )?;
+        let deployment = bind_agent_deployment(&semantic, &deployment_source)?;
+        let lifecycle = compile_source_agent_lifecycle(
+            project.sources()[0].source(),
+            project.sources()[0].path(),
+            "fixture.agent",
+        )?;
+        let proposal = proposal(
+            lifecycle.proposal_schema().schema().digest(),
+            "5",
+            false,
+            "1",
+        );
+        let execution = bind_execution_revision(
+            project.clone(),
+            ProgramRootRef::V1(&root),
+            root.program_root_digest(),
+            "src/app.spx",
+            "fixture.agent",
+            &deployment_source,
+            LifecycleTask {
+                objective: b"alpha".to_vec(),
+                budget: 12,
+            },
+            &proposal,
+            LifecycleBudget::default(),
+        )?;
+        let schema = compile_agent_interaction_schema(
+            &fixture.0.join("src/app.spx"),
+            "fixture.agent.type.proposal",
+        )?;
+        let selected = deployment.model_selections();
+        let policy = ProviderPolicy::new(
+            selected
+                .iter()
+                .map(|row| ProviderSlot::authorized(row.provider_id()))
+                .collect(),
+        );
+        let seed = LiveInvocationSeed {
+            program_root: root.program_root_digest().to_owned(),
+            deployment_policy: deployment.digest().to_owned(),
+            task: b"alpha".to_vec(),
+            budget: 12,
+            interaction_schema_digest: schema.schema().digest().to_owned(),
+            approved_providers: selected
+                .iter()
+                .map(|row| row.provider_id().to_owned())
+                .collect(),
+        };
+        let limits = intersect(
+            ModelBudgetLimits {
+                max_cost_micros: 0,
+                max_latency_millis: 1_000,
+                ..ModelBudgetLimits::single_call_only(1, 1)
+            },
+            ModelBudgetLimits::unbounded(),
+            ModelBudgetLimits::unbounded(),
+        )
+        .unwrap();
+        let binding =
+            DurablePolicyBinding::bind(&execution, &deployment, &schema, &seed, policy, limits, 0)
+                .unwrap();
+        let request = ModelInvocationRequest {
+            turn: 0,
+            task: seed.task.clone(),
+            observation: Vec::new(),
+            proposal_grammar_digest: schema.schema().digest().to_owned(),
+            deployment_binding: deployment.digest().to_owned(),
+            max_response_bytes: 1024,
+            effective_budget: 0,
+        };
+        let plan = semaprax::model_budget_policy::AdapterAttemptPlan::for_compiled(
+            &schema, &request, 1, 1, 0, 1,
+        )
+        .unwrap();
+        let selected = &selected[0];
+        let max_context_tokens = selected.max_context_tokens();
+        let exact_starts = Rc::new(Cell::new(0));
+        let exact_counter = exact_starts.clone();
+        let exact_identity = AdapterModelIdentity {
+            provider_id: selected.provider_id().to_owned(),
+            model_id: selected.model_id().to_owned(),
+            capabilities: selected.capabilities().to_vec(),
+        };
+        let mut exact_factory = move |provider: &str| {
+            Ok(Box::new(IdentityProbeAdapter {
+                capabilities: probe_capabilities(provider, max_context_tokens),
+                model: exact_identity.clone(),
+                starts: exact_counter.clone(),
+            }) as Box<dyn ProviderAdapter>)
+        };
+        let mut store = PolicyStore;
+        let mut classifier = semaprax::model_budget_policy::retry::ConservativeFailureClassifier;
+        let mut backoff = semaprax::model_budget_policy::NoDelayBackoff;
+        let clock = StepClock::new(0);
+        let cancellation = AgentCancellation::new();
+        let _ = run_durable_policy_invocation(
+            &binding,
+            &schema,
+            &request,
+            &plan,
+            &clock,
+            &cancellation,
+            AdapterInvocationCapability::grant("fixture"),
+            &mut exact_factory,
+            &mut classifier,
+            &mut backoff,
+            &mut store,
+            None,
+        );
+        assert_eq!(
+            exact_starts.get(),
+            1,
+            "exact model identity reaches adapter start"
+        );
+
+        let request_factory_calls = Rc::new(Cell::new(0));
+        let request_factory_counter = request_factory_calls.clone();
+        let request_identity = AdapterModelIdentity {
+            provider_id: selected.provider_id().to_owned(),
+            model_id: selected.model_id().to_owned(),
+            capabilities: selected.capabilities().to_vec(),
+        };
+        let mut request_factory = move |provider: &str| {
+            request_factory_counter.set(request_factory_counter.get() + 1);
+            Ok(Box::new(IdentityProbeAdapter {
+                capabilities: probe_capabilities(provider, max_context_tokens),
+                model: request_identity.clone(),
+                starts: Rc::new(Cell::new(0)),
+            }) as Box<dyn ProviderAdapter>)
+        };
+        for changed in [
+            ModelInvocationRequest {
+                task: b"swapped".to_vec(),
+                ..request.clone()
+            },
+            ModelInvocationRequest {
+                proposal_grammar_digest: "sha256:swapped".to_owned(),
+                ..request.clone()
+            },
+            ModelInvocationRequest {
+                effective_budget: 13,
+                ..request.clone()
+            },
+        ] {
+            let mut request_store = PolicyStore;
+            let refused = run_durable_policy_invocation(
+                &binding,
+                &schema,
+                &changed,
+                &plan,
+                &clock,
+                &cancellation,
+                AdapterInvocationCapability::grant("fixture"),
+                &mut request_factory,
+                &mut classifier,
+                &mut backoff,
+                &mut request_store,
+                None,
+            );
+            assert_eq!(
+                refused,
+                DurablePolicyRun::Refused(DurablePolicyRunError::RequestBindingMismatch)
+            );
+        }
+        assert_eq!(
+            request_factory_calls.get(),
+            0,
+            "swapped request fields never reach the factory"
+        );
+
+        let wrong_starts = Rc::new(Cell::new(0));
+        let wrong_counter = wrong_starts.clone();
+        let wrong_identity = AdapterModelIdentity {
+            provider_id: selected.provider_id().to_owned(),
+            model_id: "wrong-model".to_owned(),
+            capabilities: selected.capabilities().to_vec(),
+        };
+        let mut wrong_factory = move |provider: &str| {
+            Ok(Box::new(IdentityProbeAdapter {
+                capabilities: probe_capabilities(provider, max_context_tokens),
+                model: wrong_identity.clone(),
+                starts: wrong_counter.clone(),
+            }) as Box<dyn ProviderAdapter>)
+        };
+        let mut wrong_store = PolicyStore;
+        let wrong = run_durable_policy_invocation(
+            &binding,
+            &schema,
+            &request,
+            &plan,
+            &clock,
+            &cancellation,
+            AdapterInvocationCapability::grant("fixture"),
+            &mut wrong_factory,
+            &mut classifier,
+            &mut backoff,
+            &mut wrong_store,
+            None,
+        );
+        assert_eq!(
+            wrong_starts.get(),
+            0,
+            "wrong model is refused before adapter start"
+        );
+        assert!(
+            !matches!(
+                wrong,
+                DurablePolicyRun::Settled(_) | DurablePolicyRun::Replayed(_)
+            ),
+            "a wrong model identity never publishes a response"
+        );
         Ok(())
     })
     .unwrap();

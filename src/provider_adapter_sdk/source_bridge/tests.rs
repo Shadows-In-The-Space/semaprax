@@ -10,6 +10,8 @@ use crate::provider_adapter_sdk::capability::AdapterCapabilities;
 use crate::provider_adapter_sdk::fixture_adapters::{base_capabilities, usage};
 use crate::streaming_proposal_decode::source::tests::{fixture_document, fixture_schema};
 
+mod recording;
+
 static STATE: RetainedValue = RetainedValue::I64(1);
 fn request<'a>(
     task: &'a LifecycleTask,

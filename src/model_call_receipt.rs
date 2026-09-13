@@ -24,13 +24,11 @@
 //!
 //! # No live network call, no real provider, no key
 //!
-//! Every test in this module is built from offline fixture bytes and the
-//! same deterministic fixture seams `crate::live_invocation::fixture`
-//! already ships (`FixtureModelHandler`, `FixtureProposalDecoder`). Wiring
-//! a real provider adapter, a real compiled proposal grammar, or a real
-//! invoice-import transport is downstream, human-gated integration work
-//! against the traits this module and `live_invocation` already fix.
+//! Tests use offline fixture adapters, including actual compiled-schema bridge
+//! execution and retained journal replay. No live provider or invoice transport
+//! is supplied by this module. Adapter observations remain untrusted evidence.
 
+pub mod adapter_projection;
 pub mod audit_view;
 pub mod journal_projection;
 pub mod receipt;
@@ -48,5 +46,8 @@ pub use receipt::{
     ProviderReportedUsage, ReceiptRootBinding, ReceiptStage, RootBindingContext,
     LOW_ENTROPY_BYTE_THRESHOLD, RECEIPT_SCHEMA,
 };
-pub use reconciliation::{BillingReconciler, ProviderInvoiceRow, ReconciliationOutcome};
+pub use reconciliation::{
+    BillingReconciler, ProviderInvoiceRow, ProviderReportedSource, ProviderUsageDiscrepancy,
+    ReconciliationOutcome,
+};
 pub use replay::{replay_receipt, ReplayError};

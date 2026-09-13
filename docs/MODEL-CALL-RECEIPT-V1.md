@@ -318,3 +318,13 @@ cargo test --locked -p semaprax --doc model_call_receipt
 - Claiming exact remote execution internals the provider does not attest.
 - Real per-provider token accounting (billing reconciliation's "units" are
   an explicit byte-count proxy).
+
+## Adapter observations and provider usage comparison
+
+[Model Call Adapter Evidence v1](MODEL-CALL-ADAPTER-EVIDENCE-V1.md) binds
+settled generic attempts to captured transport events without inventing missing
+rich-receipt metadata. `BillingReconciler::reconcile_provider_reported` compares
+actual input tokens, output tokens, and monetary cost separately against an
+invoice. Exact call identity and account matching precede duplicate consumption;
+negative costs are invalid and absent usage remains uncertain. Mixed discrepancy
+directions are explicit. The older byte-proxy reconciliation API is unchanged.

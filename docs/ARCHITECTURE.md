@@ -166,6 +166,12 @@ folds per-attempt evidence; `model_call_receipt/source_projection` folds opaque
 recovered source checkpoints. Both bind the complete journal chain, preserve
 unknown host facts, and export read-only Audit Capsule object references.
 Neither projector writes journal rows or grants replay/dispatch authority.
+`provider_adapter_sdk/observation` decorates actual adapters with bounded,
+commitment-only ordered attempt capture. `model_call_receipt/adapter_projection`
+joins settled captures to independently validated generic journals and compiled
+schemas using the live bridge's shared request projection.
+[Model Call Adapter Evidence v1](MODEL-CALL-ADAPTER-EVIDENCE-V1.md) owns that
+additive evidence and its zero-dispatch replay.
 [Model Call Journal Receipt v1](MODEL-CALL-JOURNAL-RECEIPT-V1.md) owns this
 additive schema separately from the enriched host-metadata receipt contract.
 `agent_lifecycle/iterative/source_live` owns the one ledger and replay cursor;

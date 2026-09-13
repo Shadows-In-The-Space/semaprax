@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Capture ordered provider adapter attempts and replay retained chunks against
+  actual generic/source runtime schemas (#178/#180). Bind generic settlements
+  to validated journal requests and responses; compare provider token and cost
+  observations independently during invoice reconciliation.
+
 - Validate streamed nested Proposal fields, variant cases, exact scalars and
   text/byte bounds from compiled type tables before final decode (#178).
   Expose read-only grammar states and bounded work counters; extend the

@@ -29,6 +29,27 @@ fn hex(bytes: &[u8]) -> String {
     output
 }
 
+/// The exact request projection shared by live dispatch and receipt replay.
+/// Callers validate the logical request and schema bounds before constructing it.
+pub(crate) fn adapter_request_for(
+    request: &ModelInvocationRequest,
+    provider_schema: &str,
+) -> AdapterRequest {
+    // Hex preserves arbitrary task/observation bytes without lossy UTF-8.
+    let prompt = format!(
+        "{{\"task_hex\":{},\"observation_hex\":{},\"proposal_schema\":{}}}",
+        quote_json(&hex(&request.task)),
+        quote_json(&hex(&request.observation)),
+        provider_schema,
+    );
+    AdapterRequest {
+        request_bytes: prompt.into_bytes(),
+        max_response_bytes: request
+            .max_response_bytes
+            .min(crate::streaming_proposal_decode::MAX_STREAM_BYTES),
+    }
+}
+
 /// A provider-neutral, bounded streaming transport bridge. The adapter is
 /// negotiated before `start`; each `Delta` is validated before another poll;
 /// and an early decode refusal requests cancellation and returns immediately.
@@ -124,21 +145,8 @@ impl ModelHandler for StreamingModelHandler<'_> {
                 attempted_bytes: 0,
             };
         }
-        // Hex is lossless for arbitrary task/observation bytes; lossy UTF-8
-        // conversion would silently alter the identity-bound provider input.
-        let prompt = format!(
-            "{{\"task_hex\":{},\"observation_hex\":{},\"proposal_schema\":{}}}",
-            quote_json(&hex(&request.task)),
-            quote_json(&hex(&request.observation)),
-            provider_schema,
-        );
-        let response_cap = request
-            .max_response_bytes
-            .min(crate::streaming_proposal_decode::MAX_STREAM_BYTES);
-        let adapter_request = AdapterRequest {
-            request_bytes: prompt.into_bytes(),
-            max_response_bytes: response_cap,
-        };
+        let adapter_request = adapter_request_for(request, &provider_schema);
+        let response_cap = adapter_request.max_response_bytes;
         let required = RequiredCapabilities {
             require_streaming: true,
             require_structured_output_mode: Some(StructuredOutputMode::RawText),

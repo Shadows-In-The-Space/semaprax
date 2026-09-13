@@ -61,6 +61,7 @@ pub mod capability;
 pub mod conformance;
 pub mod fixture_adapters;
 pub mod hostile;
+pub mod observation;
 pub mod report;
 pub mod source_bridge;
 
@@ -74,6 +75,13 @@ pub use capability::{
     RequiredCapabilities, StructuredOutputMode, TokenAccountingSource,
 };
 pub use conformance::{drive_to_settlement, run_conformance_suite, DriveOutcome, ExpectedOutcome};
+pub use observation::{
+    commit_delta, commit_request, commit_response, AttemptClock, AttemptObservation,
+    AttemptTerminal, ByteCommitment, CancellationObservation, ObservedCapabilities, ObservedEvent,
+    ObservedUsage, RecordingAdapter, ReplayCancellation, ReplayError, ReplayInputs,
+    ATTEMPT_OBSERVATION_SCHEMA, MAX_OBSERVATION_RENDER_BYTES, MAX_OBSERVED_EVENTS,
+    MAX_OBSERVED_METADATA_BYTES, MAX_REPLAY_RESPONSE_BYTES,
+};
 pub use report::{ConformanceReport, ReportCaseResult};
 pub use source_bridge::{SourceAdapterFactory, StreamingSourceProposalAdapter};
 

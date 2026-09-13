@@ -20,6 +20,8 @@ use crate::provider_adapter_sdk::fixture_adapters::PanicsOnStartAdapter;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod adapter_projection;
+
 const SOURCE: &str = "module test.bridge;\n\n@id(\"answer.type\")\nrecord Answer {\n    @id(\"answer.note\")\n    note: string,\n}\n\n@id(\"app.main\")\nfn main() -> i64 { 0 }\n";
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 fn schema() -> CompiledInteractionSchema {

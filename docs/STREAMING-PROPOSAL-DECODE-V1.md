@@ -242,3 +242,12 @@ Proposal wire format. Focused gate:
 ```sh
 cargo test --locked -p semaprax --lib streaming_proposal_decode
 ```
+
+## Ordered transport evidence
+
+[Model Call Adapter Evidence v1](MODEL-CALL-ADAPTER-EVIDENCE-V1.md) records
+ordered chunk/result commitments and grammar identity from an actual adapter
+behind either runtime bridge. Independent replay uses retained transport bytes;
+the generic journal join additionally reconstructs the exact dispatched request
+and reproduces the compiled Proposal without a provider callback. These are
+local fixture-backed checks, not claims about a remote provider's internals.

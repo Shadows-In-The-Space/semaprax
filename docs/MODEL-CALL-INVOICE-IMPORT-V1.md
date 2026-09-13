@@ -3,6 +3,7 @@
 Status: local implementation for #180, with offline fixture verification. This
 is an evidence boundary and grants no network, model, tool, payment or signing
 authority. Imported observations are not proof of semantic correctness.
+Audience: compiler contributors and invoice import integrators.
 
 `model_call_receipt::invoice_import` accepts raw input through
 `RetainedInvoiceBytes` (at most 65,536 bytes) and independently retained

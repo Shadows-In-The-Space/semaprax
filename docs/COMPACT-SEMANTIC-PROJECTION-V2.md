@@ -3,6 +3,7 @@
 Status: additive local implementation. [Version 1](COMPACT-SEMANTIC-PROJECTION-V1.md)
 text and binary bytes remain unchanged. Model-text uses format version 2 and
 an explicit `model-text` encoding selection; it does not replace full JSON.
+Audience: agent and tool authors using model-text encoding and compiler contributors.
 
 ## Wire and deterministic selection
 

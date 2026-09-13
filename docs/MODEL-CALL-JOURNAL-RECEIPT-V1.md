@@ -1,6 +1,7 @@
 # Model Call Journal Receipt v1
 
 Status: local Rust evidence projection; no provider or invoice attestation.
+Audience: compiler contributors and journal receipt integrators.
 
 `model_call_receipt::journal_projection` derives per-attempt receipts directly
 from the generic live kernel's retained causal journal.

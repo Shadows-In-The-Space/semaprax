@@ -2,6 +2,7 @@
 
 Status: bounded implementation for application outbound HTTP (#193); local
 focused evidence does not extend historical hosted or platform support claims.
+Audience: compiler contributors and host integrators implementing outbound HTTPS.
 
 The additive compiler-owned operation is:
 

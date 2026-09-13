@@ -1,5 +1,8 @@
 # Authentication host v1
 
+Status: private Rust embedding profile for password hashing and session service; local evidence, no network or production deployment claim.
+Audience: host integrators and compiler contributors implementing authenticated embedding.
+
 This Rust embedding profile adds actual password hashing and authenticated
 sessions alongside the pure `std.auth` predicates specified in
 [Authentication and Sessions v1](AUTHENTICATION-SESSIONS-V1.md).

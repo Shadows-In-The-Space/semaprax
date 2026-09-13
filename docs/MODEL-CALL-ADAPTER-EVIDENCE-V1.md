@@ -1,6 +1,7 @@
 # Model Call Adapter Evidence v1
 
 Status: local implementation for #178/#180; no hosted or remote-provider claim.
+Audience: compiler contributors and provider adapter integrators.
 
 `provider_adapter_sdk/observation` owns the canonical
 `semaprax.provider-adapter-attempt-observation.v1` transcript (the exported

@@ -379,7 +379,7 @@ impl<'schema> JobRuntime<'schema> {
                     .tick
                     .checked_add(claim.lease_ticks)
                     .ok_or(JobRuntimeError::Evidence)?;
-                if runtime.store.expire_stale_leases(expiry).as_slice() != &[runtime.job_id] {
+                if runtime.store.expire_stale_leases(expiry) != [runtime.job_id] {
                     return Err(JobRuntimeError::Evidence);
                 }
                 runtime
@@ -544,38 +544,30 @@ impl<'schema> JobRuntime<'schema> {
             worker_id,
             ..ReplayFact::default()
         });
-        if outcome == OutcomeKind::Success
-            && state == JobState::Succeeded
-            && self.submission.schedule.is_some()
-        {
-            let next_run_tick = self
-                .store
-                .advance_recurring_schedule(
-                    self.job_id,
-                    now_tick,
-                    self.submission
-                        .schedule
-                        .expect("checked recurring schedule")
-                        .max_catch_up,
-                )
-                .map_err(JobRuntimeError::Store)?;
-            let occurrences_run = self
-                .store
-                .occurrences_run_of(self.job_id)
-                .ok_or(JobRuntimeError::Store(JobFixtureError::UnknownJob))?;
-            state = self.state();
-            self.evidence.append(
-                JobEvidenceEntry::RecurringAdvanced {
-                    next_run_tick,
-                    occurrences_run,
-                },
-                state.code(),
-            );
-            self.replay_facts.push(ReplayFact {
-                tick: now_tick,
-                worker_id,
-                ..ReplayFact::default()
-            });
+        if outcome == OutcomeKind::Success && state == JobState::Succeeded {
+            if let Some(schedule) = &self.submission.schedule {
+                let next_run_tick = self
+                    .store
+                    .advance_recurring_schedule(self.job_id, now_tick, schedule.max_catch_up)
+                    .map_err(JobRuntimeError::Store)?;
+                let occurrences_run = self
+                    .store
+                    .occurrences_run_of(self.job_id)
+                    .ok_or(JobRuntimeError::Store(JobFixtureError::UnknownJob))?;
+                state = self.state();
+                self.evidence.append(
+                    JobEvidenceEntry::RecurringAdvanced {
+                        next_run_tick,
+                        occurrences_run,
+                    },
+                    state.code(),
+                );
+                self.replay_facts.push(ReplayFact {
+                    tick: now_tick,
+                    worker_id,
+                    ..ReplayFact::default()
+                });
+            }
         }
         self.persist(checkpoints)?;
         Ok(DriveOutcome::Completed(state))
@@ -801,7 +793,7 @@ impl<'schema> JobRuntime<'schema> {
                     }
                 }
                 JobEvidenceEntry::LeaseExpired => {
-                    if store.expire_stale_leases(fact.tick).as_slice() != &[job_id] {
+                    if store.expire_stale_leases(fact.tick) != [job_id] {
                         return Err(JobRuntimeError::Evidence);
                     }
                 }

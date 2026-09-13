@@ -74,17 +74,15 @@ pub(in crate::workspace_graph) fn initial_core_prebound(
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     frontend_is_absent: bool,
 ) -> Result<(usize, usize, bool), Vec<Diagnostic>> {
-    let receipt = match checked_retention_prebound_with_uncached_peak(
-        programs,
-        authored,
-        frontend_is_absent,
-    ) {
-        Ok(receipt) => receipt,
-        Err(errors) if frontend_is_absent && cost::is_builder_refusal(&errors) => {
-            uncached_output_peak_prebound(programs, authored)?
-        }
-        Err(errors) => return Err(errors),
-    };
+    let receipt =
+        match checked_retention_prebound_with_uncached_peak(programs, authored, frontend_is_absent)
+        {
+            Ok(receipt) => receipt,
+            Err(errors) if frontend_is_absent && cost::is_builder_refusal(&errors) => {
+                uncached_output_peak_prebound(programs, authored)?
+            }
+            Err(errors) => return Err(errors),
+        };
     Ok((receipt.0, receipt.1, frontend_is_absent))
 }
 

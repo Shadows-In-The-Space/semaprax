@@ -122,7 +122,7 @@ impl AgentRuntimeV2 {
     ) -> Result<SourceModelBinding> {
         self.source_model
             .bind(self.deployment.digest(), self.instance.digest(), adapter)
-            .map_err(|detail| refused(detail))
+            .map_err(refused)
     }
 
     /// Narrows the retained source/deployment policy for one invocation. The
@@ -140,9 +140,7 @@ impl AgentRuntimeV2 {
         ) {
             return Err(refused("source.model_binding"));
         }
-        binding
-            .policy_binding(invocation_policy)
-            .map_err(|detail| refused(detail))
+        binding.policy_binding(invocation_policy).map_err(refused)
     }
 
     /// Consumes the bound streaming source-model route. It is additive to the
@@ -613,7 +611,7 @@ fn bind_runtime(
         &semantic,
         deployment_source,
     )
-    .map_err(|detail| refused(detail))?;
+    .map_err(refused)?;
     let proposal_digests: Vec<_> = proposals
         .iter()
         .map(|source| input_digest(source.as_bytes()))

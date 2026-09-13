@@ -464,7 +464,7 @@ def main():
         "schema": SCHEMA,
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "host": host_facts(),
-        "revision": git_revision(root),
+        "revision": git_revision(ROOT),
         "timing": {
             "collected": False,
             "reason": "this host runs many concurrent build lanes; any wall-clock "

@@ -1,5 +1,6 @@
 # Source Live I/O v5
 
+Status: additive I/O profile for durable source journal; local evidence, no provider billing claim.
 Audience: source-live integrators and private CLI operators.
 
 Source Live I/O v5 is an additive profile on the durable source journal. It

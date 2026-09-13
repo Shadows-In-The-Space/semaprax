@@ -509,6 +509,7 @@ impl SourceModelEvidence {
         self.attempts.len() < MAX_ATTEMPTS
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record(
         &mut self,
         request: &[u8],

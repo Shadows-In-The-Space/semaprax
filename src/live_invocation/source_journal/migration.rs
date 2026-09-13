@@ -565,7 +565,7 @@ impl SourceInvocationBinding {
             evaluator: evaluator_profile.to_owned(),
             max_steps_per_stage,
             max_total_steps,
-            carry,
+            carry: Box::new(carry),
         };
         Ok(binding)
     }
@@ -679,7 +679,7 @@ impl SourceInvocationBinding {
             max_steps_per_stage,
             max_total_steps,
             pricing: priced,
-            carry,
+            carry: Box::new(carry),
         };
         Ok(binding)
     }

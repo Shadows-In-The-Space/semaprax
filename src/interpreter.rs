@@ -2731,13 +2731,7 @@ fn admitted_resolved_functions_with_profile(
         })
         .filter(|function| match profile {
             SourceProfile::Legacy => {
-                // The selected legacy boundary remains scalar-only. A pure
-                // local String relay can nevertheless occur inside an
-                // already-admitted aggregate closure and still produces the
-                // same scalar envelope.
                 resolved_signature_is_admitted(function, &program.declarations)
-                    || (function.effects.is_empty()
-                        && internal_strings::signature_is_admitted(function, &program.declarations))
             }
             SourceProfile::InternalStrings => {
                 function.effects.is_empty()

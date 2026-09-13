@@ -53,6 +53,7 @@ impl HostHttpStreamTransport for ScriptedTransport {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn transport(
     polls: Vec<TransportPoll>,
 ) -> (
@@ -134,8 +135,7 @@ fn anthropic_messages_normalizes_message_flow_and_usage() {
     assert_eq!(requests.borrow()[0].path, "/v1/messages");
     assert!(requests.borrow()[0]
         .headers
-        .iter()
-        .any(|header| *header == ("anthropic-version", "2023-06-01")));
+        .contains(&("anthropic-version", "2023-06-01")));
     assert!(
         matches!(adapter.poll(), AdapterPoll::Event(super::super::AdapterEvent::Delta(bytes)) if bytes == b"ok")
     );

@@ -90,6 +90,7 @@ impl AuthService {
     }
     /// Unknown accounts and wrong passwords have the same error tag. This does
     /// not promise identical timing; rate limiting remains the host's responsibility.
+    #[allow(clippy::too_many_arguments)]
     pub fn login(
         &self,
         accounts: &dyn AccountStore,

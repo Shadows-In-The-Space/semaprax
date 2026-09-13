@@ -1,5 +1,8 @@
 # Paired coding-agent pilot — 13 September 2026
 
+Status: private pilot cohort 2026-09-13; ineligible observations, no productivity or lane-parity claim.
+Audience: benchmark operators, agent integrators, and reviewers of comparative pilot evidence.
+
 All 18 expected tuples are accounted for exactly once. No candidate passed all
 task acceptance checks (0/18). Four processes completed and 14 timed out;
 process completion is not task acceptance. There were 1,180 MCP calls, including

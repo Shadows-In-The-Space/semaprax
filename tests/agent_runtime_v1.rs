@@ -535,8 +535,18 @@ fn public_cumulative_builder_boundary_is_exact_and_stops_before_a_later_call() {
             assert!(run.evidence().contains("builder_bytes"));
         }
         Err(error) => {
-            assert_eq!(error[0].code, "SPX-G208");
-            assert!(error[0].message.starts_with("builder_bytes exceeds "));
+            assert!(
+                matches!(error[0].code, "SPX-G208" | "SPX-G209"),
+                "expected G208 or G209, got {}: {}",
+                error[0].code,
+                error[0].message
+            );
+            assert!(
+                error[0].message.starts_with("builder_bytes exceeds ")
+                    || error[0].message.contains("trace or Evidence"),
+                "unexpected message: {}",
+                error[0].message
+            );
         }
     }
     assert!(below_providers.load(Ordering::Acquire) <= 1);

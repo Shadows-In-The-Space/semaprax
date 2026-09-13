@@ -84,8 +84,8 @@ fn parse_inner(args: &[String]) -> Result<Options, &'static str> {
         return parse_task_context_options(options, rest);
     }
     let mut seen = std::collections::BTreeSet::new();
-    let mut chunks = rest.chunks_exact(2);
-    for pair in &mut chunks {
+    let (chunks, remainder) = rest.as_chunks::<2>();
+    for pair in chunks {
         if !seen.insert(pair[0].as_str()) {
             return Err("duplicate option");
         }
@@ -110,7 +110,7 @@ fn parse_inner(args: &[String]) -> Result<Options, &'static str> {
             _ => return Err("unknown or inapplicable option"),
         }
     }
-    if !chunks.remainder().is_empty() {
+    if !remainder.is_empty() {
         return Err("option requires a value");
     }
     if matches!(profile.as_str(), "graph" | "api-surface" | "candidate-diff") {

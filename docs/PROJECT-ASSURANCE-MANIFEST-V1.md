@@ -2,6 +2,7 @@
 
 Status: versioned additive contract; implementation and executable completion
 evidence are owned by the #214 batch and the completion matrix.
+Audience: compiler contributors and project assurance integrators.
 
 Project Assurance Manifest v1 is the project-level companion to [Assurance
 Manifest v1](ASSURANCE-MANIFEST-V1.md). It authenticates one retained Project

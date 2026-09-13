@@ -834,7 +834,9 @@ impl<'a> InvoiceRowParser<'a> {
 
     fn integer(&mut self, allow_negative: bool) -> Result<&str, InvoiceImportError> {
         let start = self.offset;
-        if allow_negative && self.take(b'-') {}
+        if allow_negative {
+            self.take(b'-');
+        }
         let digits_start = self.offset;
         if !matches!(self.peek(), Some(b'0'..=b'9')) {
             return Err(InvoiceImportError::InvalidRawInvoice(

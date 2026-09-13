@@ -106,6 +106,7 @@ enum SourceAdapterDispatch {
     Settled {
         canonical: String,
         response: Vec<u8>,
+        #[allow(dead_code)]
         usage: Option<(u64, u64, i64)>,
     },
     Failed {
@@ -490,7 +491,7 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
         {
             return Err(Self::refusal("source.adapter_request_bound"));
         }
-        let prompt = canonical_prompt(request, &schema);
+        let prompt = canonical_prompt(request, schema);
         if prompt.len() > max_request_bytes {
             return Err(Self::refusal("source.adapter_request_bound"));
         }

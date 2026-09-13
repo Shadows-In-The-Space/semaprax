@@ -52,6 +52,7 @@ mod native_scratch_tests;
 /// template it published.
 pub type NewProjectHook = fn(&[String]) -> Result<(PathBuf, &'static str), (String, u8)>;
 
+#[allow(clippy::type_complexity)]
 pub struct PrivateHost {
     pub new_project: NewProjectHook,
     pub source_live: fn(&[String]) -> Result<String, (String, u8)>,

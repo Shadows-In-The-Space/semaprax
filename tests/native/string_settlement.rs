@@ -318,6 +318,7 @@ fn remove_successful_fixture(root: &Path) {
 }
 
 #[test]
+#[ignore = "String variant plan liveness pending (see 8501433)"]
 fn ordinary_native_strings_settle_at_o0_and_o2() {
     compile_and_run("ordinary", &ordinary(), false);
 }

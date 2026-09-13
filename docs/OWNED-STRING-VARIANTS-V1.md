@@ -1,5 +1,8 @@
 # Owned string variants v1
 
+Status: local implementation for owned String variant payloads; no public ABI or network claim.
+Audience: compiler contributors and variant ownership integrators.
+
 This profile extends issue #216's variant payload admission with direct owned
 `string` fields. Text remains a drop-bearing owner. It is not a Copy scalar.
 

@@ -80,6 +80,7 @@ impl PricedSourceBindingV4 {
         &self.pricing
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn attempt_digest(
         &self,
         turn: u32,
@@ -92,7 +93,7 @@ impl PricedSourceBindingV4 {
     ) -> Result<String, SourceJournalError> {
         if ![request_digest, prompt_digest]
             .into_iter()
-            .all(|value| looks_like_digest(value))
+            .all(looks_like_digest)
             || !(1..=MAX_SOURCE_REQUEST_BYTES).contains(&request_bytes)
             || response_limit == 0
         {

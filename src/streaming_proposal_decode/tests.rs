@@ -456,7 +456,7 @@ fn byte_bound_is_enforced_at_its_exact_limit() {
     let filler = &document.as_bytes()[..MAX_STREAM_BYTES];
     let mut decoder = ProposalStreamDecoder::new(&outer);
 
-    let outcome = decoder.push(&filler);
+    let outcome = decoder.push(filler);
     assert_eq!(
         outcome,
         PushOutcome::Incomplete,

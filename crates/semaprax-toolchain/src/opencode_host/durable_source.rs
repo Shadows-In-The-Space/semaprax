@@ -173,13 +173,12 @@ impl<R: OpenCodeRunner> ProposalSource for OpenCodeDurableProposalSource<'_, R> 
             if usage_entry
                 .and_then(|entry| sink.append_at(entry, clock.now_millis()))
                 .is_err()
+                && result.is_ok()
             {
-                if result.is_ok() {
-                    result = Err(vec![Diagnostic::io(
-                        "SPX-I239",
-                        "OpenCode source usage checkpoint failed",
-                    )]);
-                }
+                result = Err(vec![Diagnostic::io(
+                    "SPX-I239",
+                    "OpenCode source usage checkpoint failed",
+                )]);
             }
         }
         let mut terminal_failure = recorded_attempt_failure(sink, turn, attempt);

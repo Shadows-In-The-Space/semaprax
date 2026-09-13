@@ -425,12 +425,12 @@ pub fn run_priced_live_invocation(
         sink: Some(&mut sink),
     };
     let run = run_live_invocation(config, state.journal, &mut kernel_handlers, cancellation)?;
-    drop(kernel_handlers);
+    let _ = &kernel_handlers;
     state.journal = run.journal.clone();
     state.generation = sink.generation();
     state.bound_invocation = Some(config.identity.digest().to_owned());
-    drop(sink);
-    drop(budget);
+    let _ = &sink;
+    let _ = &budget;
     state.accounting = Rc::try_unwrap(accounting)
         .map_err(|_| LiveKernelError::PersistenceFailed {
             dispatched: run.dispatched,

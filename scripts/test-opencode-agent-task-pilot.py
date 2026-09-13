@@ -263,6 +263,10 @@ class TupleTransportTests(unittest.TestCase):
                 "rpc=json.dumps({'jsonrpc':'2.0','id':1,'method':'tools/list'})+'\\n'\n"
                 "probe=subprocess.run(mcp_command,input=rpc,text=True,capture_output=True,timeout=5)\n"
                 "assert probe.returncode == 0 and json.loads(probe.stdout)['result']['tools'][0]['name'] == 'command'\n"
+                "rpc=json.dumps({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'command','arguments':{'argv':['--version']}}})+'\\n'\n"
+                "probe=subprocess.run(mcp_command,input=rpc,text=True,capture_output=True,timeout=5)\n"
+                "result=json.loads(probe.stdout)['result']\n"
+                "assert probe.returncode == 0 and not result['isError'], result\n"
                 "for item in protected:\n"
                 "    try: Path(item).read_bytes()\n"
                 "    except OSError: pass\n"
@@ -283,7 +287,9 @@ class TupleTransportTests(unittest.TestCase):
             )
             stub.chmod(0o700)
             with mock.patch.dict(os.environ, {"PILOT_TEST_SECRET": "must-not-pass"}):
-                compiler_source = Path(sys.executable).resolve(strict=True)
+                compiler_source = root / "compiler-stub"
+                compiler_source.write_text("#!/usr/bin/python3\nprint('compiler stub')\n")
+                compiler_source.chmod(0o700)
                 compiler_before = compiler_source.read_bytes()
                 records = {
                     lane: pilot.run_tuple(

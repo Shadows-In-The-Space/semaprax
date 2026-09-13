@@ -210,7 +210,7 @@ def seatbelt_profile(candidate, protected_roots, state):
     return (
         "(version 1)\n(allow default)\n"
         + read_rules
-        + f"(deny file-write* (require-not (require-any {writable})))\n"
+        + f'(deny file-write* (require-not (require-any {writable} (literal "/dev/null"))))\n'
     )
 
 

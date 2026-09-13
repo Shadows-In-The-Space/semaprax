@@ -326,7 +326,7 @@ fn state_type(runtime: &AgentRuntimeV2) -> Result<DeclarationId> {
         .map(DeclarationId::new)
         .ok_or_else(|| refused("migration.state_role"))
 }
-fn flat_state(
+pub(crate) fn flat_state(
     program: &hir::ResolvedProgram,
     id: &DeclarationId,
 ) -> Result<Vec<(DeclarationId, ResolvedType)>> {
@@ -368,7 +368,7 @@ fn flat_state(
         .map(|field| (field.id.clone(), field.ty.clone()))
         .collect())
 }
-fn evaluate_migration(
+pub(crate) fn evaluate_migration(
     program: &hir::ResolvedProgram,
     function: &str,
     old_state: &DeclarationId,
@@ -394,7 +394,7 @@ fn evaluate_migration(
 }
 
 /// Identical checked call boundary for fresh evaluation and trusted recovery.
-fn prepare_migration_call(
+pub(crate) fn prepare_migration_call(
     program: &hir::ResolvedProgram,
     function: &str,
     old_state: &DeclarationId,

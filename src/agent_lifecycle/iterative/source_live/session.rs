@@ -33,6 +33,15 @@ fn sideband(entry: &SourceJournalEntry) -> bool {
         SourceJournalEntry::ReplayStageReservation { .. } | SourceJournalEntry::AttemptUsage { .. }
     )
 }
+fn migration_preamble(entry: &SourceJournalEntry) -> bool {
+    matches!(
+        entry,
+        SourceJournalEntry::MigrationOpened { .. }
+            | SourceJournalEntry::MigrationEvaluationIntent { .. }
+            | SourceJournalEntry::MigrationEvaluationSettled { .. }
+            | SourceJournalEntry::MigrationEvaluationFailed { .. }
+    )
+}
 impl<'a> SourceExecutionSession<'a> {
     pub(super) fn new(
         sink: SourceCheckpointSink<'a>,
@@ -55,7 +64,7 @@ impl<'a> SourceExecutionSession<'a> {
             .entries()
             .iter()
             .enumerate()
-            .filter(|(_, entry)| !sideband(entry))
+            .filter(|(_, entry)| !sideband(entry) && !migration_preamble(entry))
             .map(|(seq, entry)| (seq as u32, entry.clone()))
             .collect();
         Self {

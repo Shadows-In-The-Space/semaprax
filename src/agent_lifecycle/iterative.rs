@@ -234,6 +234,24 @@ pub(crate) fn compile_linked_agent_lifecycle(
     )
 }
 
+/// Compiles one Agent's checked linked role closure from a retained Project.
+/// This selects no ambient source path and grants no execution authority.
+pub fn compile_project_agent_lifecycle_v2(
+    project: &crate::project::ProjectRevision,
+    source_path: &str,
+    agent_id: &str,
+    step_type_id: &str,
+) -> Result<CompiledIterativeLifecycle, Vec<Diagnostic>> {
+    let definition = project
+        .agent_definitions()
+        .iter()
+        .find(|item| item.definition().agent_id() == agent_id)
+        .ok_or_else(|| vec![bad("project_agent.definition")])?;
+    let source = definition.definition().canonical_source();
+    let linked = project.linked_agent_program(source_path, agent_id, source)?;
+    compile_linked_agent_lifecycle(linked, source, step_type_id)
+}
+
 fn compile_resolved_lifecycle(
     program: hir::ResolvedProgram,
     source_revision: String,

@@ -503,3 +503,6 @@ mod workspace;
 
 #[path = "linked/migration.rs"]
 mod linked_migration;
+
+#[path = "linked/source_migration.rs"]
+mod source_migration;

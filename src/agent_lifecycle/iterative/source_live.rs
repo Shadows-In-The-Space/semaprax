@@ -1,6 +1,7 @@
 //! Checked source execution over the source checkpoint journal.
 //! The ordinary live API remains separate; unsupported sources fail closed.
 use super::*;
+mod migration;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -11,7 +12,21 @@ use crate::live_invocation::{
     },
     CumulativeBudgetLedger, SourceInvocationClock,
 };
+pub use migration::{
+    prepare_source_live_migration, PreparedSourceLiveMigration, SourceLiveMigrationEndpoint,
+    SourceLiveMigrationRequest,
+};
 pub(crate) use session::SourceExecutionSession;
+
+/// Produced only after a checked, acknowledged migration settlement. The
+/// destination driver observes this State directly and never reinitializes.
+#[derive(Clone)]
+pub(crate) struct SourceMigrationSeed {
+    pub state: RetainedValue,
+    pub prior_turns: usize,
+    pub prior_stages: usize,
+    pub prior_effects: usize,
+}
 
 /// Host-selected policy. Source, lifecycle, task and stage identities are
 /// derived by the checked driver, never accepted from proposal text.
@@ -55,6 +70,44 @@ pub struct SourceProposalOutcome {
 }
 
 impl SourceLivePolicy {
+    fn seed(
+        &self,
+        compiled: &CompiledIterativeLifecycle,
+        task: &LifecycleTask,
+        budget: IterativeBudget,
+    ) -> Result<SourceInvocationSeed, SourceJournalError> {
+        Ok(SourceInvocationSeed {
+            lifecycle_digest: compiled.digest().to_owned(),
+            source_revision: compiled.source_revision().to_owned(),
+            deployment_binding: self.deployment_binding.clone(),
+            task: task.objective.clone(),
+            task_budget: task.budget,
+            proposal_schema_digest: compiled.proposal_schema().schema().digest().to_owned(),
+            response_limit: self.response_limit,
+            max_iterations: u32::try_from(budget.max_iterations)
+                .map_err(|_| SourceJournalError::Binding)?,
+            max_stages: u32::try_from(budget.max_stages)
+                .map_err(|_| SourceJournalError::Binding)?,
+            max_attempts: driver::MAX_PROPOSAL_ATTEMPTS as u32,
+            max_steps_per_stage: budget.max_steps_per_stage,
+            max_total_steps: self.max_total_steps,
+            ceiling: self.ceiling,
+            reservation_units: self.reservation_units,
+            unit: self.unit.clone(),
+            clock_domain: self.clock_domain.clone(),
+            initial_millis: self.initial_millis,
+            deadline_millis: self.deadline_millis,
+            program_root: self.program_root.clone(),
+        })
+    }
+
+    fn evaluator_profile() -> String {
+        digest(
+            b"semaprax.source-stage-evaluator.v2\0",
+            b"checked-retained-interpreter;left-to-right;full-stage-reservation;profile-1",
+        )
+    }
+
     pub fn binding(
         &self,
         compiled: &CompiledIterativeLifecycle,
@@ -62,33 +115,8 @@ impl SourceLivePolicy {
         budget: IterativeBudget,
     ) -> Result<SourceInvocationBinding, SourceJournalError> {
         SourceInvocationBinding::bind_execution(
-            SourceInvocationSeed {
-                lifecycle_digest: compiled.digest().to_owned(),
-                source_revision: compiled.source_revision().to_owned(),
-                deployment_binding: self.deployment_binding.clone(),
-                task: task.objective.clone(),
-                task_budget: task.budget,
-                proposal_schema_digest: compiled.proposal_schema().schema().digest().to_owned(),
-                response_limit: self.response_limit,
-                max_iterations: u32::try_from(budget.max_iterations)
-                    .map_err(|_| SourceJournalError::Binding)?,
-                max_stages: u32::try_from(budget.max_stages)
-                    .map_err(|_| SourceJournalError::Binding)?,
-                max_attempts: driver::MAX_PROPOSAL_ATTEMPTS as u32,
-                max_steps_per_stage: budget.max_steps_per_stage,
-                max_total_steps: self.max_total_steps,
-                ceiling: self.ceiling,
-                reservation_units: self.reservation_units,
-                unit: self.unit.clone(),
-                clock_domain: self.clock_domain.clone(),
-                initial_millis: self.initial_millis,
-                deadline_millis: self.deadline_millis,
-                program_root: self.program_root.clone(),
-            },
-            &digest(
-                b"semaprax.source-stage-evaluator.v2\0",
-                b"checked-retained-interpreter;left-to-right;full-stage-reservation;profile-1",
-            ),
+            self.seed(compiled, task, budget)?,
+            &Self::evaluator_profile(),
         )
     }
 }

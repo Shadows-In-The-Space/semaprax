@@ -8,9 +8,14 @@ use crate::live_invocation::identity::unhex;
 
 const CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v1\0";
 const EXECUTION_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v2\0";
+const MIGRATED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v3\0";
 
 fn kind(entry: &SourceJournalEntry) -> &'static str {
     match entry {
+        SourceJournalEntry::MigrationOpened { .. } => "migration_opened",
+        SourceJournalEntry::MigrationEvaluationIntent { .. } => "migration_evaluation_intent",
+        SourceJournalEntry::MigrationEvaluationSettled { .. } => "migration_evaluation_settled",
+        SourceJournalEntry::MigrationEvaluationFailed { .. } => "migration_evaluation_failed",
         SourceJournalEntry::RunOpened => "run_opened",
         SourceJournalEntry::StageReservation { .. } => "stage_reservation",
         SourceJournalEntry::ReplayStageReservation { .. } => "replay_stage_reservation",
@@ -35,6 +40,10 @@ fn kind(entry: &SourceJournalEntry) -> &'static str {
 
 fn turn_attempt(entry: &SourceJournalEntry) -> (Option<u32>, Option<u32>) {
     match entry {
+        SourceJournalEntry::MigrationOpened { .. } => (None, None),
+        SourceJournalEntry::MigrationEvaluationIntent { attempt, .. }
+        | SourceJournalEntry::MigrationEvaluationSettled { attempt, .. }
+        | SourceJournalEntry::MigrationEvaluationFailed { attempt, .. } => (None, Some(*attempt)),
         SourceJournalEntry::RunOpened => (None, None),
         SourceJournalEntry::StageReservation { turn, attempt, .. } => (Some(*turn), *attempt),
         SourceJournalEntry::ReplayStageReservation { .. } => (None, None),
@@ -82,6 +91,15 @@ fn encode_entry(entry: &SourceJournalEntry, seq: usize) -> String {
         output.push_str(&format!(",\"attempt\":{attempt}"));
     }
     let fields = match entry {
+        SourceJournalEntry::MigrationOpened { handoff_digest } =>
+            format!(",\"handoff_digest\":{}", quote_json(handoff_digest)),
+        SourceJournalEntry::MigrationEvaluationIntent { fuel, .. } =>
+            format!(",\"fuel\":{fuel}"),
+        SourceJournalEntry::MigrationEvaluationSettled { state, state_digest, .. } => format!(
+            ",\"state\":{},\"state_digest\":{}",
+            quote_json(&hex(state)), quote_json(state_digest)),
+        SourceJournalEntry::MigrationEvaluationFailed { reason, .. } =>
+            format!(",\"reason\":{}", quote_json(reason.as_str())),
         SourceJournalEntry::RunOpened => String::new(),
         SourceJournalEntry::StageReservation { role, fuel, .. } => format!(
             ",\"role\":{},\"fuel\":{}", quote_json(role.as_str()), fuel),
@@ -186,7 +204,9 @@ pub(super) fn encode_envelope(
     }
     let entries = encode_entries(journal.entries())?;
     let link = digest(
-        if journal.binding.is_execution_profile() {
+        if journal.binding.migration().is_some() {
+            MIGRATED_CHAIN_DOMAIN
+        } else if journal.binding.is_execution_profile() {
             EXECUTION_CHAIN_DOMAIN
         } else {
             CHAIN_DOMAIN
@@ -322,6 +342,22 @@ fn decode_entry(value: &Value, seq: usize) -> Result<SourceJournalEntry, SourceJ
     let turn = || u32_field(map, "turn");
     let attempt = || u32_field(map, "attempt");
     let entry = match string(map, "kind")?.as_str() {
+        "migration_opened" => SourceJournalEntry::MigrationOpened {
+            handoff_digest: string(map, "handoff_digest")?,
+        },
+        "migration_evaluation_intent" => SourceJournalEntry::MigrationEvaluationIntent {
+            attempt: attempt()?,
+            fuel: usize_field(map, "fuel")?,
+        },
+        "migration_evaluation_settled" => SourceJournalEntry::MigrationEvaluationSettled {
+            attempt: attempt()?,
+            state: bytes_field(map, "state", MAX_SOURCE_CARRIER_BYTES)?,
+            state_digest: string(map, "state_digest")?,
+        },
+        "migration_evaluation_failed" => SourceJournalEntry::MigrationEvaluationFailed {
+            attempt: attempt()?,
+            reason: tag(map, "reason", SourceMigrationFailure::parse)?,
+        },
         "run_opened" => SourceJournalEntry::RunOpened,
         "stage_reservation" => SourceJournalEntry::StageReservation {
             turn: turn()?,

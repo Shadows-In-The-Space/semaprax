@@ -325,7 +325,15 @@ pub(super) fn validate(
     if entries.len() > MAX_SOURCE_ENTRIES {
         return Err(SourceJournalError::Capacity);
     }
-    let mut fold = ExecutionFold::default();
+    let prefix = migration::prefix(binding, entries)?;
+    let mut fold = ExecutionFold {
+        model_units: prefix.model_units,
+        stage_fuel: prefix.stage_fuel,
+        stages: prefix.stages,
+        effects: prefix.effects,
+        attempts: prefix.attempts,
+        ..ExecutionFold::default()
+    };
     let mut causal = Vec::with_capacity(entries.len());
     let mut originals: Vec<OriginalStage> = Vec::new();
     let mut required: Option<RequiredStage> = None;
@@ -333,7 +341,7 @@ pub(super) fn validate(
     let mut replay: Option<ReplayPass> = None;
     let mut last_causal: Option<&SourceJournalEntry> = None;
 
-    for (index, entry) in entries.iter().enumerate() {
+    for (index, entry) in entries.iter().enumerate().skip(prefix.source_start) {
         match entry {
             SourceJournalEntry::ReplayStageReservation {
                 replay: number,
@@ -371,7 +379,12 @@ pub(super) fn validate(
                     .get(pass.next)
                     .filter(|_| pass.next < pass.limit)
                     .ok_or(SourceJournalError::Order)?;
-                if pass.next == 0 && original.role != SourceStageRole::Initialize {
+                let first_role = if binding.migration().is_some() {
+                    SourceStageRole::Observe
+                } else {
+                    SourceStageRole::Initialize
+                };
+                if pass.next == 0 && original.role != first_role {
                     return Err(SourceJournalError::Order);
                 }
                 if original.seq != *causal_seq || original.role != *role || original.fuel != *fuel {
@@ -418,8 +431,12 @@ pub(super) fn validate(
         match entry {
             SourceJournalEntry::RunOpened => {
                 required = Some(RequiredStage {
-                    role: SourceStageRole::Initialize,
-                    turn: 0,
+                    role: if binding.migration().is_some() {
+                        SourceStageRole::Observe
+                    } else {
+                        SourceStageRole::Initialize
+                    },
+                    turn: prefix.turns,
                     attempt: None,
                 });
             }
@@ -572,7 +589,16 @@ pub(super) fn validate(
         causal.push(projected);
         last_causal = Some(entry);
     }
-    if validate::validate(binding, &causal)? != fold.model_units {
+    if !causal.is_empty()
+        && validate::validate_with_initial(
+            binding,
+            &causal,
+            prefix.turns,
+            prefix.stages,
+            prefix.model_units,
+            binding.migration().is_some(),
+        )? != fold.model_units
+    {
         return Err(SourceJournalError::Malformed);
     }
     Ok(fold)

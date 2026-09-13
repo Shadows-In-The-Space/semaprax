@@ -34,7 +34,20 @@ impl CompiledIterativeLifecycle {
         driver: &mut dyn IterativeDriver,
         budget: IterativeBudget,
         cancellation: &AgentCancellation,
+        session: Option<&mut source_live::SourceExecutionSession<'_>>,
+    ) -> Result<IterativeRun, DriverFailure> {
+        self.run_with_driver_live_seed(task, source, driver, budget, cancellation, session, None)
+    }
+
+    pub(crate) fn run_with_driver_live_seed(
+        &self,
+        task: &LifecycleTask,
+        source: &mut dyn ProposalSource,
+        driver: &mut dyn IterativeDriver,
+        budget: IterativeBudget,
+        cancellation: &AgentCancellation,
         mut session: Option<&mut source_live::SourceExecutionSession<'_>>,
+        migrated: Option<&source_live::SourceMigrationSeed>,
     ) -> Result<IterativeRun, DriverFailure> {
         if budget.max_iterations > 4096 || budget.max_stages > 12289 {
             return Err(vec![bad("budget.capacity")].into());
@@ -42,9 +55,9 @@ impl CompiledIterativeLifecycle {
         let inner = &self.inner;
         let mut run = IterativeRun {
             status: IterativeStatus::BudgetExhausted,
-            iterations: 0,
+            iterations: migrated.map_or(0, |seed| seed.prior_turns),
             stages: Vec::new(),
-            effects: 0,
+            effects: migrated.map_or(0, |seed| seed.prior_effects),
             value: None,
             authorization_bindings: Vec::new(),
             invocation_digest: super::live_invocation_digest(
@@ -56,6 +69,7 @@ impl CompiledIterativeLifecycle {
             digest: String::new(),
         };
         let mut last_effect: Option<Vec<u8>> = None;
+        let prior_stages = migrated.map_or(0, |seed| seed.prior_stages);
         macro_rules! stop {
             ($status:expr, $value:expr) => {
                 return Ok(run.finish($status, $value, self.digest()))
@@ -77,7 +91,7 @@ impl CompiledIterativeLifecycle {
                 if cancellation.is_cancelled() {
                     stop!(IterativeStatus::Cancelled, None);
                 }
-                if run.stages.len() >= budget.max_stages {
+                if prior_stages.saturating_add(run.stages.len()) >= budget.max_stages {
                     stop!(IterativeStatus::BudgetExhausted, None);
                 }
                 source.check_deadline()?;
@@ -118,15 +132,19 @@ impl CompiledIterativeLifecycle {
         if budget.max_iterations == 0 {
             stop!(IterativeStatus::BudgetExhausted, None);
         }
-        let mut state = evaluate!(
-            &inner.binding.initialize,
-            &[payload(
-                &inner.binding.task,
-                task.objective.clone(),
-                task.budget
-            )],
-            None
-        );
+        let mut state = if let Some(seed) = migrated {
+            seed.state.clone()
+        } else {
+            evaluate!(
+                &inner.binding.initialize,
+                &[payload(
+                    &inner.binding.task,
+                    task.objective.clone(),
+                    task.budget
+                )],
+                None
+            )
+        };
         if !inner.carries(&state, "state") {
             return Err(vec![bad("initialize.identity")].into());
         }
@@ -238,7 +256,7 @@ impl CompiledIterativeLifecycle {
                 stop!(IterativeStatus::Cancelled, None);
             }
             // Reserve reducer capacity before dispatch: no known-doomed effect.
-            if run.stages.len() >= budget.max_stages {
+            if prior_stages.saturating_add(run.stages.len()) >= budget.max_stages {
                 stop!(IterativeStatus::BudgetExhausted, None);
             }
             let request = authorized.consume();

@@ -12,17 +12,26 @@ use crate::diagnostic::quote_json;
 use super::identity::{digest, hex, looks_like_digest};
 
 mod execution;
+mod migration;
 mod validate;
 mod wire;
+pub(crate) use migration::{
+    state_digest as source_migration_state_digest, task_digest as source_migration_task_digest,
+    SourceMigrationCarry,
+};
 
 #[cfg(test)]
 mod execution_tests;
+#[cfg(test)]
+mod migration_tests;
 #[cfg(test)]
 mod tests;
 
 pub const SOURCE_JOURNAL_SCHEMA: &str = "semaprax.live-invocation.source-persisted-journal.v1";
 pub const SOURCE_EXECUTION_JOURNAL_SCHEMA: &str =
     "semaprax.live-invocation.source-persisted-journal.v2";
+pub const SOURCE_MIGRATED_JOURNAL_SCHEMA: &str =
+    "semaprax.live-invocation.source-persisted-journal.v3";
 pub const MAX_SOURCE_ENTRIES: usize = 65_536;
 pub const MAX_SOURCE_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_SOURCE_RESPONSE_BYTES: usize = 65_536;
@@ -39,6 +48,7 @@ const EFFECT_DOMAIN: &[u8] = b"semaprax.live-invocation.source-effect.v1\0";
 const PROMPT_DOMAIN: &[u8] = b"semaprax.live-invocation.source-prompt.v1\0";
 const CONTEXT_DOMAIN: &[u8] = b"semaprax.live-invocation.source-context-binding.v1\0";
 const EXECUTION_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v2\0";
+const MIGRATED_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v3\0";
 
 /// All caller-selected policy, program and task inputs to one source run.
 /// The resulting binding is opaque; a recovery caller must supply it again.
@@ -89,6 +99,12 @@ enum SourceProfile {
         evaluator: String,
         max_steps_per_stage: usize,
         max_total_steps: usize,
+    },
+    MigratedV3 {
+        evaluator: String,
+        max_steps_per_stage: usize,
+        max_total_steps: usize,
+        carry: SourceMigrationCarry,
     },
 }
 
@@ -215,18 +231,32 @@ impl SourceInvocationBinding {
     }
 
     pub fn is_execution_profile(&self) -> bool {
-        matches!(&self.profile, SourceProfile::ExecutionV2 { .. })
+        matches!(
+            &self.profile,
+            SourceProfile::ExecutionV2 { .. } | SourceProfile::MigratedV3 { .. }
+        )
+    }
+    pub(crate) fn migration(&self) -> Option<&SourceMigrationCarry> {
+        match &self.profile {
+            SourceProfile::MigratedV3 { carry, .. } => Some(carry),
+            _ => None,
+        }
     }
     pub fn evaluator_profile(&self) -> Option<&str> {
         match &self.profile {
             SourceProfile::PrimitiveV1 => None,
-            SourceProfile::ExecutionV2 { evaluator, .. } => Some(evaluator),
+            SourceProfile::ExecutionV2 { evaluator, .. }
+            | SourceProfile::MigratedV3 { evaluator, .. } => Some(evaluator),
         }
     }
     pub fn max_steps_per_stage(&self) -> Option<usize> {
         match &self.profile {
             SourceProfile::PrimitiveV1 => None,
             SourceProfile::ExecutionV2 {
+                max_steps_per_stage,
+                ..
+            }
+            | SourceProfile::MigratedV3 {
                 max_steps_per_stage,
                 ..
             } => Some(*max_steps_per_stage),
@@ -236,6 +266,9 @@ impl SourceInvocationBinding {
         match &self.profile {
             SourceProfile::PrimitiveV1 => None,
             SourceProfile::ExecutionV2 {
+                max_total_steps, ..
+            }
+            | SourceProfile::MigratedV3 {
                 max_total_steps, ..
             } => Some(*max_total_steps),
         }
@@ -247,10 +280,10 @@ impl SourceInvocationBinding {
         self.max_stages
     }
     fn schema(&self) -> &'static str {
-        if self.is_execution_profile() {
-            SOURCE_EXECUTION_JOURNAL_SCHEMA
-        } else {
-            SOURCE_JOURNAL_SCHEMA
+        match &self.profile {
+            SourceProfile::PrimitiveV1 => SOURCE_JOURNAL_SCHEMA,
+            SourceProfile::ExecutionV2 { .. } => SOURCE_EXECUTION_JOURNAL_SCHEMA,
+            SourceProfile::MigratedV3 { .. } => SOURCE_MIGRATED_JOURNAL_SCHEMA,
         }
     }
 
@@ -384,6 +417,10 @@ closed_tags!(SourceEffectFailure {
     HandlerFailed => "handler_failed", ResultLimit => "result_limit",
     Cancelled => "cancelled", DeadlineExceeded => "deadline_exceeded"
 });
+closed_tags!(SourceMigrationFailure {
+    CheckedCall => "checked_call", Cancelled => "cancelled",
+    DeadlineExceeded => "deadline_exceeded", FuelExhausted => "fuel_exhausted"
+});
 closed_tags!(SourceTransitionCase {
     Continue => "continue", Complete => "complete", Suspend => "suspend", Fail => "fail"
 });
@@ -468,6 +505,22 @@ impl From<SourceStopStatus> for SourceTerminalStatus {
 /// replay needs them; error tags cannot carry provider text.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceJournalEntry {
+    MigrationOpened {
+        handoff_digest: String,
+    },
+    MigrationEvaluationIntent {
+        attempt: u32,
+        fuel: usize,
+    },
+    MigrationEvaluationSettled {
+        attempt: u32,
+        state: Vec<u8>,
+        state_digest: String,
+    },
+    MigrationEvaluationFailed {
+        attempt: u32,
+        reason: SourceMigrationFailure,
+    },
     RunOpened,
     StageReservation {
         turn: u32,
@@ -731,6 +784,12 @@ impl<'a> SourceCheckpointSink<'a> {
         // An intent is unusable if its worst-case bounded result cannot be
         // checkpointed. Reserve room before granting a physical dispatch.
         let (future_bytes, future_entries): (usize, usize) = match next.entries.last() {
+            Some(SourceJournalEntry::MigrationEvaluationIntent { .. }) => (
+                MAX_SOURCE_CARRIER_BYTES
+                    .saturating_mul(2)
+                    .saturating_add(4_096),
+                2,
+            ),
             Some(SourceJournalEntry::AttemptIntent { response_limit, .. }) => {
                 (response_limit.saturating_mul(2).saturating_add(4_096), 5)
             }

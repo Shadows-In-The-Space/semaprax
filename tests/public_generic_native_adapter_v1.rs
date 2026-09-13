@@ -15,6 +15,8 @@ mod c_calling_consumer;
 mod cxx_calling_consumer;
 #[path = "public_generic_native_adapter_v1/fixture.rs"]
 mod fixture;
+#[path = "public_generic_native_adapter_v1/malformed_trusted_descriptor.rs"]
+mod malformed_trusted_descriptor;
 /// The generated Rust *calling* consumer (issue #156): a real, standalone
 /// external crate built against the same compiled native provider `fixture`
 /// exercises from C, executed end to end.
@@ -33,5 +35,3 @@ mod settlement_corpus;
 /// (`tests/support/public_generic_hostile_corpus.rs`).
 #[path = "public_generic_native_adapter_v1/shared_hostile_corpus.rs"]
 mod shared_hostile_corpus;
-#[path = "public_generic_native_adapter_v1/malformed_trusted_descriptor.rs"]
-mod malformed_trusted_descriptor;

@@ -8,6 +8,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Exercise eight borrowed byte-view call compositions across interpreter,
+  C11 O0/O2 and Core Wasm, including offset-sensitive forwarded views,
+  comparator rejection and the stable escaping-view diagnostic (Refs #103).
+
 - Validate bounded Descriptor-v1 frames and versions in generated calling
   consumers before exact pairing and provider admission; exercise canonical
   shared mutations and byte-identical malformed configured descriptors in

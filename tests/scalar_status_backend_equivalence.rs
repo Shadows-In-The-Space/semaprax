@@ -407,3 +407,6 @@ fn native_o0_o2_and_core_wasm_share_exact_scalar_status_results() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[path = "scalar_status_backend_equivalence/view_call_boundary_composition.rs"]
+mod view_call_boundary_composition;

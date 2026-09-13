@@ -540,7 +540,7 @@ fn decode_case_values(aggregate: i64, cases: &[(&str, i64)]) -> Vec<i64> {
 /// `wasm_conformance_js` already established for exactly this class of
 /// module (range-descriptor carriers included), trimmed of the `Box`
 /// operations this corpus never uses.
-fn run_core_wasm_aggregate(program: &semaprax::ast::Program, root: &Path) -> i64 {
+pub(super) fn run_core_wasm_aggregate(program: &semaprax::ast::Program, root: &Path) -> i64 {
     let package = root.join("web");
     wasm::build_web(program, &package).unwrap();
     let script = root.join("observe-core-wasm.mjs");

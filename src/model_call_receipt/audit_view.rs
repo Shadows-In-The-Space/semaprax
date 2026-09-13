@@ -34,6 +34,8 @@ use crate::digest_hex::LowerHex;
 
 use super::receipt::{ModelCallReceipt, PayloadPrivacyClaim};
 
+pub mod canonical;
+
 pub const AUDIT_VIEW_SCHEMA: &str = "semaprax.model-call-audit-view.v1";
 
 const FIELD_COMMITMENT_DOMAIN: &[u8] = b"semaprax.model-call-audit-view.field-commitment.v1\0";
@@ -252,16 +254,16 @@ pub fn redact(
         authorization_header_echo,
         task_privacy_claim: PayloadPrivacyClaim::classify(
             extras.task.len(),
-            extras.private_payload_reference_material.is_some(),
+            false, // A retained reference string is not proof of private storage.
         ),
         observation_privacy_claim: PayloadPrivacyClaim::classify(
             extras.observation.len(),
-            extras.private_payload_reference_material.is_some(),
+            false, // A retained reference string is not proof of private storage.
         ),
         response_privacy_claim: extras.response.as_ref().map(|response| {
             PayloadPrivacyClaim::classify(
                 response.len(),
-                extras.private_payload_reference_material.is_some(),
+                false, // A retained reference string is not proof of private storage.
             )
         }),
     }
@@ -273,13 +275,24 @@ pub enum AuditViewError {
     /// The view's `receipt_digest` does not match the receipt it is claimed
     /// to project.
     WrongReceipt,
+    Limit,
+    PayloadMismatch {
+        field: &'static str,
+    },
+    IncompleteRedaction,
+    PrivacyClaimMismatch,
+    CanonicalMismatch,
     /// A field the view claims was withheld does not actually commit to the
     /// bytes `extras` holds for it — the redaction commitment was forged or
     /// stale.
-    CommitmentMismatch { field: &'static str },
+    CommitmentMismatch {
+        field: &'static str,
+    },
     /// A field the view reveals does not match what `extras` holds for it —
     /// the view's plaintext was tampered with after redaction.
-    RevealedFieldTampered { field: &'static str },
+    RevealedFieldTampered {
+        field: &'static str,
+    },
 }
 
 /// Independently checks a view against the receipt and extras it claims to
@@ -291,6 +304,10 @@ pub fn verify_audit_view(
     receipt: &ModelCallReceipt,
     extras: &ReceiptPrivateExtras,
 ) -> Result<(), AuditViewError> {
+    validate_audit_inputs(receipt, extras)?;
+    if view.redacted_fields.len() > 7 {
+        return Err(AuditViewError::Limit);
+    }
     if view.receipt_digest != receipt.digest() {
         return Err(AuditViewError::WrongReceipt);
     }
@@ -348,7 +365,135 @@ pub fn verify_audit_view(
             return Err(AuditViewError::RevealedFieldTampered { field: "response" });
         }
     }
+    let policy = RedactionPolicy {
+        reveal_task: view.task_preview.is_some(),
+        reveal_observation: view.observation_preview.is_some(),
+        reveal_response: view.response_preview.is_some(),
+        reveal_private_reference_material: view.private_reference_material.is_some(),
+        reveal_adapter_diagnostic_hint: view.adapter_diagnostic_hint.is_some(),
+        reveal_provider_error_detail: view.provider_error_detail.is_some(),
+        reveal_authorization_header_echo: view.authorization_header_echo.is_some(),
+    };
+    let expected = redact(receipt, extras, &policy);
+    if view.redacted_fields != expected.redacted_fields {
+        return Err(AuditViewError::IncompleteRedaction);
+    }
+    for (field, supplied, original) in [
+        (
+            "private_payload_reference_material",
+            &view.private_reference_material,
+            &expected.private_reference_material,
+        ),
+        (
+            "adapter_diagnostic_hint",
+            &view.adapter_diagnostic_hint,
+            &expected.adapter_diagnostic_hint,
+        ),
+        (
+            "provider_error_detail",
+            &view.provider_error_detail,
+            &expected.provider_error_detail,
+        ),
+        (
+            "authorization_header_echo",
+            &view.authorization_header_echo,
+            &expected.authorization_header_echo,
+        ),
+    ] {
+        if supplied != original {
+            return Err(AuditViewError::RevealedFieldTampered { field });
+        }
+    }
+    if view.task_privacy_claim != expected.task_privacy_claim
+        || view.observation_privacy_claim != expected.observation_privacy_claim
+        || view.response_privacy_claim != expected.response_privacy_claim
+    {
+        return Err(AuditViewError::PrivacyClaimMismatch);
+    }
     Ok(())
+}
+
+/// Bound caller-retained payloads before hashing or copying; check association
+/// against the receipt rather than accepting unrelated extras beside its id.
+fn validate_audit_inputs(
+    receipt: &ModelCallReceipt,
+    extras: &ReceiptPrivateExtras,
+) -> Result<(), AuditViewError> {
+    use super::receipt::{commit_observation_bytes, commit_response_bytes, commit_task_bytes};
+    let strings = [
+        &receipt.agent_id,
+        &receipt.program_root,
+        &receipt.deployment_root,
+        &receipt.instance_root,
+        &receipt.invocation_id,
+        &receipt.model_class,
+        &receipt.provider_class,
+        &receipt.adapter_identity,
+        &receipt.proposal_grammar_digest,
+        &receipt.deployment_policy_digest,
+        &receipt.task_digest,
+        &receipt.observation_digest,
+        &receipt.request_digest,
+        &receipt.provider_call_reference,
+    ];
+    if strings.into_iter().any(|s| s.len() > 4096)
+        || [
+            &receipt.response_digest,
+            &receipt.private_payload_reference,
+            &receipt.failure,
+            &receipt.proposal_digest,
+            &receipt.proposal_refusal_reason,
+        ]
+        .into_iter()
+        .any(|s| s.as_ref().is_some_and(|v| v.len() > 4096))
+        || receipt
+            .provider_reported
+            .as_ref()
+            .is_some_and(|v| v.provider_call_id.len() > 4096)
+    {
+        return Err(AuditViewError::Limit);
+    }
+    if extras.task.len() > 65_536
+        || extras.observation.len() > 65_536
+        || extras.response.as_ref().is_some_and(|v| v.len() > 65_536)
+        || [
+            &extras.private_payload_reference_material,
+            &extras.adapter_diagnostic_hint,
+            &extras.provider_error_detail,
+            &extras.authorization_header_echo,
+        ]
+        .into_iter()
+        .any(|v| v.as_ref().is_some_and(|s| s.len() > 4096))
+    {
+        return Err(AuditViewError::Limit);
+    }
+    if receipt.render().len() > 65_536 {
+        return Err(AuditViewError::Limit);
+    }
+    if commit_task_bytes(&extras.task) != receipt.task_digest {
+        return Err(AuditViewError::PayloadMismatch { field: "task" });
+    }
+    if commit_observation_bytes(&extras.observation) != receipt.observation_digest {
+        return Err(AuditViewError::PayloadMismatch {
+            field: "observation",
+        });
+    }
+    if extras.response.as_deref().map(commit_response_bytes) != receipt.response_digest
+        || extras.response.as_ref().map(Vec::len) != receipt.response_bytes_len
+    {
+        return Err(AuditViewError::PayloadMismatch { field: "response" });
+    }
+    Ok(())
+}
+
+/// Checked public audit projection; missing payload association fails closed.
+pub fn checked_redact(
+    receipt: &ModelCallReceipt,
+    extras: &ReceiptPrivateExtras,
+    policy: &RedactionPolicy,
+) -> Result<ModelCallAuditView, AuditViewError> {
+    validate_audit_inputs(receipt, extras)?;
+    Ok(redact(receipt, extras, policy))
 }
 
 /// `redacted.name` is always one of the closed literal names this module
@@ -382,7 +527,16 @@ mod tests {
     const PROVIDER_ERROR_MARKER: &str = "SECRET-PROVIDER-ERROR-DETAIL-do-not-leak";
     const AUTH_HEADER_MARKER: &str = "SECRET-AUTHORIZATION-HEADER-do-not-leak";
 
-    fn clean_extras() -> ReceiptPrivateExtras {
+    pub(super) fn bound_receipt(extras: &ReceiptPrivateExtras) -> ModelCallReceipt {
+        let mut receipt = sample_receipt();
+        receipt.task_digest = commit_task_bytes(&extras.task);
+        receipt.observation_digest = commit_observation_bytes(&extras.observation);
+        receipt.response_digest = extras.response.as_deref().map(commit_response_bytes);
+        receipt.response_bytes_len = extras.response.as_ref().map(Vec::len);
+        receipt
+    }
+
+    pub(super) fn clean_extras() -> ReceiptPrivateExtras {
         ReceiptPrivateExtras {
             task: b"ordinary non-secret task".to_vec(),
             observation: b"ordinary non-secret observation".to_vec(),
@@ -473,6 +627,7 @@ mod tests {
         }
 
         for (field, extras_with_secret) in &cases {
+            let receipt = bound_receipt(extras_with_secret);
             let marker = match *field {
                 "task" => std::str::from_utf8(TASK_MARKER).unwrap(),
                 "observation" => std::str::from_utf8(OBSERVATION_MARKER).unwrap(),
@@ -531,11 +686,11 @@ mod tests {
 
     #[test]
     fn verify_audit_view_rejects_a_forged_commitment_and_a_tampered_plaintext() {
-        let receipt = sample_receipt();
         let extras = ReceiptPrivateExtras {
             task: TASK_MARKER.to_vec(),
             ..clean_extras()
         };
+        let receipt = bound_receipt(&extras);
         let mut view = redact(&receipt, &extras, &RedactionPolicy::fully_redacted());
         assert_eq!(verify_audit_view(&view, &receipt, &extras), Ok(()));
 
@@ -597,7 +752,7 @@ mod tests {
         );
         assert_eq!(
             referenced_view.task_privacy_claim,
-            PayloadPrivacyClaim::Withheld
+            PayloadPrivacyClaim::DigestOnlyLowEntropyCaveat
         );
 
         let long_extras = ReceiptPrivateExtras {
@@ -621,3 +776,7 @@ mod tests {
         assert_ne!(commit_task_bytes(bytes), commit_response_bytes(bytes));
     }
 }
+
+#[cfg(test)]
+#[path = "audit_view/hostile_tests.rs"]
+mod hostile_tests;

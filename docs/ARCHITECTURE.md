@@ -161,6 +161,13 @@ refusal echoes for stateless operations, with shared hard caps for execution.
 existing semantic service through opaque handles and canonical reports. It
 retains the service's staged refresh and replay boundaries; caught stateful
 panics poison the facade rather than presenting its state as reusable.
+`model_call_receipt/invoice_import` bounds raw invoice input before explicit
+adapter verification, retains canonical imports and reconciliation evidence,
+and gives neither record dispatch authority. `audit_view/canonical` owns the
+exact audit wire projection; verification requires complete disclosure coverage
+and independently retained payload association.
+`model_call_receipt/emission` provides checked receipt methods on actual live
+run/checkpoint objects while keeping required host facts explicit.
 `model_call_receipt/receipt_decode` owns the bounded canonical v1 inverse.
 `model_call_receipt/generic_enrichment` reconstructs rich host-bound receipts
 from validated journals and independently compiled decode outcomes; observed

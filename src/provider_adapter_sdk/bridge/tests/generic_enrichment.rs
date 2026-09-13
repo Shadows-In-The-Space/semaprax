@@ -100,8 +100,9 @@ fn accepted_actual_kernel_receipt_enriches_replays_and_decodes() {
     let (run, recorder) = accepted_run(&schema);
     let host = host();
 
-    let receipt =
-        enrich_generic_call(&run.journal, &seed, &request, &schema, &roots, &host).unwrap();
+    let receipt = run
+        .rich_model_call_receipt(&seed, &request, &schema, &roots, &host)
+        .unwrap();
     assert_eq!(receipt.terminal_stage, ReceiptStage::Accepted);
     assert_eq!(receipt.first_byte_at_ms, Some(12));
     assert_eq!(receipt.completed_at_ms, Some(13));
@@ -316,4 +317,10 @@ fn failed_cancelled_and_validated_unresolved_prefixes_remain_distinct_receipt_st
         enrich_generic_call(&prefix, &seed, &request, &schema, &roots, &unresolved_host).unwrap();
     assert_eq!(receipt.terminal_stage, ReceiptStage::Uncertain);
     assert_eq!(receipt.response_digest, None);
+    unresolved_host.dispatched_at_ms = Some(11);
+    unresolved_host.first_byte_at_ms = Some(12);
+    let first_byte =
+        enrich_generic_call(&prefix, &seed, &request, &schema, &roots, &unresolved_host).unwrap();
+    assert_eq!(first_byte.terminal_stage, ReceiptStage::FirstByte);
+    assert_eq!(first_byte.response_digest, None);
 }

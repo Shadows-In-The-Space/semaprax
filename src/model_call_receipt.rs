@@ -30,7 +30,9 @@
 
 pub mod adapter_projection;
 pub mod audit_view;
+pub mod emission;
 pub mod generic_enrichment;
+pub mod invoice_import;
 pub mod journal_projection;
 pub mod observed_usage;
 pub mod receipt;
@@ -43,6 +45,13 @@ pub mod source_projection;
 pub use audit_view::{
     redact, verify_audit_view, AuditViewError, ModelCallAuditView, ReceiptPrivateExtras,
     RedactedField, RedactionPolicy, AUDIT_VIEW_SCHEMA,
+};
+pub use invoice_import::{
+    import_invoice_row, raw_invoice_digest, reconcile_verified_provider_import,
+    ExpectedContentDigestVerifier, InvoiceImportError, InvoiceImportExpectation,
+    InvoiceImportVerifier, ReconciliationRecord, ReconciliationRecordError, RetainedInvoiceBytes,
+    VerifiedInvoiceImport, INVOICE_IMPORT_SCHEMA, MAX_INVOICE_IMPORT_BYTES,
+    MAX_INVOICE_IMPORT_LABEL_BYTES, RECONCILIATION_RECORD_SCHEMA,
 };
 pub use receipt::{
     commit_observation_bytes, commit_proposal_bytes, commit_response_bytes, commit_task_bytes,

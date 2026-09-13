@@ -224,6 +224,10 @@ pub fn enrich_generic_call(
         } else {
             ReceiptStage::IntentPersisted
         }
+    } else if host.first_byte_at_ms.is_some() {
+        ReceiptStage::FirstByte
+    } else if host.dispatched_at_ms.is_some() {
+        ReceiptStage::Dispatched
     } else {
         ReceiptStage::Uncertain
     };

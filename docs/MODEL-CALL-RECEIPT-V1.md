@@ -133,13 +133,13 @@ which recomputes rather than trusts.
 A bare commitment digest over a short payload (below
 `LOW_ENTROPY_BYTE_THRESHOLD` = 32 bytes) can still be recovered by brute
 force even though the plaintext was never transmitted — a two-byte prompt's
-digest is not meaningfully private. `PayloadPrivacyClaim::classify` returns
-`Withheld` only when an authenticated private reference is attached;
-otherwise a short payload gets `DigestOnlyLowEntropyCaveat` (never
-`Withheld`), and only a long-enough payload with no reference gets the plain
-`DigestOnly` claim. `audit_view`'s rendered view always carries this
-classification explicitly rather than a bare "redacted"/"safe" label
-(`audit_view::tests::low_entropy_payload_never_earns_a_withheld_claim_without_a_private_reference`).
+digest is not meaningfully private. Receipt and audit projections always use
+`DigestOnlyLowEntropyCaveat` for short payloads and `DigestOnly` otherwise.
+An opaque private-reference string does not authenticate private retention and
+cannot promote either projection to `Withheld`. The low-level
+`PayloadPrivacyClaim::classify(..., true)` remains available only for callers
+that separately possess authenticated proof; this module does not produce it.
+Neither length nor a hash is an encryption guarantee.
 
 ## Redaction: `ModelCallAuditView v1`
 
@@ -159,8 +159,10 @@ free-text fields a careless handler or adapter might attach —
 redaction boundary actually stops them from reaching a reviewer, rather than
 merely asserting it never records them in the first place.
 
-`RedactionPolicy` is six independent reveal flags, all `false` by default
-(`fully_redacted()`). `redact(receipt, extras, policy)` produces a
+`RedactionPolicy` is seven independent reveal flags, all `false` by default
+(`fully_redacted()`). `checked_redact(receipt, extras, policy)` first bounds
+inputs and verifies task/observation/response association with the receipt,
+then produces a
 `ModelCallAuditView` carrying:
 
 - `receipt_digest`, binding the view to one exact receipt (never mutating
@@ -178,7 +180,19 @@ merely asserting it never records them in the first place.
 redacted field's commitment from `extras` and rejects a forged commitment
 (`AuditViewError::CommitmentMismatch`), and independently checks every
 revealed field's plaintext against `extras` and rejects a tampered
-plaintext (`AuditViewError::RevealedFieldTampered`).
+plaintext (`AuditViewError::RevealedFieldTampered`). Every present field must
+appear exactly once as either disclosure or ordered redaction commitment;
+omissions, duplicate entries, double disclosure and forged privacy labels fail
+closed. Receipt payload commitments must agree with the independently retained
+extras. The legacy `redact` constructor remains available, but it does not
+perform these checks itself.
+
+`audit_view::canonical` renders sorted canonical JSON with a terminal LF and
+hex-encoded arbitrary disclosed bytes. It caps the document at 1 MiB and replays
+exact submitted bytes against the original receipt, extras, and disclosure
+policy, without a provider or storage callback. Unknown keys, changed encoding,
+and any single-byte mutation fail exact replay. The human review renderer is
+display-only and is not the wire codec.
 
 ### Per-field redaction proof
 
@@ -290,17 +304,18 @@ Run via `cargo test --locked -p semaprax --doc model_call_receipt`.
 
 ## No live network call, no real provider, no key
 
-Every test in this module is built from offline fixture bytes and the
-deterministic fixtures `live_invocation::fixture` already ships
-(`FixtureModelHandler`, `FixtureProposalDecoder`, `fixture_response`).
-Wiring a real provider adapter, a real compiled proposal grammar, or a real
-invoice-import transport is downstream, human-gated integration work against
-the traits this module and `live_invocation` already fix.
+Tests use offline provider fixtures, actual compiled Proposal schemas, live
+kernel runs and recovered source checkpoints. Invoice verification accepts
+explicit host-supplied verifier implementations; the built-in content-digest
+verifier is local retained-byte evidence, not remote-provider authentication.
+No provider network transport, credentials or invoice-fetching authority are
+created by a receipt or verification result.
 
 ## Focused gate
 
 ```sh
 cargo test --locked -p semaprax --lib model_call_receipt
+cargo test --locked -p semaprax --lib provider_adapter_sdk
 cargo test --locked -p semaprax --doc model_call_receipt
 ```
 
@@ -381,3 +396,23 @@ in the journal and become one-based in rich receipts. At most 1024 attempts,
 compares their canonical documents concatenated in causal order. A checkpoint
 without a bound ProgramRoot remains eligible for the journal projection, but
 cannot manufacture a root-bound rich receipt.
+
+## Source usage consistency and lifecycle evidence
+
+Source enrichment indexes checkpoint observations, outcomes and usage by
+(turn, attempt). Known journal input/output counters must match supplied host
+provider usage. Unknown counters remain unknown; total, reasoning and cache
+counters are distinct dimensions. Source monetary charges retain their currency
+and minor-unit scale in journal evidence and are not silently converted to a
+currency-free `cost_micros` field. Pending attempts with a known first-byte time
+emit `first_byte`; those with only dispatch known emit `dispatched`.
+`LiveKernelRun::rich_model_call_receipt` and
+`RecoveredSourceCheckpoint::rich_model_call_receipts` expose the same checked
+constructors directly on actual run evidence. Mandatory host facts stay explicit.
+
+## Verified invoice import and reconciliation records
+
+[Model Call Invoice Import v1](MODEL-CALL-INVOICE-IMPORT-V1.md) owns the bounded
+external import boundary, explicit adapter verification, closed offline replay,
+and immutable reconciliation-result evidence. The existing raw typed-row API
+remains available for legacy hosts and does not imply verified import.

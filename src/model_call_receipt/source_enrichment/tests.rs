@@ -3,7 +3,7 @@ use crate::agent_lifecycle::{CheckpointStore, CheckpointStoreError};
 use crate::live_invocation::identity::digest;
 use crate::live_invocation::source_journal::{
     source_prompt_digest, source_response_digest, SourceCheckpointSink, SourceInvocationBinding,
-    SourceInvocationSeed, SourceJournalEntry,
+    SourceInvocationSeed, SourceJournalEntry, SourceReportedUsage,
 };
 use crate::streaming_proposal_decode::source::tests::{fixture_document, fixture_schema};
 
@@ -45,14 +45,40 @@ fn seed() -> SourceInvocationSeed {
 }
 
 fn checkpoint() -> (RecoveredSourceCheckpoint, SourceInvocationSeed) {
+    checkpoint_with_usage(None, false)
+}
+
+fn checkpoint_with_usage(
+    reported: Option<SourceReportedUsage>,
+    settled: bool,
+) -> (RecoveredSourceCheckpoint, SourceInvocationSeed) {
     let seed = seed();
-    let binding = SourceInvocationBinding::bind(seed.clone()).unwrap();
+    let binding = if settled {
+        SourceInvocationBinding::bind_execution(seed.clone(), &hash("evaluator")).unwrap()
+    } else {
+        SourceInvocationBinding::bind(seed.clone()).unwrap()
+    };
     let prompt = b"prompt";
     let request = hash("request");
     let mut store = Store::default();
     let checkpoint = {
         let mut sink = SourceCheckpointSink::new(&mut store, binding.clone());
         sink.append_at(SourceJournalEntry::RunOpened, 0).unwrap();
+        if settled {
+            use crate::live_invocation::source_journal::SourceStageRole;
+            for role in [SourceStageRole::Initialize, SourceStageRole::Observe] {
+                sink.append_at(
+                    SourceJournalEntry::StageReservation {
+                        turn: 0,
+                        attempt: None,
+                        role,
+                        fuel: 1,
+                    },
+                    0,
+                )
+                .unwrap();
+            }
+        }
         sink.append_at(
             SourceJournalEntry::TurnObserved {
                 turn: 0,
@@ -83,6 +109,28 @@ fn checkpoint() -> (RecoveredSourceCheckpoint, SourceInvocationSeed) {
             2,
         )
         .unwrap();
+        if settled {
+            let response = b"response".to_vec();
+            sink.append_at(
+                SourceJournalEntry::AttemptSettled {
+                    turn: 0,
+                    attempt: 0,
+                    response: response.clone(),
+                    response_digest: source_response_digest(&response),
+                },
+                3,
+            )
+            .unwrap();
+            sink.append_at(
+                SourceJournalEntry::AttemptUsage {
+                    turn: 0,
+                    attempt: 0,
+                    reported,
+                },
+                4,
+            )
+            .unwrap();
+        }
         sink.checkpoint().unwrap()
     };
     (checkpoint, seed)
@@ -207,17 +255,31 @@ fn source_enrichment_retains_an_unresolved_intent_and_replays_exact_bytes() {
         proposal_schema_digest: &seed.proposal_schema_digest,
         compiled_schema: None,
     };
-    let metadata = host_metadata(&checkpoint, &seed);
-    let receipts = enrich_source_calls(&checkpoint, &binding, &[metadata]).unwrap();
+    let mut metadata = host_metadata(&checkpoint, &seed);
+    metadata.dispatched_at_ms = None;
+    let receipts = checkpoint
+        .rich_model_call_receipts(&binding, &[metadata])
+        .unwrap();
     assert_eq!(receipts.len(), 1);
     assert_eq!(receipts[0].terminal_stage, ReceiptStage::Uncertain);
     assert_eq!(receipts[0].attempt, 1);
     assert_eq!(receipts[0].invocation_id, checkpoint.invocation());
+
+    let mut first_byte_metadata = host_metadata(&checkpoint, &seed);
+    first_byte_metadata.first_byte_at_ms = Some(3);
+    let first_byte_receipts =
+        enrich_source_calls(&checkpoint, &binding, &[first_byte_metadata]).unwrap();
+    assert_eq!(
+        first_byte_receipts[0].terminal_stage,
+        ReceiptStage::FirstByte
+    );
+
     let bytes = receipts
         .iter()
         .flat_map(|receipt| receipt.render().into_bytes())
         .collect::<Vec<_>>();
-    let metadata = host_metadata(&checkpoint, &seed);
+    let mut metadata = host_metadata(&checkpoint, &seed);
+    metadata.dispatched_at_ms = None;
     replay_source_enriched_calls(&bytes, &checkpoint, &binding, &[metadata]).unwrap();
 }
 
@@ -254,6 +316,119 @@ fn source_enrichment_rejects_a_checkpoint_binding_or_host_root_mismatch() {
         enrich_source_calls(&checkpoint, &binding, &[metadata]),
         Err(SourceEnrichmentError::Root)
     );
+}
+
+#[test]
+fn source_enrichment_checks_known_input_output_usage_without_normalizing_other_dimensions() {
+    let journal_usage = SourceReportedUsage {
+        total: Some(999),
+        input: Some(11),
+        output: None,
+        reasoning: Some(5),
+        cache_read: Some(3),
+        cache_write: Some(2),
+    };
+    let (checkpoint, seed) = checkpoint_with_usage(Some(journal_usage), true);
+    let binding = SourceReceiptBindingInputs {
+        source_revision: &seed.source_revision,
+        deployment_binding: &seed.deployment_binding,
+        task: &seed.task,
+        task_budget: seed.task_budget,
+        proposal_schema_digest: &seed.proposal_schema_digest,
+        compiled_schema: None,
+    };
+    let provider = ProviderReportedUsage {
+        provider_call_id: "call-0".into(),
+        tokens_in: 11,
+        tokens_out: 7,
+        provider_cost_micros: 13,
+    };
+    let mut metadata = host_metadata(&checkpoint, &seed);
+    metadata.provider_reported = Some(&provider);
+    let receipts = enrich_source_calls(&checkpoint, &binding, &[metadata]).unwrap();
+    assert_eq!(receipts[0].provider_reported, Some(provider.clone()));
+
+    // The journal did not report output, so a differing host output remains
+    // independently retained rather than being compared to an unknown.
+    let mismatched_provider = ProviderReportedUsage {
+        tokens_out: 8,
+        ..provider.clone()
+    };
+    let mut metadata = host_metadata(&checkpoint, &seed);
+    metadata.provider_reported = Some(&mismatched_provider);
+    assert!(enrich_source_calls(&checkpoint, &binding, &[metadata]).is_ok());
+
+    let mismatched_provider = ProviderReportedUsage {
+        tokens_in: 12,
+        ..provider
+    };
+    let mut metadata = host_metadata(&checkpoint, &seed);
+    metadata.provider_reported = Some(&mismatched_provider);
+    assert_eq!(
+        enrich_source_calls(&checkpoint, &binding, &[metadata]),
+        Err(SourceEnrichmentError::HostFacts)
+    );
+}
+
+#[test]
+fn source_enrichment_rejects_a_known_output_mismatch_and_keeps_missing_usage_unknown() {
+    let journal_usage = SourceReportedUsage {
+        total: None,
+        input: None,
+        output: Some(7),
+        reasoning: None,
+        cache_read: None,
+        cache_write: None,
+    };
+    let (checkpoint, seed) = checkpoint_with_usage(Some(journal_usage), true);
+    let binding = SourceReceiptBindingInputs {
+        source_revision: &seed.source_revision,
+        deployment_binding: &seed.deployment_binding,
+        task: &seed.task,
+        task_budget: seed.task_budget,
+        proposal_schema_digest: &seed.proposal_schema_digest,
+        compiled_schema: None,
+    };
+    let mut metadata = host_metadata(&checkpoint, &seed);
+    let provider = ProviderReportedUsage {
+        provider_call_id: "call-0".into(),
+        tokens_in: 11,
+        tokens_out: 8,
+        provider_cost_micros: 13,
+    };
+    metadata.provider_reported = Some(&provider);
+    assert_eq!(
+        enrich_source_calls(&checkpoint, &binding, &[metadata]),
+        Err(SourceEnrichmentError::HostFacts)
+    );
+
+    // A missing independently retained provider report cannot be completed
+    // from journal evidence; the rich receipt keeps usage absent.
+    let mut metadata = host_metadata(&checkpoint, &seed);
+    metadata.provider_reported = None;
+    let receipts = enrich_source_calls(&checkpoint, &binding, &[metadata]).unwrap();
+    assert_eq!(receipts[0].provider_reported, None);
+
+    // The priced/legacy journal's explicit unknown state likewise does not
+    // contradict a separately retained complete host report.
+    let (unknown_checkpoint, unknown_seed) = checkpoint_with_usage(None, true);
+    let unknown_binding = SourceReceiptBindingInputs {
+        source_revision: &unknown_seed.source_revision,
+        deployment_binding: &unknown_seed.deployment_binding,
+        task: &unknown_seed.task,
+        task_budget: unknown_seed.task_budget,
+        proposal_schema_digest: &unknown_seed.proposal_schema_digest,
+        compiled_schema: None,
+    };
+    let mut metadata = host_metadata(&unknown_checkpoint, &unknown_seed);
+    let provider = ProviderReportedUsage {
+        provider_call_id: "call-0".into(),
+        tokens_in: 999,
+        tokens_out: 888,
+        provider_cost_micros: 13,
+    };
+    metadata.provider_reported = Some(&provider);
+    assert!(enrich_source_calls(&unknown_checkpoint, &unknown_binding, &[metadata]).is_ok());
 }
 
 #[test]

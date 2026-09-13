@@ -8,7 +8,8 @@ use crate::agent_proposal::CompiledAgentProposalSchema;
 use crate::live_invocation::{
     identity::digest,
     source_journal::{
-        source_prompt_digest, source_response_digest, RecoveredSourceCheckpoint, SourceJournalEntry,
+        source_prompt_digest, source_response_digest, RecoveredSourceCheckpoint,
+        SourceJournalEntry, SourceReportedUsage, SourceUsageObservationV4,
     },
 };
 
@@ -89,7 +90,7 @@ pub fn enrich_source_calls(
     use SourceEnrichmentError as E;
     validate_binding(checkpoint, inputs, attempts)?;
     let metadata = metadata_index(attempts)?;
-    let observations = observation_index(checkpoint);
+    let checkpoint_index = checkpoint_index(checkpoint)?;
 
     let mut receipts = Vec::new();
     let mut rendered_bytes = 0usize;
@@ -131,16 +132,22 @@ pub fn enrich_source_calls(
         {
             return Err(E::Journal);
         }
-        let recorded_observation = observations.get(&turn).ok_or(E::Journal)?;
+        let recorded_observation = checkpoint_index.observations.get(&turn).ok_or(E::Journal)?;
         if digest(SOURCE_OBSERVATION_DOMAIN, host.observation).as_str() != *recorded_observation {
             return Err(E::Journal);
         }
+        if let Some(reported) = host.provider_reported {
+            let journal_usage = checkpoint_index
+                .attempts
+                .get(&(turn, attempt))
+                .and_then(|evidence| evidence.usage);
+            check_usage_consistency(reported, journal_usage)?;
+        }
         let outcome = source_outcome(
-            checkpoint,
-            turn,
-            attempt,
+            checkpoint_index.attempts.get(&(turn, attempt)),
             inputs.compiled_schema,
             host.dispatched_at_ms.is_some(),
+            host.first_byte_at_ms.is_some(),
         )?;
         let receipt_attempt = attempt.checked_add(1).ok_or(E::Limit)?;
         let receipt = ModelCallReceipt {
@@ -327,17 +334,117 @@ fn metadata_index<'a>(
     Ok(index)
 }
 
-fn observation_index(checkpoint: &RecoveredSourceCheckpoint) -> BTreeMap<u32, &str> {
+#[derive(Default)]
+struct AttemptEvidence<'a> {
+    response: Option<&'a [u8]>,
+    failure: Option<(&'a str, usize)>,
+    admitted: Option<&'a str>,
+    refused: Option<&'a str>,
+    usage: Option<&'a SourceReportedUsage>,
+}
+
+struct CheckpointIndex<'a> {
+    observations: BTreeMap<u32, &'a str>,
+    attempts: BTreeMap<(u32, u32), AttemptEvidence<'a>>,
+}
+
+fn checkpoint_index<'a>(
+    checkpoint: &'a RecoveredSourceCheckpoint,
+) -> Result<CheckpointIndex<'a>, SourceEnrichmentError> {
     let mut observations = BTreeMap::new();
+    let mut attempts: BTreeMap<(u32, u32), AttemptEvidence<'a>> = BTreeMap::new();
     for entry in checkpoint.entries() {
-        if let SourceJournalEntry::TurnObserved {
-            turn, observation, ..
-        } = entry
-        {
-            observations.insert(*turn, observation.as_str());
+        match entry {
+            SourceJournalEntry::TurnObserved {
+                turn, observation, ..
+            } => {
+                observations.insert(*turn, observation.as_str());
+            }
+            SourceJournalEntry::AttemptSettled {
+                turn,
+                attempt,
+                response,
+                response_digest,
+            } => {
+                if source_response_digest(response) != *response_digest {
+                    return Err(SourceEnrichmentError::Journal);
+                }
+                attempts.entry((*turn, *attempt)).or_default().response = Some(response.as_slice());
+            }
+            SourceJournalEntry::AttemptFailed {
+                turn,
+                attempt,
+                reason,
+                attempted_bytes,
+            } => {
+                attempts.entry((*turn, *attempt)).or_default().failure =
+                    Some((reason.as_str(), *attempted_bytes));
+            }
+            SourceJournalEntry::ProposalAdmitted {
+                turn,
+                attempt,
+                proposal_digest,
+            } => {
+                attempts.entry((*turn, *attempt)).or_default().admitted =
+                    Some(proposal_digest.as_str());
+            }
+            SourceJournalEntry::ProposalRefused {
+                turn,
+                attempt,
+                reason,
+            } => {
+                attempts.entry((*turn, *attempt)).or_default().refused = Some(reason.as_str());
+            }
+            SourceJournalEntry::AttemptUsage {
+                turn,
+                attempt,
+                reported,
+            } => {
+                attempts.entry((*turn, *attempt)).or_default().usage = reported.as_ref();
+            }
+            SourceJournalEntry::PricedAttemptUsage(usage) => {
+                if let SourceUsageObservationV4::Observed(reported) = &usage.usage {
+                    attempts
+                        .entry((usage.turn, usage.attempt))
+                        .or_default()
+                        .usage = Some(reported);
+                }
+            }
+            _ => {}
         }
     }
-    observations
+    Ok(CheckpointIndex {
+        observations,
+        attempts,
+    })
+}
+
+/// Compares only the source dimensions that have compatible semantics with
+/// the complete rich receipt usage. Source `total`, reasoning, and cache
+/// counters remain distinct dimensions; they are never summed or normalized
+/// into the rich receipt's input/output fields. A priced source charge also
+/// remains a separate journal projection: `provider_cost_micros` has no
+/// declared currency or minor-unit exponent in `ProviderReportedUsage`, so
+/// this route cannot establish compatible monetary units to compare.
+fn check_usage_consistency(
+    provider: &ProviderReportedUsage,
+    journal: Option<&SourceReportedUsage>,
+) -> Result<(), SourceEnrichmentError> {
+    let Some(journal) = journal else {
+        // Legacy `reported: None` and priced `usage: Unknown` are durable
+        // unknowns. They do not contradict independently retained host facts.
+        return Ok(());
+    };
+    if journal
+        .input
+        .is_some_and(|value| value != provider.tokens_in)
+        || journal
+            .output
+            .is_some_and(|value| value != provider.tokens_out)
+    {
+        return Err(SourceEnrichmentError::HostFacts);
+    }
+    Ok(())
 }
 
 struct Outcome<'a> {
@@ -350,57 +457,21 @@ struct Outcome<'a> {
 }
 
 fn source_outcome<'a>(
-    checkpoint: &'a RecoveredSourceCheckpoint,
-    turn: u32,
-    attempt: u32,
+    evidence: Option<&AttemptEvidence<'a>>,
     schema: Option<&CompiledAgentProposalSchema>,
     dispatched: bool,
+    first_byte: bool,
 ) -> Result<Outcome<'a>, SourceEnrichmentError> {
     use SourceEnrichmentError as E;
-    let mut response = None;
-    let mut failure = None;
-    let mut attempted_bytes = 0;
-    let mut admitted = None;
-    let mut refused = None;
-    for entry in checkpoint.entries() {
-        match entry {
-            SourceJournalEntry::AttemptSettled {
-                turn: current_turn,
-                attempt: current_attempt,
-                response: bytes,
-                response_digest,
-            } if *current_turn == turn && *current_attempt == attempt => {
-                if source_response_digest(bytes) != *response_digest {
-                    return Err(E::Journal);
-                }
-                response = Some(bytes.as_slice());
-            }
-            SourceJournalEntry::AttemptFailed {
-                turn: current_turn,
-                attempt: current_attempt,
-                reason,
-                attempted_bytes: bytes,
-            } if *current_turn == turn && *current_attempt == attempt => {
-                failure = Some(reason.as_str().to_owned());
-                attempted_bytes = *bytes;
-            }
-            SourceJournalEntry::ProposalAdmitted {
-                turn: current_turn,
-                attempt: current_attempt,
-                proposal_digest,
-            } if *current_turn == turn && *current_attempt == attempt => {
-                admitted = Some(proposal_digest.as_str())
-            }
-            SourceJournalEntry::ProposalRefused {
-                turn: current_turn,
-                attempt: current_attempt,
-                reason,
-            } if *current_turn == turn && *current_attempt == attempt => {
-                refused = Some(reason.as_str())
-            }
-            _ => {}
-        }
-    }
+    let response = evidence.and_then(|evidence| evidence.response);
+    let failure = evidence
+        .and_then(|evidence| evidence.failure)
+        .map(|(reason, _)| reason.to_owned());
+    let attempted_bytes = evidence
+        .and_then(|evidence| evidence.failure)
+        .map_or(0, |(_, bytes)| bytes);
+    let admitted = evidence.and_then(|evidence| evidence.admitted);
+    let refused = evidence.and_then(|evidence| evidence.refused);
     if response.is_some() && failure.is_some() || admitted.is_some() && refused.is_some() {
         return Err(E::Journal);
     }
@@ -450,6 +521,8 @@ fn source_outcome<'a>(
                 ReceiptStage::IntentPersisted
             },
         ),
+        (None, None) if first_byte => (None, None, ReceiptStage::FirstByte),
+        (None, None) if dispatched => (None, None, ReceiptStage::Dispatched),
         (None, None) => (None, None, ReceiptStage::Uncertain),
         (Some(_), Some(_)) => return Err(E::Journal),
     };

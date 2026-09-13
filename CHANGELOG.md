@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Import bounded provider invoice evidence through explicit verifiers and retain
+  reconciliation results (#180). Enforce source usage consistency and complete
+  audit-view disclosure, payload association and truthful privacy claims; add
+  canonical audit replay and direct receipt emission from live run evidence.
+
 - Decode canonical model receipts with strict bounds and enrich actual generic
   and source attempt journals using retained root, request and host metadata (#180).
   Join explicit adapter observations and provider usage without inventing

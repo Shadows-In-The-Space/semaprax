@@ -339,10 +339,14 @@ impl ModelCallReceipt {
     }
 
     /// Re-derives this receipt's own low-entropy privacy classification for
-    /// its task payload, given whether a private reference is attached.
+    /// its task payload. A receipt's opaque private-reference string is not
+    /// itself authenticated proof of private retention, so it cannot promote
+    /// this claim to [`PayloadPrivacyClaim::Withheld`]. Callers that have
+    /// separately verified such proof may use [`PayloadPrivacyClaim::classify`]
+    /// with its explicit boolean instead.
     #[must_use]
     pub fn task_privacy_claim(&self, task_bytes_len: usize) -> PayloadPrivacyClaim {
-        PayloadPrivacyClaim::classify(task_bytes_len, self.private_payload_reference.is_some())
+        PayloadPrivacyClaim::classify(task_bytes_len, false)
     }
 }
 
@@ -596,6 +600,27 @@ pub(crate) mod tests {
         assert_eq!(
             PayloadPrivacyClaim::classify(4096, false),
             PayloadPrivacyClaim::DigestOnly
+        );
+    }
+
+    #[test]
+    fn bare_receipt_private_reference_cannot_upgrade_a_low_entropy_claim() {
+        let mut receipt = sample_receipt();
+        receipt.private_payload_reference = Some("opaque-vault-reference".into());
+
+        assert_eq!(
+            receipt.task_privacy_claim(2),
+            PayloadPrivacyClaim::DigestOnlyLowEntropyCaveat,
+            "an opaque receipt field is not authenticated reference proof"
+        );
+        assert_eq!(
+            receipt.task_privacy_claim(LOW_ENTROPY_BYTE_THRESHOLD),
+            PayloadPrivacyClaim::DigestOnly
+        );
+        assert_eq!(
+            PayloadPrivacyClaim::classify(2, true),
+            PayloadPrivacyClaim::Withheld,
+            "the explicit classifier remains available to a verifier with proof"
         );
     }
 }

@@ -489,6 +489,9 @@ jobs:
           cargo test --locked -p semaprax --test project standard_library::text -- --nocapture
           cargo test --locked -p semaprax --test project standard_library::execution_matrix -- --nocapture
           cargo test --locked -p semaprax --test project standard_library::filesystem_v2 -- --nocapture
+          cargo test --locked -p semaprax --test project standard_library::filesystem_v3 -- --nocapture
+          cargo test --locked -p semaprax --test project standard_library::filesystem_v3_core -- --nocapture
+          cargo test --locked -p semaprax --test project standard_library::imported_view_composition -- --nocapture
           cargo test --locked -p semaprax --test project standard_library::provider_outcomes -- --nocapture
           # Issue #102: proves the interpreter/native/Wasm comparison
           # `run_examples_and_conformance` now performs is discriminating,

@@ -17,6 +17,105 @@ fn scripted(compiled: &CompiledIterativeLifecycle, count: usize) -> Source {
     }
 }
 
+/// Host adapters may report a checked pre-dispatch terminal without making an
+/// attempt. The source session must preserve that status, while still
+/// rejecting an adapter that claims it dispatched but omitted its receipt.
+struct NoReceiptSource {
+    inner: Source,
+    terminal_failure: SourceTerminalStatus,
+    model_dispatches: u32,
+    writes_intent: bool,
+}
+
+impl ProposalSource for NoReceiptSource {
+    fn checkpoint_policy(&self) -> Option<SourceProposalPolicy<'_>> {
+        self.inner.checkpoint_policy()
+    }
+
+    fn checkpoint_attempt_identity(
+        &self,
+        request: &ProposalRequest<'_>,
+    ) -> Result<SourceAttemptIdentity, Vec<crate::diagnostic::Diagnostic>> {
+        self.inner.checkpoint_attempt_identity(request)
+    }
+
+    fn propose_checkpointed(
+        &mut self,
+        request: ProposalRequest<'_>,
+        sink: &mut SourceCheckpointSink<'_>,
+        _: &mut crate::live_invocation::CumulativeBudgetLedger<'_>,
+        clock: &dyn SourceInvocationClock,
+    ) -> SourceProposalOutcome {
+        if self.writes_intent {
+            let identity = Source::identity(&request);
+            let intent = sink
+                .attempt_intent(
+                    request.turn as u32,
+                    request.attempt as u32,
+                    identity.request_digest,
+                    identity.prompt_digest,
+                    identity.request_bytes,
+                )
+                .expect("fixture intent is valid");
+            sink.append_at(intent, clock.now_millis())
+                .expect("fixture intent is acknowledged");
+        }
+        self.inner.calls += usize::from(self.model_dispatches != 0);
+        SourceProposalOutcome {
+            terminal_failure: Some(self.terminal_failure),
+            result: Err(vec![bad("fixture.no_attempt_receipt")]),
+            model_dispatches: self.model_dispatches,
+        }
+    }
+
+    fn propose(
+        &mut self,
+        request: ProposalRequest<'_>,
+    ) -> Result<String, Vec<crate::diagnostic::Diagnostic>> {
+        self.inner.propose(request)
+    }
+}
+
+#[test]
+fn predispatch_terminal_requires_an_untouched_journal_and_missing_receipts_model_fail() {
+    for (model_dispatches, writes_intent, expected) in [
+        (0, false, SourceTerminalStatus::Cancelled),
+        (0, true, SourceTerminalStatus::ModelFailed),
+        (1, false, SourceTerminalStatus::ModelFailed),
+    ] {
+        let compiled = lifecycle();
+        let task = task();
+        let policy = policy(1);
+        let clock = Clock { now: 1 };
+        let cancellation = AgentCancellation::default();
+        let mut source = NoReceiptSource {
+            inner: scripted(&compiled, 0),
+            terminal_failure: SourceTerminalStatus::Cancelled,
+            model_dispatches,
+            writes_intent,
+        };
+        let mut read = Read { calls: 0 };
+        let mut store = Store::default();
+        let result = compiled.run_live_durable(
+            request(&task, &policy, &clock, &cancellation),
+            &mut source,
+            &mut read,
+            &mut store,
+        );
+        assert_eq!(source.inner.calls, usize::from(model_dispatches != 0));
+        assert_eq!(read.calls, 0);
+        let failure = match result {
+            Err(failure) => failure,
+            Ok(_) => panic!("adapter failure must remain an error with a selected terminal"),
+        };
+        assert_eq!(failure.model_dispatches, model_dispatches);
+        assert_eq!(failure.selected, Some(expected));
+        if !writes_intent && model_dispatches == 0 {
+            assert!(failure.journal_error.is_none());
+        }
+    }
+}
+
 fn stage(
     turn: u32,
     attempt: Option<u32>,

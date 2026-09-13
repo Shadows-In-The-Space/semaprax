@@ -179,6 +179,50 @@ fn durable_source_policy_binds_exact_transport_limits() {
 }
 
 #[test]
+fn durable_source_host_cancellation_before_intent_is_a_zero_dispatch_terminal() {
+    let (_, mut handler, task, grammar) = setup(compiled_proposal());
+    let capability = ModelInvokeCapability::grant("durable source fixture");
+    let value = RetainedValue::I64(0);
+    let shared = Rc::new(Cell::new(0));
+    let clock = SourceClock(shared);
+    let bound = binding(&task, &grammar);
+    let mut ledger = CumulativeBudgetLedger::start_source(&bound, &clock).unwrap();
+    let mut store = Store::default();
+    let mut sink = SourceCheckpointSink::new(&mut store, bound);
+    begin(&mut sink);
+    handler.config.cancellation().cancel();
+    let mut source = OpenCodeDurableProposalSource::new(
+        &mut handler,
+        &capability,
+        DEPLOYMENT.into(),
+        grammar.clone(),
+        4096,
+        1,
+    )
+    .unwrap();
+    let outcome = source.propose_checkpointed(
+        request(&task, &grammar, &value),
+        &mut sink,
+        &mut ledger,
+        &clock,
+    );
+    assert!(outcome.result.is_err());
+    assert_eq!(outcome.model_dispatches, 0);
+    assert_eq!(
+        outcome.terminal_failure,
+        Some(SourceTerminalStatus::Cancelled)
+    );
+    assert_eq!(
+        sink.generation(),
+        4,
+        "pre-dispatch cancellation writes no intent"
+    );
+    drop(source);
+    assert_eq!(handler.runner.calls, 0);
+    assert_eq!(ledger.committed(), 0);
+}
+
+#[test]
 fn durable_checkpointed_source_dispatches_once_charges_once_and_persists_usage() {
     let (_, mut handler, task, grammar) = setup(compiled_proposal());
     let capability = ModelInvokeCapability::grant("durable source fixture");

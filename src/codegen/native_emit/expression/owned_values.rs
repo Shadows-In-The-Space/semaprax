@@ -6,7 +6,7 @@ use super::{backend_error, variant_declaration_id, CEmitter, COutput, CValue};
 // These helpers apply the authenticated owned-Bytes plan while expression
 // lowering remains in the parent module.
 impl<'a, O: COutput> CEmitter<'a, O> {
-    pub(super) fn apply_owned_plan_at_value(
+    pub(in crate::codegen::native_emit) fn apply_owned_plan_at_value(
         &mut self,
         at: &ExpressionId,
         value: &CValue,
@@ -26,7 +26,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         Ok(())
     }
 
-    pub(super) fn stage_bytes_call_argument(
+    pub(in crate::codegen::native_emit) fn stage_bytes_call_argument(
         &mut self,
         call: &ExpressionId,
         index: usize,

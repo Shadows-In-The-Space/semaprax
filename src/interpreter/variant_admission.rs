@@ -49,6 +49,17 @@ pub(super) fn is_admitted_owned_byte_variant(
         })
 }
 
+/// Shared direct owned-variant classifier for execution paths which can move
+/// the selected case payload. Generic and prelude ownership remain Bytes-only;
+/// the string branch is the separate direct monomorphic profile.
+pub(super) fn is_admitted_owned_variant(
+    declarations: &hir::DeclarationIndex,
+    ty: &ResolvedType,
+) -> bool {
+    is_admitted_owned_byte_variant(declarations, ty)
+        || hir::is_admitted_owned_string_variant(declarations, ty)
+}
+
 /// A monomorphic fieldless variant carries only a Copy case tag. Keep this
 /// bounded value shape distinct from the owned byte-variant admission below.
 pub(super) fn is_admitted_fieldless_variant(

@@ -289,6 +289,9 @@ fn outcome_summary(outcome: &TraceOutcome) -> String {
         } => {
             format!("success:owned:{type_id}")
         }
+        TraceOutcome::Success {
+            result: TraceResult::String,
+        } => "success:string".to_owned(),
         TraceOutcome::Failure { status, .. } => format!(
             "failure:{}:{}:{}",
             status.domain_id(),

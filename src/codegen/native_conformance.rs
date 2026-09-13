@@ -697,6 +697,7 @@ fn emit_case(
         ResolvedType::Nominal { declaration, .. } => {
             (4, "INT64_C(0)", format!("\"{}\"", declaration.as_str()))
         }
+        ResolvedType::String => (5, "INT64_C(0)", "NULL".to_owned()),
         _ => panic!("unsupported first-corpus result"),
     };
     writeln!(
@@ -858,6 +859,9 @@ static bool spx_write_trace(
             ok = spx_write_i64(file, scalar_result);
         } else if (ok && result_kind == UINT32_C(4)) {
             ok = spx_write_text(file, owned_result_type);
+        } else if (ok && result_kind == UINT32_C(5)) {
+            /* Opaque owned String result: never serialize a native pointer. */
+            ok = true;
         } else {
             ok = false;
         }

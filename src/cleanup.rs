@@ -17,7 +17,7 @@ use crate::hir::{
 
 mod generic_record;
 mod iterator;
-pub(crate) use iterator::variant_leaf_lifecycle;
+pub(crate) use iterator::{primitive_leaf_lifecycle, variant_leaf_lifecycle};
 pub const ITER_DROP_LIFECYCLE_ID: &str = "core.iter.drop";
 
 #[cfg(test)]
@@ -175,6 +175,7 @@ pub(crate) const MAX_CLEANUP_VISITED_FIELDS: usize = 4_096;
 /// This identity is derived from the primitive type by both the inventory and
 /// CleanupPlan replay. It is never supplied by source or backend metadata.
 pub const BYTES_DROP_LIFECYCLE_ID: &str = "core.bytes.drop";
+pub const STRING_DROP_LIFECYCLE_ID: &str = "core.string.drop";
 /// Canonical compiler-owned lifecycle for one uniquely owned bounded `Vec<T>`
 /// carrier. The element profile is authenticated by the HIR type rather than
 /// supplied by source or backend metadata.
@@ -473,8 +474,8 @@ pub(crate) fn build_inventory(
 }
 
 /// Whether a type contains a leaf governed by the resource-lifecycle cleanup
-/// plan. Owned `String` storage is settled inline by the backends, including
-/// when nested in an aggregate, so `TypeFacts::needs_drop` alone is too broad.
+/// plan. Owned strings use the compiler-owned string lifecycle; borrowed views
+/// carry no cleanup authority.
 pub(crate) fn type_needs_resource_cleanup(
     program: &ResolvedProgram,
     ty: &ResolvedType,
@@ -490,11 +491,8 @@ pub(crate) fn type_needs_resource_cleanup(
             continue;
         }
         match ty {
-            ResolvedType::Bytes => return Ok(true),
-            ResolvedType::Function { .. }
-            | ResolvedType::String
-            | ResolvedType::Str
-            | ResolvedType::SliceU8 => {}
+            ResolvedType::Bytes | ResolvedType::String => return Ok(true),
+            ResolvedType::Function { .. } | ResolvedType::Str | ResolvedType::SliceU8 => {}
             ResolvedType::Nominal {
                 declaration,
                 arguments,
@@ -847,11 +845,11 @@ impl InventoryBuilder<'_> {
                         shapes.push(FieldLivenessShape::NoDrop);
                         continue;
                     }
-                    if matches!(ty, ResolvedType::Bytes) {
+                    if let Some(id) = primitive_leaf_lifecycle(ty) {
                         let flag_index = u32::try_from(self.flags.len())
                             .map_err(|_| cleanup_error("too many cleanup liveness flags"))?;
                         let flag = LivenessFlagId(flag_index);
-                        let lifecycle = DeclarationId::new(BYTES_DROP_LIFECYCLE_ID);
+                        let lifecycle = DeclarationId::new(id);
                         self.flags.push(CleanupFlag {
                             id: flag,
                             place: CleanupPlace {
@@ -1442,7 +1440,8 @@ impl InventoryBuilder<'_> {
     fn collect_owned_temporary(&mut self, expression: &ResolvedExpr) -> Result<(), Diagnostic> {
         if expression.ownership == OwnershipMode::Own
             && self.needs_drop(&expression.ty)?
-            && !matches!(expression.kind, ResolvedExprKind::Place(_))
+            && (expression.ty == ResolvedType::String
+                || !matches!(expression.kind, ResolvedExprKind::Place(_)))
         {
             self.add_slot(
                 CleanupStorageOrigin::Temporary {

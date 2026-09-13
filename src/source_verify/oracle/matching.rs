@@ -477,7 +477,8 @@ pub(super) fn oracle_match(
             )),
             MatchMode::Own
                 if !variant_needs_drop
-                    || !types.is_flat_owned_byte_variant(&scrutinee_value.ty)
+                    || !(types.is_flat_owned_byte_variant(&scrutinee_value.ty)
+                        || types.is_flat_owned_string_variant(&scrutinee_value.ty))
                     || scrutinee_value.mode != ParamMode::Own =>
             {
                 diagnostics.push(error(
@@ -498,7 +499,8 @@ pub(super) fn oracle_match(
             )),
             MatchMode::Borrow
                 if !variant_needs_drop
-                    || !types.is_flat_owned_byte_variant(&scrutinee_value.ty)
+                    || !(types.is_flat_owned_byte_variant(&scrutinee_value.ty)
+                        || types.is_flat_owned_string_variant(&scrutinee_value.ty))
                     || !matches!(scrutinee_value.mode, ParamMode::Own | ParamMode::Borrow)
                     || source_place(scrutinee, variables, types)
                         .is_none_or(|place| !place.projections.is_empty()) =>

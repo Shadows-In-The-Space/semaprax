@@ -45,6 +45,7 @@ pub(crate) struct VariantFieldLayout {
 pub(crate) enum VariantFieldValueKind {
     Copy,
     OwnedBytes,
+    OwnedString,
     OwnedIterator,
 }
 
@@ -141,6 +142,16 @@ impl VariantLayout {
             return Err(layout_error(format!(
                 "variant `{variant}` has invalid concrete arguments"
             )));
+        }
+        if cases
+            .iter()
+            .flat_map(|case| &case.fields)
+            .any(|field| field.ty == ResolvedType::String)
+            && !crate::hir::is_admitted_owned_string_variant(&program.declarations, instance)
+        {
+            return Err(layout_error(
+                "string-bearing variant is outside Owned String Variants v1",
+            ));
         }
         if cases.is_empty() {
             return Err(layout_error(format!(
@@ -338,6 +349,8 @@ fn layout_case(
         let (size, field_align, value_kind) = if concrete_ty == ResolvedType::Bytes {
             let (size, align) = owned_bytes_size_align(target);
             (size, align, VariantFieldValueKind::OwnedBytes)
+        } else if concrete_ty == ResolvedType::String {
+            (8, 8, VariantFieldValueKind::OwnedString)
         } else if crate::iterator_ops::is_iter(&concrete_ty) {
             (
                 match target {

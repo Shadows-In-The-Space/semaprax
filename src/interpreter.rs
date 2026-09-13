@@ -2189,7 +2189,9 @@ use nested_owned::{
 };
 
 mod variant_admission;
-use variant_admission::{is_admitted_fieldless_variant, is_admitted_owned_byte_variant};
+use variant_admission::{
+    is_admitted_fieldless_variant, is_admitted_owned_byte_variant, is_admitted_owned_variant,
+};
 
 fn concrete_variant_case_fields(
     declarations: &hir::DeclarationIndex,
@@ -2222,7 +2224,7 @@ fn variant_constructor_is_admitted(
     declarations: &hir::DeclarationIndex,
     expression: &ResolvedExpr,
 ) -> bool {
-    if !is_admitted_owned_byte_variant(declarations, &expression.ty)
+    if !is_admitted_owned_variant(declarations, &expression.ty)
         || !(expression.ownership == hir::OwnershipMode::Own
             || (expression.ownership == hir::OwnershipMode::Value
                 && is_admitted_fieldless_variant(declarations, &expression.ty)))
@@ -2266,6 +2268,7 @@ fn variant_constructor_is_admitted(
             && field.value.ty == *declared_ty
             && field.value.ownership
                 == if *declared_ty == ResolvedType::Bytes
+                    || *declared_ty == ResolvedType::String
                     || crate::iterator_ops::is_iter(declared_ty)
                 {
                     hir::OwnershipMode::Own
@@ -2281,7 +2284,7 @@ fn variant_pattern_is_admitted(
     ty: &ResolvedType,
     arms: &[hir::ResolvedMatchArm],
 ) -> bool {
-    if !is_admitted_owned_byte_variant(declarations, ty)
+    if !is_admitted_owned_variant(declarations, ty)
         || !(matches!(
             mode,
             hir::ResolvedMatchMode::Own | hir::ResolvedMatchMode::Borrow
@@ -2339,6 +2342,7 @@ fn variant_pattern_is_admitted(
                 return false;
             }
             let expected_ownership = if *declared_ty == ResolvedType::Bytes
+                || *declared_ty == ResolvedType::String
                 || crate::iterator_ops::is_iter(declared_ty)
             {
                 match mode {
@@ -2727,7 +2731,13 @@ fn admitted_resolved_functions_with_profile(
         })
         .filter(|function| match profile {
             SourceProfile::Legacy => {
+                // The selected legacy boundary remains scalar-only. A pure
+                // local String relay can nevertheless occur inside an
+                // already-admitted aggregate closure and still produces the
+                // same scalar envelope.
                 resolved_signature_is_admitted(function, &program.declarations)
+                    || (function.effects.is_empty()
+                        && internal_strings::signature_is_admitted(function, &program.declarations))
             }
             SourceProfile::InternalStrings => {
                 function.effects.is_empty()
@@ -2797,7 +2807,7 @@ fn resolved_data_parameter_is_admitted(
         (ty, hir::OwnershipMode::Own | hir::OwnershipMode::Borrow)
             if owned_vec::is_collection_type(ty)
                 || is_admitted_owned_byte_record(declarations, ty)
-                || is_admitted_owned_byte_variant(declarations, ty) =>
+                || is_admitted_owned_variant(declarations, ty) =>
         {
             true
         }
@@ -2813,7 +2823,7 @@ fn resolved_data_result_is_admitted(
         || matches!(ty, ResolvedType::ArrayU8(_) | ResolvedType::Bytes)
         || owned_vec::is_collection_type(ty)
         || is_admitted_owned_byte_record(declarations, ty)
-        || is_admitted_owned_byte_variant(declarations, ty)
+        || is_admitted_owned_variant(declarations, ty)
 }
 
 pub(crate) fn evaluate_resolved_stdout_transcript(
@@ -3738,7 +3748,8 @@ impl Evaluator<'_> {
             | (Value::Float32(_), ResolvedType::F32)
             | (Value::Float64(_), ResolvedType::F64)
             | (Value::Bool(_), ResolvedType::Bool)
-            | (Value::Bytes(_), ResolvedType::Bytes) => true,
+            | (Value::Bytes(_), ResolvedType::Bytes)
+            | (Value::String(_), ResolvedType::String) => true,
             (Value::Variant(carrier), expected) => &carrier.ty == expected,
             (Value::Iter(carrier), expected) => {
                 crate::iterator_ops::is_iter(expected)
@@ -4260,7 +4271,7 @@ impl Evaluator<'_> {
                 case,
                 fields,
             } => {
-                if !is_admitted_owned_byte_variant(self.declarations, &expression.ty) {
+                if !is_admitted_owned_variant(self.declarations, &expression.ty) {
                     return Err(Flow::Guard(
                         "variant construction is outside owned byte variant v1",
                     ));

@@ -37,6 +37,7 @@ mod owned_try;
 mod record_destructure;
 mod renewal;
 mod schema;
+mod strings;
 mod type_shape;
 const UNRESOLVED_EXIT: ExitTargetId = ExitTargetId(u32::MAX);
 #[cfg(test)]
@@ -1314,32 +1315,6 @@ impl<'a> PlanBuilder<'a> {
         Ok(())
     }
 
-    fn initialize_owned_result(
-        &mut self,
-        block: BlockId,
-        expression: &ResolvedExpr,
-        destination: CleanupPlace,
-        state: &mut FlowState,
-    ) -> Result<(), Diagnostic> {
-        let slot = self
-            .storage_to_slot
-            .get(&destination.storage)
-            .and_then(|slot| self.slots.get(slot.0 as usize))
-            .ok_or_else(|| plan_error("owned result has no cleanup slot"))?;
-        if let FieldLivenessShape::Variant { declaration, .. } = &slot.field_liveness_shape {
-            let declaration = declaration.clone();
-            self.initialize_variant(
-                block,
-                expression.id.clone(),
-                destination,
-                declaration,
-                state,
-            )
-        } else {
-            self.initialize(block, expression.id.clone(), destination, state)
-        }
-    }
-
     fn seal_constructed_variant(
         &self,
         destination: &CleanupPlace,
@@ -1368,13 +1343,13 @@ impl<'a> PlanBuilder<'a> {
         state.conditional_variants.push(ConditionalFlowVariant {
             root: destination.clone(),
             variant: variant.clone(),
-            cases: if variant.as_str() == crate::iterator_ops::STEP_ID {
+            cases: if strings::needs_complete_case_domain(self.program, variant) {
                 // Keep the closed domain at a consuming match boundary: both
-                // guarded arms are checked even for an authored Done value.
+                // guarded arms are checked even for a statically constructed case.
                 self.program
                     .declarations
                     .variant_cases(variant)
-                    .ok_or_else(|| plan_error("constructed iterator step has no case domain"))?
+                    .ok_or_else(|| plan_error("constructed owning variant has no case domain"))?
                     .iter()
                     .map(|candidate| {
                         let prefix = destination.projected(candidate.id.clone());
@@ -1621,140 +1596,6 @@ impl<'a> PlanBuilder<'a> {
         Ok(EvalResult {
             block: after,
             state: entry_state,
-            owned_source: None,
-        })
-    }
-
-    /// Refutable Match v1 recursive-reference twin: one linearized pass
-    /// whose Boolean joins mirror the while model, with fail-closed
-    /// owned-liveness equality at the join.
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    fn lower_scalar_match(
-        &mut self,
-        expression: &ResolvedExpr,
-        scrutinee: &ResolvedExpr,
-        arms: &[ResolvedMatchArm],
-        decision_start: BlockId,
-        branch_state: FlowState,
-        region: CleanupRegionId,
-        destination: Option<CleanupPlace>,
-    ) -> Result<EvalResult, Diagnostic> {
-        if arms.is_empty() {
-            return Err(plan_error("refutable match has no arms"));
-        }
-        let entry_state = branch_state.clone();
-        let mut decision = decision_start;
-        let mut arm_results = Vec::with_capacity(arms.len());
-        for (index, arm) in arms.iter().enumerate() {
-            let final_arm = index + 1 == arms.len();
-            let arm_entry = self.new_block(region)?;
-            if final_arm {
-                let edge = self.new_edge(decision, arm_entry, EdgeCondition::Always)?;
-                self.terminate(decision, CleanupTerminator::Goto(edge))?;
-            } else {
-                let next_decision = self.new_block(region)?;
-                let selected = self.new_edge(
-                    decision,
-                    arm_entry,
-                    EdgeCondition::ArmSelected {
-                        scrutinee: scrutinee.id.clone(),
-                        arm: u32::try_from(index).map_err(|_| plan_error("too many match arms"))?,
-                        selected: true,
-                    },
-                )?;
-                let rejected = self.new_edge(
-                    decision,
-                    next_decision,
-                    EdgeCondition::ArmSelected {
-                        scrutinee: scrutinee.id.clone(),
-                        arm: u32::try_from(index).map_err(|_| plan_error("too many match arms"))?,
-                        selected: false,
-                    },
-                )?;
-                self.terminate(
-                    decision,
-                    CleanupTerminator::Branch(vec![selected, rejected]),
-                )?;
-                decision = next_decision;
-            }
-            let value_block = if let Some(guard) = &arm.guard {
-                let evaluated_guard = self.lower_expr_recursive_reference(
-                    guard.as_ref(),
-                    arm_entry,
-                    branch_state.clone(),
-                    region,
-                )?;
-                if evaluated_guard.owned_source.is_some() {
-                    return Err(plan_error(
-                        "scalar match guard owns a value, which no admitted program can express",
-                    ));
-                }
-                let value_entry = self.new_block(region)?;
-                let true_edge = self.new_edge(
-                    evaluated_guard.block,
-                    value_entry,
-                    EdgeCondition::BooleanResult(guard.id.clone(), true),
-                )?;
-                let false_edge = self.new_edge(
-                    evaluated_guard.block,
-                    decision,
-                    EdgeCondition::BooleanResult(guard.id.clone(), false),
-                )?;
-                self.terminate(
-                    evaluated_guard.block,
-                    CleanupTerminator::Branch(vec![true_edge, false_edge]),
-                )?;
-                value_entry
-            } else {
-                arm_entry
-            };
-            let mut result = self.lower_expr_recursive_reference(
-                &arm.value,
-                value_block,
-                branch_state.clone(),
-                region,
-            )?;
-            if let Some(destination) = destination.clone() {
-                let source = result
-                    .owned_source
-                    .take()
-                    .ok_or_else(|| plan_error("owned scalar match arm has no cleanup source"))?;
-                self.transfer(
-                    result.block,
-                    expression.id.clone(),
-                    source,
-                    destination,
-                    &mut result.state,
-                    true,
-                )?;
-            }
-            arm_results.push(result);
-        }
-        let mut arm_results = arm_results.into_iter();
-        let first = arm_results
-            .next()
-            .ok_or_else(|| plan_error("refutable match produced no arm result"))?;
-        let mut merged_state = first.state.clone();
-        let mut completed = vec![first];
-        for result in arm_results {
-            merged_state = self.merge_states(&merged_state, &result.state)?;
-            completed.push(result);
-        }
-        if merged_state != entry_state {
-            return Err(plan_error(
-                "refutable match changes owned liveness, which the Refutable Match v1 \
-                 admission profile forbids",
-            ));
-        }
-        let join = self.new_block(region)?;
-        for result in completed {
-            let edge = self.new_edge(result.block, join, EdgeCondition::Always)?;
-            self.terminate(result.block, CleanupTerminator::Goto(edge))?;
-        }
-        Ok(EvalResult {
-            block: join,
-            state: merged_state,
             owned_source: None,
         })
     }
@@ -2374,9 +2215,12 @@ impl<'a> PlanBuilder<'a> {
                 arms: &'e [ResolvedMatchArm],
                 index: usize,
                 decision: BlockId,
-                branch_state: FlowState,
                 arm_results: Vec<EvalResult>,
                 destination: Option<CleanupPlace>,
+                guard_region: CleanupRegionId,
+                value_region: Option<CleanupRegionId>,
+                value_entry: BlockId,
+                parent_region: CleanupRegionId,
             },
             ScalarMatchAfterArm {
                 expression: &'e ResolvedExpr,
@@ -2387,6 +2231,8 @@ impl<'a> PlanBuilder<'a> {
                 branch_state: FlowState,
                 arm_results: Vec<EvalResult>,
                 destination: Option<CleanupPlace>,
+                value_region: Option<CleanupRegionId>,
+                parent_region: CleanupRegionId,
             },
             UpdateAfterBase {
                 expression: &'e ResolvedExpr,
@@ -2504,12 +2350,6 @@ impl<'a> PlanBuilder<'a> {
                     destination: place,
                     ..
                 }
-                | Frame::ScalarMatchAfterGuard {
-                    branch_state,
-                    arm_results,
-                    destination: place,
-                    ..
-                }
                 | Frame::ScalarMatchAfterArm {
                     branch_state,
                     arm_results,
@@ -2520,6 +2360,11 @@ impl<'a> PlanBuilder<'a> {
                         + results(arm_results)
                         + destination(place)
                 }
+                Frame::ScalarMatchAfterGuard {
+                    arm_results,
+                    destination: place,
+                    ..
+                } => results(arm_results) + destination(place),
                 Frame::UpdateNext {
                     flow,
                     destination: place,
@@ -2590,6 +2435,13 @@ impl<'a> PlanBuilder<'a> {
             );
             match frame {
                 Frame::RestoreRegion(restored) => active_region = restored,
+                Frame::Enter {
+                    expression,
+                    block,
+                    state,
+                } if strings::owns_clone(expression) => {
+                    results.push(self.initialize_string(expression, block, state)?);
+                }
                 Frame::Enter {
                     expression,
                     block,
@@ -4339,7 +4191,8 @@ impl<'a> PlanBuilder<'a> {
                         // Copy-scalar admission makes every path observe the
                         // same owned liveness as the decision entry; anything
                         // else means a non-admitted shape reached lowering.
-                        if merged_state != entry_state {
+                        let direct_single_catchall = arms.len() == 1 && arms[0].guard.is_none();
+                        if !direct_single_catchall && merged_state != entry_state {
                             return Err(plan_error(
                                 "refutable match changes owned liveness, which the \
                                  Refutable Match v1 admission profile forbids",
@@ -4359,6 +4212,18 @@ impl<'a> PlanBuilder<'a> {
                         let arm = &arms[index];
                         let final_arm = index + 1 == arms.len();
                         let arm_entry = self.new_block(active_region)?;
+                        // A single unconditional arm has no authenticated
+                        // selection boundary. Keep it in the parent region;
+                        // otherwise the backend cannot distinguish that
+                        // synthetic region from a lexical child block.
+                        let direct_single_catchall = arms.len() == 1 && arm.guard.is_none();
+                        let (value_region, value_entry) = if direct_single_catchall {
+                            (None, arm_entry)
+                        } else {
+                            let value_region = self.new_region(active_region)?;
+                            let value_entry = self.new_block(value_region)?;
+                            (Some(value_region), value_entry)
+                        };
                         if final_arm {
                             // The resolver guarantees one trailing
                             // irrefutable guard-free catch-all, so the final
@@ -4397,22 +4262,41 @@ impl<'a> PlanBuilder<'a> {
                             decision = next_decision;
                         }
                         if let Some(guard) = &arm.guard {
+                            // The guard's result is Copy, but evaluating it
+                            // may create owned String temporaries. Its region
+                            // must end before either Boolean edge so neither
+                            // the selected arm nor the fallthrough inherits
+                            // guard-local liveness.
+                            let guard_region = self.new_region(active_region)?;
+                            let guard_entry = self.new_block(guard_region)?;
+                            let guard_edge =
+                                self.new_edge(arm_entry, guard_entry, EdgeCondition::Always)?;
+                            self.terminate(arm_entry, CleanupTerminator::Goto(guard_edge))?;
                             frames.push(Frame::ScalarMatchAfterGuard {
                                 expression,
                                 scrutinee,
                                 arms,
                                 index,
                                 decision,
-                                branch_state: branch_state.clone(),
                                 arm_results,
                                 destination,
+                                guard_region,
+                                value_region,
+                                value_entry,
+                                parent_region: active_region,
                             });
+                            active_region = guard_region;
                             frames.push(Frame::Enter {
                                 expression: guard.as_ref(),
-                                block: arm_entry,
+                                block: guard_entry,
                                 state: branch_state,
                             });
                         } else {
+                            if !direct_single_catchall {
+                                let value_edge =
+                                    self.new_edge(arm_entry, value_entry, EdgeCondition::Always)?;
+                                self.terminate(arm_entry, CleanupTerminator::Goto(value_edge))?;
+                            }
                             frames.push(Frame::ScalarMatchAfterArm {
                                 expression,
                                 scrutinee,
@@ -4422,10 +4306,15 @@ impl<'a> PlanBuilder<'a> {
                                 branch_state: branch_state.clone(),
                                 arm_results,
                                 destination,
+                                value_region,
+                                parent_region: active_region,
                             });
+                            if let Some(value_region) = value_region {
+                                active_region = value_region;
+                            }
                             frames.push(Frame::Enter {
                                 expression: &arm.value,
-                                block: arm_entry,
+                                block: value_entry,
                                 state: branch_state,
                             });
                         }
@@ -4437,9 +4326,12 @@ impl<'a> PlanBuilder<'a> {
                     arms,
                     index,
                     decision,
-                    branch_state,
                     arm_results,
                     destination,
+                    guard_region,
+                    value_region,
+                    value_entry,
+                    parent_region,
                 } => {
                     // The guard is an ordinary bool expression evaluated once
                     // after the pattern matched; its Boolean join routes to
@@ -4454,19 +4346,23 @@ impl<'a> PlanBuilder<'a> {
                     let Some(guard_expr) = &arm.guard else {
                         return Err(plan_error("scalar match guard continuation lost its guard"));
                     };
-                    let value_entry = self.new_block(active_region)?;
+                    let (guard_after, guard_state) =
+                        self.exit_scope(guard.block, guard.state, guard_region)?;
+                    let value_region = value_region.ok_or_else(|| {
+                        plan_error("guarded scalar match has no arm cleanup region")
+                    })?;
                     let true_edge = self.new_edge(
-                        guard.block,
+                        guard_after,
                         value_entry,
                         EdgeCondition::BooleanResult(guard_expr.id.clone(), true),
                     )?;
                     let false_edge = self.new_edge(
-                        guard.block,
+                        guard_after,
                         decision,
                         EdgeCondition::BooleanResult(guard_expr.id.clone(), false),
                     )?;
                     self.terminate(
-                        guard.block,
+                        guard_after,
                         CleanupTerminator::Branch(vec![true_edge, false_edge]),
                     )?;
                     frames.push(Frame::ScalarMatchAfterArm {
@@ -4475,14 +4371,17 @@ impl<'a> PlanBuilder<'a> {
                         arms,
                         index,
                         decision,
-                        branch_state: branch_state.clone(),
+                        branch_state: guard_state.clone(),
                         arm_results,
                         destination,
+                        value_region: Some(value_region),
+                        parent_region,
                     });
+                    active_region = value_region;
                     frames.push(Frame::Enter {
                         expression: &arm.value,
                         block: value_entry,
-                        state: branch_state,
+                        state: guard_state,
                     });
                 }
                 Frame::ScalarMatchAfterArm {
@@ -4494,6 +4393,8 @@ impl<'a> PlanBuilder<'a> {
                     branch_state,
                     mut arm_results,
                     destination,
+                    value_region,
+                    parent_region,
                 } => {
                     let mut result = results.pop().expect("scalar match arm value retained");
                     if let Some(destination) = destination.clone() {
@@ -4509,6 +4410,11 @@ impl<'a> PlanBuilder<'a> {
                             true,
                         )?;
                     }
+                    if let Some(value_region) = value_region {
+                        (result.block, result.state) =
+                            self.exit_scope(result.block, result.state, value_region)?;
+                    }
+                    active_region = parent_region;
                     arm_results.push(result);
                     frames.push(Frame::ScalarMatchNext {
                         expression,
@@ -4759,6 +4665,9 @@ impl<'a> PlanBuilder<'a> {
                 }
             }
             return Ok(evaluated);
+        }
+        if strings::owns_clone(expression) {
+            return self.initialize_string(expression, block, state);
         }
         match &expression.kind {
             ResolvedExprKind::Int(_)

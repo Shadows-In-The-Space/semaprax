@@ -103,12 +103,25 @@ pub(super) fn check_byte_data_declarations<'p>(
                     .flat_map(|case| &case.fields)
                     .collect::<Vec<_>>();
                 let has_direct_bytes = fields.iter().any(|field| field.ty == Type::Bytes);
+                let has_direct_string = fields.iter().any(|field| field.ty == Type::String);
                 if has_direct_bytes && !declaration.type_parameters.is_empty() {
                     diagnostics.push(error(
                         program,
                         "SPX-T268",
                         format!(
                             "owned-Bytes variant `{}` must be monomorphic in this tranche",
+                            declaration.name
+                        ),
+                        declaration.span,
+                    ));
+                }
+                if has_direct_string && !has_direct_bytes && !declaration.type_parameters.is_empty()
+                {
+                    diagnostics.push(error(
+                        program,
+                        "SPX-T268",
+                        format!(
+                            "owned-string variant `{}` must be monomorphic in this tranche",
                             declaration.name
                         ),
                         declaration.span,
@@ -135,6 +148,20 @@ pub(super) fn check_byte_data_declarations<'p>(
                             format!(
                                 "variant `{}` nests owned `Bytes`; this tranche admits only direct `Bytes` payloads",
                                 declaration.name
+                            ),
+                            field.span,
+                        ));
+                    } else if has_direct_string
+                        && !has_direct_bytes
+                        && field.ty != Type::String
+                        && !owned_byte_record_copy_field_is_admitted(&field.ty)
+                    {
+                        diagnostics.push(error(
+                            program,
+                            "SPX-T268",
+                            format!(
+                                "owned-string variant field `{}.{}` must be direct `string` or a direct Copy scalar",
+                                declaration.name, field.name
                             ),
                             field.span,
                         ));
@@ -477,6 +504,12 @@ pub(super) fn check_declared_fields<'p>(
                     .iter()
                     .flat_map(|case| &case.fields)
                     .any(|field| field.ty == Type::Bytes);
+            let owned_string_variant = parameters.is_empty()
+                && !owned_byte_variant
+                && cases
+                    .iter()
+                    .flat_map(|case| &case.fields)
+                    .any(|field| field.ty == Type::String);
             for case in cases {
                 for field in &case.fields {
                     check_declared_type(
@@ -502,6 +535,7 @@ pub(super) fn check_declared_fields<'p>(
                     let is_copy_aggregate = parameters.is_empty()
                         && types.is_admitted_copy_aggregate_variant_field(&field.ty);
                     if !owned_byte_variant
+                        && !owned_string_variant
                         && !owned_byte_record_copy_field_is_admitted(&field.ty)
                         && !is_parameter
                         && !is_unknown_parameter

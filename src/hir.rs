@@ -108,8 +108,10 @@ mod resolve_program;
 mod resolve_statement;
 mod resolve_vec_call;
 mod type_reachability;
-pub(crate) use type_reachability::is_admitted_concrete_owned_byte_variant;
 pub(crate) use type_reachability::is_admitted_copy_aggregate_variant_field;
+pub(crate) use type_reachability::{
+    is_admitted_concrete_owned_byte_variant, is_admitted_owned_string_variant,
+};
 mod validation;
 mod workspace_link;
 pub use agent_nodes::{

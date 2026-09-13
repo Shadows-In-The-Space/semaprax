@@ -119,13 +119,11 @@ fn main() -> i64 { 0 }
 }
 
 #[test]
-fn string_variant_payload_is_rejected_distinctly_from_the_empty_variant_code() {
-    // Names the exact SPX-T215 boundary this issue widens for `record`
-    // fields but deliberately leaves closed for `string`: a `string` case
-    // field has no cleanup-plan leaf of its own (Copy Aggregate Variant
-    // Payload v1 only ever admits a drop-free nested `record`), and the
-    // separate Owned Byte Variant Algebra v1 admits only a direct `Bytes`
-    // leaf, never `string`.
+fn direct_monomorphic_string_variant_payload_is_admitted() {
+    // A direct `string` leaf gives this monomorphic variant its canonical
+    // `core.string.drop` cleanup. It remains separate from the Copy aggregate
+    // and owned-Bytes profiles: only direct strings and direct Copy scalars
+    // may occur in its cases.
     let source = r#"
 module test.variant_string_payload;
 @id("test.payload")
@@ -138,18 +136,11 @@ variant Payload {
 @id("app.main")
 fn main() -> i64 { 0 }
 "#;
-    let codes = codes(source);
-    assert_eq!(codes, ["SPX-T215"]);
+    assert!(codes(source).is_empty());
     let program = parse(source, Path::new("variant-string-payload.spx")).unwrap();
-    let message = verify::verify(&program)
-        .into_iter()
-        .find(|diagnostic| diagnostic.code == "SPX-T215")
+    assert!(graph::to_json(&program)
         .unwrap()
-        .message;
-    assert!(
-        !message.contains("SPX-T268"),
-        "string rejection must not be confused with the nested-owned-Bytes guard: {message}"
-    );
+        .contains("core.string.drop"));
 }
 
 #[test]

@@ -297,6 +297,7 @@ fn materialize_result(
             .map(TraceResult::Uint8)
             .map_err(|_| MaterializeError::ResultTypeMismatch),
         (ResolvedType::Bool, WireResult::Bool(value)) => Ok(TraceResult::Bool(value)),
+        (ResolvedType::String, WireResult::String) => Ok(TraceResult::String),
         (
             ResolvedType::Nominal {
                 declaration,
@@ -320,12 +321,9 @@ fn materialize_result(
         (_, WireResult::Unit)
         | (ResolvedType::Unit, _)
         | (ResolvedType::I64, _)
-        | (ResolvedType::Char, WireResult::Bool(_))
-        | (ResolvedType::Char, WireResult::Owned { .. })
-        | (ResolvedType::I32, WireResult::Bool(_))
-        | (ResolvedType::I32, WireResult::Owned { .. })
-        | (ResolvedType::U8, WireResult::Bool(_))
-        | (ResolvedType::U8, WireResult::Owned { .. })
+        | (ResolvedType::Char, _)
+        | (ResolvedType::I32, _)
+        | (ResolvedType::U8, _)
         | (ResolvedType::Usize, _)
         | (ResolvedType::F32, _)
         | (ResolvedType::F64, _)

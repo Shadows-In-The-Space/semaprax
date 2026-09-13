@@ -294,6 +294,31 @@ impl<'a> SourceExecutionSession<'a> {
             if self.sink.poisoned() {
                 self.journal_error = Some(SourceJournalError::Poisoned);
             }
+            // A source adapter may report one of these closed local terminal
+            // conditions before it has approached a provider, so there is no
+            // attempt intent or receipt to require.  Never apply such a
+            // status after any claimed dispatch: a missing durable receipt
+            // then remains a model failure/unknown provider outcome rather
+            // than becoming a clean cancellation or budget refusal.
+            let pre_dispatch_terminal = (result.model_dispatches == 0
+                && self.sink.journal().entries().len() == start
+                && !self.sink.poisoned())
+            .then_some(result.terminal_failure)
+            .flatten()
+            .filter(|status| {
+                matches!(
+                    *status,
+                    SourceTerminalStatus::Cancelled
+                        | SourceTerminalStatus::DeadlineExceeded
+                        | SourceTerminalStatus::BudgetExhausted
+                )
+            });
+            if self.selected.is_none() {
+                self.selected = pre_dispatch_terminal;
+            }
+            if self.selected.is_none() {
+                self.selected = Some(SourceTerminalStatus::ModelFailed);
+            }
             return Err(result.result.err().unwrap_or_else(|| {
                 self.refuse(SourceTerminalStatus::Rejected, "source.attempt_receipt")
             }));

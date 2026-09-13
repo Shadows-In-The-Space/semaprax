@@ -252,7 +252,12 @@ pub(super) fn emit_owned_variant_shell(
         )
         .expect("writing to a string cannot fail");
         for field in &case.fields {
-            if field.size == 0 || field.value_kind == VariantFieldValueKind::OwnedBytes {
+            if field.size == 0
+                || matches!(
+                    field.value_kind,
+                    VariantFieldValueKind::OwnedBytes | VariantFieldValueKind::OwnedString
+                )
+            {
                 continue;
             }
             let case_symbol = c_case_symbol(&case.case);

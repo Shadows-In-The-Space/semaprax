@@ -9,9 +9,9 @@ const REVISION_DOMAIN: &[u8] = b"semaprax.agent-interaction-schema.type-revision
 
 /// One nested record (`Inner`), one record referencing it plus every
 /// admitted direct scalar kind (`Outer`), one standalone bounded-`Bytes`
-/// record (`WithBytes`), and one variant (`Choice`; case payloads in this
-/// language admit only direct Copy scalars, never a nested record or
-/// `string`, so its case carries a flat `i64` rather than a nested field).
+/// record (`WithBytes`), and one scalar-only variant (`Choice`). The fixture
+/// keeps that existing variant byte-stable; a separate case below exercises
+/// the direct owned-`string` variant profile.
 /// Every executable module needs `fn main() -> i64`.
 const FIXTURE: &str = r#"
 module test.agent_interaction_schema;
@@ -432,10 +432,55 @@ fn variant_case_round_trips_and_rejects_wrong_tag() {
     std::fs::remove_file(&path).ok();
 }
 
+#[test]
+fn direct_string_variant_payload_derives_and_decodes() {
+    let source = r#"
+module test.agent_interaction_string_variant;
+
+@id("text.choice")
+variant Choice {
+    @id("text.choice.empty") Empty,
+    @id("text.choice.value") Value {
+        @id("text.choice.value.text") text: string,
+        @id("text.choice.value.marker") marker: i64,
+    },
+}
+
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let path = write_temp(source, "string-variant");
+    let compiled = compile_agent_interaction_schema(&path, "text.choice")
+        .expect("a direct owned-string variant payload is source-admitted");
+    std::fs::remove_file(&path).ok();
+
+    let document = document(
+        "text.choice",
+        compiled.schema().digest(),
+        "{\"case\":\"text.choice.value\",\"fields\":{\"text.choice.value.text\":\"héllo\",\"text.choice.value.marker\":\"7\"}}",
+    );
+    let decoded = compiled
+        .decode(document.as_bytes())
+        .expect("the string case must decode canonically");
+    assert_eq!(decoded.canonical_json(), document);
+    assert_eq!(decoded.value().case(), Some("text.choice.value"));
+    assert_eq!(
+        decoded.value().field("text.choice.value.text"),
+        Some(&FieldValue::Scalar(ScalarValue::Text("héllo".to_owned())))
+    );
+    assert_eq!(
+        decoded.value().field("text.choice.value.marker"),
+        Some(&FieldValue::Scalar(ScalarValue::Signed(7)))
+    );
+    assert!(compiled
+        .provider_json_schema()
+        .contains("\"text.choice.value.text\":{\"type\":\"string\",\"maxLength\":4096}"));
+}
+
 /// Copy Aggregate Variant Payload v1 admits a case whose field is a
 /// drop-free nested record. This makes the interaction-schema path that was
-/// previously unreachable from source observable without widening the still
-/// refused `string` or owning nested-record profiles.
+/// previously unreachable from source observable without widening the separate
+/// direct owned-`string` or owning nested-record profiles.
 #[test]
 fn copy_aggregate_variant_payload_derives_and_decodes_as_a_nested_schema_value() {
     let source = r#"

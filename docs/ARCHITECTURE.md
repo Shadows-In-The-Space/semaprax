@@ -231,6 +231,11 @@ through that sink. Its `durable_source` wrapper borrows the driver's ledger for
 one attempt, acknowledges intent before transport and settlement before exposing
 response text, and records optional usage in the same journal. A durable source
 CLI remains separate work. An in-memory receipt is not a checkpoint.
+Pre-dispatch host cancellation returns a `Cancelled` source-live failure with
+no attempt intent or provider dispatch. Adapter-local cancellation, deadline
+or budget classification without a receipt is accepted only when the journal
+is untouched and healthy. A changed journal or claimed dispatch without its
+receipt remains `ModelFailed`; an unresolved intent cannot become a clean stop.
 No private crate is a normal or optional dependency of the registry
 package. Compiler-owned SDK replay and Windows carrier preparation/replay remain
 before/around explicit injected host calls; opaque prepared facts are not
@@ -2643,3 +2648,14 @@ the selected source associations while both direct paths retain v1/v2 bytes.
 `iterative/effects/durable` retains the v2 local journal and carries the immutable
 migration baseline into additive v3 evidence and cumulative budgets. Parsed
 hashes alone cannot authorize seed recovery or host work.
+
+Owned string variant admission and the compiler primitive `core.string.drop`
+are specified by [Owned String Variants v1](OWNED-STRING-VARIANTS-V1.md).
+Inventory and cleanup replay own the lifecycle; native and Wasm finalizers
+consume its canonical actions. String clone initialization helpers live in
+`cleanup_plan/build/strings` and independent replay in `cleanup_plan/replay/strings`.
+Native scalar-match scope lookup lives in `codegen/native_bytes/scalar_match_scope`;
+Wasm lookup and action emission live in `wasm/aggregate/cleanup`.
+`wasm/aggregate/string_runtime` owns optional aggregate String intrinsic imports;
+`wasm/browser_runtime.js` owns their generated web adapter and byte-carrier
+validation. It is included verbatim by the browser runtime renderer.

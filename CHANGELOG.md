@@ -8,6 +8,15 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Preserve pre-dispatch OpenCode cancellation as a zero-call cancellation
+  failure (#113). A changed journal or claimed dispatch without a receipt
+  remains a model failure; unresolved attempts cannot become clean refusals.
+
+- Add direct owned String variant payloads (#216), with canonical String
+  lifecycle replay, own/borrow matching and backend cleanup. Scalar-match guard
+  and arm temporaries settle through exact cleanup regions. Generic String
+  substitutions and nested owned-record variant payloads remain restricted.
+
 - Add explicit Rust-host Argon2id password hashing, authenticated sessions and
   signup/login/logout composition (#191). Persist job cancellation and recurring
   schedule advancement with checked arithmetic and replay evidence (#192).

@@ -52,6 +52,8 @@ mod executor;
 mod inventory;
 #[path = "cleanup_backends/kernel_boundary.rs"]
 mod kernel_boundary;
+#[path = "cleanup_backends/owned_string_variant.rs"]
+mod owned_string_variant;
 #[path = "cleanup_backends/plan.rs"]
 mod plan;
 #[path = "cleanup_backends/scoped_tasks_model.rs"]

@@ -23,8 +23,8 @@ mod vec_intrinsic;
 pub(crate) use type_profiles::resolved_type_contains_owned_bytes;
 use type_profiles::{
     generic_instance_arguments_are_admitted, resolved_type_is_flat_owned_byte_variant,
-    template_contains_nested_owned_record_type, template_has_owned_record_slot, template_ownership,
-    validate_nested_update_base_shape,
+    resolved_type_is_flat_owned_string_variant, template_contains_nested_owned_record_type,
+    template_has_owned_record_slot, template_ownership, validate_nested_update_base_shape,
 };
 use unsafe_scan::contains_unsafe_boundary;
 
@@ -562,6 +562,8 @@ impl<'a> HirValidator<'a> {
                         .collect::<Vec<_>>();
                     let has_direct_bytes =
                         fields.iter().any(|field| field.ty == ResolvedType::Bytes);
+                    let has_direct_string =
+                        fields.iter().any(|field| field.ty == ResolvedType::String);
                     if has_direct_bytes
                         && (!declaration.type_parameters.is_empty()
                             || fields.iter().any(|field| {
@@ -582,6 +584,20 @@ impl<'a> HirValidator<'a> {
                     {
                         return Err(hir_error(
                             "resolved variant contains compiler-owned Bytes outside flat v1",
+                        ));
+                    }
+                    if has_direct_string
+                        && !has_direct_bytes
+                        && (!declaration.type_parameters.is_empty()
+                            || fields.iter().any(|field| {
+                                field.ty != ResolvedType::String
+                                && !super::type_reachability::nested_record_copy_scalar_is_admitted(
+                                    &field.ty,
+                                )
+                            }))
+                    {
+                        return Err(hir_error(
+                            "resolved owned-string variant is not direct and monomorphic",
                         ));
                     }
                 }
@@ -847,6 +863,12 @@ impl<'a> HirValidator<'a> {
                         .iter()
                         .flat_map(|case| &case.fields)
                         .any(|field| field.ty == ResolvedType::Bytes);
+                let owned_string_variant = declaration.type_parameters.is_empty()
+                    && !owned_byte_variant
+                    && cases
+                        .iter()
+                        .flat_map(|case| &case.fields)
+                        .any(|field| field.ty == ResolvedType::String);
                 if cases.is_empty() {
                     return Err(hir_error(format!(
                         "variant `{}` has no cases",
@@ -924,6 +946,7 @@ impl<'a> HirValidator<'a> {
                                 &field.ty,
                             ) || matches!(field.ty, ResolvedType::TypeParameter { .. })
                                 || (owned_byte_variant && field.ty == ResolvedType::Bytes)
+                                || (owned_string_variant && field.ty == ResolvedType::String)
                                 || (declaration.type_parameters.is_empty()
                                     && super::type_reachability::is_admitted_copy_aggregate_variant_field(
                                         &self.program.declarations,
@@ -958,6 +981,7 @@ impl<'a> HirValidator<'a> {
                             }
                         }
                         if owned_byte_variant
+                            || owned_string_variant
                             || crate::iterator_ops::is_step_rest_field(
                                 &declaration.id,
                                 &case.id,
@@ -1021,7 +1045,7 @@ impl<'a> HirValidator<'a> {
                     let cached = self.program.declarations.type_facts(&variant_ty);
                     let recomputed = self.program.declarations.recompute_type_facts(&variant_ty);
                     let valid_facts = cached.as_ref().is_some_and(|facts| {
-                        if owned_byte_variant {
+                        if owned_byte_variant || owned_string_variant {
                             !facts.copy
                                 && !facts.contains_resource
                                 && facts.needs_drop
@@ -4987,20 +5011,26 @@ impl<'a> HirValidator<'a> {
                             ResolvedMatchMode::Value
                                 if facts.copy && scrutinee.ownership == OwnershipMode::Value => {}
                             ResolvedMatchMode::Own
-                                if resolved_type_is_flat_owned_byte_variant(
+                                if (resolved_type_is_flat_owned_byte_variant(
                                     self.program,
                                     &scrutinee.ty,
-                                ) && facts.needs_drop
+                                ) || resolved_type_is_flat_owned_string_variant(
+                                    self.program,
+                                    &scrutinee.ty,
+                                )) && facts.needs_drop
                                     && !facts.copy
                                     && scrutinee.ownership == OwnershipMode::Own =>
                             {
                                 self.mark_value_sources_moved(scrutinee, &mut outer)?;
                             }
                             ResolvedMatchMode::Borrow
-                                if resolved_type_is_flat_owned_byte_variant(
+                                if (resolved_type_is_flat_owned_byte_variant(
                                     self.program,
                                     &scrutinee.ty,
-                                ) && facts.needs_drop
+                                ) || resolved_type_is_flat_owned_string_variant(
+                                    self.program,
+                                    &scrutinee.ty,
+                                )) && facts.needs_drop
                                     && !facts.copy
                                     && matches!(
                                         scrutinee.ownership,
@@ -7261,20 +7291,26 @@ impl<'a> HirValidator<'a> {
                     ResolvedMatchMode::Value
                         if facts.copy && scrutinee.ownership == OwnershipMode::Value => {}
                     ResolvedMatchMode::Own
-                        if resolved_type_is_flat_owned_byte_variant(
+                        if (resolved_type_is_flat_owned_byte_variant(
                             self.program,
                             &scrutinee.ty,
-                        ) && facts.needs_drop
+                        ) || resolved_type_is_flat_owned_string_variant(
+                            self.program,
+                            &scrutinee.ty,
+                        )) && facts.needs_drop
                             && !facts.copy
                             && scrutinee.ownership == OwnershipMode::Own =>
                     {
                         self.mark_value_sources_moved(scrutinee, scope)?;
                     }
                     ResolvedMatchMode::Borrow
-                        if resolved_type_is_flat_owned_byte_variant(
+                        if (resolved_type_is_flat_owned_byte_variant(
                             self.program,
                             &scrutinee.ty,
-                        ) && facts.needs_drop
+                        ) || resolved_type_is_flat_owned_string_variant(
+                            self.program,
+                            &scrutinee.ty,
+                        )) && facts.needs_drop
                             && !facts.copy
                             && matches!(
                                 scrutinee.ownership,
@@ -8208,6 +8244,12 @@ impl<'a> HirValidator<'a> {
                             )
                             || resolved_type_is_flat_owned_byte_variant(self.program, &param.ty))
                             && matches!(actual, OwnershipMode::Own | OwnershipMode::Borrow)
+                            && matches!(
+                                &argument.kind,
+                                ResolvedExprKind::Place(place) if place.projections.is_empty()
+                            )
+                    } else if resolved_type_is_flat_owned_string_variant(self.program, &param.ty) {
+                        matches!(actual, OwnershipMode::Own | OwnershipMode::Borrow)
                             && matches!(
                                 &argument.kind,
                                 ResolvedExprKind::Place(place) if place.projections.is_empty()

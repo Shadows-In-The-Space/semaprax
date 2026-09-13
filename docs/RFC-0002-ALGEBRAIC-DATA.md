@@ -29,6 +29,9 @@ owning profiles, general lifetime rules and a public generic ABI remain open.
 An additive generic/cleanup/graph version does not widen a predecessor's frozen
 contract. Public package and component support remains separately scoped.
 
+The [Owned String Variants v1](OWNED-STRING-VARIANTS-V1.md) profile defines
+direct monomorphic string payloads and canonical string lifecycle integration.
+
 ## Historical profile and evidence records
 
 The following records retain the original narrower profile boundaries and

@@ -10,9 +10,9 @@ use super::expr_nodes::{
 use super::ids::{DeclarationId, ExpressionId, FunctionExecutionId, ValueId};
 use super::monomorphize::substitute_type;
 use super::nodes::{
-    is_scalar_resolved_type, resolver_admits_flat_owned_byte_variant, DeclarationKind,
-    OwnershipMode, ResolvedBinding, ResolvedHostCommandCall, ResolvedImportResultKind,
-    ResolvedMatchMode, ResolvedNativeRustImportCall, ResolvedType,
+    is_scalar_resolved_type, resolver_admits_owned_variant, DeclarationKind, OwnershipMode,
+    ResolvedBinding, ResolvedHostCommandCall, ResolvedImportResultKind, ResolvedMatchMode,
+    ResolvedNativeRustImportCall, ResolvedType,
 };
 use super::type_reachability::record_args_ok;
 use super::{Binding, Place, PlaceProjection, Resolver};
@@ -1414,17 +1414,13 @@ impl Resolver<'_> {
                     (DeclarationKind::Variant, ResolvedMatchMode::Value)
                         if facts.copy && scrutinee.ownership == OwnershipMode::Value => {}
                     (DeclarationKind::Variant, ResolvedMatchMode::Own)
-                        if resolver_admits_flat_owned_byte_variant(
-                            &self.declarations,
-                            &scrutinee.ty,
-                        ) && facts.needs_drop
+                        if resolver_admits_owned_variant(&self.declarations, &scrutinee.ty)
+                            && facts.needs_drop
                             && !facts.copy
                             && scrutinee.ownership == OwnershipMode::Own => {}
                     (DeclarationKind::Variant, ResolvedMatchMode::Borrow)
-                        if resolver_admits_flat_owned_byte_variant(
-                            &self.declarations,
-                            &scrutinee.ty,
-                        ) && facts.needs_drop
+                        if resolver_admits_owned_variant(&self.declarations, &scrutinee.ty)
+                            && facts.needs_drop
                             && !facts.copy
                             && matches!(
                                 scrutinee.ownership,

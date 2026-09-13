@@ -246,10 +246,15 @@ A successful trace has exactly one published result:
 {"kind":"i64","value":"42"}
 {"kind":"bool","value":true}
 {"kind":"unit"}
+{"kind":"string"}
 {"kind":"owned","type_id":"platform.token"}
 ```
 
 `i64` is a decimal JSON string so JavaScript consumers preserve the complete range. In the current scalar-resource executor, an owned result exposes only its resource declaration ID. Record results are rejected with `UnsupportedResultType`; a later trace schema must add an aggregate semantic value projection before record-result conformance can be claimed.
+
+The additive `string` marker authenticates an owned String result and its
+publication without exposing text, pointers or allocation handles. Its primitive
+cleanup lifecycle is specified by [Owned string variants v1](OWNED-STRING-VARIANTS-V1.md).
 
 A failed trace publishes no result:
 

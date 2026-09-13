@@ -15,11 +15,12 @@ and the bounded stdout-transcript lane. It implements the existing inline
 String cleanup convention for already admitted source. It adds no syntax,
 types, intrinsic operations, public ABI, schema, import, or ambient authority.
 
-The resource cleanup inventory deliberately excludes `String`; its physical
-allocation ownership is separate from resource CleanupPlan slots. This
-correction reuses the private owner-cell machinery introduced for the
-[v10 owned UTF-8 provider](PUBLIC-OWNED-UTF8-API-V1.md), without changing
-resource inventory, canonical plan ordering, or independent plan replay.
+The original correction used the private owner-cell machinery introduced for
+the [v10 owned UTF-8 provider](PUBLIC-OWNED-UTF8-API-V1.md). The additive
+[owned String variant profile](OWNED-STRING-VARIANTS-V1.md) migrates ordinary
+String ownership into canonical CleanupPlan slots under `core.string.drop`,
+including independent replay. Plan-owned Strings use those exact transitions
+and exits; the legacy owner ledger is disabled for those functions.
 
 ## Exact ownership
 
@@ -30,7 +31,8 @@ All owner flags and temporary pointer cells are initialized at function entry,
 before any recoverable failure branch; block-local addresses are not retained.
 
 - Literal, clone, and successful call results establish one live owner.
-- Place reads retain the existing clone behavior; a temporary handoff moves
+- Owning place reads retain the existing clone behavior; borrowed reads alias
+  the existing carrier. A temporary handoff moves
   its value and clears its source ownership.
 - Binding, branch, match, and provisional-result transfers require a live
   source and dead destination. A live cell must not be overwritten on reuse.

@@ -86,16 +86,20 @@ impl Emitter<'_> {
                         .copied()
                     {
                         if *value_type(value) != ResolvedType::Bytes
+                            && *value_type(value) != ResolvedType::String
                             && !owned_vec(self.program, value_type(value))
                             && !crate::cleanup::is_owned_bounded_box_type(value_type(value))
                         {
                             return Err(error(
-                                "owned call epoch requires an exact Bytes or bounded Vec carrier",
+                                "owned call epoch requires an exact Bytes, String, or bounded Vec carrier",
                             ));
                         }
                         self.get_scalar(value);
                         self.output.push(0x21);
                         write_u32(self.output, local);
+                        if *value_type(value) == ResolvedType::String {
+                            self.clear_scalar(value)?;
+                        }
                     }
                     self.set_storage_flag(source, false)?;
                     if !self.set_variant_storage_flags_from_value(destination, value)? {

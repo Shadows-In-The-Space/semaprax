@@ -26,6 +26,9 @@ fn consume(value: own Token, allowed: bool) -> i64
 @id("token.identity")
 fn identity(value: own Token) -> Token { value }
 
+@id("text.result")
+fn text_result() -> string { "result" }
+
 @id("app.main")
 fn main() -> i64 { 0 }
 "#;
@@ -213,6 +216,40 @@ fn materializes_owned_transfer_and_result_source() {
                 type_id: program.types[0].id.clone()
             }
         }
+    );
+}
+
+#[test]
+fn materializes_opaque_owned_string_result() {
+    let program = program();
+    let function = function(&program, "text.result");
+    let trace = materialize(
+        &program,
+        function,
+        WireTrace {
+            scenario_id: "string-success".to_owned(),
+            root_function_id: function.id.as_str().to_owned(),
+            events: Vec::new(),
+            outcome: WireOutcome::Success(WireResult::String),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        trace.outcome,
+        TraceOutcome::Success {
+            result: TraceResult::String
+        }
+    );
+
+    let mismatch = WireTrace {
+        scenario_id: "string-mismatch".to_owned(),
+        root_function_id: function.id.as_str().to_owned(),
+        events: Vec::new(),
+        outcome: WireOutcome::Success(WireResult::Unit),
+    };
+    assert_eq!(
+        materialize(&program, function, mismatch),
+        Err(MaterializeError::ResultTypeMismatch)
     );
 }
 

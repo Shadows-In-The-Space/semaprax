@@ -498,7 +498,22 @@ fn wire_data_types_follow_the_extended_copy_variant_and_nested_generic_source_pr
         "case_field",
         Some("data.added.some"),
     );
-    for ty in [json!("string"), nominal("data.existing-choice", &[])] {
+    let (candidate, _) = apply(
+        &base,
+        addition(variant(vec![field(
+            "data.added.some.value",
+            "value",
+            json!("string"),
+        )])),
+    )
+    .expect("a direct string variant payload must be admitted");
+    fact(
+        &candidate,
+        "data.added.some.value",
+        "case_field",
+        Some("data.added.some"),
+    );
+    for ty in [nominal("data.existing-choice", &[])] {
         code(
             apply(
                 &base,

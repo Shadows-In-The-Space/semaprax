@@ -43,9 +43,6 @@ impl FunctionPlan {
             } else {
                 let local =
                     self.add_local(parameter_count, scalar_wasm_type(program, &binding.ty)?)?;
-                if binding.ty == ResolvedType::String {
-                    self.owned_strings.insert(local)?;
-                }
                 if self
                     .scalar_bindings
                     .insert(binding.id.clone(), local)

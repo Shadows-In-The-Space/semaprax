@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+mod cleanup;
 #[path = "closure.rs"]
 mod closure;
 mod collect_block;
@@ -58,6 +59,7 @@ use super::{
 
 mod box_ops;
 mod scalar_shape;
+mod string_runtime;
 mod vec_owned_payload;
 mod vec_record_payload;
 use crate::wasm::vec_ops::is_wasm_owned_vec_type as owned_vec;
@@ -209,7 +211,6 @@ impl FrameAllocator {
 }
 
 struct FunctionPlan {
-    owned_strings: owned_strings::Cells,
     local_types: Vec<u8>,
     old_stack: u32,
     frame_base: u32,
@@ -237,6 +238,7 @@ struct FunctionPlan {
     cleanup_place_flags: std::collections::BTreeMap<crate::cleanup_plan::CleanupPlace, u32>,
     cleanup_storage_types: HashMap<crate::cleanup_plan::StorageId, ResolvedType>,
     cleanup_call_argument_carriers: HashMap<crate::cleanup_plan::StorageId, u32>,
+    string_cleanup_carrier: Option<u32>,
     frame_size: u32,
 }
 
@@ -391,6 +393,7 @@ impl FunctionPlan {
         let mut cleanup_place_flags = std::collections::BTreeMap::new();
         let mut cleanup_storage_types = HashMap::new();
         let mut cleanup_call_argument_carriers = HashMap::new();
+        let mut string_cleanup_carrier = None;
         for slot in &function.cleanup_plan.slots {
             cleanup_storage_types.insert(slot.storage.clone(), slot.ty.clone());
             flatten_byte_leaves(
@@ -398,12 +401,15 @@ impl FunctionPlan {
                 &slot.field_liveness_shape,
                 &mut Vec::new(),
                 &mut |place, flag, lifecycle| {
+                    let string_leaf =
+                        lifecycle.as_str() == crate::cleanup::STRING_DROP_LIFECYCLE_ID;
                     if lifecycle.as_str() != crate::cleanup::BYTES_DROP_LIFECYCLE_ID
+                        && !string_leaf
                         && lifecycle.as_str() != crate::cleanup::VEC_DROP_LIFECYCLE_ID
                         && lifecycle.as_str() != crate::cleanup::BOX_DROP_LIFECYCLE_ID
                         && lifecycle.as_str() != crate::cleanup::ITER_DROP_LIFECYCLE_ID
                     {
-                        return Err(error("Bytes CleanupPlan leaf has the wrong lifecycle"));
+                        return Err(error("CleanupPlan leaf has an unsupported lifecycle"));
                     }
                     let local = add_local(I32)?;
                     if cleanup_flags.insert(flag, local).is_some()
@@ -412,6 +418,9 @@ impl FunctionPlan {
                         return Err(error(
                             "Bytes CleanupPlan repeats a place or liveness identity",
                         ));
+                    }
+                    if string_leaf && string_cleanup_carrier.is_none() {
+                        string_cleanup_carrier = Some(add_local(I64)?);
                     }
                     if place.projections.is_empty()
                         && matches!(
@@ -450,7 +459,6 @@ impl FunctionPlan {
                 )
             };
         let mut plan = Self {
-            owned_strings: owned_strings::Cells::default(),
             local_types,
             old_stack,
             frame_base,
@@ -478,25 +486,17 @@ impl FunctionPlan {
             cleanup_place_flags,
             cleanup_storage_types,
             cleanup_call_argument_carriers,
+            string_cleanup_carrier,
             frame_size: 0,
         };
-        for (index, parameter) in function.params.iter().enumerate() {
-            if parameter.ty == ResolvedType::String {
-                if parameter.ownership != crate::hir::OwnershipMode::Own {
-                    return Err(error(
-                        "String parameter must use validated owned classification",
-                    ));
-                }
-                plan.owned_strings.insert(
-                    u32::try_from(index).map_err(|_| error("String parameter index overflows"))?,
-                )?;
+        for parameter in &function.params {
+            if parameter.ty == ResolvedType::String
+                && parameter.ownership != crate::hir::OwnershipMode::Own
+            {
+                return Err(error(
+                    "String parameter must use validated owned classification",
+                ));
             }
-        }
-        if function.return_type == ResolvedType::String {
-            plan.owned_strings.insert(
-                plan.result_stage_scalar
-                    .ok_or_else(|| error("String result has no scalar stage"))?,
-            )?;
         }
         for contract in &function.requires {
             plan.collect_expr(
@@ -545,10 +545,6 @@ impl FunctionPlan {
         parameter_count: u32,
         frame: &mut FrameAllocator,
     ) -> Result<(), Diagnostic> {
-        let first = parameter_count
-            .checked_add(1)
-            .and_then(|base| base.checked_add(u32::try_from(self.local_types.len()).ok()?))
-            .ok_or_else(|| error("String scope local index overflows"))?;
         if is_aggregate(program, &expr.ty)? {
             let (size, align) = aggregate_size_align(program, variant_layouts, &expr.ty)?;
             let offset = frame.allocate(size, align)?;
@@ -565,9 +561,6 @@ impl FunctionPlan {
         } else {
             let ty = scalar_wasm_type(program, &expr.ty)?;
             let local = self.add_local(parameter_count, ty)?;
-            if expr.ty == ResolvedType::String {
-                self.owned_strings.insert(local)?;
-            }
             if self
                 .scalar_expressions
                 .insert(expr.id.clone(), local)
@@ -752,11 +745,6 @@ impl FunctionPlan {
             | ResolvedExprKind::Place(_)
             | ResolvedExprKind::BorrowPlace { .. } => {}
         }
-        let end = parameter_count
-            .checked_add(1)
-            .and_then(|base| base.checked_add(u32::try_from(self.local_types.len()).ok()?))
-            .ok_or_else(|| error("String scope local index overflows"))?;
-        self.owned_strings.scope(&expr.id, first, end)?;
         Ok(())
     }
 
@@ -901,7 +889,12 @@ fn expression_uses_str_ops(expression: &ResolvedExpr) -> bool {
                     op,
                     crate::str_ops::StrOp::StartsWith | crate::str_ops::StrOp::Contains
                 )
-            }) || args.iter().any(expression_uses_str_ops)
+            }) || matches!(
+                crate::string_ops::by_id(callee.as_str()),
+                Some(
+                    crate::string_ops::StringOp::StartsWith | crate::string_ops::StringOp::Contains
+                )
+            ) || args.iter().any(expression_uses_str_ops)
         }
         ResolvedExprKind::NativeRustImportCall(call) => {
             call.args.iter().any(expression_uses_str_ops)
@@ -2208,7 +2201,9 @@ fn emit_profile_with_scalar_exports(
     host_output: bool,
     scalar_exports: &[super::scalar_exports::ScalarExportPlan],
 ) -> Result<Vec<u8>, Diagnostic> {
-    let uses_byte_data = super::program_uses_byte_data(program);
+    let uses_string_runtime = string_runtime::program_uses_runtime(program);
+    let uses_byte_data =
+        super::program_uses_byte_data(program) || super::program_uses_strings(program);
     let uses_owned_buffer = program_uses_owned_buffer(program);
     let uses_vec = super::program_uses_vec(program);
     let uses_extended_vec = super::vec_ops::program_uses_extended_vec(program);
@@ -2285,6 +2280,26 @@ fn emit_profile_with_scalar_exports(
             Signature {
                 params: vec![I64],
                 results: Vec::new(),
+            },
+            &mut types,
+            &mut type_indexes,
+        )
+    });
+    let string_from_char = uses_string_runtime.then(|| {
+        intern_type(
+            Signature {
+                params: vec![I32],
+                results: vec![I64],
+            },
+            &mut types,
+            &mut type_indexes,
+        )
+    });
+    let string_text_binary = uses_string_runtime.then(|| {
+        intern_type(
+            Signature {
+                params: vec![I64, I64],
+                results: vec![I32],
             },
             &mut types,
             &mut type_indexes,
@@ -2497,7 +2512,7 @@ fn emit_profile_with_scalar_exports(
             )
         })
         .collect::<Vec<_>>();
-    let function_indexes = executable_functions
+    let mut function_indexes = executable_functions
         .iter()
         .enumerate()
         .map(|(index, (_, execution))| {
@@ -2527,6 +2542,11 @@ fn emit_profile_with_scalar_exports(
                         0
                     }
                     + if uses_box { BOX_IMPORT_COUNT } else { 0 }
+                    + if uses_string_runtime {
+                        string_runtime::IMPORT_COUNT
+                    } else {
+                        0
+                    }
                     + u32::try_from(index).unwrap_or(u32::MAX),
             )
         })
@@ -2568,7 +2588,12 @@ fn emit_profile_with_scalar_exports(
             } else {
                 0
             }
-            + if uses_box { BOX_IMPORT_COUNT } else { 0 },
+            + if uses_box { BOX_IMPORT_COUNT } else { 0 }
+            + if uses_string_runtime {
+                string_runtime::IMPORT_COUNT
+            } else {
+                0
+            },
     );
     for name in ["spx_add", "spx_sub", "spx_mul", "spx_div", "spx_rem"] {
         function_import(&mut imports, "env", name, binary_checked);
@@ -2624,6 +2649,40 @@ fn emit_profile_with_scalar_exports(
         function_import(&mut imports, "env", names[1], box_read.unwrap());
         function_import(&mut imports, "env", names[2], box_read.unwrap());
         function_import(&mut imports, "env", names[3], box_drop.unwrap());
+    }
+    if uses_string_runtime {
+        string_runtime::emit_imports(
+            &mut imports,
+            binary_checked,
+            unary_checked,
+            string_from_char.expect("String runtime from-char type"),
+            string_text_binary.expect("String runtime text comparison type"),
+        );
+        let base = SCALAR_IMPORT_COUNT
+            + if uses_byte_data { BYTE_IMPORT_COUNT } else { 0 }
+            + if uses_owned_buffer {
+                OWNED_BUFFER_IMPORT_COUNT
+            } else {
+                0
+            }
+            + if uses_vec { VEC_IMPORT_COUNT } else { 0 }
+            + if uses_extended_vec {
+                EXTENDED_VEC_IMPORT_COUNT
+            } else {
+                0
+            }
+            + if uses_vec_record {
+                RECORD_VEC_IMPORT_COUNT
+            } else {
+                0
+            }
+            + if uses_owned_iterator {
+                OWNED_ITER_IMPORT_COUNT
+            } else {
+                0
+            }
+            + if uses_box { BOX_IMPORT_COUNT } else { 0 };
+        string_runtime::insert_function_indexes(&mut function_indexes, base);
     }
     section(&mut module, 2, imports);
 
@@ -2757,6 +2816,13 @@ fn emit_profile_with_scalar_exports(
             })
         })
         .and_then(|value| value.checked_add(if uses_box { BOX_IMPORT_COUNT } else { 0 }))
+        .and_then(|value| {
+            value.checked_add(if uses_string_runtime {
+                string_runtime::IMPORT_COUNT
+            } else {
+                0
+            })
+        })
         .ok_or_else(|| error("aggregate wrapper import count overflows u32"))?
         .checked_add(
             u32::try_from(executable_functions.len()).map_err(|_| error("too many functions"))?,
@@ -3155,12 +3221,6 @@ fn emit_function_profile(
         emitter.failure_expression = None;
     }
     emitter.emit_success_cleanup(&function.cleanup_plan)?;
-    if owned_string_profile {
-        let escape = (function.return_type == ResolvedType::String)
-            .then_some(plan.result_stage_scalar)
-            .flatten();
-        plan.owned_strings.emit_all(emitter.output, escape);
-    }
     let caller = if is_aggregate(program, &function.return_type)? {
         Value::Aggregate {
             pointer: Pointer {
@@ -3196,11 +3256,8 @@ fn emit_function_profile(
     }
     drop(emitter);
     body.push(0x0b);
-    // Every recoverable failure branches here. Successfully published String
-    // stages have been cleared; a failed provisional result remains owned.
-    if owned_string_profile {
-        plan.owned_strings.emit_all(&mut body, None);
-    }
+    // Every recoverable failure branches here. Canonical CleanupPlan actions
+    // have settled every live String carrier before reaching this edge.
     body.push(0x20);
     write_u32(&mut body, plan.old_stack);
     body.push(0x24);
@@ -3312,9 +3369,9 @@ struct Emitter<'a> {
     cleanup_plan: &'a crate::cleanup_plan::CleanupPlan,
     bindings: HashMap<ValueId, Value>,
     /// Exact physical carriers for projected call-argument epochs. Scalar
-    /// `Bytes` epochs own a dedicated local in `FunctionPlan`; a flat owned
-    /// record keeps its materialized aggregate pointer and changes only
-    /// CleanupPlan liveness until `CallCommit`.
+    /// `Bytes` and `String` epochs own a dedicated local in `FunctionPlan`; a
+    /// flat owned record keeps its materialized aggregate pointer and changes
+    /// only CleanupPlan liveness until `CallCommit`.
     call_argument_values: HashMap<crate::cleanup_plan::StorageId, Value>,
     control_depth: u32,
     status_exit_extra_depth: u32,
@@ -3365,18 +3422,6 @@ impl Emitter<'_> {
             }
             nested_owned::emit_update_scope_cleanup(self, expr)?;
         }
-        if self.owned_utf8_literals.is_some() {
-            let escape = match &value {
-                Value::Scalar {
-                    local,
-                    ty: ResolvedType::String,
-                } => Some(*local),
-                _ => None,
-            };
-            self.plan
-                .owned_strings
-                .emit_scope(self.output, &expr.id, escape)?;
-        }
         Ok(value)
     }
 
@@ -3425,104 +3470,6 @@ impl Emitter<'_> {
         self.emit_cleanup_actions(&actions)
     }
 
-    fn emit_cleanup_actions(
-        &mut self,
-        actions: &[crate::cleanup_plan::FinalizeAction],
-    ) -> Result<(), Diagnostic> {
-        for action in actions {
-            let vec_leaf = action.lifecycle_id.as_str() == crate::cleanup::VEC_DROP_LIFECYCLE_ID;
-            let box_leaf = action.lifecycle_id.as_str() == crate::cleanup::BOX_DROP_LIFECYCLE_ID;
-            let iter_leaf = action.lifecycle_id.as_str() == crate::cleanup::ITER_DROP_LIFECYCLE_ID;
-            if action.lifecycle_id.as_str() != crate::cleanup::BYTES_DROP_LIFECYCLE_ID
-                && !vec_leaf
-                && !box_leaf
-                && !iter_leaf
-            {
-                return Err(error(
-                    "byte-data WebAssembly cleanup requires compiler-owned Bytes leaves",
-                ));
-            }
-            let value = self.cleanup_value_at(&action.source)?;
-            if iter_leaf {
-                if !crate::iterator_ops::is_iter(value_type(&value)) {
-                    return Err(error(
-                        "Iter CleanupPlan finalizer type disagrees with lifecycle",
-                    ));
-                }
-            } else if vec_leaf {
-                if !owned_vec(self.program, value_type(&value)) {
-                    return Err(error(
-                        "Vec CleanupPlan finalizer type disagrees with lifecycle",
-                    ));
-                }
-            } else if box_leaf {
-                if !crate::cleanup::is_owned_bounded_box_type(value_type(&value)) {
-                    return Err(error(
-                        "Box CleanupPlan finalizer type disagrees with lifecycle",
-                    ));
-                }
-            } else {
-                require_type(
-                    value_type(&value),
-                    &ResolvedType::Bytes,
-                    "CleanupPlan finalizer",
-                )?;
-            }
-            let flag = self
-                .plan
-                .cleanup_flags
-                .get(&action.guard_flag)
-                .copied()
-                .ok_or_else(|| error("CleanupPlan finalizer guard has no exact Wasm local"))?;
-            self.output.push(0x20);
-            write_u32(self.output, flag);
-            self.output.extend([0x04, 0x40]);
-            if iter_leaf {
-                let Value::Aggregate { pointer, ty } = &value else {
-                    return Err(error("Iter cleanup leaf is not aggregate storage"));
-                };
-                self.emit_pointer(*pointer);
-                self.load_scalar(&ResolvedType::I64);
-                if *ty == crate::iterator_ops::resolved_iter(ResolvedType::Bytes) {
-                    self.emit_pointer(Pointer {
-                        offset: pointer.offset + iterator_ops::ITER_CURSOR_OFFSET,
-                        ..*pointer
-                    });
-                    self.load_scalar(&ResolvedType::Usize);
-                }
-            } else {
-                self.get_scalar(&value);
-            }
-            self.output.push(0x10);
-            write_u32(
-                self.output,
-                if iter_leaf
-                    && *value_type(&value)
-                        == crate::iterator_ops::resolved_iter(ResolvedType::Bytes)
-                {
-                    iterator_ops::owned_import_base(self.program) + 2
-                } else if vec_leaf || iter_leaf {
-                    vec_import_base(self.program) + 5
-                } else if box_leaf {
-                    box_import_base(self.program) + 3
-                } else {
-                    BYTE_DROP_IMPORT
-                },
-            );
-            // Poison the moved/dropped carrier locally. Any backend mistake
-            // that reads it later reaches the host's malformed-token trap.
-            if iter_leaf {
-                self.clear_iterator(&value)?;
-            } else {
-                self.clear_scalar(&value)?;
-            }
-            self.output.extend([0x41, 0x00, 0x21]);
-            write_u32(self.output, flag);
-            self.output.push(0x0b);
-        }
-        Ok(())
-    }
-
     fn emit_block_scope_cleanup(
         &mut self,
         statements: &[ResolvedStatement],
@@ -3533,6 +3480,7 @@ impl Emitter<'_> {
                 let mut anchors = Vec::with_capacity(2);
                 if let ResolvedStatement::Let { binding, .. } = statement {
                     if binding.ty == ResolvedType::Bytes
+                        || binding.ty == ResolvedType::String
                         || owned_vec(self.program, &binding.ty)
                         || crate::cleanup::is_owned_bounded_box_type(&binding.ty)
                         || crate::iterator_ops::is_iter(&binding.ty)
@@ -3549,6 +3497,7 @@ impl Emitter<'_> {
                 };
                 if let Some(value) = value.filter(|value| {
                     value.ty == ResolvedType::Bytes
+                        || value.ty == ResolvedType::String
                         || owned_vec(self.program, &value.ty)
                         || crate::cleanup::is_owned_bounded_box_type(&value.ty)
                         || crate::iterator_ops::is_iter(&value.ty)
@@ -4478,14 +4427,19 @@ impl Emitter<'_> {
             })
             .collect::<Vec<_>>();
         for carrier in carriers {
-            require_type(
-                value_type(value),
-                &ResolvedType::Bytes,
-                "owned Try call epoch",
-            )?;
+            if *value_type(value) != ResolvedType::Bytes
+                && *value_type(value) != ResolvedType::String
+            {
+                return Err(error(
+                    "owned Try call epoch requires an exact Bytes or String carrier",
+                ));
+            }
             self.get_scalar(value);
             self.output.push(0x21);
             write_u32(self.output, carrier);
+            if *value_type(value) == ResolvedType::String {
+                self.clear_scalar(value)?;
+            }
         }
         Ok(())
     }
@@ -4626,7 +4580,10 @@ impl Emitter<'_> {
             }
             ResolvedExprKind::Place(place) => {
                 let value = self.place_value(place)?;
-                if self.owned_utf8_literals.is_some() && expr.ty == ResolvedType::String {
+                if self.owned_utf8_literals.is_some()
+                    && expr.ty == ResolvedType::String
+                    && expr.ownership == crate::hir::OwnershipMode::Own
+                {
                     let local = self.plan.expr_scalar(expr)?;
                     owned_strings::emit_empty_guard(self.output, local);
                     self.get_scalar(&value);
@@ -4917,7 +4874,7 @@ impl Emitter<'_> {
                     .cases
                     .iter()
                     .flat_map(|case| &case.fields)
-                    .any(|field| field.ty == ResolvedType::Bytes)
+                    .any(|field| matches!(&field.ty, ResolvedType::Bytes | ResolvedType::String))
                 {
                     self.trap_if();
                 } else {
@@ -5597,14 +5554,18 @@ impl Emitter<'_> {
                 // depth zero because selection has not happened yet.
                 let flag = self.emit_expr(guard)?;
                 require_type(value_type(&flag), &ResolvedType::Bool, "match guard")?;
-                if self.standalone_strings {
-                    self.get_scalar(&flag);
-                }
+                // Keep the computed result below the child-region finalizers;
+                // `br_if` consumes it only after those String owners settle.
+                self.get_scalar(&flag);
+                self.emit_scalar_match_guard_cleanup(expr, guard)?;
                 self.output.push(0x45); // i32.eqz
                 self.output.extend([0x0d, 0x00]); // br_if 0 -> next arm
             }
             let value = self.emit_expr(&arm.value)?;
             self.copy_value(&destination, &value, "refutable match arm result")?;
+            if !(arms.len() == 1 && arm.guard.is_none()) {
+                self.emit_scalar_match_value_cleanup(expr, &arm.value)?;
+            }
             self.bindings = saved;
             if !final_arm {
                 // Selecting this arm exits the whole chain. The only labels
@@ -5949,6 +5910,9 @@ impl Emitter<'_> {
             }
         }
         if instance.is_none() {
+            if let Some(operation) = crate::string_ops::by_id(callee.as_str()) {
+                return self.emit_aggregate_string_operation(expr, operation, args);
+            }
             if let Some(op) = crate::iterator_ops::by_id(callee.as_str()) {
                 return self.emit_iterator_op(expr, op, type_arguments, args);
             }
@@ -7458,33 +7422,28 @@ impl Emitter<'_> {
             BinaryOp::Div => self.emit_checked_div_rem(&left, &right, destination, false)?,
             BinaryOp::Rem => self.emit_checked_div_rem(&left, &right, destination, true)?,
             BinaryOp::Eq | BinaryOp::Ne => {
-                if false
-                    && self.owned_utf8_literals.is_some()
-                    && value_type(&left) == &ResolvedType::String
-                {
-                    return Err(error(
-                        "owned String equality has no admitted WebAssembly lowering",
-                    ));
-                }
-                if is_aggregate(self.program, value_type(&left))? {
+                if value_type(&left) == &ResolvedType::String {
+                    self.emit_aggregate_string_equality(op, &left, &right, destination)?;
+                } else if is_aggregate(self.program, value_type(&left))? {
                     return Err(error("record equality is outside executable records v1"));
+                } else {
+                    require_type(value_type(&left), value_type(&right), "equality operands")?;
+                    self.get_scalar(&left);
+                    self.get_scalar(&right);
+                    self.output.push(match (value_type(&left), op) {
+                        (ResolvedType::I64 | ResolvedType::Usize, BinaryOp::Eq) => 0x51,
+                        (ResolvedType::I64 | ResolvedType::Usize, BinaryOp::Ne) => 0x52,
+                        (ResolvedType::F32, BinaryOp::Eq) => 0x5b,
+                        (ResolvedType::F32, BinaryOp::Ne) => 0x5c,
+                        (ResolvedType::F64, BinaryOp::Eq) => 0x61,
+                        (ResolvedType::F64, BinaryOp::Ne) => 0x62,
+                        (_, BinaryOp::Eq) => 0x46,
+                        (_, BinaryOp::Ne) => 0x47,
+                        _ => unreachable!(),
+                    });
+                    self.output.push(0x21);
+                    write_u32(self.output, destination);
                 }
-                require_type(value_type(&left), value_type(&right), "equality operands")?;
-                self.get_scalar(&left);
-                self.get_scalar(&right);
-                self.output.push(match (value_type(&left), op) {
-                    (ResolvedType::I64 | ResolvedType::Usize, BinaryOp::Eq) => 0x51,
-                    (ResolvedType::I64 | ResolvedType::Usize, BinaryOp::Ne) => 0x52,
-                    (ResolvedType::F32, BinaryOp::Eq) => 0x5b,
-                    (ResolvedType::F32, BinaryOp::Ne) => 0x5c,
-                    (ResolvedType::F64, BinaryOp::Eq) => 0x61,
-                    (ResolvedType::F64, BinaryOp::Ne) => 0x62,
-                    (_, BinaryOp::Eq) => 0x46,
-                    (_, BinaryOp::Ne) => 0x47,
-                    _ => unreachable!(),
-                });
-                self.output.push(0x21);
-                write_u32(self.output, destination);
             }
             BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
                 let operand_ty = value_type(&left);
@@ -8199,7 +8158,9 @@ impl Emitter<'_> {
                         .cases
                         .iter()
                         .flat_map(|case| &case.fields)
-                        .any(|field| field.ty == ResolvedType::Bytes)
+                        .any(|field| {
+                            matches!(&field.ty, ResolvedType::Bytes | ResolvedType::String)
+                        })
                     {
                         // Authenticate the tag before reading any union payload.
                         self.emit_pointer(*source);
@@ -8290,11 +8251,14 @@ impl Emitter<'_> {
             value_type(destination),
             "borrowed record field alias",
         )?;
-        require_type(
+        if !matches!(
             value_type(source),
-            &ResolvedType::Bytes,
-            "borrowed record field alias",
-        )?;
+            ResolvedType::Bytes | ResolvedType::String
+        ) {
+            return Err(error(
+                "borrowed record field alias requires an exact Bytes or String carrier",
+            ));
+        }
         match destination {
             Value::Scalar { local, .. } => {
                 self.get_scalar(source);

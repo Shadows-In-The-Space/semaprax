@@ -211,13 +211,13 @@ its requested ownership mode and rebuilt type facts. A newly created owned
 type can subsequently be selected by a local owning helper, but creating it
 does not grant cross-module owning imports or waive function/target admission.
 
-This vocabulary does not widen aggregate source profiles. In particular, a
-variant without a direct `Bytes` payload retains the existing `SPX-T215`
-restriction on payload types beyond `i64`/`bool`; putting `string`, `i32`, `u8`
-or `usize` in such a variant still rejects. Nesting a generic record instance
-in a record field retains `SPX-T223`. Other source, HIR and selected-target
-restrictions also remain authoritative. These are explicit rejection cases,
-not successful type-creation evidence.
+This vocabulary follows the ordinary aggregate source profiles. Direct Copy
+scalars and drop-free monomorphic nested record payloads use the Copy variant
+profile. Direct monomorphic `string` payloads use
+[Owned String Variants v1](OWNED-STRING-VARIANTS-V1.md); generic strings,
+nested owned records and mixed string/Bytes cases remain closed. Nesting a
+generic record instance in a record field retains `SPX-T223`. Other source,
+HIR and selected-target restrictions remain authoritative.
 
 The post-rebuild gate computes ordinary type facts for the new monomorphic
 owner and its selected dependency closure even when unused. It requires

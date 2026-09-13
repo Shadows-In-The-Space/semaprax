@@ -34,32 +34,32 @@ fn exhausted_or_duplicate_cell_identity_is_diagnostic_not_panic() {
 }
 
 #[test]
-fn inline_owner_cells_cover_ordinary_and_owned_data_provider_strings() {
+fn planned_string_slots_guard_initialization_and_finalize_once() {
     let checked = crate::check(
-            "module test.inline; @id(\"word\") fn word() -> string { \"value\" } @id(\"main\") fn main() -> i64 { 0 }",
-            "inline.spx",
-        ).unwrap();
+        "module test.inline; @id(\"word\") fn word() -> string { let discarded = \"drop\"; \"value\" } @id(\"main\") fn main() -> i64 { 0 }",
+        "inline.spx",
+    )
+    .unwrap();
     let program = crate::hir::resolve(&checked).unwrap();
-    let ordinary = crate::codegen::emit_hir_c(&program).unwrap();
-    let provider = crate::codegen::emit_hir_c_for_owned_data_provider(&program).unwrap();
-    assert!(provider.contains("spx_result_live"));
-    assert!(provider.contains("invalid String transfer"));
-    assert!(provider.contains("live String overwritten"));
-    assert!(ordinary.contains("spx_result_live"));
-    assert!(ordinary.contains("invalid String transfer"));
-    assert!(!ordinary.contains("strlen(spx_source)"));
-    assert!(ordinary.contains("struct spx_string_v10"));
-    assert!(!provider.contains("strlen(spx_source)"));
-    assert!(provider.contains("struct spx_string_v10"));
-    let current = crate::codegen::emit_hir_c_for_owned_utf8_provider(&program).unwrap();
-    assert!(current.contains("char *spx_internal_0 = NULL;"));
-    assert!(current.contains("bool spx_internal_0_live = false;"));
-    assert!(current.contains("invalid String transfer"));
-    assert!(current.contains("if (!spx_result_live)"));
-    let publish = current
-        .find("*spx_result_out = spx_result;\n    spx_result_live = false;")
-        .unwrap();
-    assert!(publish > current.find("if (!spx_result_live)").unwrap());
+    for generated in [
+        crate::codegen::emit_hir_c(&program).unwrap(),
+        crate::codegen::emit_hir_c_for_owned_data_provider(&program).unwrap(),
+        crate::codegen::emit_hir_c_for_owned_utf8_provider(&program).unwrap(),
+    ] {
+        // Direct strings now use the CleanupPlan slot/flag inventory rather
+        // than a parallel inline String owner cell.
+        assert!(generated.contains("char * spx_bytes_slot_"));
+        assert!(generated.contains("bool spx_bytes_live_"));
+        // The finalizer guard and slot drop prove one plan owner; an inline
+        // `spx_result_live` cell would be a second ownership channel.
+        assert!(generated.contains("if (spx_bytes_live_"));
+        assert!(generated.contains("spx_string_drop(spx_bytes_slot_"));
+        assert!(!generated.contains("spx_result_live"));
+        assert!(!generated.contains("invalid String transfer"));
+        assert!(!generated.contains("live String overwritten"));
+        assert!(!generated.contains("strlen(spx_source)"));
+        assert!(generated.contains("struct spx_string_v10"));
+    }
 }
 
 fn resolved(source: &str) -> crate::hir::ResolvedProgram {
@@ -121,12 +121,12 @@ fn ordinary_and_provider_discovery_include_instantiated_string_runtime_groups() 
     let native = crate::codegen::emit_hir_c(&program).unwrap();
     assert!(native.contains("static __attribute__((unused)) char *spx_string_from_literal("));
     assert!(native.contains("spx_string_len_chars(const char *"));
-    assert!(native.contains("live String overwritten"));
+    assert!(native.contains("spx_string_drop(spx_bytes_slot_"));
     let provider = crate::codegen::emit_hir_c_for_owned_data_provider(&program).unwrap();
     assert!(provider.contains("static __attribute__((unused)) char *spx_string_from_literal("));
     assert!(provider.contains("spx_string_len_chars(const char *"));
     assert!(provider.contains("struct spx_string_v10"));
-    assert!(provider.contains("live String overwritten"));
+    assert!(provider.contains("spx_string_drop(spx_bytes_slot_"));
 }
 
 #[test]

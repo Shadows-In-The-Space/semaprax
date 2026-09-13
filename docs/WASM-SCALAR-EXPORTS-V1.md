@@ -123,8 +123,10 @@ SDK-mode modules export only the explicitly selected adapters. They do not
 export the legacy `semaprax_main`, memory, unselected functions, or owned
 resource adapters. Successful String-free builds without `--export` retain
 the unchanged legacy `semaprax.web.v3` package and `semaprax_main` behavior.
-Legacy String-bearing Web builds now reject with `SPX-W116` before output
-creation: their old browser runtime does not supply the required imports.
+Legacy scalar-only String Web builds reject with `SPX-W116` before output
+creation: that lowering uses the separate internal String import ABI.
+Aggregate String builds use the private carrier adapter specified by
+[owned String variants v1](OWNED-STRING-VARIANTS-V1.md).
 The separate explicit [internal String Web profile](WASM-INTERNAL-STRINGS-WEB-V1.md)
 does not change this scalar profile's admission or bytes.
 

@@ -26,11 +26,10 @@
 //! Deliberate exclusions, each an explicit located `SPX-F102` admission
 //! diagnostic rather than a panic or a silent widening:
 //!
-//! - `String`/`str`. Agent Proposal Schema v1 admits a `string` field, but no
-//!   interpreter record or variant classifier does: a `String` leaf would be a
-//!   new owned cleanup leaf kind, and inventing one here would put the
-//!   interpreter's cleanup shape ahead of the shared cleanup machinery and the
-//!   native and Wasm backends. Owned UTF-8 stays on its own profile.
+//! - `String`/`str`. Local interpreter String values and the owned String
+//!   variant profile do not add a retained-call transport representation.
+//!   This seam remains closed until its carrier and transport contract are
+//!   extended together. Owned UTF-8 stays on its own profile.
 //! - `char`, `f32`, `f64`. Excluded by the proposal schema's exact-transport
 //!   rule, so this seam does not transport them either.
 //! - `Slice<u8>`, fixed byte arrays, and every generic or type-parameter

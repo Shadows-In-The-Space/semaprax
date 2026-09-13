@@ -158,6 +158,7 @@ fn decodes_all_trace_results_and_failure_outcome() {
         ),
         (2, 1_u32.to_le_bytes().to_vec(), WireResult::Bool(true)),
         (3, Vec::new(), WireResult::Unit),
+        (5, Vec::new(), WireResult::String),
     ];
     for (tag, payload, expected) in cases {
         let mut writer = Writer::new(0, "scenario", "fn.root");
@@ -200,6 +201,26 @@ fn decodes_all_trace_results_and_failure_outcome() {
             }
         }
     ));
+}
+
+#[test]
+fn string_result_tag_is_opaque_and_refuses_trailing_payload() {
+    let mut valid = Writer::new(0, "string", "fn.root");
+    valid.u32(1);
+    valid.u32(5);
+    assert_eq!(
+        decode(&valid.0).unwrap().outcome,
+        WireOutcome::Success(WireResult::String)
+    );
+
+    // Tag 5 has no payload: accepting even a bounded fake pointer/value
+    // field would silently turn native representation into protocol data.
+    let mut hostile = valid;
+    hostile.0.extend_from_slice(&0_u32.to_le_bytes());
+    assert_eq!(
+        decode(&hostile.0),
+        Err(WireDecodeError::TrailingBytes { count: 4 })
+    );
 }
 
 #[test]

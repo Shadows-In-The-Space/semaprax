@@ -19,9 +19,8 @@ pub(super) fn derive(
     derive_weighted(program, layouts, roots, |plan| Ok(plan.frame_size))
 }
 
-/// Every authenticated Bytes cleanup leaf and private String owner cell may
-/// retain an owner for one activation. String cells are also used for physical
-/// settlement; unlike Strings, Bytes use the resource CleanupPlan authority.
+/// Every authenticated owned leaf, including String, is represented by the
+/// canonical CleanupPlan for one activation.
 /// Add simultaneous activations, not sibling calls or loop iterations. One
 /// extra slot covers the synchronous mint-to-initialize/result handoff.
 /// This is conservative storage accounting, not exact liveness or heap bytes.
@@ -31,11 +30,7 @@ pub(super) fn arena_capacity(
     roots: &[DeclarationId],
 ) -> Result<u32, Diagnostic> {
     let extents = derive_weighted(program, layouts, roots, |plan| {
-        let count = plan
-            .cleanup_place_flags
-            .len()
-            .checked_add(plan.owned_strings.owners.len())
-            .ok_or_else(|| error("owned-data arena cleanup inventory overflows"))?;
+        let count = plan.cleanup_place_flags.len();
         u32::try_from(count).map_err(|_| error("owned-data arena cleanup inventory overflows"))
     })?;
     let maximum = roots.iter().try_fold(0, |maximum, root| {
@@ -235,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn string_owner_cells_count_even_when_resource_cleanup_inventory_is_empty() {
+    fn string_cleanup_flags_count_in_the_canonical_inventory() {
         let source = r#"module test.string_capacity;
 @id("s.sink") fn sink(value: string) -> string { "done" }
 @id("s.root") fn root() -> string { sink("argument") }
@@ -254,9 +249,8 @@ mod tests {
                 .find(|function| function.id == id(name))
                 .unwrap();
             let plan = FunctionPlan::build(&program, function, &layouts).unwrap();
-            assert!(plan.cleanup_place_flags.is_empty());
-            assert!(!plan.owned_strings.owners.is_empty());
-            count += u32::try_from(plan.owned_strings.owners.len()).unwrap();
+            assert!(!plan.cleanup_place_flags.is_empty());
+            count += u32::try_from(plan.cleanup_place_flags.len()).unwrap();
         }
         assert_eq!(
             arena_capacity(&program, &layouts, &[id("s.root")]).unwrap(),

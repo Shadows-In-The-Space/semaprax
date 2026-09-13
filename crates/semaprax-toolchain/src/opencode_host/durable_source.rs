@@ -101,6 +101,22 @@ impl<R: OpenCodeRunner> ProposalSource for OpenCodeDurableProposalSource<'_, R> 
         ledger: &mut CumulativeBudgetLedger<'_>,
         clock: &dyn SourceInvocationClock,
     ) -> SourceProposalOutcome {
+        // This is the host cancellation boundary for a source model attempt.
+        // There is no intent or receipt to replay because no provider call was
+        // approached.  Carry the closed terminal status to the checked source
+        // session so it can durably record the outer cancellation outcome
+        // without treating this pre-dispatch refusal as a failed provider
+        // attempt.
+        if self.handler.runner.cancelled(&self.handler.config) {
+            return SourceProposalOutcome {
+                terminal_failure: Some(SourceTerminalStatus::Cancelled),
+                result: Err(vec![Diagnostic::io(
+                    "SPX-I239",
+                    "OpenCode source checkpoint cancelled before dispatch",
+                )]),
+                model_dispatches: 0,
+            };
+        }
         let turn = match u32::try_from(request.turn) {
             Ok(turn) => turn,
             Err(_) => return closed_outcome("OpenCode durable source turn exceeds u32"),

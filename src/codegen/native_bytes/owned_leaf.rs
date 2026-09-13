@@ -5,6 +5,7 @@ use super::ByteSlot;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) enum OwnedLeafKind {
     Bytes,
+    String,
     Vec,
     Box,
     Iter,
@@ -14,6 +15,7 @@ impl OwnedLeafKind {
     pub(super) fn c_type(self) -> &'static str {
         match self {
             Self::Bytes => "spx_bytes_v1",
+            Self::String => "char *",
             Self::Vec => "spx_vec_v1",
             Self::Box => "spx_box_v1",
             Self::Iter => "spx_iter_v1",
@@ -23,6 +25,7 @@ impl OwnedLeafKind {
     pub(super) fn move_call(self, source: &str) -> String {
         match self {
             Self::Bytes => format!("spx_bytes_move(&{source})"),
+            Self::String => source.to_owned(),
             Self::Vec => format!("spx_vec_move(spx_ctx, &{source})"),
             Self::Box => format!("spx_box_move(spx_ctx, &{source})"),
             Self::Iter => format!("spx_iter_move(spx_ctx, &{source})"),
@@ -32,6 +35,7 @@ impl OwnedLeafKind {
     pub(super) fn drop_call(self, value: &str) -> String {
         match self {
             Self::Bytes => format!("spx_bytes_drop(&{value})"),
+            Self::String => format!("spx_string_drop({value})"),
             Self::Vec => format!("spx_vec_drop(spx_ctx, &{value})"),
             Self::Box => format!("spx_box_drop(spx_ctx, &{value})"),
             Self::Iter => format!("spx_iter_drop(spx_ctx, &{value})"),

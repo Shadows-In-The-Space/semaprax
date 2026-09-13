@@ -45,7 +45,9 @@ mod mixed_result_tests;
 mod nested_shape;
 mod path_join;
 mod renewal;
+mod strings;
 use renewal::validate_join_compatibility;
+use strings::temporary_place;
 mod record_destructure;
 mod resolved_call;
 mod schema;
@@ -2841,7 +2843,7 @@ fn validate_exits(
                 CleanupResultSource::Owned { storage: result } => {
                     if !matches!(
                         function.return_type,
-                        ResolvedType::Nominal { .. } | ResolvedType::Bytes
+                        ResolvedType::Nominal { .. } | ResolvedType::Bytes | ResolvedType::String
                     ) || !type_needs_drop(program, function, &function.return_type)?
                         || result.storage != StorageId::ProvisionalResult
                         || !result.projections.is_empty()
@@ -3484,6 +3486,10 @@ fn expression_skeleton(
             }
             Frame::Eval(expression) => {
                 debug_assert!(produced.is_none());
+                if strings::owns_clone(expression) {
+                    produced = Some(strings::paths(expression, work)?);
+                    continue;
+                }
                 if crate::hir::iterator_loop::renewal_binding(function, &expression.id).is_some() {
                     push_frame!(frames, Frame::RenewalPrefix(expression));
                 }
@@ -6301,18 +6307,6 @@ fn transfer_completed_paths(
     Ok(paths)
 }
 
-fn temporary_place(
-    expression: &ResolvedExpr,
-    work: &mut SkeletonWork<'_, '_>,
-) -> Result<CleanupPlace, Diagnostic> {
-    Ok(CleanupPlace {
-        storage: StorageId::Temporary(
-            work.clone_owned(&expression.id, "temporary-place expression clone")?,
-        ),
-        projections: Vec::new(),
-    })
-}
-
 fn cleanup_place_from_hir(
     function: &ResolvedFunction,
     place: &crate::hir::Place,
@@ -6851,7 +6845,7 @@ fn execute_replay_transition(
             case,
             ..
         } => {
-            if variant.as_str() == crate::iterator_ops::STEP_ID
+            if strings::needs_complete_case_domain(program, variant)
                 && !state
                     .conditional_variants
                     .iter()
@@ -7153,14 +7147,14 @@ fn materialize_constructed_variant(
     state.conditional_variants.push(ReplayConditionalVariant {
         root: source.clone(),
         variant: variant.clone(),
-        cases: if variant.as_str() == crate::iterator_ops::STEP_ID {
+        cases: if strings::needs_complete_case_domain(program, variant) {
             // Independently retain every guarded case after authenticating
             // the constructed payload; inactive runtime flags remain dead.
             program
                 .declarations
                 .variant_cases(variant)
                 .ok_or_else(|| {
-                    replay_error(function, "constructed iterator step has no case domain")
+                    replay_error(function, "constructed owning variant has no case domain")
                 })?
                 .iter()
                 .map(|candidate| {

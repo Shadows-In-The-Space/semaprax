@@ -17,8 +17,11 @@ use super::native_emit::{c_case_symbol, c_field_symbol};
 mod nested_owned;
 mod owned_leaf;
 mod record_if;
+mod scalar_match_scope;
+mod string_slots;
 mod variant_match;
 use owned_leaf::{emit_transfer, OwnedLeafKind};
+use scalar_match_scope::ScopeExit;
 
 #[derive(Clone, Debug)]
 pub(super) struct NativeBytesPlan {
@@ -26,7 +29,7 @@ pub(super) struct NativeBytesPlan {
     storage_leaves: BTreeMap<StorageId, Vec<CleanupPlace>>,
     transitions: BTreeMap<ExpressionId, Vec<CleanupTransition>>,
     finalizers: Vec<ByteSlot>,
-    scope_exits: Vec<(BTreeSet<StorageId>, Vec<ByteSlot>)>,
+    scope_exits: Vec<ScopeExit>,
     referenced_places: BTreeSet<CleanupPlace>,
     inactive_places: BTreeSet<CleanupPlace>,
     variant_storage: BTreeSet<StorageId>,
@@ -60,6 +63,7 @@ impl NativeBytesPlan {
                 &mut |place, flag, lifecycle| {
                     let kind = match lifecycle.as_str() {
                         crate::cleanup::BYTES_DROP_LIFECYCLE_ID => OwnedLeafKind::Bytes,
+                        crate::cleanup::STRING_DROP_LIFECYCLE_ID => OwnedLeafKind::String,
                         crate::cleanup::ITER_DROP_LIFECYCLE_ID => OwnedLeafKind::Iter,
                         crate::cleanup::VEC_DROP_LIFECYCLE_ID if place.projections.is_empty() => {
                             OwnedLeafKind::Vec
@@ -68,9 +72,7 @@ impl NativeBytesPlan {
                             OwnedLeafKind::Box
                         }
                         _ => {
-                            // This bridge owns only compiler-owned Bytes leaves.
-                            // Authenticated user-resource lifecycles remain under
-                            // the separate native resource cleanup classifier.
+                            // User-resource lifecycles remain under native resource cleanup.
                             return Ok(());
                         }
                     };
@@ -146,41 +148,8 @@ impl NativeBytesPlan {
             })
             .collect::<Vec<_>>();
         let finalizers = canonical_finalizer_order(&terminal_sequences)?;
-        let mut scope_exits = Vec::new();
-        for region in &function.cleanup_plan.regions {
-            let storage = region
-                .slots
-                .iter()
-                .filter(|storage| storage_leaves.contains_key(*storage))
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            if storage.is_empty() {
-                continue;
-            }
-            if region.parent.is_none() {
-                scope_exits.push((storage, Vec::new()));
-                continue;
-            }
-            let exit = function
-                .cleanup_plan
-                .exits
-                .get(region.normal_scope_end.0 as usize)
-                .filter(|exit| exit.id == region.normal_scope_end)
-                .ok_or_else(|| error("Bytes region has no canonical normal-scope exit"))?;
-            if !matches!(
-                exit.continuation,
-                crate::cleanup_plan::ExitContinuation::Continue(_)
-            ) || exit.leaves_regions.as_slice() != [region.id]
-            {
-                return Err(error("Bytes region normal-scope exit is not canonical"));
-            }
-            let actions = exit
-                .finalize_in_order
-                .iter()
-                .filter_map(|action| by_flag.get(&action.guard_flag).cloned())
-                .collect::<Vec<_>>();
-            scope_exits.push((storage, actions));
-        }
+        let scope_exits =
+            scalar_match_scope::build_scope_exits(function, &storage_leaves, &by_flag)?;
         let reachable_cases = reachable_variant_cases(function, &variant_domains, &transitions);
         let variant_storage = variant_domains.keys().cloned().collect();
         let inactive_places = storage_leaves
@@ -277,7 +246,7 @@ impl NativeBytesPlan {
         referenced_places.extend(
             scope_exits
                 .iter()
-                .flat_map(|(_, actions)| actions)
+                .flat_map(ScopeExit::actions)
                 .map(|slot| slot.place.clone()),
         );
         // Result publication materializes the complete variant carrier and
@@ -316,11 +285,7 @@ impl NativeBytesPlan {
             .collect::<BTreeSet<_>>();
         let mut output = String::new();
         for slot in self.slots.values() {
-            // A case-qualified leaf remains part of the exact static
-            // inventory even when a proven payload-free case makes that leaf
-            // unreachable in this function. Keep it visible to the cleanup
-            // bridge without letting strict Clang warning gates reject the
-            // intentionally inert declaration.
+            // Keep static but provably inert case leaves visible to cleanup without warning failures.
             let maybe_unused = if provider_retains_all_slots
                 || (self.inactive_places.contains(&slot.place)
                     && !self.referenced_places.contains(&slot.place))
@@ -387,8 +352,9 @@ impl NativeBytesPlan {
             let slot = &self.slots[place];
             let path = nested_owned::c_field_path(&place.projections)?;
             output.push_str(&format!(
-                "    {} = spx_bytes_move(&({parameter}->{path}));\n",
+                "    {} = {};\n",
                 slot.value,
+                slot.kind.move_call(&format!("({parameter}->{path})")),
             ));
         }
         Ok(output)
@@ -805,9 +771,9 @@ impl NativeBytesPlan {
             let slot = &self.slots[place];
             let path = nested_owned::c_field_path(&place.projections)?;
             output.push_str(&format!(
-                "if (!{}) spx_runtime_invariant_failure(\"dead owned record field\");\n({carrier}).{path} = spx_bytes_move(&{});\n{} = false;\n",
+                "if (!{}) spx_runtime_invariant_failure(\"dead owned record field\");\n({carrier}).{path} = {};\n{} = false;\n",
                 slot.flag,
-                slot.value,
+                slot.kind.move_call(&slot.value),
                 slot.flag,
             ));
         }
@@ -897,8 +863,9 @@ impl NativeBytesPlan {
             let path = nested_owned::c_field_path(relative)?;
             let slot = &self.slots[place];
             output.push_str(&format!(
-                "{} = spx_bytes_move(&(({carrier}).{path}));\n",
+                "{} = {};\n",
                 slot.value,
+                slot.kind.move_call(&format!("(({carrier}).{path})")),
             ));
         }
         Ok(output)
@@ -1016,24 +983,6 @@ impl NativeBytesPlan {
 
     pub(super) fn epilogue(&self) -> String {
         self.emit_finalizers(&self.finalizers, true)
-    }
-
-    pub(super) fn scope_exit(&self, anchors: &BTreeSet<StorageId>) -> Result<String, Diagnostic> {
-        let mut matches = self
-            .scope_exits
-            .iter()
-            .filter(|(storage, _)| storage.iter().any(|slot| anchors.contains(slot)));
-        let Some((_, actions)) = matches.next() else {
-            return if anchors.is_empty() {
-                Ok(String::new())
-            } else {
-                Err(error("Bytes block has no authenticated CleanupPlan region"))
-            };
-        };
-        if matches.next().is_some() {
-            return Err(error("Bytes block maps to multiple CleanupPlan regions"));
-        }
-        Ok(self.emit_finalizers(actions, false))
     }
 
     fn emit_finalizers(&self, finalizers: &[ByteSlot], terminal: bool) -> String {

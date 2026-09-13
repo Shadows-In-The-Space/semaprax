@@ -46,12 +46,13 @@ impl<'a, O: COutput> CEmitter<'a, O> {
     fn emit_scalar_match(
         &mut self,
         expr: &ResolvedExpr,
+        scalar_scrutinee: &ExpressionId,
         scrutinee: &CValue,
         arms: &[hir::ResolvedMatchArm],
     ) -> Result<CValue, Diagnostic> {
         let staged = self.temporary(&scrutinee.ty)?;
         self.line(&format!("{staged} = {};", scrutinee.code));
-        let result = if matches!(expr.ty, ResolvedType::Bytes) {
+        let result = if is_direct_plan_owned(self.program, &expr.ty) {
             self.bytes_plan
                 .ok_or_else(|| backend_error("owned Bytes match has no cleanup plan"))?
                 .value(&crate::cleanup_plan::StorageId::Temporary(expr.id.clone()))?
@@ -61,6 +62,10 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         };
         let matched = self.temporary(&ResolvedType::Bool)?;
         self.line(&format!("{matched} = false;"));
+        // The builder lowers the one admitted guard-free catch-all directly
+        // in its parent region. Every guarded or multi-arm scalar match has
+        // the canonical arm-value child region selected below.
+        let arm_value_has_child_region = arms.len() != 1 || arms[0].guard.is_some();
         for arm in arms {
             let saved = self.variables.clone();
             if let hir::ResolvedMatchPattern::Binding(binding) = &arm.pattern {
@@ -107,12 +112,13 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 // `matched` untouched and falls through to the next arm.
                 let flag = self.emit_expr(guard)?;
                 self.require_type(&flag.ty, &ResolvedType::Bool, "match guard")?;
+                self.emit_scalar_match_guard_scope_exit(guard)?;
                 self.line(&format!("if ({}) {{", flag.code));
                 self.indent += 1;
                 self.line(&format!("{matched} = true;"));
                 let value = self.emit_expr(&arm.value)?;
                 self.require_type(&value.ty, &expr.ty, "match arm result")?;
-                if matches!(expr.ty, ResolvedType::Bytes) {
+                if is_direct_plan_owned(self.program, &expr.ty) {
                     let transitions = self
                         .bytes_plan
                         .expect("checked above")
@@ -120,10 +126,11 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     for line in transitions.lines() {
                         self.line(line);
                     }
-                } else if matches!(value.ty, ResolvedType::String) && self.owned_strings.is_some() {
-                    self.string_move(&result, &value.code);
                 } else {
                     self.line(&format!("{result} = {};", value.code));
+                }
+                if arm_value_has_child_region {
+                    self.emit_scalar_match_value_scope_exit(scalar_scrutinee, &arm.value)?;
                 }
                 self.indent -= 1;
                 self.line("}");
@@ -131,7 +138,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 self.line(&format!("{matched} = true;"));
                 let value = self.emit_expr(&arm.value)?;
                 self.require_type(&value.ty, &expr.ty, "match arm result")?;
-                if matches!(expr.ty, ResolvedType::Bytes) {
+                if is_direct_plan_owned(self.program, &expr.ty) {
                     let transitions = self
                         .bytes_plan
                         .expect("checked above")
@@ -139,10 +146,11 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     for line in transitions.lines() {
                         self.line(line);
                     }
-                } else if matches!(value.ty, ResolvedType::String) && self.owned_strings.is_some() {
-                    self.string_move(&result, &value.code);
                 } else {
                     self.line(&format!("{result} = {};", value.code));
+                }
+                if arm_value_has_child_region {
+                    self.emit_scalar_match_value_scope_exit(scalar_scrutinee, &arm.value)?;
                 }
             }
             self.variables = saved;
@@ -155,92 +163,6 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         Ok(CValue {
             code: result,
             ty: expr.ty.clone(),
-        })
-    }
-
-    fn emit_string_op(
-        &mut self,
-        op: crate::string_ops::StringOp,
-        args: &[ResolvedExpr],
-        result_type: &ResolvedType,
-    ) -> Result<CValue, Diagnostic> {
-        // Arguments stage left-to-right; every argument evaluation yields a
-        // fresh caller-owned buffer, and consuming operations free their
-        // inputs exactly at the operation site like owned string equality.
-        let mut arguments = Vec::with_capacity(args.len());
-        for (index, argument) in args.iter().enumerate() {
-            let value = self.emit_expr(argument)?;
-            self.require_type(
-                &value.ty,
-                &op.param_types()[index],
-                "string operation argument",
-            )?;
-            arguments.push(value);
-        }
-        self.require_type(result_type, &op.return_type(), "string operation result")?;
-        let temporary = self.temporary(&op.return_type())?;
-        match op {
-            crate::string_ops::StringOp::Len => {
-                let input = &arguments[0].code;
-                self.line(&format!("{temporary} = spx_string_len({input});"));
-                self.string_drop(input);
-            }
-            crate::string_ops::StringOp::IsEmpty => {
-                let input = &arguments[0].code;
-                self.line(&format!("{temporary} = spx_string_is_empty({input});"));
-                self.string_drop(input);
-            }
-            crate::string_ops::StringOp::Concat => {
-                let left = &arguments[0].code;
-                let right = &arguments[1].code;
-                self.line(&format!(
-                    "{temporary} = spx_string_concat({left}, {right});"
-                ));
-                self.string_drop(left);
-                self.string_drop(right);
-            }
-            crate::string_ops::StringOp::StartsWith => {
-                let value = &arguments[0].code;
-                let prefix = &arguments[1].code;
-                self.line(&format!(
-                    "{temporary} = spx_string_starts_with({value}, {prefix});"
-                ));
-                self.string_drop(value);
-                self.string_drop(prefix);
-            }
-            crate::string_ops::StringOp::Contains => {
-                let value = &arguments[0].code;
-                let needle = &arguments[1].code;
-                self.line(&format!(
-                    "{temporary} = spx_string_contains({value}, {needle});"
-                ));
-                self.string_drop(value);
-                self.string_drop(needle);
-            }
-            crate::string_ops::StringOp::LenChars => {
-                let input = &arguments[0].code;
-                self.line(&format!("{temporary} = spx_string_len_chars({input});"));
-                self.string_drop(input);
-            }
-            crate::string_ops::StringOp::FromChar => {
-                let scalar = &arguments[0].code;
-                self.line(&format!("{temporary} = spx_string_from_char({scalar});"));
-            }
-            crate::string_ops::StringOp::FromI64 => {
-                let value = &arguments[0].code;
-                self.line(&format!("{temporary} = spx_string_from_i64({value});"));
-            }
-            crate::string_ops::StringOp::FromUsize => {
-                let value = &arguments[0].code;
-                self.line(&format!("{temporary} = spx_string_from_usize({value});"));
-            }
-        }
-        if matches!(op.return_type(), ResolvedType::String) {
-            self.string_initialize(&temporary);
-        }
-        Ok(CValue {
-            code: temporary,
-            ty: op.return_type(),
         })
     }
 
@@ -298,6 +220,69 @@ impl<'a, O: COutput> CEmitter<'a, O> {
             code: temporary,
             ty: op.return_type(),
         })
+    }
+
+    /// Own String temporary descendants in scalar-match guards and arm values
+    /// are each scoped by their own canonical child region. The cleanup plan
+    /// determines both the region and its finalizer order; lowering only
+    /// supplies the anchors and emits that exit after the expression's output
+    /// has been consumed by the parent match region.
+    fn scalar_match_string_temporary_anchors(
+        &self,
+        expression: &ResolvedExpr,
+    ) -> BTreeSet<crate::cleanup_plan::StorageId> {
+        let Some(plan) = self.bytes_plan else {
+            return BTreeSet::new();
+        };
+        let mut anchors = BTreeSet::new();
+        let mut pending = vec![expression];
+        while let Some(expression) = pending.pop() {
+            if matches!(expression.ty, ResolvedType::String) {
+                let storage = crate::cleanup_plan::StorageId::Temporary(expression.id.clone());
+                if plan.value(&storage).is_ok() {
+                    anchors.insert(storage);
+                }
+            }
+            pending.extend(super::resolved_expr_children(expression));
+        }
+        anchors
+    }
+
+    fn emit_scalar_match_guard_scope_exit(
+        &mut self,
+        guard: &ResolvedExpr,
+    ) -> Result<(), Diagnostic> {
+        let anchors = self.scalar_match_string_temporary_anchors(guard);
+        if anchors.is_empty() {
+            return Ok(());
+        }
+        let cleanup = self
+            .bytes_plan
+            .ok_or_else(|| backend_error("String match guard has no cleanup plan"))?
+            .scalar_match_guard_scope_exit(&guard.id, &anchors)?;
+        for line in cleanup.lines() {
+            self.line(line);
+        }
+        Ok(())
+    }
+
+    fn emit_scalar_match_value_scope_exit(
+        &mut self,
+        scalar_scrutinee: &ExpressionId,
+        value: &ResolvedExpr,
+    ) -> Result<(), Diagnostic> {
+        let anchors = self.scalar_match_string_temporary_anchors(value);
+        if anchors.is_empty() {
+            return Ok(());
+        }
+        let cleanup = self
+            .bytes_plan
+            .ok_or_else(|| backend_error("String match arm value has no cleanup plan"))?
+            .scalar_match_value_scope_exit(scalar_scrutinee, &anchors)?;
+        for line in cleanup.lines() {
+            self.line(line);
+        }
+        Ok(())
     }
 
     fn emit_byte_op(
@@ -575,29 +560,67 @@ impl<'a, O: COutput> CEmitter<'a, O> {
             }
             ResolvedExprKind::String(value) => {
                 self.require_type(&expr.ty, &ResolvedType::String, "string literal")?;
-                let temporary = self.temporary(&ResolvedType::String)?;
+                let temporary = self
+                    .bytes_plan
+                    .ok_or_else(|| backend_error("owned String literal has no cleanup plan"))?
+                    .value(&crate::cleanup_plan::StorageId::Temporary(expr.id.clone()))?
+                    .to_owned();
                 self.line(&format!(
                     "{temporary} = spx_string_from_literal(\"{}\", UINT64_C({}));",
                     c_string(value),
                     value.len()
                 ));
-                self.string_initialize(&temporary);
-                CValue {
+                let value = CValue {
                     code: temporary,
+                    ty: ResolvedType::String,
+                };
+                self.apply_owned_plan_at_value(&expr.id, &value)?;
+                CValue {
+                    code: self
+                        .bytes_plan
+                        .and_then(|plan| plan.result_at(&expr.id))
+                        .ok_or_else(|| {
+                            backend_error("owned String literal has no canonical result transfer")
+                        })?
+                        .to_owned(),
                     ty: ResolvedType::String,
                 }
             }
             ResolvedExprKind::Place(place) => {
                 let value = self.emit_place(place)?;
                 self.require_type(&expr.ty, &value.ty, "place expression")?;
-                // Every read of an owned string place yields a fresh buffer so
-                // the source place keeps its unique owner.
-                if matches!(value.ty, ResolvedType::String) {
-                    let temporary = self.temporary(&ResolvedType::String)?;
+                // An owning String read yields a fresh buffer so the source
+                // place keeps its unique owner. A borrowed String place is
+                // already an authenticated view of its carrier and must stay
+                // an alias: cloning it would create an unplanned owner.
+                if matches!(value.ty, ResolvedType::String)
+                    && expr.ownership == hir::OwnershipMode::Own
+                {
+                    let temporary = self
+                        .bytes_plan
+                        .ok_or_else(|| {
+                            backend_error("owned String place read has no cleanup plan")
+                        })?
+                        .value(&crate::cleanup_plan::StorageId::Temporary(expr.id.clone()))?
+                        .to_owned();
                     self.line(&format!("{temporary} = spx_string_clone({});", value.code));
-                    self.string_initialize(&temporary);
+                    self.apply_owned_plan_at_value(
+                        &expr.id,
+                        &CValue {
+                            code: temporary,
+                            ty: ResolvedType::String,
+                        },
+                    )?;
                     return Ok(CValue {
-                        code: temporary,
+                        code: self
+                            .bytes_plan
+                            .and_then(|plan| plan.result_at(&expr.id))
+                            .ok_or_else(|| {
+                                backend_error(
+                                    "owned String place read has no canonical result transfer",
+                                )
+                            })?
+                            .to_owned(),
                         ty: value.ty,
                     });
                 }
@@ -868,7 +891,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                         return self.emit_byte_op(op, args, &expr.ty, &expr.id);
                     }
                     if let Some(op) = crate::string_ops::by_id(callee.as_str()) {
-                        return self.emit_string_op(op, args, &expr.ty);
+                        return self.emit_string_op(op, args, &expr.ty, &expr.id);
                     }
                 }
                 self.emit_user_call_expr(expr, callee, instance.as_ref(), args)
@@ -974,79 +997,67 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         values: Vec<CValue>,
     ) -> Result<CValue, Diagnostic> {
         let mut arguments = Vec::with_capacity(args.len());
-        let mut string_arguments = Vec::new();
         for (index, (expected, argument)) in target.params.iter().zip(values).enumerate() {
             self.require_type(&argument.ty, expected, &format!("call argument {index}"))?;
-            arguments.push(
-                if matches!(expected, ResolvedType::String) && self.owned_strings.is_some() {
-                    // Aliases carry values only across the non-failing commit;
-                    // the caller cells remain the sole owners until all staging ends.
-                    let alias = format!("spx_string_argument_{}", self.next_local);
-                    self.next_local += 1;
-                    self.line(&format!("char *{alias} = {};", argument.code));
-                    string_arguments.push(argument.code);
-                    alias
-                } else if is_direct_plan_owned(self.program, expected) {
-                    match target.param_ownerships[index] {
-                        hir::OwnershipMode::Own => {
-                            let plan = self.bytes_plan.ok_or_else(|| {
-                                backend_error("owned call has no canonical cleanup plan")
-                            })?;
-                            let parameter_index = u32::try_from(index).map_err(|_| {
-                                backend_error("native call has too many parameters")
-                            })?;
-                            let (value, _, is_vec) =
-                                plan.call_argument(&expr.id, parameter_index)?;
-                            if argument.code != value {
-                                return Err(backend_error(
-                                    "owned call argument was not staged in its canonical epoch",
-                                ));
-                            }
-                            if crate::iterator_ops::is_iter(expected) {
-                                format!("spx_iter_move(spx_ctx, &{value})")
-                            } else if crate::cleanup::is_owned_bounded_box_type(expected) {
-                                format!("spx_box_move(spx_ctx, &{value})")
-                            } else if is_vec {
-                                format!("spx_vec_move(spx_ctx, &{value})")
-                            } else {
-                                format!("spx_bytes_move(&{value})")
-                            }
-                        }
-                        hir::OwnershipMode::Borrow => format!("&({})", argument.code),
-                        _ => {
+            arguments.push(if is_direct_plan_owned(self.program, expected) {
+                match target.param_ownerships[index] {
+                    hir::OwnershipMode::Own => {
+                        let plan = self.bytes_plan.ok_or_else(|| {
+                            backend_error("owned call has no canonical cleanup plan")
+                        })?;
+                        let parameter_index = u32::try_from(index)
+                            .map_err(|_| backend_error("native call has too many parameters"))?;
+                        let (value, _, is_vec) = plan.call_argument(&expr.id, parameter_index)?;
+                        if argument.code != value {
                             return Err(backend_error(
-                                "owned call argument lacks validated ownership classification",
+                                "owned call argument was not staged in its canonical epoch",
                             ));
                         }
-                    }
-                } else if is_aggregate_type(self.program, expected)? {
-                    if target.param_ownerships[index] == hir::OwnershipMode::Own {
-                        if let Some(plan) = self.bytes_plan {
-                            let parameter_index = u32::try_from(index).map_err(|_| {
-                                backend_error("native call has too many parameters")
-                            })?;
-                            let storage = plan.call_argument_storage(&expr.id, parameter_index)?;
-                            let materialize = if plan.has_variant_leaves(&storage) {
-                                let layout = self.variant_layout(expected)?;
-                                plan.materialize_variant_carrier(
-                                    &storage,
-                                    &argument.code,
-                                    &argument.code,
-                                    &layout,
-                                )?
-                            } else {
-                                plan.materialize_record_carrier(&storage, &argument.code)?
-                            };
-                            for line in materialize.lines() {
-                                self.line(line);
-                            }
+                        if crate::iterator_ops::is_iter(expected) {
+                            format!("spx_iter_move(spx_ctx, &{value})")
+                        } else if crate::cleanup::is_owned_bounded_box_type(expected) {
+                            format!("spx_box_move(spx_ctx, &{value})")
+                        } else if is_vec {
+                            format!("spx_vec_move(spx_ctx, &{value})")
+                        } else if matches!(expected, ResolvedType::String) {
+                            value.to_owned()
+                        } else {
+                            format!("spx_bytes_move(&{value})")
                         }
                     }
-                    format!("&({})", argument.code)
-                } else {
-                    argument.code
-                },
-            );
+                    hir::OwnershipMode::Borrow => format!("&({})", argument.code),
+                    _ => {
+                        return Err(backend_error(
+                            "owned call argument lacks validated ownership classification",
+                        ))
+                    }
+                }
+            } else if is_aggregate_type(self.program, expected)? {
+                if target.param_ownerships[index] == hir::OwnershipMode::Own {
+                    if let Some(plan) = self.bytes_plan {
+                        let parameter_index = u32::try_from(index)
+                            .map_err(|_| backend_error("native call has too many parameters"))?;
+                        let storage = plan.call_argument_storage(&expr.id, parameter_index)?;
+                        let materialize = if plan.has_variant_leaves(&storage) {
+                            let layout = self.variant_layout(expected)?;
+                            plan.materialize_variant_carrier(
+                                &storage,
+                                &argument.code,
+                                &argument.code,
+                                &layout,
+                            )?
+                        } else {
+                            plan.materialize_record_carrier(&storage, &argument.code)?
+                        };
+                        for line in materialize.lines() {
+                            self.line(line);
+                        }
+                    }
+                }
+                format!("&({})", argument.code)
+            } else {
+                argument.code
+            });
             if is_aggregate_type(self.program, expected)?
                 && target.param_ownerships[index] == hir::OwnershipMode::Borrow
             {
@@ -1100,15 +1111,6 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         } else {
             self.call_result_temporary(&target.return_type)?
         };
-        for source in &string_arguments {
-            self.line(&format!(
-                "if (!{source}_live) spx_runtime_invariant_failure(\"dead String argument\");"
-            ));
-        }
-        for source in string_arguments {
-            self.line(&format!("{source}_live = false;"));
-            self.line(&format!("{source} = NULL;"));
-        }
         self.line(&format!(
             "spx_status = {}(spx_ctx{}{}, &{temporary});",
             target.symbol,
@@ -1130,7 +1132,9 @@ impl<'a, O: COutput> CEmitter<'a, O> {
             }
         }
         self.line("if (spx_status != SPX_STATUS_SUCCESS) goto spx_epilogue;");
-        if matches!(target.return_type, ResolvedType::String) {
+        if matches!(target.return_type, ResolvedType::String)
+            && !is_direct_plan_owned(self.program, &target.return_type)
+        {
             self.string_initialize(&temporary);
         }
         if is_aggregate_type(self.program, &target.return_type)? {
@@ -1417,17 +1421,19 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 // their own buffer when the block exits; outer bindings and
                 // the tail value are untouched. The order is sorted so the
                 // projection stays byte-deterministic.
-                let mut introduced_strings: Vec<String> = self
-                    .variables
-                    .iter()
-                    .filter(|(id, binding)| {
-                        matches!(binding.ty, ResolvedType::String) && !saved.contains_key(*id)
-                    })
-                    .map(|(_, binding)| binding.name.clone())
-                    .collect();
-                introduced_strings.sort();
-                for name in introduced_strings {
-                    self.string_drop(&name);
+                if self.bytes_plan.is_none() {
+                    let mut introduced_strings: Vec<String> = self
+                        .variables
+                        .iter()
+                        .filter(|(id, binding)| {
+                            matches!(binding.ty, ResolvedType::String) && !saved.contains_key(*id)
+                        })
+                        .map(|(_, binding)| binding.name.clone())
+                        .collect();
+                    introduced_strings.sort();
+                    for name in introduced_strings {
+                        self.string_drop(&name);
+                    }
                 }
                 if is_direct_plan_owned(self.program, &tail.ty) {
                     let plan = self.bytes_plan.ok_or_else(|| {
@@ -1585,7 +1591,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     if field.size != 0 && self.record_contains_owned_bytes(&field.ty)? {
                         let destination = format!("{temporary}.{}", c_field_symbol(&field.field));
                         self.move_owned_record_fields(&destination, &value.code, &field.ty)?;
-                    } else if field.size != 0 && !matches!(field.ty, ResolvedType::Bytes) {
+                    } else if field.size != 0 && !is_direct_plan_owned(self.program, &field.ty) {
                         self.line(&format!(
                             "{temporary}.{} = {};",
                             c_field_symbol(&field.field),
@@ -1641,7 +1647,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                             })?;
                     let value = self.emit_expr(&initializer.value)?;
                     self.require_type(&value.ty, &field.ty, "variant field initializer")?;
-                    if matches!(field.ty, ResolvedType::Bytes)
+                    if is_direct_plan_owned(self.program, &field.ty)
                         || crate::iterator_ops::is_iter(&field.ty)
                     {
                         let plan = self.bytes_plan.ok_or_else(|| {
@@ -1666,7 +1672,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 let case_symbol = c_case_symbol(case);
                 for (field, value) in values {
                     if field.size != 0
-                        && !matches!(field.ty, ResolvedType::Bytes)
+                        && !is_direct_plan_owned(self.program, &field.ty)
                         && !crate::iterator_ops::is_iter(&field.ty)
                     {
                         self.line(&format!(
@@ -1733,6 +1739,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     }
                     _ => None,
                 };
+                let scalar_scrutinee = scrutinee.id.clone();
                 let scrutinee = self.emit_expr(scrutinee)?;
                 // Refutable Match v1: Copy-scalar scrutinees lower to the
                 // literal/guard decision chain; aggregates keep the exact
@@ -1745,7 +1752,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                         | ResolvedType::Char
                         | ResolvedType::Bool
                 ) {
-                    return self.emit_scalar_match(expr, &scrutinee, arms);
+                    return self.emit_scalar_match(expr, &scalar_scrutinee, &scrutinee, arms);
                 }
                 if let Some(record) = record_declaration_id(self.program, &scrutinee.ty)?.cloned() {
                     let [arm] = arms.as_slice() else {
@@ -1897,7 +1904,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     "if ({staged}.spx_tag >= UINT32_C({})) spx_runtime_invariant_failure(\"invalid variant tag\");",
                     layout.cases.len()
                 ));
-                let result = if matches!(expr.ty, ResolvedType::Bytes) {
+                let result = if is_direct_plan_owned(self.program, &expr.ty) {
                     self.bytes_plan
                         .ok_or_else(|| backend_error("owned Bytes match has no cleanup plan"))?
                         .value(&crate::cleanup_plan::StorageId::Temporary(expr.id.clone()))?
@@ -1957,7 +1964,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                                     &field.ty,
                                     "match payload binding",
                                 )?;
-                                let name = if matches!(field.ty, ResolvedType::Bytes)
+                                let name = if is_direct_plan_owned(self.program, &field.ty)
                                     || crate::iterator_ops::is_iter(&field.ty)
                                 {
                                     match (*mode, pattern_field.binding.ownership) {
@@ -1976,14 +1983,19 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                                         (
                                             hir::ResolvedMatchMode::Borrow,
                                             hir::OwnershipMode::Borrow,
+                                        ) if matches!(field.ty, ResolvedType::String) => format!(
+                                            "({staged}).spx_payload.{case_symbol}.{}",
+                                            c_field_symbol(&field.field)
+                                        ),
+                                        (
+                                            hir::ResolvedMatchMode::Borrow,
+                                            hir::OwnershipMode::Borrow,
                                         ) => source_storage
                                             .as_ref()
                                             .and_then(|storage| {
                                                 self.bytes_plan.and_then(|plan| {
                                                     plan.variant_value_if_present(
-                                                        storage,
-                                                        case,
-                                                        &field.field,
+                                                        storage, case, &field.field,
                                                     )
                                                 })
                                             })
@@ -1991,21 +2003,14 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                                             .or_else(|| {
                                                 let crate::cleanup_plan::StorageId::Value(root) =
                                                     source_storage.as_ref()?
-                                                else {
-                                                    return None;
-                                                };
+                                                else { return None; };
                                                 self.borrowed_aggregate_bytes
-                                                    .get(&(
-                                                        root.clone(),
-                                                        vec![case.clone(), field.field.clone()],
-                                                    ))
+                                                    .get(&(root.clone(), vec![case.clone(), field.field.clone()]))
                                                     .cloned()
                                             })
-                                            .ok_or_else(|| {
-                                                backend_error(
-                                                    "borrowed variant Bytes field has no authenticated alias",
-                                                )
-                                            })?,
+                                            .ok_or_else(|| backend_error(
+                                                "borrowed variant Bytes field has no authenticated alias",
+                                            ))?,
                                         _ => {
                                             return Err(backend_error(
                                                 "variant Bytes binding ownership disagrees with match mode",
@@ -2060,7 +2065,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     }
                     let value = self.emit_expr(&arm.value)?;
                     self.require_type(&value.ty, &expr.ty, "match arm result")?;
-                    if matches!(expr.ty, ResolvedType::Bytes) {
+                    if is_direct_plan_owned(self.program, &expr.ty) {
                         let transitions = self
                             .bytes_plan
                             .expect("checked above")
@@ -2070,10 +2075,6 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                         }
                     } else if aggregate_result && expr.ownership == hir::OwnershipMode::Own {
                         self.copy_variant_join_carrier(&result, &value.code, &expr.ty)?;
-                    } else if matches!(value.ty, ResolvedType::String)
-                        && self.owned_strings.is_some()
-                    {
-                        self.string_move(&result, &value.code);
                     } else {
                         self.line(&format!("{result} = {};", value.code));
                     }
@@ -2218,7 +2219,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     ))
                 })?;
                 self.require_type(&expr.ty, &field.ty, "record projection")?;
-                if matches!(field.ty, ResolvedType::Bytes) {
+                if is_direct_plan_owned(self.program, &field.ty) {
                     let plan = self.bytes_plan.ok_or_else(|| {
                         backend_error("owned Bytes projection has no canonical cleanup plan")
                     })?;
@@ -2439,8 +2440,8 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 "aggregate equality is outside executable copy variants v1",
             ));
         }
-        // Owned strings compare by UTF-8 contents; both operand buffers stay
-        // owned by this expression and are freed right after the comparison.
+        // Owned strings compare by UTF-8 contents; their canonical plan
+        // regions retain cleanup responsibility after the comparison.
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && matches!(left.ty, ResolvedType::String) {
             let right = self.emit_expr(right)?;
             self.require_type(&right.ty, &ResolvedType::String, "binary right operand")?;
@@ -2452,8 +2453,6 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 format!("!spx_string_eq({}, {})", left.code, right.code)
             };
             self.line(&format!("{temporary} = {comparison};"));
-            self.string_drop(&left.code);
-            self.string_drop(&right.code);
             return Ok(CValue {
                 code: temporary,
                 ty: ResolvedType::Bool,

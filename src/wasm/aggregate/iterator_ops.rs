@@ -92,7 +92,9 @@ impl Emitter<'_> {
                     ty: field.ty.clone(),
                 }
             };
-            if field.ty == ResolvedType::Bytes && mode == crate::hir::ResolvedMatchMode::Borrow {
+            if matches!(&field.ty, ResolvedType::Bytes | ResolvedType::String)
+                && mode == crate::hir::ResolvedMatchMode::Borrow
+            {
                 self.copy_borrowed_scalar_alias(&destination, &source)?;
             } else {
                 self.copy_value(&destination, &source, "variant match field binding")?;

@@ -12,13 +12,13 @@ impl PlanBuilder<'_> {
         if !self.needs_drop(ty)? {
             return Ok(FieldLivenessShape::NoDrop);
         }
-        if matches!(ty, ResolvedType::Bytes) {
+        if let Some(id) = crate::cleanup::primitive_leaf_lifecycle(ty) {
             let flag = LivenessFlagId(self.next_flag);
             self.next_flag = self
                 .next_flag
                 .checked_add(1)
                 .ok_or_else(|| plan_error("too many cleanup liveness flags"))?;
-            let lifecycle = DeclarationId::new(crate::cleanup::BYTES_DROP_LIFECYCLE_ID);
+            let lifecycle = DeclarationId::new(id);
             self.leaves.insert(
                 flag,
                 LeafMetadata {

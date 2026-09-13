@@ -172,6 +172,10 @@ fn scalar_success_trace_has_an_exact_canonical_projection() {
         trace_result_json(&TraceResult::Bytes),
         "{\"kind\":\"bytes\"}"
     );
+    assert_eq!(
+        trace_result_json(&TraceResult::String),
+        "{\"kind\":\"string\"}"
+    );
 }
 
 #[test]

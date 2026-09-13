@@ -704,6 +704,32 @@ impl<'a> TypeTable<'a> {
                 && cases.len() == 2)
     }
 
+    /// Direct, monomorphic owned-string variant profile. `string` is a
+    /// uniquely owned leaf, so it is deliberately separate from Bytes and
+    /// cannot be selected by a generic instantiation.
+    pub(super) fn is_flat_owned_string_variant(&self, ty: &Type) -> bool {
+        let Type::Named { name, arguments } = ty else {
+            return false;
+        };
+        if !arguments.is_empty() || matches!(name.as_str(), "Option" | "Result") {
+            return false;
+        }
+        let Some(declaration) = self.declaration(name) else {
+            return false;
+        };
+        let TypeDeclarationKind::Variant { cases } = &declaration.kind else {
+            return false;
+        };
+        declaration.type_parameters.is_empty()
+            && cases
+                .iter()
+                .flat_map(|case| &case.fields)
+                .any(|field| field.ty == Type::String)
+            && cases.iter().flat_map(|case| &case.fields).all(|field| {
+                field.ty == Type::String || owned_byte_record_copy_field_is_admitted(&field.ty)
+            })
+    }
+
     /// Copy Aggregate Variant Payload v1: a variant case field may name a
     /// direct, monomorphic (no type arguments) `record` declaration whose own
     /// fields are, recursively, admitted Copy scalars or further such

@@ -145,7 +145,11 @@ pub(super) enum WireResult {
     I64(i64),
     Bool(bool),
     Unit,
-    Owned { type_id: String },
+    Owned {
+        type_id: String,
+    },
+    /// Owned String success is opaque: no native pointer or content crosses the wire.
+    String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -642,6 +646,7 @@ impl<'a> Reader<'a> {
             4 => Ok(WireResult::Owned {
                 type_id: self.read_identity()?,
             }),
+            5 => Ok(WireResult::String),
             _ => Err(WireDecodeError::UnknownTag {
                 context: "trace result",
                 tag,

@@ -76,7 +76,7 @@ fn derive(
                     shapes.push(FieldLivenessShape::NoDrop);
                     continue;
                 }
-                if matches!(ty, ResolvedType::Bytes) {
+                if let Some(id) = crate::cleanup::primitive_leaf_lifecycle(&ty) {
                     if depth > 1 && !nested_schema(function.cleanup_plan.schema) {
                         return Err(replay_error(
                             function,
@@ -87,7 +87,7 @@ fn derive(
                     let flag = next_flag_id(function, next_flag)?;
                     shapes.push(FieldLivenessShape::Leaf {
                         flag,
-                        lifecycle: DeclarationId::new(crate::cleanup::BYTES_DROP_LIFECYCLE_ID),
+                        lifecycle: DeclarationId::new(id),
                     });
                     continue;
                 }

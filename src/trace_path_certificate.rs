@@ -854,6 +854,7 @@ mod tests {
                 | crate::conformance::TraceResult::F64(_)
                 | crate::conformance::TraceResult::Bool(_) => TracePathOutcome::ScalarSuccess,
                 crate::conformance::TraceResult::Bytes
+                | crate::conformance::TraceResult::String
                 | crate::conformance::TraceResult::Owned { .. } => TracePathOutcome::OwnedSuccess,
                 crate::conformance::TraceResult::Unit => panic!("unit is outside callable v2"),
             },

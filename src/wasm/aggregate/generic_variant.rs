@@ -45,6 +45,7 @@ impl Emitter<'_> {
             .iter()
             .filter(|field| {
                 field.binding.ty == ResolvedType::Bytes
+                    || field.binding.ty == ResolvedType::String
                     || crate::iterator_ops::is_iter(&field.binding.ty)
                     || crate::iterator_ops::is_step(&field.binding.ty)
             })

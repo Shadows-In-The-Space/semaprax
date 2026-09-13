@@ -65,7 +65,14 @@ impl OwnedStrings {
 
 impl<O: super::COutput> super::CEmitter<'_, O> {
     pub(super) fn string_initialize(&mut self, name: &str) {
-        if self.owned_strings.is_some() {
+        if let Some(plan) = self
+            .bytes_plan
+            .and_then(|plan| plan.string_initialize(name))
+        {
+            for line in plan.lines() {
+                self.line(line);
+            }
+        } else if self.owned_strings.is_some() {
             self.line(&format!("{name}_live = true;"));
         }
     }
@@ -91,7 +98,11 @@ impl<O: super::COutput> super::CEmitter<'_, O> {
     }
 
     pub(super) fn string_drop(&mut self, name: &str) {
-        if self.owned_strings.is_some() {
+        if let Some(plan) = self.bytes_plan.and_then(|plan| plan.string_drop(name)) {
+            for line in plan.lines() {
+                self.line(line);
+            }
+        } else if self.owned_strings.is_some() {
             self.line(&format!("if ({name}_live) {{"));
             self.indent += 1;
             self.line(&format!("{name}_live = false;"));

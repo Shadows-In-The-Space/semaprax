@@ -217,50 +217,8 @@ pub fn execute_for_conformance(
     Executor::new(program, function, scenario)?.run()
 }
 
-fn validate_public_result_type(
-    program: &ResolvedProgram,
-    function: &ResolvedFunction,
-) -> Result<(), CleanupExecutionError> {
-    let ResolvedType::Nominal { declaration, .. } = &function.return_type else {
-        return if matches!(function.return_type, ResolvedType::I64 | ResolvedType::Bool) {
-            Ok(())
-        } else {
-            Err(CleanupExecutionError::UnsupportedResultType(
-                function.return_type.identity_key(),
-            ))
-        };
-    };
-    match program
-        .types
-        .iter()
-        .find(|item| item.id == *declaration)
-        .map(|item| &item.kind)
-    {
-        Some(ResolvedTypeDeclarationKind::Resource { .. }) => Ok(()),
-        Some(ResolvedTypeDeclarationKind::Variant { .. })
-            if expression_has_try(&function.body)
-                && program
-                    .declarations
-                    .type_facts(&function.return_type)
-                    .is_some_and(|facts| {
-                        facts.copy && facts.sized && !facts.contains_resource && !facts.needs_drop
-                    }) =>
-        {
-            // The executor authenticates staged Copy-result control/state, but
-            // the public conformance protocol intentionally has no aggregate
-            // value representation. Terminal materialization remains closed.
-            Ok(())
-        }
-        Some(
-            ResolvedTypeDeclarationKind::Record { .. }
-            | ResolvedTypeDeclarationKind::Class { .. }
-            | ResolvedTypeDeclarationKind::Variant { .. },
-        )
-        | None => Err(CleanupExecutionError::UnsupportedResultType(
-            function.return_type.identity_key(),
-        )),
-    }
-}
+mod result_admission;
+use result_admission::validate_public_result_type;
 
 fn collect_variant_domains(
     program: &ResolvedProgram,
@@ -1450,6 +1408,7 @@ impl<'a> Executor<'a> {
             | (ResolvedType::F32, TraceResult::F32(_))
             | (ResolvedType::F64, TraceResult::F64(_)) => true,
             (ResolvedType::Bytes, TraceResult::Bytes) => true,
+            (ResolvedType::String, TraceResult::String) => true,
             (ResolvedType::Nominal { declaration, .. }, TraceResult::Owned { type_id }) => {
                 declaration == type_id
             }
@@ -1469,12 +1428,10 @@ impl<'a> Executor<'a> {
                 | ResolvedType::Bool
                 | ResolvedType::Function { .. },
             ) => true,
-            (CleanupResultSource::Owned { storage }, ResolvedType::Nominal { .. }) => {
-                storage.storage == StorageId::ProvisionalResult && storage.projections.is_empty()
-            }
-            (CleanupResultSource::Owned { storage }, ResolvedType::Bytes) => {
-                storage.storage == StorageId::ProvisionalResult && storage.projections.is_empty()
-            }
+            (
+                CleanupResultSource::Owned { storage },
+                ResolvedType::Nominal { .. } | ResolvedType::Bytes | ResolvedType::String,
+            ) => storage.storage == StorageId::ProvisionalResult && storage.projections.is_empty(),
             (CleanupResultSource::Scalar { .. }, ResolvedType::Nominal { .. })
             | (CleanupResultSource::Scalar { .. }, ResolvedType::Unit)
             | (CleanupResultSource::Scalar { .. }, ResolvedType::String)
@@ -1493,7 +1450,6 @@ impl<'a> Executor<'a> {
                 | ResolvedType::F32
                 | ResolvedType::F64
                 | ResolvedType::Bool
-                | ResolvedType::String
                 | ResolvedType::Str
                 | ResolvedType::SliceU8
                 | ResolvedType::Function { .. },
@@ -1776,7 +1732,7 @@ fn resolve_lifecycle_binding(
     program: &ResolvedProgram,
     lifecycle: &DeclarationId,
 ) -> Result<Option<DeclarationId>, CleanupExecutionError> {
-    if lifecycle.as_str() == crate::cleanup::BYTES_DROP_LIFECYCLE_ID {
+    if matches!(lifecycle.as_str(), "core.bytes.drop" | "core.string.drop") {
         return Ok(None);
     }
     let mut binding = None;

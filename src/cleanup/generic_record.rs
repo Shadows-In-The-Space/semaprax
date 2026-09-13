@@ -30,7 +30,7 @@ impl InventoryBuilder<'_> {
                         shapes.push(FieldLivenessShape::NoDrop);
                         continue;
                     }
-                    if ty == ResolvedType::Bytes {
+                    if let Some(id) = primitive_leaf_lifecycle(&ty) {
                         owned_leaves = owned_leaves.checked_add(1).ok_or_else(|| {
                             cleanup_error("generic cleanup owned-leaf count overflowed")
                         })?;
@@ -43,7 +43,7 @@ impl InventoryBuilder<'_> {
                             u32::try_from(self.flags.len())
                                 .map_err(|_| cleanup_error("too many cleanup liveness flags"))?,
                         );
-                        let lifecycle = DeclarationId::new(BYTES_DROP_LIFECYCLE_ID);
+                        let lifecycle = DeclarationId::new(id);
                         self.flags.push(CleanupFlag {
                             id: flag,
                             place: CleanupPlace {

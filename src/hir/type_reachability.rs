@@ -416,6 +416,52 @@ pub(crate) fn is_admitted_concrete_owned_byte_variant(
             && cases.len() == 2)
 }
 
+/// The direct, monomorphic owned-string variant profile. A string leaf is a
+/// separate owned runtime carrier: it is never a Copy payload and never shares
+/// the owned-Bytes or generic-variant profiles.
+pub(crate) fn is_admitted_owned_string_variant(
+    declarations: &DeclarationIndex,
+    ty: &ResolvedType,
+) -> bool {
+    let ResolvedType::Nominal {
+        declaration,
+        arguments,
+    } = ty
+    else {
+        return false;
+    };
+    if !arguments.is_empty()
+        || matches!(
+            declaration.as_str(),
+            crate::prelude::OPTION_ID | crate::prelude::RESULT_ID
+        )
+    {
+        return false;
+    }
+    let Some(item) = declarations.declaration(declaration) else {
+        return false;
+    };
+    if item.kind != DeclarationKind::Variant
+        || declarations
+            .type_parameters(declaration)
+            .is_none_or(|parameters| !parameters.is_empty())
+    {
+        return false;
+    }
+    declarations
+        .variant_cases(declaration)
+        .is_some_and(|cases| {
+            cases
+                .iter()
+                .flat_map(|case| &case.fields)
+                .any(|field| field.ty == ResolvedType::String)
+                && cases.iter().flat_map(|case| &case.fields).all(|field| {
+                    field.ty == ResolvedType::String
+                        || nested_record_copy_scalar_is_admitted(&field.ty)
+                })
+        })
+}
+
 /// Copy Aggregate Variant Payload v1: the HIR twin of the source-level
 /// `TypeTable::is_admitted_copy_aggregate_variant_field` check. A variant
 /// case field may name a direct, monomorphic `record` declaration whose

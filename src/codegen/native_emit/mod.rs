@@ -35,6 +35,7 @@ mod nested_owned;
 mod network_io;
 mod output_profile;
 mod owned_strings;
+mod string_ops;
 mod string_views;
 mod symbols;
 #[cfg(test)]
@@ -514,7 +515,14 @@ fn program_uses_byte_data(program: &ResolvedProgram) -> bool {
 /// Whether any resolved signature, body, or contract admits an owned string
 /// value that lowers through the string runtime helpers.
 fn program_uses_strings(program: &ResolvedProgram, include_instances: bool) -> bool {
-    string_runtime_functions(program, include_instances).any(function_uses_strings)
+    program.types.iter().any(|declaration| {
+        matches!(
+            &declaration.kind,
+            ResolvedTypeDeclarationKind::Variant { cases }
+                if cases.iter().flat_map(|case| &case.fields)
+                    .any(|field| matches!(field.ty, ResolvedType::String))
+        )
+    }) || string_runtime_functions(program, include_instances).any(function_uses_strings)
 }
 
 fn string_runtime_functions(
@@ -1738,7 +1746,9 @@ fn emit_function(
                     &crate::cleanup_plan::StorageId::Value(parameter.id.clone()),
                     &format!("spx_param_{index}"),
                 )?);
-            } else if is_aggregate_type(program, &parameter.ty)? {
+            } else if parameter.ownership == crate::hir::OwnershipMode::Own
+                && is_aggregate_type(program, &parameter.ty)?
+            {
                 let storage = crate::cleanup_plan::StorageId::Value(parameter.id.clone());
                 if plan.has_projected_leaves(&storage) {
                     if plan.has_variant_leaves(&storage) {
@@ -1804,7 +1814,8 @@ fn emit_function(
             }
         }
     }
-    let track_strings = emission.output_profile.tracks_strings(function);
+    // String values with cleanup-plan slots use that plan as their only owner.
+    let track_strings = emission.output_profile.tracks_strings(function) && bytes_plan.is_none();
     let mut function_body = if track_strings {
         owned_strings::FunctionOutput::Staged(crate::bounded_output::CappedString::new())
     } else {
@@ -2019,7 +2030,7 @@ fn emit_function(
             };
             output.push_str(&format!("    if ({guard}{name}_live) {{ {name}_live = false; spx_string_drop({name}); {name} = NULL; }}\n"));
         }
-    } else {
+    } else if bytes_plan.is_none() {
         for (index, param) in function.params.iter().enumerate() {
             if matches!(param.ty, ResolvedType::String) {
                 output.push_str(&format!("    spx_string_drop(spx_param_{index});\n"));
@@ -2408,41 +2419,6 @@ impl<'a, O: COutput> CEmitter<'a, O> {
 
     fn label(&mut self, value: &str) {
         writeln!(self.output, "{value}: ;").expect("writing to a string cannot fail");
-    }
-
-    fn temporary(&mut self, ty: &ResolvedType) -> Result<String, Diagnostic> {
-        if matches!(ty, ResolvedType::ArrayU8(0)) {
-            return Ok("UINT8_C(0)".to_owned());
-        }
-        let name = format!("spx_internal_{}", self.next_local);
-        self.next_local += 1;
-        if matches!(ty, ResolvedType::String) {
-            if let Some(cells) = &mut self.owned_strings {
-                cells.register(&name, true)?;
-                self.string_require_dead(&name);
-                return Ok(name);
-            }
-        }
-        // A runtime helper writes its out-parameter only on success and the
-        // caller jumps to the epilogue first, but a compiler that cannot prove
-        // that across the status check reports the slot as maybe-uninitialized.
-        // Zero it the way the function result slot already is.
-        self.line(&format!(
-            "{} {name} = {{0}};",
-            c_value_type(self.program, self.resource_abi, ty)?
-        ));
-        Ok(name)
-    }
-
-    fn call_result_temporary(&mut self, ty: &ResolvedType) -> Result<String, Diagnostic> {
-        if matches!(ty, ResolvedType::ArrayU8(0)) {
-            let name = format!("spx_internal_{}", self.next_local);
-            self.next_local += 1;
-            self.line(&format!("uint8_t {name} = UINT8_C(0);"));
-            Ok(name)
-        } else {
-            self.temporary(ty)
-        }
     }
 
     fn require_type(

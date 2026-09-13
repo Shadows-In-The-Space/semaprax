@@ -147,6 +147,15 @@ impl CompiledAgentProposalSchema {
         )
         .map_err(|diagnostic| vec![diagnostic])
     }
+
+    pub(crate) fn stream_envelope_prefix(&self) -> String {
+        format!(
+            "{{\"schema\":{},\"agent_id\":{},\"proposal_schema_digest\":{},\"value\":",
+            quote_json(PROPOSAL_SCHEMA),
+            quote_json(&self.schema.agent_id),
+            quote_json(&self.schema.digest),
+        )
+    }
 }
 
 /// Derives the closed proposal grammar of one AgentDefinition from one checked

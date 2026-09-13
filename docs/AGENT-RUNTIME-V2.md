@@ -52,6 +52,16 @@ with zero host calls, changed-task rejection before store access, uncertain
 intent rejection, and observed-result recovery that executes only the remaining
 two operations.
 
+`bind_agent_runtime_v2_live` is an additive source-proposal binding with no
+submitted proposal inventory. `AgentRuntimeV2::run_live` rejects a runtime that
+was bound with frozen proposal bytes, routes the ordinary `ProposalSource` only
+through the checked iterative lifecycle, and captures the canonical proposal at
+the lifecycle's effect boundary. The typed effect dispatcher therefore cannot
+run for a malformed stream, cancellation before adapter construction, or a
+completed stream whose settlement bytes disagree. The supplied source remains
+an explicit host capability; this route creates no transport, provider, or
+checkpoint authority.
+
 `run_durable` consumes the same bound producer and a caller-owned single-writer
 checkpoint store. A retained snapshot must come from that authorized trusted
 store; hashes do not authenticate host observations. The private producer

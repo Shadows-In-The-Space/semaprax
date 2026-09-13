@@ -1,6 +1,7 @@
 //! Additive typed host boundary bound to exact deployed tool contracts.
 //! Reducers retain Outcome{Bytes,i64}; Bytes contains the canonical typed result.
 pub(crate) mod continuation;
+mod live;
 use super::*;
 pub mod durable;
 use crate::agent_deployment::BoundAgentDeployment;
@@ -369,11 +370,22 @@ impl Dispatch<'_> {
         if self.dispatched >= self.budget.max_calls {
             return Err("call_budget");
         }
-        let lifecycle = &self.compiled.lifecycle;
         let source = self
             .proposals
             .get(self.dispatched)
             .ok_or("proposal_index")?;
+        self.invoke_proposal(authorization, source)
+    }
+
+    fn invoke_proposal(
+        &mut self,
+        authorization: &AuthorizedRequest,
+        source: &str,
+    ) -> Result<Vec<u8>, &'static str> {
+        if self.dispatched >= self.budget.max_calls {
+            return Err("call_budget");
+        }
+        let lifecycle = &self.compiled.lifecycle;
         let decoded = lifecycle
             .inner
             .proposal

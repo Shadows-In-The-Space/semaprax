@@ -3,7 +3,8 @@
 use crate::agent_proposal::{CompiledAgentProposalSchema, DecodedProposal};
 
 use super::{
-    Scanner, StreamRefusal, MAX_STREAM_BYTES, STREAM_BYTES, STREAM_SEMANTIC, STREAM_TRUNCATED,
+    schema_prefix::SchemaPrefix, Scanner, StreamRefusal, MAX_STREAM_BYTES, STREAM_BYTES,
+    STREAM_SEMANTIC, STREAM_TRUNCATED,
 };
 
 /// Source-proposal streaming outcome. It deliberately has its own typed
@@ -35,6 +36,7 @@ pub struct SourceProposalStreamDecoder<'a> {
     buffer: Vec<u8>,
     confirmed_len: usize,
     scan: Scanner,
+    prefix: SchemaPrefix,
     terminal: Option<SourceTerminal>,
 }
 
@@ -49,6 +51,7 @@ impl<'a> SourceProposalStreamDecoder<'a> {
             buffer: Vec::new(),
             confirmed_len: 0,
             scan: Scanner::default(),
+            prefix: SchemaPrefix::new(schema.stream_envelope_prefix()),
             terminal: None,
         }
     }
@@ -82,6 +85,9 @@ impl<'a> SourceProposalStreamDecoder<'a> {
         let base = self.confirmed_len;
         for (offset, byte) in text.bytes().enumerate() {
             if let Err(refusal) = self.scan.step(byte, base + offset) {
+                return self.finalize(SourceTerminal::Refused(refusal));
+            }
+            if let Err(refusal) = self.prefix.step(byte, base + offset) {
                 return self.finalize(SourceTerminal::Refused(refusal));
             }
         }

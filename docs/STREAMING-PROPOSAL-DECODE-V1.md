@@ -62,6 +62,7 @@ document:
 |---|---|
 | Buffered bytes ≤ `MAX_STREAM_BYTES` (65536) | `source.len() > MAX_DOCUMENT_BYTES` (65536) is already refused |
 | First byte must be `{` | A non-object top level already fails `value.as_object()` |
+| Exact compiled outer-envelope prefix through `value` | Canonical rendering emits exactly this closed envelope; unknown, duplicate, reordered, or mismatched outer identities cannot replay canonically |
 | No raw whitespace/control byte outside a string, other than the single terminal `\n` | Canonical rendering never emits whitespace; any inserted whitespace already fails the exact byte-for-byte canonical-replay check |
 | Exactly one trailing `\n`, nothing after | `text.strip_suffix('\n')` plus "no other `\n`/`\r`" is already required |
 | UTF-8 validity | Uses `std::str::from_utf8` — the identical stdlib check the whole decoder itself runs |
@@ -195,17 +196,24 @@ ordinary `ProposalDecoder` seam, while
 through this decoder before the generic kernel can authorize a proposal.
 The bridge waits for `Completed` and the matching adapter settlement before
 calling `finish`; an early streaming refusal requests adapter cancellation and
-does not poll again. This is an offline adapter seam, not a Direct Runtime or
+does not poll again. The source-native counterpart,
+`StreamingSourceProposalAdapter`, feeds `SourceProposalStreamDecoder` through
+the ordinary `ProposalSource` seam. `bind_agent_runtime_v2_live` binds an empty
+frozen proposal inventory and `AgentRuntimeV2::run_live` refuses any runtime
+that was bound with submitted proposal bytes. It reuses the checked typed
+effect dispatcher, so malformed streamed bytes fail before authorization or
+effect dispatch. These are offline injected adapters, not a live provider or
 generated-client integration.
 
 - **Not a JSON parser.** The incremental scanner validates only what it
   needs to bound work and detect the terminal byte early: container
   nesting, string-literal well-formedness, the absence of disallowed raw
-  bytes outside strings, and the exact single-newline framing. It does not
-  itself validate object key/value/comma grammar, number lexical form, or
-  `true`/`false` spelling — full semantic legality is always decided by the
-  one delegated `CompiledInteractionSchema::decode` call, never by this
-  scanner accepting or rejecting on its own authority.
+  bytes outside strings, exact compiled outer-envelope bytes through `value`,
+  and the exact single-newline framing. It does not incrementally validate
+  nested field names, case tags, object commas, number lexical form, or
+  `true`/`false` spelling — full nested semantic legality is always decided
+  by the one delegated `CompiledInteractionSchema::decode` call, never by
+  this scanner accepting or rejecting on its own authority.
 - **No provider prompt/schema projection change.** `provider_json_schema`
   is unchanged, untouched, and out of this module's scope.
 - **No hosted evidence.** Every claim above is local

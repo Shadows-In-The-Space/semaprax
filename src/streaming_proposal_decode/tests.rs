@@ -443,7 +443,8 @@ fn byte_bound_is_enforced_at_its_exact_limit() {
     let outer = compile_outer();
     let mut decoder = ProposalStreamDecoder::new(&outer);
 
-    let mut filler = vec![b'{', b'"'];
+    let mut filler = outer.stream_envelope_prefix().into_bytes();
+    filler.push(b'"');
     filler.resize(MAX_STREAM_BYTES, b'a');
     assert_eq!(filler.len(), MAX_STREAM_BYTES);
 
@@ -473,9 +474,8 @@ fn depth_bound_is_enforced_at_its_exact_limit() {
     let outer = compile_outer();
     let mut decoder = ProposalStreamDecoder::new(&outer);
 
-    // The mandatory leading '{' is depth 1; MAX_STREAM_DEPTH - 1 further
-    // opens reach exactly MAX_STREAM_DEPTH.
-    let mut bytes = vec![b'{'];
+    // The schema envelope retains its opening object at depth 1.
+    let mut bytes = outer.stream_envelope_prefix().into_bytes();
     bytes.extend(std::iter::repeat_n(b'[', MAX_STREAM_DEPTH - 1));
     assert_eq!(
         decoder.push(&bytes),
@@ -496,8 +496,9 @@ fn string_token_bound_is_enforced_at_its_exact_limit() {
     let outer = compile_outer();
     let mut decoder = ProposalStreamDecoder::new(&outer);
 
-    let mut bytes = vec![b'{'];
-    for _ in 0..MAX_STREAM_STRING_TOKENS {
+    let mut bytes = outer.stream_envelope_prefix().into_bytes();
+    // Seven completed envelope strings precede its value.
+    for _ in 0..(MAX_STREAM_STRING_TOKENS - 7) {
         bytes.extend_from_slice(b"\"\"");
     }
     assert_eq!(
@@ -841,4 +842,24 @@ fn bounded_deterministic_fuzz_finds_no_streaming_whole_document_disagreement() {
             .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn interaction_schema_prefix_refuses_wrong_identity_duplicate_or_reordered_keys_without_finish() {
+    let schema = compile_outer();
+    let valid = outer_document(&schema, "1", "true", "ok");
+    let wrong_digest = valid.replacen(schema.schema().digest(), &"0".repeat(64), 1);
+    let duplicate = valid.replacen("\"root_type_id\"", "\"schema\"", 1);
+    for prefix in [
+        b"{\"unknown\"".as_slice(),
+        b"{\"root_type_id\"".as_slice(),
+        wrong_digest.as_bytes(),
+        duplicate.as_bytes(),
+    ] {
+        let mut decoder = ProposalStreamDecoder::new(&schema);
+        assert!(
+            matches!(decoder.push(prefix), PushOutcome::Refused(refusal) if refusal.code == STREAM_SCHEMA_PREFIX),
+            "prefix {prefix:?} must refuse before finish"
+        );
+    }
 }

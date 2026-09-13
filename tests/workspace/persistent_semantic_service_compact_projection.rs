@@ -88,6 +88,25 @@ fn compact_projection_is_exactly_selected_from_the_retained_project_revision() {
     assert_eq!(payload["source_revision"], expected.source_revision());
     assert_eq!(payload["source_digest"], expected.source_digest());
     assert_eq!(payload["value"], expected.to_text());
+    let model = call(
+        &mut session,
+        2,
+        json!({
+            "expected_workspace_revision": workspace,
+            "profile": "api-surface-v8-owned-data", "encoding": "model-text"
+        }),
+    );
+    let model = &success(&model)["payload"];
+    assert_eq!(model["format_version"], 2);
+    assert_eq!(model["authority"], false);
+    let decoded = semaprax::compact_semantic_projection::decode_model_text(
+        model["value"].as_str().unwrap().as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        decoded.reconstructed().unwrap(),
+        expected.reconstructed().unwrap()
+    );
 }
 
 #[test]

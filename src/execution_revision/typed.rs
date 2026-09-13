@@ -64,6 +64,47 @@ impl AgentRuntimeV2 {
             revision: self.revision,
         })
     }
+
+    /// Consume the live source-proposal route. This is only admitted for a
+    /// runtime bound without a frozen proposal inventory, so no caller can
+    /// silently replace committed proposal bytes with provider output.
+    pub fn run_live(
+        self,
+        source: &mut dyn crate::agent_lifecycle::iterative::driver::ProposalSource,
+        read: &mut dyn TypedEffectHandler,
+        cancellation: &AgentCancellation,
+    ) -> Result<AgentRuntimeV2Evidence> {
+        if !self.proposals.is_empty() {
+            return Err(refused(
+                "live source runtime cannot replace a bound proposal inventory",
+            ));
+        }
+        let run = self.lifecycle.run_live(
+            &self.task,
+            source,
+            read,
+            self.budget,
+            self.effects,
+            cancellation,
+        )?;
+        let evidence = root(
+            "semaprax.evidence-root.v3",
+            json!({
+                "execution_revision": self.revision.digest(),
+                "instance_root": self.instance.digest(),
+                "typed_effect_evidence": run.evidence_digest(),
+            }),
+        );
+        Ok(AgentRuntimeV2Evidence {
+            run,
+            evidence,
+            revision: self.revision,
+        })
+    }
+
+    pub fn proposal_schema(&self) -> &crate::agent_proposal::CompiledAgentProposalSchema {
+        self.lifecycle.proposal_schema()
+    }
 }
 
 pub struct AgentRuntimeV2Evidence {
@@ -114,6 +155,41 @@ pub fn bind_agent_runtime_v2(
         deployment_source,
         task,
         proposals,
+        budget,
+        effects,
+        false,
+    )
+}
+
+/// Bind Direct Runtime v2 for a source selected at run time. Its empty frozen
+/// proposal inventory is intentional and enforced by [`AgentRuntimeV2::run_live`].
+#[allow(clippy::too_many_arguments)]
+pub fn bind_agent_runtime_v2_live(
+    project: Arc<ProjectRevision>,
+    program: ProgramRootRef<'_>,
+    expected_program_digest: &str,
+    source_path: &str,
+    agent_id: &str,
+    step_type_id: &str,
+    selector_field_id: &str,
+    operations: Vec<EffectOperation>,
+    deployment_source: &str,
+    task: LifecycleTask,
+    budget: IterativeBudget,
+    effects: EffectBudget,
+) -> Result<AgentRuntimeV2> {
+    bind_runtime(
+        project,
+        program,
+        expected_program_digest,
+        source_path,
+        agent_id,
+        step_type_id,
+        selector_field_id,
+        operations,
+        deployment_source,
+        task,
+        &[],
         budget,
         effects,
         false,

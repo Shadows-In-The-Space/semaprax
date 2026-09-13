@@ -1,4 +1,4 @@
-//! Explicit compatibility selection for existing compact projection v1 wires.
+//! Explicit compatibility selection for compact projection v1 and model-text v2 wires.
 
 /// Bounded negotiation input. Each offer names only existing wire facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,6 +12,7 @@ pub struct ProjectionOffer {
 pub enum ProjectionEncoding {
     Binary,
     Text,
+    ModelText,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,6 +27,7 @@ pub enum NegotiationRefusal {
     OfferLimit,
     UnsupportedVersion,
     UnsupportedProfile,
+    UnsupportedEncoding,
     NoCommonOffer,
 }
 
@@ -64,8 +66,22 @@ pub fn negotiate(
 
 fn validate(offers: &[ProjectionOffer]) -> Result<(), NegotiationRefusal> {
     for offer in offers {
-        if offer.format_version != super::FORMAT_VERSION {
+        if !matches!(
+            offer.format_version,
+            super::FORMAT_VERSION | super::MODEL_TEXT_FORMAT_VERSION
+        ) {
             return Err(NegotiationRefusal::UnsupportedVersion);
+        }
+        let supported = match offer.encoding {
+            ProjectionEncoding::Binary | ProjectionEncoding::Text => {
+                offer.format_version == super::FORMAT_VERSION
+            }
+            ProjectionEncoding::ModelText => {
+                offer.format_version == super::MODEL_TEXT_FORMAT_VERSION
+            }
+        };
+        if !supported {
+            return Err(NegotiationRefusal::UnsupportedEncoding);
         }
         if !PROFILES.contains(&offer.profile.as_str()) {
             return Err(NegotiationRefusal::UnsupportedProfile);
@@ -99,7 +115,7 @@ mod tests {
         assert_eq!(
             negotiate(
                 &[ProjectionOffer {
-                    format_version: 2,
+                    format_version: 99,
                     encoding: ProjectionEncoding::Text,
                     profile: "full-graph".into()
                 }],
@@ -110,6 +126,35 @@ mod tests {
         assert_eq!(
             negotiate(&[offer("unknown", ProjectionEncoding::Text)], &[]),
             Err(NegotiationRefusal::UnsupportedProfile)
+        );
+    }
+    #[test]
+    fn model_text_requires_its_own_version_and_exact_common_offer() {
+        let model = ProjectionOffer {
+            format_version: 2,
+            encoding: ProjectionEncoding::ModelText,
+            profile: "full-graph".into(),
+        };
+        assert_eq!(
+            negotiate(std::slice::from_ref(&model), std::slice::from_ref(&model))
+                .unwrap()
+                .format_version,
+            2
+        );
+        assert_eq!(
+            negotiate(
+                std::slice::from_ref(&model),
+                &[offer("full-graph", ProjectionEncoding::Text)]
+            ),
+            Err(NegotiationRefusal::NoCommonOffer)
+        );
+        let invalid = ProjectionOffer {
+            format_version: 1,
+            ..model
+        };
+        assert_eq!(
+            negotiate(&[invalid], &[]),
+            Err(NegotiationRefusal::UnsupportedEncoding)
         );
     }
     #[test]

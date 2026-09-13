@@ -211,3 +211,6 @@ pub(in crate::execution_revision) mod migration;
 
 #[path = "typed/linked.rs"]
 mod linked;
+
+#[path = "typed/live_streaming.rs"]
+mod live_streaming;

@@ -136,13 +136,21 @@ charges in memory without claiming generic-journal crash recovery.
 `provider_adapter_sdk/source_bridge` adapts the ordinary source `ProposalSource`
 with explicit fresh adapter factories, bounded canonical retained context, and
 `streaming_proposal_decode/source` admission against the authoritative source
-Proposal schema. It does not advertise durable checkpoint policy.
+Proposal schema. `AgentRuntimeV2::run_live` consumes that ordinary source
+through Direct Runtime v2 only after canonical proposal admission and at the
+typed-effect boundary; submitted proposal inventories are refused on this live
+route. It does not advertise durable checkpoint policy, create a provider
+transport, or add ambient authority.
 `compact_semantic_projection/selected` wraps existing task, public API, candidate,
 and Agent graph producers and independently regenerates selected content on
 replay; encoded evidence cannot replace the owning compiler object.
 `semantic_service_transport/compact` selects from exact retained service
 snapshots and feeds the same codec; MCP forwards to that dispatcher.
 `cli/compact` owns explicit host input/replay paths and writes only stdout.
+`compact_semantic_projection/model_text` owns additive model-text v2 with
+selective dictionaries and bounded expansion. It normalizes independently
+decoded bytes through the existing projection encoder, preserving v1 wire
+semantics and producer authority.
 `embedding_api/analysis_request` owns source/label/symbol preflight and bounded
 refusal echoes for stateless operations, with shared hard caps for execution.
 `embedding_api/project_session` exposes caller-owned source admission and the

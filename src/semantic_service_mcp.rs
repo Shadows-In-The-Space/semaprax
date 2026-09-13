@@ -303,7 +303,7 @@ fn tools() -> Vec<Value> {
             "properties":{
                 "expected_workspace_revision":{"type":"string","maxLength":4096},
                 "profile":{"type":"string","maxLength":4096,"enum":["full-graph","agent-context-v2","task-context-v1","api-surface-v8-owned-data","candidate-semantic-delta-catalog","agent-definition-graph"]},
-                "encoding":{"type":"string","enum":["text","binary"]},
+                "encoding":{"type":"string","enum":["text","binary","model-text"]},
                 "source_path":{"type":"string","maxLength":4096},
                 "root":{"type":"string","maxLength":4096},
                 "candidate_capsule":{"type":"string","maxLength":67108864},

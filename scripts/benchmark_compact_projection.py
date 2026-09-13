@@ -27,6 +27,10 @@ CASES = (
     "examples/calculator-project/semaprax.toml",
     "examples/frame-payload-project/semaprax.toml",
 )
+TASK_CONTEXT_CASES = {
+    "examples/banking_ledger.spx": "ledger.apply",
+    "examples/http_app_routing.spx": "app.main",
+}
 ENCODINGS = ("cl100k_base", "o200k_base")
 
 
@@ -121,7 +125,7 @@ def main() -> int:
         case_rows = []
         payloads = {}
         full = None
-        for encoding in ("text", "binary"):
+        for encoding in ("text", "binary", "model-text"):
             encoded = run_bounded([str(cli), "compact", "graph", str(case), "--encoding", encoding], root, args.timeout)
             with tempfile.NamedTemporaryFile(prefix="semaprax-compact-", suffix=".wire", delete=False) as wire:
                 wire_path = pathlib.Path(wire.name)
@@ -131,11 +135,11 @@ def main() -> int:
             finally:
                 wire_path.unlink(missing_ok=True)
             if full is not None and full != replay:
-                raise RuntimeError(f"text and binary replay disagree for {relative}")
+                raise RuntimeError(f"wire replays disagree for {relative}")
             full = replay
             case_rows.append({"encoding": encoding, "compact": {"sha256": sha256(encoded), "bytes": len(encoded)}, "replay": {"sha256": sha256(replay), "bytes": len(replay)}})
-            if encoding == "text":
-                payloads["compact_text"] = encoded
+            if encoding != "binary":
+                payloads["compact_" + encoding.replace("-", "_")] = encoded
         ordinary = run_bounded([str(cli), "graph", str(case)], root, args.timeout)
         # The ordinary graph CLI adds one display LF after the canonical report.
         if ordinary != full and ordinary != full + b"\n":
@@ -149,7 +153,41 @@ def main() -> int:
                 for label, count in tokenizer["tokens"].items()
                 if label != "full"
             }
-        rows.append({"case": relative, "full": {"sha256": sha256(full), "bytes": len(full)}, "projections": case_rows, "tokenizers": token_data})
+        row = {"case": relative, "full": {"sha256": sha256(full), "bytes": len(full)}, "projections": case_rows, "tokenizers": token_data}
+        if relative in TASK_CONTEXT_CASES:
+            stable_id = TASK_CONTEXT_CASES[relative]
+            context_rows = []
+            context_payloads = {}
+            context_full = None
+            for encoding in ("text", "binary", "model-text"):
+                command = [str(cli), "compact", "task-context", str(case), stable_id, "--encoding", encoding]
+                encoded = run_bounded(command, root, args.timeout)
+                with tempfile.NamedTemporaryFile(prefix="semaprax-task-context-", suffix=".wire", delete=False) as wire:
+                    wire_path = pathlib.Path(wire.name)
+                    wire.write(encoded)
+                try:
+                    replay = run_bounded(command + ["--replay", str(wire_path)], root, args.timeout)
+                finally:
+                    wire_path.unlink(missing_ok=True)
+                if context_full is not None and context_full != replay:
+                    raise RuntimeError(f"task-context wire replays disagree for {relative} ({stable_id})")
+                context_full = replay
+                context_rows.append({"encoding": encoding, "compact": {"sha256": sha256(encoded), "bytes": len(encoded)}, "replay": {"sha256": sha256(replay), "bytes": len(replay)}})
+                if encoding != "binary":
+                    context_payloads["compact_" + encoding.replace("-", "_")] = encoded
+            context_payloads["full"] = context_full
+            context_tokens = tokenize_all(context_payloads)
+            for tokenizer in context_tokens.values():
+                full_tokens = tokenizer["tokens"]["full"]
+                tokenizer["token_ratios"] = {
+                    label: (count / full_tokens if full_tokens else None)
+                    for label, count in tokenizer["tokens"].items() if label != "full"
+                }
+            for tokenizer in context_tokens.values():
+                full_tokens = tokenizer["tokens"]["full"]
+                tokenizer["token_ratios"] = {label: (count / full_tokens if full_tokens else None) for label, count in tokenizer["tokens"].items() if label != "full"}
+            row["task_context"] = {"stable_id": stable_id, "full": {"sha256": sha256(context_full), "bytes": len(context_full)}, "projections": context_rows, "tokenizers": context_tokens}
+        rows.append(row)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({"schema": "semaprax.compact-projection-benchmark.v1", "cases": rows}, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return 0

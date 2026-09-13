@@ -114,8 +114,13 @@ use crate::diagnostic::Diagnostic;
 use crate::digest_hex::LowerHex;
 use crate::graph::{self, AgentContextV2Options};
 
+pub mod model_text;
 pub mod negotiation;
 mod selected;
+
+pub use model_text::{
+    decode_model_text, decode_model_text_and_verify, encode_model_text, MODEL_TEXT_FORMAT_VERSION,
+};
 
 pub use selected::{
     encode_selected, replay_selected_binary, replay_selected_text, ProjectionSelection,

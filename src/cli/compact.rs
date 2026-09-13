@@ -12,7 +12,7 @@ pub(crate) struct Options {
     profile: String,
     input: PathBuf,
     selection: Option<String>,
-    binary: bool,
+    encoding: compact::negotiation::ProjectionEncoding,
     replay: Option<PathBuf>,
     max_bytes: usize,
     max_tokens: usize,
@@ -51,7 +51,7 @@ fn parse_inner(args: &[String]) -> Result<Options, &'static str> {
         profile: profile.clone(),
         input: input.into(),
         selection,
-        binary: false,
+        encoding: compact::negotiation::ProjectionEncoding::Text,
         replay: None,
         max_bytes: 65_536,
         max_tokens: 65_536,
@@ -64,10 +64,11 @@ fn parse_inner(args: &[String]) -> Result<Options, &'static str> {
         }
         match pair[0].as_str() {
             "--encoding" => {
-                options.binary = match pair[1].as_str() {
-                    "text" => false,
-                    "binary" => true,
-                    _ => return Err("encoding must be text or binary"),
+                options.encoding = match pair[1].as_str() {
+                    "text" => compact::negotiation::ProjectionEncoding::Text,
+                    "binary" => compact::negotiation::ProjectionEncoding::Binary,
+                    "model-text" => compact::negotiation::ProjectionEncoding::ModelText,
+                    _ => return Err("encoding must be text, binary or model-text"),
                 }
             }
             "--replay" if !pair[1].is_empty() && !pair[1].starts_with('-') => {
@@ -194,22 +195,31 @@ pub(crate) fn output(options: &Options) -> Result<Vec<u8>, Vec<Diagnostic>> {
     let expected = encode(options)?;
     if let Some(path) = &options.replay {
         let bytes = read(path, compact::MAX_ENCODED_BYTES)?;
-        let decoded = if options.binary {
-            compact::decode_binary_and_verify(
+        let decoded = match options.encoding {
+            compact::negotiation::ProjectionEncoding::Binary => compact::decode_binary_and_verify(
                 &bytes,
                 expected.profile(),
                 expected.root(),
                 expected.source_revision(),
-            )
-        } else {
-            let encoded = std::str::from_utf8(&bytes)
-                .map_err(|_| vec![Diagnostic::io("SPX-Z904", "compact text must be UTF-8")])?;
-            compact::decode_text_and_verify(
-                encoded,
-                expected.profile(),
-                expected.root(),
-                expected.source_revision(),
-            )
+            ),
+            compact::negotiation::ProjectionEncoding::Text => {
+                let encoded = std::str::from_utf8(&bytes)
+                    .map_err(|_| vec![Diagnostic::io("SPX-Z904", "compact text must be UTF-8")])?;
+                compact::decode_text_and_verify(
+                    encoded,
+                    expected.profile(),
+                    expected.root(),
+                    expected.source_revision(),
+                )
+            }
+            compact::negotiation::ProjectionEncoding::ModelText => {
+                compact::decode_model_text_and_verify(
+                    &bytes,
+                    expected.profile(),
+                    expected.root(),
+                    expected.source_revision(),
+                )
+            }
         }
         .map_err(|error| vec![error])?;
         let full = decoded.reconstructed().map_err(|error| vec![error])?;
@@ -220,10 +230,16 @@ pub(crate) fn output(options: &Options) -> Result<Vec<u8>, Vec<Diagnostic>> {
             )]);
         }
         Ok(full)
-    } else if options.binary {
-        Ok(expected.to_binary())
     } else {
-        Ok(expected.to_text().into_bytes())
+        match options.encoding {
+            compact::negotiation::ProjectionEncoding::Binary => Ok(expected.to_binary()),
+            compact::negotiation::ProjectionEncoding::Text => Ok(expected.to_text().into_bytes()),
+            compact::negotiation::ProjectionEncoding::ModelText => {
+                compact::encode_model_text(&expected)
+                    .map(String::into_bytes)
+                    .map_err(|error| vec![error])
+            }
+        }
     }
 }
 
@@ -235,10 +251,11 @@ mod tests {
     }
     #[test]
     fn compact_cli_grammar_is_closed_and_profile_specific() {
-        assert!(
+        assert_eq!(
             parse_inner(&args(&["graph", "input.spx", "--encoding", "binary"]))
                 .unwrap()
-                .binary
+                .encoding,
+            compact::negotiation::ProjectionEncoding::Binary
         );
         for input in [
             vec!["unknown", "input"],
@@ -264,6 +281,21 @@ mod tests {
         let options = parse_inner(&args(&["graph", path.to_str().unwrap()])).unwrap();
         let encoded = output(&options).unwrap();
         let decoded = compact::decode_text(std::str::from_utf8(&encoded).unwrap()).unwrap();
+        let model_options = parse_inner(&args(&[
+            "graph",
+            path.to_str().unwrap(),
+            "--encoding",
+            "model-text",
+        ]))
+        .unwrap();
+        let model_wire = output(&model_options).unwrap();
+        assert_eq!(
+            compact::decode_model_text(&model_wire)
+                .unwrap()
+                .reconstructed()
+                .unwrap(),
+            decoded.reconstructed().unwrap()
+        );
         let source = std::fs::read_to_string(&path).unwrap();
         let program = semaprax::parse(&source, &path).unwrap();
         assert_eq!(

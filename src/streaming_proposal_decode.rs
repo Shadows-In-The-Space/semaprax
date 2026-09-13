@@ -31,6 +31,7 @@
 
 use crate::agent_interaction_schema::{CompiledInteractionSchema, DecodedInteractionValue};
 
+mod schema_prefix;
 pub mod source;
 pub use source::{SourceProposalStreamDecoder, SourcePushOutcome};
 
@@ -114,6 +115,8 @@ pub const STREAM_CANCELLED: &str = "STREAM-CANCELLED";
 /// diagnostic's own stable code and text, so a caller sees exactly which
 /// admission rule failed, never a generic "malformed" tag.
 pub const STREAM_SEMANTIC: &str = "STREAM-SEMANTIC";
+/// The prefix diverged from a bound compiled schema envelope.
+pub const STREAM_SCHEMA_PREFIX: &str = "STREAM-SCHEMA-PREFIX";
 
 /// The result of feeding one chunk (or of [`ProposalStreamDecoder::cancel`]
 /// / [`ProposalStreamDecoder::finish`]).
@@ -324,6 +327,7 @@ pub struct ProposalStreamDecoder<'a> {
     buffer: Vec<u8>,
     confirmed_len: usize,
     scan: Scanner,
+    prefix: schema_prefix::SchemaPrefix,
     terminal: Option<TerminalResult>,
 }
 
@@ -335,6 +339,7 @@ impl<'a> ProposalStreamDecoder<'a> {
             buffer: Vec::new(),
             confirmed_len: 0,
             scan: Scanner::default(),
+            prefix: schema_prefix::SchemaPrefix::new(schema.stream_envelope_prefix()),
             terminal: None,
         }
     }
@@ -393,6 +398,9 @@ impl<'a> ProposalStreamDecoder<'a> {
         let base = self.confirmed_len;
         for (offset, byte) in confirmed_text.bytes().enumerate() {
             if let Err(refusal) = self.scan.step(byte, base + offset) {
+                return self.finalize(TerminalResult::Refused(refusal));
+            }
+            if let Err(refusal) = self.prefix.step(byte, base + offset) {
                 return self.finalize(TerminalResult::Refused(refusal));
             }
         }

@@ -84,3 +84,23 @@ fn terminal_lf_then_incomplete_utf8_refuses_without_panicking() {
         matches!(decoder.finish(), SourcePushOutcome::Refused(refusal) if refusal.code == STREAM_UTF8)
     );
 }
+
+#[test]
+fn top_level_schema_prefix_refuses_wrong_identity_duplicate_or_reordered_keys_without_finish() {
+    let schema = schema();
+    let valid = String::from_utf8(document(&schema, "ok")).unwrap();
+    let wrong_digest = valid.replacen(schema.schema().digest(), &"0".repeat(64), 1);
+    let duplicate = valid.replacen("\"agent_id\"", "\"schema\"", 1);
+    for prefix in [
+        b"{\"unknown\"".as_slice(),
+        b"{\"agent_id\"".as_slice(),
+        wrong_digest.as_bytes(),
+        duplicate.as_bytes(),
+    ] {
+        let mut decoder = SourceProposalStreamDecoder::new(&schema);
+        assert!(
+            matches!(decoder.push(prefix), SourcePushOutcome::Refused(refusal) if refusal.code == super::super::STREAM_SCHEMA_PREFIX),
+            "prefix {prefix:?} must refuse before finish"
+        );
+    }
+}

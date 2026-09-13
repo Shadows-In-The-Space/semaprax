@@ -1,5 +1,8 @@
 # Compact Semantic Projection v1
 
+[Model-text v2](COMPACT-SEMANTIC-PROJECTION-V2.md) adds a separately versioned
+selective-dictionary encoding; this document retains the frozen v1 contract.
+
 Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: agent and tool authors who paste or transport a selected semantic

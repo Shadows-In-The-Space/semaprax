@@ -149,6 +149,15 @@ impl CompiledInteractionSchema {
         decode::decode(&self.graph, &self.schema.digest, source)
             .map_err(|diagnostic| vec![diagnostic])
     }
+
+    pub(crate) fn stream_envelope_prefix(&self) -> String {
+        format!(
+            "{{\"schema\":{},\"root_type_id\":{},\"schema_digest\":{},\"value\":",
+            crate::diagnostic::quote_json(DOCUMENT_SCHEMA),
+            crate::diagnostic::quote_json(&self.graph.root_type_id),
+            crate::diagnostic::quote_json(&self.schema.digest),
+        )
+    }
 }
 
 /// Derives the closed, bounded Agent Interaction Schema v1 rooted at

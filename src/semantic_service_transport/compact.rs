@@ -40,9 +40,9 @@ pub(super) fn project(
     let snapshot = service.snapshot(&expected)?;
     let profile = required(&mut params, "profile")?;
     let encoding = required(&mut params, "encoding")?;
-    if !matches!(encoding.as_str(), "text" | "binary") {
+    if !matches!(encoding.as_str(), "text" | "binary" | "model-text") {
         return Err(invalid(
-            "compact projection encoding must be text or binary",
+            "compact projection encoding must be text, binary or model-text",
         ));
     }
     let source_path = optional(&mut params, "source_path")?;
@@ -249,6 +249,8 @@ fn context_options() -> Result<AgentContextV2Options> {
 
 fn render(projection: &CompactProjection, encoding: &str) -> Result<Value> {
     let encoded = match encoding {
+        "model-text" => crate::compact_semantic_projection::encode_model_text(projection)
+            .map_err(|error| vec![error])?,
         "text" => {
             let text = projection.to_text();
             if text.len() > MAX_ENCODED_BYTES {
@@ -272,7 +274,7 @@ fn render(projection: &CompactProjection, encoding: &str) -> Result<Value> {
     Ok(json!({
         "authority": false,
         "encoding": encoding,
-        "format_version": crate::compact_semantic_projection::FORMAT_VERSION,
+        "format_version": if encoding == "model-text" { crate::compact_semantic_projection::MODEL_TEXT_FORMAT_VERSION } else { crate::compact_semantic_projection::FORMAT_VERSION },
         "profile": projection.profile(),
         "root": projection.root(),
         "source_digest": projection.source_digest(),

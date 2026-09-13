@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add versioned selective-dictionary model-text projections to CLI, retained
+  service and compatibility negotiation (#201). Connect streaming proposals to
+  Direct Runtime v2 typed effects and reject mismatched compiled schema envelopes
+  while streaming (#178); nested semantic admission remains in the full decoder.
+
 - Expose compact projections through CLI replay and retained service/MCP routes,
   with explicit format/profile negotiation and offline model-token measurement
   tooling (#201). Introduce Rust embedding API v2 for mandatory analysis/execution input caps, add

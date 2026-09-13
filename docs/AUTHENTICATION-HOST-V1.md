@@ -28,7 +28,9 @@ encoded and separated by one dot. The authenticated claims carry the schema
 magic/version, 32-byte session id, generation, issue and expiry ticks, and the
 exact policy, issuer, audience, and subject strings. Parsing is bounded and
 canonical; MAC verification uses `hmac`'s `verify_slice` before claims are
-accepted. The tag includes a fixed domain separator.
+accepted. The tag includes a fixed domain separator. Verification rejects a
+clock tick before issue time and rechecks the claimed lifetime against the
+current server policy.
 
 `SessionToken` owns redacted, zeroized bytes and exposes its value only through
 `bearer()` for an explicitly selected transport boundary. It has no `Clone`,

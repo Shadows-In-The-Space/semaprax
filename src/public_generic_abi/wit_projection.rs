@@ -1,4 +1,4 @@
-//! WIT type projection for one [`AdmittedSubject`](super::classifier::AdmittedSubject).
+//! WIT type projection for one [`AdmittedSubject`].
 //!
 //! This is a documentation-tracked slice of issue #176 ("Add a WIT and
 //! WebAssembly Component Model projection for supported generic resources"),

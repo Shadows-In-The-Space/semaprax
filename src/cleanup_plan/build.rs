@@ -2872,6 +2872,7 @@ impl<'a> PlanBuilder<'a> {
                         }
                         if *mode == ResolvedMatchMode::Value
                             && self.needs_drop(&arms[0].value.ty)?
+                            && !matches!(arms[0].value.ty, crate::hir::ResolvedType::String)
                         {
                             return Err(plan_error(
                                 "droppable match result reached the copy-only cleanup slice",
@@ -4191,8 +4192,16 @@ impl<'a> PlanBuilder<'a> {
                         // Copy-scalar admission makes every path observe the
                         // same owned liveness as the decision entry; anything
                         // else means a non-admitted shape reached lowering.
+                        // Owned droppable results (String, Bytes, Vec, etc.)
+                        // are an explicit exception: a `match i64 { 0 => "yes", _ => "no" }`
+                        // produces an owned value and therefore legitimately
+                        // changes owned liveness even though the scrutinee is Copy.
                         let direct_single_catchall = arms.len() == 1 && arms[0].guard.is_none();
-                        if !direct_single_catchall && merged_state != entry_state {
+                        let is_droppable_result = self.needs_drop(&expression.ty).unwrap_or(false);
+                        if !direct_single_catchall
+                            && !is_droppable_result
+                            && merged_state != entry_state
+                        {
                             return Err(plan_error(
                                 "refutable match changes owned liveness, which the \
                                  Refutable Match v1 admission profile forbids",
@@ -4203,10 +4212,15 @@ impl<'a> PlanBuilder<'a> {
                             let edge = self.new_edge(result.block, join, EdgeCondition::Always)?;
                             self.terminate(result.block, CleanupTerminator::Goto(edge))?;
                         }
+                        let owned_source = if self.needs_drop(&expression.ty).unwrap_or(false) {
+                            destination.clone()
+                        } else {
+                            None
+                        };
                         results.push(EvalResult {
                             block: join,
                             state: merged_state,
-                            owned_source: None,
+                            owned_source,
                         });
                     } else {
                         let arm = &arms[index];
@@ -6039,7 +6053,10 @@ impl<'a> PlanBuilder<'a> {
         if arms.is_empty() {
             return Err(plan_error("copy-variant match has no arms"));
         }
-        if *mode == ResolvedMatchMode::Value && self.needs_drop(&arms[0].value.ty)? {
+        if *mode == ResolvedMatchMode::Value
+            && self.needs_drop(&arms[0].value.ty)?
+            && !matches!(arms[0].value.ty, crate::hir::ResolvedType::String)
+        {
             return Err(plan_error(
                 "droppable match result reached the copy-only cleanup slice",
             ));

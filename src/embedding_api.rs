@@ -65,9 +65,16 @@
 //! `src/semantic_embedding/fixture.rs`'s `ScriptedEmbeddingProvider` uses to
 //! prove paths the real fixture cannot reach.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use crate::diagnostic::{Diagnostic, Severity};
 
 mod execution;
+mod negotiation;
+pub use negotiation::{
+    context_v2_source_with_cancellation, negotiate_features, EmbeddingFeatures, SUPPORTED_FEATURES,
+    UNSUPPORTED_FEATURE_DIAGNOSTIC_CODE,
+};
 mod project_session;
 
 pub use execution::{
@@ -75,22 +82,54 @@ pub use execution::{
     ExecutionOutcome, ExecutionReport,
 };
 pub use project_session::{
-    open_project_session, ProjectCandidateOutcome, ProjectQueryOutcome, ProjectSession,
-    ProjectSessionInput, ProjectSessionOpenOutcome, ProjectSessionRefreshOutcome,
-    ProjectSourceInput,
+    open_project_session, open_project_session_with_cancellation, ProjectCandidateOutcome,
+    ProjectQueryOutcome, ProjectSession, ProjectSessionInput, ProjectSessionOpenOutcome,
+    ProjectSessionRefreshOutcome, ProjectSourceInput,
 };
 
 /// A diagnostic code reserved for [`check_source`]'s panic-normalization
 /// path. No parser or analyzer diagnostic uses this code; it names an
 /// embedding-boundary defect, never a property of the checked program.
 pub const PANIC_NORMALIZED_DIAGNOSTIC_CODE: &str = "SPX-EMB001";
+/// Stable refusal for a host compiled against a different embedding API major.
+pub const VERSION_MISMATCH_DIAGNOSTIC_CODE: &str = "SPX-EMB002";
+/// Stable refusal for an embedding request cancelled before its result is used.
+pub const CANCELLATION_DIAGNOSTIC_CODE: &str = "SPX-EMB003";
+
+/// Monotonic host-owned cancellation signal for pure embedding requests.
+///
+/// The compiler samples it before work and, for the cancellable context calls,
+/// again before returning a successful report. It is not a promise to interrupt
+/// parser/resolver internals mid-operation.
+#[derive(Default)]
+pub struct EmbeddingCancellation {
+    cancelled: AtomicBool,
+}
+
+impl EmbeddingCancellation {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            cancelled: AtomicBool::new(false),
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+}
 
 /// This embedding surface's own compatibility version — unrelated to any
 /// checked program's semantics. See "Compatibility policy" in
 /// `docs/EMBEDDING-API-V1.md`.
 pub const EMBEDDING_API_VERSION: EmbeddingApiVersion = EmbeddingApiVersion {
     major: 1,
-    minor: 6,
+    minor: 7,
     patch: 0,
 };
 
@@ -113,6 +152,21 @@ impl EmbeddingApiVersion {
     /// explicitly refused rather than silently assumed compatible.
     pub fn is_compatible_with(&self, requested_major: u16) -> bool {
         self.major == requested_major
+    }
+
+    /// Refuse a mismatched major with a stable embedding-boundary diagnostic.
+    pub fn require_compatible(&self, requested_major: u16) -> Result<(), Diagnostic> {
+        self.is_compatible_with(requested_major)
+            .then_some(())
+            .ok_or_else(|| {
+                Diagnostic::io(
+                    VERSION_MISMATCH_DIAGNOSTIC_CODE,
+                    format!(
+                        "embedding API major {requested_major} is incompatible with host major {}",
+                        self.major
+                    ),
+                )
+            })
     }
 }
 
@@ -666,6 +720,43 @@ pub fn context_source(
     context_with(&StandardContexter, unit_name, source, symbol, options)
 }
 
+/// Run a bounded v1 context request with explicit cooperative cancellation.
+///
+/// Cancellation is sampled before parsing and once more before a successful
+/// JSON report is returned. The graph kernel has no mid-traversal cancellation
+/// hook, so cancellation after work begins can discard a completed report but
+/// cannot claim that parser/resolver work was interrupted.
+pub fn context_source_with_cancellation(
+    unit_name: &str,
+    source: &str,
+    symbol: &str,
+    options: &ContextOptions,
+    cancellation: &EmbeddingCancellation,
+) -> ContextOutcome {
+    if cancellation.is_cancelled() {
+        return cancelled_context_outcome(unit_name, symbol);
+    }
+    let outcome = context_source(unit_name, source, symbol, options);
+    if outcome.ok && cancellation.is_cancelled() {
+        cancelled_context_outcome(unit_name, symbol)
+    } else {
+        outcome
+    }
+}
+
+fn cancelled_context_outcome(unit_name: &str, symbol: &str) -> ContextOutcome {
+    ContextOutcome {
+        unit_name: unit_name.to_owned(),
+        symbol: symbol.to_owned(),
+        ok: false,
+        diagnostics: vec![Diagnostic::io(
+            CANCELLATION_DIAGNOSTIC_CODE,
+            "embedding context request was cancelled before a report was returned",
+        )],
+        context_json: None,
+    }
+}
+
 /// Closed traversal direction admitted by [`ContextV2Options`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextDirection {
@@ -952,6 +1043,9 @@ mod tests {
         assert!(EMBEDDING_API_VERSION.is_compatible_with(1));
         assert!(!EMBEDDING_API_VERSION.is_compatible_with(2));
         assert!(!EMBEDDING_API_VERSION.is_compatible_with(0));
+        assert!(EMBEDDING_API_VERSION.require_compatible(1).is_ok());
+        let refusal = EMBEDDING_API_VERSION.require_compatible(2).unwrap_err();
+        assert_eq!(refusal.code, VERSION_MISMATCH_DIAGNOSTIC_CODE);
     }
 
     #[test]
@@ -1160,6 +1254,22 @@ mod tests {
         assert!(outcome.diagnostics.is_empty());
         assert_eq!(outcome.symbol, "app.does_not_exist");
         assert_eq!(outcome.context_json, None);
+    }
+
+    #[test]
+    fn cancelled_context_never_starts_or_returns_a_report() {
+        let cancellation = EmbeddingCancellation::new();
+        cancellation.cancel();
+        let outcome = context_source_with_cancellation(
+            "hello.spx",
+            HELLO,
+            "app.main",
+            &ContextOptions::default(),
+            &cancellation,
+        );
+        assert!(!outcome.ok);
+        assert_eq!(outcome.diagnostics[0].code, CANCELLATION_DIAGNOSTIC_CODE);
+        assert!(outcome.context_json.is_none());
     }
 
     #[test]

@@ -114,6 +114,12 @@ use crate::diagnostic::Diagnostic;
 use crate::digest_hex::LowerHex;
 use crate::graph::{self, AgentContextV2Options};
 
+mod selected;
+
+pub use selected::{
+    encode_selected, replay_selected_binary, replay_selected_text, ProjectionSelection,
+};
+
 /// Schema identity of this module's compact wire envelope.
 pub const SCHEMA: &str = "semaprax.compact-semantic-projection.v1";
 /// Wire format version this build reads and writes. A decoder refuses any

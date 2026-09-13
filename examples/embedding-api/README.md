@@ -2,9 +2,10 @@
 
 This standalone Rust program is an external host using only the public
 `semaprax::embedding_api` facade. It checks caller supplied source, formats the
-canonical projection, renders the semantic graph, preserves a successful-check
-warning, rejects malformed input with `SPX-P101`, and refuses incompatible API
-major versions.
+canonical projection, renders the semantic graph and bounded context, performs
+explicitly authorized deterministic execution, opens an opaque in-memory
+Project session from embedded bytes, preserves a successful-check warning,
+rejects malformed input with `SPX-P101`, and refuses incompatible API majors.
 
 Run it from this directory with:
 

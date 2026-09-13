@@ -180,3 +180,36 @@ decode, model-policy reservation and journal receipt projection together;
 malformed first-chunk refusal with no further reads or authorization; and
 pre-dispatch/pending deadline, cancellation, schema and hostile byte-cap cases.
 These are offline injected adapters, not evidence for two live vendors.
+
+## Ordinary source proposal streaming bridge
+
+`source_bridge::StreamingSourceProposalAdapter` implements the existing source
+`ProposalSource` trait using a fresh, explicitly injected `SourceAdapterFactory`
+for each attempt. It uses the source `CompiledAgentProposalSchema`, distinct
+from the generic interaction schema, and refuses source revision or schema
+drift before adapter creation. The source driver retains authorization and
+retry decisions. This bridge advertises no checkpoint policy: it does not
+invent durable provider attempt identities or journal intents.
+
+The generated `semaprax.source-adapter-prompt.v1` JSON carries exact task bytes
+as hex, task budget, source revision, turn, attempt, remaining iterations,
+canonical lifecycle state/observation, prior effect bytes as hex or null, prior
+rejection or null, and the compiler proposal schema. Retained carriers are
+checked before rendering with a conservative 65,536-byte upper bound and depth
+64; prior effect/rejection and complete prompt are bounded at 65,536 bytes.
+These bounds do not alter the lifecycle's canonical retained-value encoding.
+
+An optional host cancellation token and absolute `InvocationClock` deadline
+are checked before factory creation, before start, and before each poll.
+The bridge allows at most 10,000 polls; blocking host callbacks remain
+cooperative. It checks each chunk before the next poll, cancels on early
+refusal, and requires one Completed event followed by settlement containing
+exactly the streamed bytes. Duplicate completion, post-completion deltas/usage,
+negative or regressing known usage, malformed framing, and semantic decoder
+refusal cannot produce a proposal. Missing usage remains unknown.
+
+Local fixture tests cover real compiled-schema admission, iterative context,
+fresh attempts, early stream refusal/cancellation, predispatch cancellation,
+deadline, identity and capacity refusals, and settlement/usage contradictions.
+This is an in-process adapter seam, not evidence of a network provider or a
+durable source checkpoint implementation.

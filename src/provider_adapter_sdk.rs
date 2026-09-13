@@ -62,6 +62,7 @@ pub mod conformance;
 pub mod fixture_adapters;
 pub mod hostile;
 pub mod report;
+pub mod source_bridge;
 
 pub use adapter::{
     AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterRefusal, AdapterRequest,
@@ -74,6 +75,7 @@ pub use capability::{
 };
 pub use conformance::{drive_to_settlement, run_conformance_suite, DriveOutcome, ExpectedOutcome};
 pub use report::{ConformanceReport, ReportCaseResult};
+pub use source_bridge::{SourceAdapterFactory, StreamingSourceProposalAdapter};
 
 #[cfg(test)]
 mod tests;

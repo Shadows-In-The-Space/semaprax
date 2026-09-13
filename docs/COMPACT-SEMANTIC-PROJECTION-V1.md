@@ -85,23 +85,25 @@ wraps `crate::graph::agent_context_v2_json` for one seed symbol (`profile`
 `"agent-context-v2"`, root the seed symbol). The wire format itself does not
 restrict `profile` to this list -- a future profile is one more
 `ProjectionSource` variant in [`encode_profile`], with no wire-format
-change -- but only these two are implemented and tested here.
+change. [`ProjectionSelection`](../src/compact_semantic_projection/selected.rs)
+adds authoritative profiles whose replay regenerates their owning kernel before
+accepting decoded content: goal-aware `semantic_task_context::compile`, the
+explicitly scoped Project v8 owned-data public API descriptor, a candidate's
+`semantic_delta_catalog(expected_candidate)`, and one compiled Agent
+definition's canonical graph. These profiles bind respectively to the graph
+revision, retained Project revision, candidate revision plus expected candidate
+digest, and AgentGraph digest; they do not accept a self-rehashed envelope as
+replay evidence.
 
 ## Deliberately out of scope
 
-Issue #201 asks for a much larger surface: a "task context" profile wired
-to issue #197's goal-aware compiler, an "API surface" profile, a
-"candidate diff" profile, an "Agent definition" profile, byte/token
-benchmarks across multiple *model* tokenizer versions, version
-*negotiation* (as opposed to version *refusal*, which this module does
-implement), and CLI/MCP exposure. None of that is in this module. This is
-one narrow, honestly-scoped slice -- the dictionary/index encoding,
-canonical ordering, dual wire form, and lossless-with-detection replay
-bullets of #201's implementation sequence, applied to the two
-selected-view sources this module already had unchanged engines for --
-matching the precedent `semantic_task_context` and `semantic_embedding` set
-for shipping one demonstrable slice of a large issue rather than an
-unverifiable broader claim.
+Issue #201 additionally asks for byte/token benchmarks across multiple *model*
+tokenizer versions, version *negotiation* (as opposed to version *refusal*,
+which this module does implement), and CLI/MCP exposure. Those are not in this
+module. The selected profiles reuse existing authoritative producers and the
+unchanged bounded dictionary/text/binary codec. Selected replay adds exact
+regeneration equality (`SPX-Z910` on disagreement) to envelope integrity and
+profile/root/revision checks. It grants no candidate commit or runtime authority.
 
 ## Honesty bar: what "lossless" means here, exactly
 

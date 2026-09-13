@@ -31,6 +31,9 @@
 
 use crate::agent_interaction_schema::{CompiledInteractionSchema, DecodedInteractionValue};
 
+pub mod source;
+pub use source::{SourceProposalStreamDecoder, SourcePushOutcome};
+
 /// The maximum number of bytes this decoder will buffer before refusing,
 /// independent of whether the document ever completes. Matches the whole-
 /// document decoder's own `MAX_DOCUMENT_BYTES` (65536): a streamed document

@@ -13,7 +13,9 @@ use crate::project::{
     SemanticWorkspaceService, MAX_SOURCES, MAX_TOTAL_SOURCE_BYTES,
 };
 
-use super::PANIC_NORMALIZED_DIAGNOSTIC_CODE;
+use super::{
+    EmbeddingCancellation, CANCELLATION_DIAGNOSTIC_CODE, PANIC_NORMALIZED_DIAGNOSTIC_CODE,
+};
 
 /// One caller-owned Project source. `path` is a manifest inventory label, not a
 /// path the embedding API will open.
@@ -166,6 +168,19 @@ pub fn open_project_session(
     }
 }
 
+/// Open only when cancellation has not already been requested. Opening has no
+/// partial adoption before the service is returned, so a pre-cancelled call
+/// performs no Project admission or cache work.
+pub fn open_project_session_with_cancellation(
+    input: &ProjectSessionInput,
+    cancellation: &EmbeddingCancellation,
+) -> (Option<ProjectSession>, ProjectSessionOpenOutcome) {
+    if cancellation.is_cancelled() {
+        return (None, open_failure(cancellation_diagnostics()));
+    }
+    open_project_session(input)
+}
+
 impl ProjectSession {
     /// The live workspace revision, absent after a caught stateful-operation
     /// panic. Callers must reopen rather than treat a poisoned handle as stale.
@@ -214,6 +229,22 @@ impl ProjectSession {
             },
             Err(diagnostics) => refresh_failure(diagnostics),
         }
+    }
+
+    /// Begin an atomic refresh only when cancellation was already observed as
+    /// clear. The persistent service has no safe mid-refresh cancellation
+    /// point: once admitted staging starts, this façade lets its existing
+    /// all-or-nothing refresh finish rather than claiming interruption.
+    pub fn refresh_with_cancellation(
+        &mut self,
+        input: &ProjectSessionInput,
+        expected_old_workspace_revision: &str,
+        cancellation: &EmbeddingCancellation,
+    ) -> ProjectSessionRefreshOutcome {
+        if cancellation.is_cancelled() {
+            return refresh_failure(cancellation_diagnostics());
+        }
+        self.refresh(input, expected_old_workspace_revision)
     }
 
     /// Execute a canonical query against the active immutable generation.
@@ -412,6 +443,13 @@ fn poisoned_diagnostics() -> Vec<Diagnostic> {
     }]
 }
 
+fn cancellation_diagnostics() -> Vec<Diagnostic> {
+    vec![Diagnostic::io(
+        CANCELLATION_DIAGNOSTIC_CODE,
+        "embedding Project request was cancelled before it began",
+    )]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,6 +595,31 @@ mod tests {
             Err(errors) => errors,
         };
         assert_eq!(errors[0].code, "SPX-G256");
+    }
+
+    #[test]
+    fn cancelled_project_open_does_no_admission_work() {
+        let cancellation = EmbeddingCancellation::new();
+        cancellation.cancel();
+        let (session, outcome) = open_project_session_with_cancellation(&input(APP), &cancellation);
+        assert!(session.is_none());
+        assert!(!outcome.ok);
+        assert_eq!(outcome.diagnostics[0].code, CANCELLATION_DIAGNOSTIC_CODE);
+    }
+
+    #[test]
+    fn cancelled_refresh_preserves_generation_and_handle_remains_usable() {
+        let (session, opened) = open_project_session(&input(APP));
+        assert!(opened.ok);
+        let mut session = session.unwrap();
+        let before = session.workspace_revision().unwrap().to_owned();
+        let cancellation = EmbeddingCancellation::new();
+        cancellation.cancel();
+        let result = session.refresh_with_cancellation(&input(APP), &before, &cancellation);
+        assert!(!result.ok);
+        assert_eq!(result.diagnostics[0].code, CANCELLATION_DIAGNOSTIC_CODE);
+        assert_eq!(session.workspace_revision(), Some(before.as_str()));
+        assert!(session.refresh(&input(APP), &before).ok);
     }
 
     #[test]

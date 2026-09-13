@@ -153,6 +153,11 @@ work, since every scanner step is a single O(1) transition over at most
 
 ## Determinism across chunk boundaries
 
+`SourceProposalStreamDecoder` applies this same bounded framing to the
+source-live route's distinct `CompiledAgentProposalSchema` grammar. It does
+not translate that grammar into the interaction-value wire: after a terminal
+LF it calls the source schema's own `decode` and returns `DecodedProposal`.
+
 The single most valuable property this document proves: the same total
 byte sequence produces the identical final outcome no matter how it is
 split into chunks. `ProposalStreamDecoder` has no chunk-boundary-dependent
@@ -210,9 +215,10 @@ generated-client integration.
 
 `src/streaming_proposal_decode.rs` (`ProposalStreamDecoder`, `PushOutcome`,
 `StreamRefusal`, the `STREAM-*` closed vocabulary, and the `MAX_STREAM_*`
-bounds) plus its `tests` submodule
-(`src/streaming_proposal_decode/tests.rs`) is the complete reference
-implementation this document describes. Focused gate:
+bounds), its generic tests, and the additive `source` decoder and source tests
+form the reference implementation. The source decoder delegates final
+admission to `CompiledAgentProposalSchema` and preserves the existing source
+Proposal wire format. Focused gate:
 
 ```sh
 cargo test --locked -p semaprax --lib streaming_proposal_decode

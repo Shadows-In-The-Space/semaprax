@@ -8,6 +8,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add authoritative task-context, Project API, candidate-diff, and Agent graph
+  compact profiles with regeneration-bound replay (#201). Extend Rust embedding
+  negotiation, cancellation, and the external consumer (#203). Connect the
+  source Proposal grammar to incremental decoding and an explicit per-attempt
+  provider adapter factory with bounded iterative context (#178).
+
 - Connect the streaming Proposal decoder to the provider adapter and generic
   live-kernel seams (#178), and compose token/cost/call policy with the live
   work-budget hook (#179). Extend the embedding facade with opaque in-memory

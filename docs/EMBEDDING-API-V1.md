@@ -47,8 +47,8 @@ Issue #203's "In scope" list, mapped to real code, as of this tranche:
 | Candidate validate/replay | `src/project/candidate/**` implements this for the Project workspace transaction path. | [`ProjectSession::validate_candidate_v2`](../src/embedding_api/project_session.rs) and [`ProjectSession::replay_candidate_v2`](../src/embedding_api/project_session.rs) return canonical authority-free reports over the active generation. |
 | Deterministic interpreter execution for admitted profiles | `interpreter`/`hosted_interpreter` exist. | [`execute_entry_source(capability, unit_name, source, options, cancellation)`](../src/embedding_api/execution.rs) executes only the existing prepared, zero-argument `i64` entrypoint profile. It requires [`ExecutionCapability`](../src/embedding_api/execution.rs), caller bounds, and a cooperative cancellation token; no source-native host effect receives a provider or ambient fallback. |
 | Explicit provider/capability injection | Done, for the vector-embedding effect only, by `semantic_embedding::EmbeddingCapability`/`EmbeddingProvider` (see above). | `check_source` needs no capability because checking is pure and effect-free; this bullet is satisfied for *this* operation by construction (nothing to inject authority into), not by adding an unnecessary capability type. |
-| Memory/resource ownership and cancellation | Not documented for any embedding surface. | Stateless analysis calls hold no resource across calls. A `ProjectSession` owns only in-memory compiler cache/service state and normal Rust drop releases it. [`ExecutionCancellation`](../src/embedding_api/execution.rs) provides monotonic cooperative cancellation for the bounded interpreter call. Project-service operations currently provide no cancellation kernel, so the session facade does not falsely advertise one. |
-| Version/feature negotiation | Not present for any embedding surface. | [`EMBEDDING_API_VERSION`](../src/embedding_api.rs) and `EmbeddingApiVersion::is_compatible_with` exist and are tested against both a matching and two non-matching major versions. |
+| Memory/resource ownership and cancellation | Not documented for any embedding surface. | Stateless analysis calls hold no resource across calls. A `ProjectSession` owns only in-memory compiler cache/service state and normal Rust drop releases it. [`EmbeddingCancellation`](../src/embedding_api.rs) pre-cancels Project opening/refresh and samples bounded context before work and before returning a successful report; it does not promise an unsafe mid-refresh interruption. [`ExecutionCancellation`](../src/embedding_api/execution.rs) cooperatively cancels the bounded interpreter call. |
+| Version/feature negotiation | Not present for any embedding surface. | [`EMBEDDING_API_VERSION`](../src/embedding_api.rs), `EmbeddingApiVersion::is_compatible_with`, `require_compatible`, and `negotiate_features` check major/minimum minor and exact operation/profile names. Unknown features fail closed with `SPX-EMB004`. |
 | Thread-safety and reentrancy contract | Not documented. | `check_source` takes no shared or mutable state. `ProjectSession` makes no `Sync`, clone, reentrancy, or simultaneous-refresh promise; refresh/candidate validation take `&mut self`. A caught stateful-operation panic poisons the handle, requiring callers to drop and reopen it from explicit bytes. |
 
 ## The `CheckOutcome` contract
@@ -207,15 +207,20 @@ option types or traversal state.
 
 ## Compatibility policy
 
-`EMBEDDING_API_VERSION` (currently `1.6.0`; `1.1.0` after `format_source`,
+`EMBEDDING_API_VERSION` (currently `1.7.0`; `1.1.0` after `format_source`,
 `1.2.0` after `graph_source`, `1.3.0` after `context_source`, and `1.4.0`
 after `context_v2_source`, then `1.5.0` after `execute_entry_source`, and
-`1.6.0` after the Project session facade) names
+`1.6.0` after the Project session facade, and `1.7.0` after explicit
+version-refusal and pre-cancelled request entry points) names
 this Rust surface's own version,
 independent of any checked SEMAPRAX program's semantics.
 `EmbeddingApiVersion::is_compatible_with(requested_major)` returns `true`
-only when `requested_major` equals this build's `major`; a differing major
-version is refused rather than silently assumed compatible.
+only when `requested_major` equals this build's `major`; `require_compatible`
+turns a mismatch into the stable `SPX-EMB002` diagnostic rather than silently
+assuming compatibility. `EmbeddingCancellation` reports `SPX-EMB003` only
+when it was observed before a request starts, or (for pure context) before its
+successful report is returned; it never claims the graph/project kernels were
+interrupted mid-operation.
 `version_negotiation_accepts_matching_major_and_refuses_a_different_one`
 tests both a match (`1`) and two refusals (`0` and `2`). Within one major
 version, each existing function's accepted inputs and each existing outcome
@@ -306,3 +311,19 @@ diagnostics, retained warnings, and API-major rejection. Run it with
 It has its own Cargo workspace and lockfile. Its dependency is a local path
 to the compiler checkout; this is local consumer evidence, not validation
 of an installed or published registry package.
+
+### Exact feature negotiation and cancellation
+
+`negotiate_features(major, minimum_minor, required_names)` validates against
+`SUPPORTED_FEATURES`, with at most 32 names of at most 128 bytes each. A differing
+major or unsupported minimum minor returns `SPX-EMB002`; an unknown name or
+capacity violation returns `SPX-EMB004`. The returned read-only `EmbeddingFeatures`
+is availability information. Execution still requires `ExecutionCapability`.
+There is no implicit profile fallback or authority in this result.
+
+Both `context_source_with_cancellation` and
+`context_v2_source_with_cancellation` sample the monotonic host signal before
+analysis and before returning a successful report. Project open and refresh
+sample only before starting; cancellation never reports an uncommitted state
+after the persistent service has adopted a generation. A pre-cancelled refresh
+leaves its handle usable and its old revision intact.

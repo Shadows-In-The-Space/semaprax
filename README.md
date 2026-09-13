@@ -4,155 +4,110 @@
 
 ### Meaning in. Verified machine code out.
 
-An experimental systems programming language with a stable semantic program
-graph designed for humans and software agents.
+**A systems programming language built for AI agents. Still readable by humans.**
+
+Give coding agents a typed map of your program, not just a pile of files.
+Build runtime agents whose proposals must pass checked code before they can act.
 
 [![CI](https://github.com/wavect/semaprax/actions/workflows/ci.yml/badge.svg)](https://github.com/wavect/semaprax/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.4.1-7c3aed.svg)](Cargo.toml)
 [![Status](https://img.shields.io/badge/status-pre--alpha-f59e0b.svg)](#project-status)
-[![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000.svg?logo=rust)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-2563eb.svg)](LICENSE)
 
-[Get started](#get-started) · [Understand the model](#the-programming-model) ·
-[Check the status](#project-status) · [Read the docs](docs/index.md)
+[Get started](#get-started) · [Why Semaprax?](#why-semaprax) ·
+[Build agents](#agents-as-programs-not-just-prompts) ·
+[Examples](examples/README.md) · [Documentation](docs/index.md)
 
 </div>
 
-
-
 https://github.com/user-attachments/assets/8768f221-86c3-40a8-ad62-e75ee74ee66c
 
-
-
 > [!WARNING]
-> SEMAPRAX is pre-alpha research software. Its language, graph schemas,
-> diagnostics, and ABIs can change. Do not use it for production or
+> Semaprax is **pre-alpha research software**, not a production-ready language.
+> Syntax, protocols, and binary interfaces can change. Use it to experiment,
+> build prototypes, and help shape the language, not for production or
 > safety-critical workloads.
 
-Most programming tools edit text and reconstruct meaning afterward. SEMAPRAX
-keeps readable `.spx` source as the canonical Git representation while
-exposing a deterministic, versioned semantic graph for program analysis and
-agent operations.
+## Why Semaprax?
 
-| Principle | Practical effect |
+**The idea: make meaning, constraints, and change first-class parts of programming.**
+
+Semaprax keeps human-readable `.spx` source in Git. The compiler also exposes a
+versioned semantic graph: declarations, types, contracts, effects, and their
+relationships. A coding agent can ask what a function means, inspect its
+callers, and propose a change against the exact revision it inspected.
+
+| What you get | Why it matters |
 | --- | --- |
-| Persistent identity | Public declarations keep stable `@id` values across display-name changes. |
-| Checked meaning | Types, effects, contracts, ownership, and call relationships are resolved before lowering. |
-| Stale-safe changes | Supported semantic patches bind to a known revision and fail without changing source when replay or validation fails. |
-| Shared semantics | Native and WebAssembly lanes start from the same validated HIR and cleanup meaning. |
+| **Stable identities** | An explicit `@id("math.add")` identifies the same declaration after a supported display-name change. Tools need not treat its spelling as its identity. |
+| **Relevant, bounded context** | Query a declaration and its semantic neighborhood with explicit depth, node, and byte limits instead of always transferring the whole graph. |
+| **Contracts, effects, and ownership** | Express what code expects, what it promises, which effects it declares, and how it owns or borrows values. |
+| **Checked changes** | Preview supported semantic edits, inspect their impact, and reject stale or invalid transactions rather than blindly overwrite source. |
+| **Typed runtime agents** | Separate an AI model's proposal from deterministic authorization, effect execution, and state transitions. |
+
+This is a language and toolchain, not a prompt wrapper, a natural-language
+compiler, or a requirement to use AI. You can write and run ordinary programs
+without an AI model or API key.
 
 ## Get started
 
-### 1. Check prerequisites (10s)
+### Run your first program
 
-| Need | Version | Check | Why you need it |
-| --- | --- | --- | --- |
-| Rust (`cargo`, `rustc`) | 1.88+ | `rustc --version` | Builds and installs the CLIs |
-| Clang | any C11 driver | `clang --version` | Native lane (`--target native`) emits C11 and spawns `clang` |
-| Node.js | 22+ | `node --version` | Verifies Wasm/Web packages; not needed for `check`/`run` |
-| Git | any recent | `git --version` | Only to clone the checkout |
-
-```sh
-rustc --version  # ≥1.88
-clang --version
-node --version   # ≥22 for `build --target web` verification
-```
-
-Missing one? `rustup` for Rust, `xcode-select --install` / `apt install clang` / `nvm install 22`. Full prerequisites, `PATH` setup, and what a first failure means live in [Install](docs/INSTALL.md).
-
-### 2. Try without installing (30s) — recommended
+You need **Git and Rust/Cargo 1.88+** for this source-checkout route. The two
+commands below use the checker and interpreter; they do not require Clang,
+Node.js, or a model provider. Cargo may download Rust dependencies and compile
+the toolchain on the first run.
 
 ```sh
 git clone https://github.com/wavect/semaprax.git
 cd semaprax
-cargo run --locked -p semaprax -- check examples/meaning.spx  # → verified examples/meaning.spx
-cargo run --locked -p semaprax -- run examples/meaning.spx    # → 42
+
+cargo run --locked -p semaprax -- check examples/meaning.spx
+cargo run --locked -p semaprax -- run examples/meaning.spx
 ```
 
-No `cargo install`, no `PATH` edits. This is what the docs and CI use to be unambiguous. Use `semaprax --help` or `semaprax help language` (compiler-checked [agent quick reference](docs/AGENT-QUICK-REFERENCE.md)) for the one-page card without a checkout. Open a `.spx` file in VS Code with the [repository extension](editors/vscode/README.md) for syntax highlighting. On GitHub, `.spx` files render with Rust's highlighting today via a `linguist-language` override in `.gitattributes`; see [GitHub Linguist submission v1](docs/GITHUB-LINGUIST-SUBMISSION-V1.md) for what native `Semaprax` recognition still needs.
+The first command reports a verified program and its revision. The second
+prints **`42`**. No global installation or `PATH` change is needed.
 
-### 3. Install for short commands (optional, 60s)
+### Use shorter commands and create a project
+
+From the same repository directory, install the standalone CLI:
 
 ```sh
-cargo install --locked --path .          # installs `semaprax`
-# for private host surfaces, from the same checkout:
-cargo install --locked --path crates/semaprax-toolchain  # installs `semaprax-full`
+cargo install --locked --path . --bin semaprax
 ```
 
-If `command not found`, add Cargo's bin dir to `PATH` (details in [Install](docs/INSTALL.md#put-cargos-binary-directory-on-your-path)):
+Ensure Cargo's binary directory is on `PATH`; in Bash or Zsh:
 
 ```sh
-export PATH="$HOME/.cargo/bin:$PATH"   # bash/zsh, new shell afterwards
-command -v semaprax
-semaprax check examples/meaning.spx
-semaprax run examples/meaning.spx
+export PATH="$HOME/.cargo/bin:$PATH"
+semaprax --version
 ```
 
-Prefer a pre-built binary (no Rust needed)? Download the [v0.4.1 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.4.1) archive for your host and put the unpacked `semaprax` on `PATH`.
-
-### 4. Create your first project (30s)
+Then create, check, test, and run a multi-file project without leaving the
+repository directory:
 
 ```sh
 semaprax new first-semaprax
-cd first-semaprax
-semaprax check .   # parse + type-check the generated `semaprax.toml` project
-semaprax test .    # run the project's test
-semaprax run .     # → 42
+semaprax check first-semaprax/semaprax.toml
+semaprax test first-semaprax/semaprax.toml
+semaprax run first-semaprax/semaprax.toml
 ```
 
-`new` uses only compiled-in files, writes to a fresh directory under an existing parent, never replaces an entry, and touches no network/Git. Every generated project carries an `AGENTS.md` with the commands and the rules that differ from other languages. Re-run `semaprax help diagnostic SPX-T208` for one indexed correction, or `semaprax help diagnostic codes` for the full inventory.
+The generated calculator prints **`42`**. It includes a manifest, source, tests,
+and an `AGENTS.md` with project commands and language-specific guidance.
+`new` requires a fresh destination; it does not initialize Git, install
+packages, or access the network.
 
-Need the same five files as a reproducible stdout doc without granting a destination? `semaprax project-scaffold --name first-semaprax` prints the `semaprax.project-scaffold.v2` capsule (caller-materialized data, not a publication API).
-
-Full walkthrough: [quickstart](docs/QUICKSTART.md).
-
-### 5. What you can do next (copy-paste)
-
-```sh
-# bounded semantic view
-semaprax graph examples/meaning.spx
-semaprax context examples/meaning.spx app.main --depth 1 --max-bytes 65536 --max-nodes 256
-```
-
-Build a browser package from the library calculator (pinned walkthrough — prints `scalar-exports-v1-ok`):
-
-```sh
-semaprax build examples/calculator.spx --target web \
-  --export calculator.add --export calculator.subtract \
-  --export calculator.multiply --export calculator.divide \
-  --export calculator.is-negative --export calculator.not \
-  -o target/calculator-web
-
-node scripts/verify-wasm-scalar-exports.mjs target/calculator-web
-```
-
-```sh
-# multi-file project (check / test / build)
-semaprax check examples/calculator-project/semaprax.toml
-semaprax test examples/calculator-project/semaprax.toml
-semaprax build examples/calculator-project/semaprax.toml --target web -o target/calculator-project-web
-```
-
-The generated JS API uses stable IDs — a display rename does not change the external key; see [Wasm Scalar Exports v1](docs/WASM-SCALAR-EXPORTS-V1.md). The extensible `semaprax.manifest.v1` can also name exact local `Subject-v3` closures and Cargo crate inputs for the Native Rust SDK (no allowlist; `import rust fn` keeps the Rust API outside checked code). Details in [Project Dependencies v1](docs/PROJECT-DEPENDENCIES-V1.md) and [Project Manifest v1](docs/PROJECT-MANIFEST-V1.md).
-
-> Offline packages: the additive [Offline Multi-Package Source Capsule v1](docs/OFFLINE-MULTI-PACKAGE-SOURCE-CAPSULE-V1.md) + [Linked Scalar Core-Wasm Package Build v2](docs/OFFLINE-LINKED-SCALAR-WASM-PACKAGE-BUILD-V2.md) authenticate a narrow caller-owned scalar closure above offline resolution. Their nonignored hostile evidence ran in the tagged matrix, unpromoted — not a package manager, trusted provenance, or hermetic sandbox.
-
-### Releases and changelog
-
-The published tag is the
-[v0.4.1 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.4.1)
-(2026-09-11, `2ef043ba`) with smoke-tested archives, SHA256 checksums, and
-hosted release evidence in the
-[release process](docs/RELEASE-PROCESS.md#041-hosted-release-evidence); the
-prior `v0.2.0` remains archived at
-[its release record](docs/RELEASE-PROCESS.md#v020-hosted-release-evidence).
-The
-development changelog is now summarized in [CHANGELOG.md](CHANGELOG.md),
-with compact highlights in [docs/CHANGELOG-SUMMARY.md](docs/CHANGELOG-SUMMARY.md)
-and full historical detail archived at
-[docs/CHANGELOG-ARCHIVE.md](docs/CHANGELOG-ARCHIVE.md).
+**All remaining commands assume the repository root.** To stay with the
+no-install route, replace `semaprax` with `cargo run --locked -p semaprax --`.
+Shell examples use POSIX syntax; [Install](docs/INSTALL.md) covers Windows,
+prebuilt release archives, prerequisites, and troubleshooting. The
+[full quickstart](docs/QUICKSTART.md) takes the generated project further.
 
 ## A small SEMAPRAX program
+
+This is the complete [program you just ran](examples/meaning.spx):
 
 ```semaprax
 module examples.meaning;
@@ -174,140 +129,321 @@ fn main() -> i64
 }
 ```
 
-`@id` is the declaration's persistent semantic identity. The name `add` is
-for humans; tools can continue to refer to `math.add` after a supported rename.
+`add` is the human-facing name; `math.add` is its persistent semantic identity.
+`requires` and `ensures` are part of the function's meaning, not just comments.
+The last expression is the function's result.
 
-The [language tour](docs/LANGUAGE-TOUR.md) walks from this program to
-identity, contracts, records and matching, explicit mutation, ownership,
-cleanup, and effects, one runnable example at a time. The
-[examples index](examples/README.md) says what every committed example
-demonstrates and which command was observed to succeed on it.
+Verification is progressive: the implemented checks and contract machinery
+combine static validation with runtime guards in supported profiles.
+**“Verified” does not mean every program has a full formal proof or is bug-free.**
+The [language tour](docs/LANGUAGE-TOUR.md) explains the rules through committed,
+compiler-checked examples.
 
-Coding agents and readers with a small context window can start from the
-compiler-checked [agent quick reference](docs/AGENT-QUICK-REFERENCE.md)
-instead: one page of admitted shapes, the diagnostics that habits from other
-languages trigger, and the fix for each. The generated
-[standard library catalog](docs/STANDARD-LIBRARY-CATALOG.md) lists every
-`std.*` declaration that exists today with its contract. An installed compiler
-can return one exact entry without transferring the whole catalog:
-`semaprax help library <module|name|stable-id>`. It can likewise return one
-compiler-verified declaration example with
-`semaprax help shapes <kind|stable-id|path#stable-id>`, or one compiler-checked
-language-card section with `semaprax help language <topic>` after listing the
-stable selectors with `semaprax help language topics`.
-Given a diagnostic such as `SPX-T208`, the installed compiler can instead
-return only its common failed form and correction with `semaprax help
-diagnostic SPX-T208`; `semaprax help diagnostic codes` lists the closed exact
-inventory.
+## For AI coding agents: inspect meaning, then change it
+
+Start with the same program, but ask for the representation a tool can use:
+
+```sh
+# The complete semantic graph for this file.
+semaprax graph examples/meaning.spx
+
+# Bounded context around one stable declaration identity.
+semaprax context examples/meaning.spx app.main \
+  --depth 1 --max-bytes 65536 --max-nodes 256
+
+# Just the contract-oriented view of the function it calls.
+semaprax context examples/meaning.spx math.add --depth 1 --filters contracts
+```
+
+The important shift is from “find something that looks like this text” to
+“inspect and change this declaration at this revision.” The supported workflow is:
+
+```text
+Inspect graph/context → propose semantic edit → inspect impact/review
+                     → replay checks → explicitly authorized apply
+```
+
+[Semantic patches](docs/SEMANTIC-PATCH-V2.md) and the
+[managed workspace protocols](docs/DEVELOPMENT.md) implement defined editing
+operations, not arbitrary AI rewrites. Supported patches check their base
+revision and semantic constraints before changing source. Read-only reports
+are not permission to write, and multi-file validation is not itself publication.
+
+For tool builders, the repository includes MCP-connected review/publication
+workflows in [the agent-workflow package](packages/semaprax-agent-workflow/README.md)
+and a [Rust embedding API](examples/embedding-api/README.md). These are scoped
+integration routes, not a universal IDE agent or an unrestricted filesystem API.
+
+### Give your coding agent the language, not a guess
+
+Every generated project includes `AGENTS.md`. The installed compiler also
+carries targeted language help, declaration examples, and diagnostic fixes:
+
+```sh
+semaprax help language
+semaprax help language topics
+semaprax help diagnostic SPX-T208
+semaprax help diagnostic codes
+```
+
+Use the [agent quick reference](docs/AGENT-QUICK-REFERENCE.md),
+[standard library catalog](docs/STANDARD-LIBRARY-CATALOG.md), and
+[language shapes catalog](docs/LANGUAGE-SHAPES-CATALOG.md) as compact context.
+The [VS Code extension](editors/vscode/README.md) adds `.spx` highlighting.
+
+## Agents as programs, not just prompts
+
+**A model can propose an action. That does not give it authority to perform it.**
+
+Semaprax also has source-defined Agents with typed roles for tasks, state,
+observations, proposals, outcomes, and results. Its implemented iterative
+lifecycle separates model output from the deterministic code that decides what
+happens next:
+
+```text
+Initialize once
+    ↓
+Observe → model proposes → decode typed Proposal → authorize → execute → reduce
+    ↑                                                                      │
+    └──────────────────────────── Continue ────────────────────────────────┘
+                                      or Complete / Suspend / Fail
+```
+
+The [iterative lifecycle](docs/AGENT-ITERATIVE-LIFECYCLE-V2.md),
+[typed effects](docs/AGENT-TYPED-EFFECTS-V3.md), and
+[Direct Runtime](docs/AGENT-RUNTIME-V2.md) give this separation executable form.
+The checked reducer chooses the next state; authorization runs again for each
+turn; host capabilities and handlers are supplied explicitly.
+
+<details>
+<summary><strong>Explore streaming, budgets, recovery, and migration</strong></summary>
+
+| Capability | Current implementation boundary |
+| --- | --- |
+| **Typed proposals and streaming validation** | Compiler-derived Proposal schemas constrain decoding. The bound source-model route rejects malformed or mismatched proposals before typed-effect dispatch. |
+| **Budgets and deadlines** | Execution and model-policy routes apply their configured limits to iterations, work, calls, bytes, tokens, and quoted costs. Accounting distinguishes reservations, observations, and unknown usage. |
+| **Checkpoints and recovery** | Separate durable profiles journal intent before dispatch and retain outcomes. An unresolved attempt is uncertainty, not permission to try again. |
+| **Retries and failover** | The generic host-integration profile supports bounded retries and ordered failover, including a durable profile bound to retained execution and model policy. The bound source-model route does **not** yet admit automatic retries or provider switching. |
+| **State migration** | Checked migration profiles move admitted state between explicitly bound revisions while retaining their authorization and cumulative-accounting requirements. |
+
+These are advanced, evolving runtime integrations. Provider adapters,
+credentials, persistence, and actual external authority belong to explicit host
+implementations. Source Agent stages currently use the retained interpreter;
+this is not a claim of native/Wasm Agent-stage parity, guaranteed provider
+billing, or a turnkey hosted agent service.
+
+Start with [Source Model Operation](docs/SOURCE-MODEL-OPERATION-V1.md),
+[model budget policy](docs/MODEL-BUDGET-POLICY-V1.md), and
+[the live invocation contract](docs/LIVE-INVOCATION-CONTRACT-V1.md).
+
+</details>
+
+Source Agent execution currently uses the retained interpreter and explicitly
+supplied host integrations. Start with the linked lifecycle and runtime guides;
+this is not a one-command hosted agent service.
+
+## A real language beneath the agent tooling
+
+The development tree goes beyond a calculator. Its supported language profiles
+include the following; individual constructs and target combinations still have
+explicit limits.
+
+| Area | Explore |
+| --- | --- |
+| **Data modeling** | Records, variants, `Option`, `Result`, matching, classes, and inheritance. |
+| **Control flow** | Expression-valued blocks and conditionals, immutable bindings, explicit mutation, and loops. |
+| **Ownership and cleanup** | Owned values, borrowed views, resources, and checked cleanup in the supported ownership profiles. |
+| **Generic programming** | Generic functions, records and variants, compiler collections, iterators, function values, and bounded closure profiles. |
+| **Useful data and I/O** | Text, Unicode operations, bytes, parsing, and bounded filesystem, process, and network integrations. |
+| **Projects** | Multi-file manifests, declared tests and exports, and explicitly supplied dependency inputs. |
+
+Follow the [language tour](docs/LANGUAGE-TOUR.md), then choose a runnable
+[example](examples/README.md). The [completion matrix](docs/COMPLETION-MATRIX.md)
+separates these implemented profiles from the broader language goal.
+
+<details>
+<summary><strong>Further experiments: application services and economic agents</strong></summary>
+
+The [development changelog](CHANGELOG.md) also tracks checked-source HTTPS,
+explicit Rust-host authentication/session composition, and checkpointed job
+execution. These are individual language or host-integration profiles, not a
+complete web application framework.
+
+The [economic-agent implementation](src/economic_agent.rs) explores policy-bound
+payment intents, simulation, approval, signing/broadcast boundaries, and
+reconciliation. The host supplies the wallet, signing, transport, and journal
+implementations. Model output is not payment authority; there is no built-in
+wallet, mainnet authority, or exactly-once payment guarantee.
+
+</details>
+
+## Build something your existing stack can call
+
+You do not need to replace an entire application to explore Semaprax. Start
+with a small computational kernel, validator, or parser and keep the UI,
+networking infrastructure, and application services in your host stack.
+
+### From Semaprax to JavaScript through WebAssembly
+
+With **Node.js 22+**, run this from the repository root. The build emits a Wasm
+module plus JavaScript bindings and TypeScript declarations:
+
+```sh
+semaprax build examples/calculator.spx --target web \
+  --export calculator.add --export calculator.subtract \
+  --export calculator.multiply --export calculator.divide \
+  --export calculator.is-negative --export calculator.not \
+  -o target/calculator-web
+
+node scripts/verify-wasm-scalar-exports.mjs target/calculator-web
+```
+
+The verifier prints **`scalar-exports-v1-ok`**. Now call the generated package:
+
+```sh
+node --input-type=module <<'JS'
+import { readFile } from 'node:fs/promises';
+import { instantiateBytes } from './target/calculator-web/semaprax.bindings.js';
+
+const runtime = await instantiateBytes(await readFile('target/calculator-web/app.wasm'));
+console.log(runtime.call('calculator.add', 19n, 23n));
+// { ok: true, value: 42n }
+JS
+```
+
+The API uses the stable identity `calculator.add`, not a generated display
+name. Semaprax's `i64` values cross this JavaScript boundary as `BigInt`, hence
+`19n` and `23n`. Contract and arithmetic failures use structured status results.
+See [scalar exports](docs/WASM-SCALAR-EXPORTS-V1.md) and the
+[browser example](examples/calculator-web/README.md).
+
+### Other targets and integrations
+
+The native path emits C11 and uses **Clang**. Selected generated Rust SDKs and
+owned-data JavaScript/Rust interfaces are also available as developer previews.
+Some require the separate `semaprax-full` toolchain rather than the standalone
+CLI; follow the [Rust consumer](examples/calculator-rust/README.md) or
+[owned-data API](docs/PUBLIC-OWNED-DATA-API-V1.md) instructions for that route.
+Generated preview packages are not a promise of registry publication, a stable
+ABI, or support for every language feature on every target.
+
+## What should you build first?
+
+| Start with | Why it is a useful first experiment |
+| --- | --- |
+| [Calculator project](examples/calculator-project/semaprax.toml) | Learn multi-file imports, tests, and browser exports without external services. |
+| [Configuration validator](examples/config-validator-project/semaprax.toml) | Explore a small text-processing kernel with explicit input boundaries. |
+| [Binary frame parser](examples/binary-frame-project/semaprax.toml) | Work with indexed bytes, validation, and checksums. |
+| [Text analytics](examples/text_analytics.spx) | Try strings, borrowed views, byte traversal, and ordinary computation. |
+
+For an agent-tooling experiment, inspect `math.add` with `context` and follow
+[semantic impact](docs/SEMANTIC-IMPACT-V1.md) into a supported rename on a copy.
+The committed `examples/rename.spatch` deliberately contains a revision
+placeholder; obtain the current revision before using it, and do not mutate
+the canonical example used by repository tests.
 
 ## The programming model
 
 ```mermaid
 flowchart LR
-    S["Canonical .spx source"] --> P["Parse and verify"]
-    P --> H["Validated stable-ID HIR"]
+    S["Readable .spx source in Git"] --> H["Checked compiler representation"]
     H --> G["Versioned semantic graph"]
-    G --> Q["Context · impact · review"]
-    G --> T["Replay-checked transactions"]
+    G --> Q["Context, queries, impact and review"]
+    G --> T["Replay-checked semantic edits"]
     T --> S
-    H --> N["C11 / Clang"]
-    H --> W["WebAssembly Core"]
+    H --> I["Interpreter"]
+    H --> N["Native via C11 / Clang"]
+    H --> W["Core WebAssembly / JS bindings"]
 ```
 
-Readable source remains the reviewable, version-controlled representation.
-The graph is the preferred query and change interface. A graph or evidence
-capsule describes meaning; it does not itself grant filesystem, build, or
-publication authority.
-
-## CLI overview
-
-| Command | Purpose |
-| --- | --- |
-| `semaprax --version` / `version --json` | Report deterministic package and injected commit identity. |
-| `semaprax-full doctor [--profile <id>] [--target …] [--json]` | Private offline-profile checks; production profiles currently unavailable, with no ambient-tool fallback. |
-| `semaprax new <destination>` | Create and verify a Project v1 calculator from the built-in template; the full toolchain publishes the same files through a staged rename. |
-| `semaprax check …` | Parse, resolve, type-check, and verify a file or project manifest. |
-| `semaprax fmt <file> [--check]` | Write or check canonical formatting. |
-| `semaprax run …` / `semaprax test …` | Execute an admitted file or project through the development path. |
-| `semaprax build … --target …` | Produce an admitted native, callable, WebAssembly, Web, or npm artifact. |
-| `semaprax graph <file>` | Emit the revisioned semantic graph. |
-| `semaprax context <file|project> <id> …` | Emit bounded semantic context around a declaration. |
-| `semaprax query <file|project> …` | Find declarations and semantic callers without reading the full graph. |
-| `semaprax impact` / `review` | Preview supported semantic-patch consequences without writing. |
-| `semaprax patch` | Apply a supported single-file semantic transaction. |
-| `semaprax workspace-*` | Use the bounded managed multi-file protocols. |
-
-`semaprax --help` is a one-screen guided overview of these commands. Run
-`semaprax help all` for the complete command list. Many report, evidence,
-workspace, and host-integration commands are narrow protocol surfaces intended
-for tool authors; their versioned reference documents define the exact
-admission rules and non-claims.
-
-This source tree contains a Project v8
-`owned-data-api.v1` developer-preview route for `--target npm` and
-`--target rust`, plus the `examples/frame-payload-*` validation fixtures. Its
-nonignored repository regressions include exact-tag evidence, including the
-three-host Rust matrices and selected external-consumer jobs. This is hosted
-developer-preview evidence, not a registry publication or formal support
-decision: generated packages remain unpublished and must not be treated as a
-stable or general owned-data ABI. See [Public Owned Data API
-v1](docs/PUBLIC-OWNED-DATA-API-V1.md) and the [completion
-matrix](docs/COMPLETION-MATRIX.md).
-
-Project v9 flat-owned-record and Project v10 owned-UTF-8 follow-ons also have
-exact-tag hosted regression coverage. Their generated packages remain
-unpublished, neither profile is promoted, and v10 remains gated on an explicit
-v9 promotion decision. See [Public Flat Owned Record API v1](docs/PUBLIC-FLAT-OWNED-RECORD-API-V1.md)
-and [Public Owned UTF-8 API v1](docs/PUBLIC-OWNED-UTF8-API-V1.md).
+These paths share checked program meaning, but admit different subsets.
+The graph describes the program; it does not itself grant write, network,
+build, payment, or publication authority.
 
 ## Project status
 
-**Release:** [v0.4.1 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.4.1) · **Changelog:** [CHANGELOG.md](CHANGELOG.md) · **Maturity:** pre-alpha research · **Overall goal:**
-Partial
+**Development version: 0.4.1 · Maturity: pre-alpha · Full product goal: Partial.**
 
-SEMAPRAX has executable vertical slices across its language, semantic graph,
-agent-change workflow, native C11 lane, Core WebAssembly lane, bounded project
-builds, and selected host integrations. It does not yet provide the general
-ownership/lifetime system, package ecosystem, stable public ABIs, production
-application toolchain, or cross-platform validation required for 1.0.
+There is executable language, graph, semantic-change, runtime, and host-integration
+work to explore today. There is not yet a production application toolchain,
+a stable general ownership/lifetime system or public ABI, a complete package
+ecosystem, or universal target support. Latest `main` also contains work beyond
+the published release; a development-tree capability is not automatically
+available in a downloaded archive.
 
-Status has one owner: the [completion matrix](docs/COMPLETION-MATRIX.md). It
-separates the long-term product contract from the current release-exit audit
-and links each claim to its evidence-owning specification. Historical changes
-belong in the [changelog](CHANGELOG.md); future sequencing belongs in the
-[roadmap](docs/ROADMAP.md).
+The long-term ambition is a systems language in which agents manipulate meaning,
+humans retain readable source and review control, and compilation connects both
+to native and portable execution. Memory safety without a mandatory tracing
+collector, richer verification, broader interoperability, and better agent
+workflows belong to that [language contract](docs/RFC-0001.md).
+
+Reducing irrelevant model context and repair ambiguity is a design goal, not a
+blanket claim of measured token savings, faster development, or superior model
+accuracy. Evidence and future goals stay separate:
+[completion matrix](docs/COMPLETION-MATRIX.md) ·
+[roadmap](docs/ROADMAP.md) · [releases](https://github.com/wavect/semaprax/releases) ·
+[changelog](CHANGELOG.md).
 
 ## Documentation
 
-The documentation has three audiences:
+| Your next question | Start here |
+| --- | --- |
+| How do I install it and run a project? | [Install](docs/INSTALL.md) · [Quickstart](docs/QUICKSTART.md) |
+| How do I write the language? | [Language tour](docs/LANGUAGE-TOUR.md) · [Examples](examples/README.md) |
+| What should my coding agent read? | [Agent quick reference](docs/AGENT-QUICK-REFERENCE.md) · [Library catalog](docs/STANDARD-LIBRARY-CATALOG.md) |
+| How do I use the tools? | [CLI guide](docs/CLI-GUIDE.md) · [VS Code extension](editors/vscode/README.md) |
+| How do typed runtime agents work? | [Iterative lifecycle](docs/AGENT-ITERATIVE-LIFECYCLE-V2.md) · [Direct Runtime](docs/AGENT-RUNTIME-V2.md) |
+| Where are the complete docs and exact protocols? | [Documentation home](docs/index.md) · [Book contents](docs/SUMMARY.md) |
 
-- [Public documentation](docs/index.md) explains the language, supported
-  workflows, and user-visible boundaries.
-- Versioned reference specifications define exact wire formats, admission
-  profiles, diagnostics, and compatibility rules for tool and host authors.
-- [Development documentation](docs/DEVELOPMENT.md) contains architecture,
-  completion evidence, quality gates, roadmap sequencing, migrations, and
-  private experiment contracts.
+Versioned specifications define precise behavior for integrations; they are
+reference material, not prerequisites for your first program.
 
-The [book summary](docs/SUMMARY.md) is the exhaustive catalog. Stable
-specification paths remain in `docs/` so existing citations keep working.
+## CLI overview
+
+<details>
+<summary>Everyday commands at a glance</summary>
+
+| Command | Purpose |
+| --- | --- |
+| `semaprax new <destination>` | Create the built-in starter project in a fresh directory. |
+| `semaprax check <input>` | Check a source file or project. |
+| `semaprax run <input>` / `semaprax test <project>` | Run a program or its declared project tests. |
+| `semaprax fmt <file> --check` | Check canonical formatting without rewriting the file. |
+| `semaprax graph <input>` | Inspect the semantic graph. |
+| `semaprax context <input> <id> …` | Retrieve bounded context around a declaration. |
+| `semaprax impact` / `semaprax review` | Inspect supported proposed changes. |
+| `semaprax patch` | Apply a supported single-file semantic transaction. |
+| `semaprax build <input> --target …` | Build an artifact admitted by the selected target/profile. |
+| `semaprax help language` / `semaprax help diagnostic <code>` | Retrieve installed language guidance or an indexed diagnostic fix. |
+
+Run `semaprax --help` for the guided overview, `semaprax <command> --help`
+for exact arguments, and `semaprax help all` for the complete command list.
+
+</details>
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before
-changing semantics. [First contribution](docs/FIRST-CONTRIBUTION.md) sequences
-one change end to end against them. On Unix, the complete repository gate is:
+**Try a small program. Find the boundary. Help make it better.**
+
+Useful contributions include runnable examples, clearer diagnostics,
+reproducible bug reports, adversarial tests, target parity, and measured
+agent-workflow experiments. Start with [First contribution](docs/FIRST-CONTRIBUTION.md),
+[CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md).
+Changes to syntax, graphs, effects, ownership, contracts, or ABIs should begin
+with an RFC or an explicit update to an existing one.
+
+On Unix, the complete repository gate is:
 
 ```sh
 scripts/quality.sh full
 ```
 
-Changes to syntax, graph schemas, transactions, effects, ownership, contracts,
-or ABIs should begin with an RFC or an explicit update to an existing one.
+[Report an issue](https://github.com/wavect/semaprax/issues) ·
+[Discuss an idea](https://github.com/wavect/semaprax/discussions) ·
+**Star the repository to follow the work.**
 
 ## Citation and license
 
-Use [CITATION.cff](CITATION.cff) for repository metadata and
-[CITATION.md](CITATION.md) for claim-specific evidence guidance. SEMAPRAX is
-maintained by Wavect GmbH and distributed under the
-[Apache License 2.0](LICENSE).
+Created and maintained by **Wavect GmbH**. Licensed under
+[Apache 2.0](LICENSE). For research citations and claim-specific evidence,
+see [CITATION.cff](CITATION.cff) and [CITATION.md](CITATION.md).

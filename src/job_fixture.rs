@@ -20,16 +20,13 @@
 //! process authority, opens no socket, spawns no thread, and is used only by
 //! this module's own tests.
 //!
-//! **The #228 boundary.** This fixture's [`JobStore::record_connection_uncertain`]
-//! plays exactly the role `DatabaseFixture::connection_lost` already plays
-//! for `std.db`: it is the one transition driven by an external signal the
-//! *Rust* host layer observes, not a request a checked SEMAPRAX handler
-//! makes. A checked SEMAPRAX-authored job handler cannot produce this input
-//! itself today, because every fallible host operation in this repository
-//! aborts its enclosing invocation on failure instead of returning an
-//! inspectable value (issue #228). `docs/DURABLE-JOBS-V1.md#the-228-boundary-what-blocks-a-checked-semaprax-caller`
-//! records the exact follow-on probe; this module does not work around the
-//! gap or invent a checked-source path to the `UNCERTAIN` state.
+//! **Classified uncertainty.** The checked atomic-write provider route now
+//! returns `Published`, `NotPublished`, or `Uncertain` as a checked value
+//! (`docs/HOST-OPERATION-OUTCOME-V1.md`). A host runner may map only that
+//! provider-observed third outcome to [`OutcomeKind::Uncertain`].
+//! [`JobStore::record_connection_uncertain`] remains the recovery path for a
+//! lost completion acknowledgement or an interrupted durable checkpoint; it
+//! must not be used to turn ordinary failures into uncertainty.
 
 use std::collections::BTreeMap;
 
@@ -187,8 +184,8 @@ impl JobState {
 }
 
 /// An outcome kind reported after an attempt, mirroring `std.jobs.outcome`:
-/// `Success`, `Retryable`, `Permanent`, or `Uncertain` (see the module-level
-/// #228 boundary note for who is allowed to supply `Uncertain`).
+/// `Success`, `Retryable`, `Permanent`, or `Uncertain`. The last variant is
+/// reserved for an actual provider-observed outcome-unknown signal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutcomeKind {
     Success,
@@ -293,6 +290,14 @@ impl JobStore {
             next_id: 1,
             current_revision,
         }
+    }
+
+    /// Advances the revision ledger a recovered runner validates queued jobs
+    /// against. Existing jobs retain their enqueue-time `bound_revision`;
+    /// lowering this value therefore makes a previously queued newer job fail
+    /// closed at [`Self::revision_check`].
+    pub fn set_current_revision(&mut self, current_revision: u8) {
+        self.current_revision = current_revision;
     }
 
     /// Creates the ledger-backed `jobs` table on a fresh `DatabaseFixture`.
@@ -630,8 +635,8 @@ impl JobStore {
     /// I/O failure whose acknowledgement never arrived) and forces the
     /// honest `Uncertain` resting state rather than guessing success or
     /// failure. Mirrors `DatabaseFixture::connection_lost` exactly; see the
-    /// module-level #228 boundary note for why only a Rust-side caller can
-    /// supply this input today.
+    /// checked publication outcome or checkpoint-recovery signal, never an
+    /// ordinary failure relabelled by a caller.
     pub fn record_connection_uncertain(&mut self, id: u64) -> Result<(), JobFixtureError> {
         let job = self.job_mut(id)?;
         if !matches!(job.state, JobState::Leased | JobState::Running) {

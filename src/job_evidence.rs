@@ -75,6 +75,15 @@ pub enum JobEvidenceEntry {
         attempt_before: u8,
         max_attempts: u8,
     },
+    /// Mirrors `JobStore::complete_durable`. `commit_confirmed` records the
+    /// host's observation of the ledger commit, not a guess from the handler
+    /// outcome. A false value is therefore always replayed as `UNCERTAIN`.
+    DurableCompleted {
+        outcome_kind: usize,
+        attempt_before: u8,
+        max_attempts: u8,
+        commit_confirmed: bool,
+    },
     /// Mirrors `JobStore::record_connection_uncertain`.
     ConnectionUncertain,
     /// Mirrors `JobStore::reconcile_uncertain`. `decision`: 0 confirmed
@@ -87,6 +96,10 @@ pub enum JobEvidenceEntry {
     },
     /// Mirrors `JobStore::cancel`.
     Cancelled,
+    /// Mirrors recovery of a checkpointed `LEASED` job whose handler had not
+    /// begun. No handler effect is possible in this state, so expiry safely
+    /// returns it to `PENDING` for a later explicit claim.
+    LeaseExpired,
 }
 
 impl JobEvidenceEntry {
@@ -99,6 +112,8 @@ impl JobEvidenceEntry {
             Self::ConnectionUncertain => 4,
             Self::ReconciledUncertain { .. } => 5,
             Self::Cancelled => 6,
+            Self::DurableCompleted { .. } => 7,
+            Self::LeaseExpired => 8,
         }
     }
 
@@ -106,7 +121,11 @@ impl JobEvidenceEntry {
     /// Two entries that differ in any field encode to different bytes, so a
     /// tampered field is never absorbed into an unchanged digest (see
     /// `job_evidence::tests::tampering_a_recorded_outcome_changes_both_the_root_and_the_recomputed_state`).
-    fn canonical_bytes(self) -> Vec<u8> {
+    /// Version-1 fixed-layout bytes for the entry. The durable runtime uses
+    /// this only inside its separately versioned checkpoint envelope; it
+    /// remains inert evidence data, never a capability or an instruction to
+    /// execute a handler.
+    pub fn canonical_bytes(self) -> Vec<u8> {
         let mut bytes = vec![self.discriminant()];
         match self {
             Self::Enqueued { scheduled } => bytes.push(u8::from(scheduled)),
@@ -121,6 +140,17 @@ impl JobEvidenceEntry {
                 bytes.push(attempt_before);
                 bytes.push(max_attempts);
             }
+            Self::DurableCompleted {
+                outcome_kind,
+                attempt_before,
+                max_attempts,
+                commit_confirmed,
+            } => {
+                bytes.extend_from_slice(&(outcome_kind as u64).to_le_bytes());
+                bytes.push(attempt_before);
+                bytes.push(max_attempts);
+                bytes.push(u8::from(commit_confirmed));
+            }
             Self::ConnectionUncertain => {}
             Self::ReconciledUncertain {
                 decision,
@@ -133,9 +163,56 @@ impl JobEvidenceEntry {
                 bytes.push(attempt);
                 bytes.push(max_attempts);
             }
-            Self::Cancelled => {}
+            Self::Cancelled | Self::LeaseExpired => {}
         }
         bytes
+    }
+
+    /// Decodes exactly one [`Self::canonical_bytes`] value. Unknown tags,
+    /// noncanonical booleans, truncated integers, and trailing bytes are
+    /// refused so checkpoint recovery never repairs or interprets a malformed
+    /// entry.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Option<Self> {
+        let (&tag, fields) = bytes.split_first()?;
+        let bool_field = |fields: &[u8]| match fields {
+            [0] => Some(false),
+            [1] => Some(true),
+            _ => None,
+        };
+        let usize_field = |fields: &[u8]| {
+            let raw: [u8; 8] = fields.try_into().ok()?;
+            usize::try_from(u64::from_le_bytes(raw)).ok()
+        };
+        match tag {
+            0 => Some(Self::Enqueued {
+                scheduled: bool_field(fields)?,
+            }),
+            1 => Some(Self::Claimed {
+                is_due: bool_field(fields)?,
+            }),
+            2 if fields.is_empty() => Some(Self::BegunExecution),
+            3 if fields.len() == 10 => Some(Self::Completed {
+                outcome_kind: usize_field(&fields[..8])?,
+                attempt_before: fields[8],
+                max_attempts: fields[9],
+            }),
+            4 if fields.is_empty() => Some(Self::ConnectionUncertain),
+            5 if fields.len() == 11 => Some(Self::ReconciledUncertain {
+                decision: usize_field(&fields[..8])?,
+                is_idempotent_handler: bool_field(&fields[8..9])?,
+                attempt: fields[9],
+                max_attempts: fields[10],
+            }),
+            6 if fields.is_empty() => Some(Self::Cancelled),
+            7 if fields.len() == 11 => Some(Self::DurableCompleted {
+                outcome_kind: usize_field(&fields[..8])?,
+                attempt_before: fields[8],
+                max_attempts: fields[9],
+                commit_confirmed: bool_field(&fields[10..])?,
+            }),
+            8 if fields.is_empty() => Some(Self::LeaseExpired),
+            _ => None,
+        }
     }
 }
 
@@ -205,6 +282,29 @@ impl JobEvidenceLog {
         self.claimed_final_state
     }
 
+    /// The typed, ordered entries committed by [`Self::root`]. Callers get a
+    /// shared view only; they cannot mutate the log without going through
+    /// [`Self::append`].
+    pub fn entries(&self) -> &[JobEvidenceEntry] {
+        &self.entries
+    }
+
+    /// Rebuilds an evidence log from canonical entries and a claimed final
+    /// state. Digests are recomputed rather than accepted from storage, then
+    /// the complete log is independently replayed before it is returned.
+    pub fn from_entries(
+        entries: Vec<JobEvidenceEntry>,
+        claimed_final_state: usize,
+    ) -> Result<Self, JobEvidenceError> {
+        let mut log = Self::new();
+        for entry in entries {
+            log.append(entry, 0);
+        }
+        log.claimed_final_state = claimed_final_state;
+        log.replay()?;
+        Ok(log)
+    }
+
     /// Independently recomputes the job's final lifecycle state from the
     /// recorded entries alone. Never mutates `self`, never touches a clock,
     /// a file, or a socket, and never claims, retries, or executes anything
@@ -268,6 +368,31 @@ impl JobEvidenceLog {
                 // decision procedure's own pre-fold output.
                 Some(if next == 5 { 1 } else { next })
             }
+            (
+                JobEvidenceEntry::DurableCompleted {
+                    outcome_kind,
+                    attempt_before,
+                    max_attempts,
+                    commit_confirmed,
+                },
+                Some(3),
+            ) => {
+                if !commit_confirmed {
+                    Some(8)
+                } else {
+                    let attempt_after = if outcome_kind == 0 {
+                        attempt_before
+                    } else {
+                        attempt_before.saturating_add(1)
+                    };
+                    let next = decisions::retry_next_state_after_outcome(
+                        outcome_kind,
+                        attempt_after,
+                        max_attempts,
+                    );
+                    Some(if next == 5 { 1 } else { next })
+                }
+            }
             (JobEvidenceEntry::ConnectionUncertain, Some(2 | 3)) => Some(8),
             (
                 JobEvidenceEntry::ReconciledUncertain {
@@ -293,6 +418,7 @@ impl JobEvidenceLog {
             (JobEvidenceEntry::Cancelled, Some(current)) if decisions::cancel_is_legal(current) => {
                 Some(7)
             }
+            (JobEvidenceEntry::LeaseExpired, Some(2)) => Some(0),
             _ => None,
         }
     }
@@ -556,6 +682,54 @@ mod tests {
             9,
         );
         assert_eq!(log.replay(), Ok(9));
+    }
+
+    #[test]
+    fn durable_completion_with_an_unconfirmed_ledger_commit_stays_uncertain() {
+        let mut log = JobEvidenceLog::new();
+        log.append(JobEvidenceEntry::Enqueued { scheduled: false }, 0);
+        log.append(JobEvidenceEntry::Claimed { is_due: true }, 2);
+        log.append(JobEvidenceEntry::BegunExecution, 3);
+        log.append(
+            JobEvidenceEntry::DurableCompleted {
+                outcome_kind: 0,
+                attempt_before: 0,
+                max_attempts: 3,
+                commit_confirmed: false,
+            },
+            8,
+        );
+        assert_eq!(log.replay(), Ok(8));
+    }
+
+    #[test]
+    fn encoded_entries_refuse_noncanonical_boolean_and_round_trip_new_variants() {
+        assert_eq!(
+            JobEvidenceEntry::ConnectionUncertain.canonical_bytes(),
+            vec![4],
+            "new evidence entries must not renumber existing v1 encodings"
+        );
+        assert_eq!(
+            JobEvidenceEntry::from_canonical_bytes(&[0, 2]),
+            None,
+            "a malformed boolean must not become a scheduled flag"
+        );
+        let durable = JobEvidenceEntry::DurableCompleted {
+            outcome_kind: 3,
+            attempt_before: 1,
+            max_attempts: 3,
+            commit_confirmed: true,
+        };
+        assert_eq!(
+            JobEvidenceEntry::from_canonical_bytes(&durable.canonical_bytes()),
+            Some(durable)
+        );
+        assert_eq!(
+            JobEvidenceEntry::from_canonical_bytes(
+                &JobEvidenceEntry::LeaseExpired.canonical_bytes()
+            ),
+            Some(JobEvidenceEntry::LeaseExpired)
+        );
     }
 
     #[test]

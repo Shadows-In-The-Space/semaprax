@@ -271,3 +271,9 @@ Reproduce with an already installed `tiktoken` and cached encoding assets:
 ```sh
 python3 scripts/benchmark_compact_projection.py --semaprax target/debug/semaprax --root . --output compact-measurements.json
 ```
+
+The `task-context` CLI selection additionally accepts prioritized repeated seeds,
+explicit byte/lexical accounting and an expected source revision; the exact
+selection grammar and bounds are owned by
+[Semantic Task Context v1](SEMANTIC-TASK-CONTEXT-V1.md#multi-seed-cli-selection).
+This changes selection inputs, not the compact wire encodings or authority.

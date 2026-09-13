@@ -140,6 +140,13 @@ backoff/classification seams; it adds no durable journal or deployment authority
 behind the explicit `HostHttpStreamTransport` seam. The host retains origin,
 TLS, proxy and credential configuration; compiler-derived Proposal admission
 remains in the streaming/schema owners.
+`provider_adapter_sdk/vendor/http` implements the native HTTPS seam with
+explicit origin, TLS and credential configuration, disabled redirects/proxies,
+and bounded buffered responses. It does not provide incremental network polling.
+`job_runtime` owns single-job checkpoint persistence and host-driven execution;
+`job_fixture` owns lifecycle decisions and `job_evidence` owns replay validation.
+Payload admission uses a supplied compiled schema; handler implementation and
+checkpoint storage authority remain explicit host responsibilities.
 `provider_adapter_sdk/source_bridge` adapts the ordinary source `ProposalSource`
 with explicit fresh adapter factories, bounded canonical retained context, and
 `streaming_proposal_decode/source` admission against the authoritative source

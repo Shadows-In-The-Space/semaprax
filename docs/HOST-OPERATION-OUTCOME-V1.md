@@ -33,16 +33,12 @@ network operations remain outside this slice. For the legacy operation:
   invocation failure. ABI, capability, malformed-input, and invalid callback
   results still fail closed.
 
-`docs/DURABLE-JOBS-V1.md`'s ["The #228
-boundary"](DURABLE-JOBS-V1.md#the-228-boundary-what-blocks-a-checked-semaprax-caller)
-section already reaches this conclusion independently while specifying
-`std.jobs`'s `UNCERTAIN` lifecycle state (state `8`): the *decision procedure*
-over an already-known uncertain outcome is fully checked today, but nothing
-in checked SEMAPRAX source can *produce* the `kind == 3` (uncertain) input
-that procedure consumes — only a Rust-side runner can, exactly the way
-`DatabaseFixture::connection_lost` supplies `std.db`'s equivalent external
-signal. That section also names "the exact probe a follow-on tranche needs
-once #228 lands"; this document owns the additive checked operation; downstream composition remains separate.
+`docs/DURABLE-JOBS-V1.md`'s [checked publication outcome
+section](DURABLE-JOBS-V1.md#checked-publication-outcomes-and-recovery-uncertainty)
+defines the downstream mapping: the checked provider's actual `UNCERTAIN`
+value may feed `std.jobs` outcome kind `3`; ordinary provider failure may not.
+This document owns the additive checked operation; the durable host runtime
+owns checkpointing, lease recovery, and handler dispatch.
 
 `tests/useful_data/filesystem_v2_native.rs`'s
 `filesystem_v2_write_atomic_failure_collapses_into_undifferentiated_abort`
@@ -118,7 +114,7 @@ The critical admission rule, restated from the repository's own invariant
 **`UNCERTAIN` is reached only from an externally observed
 outcome-unknown signal from the provider itself, exactly the discipline
 `std.jobs`'s `UNCERTAIN` state and `std.db`'s `connection_lost` transition
-already both hold** (`DURABLE-JOBS-V1.md`, "The #228 boundary"). A provider
+already both hold** (`DURABLE-JOBS-V1.md`, "Checked publication outcomes and recovery uncertainty"). A provider
 may not translate every ordinary `IoFailure` into `UNCERTAIN` merely because
 uncertainty is a documented case. Nor may it translate every `IoFailure` into
 `NOT_PUBLISHED`: the existing physical `write_atomic` maps both temporary
@@ -220,7 +216,7 @@ commit phase; injected syscall-failure evidence is not claimed.
 A checked SEMAPRAX job handler can now call `file_write_atomic_checked`,
 receive `2` (`UNCERTAIN`), and feed that directly as the `kind == 3` input to
 `std.jobs.uncertain.retry_next_state_after_outcome` — closing exactly the gap
-`DURABLE-JOBS-V1.md`'s "#228 boundary" section names as the tranche's one
+`DURABLE-JOBS-V1.md`'s checked-publication-outcome section names as the tranche's one
 remaining limitation. That wiring is `std.jobs` *composition* work for the
 issue that lowers this document, not part of this document's own scope.
 

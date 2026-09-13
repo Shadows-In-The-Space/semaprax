@@ -1,8 +1,9 @@
 # Provider Adapter SDK v1
 
-Status: **LOCAL** bounded SDK, fixture/recording evidence, and two real
-provider *protocol normalizers*. No live credential, endpoint, or network call
-was used to produce the local evidence cited here.
+Status: **LOCAL** bounded SDK, fixture/recording evidence, two real provider
+*protocol normalizers*, and an explicitly configured native HTTPS host
+transport. No live credential, endpoint, or network call was used to produce
+the local evidence cited here.
 
 Audience: implementers of issue #181 ("Create a provider adapter SDK and
 deterministic model-provider conformance suite") and reviewers of the
@@ -154,6 +155,46 @@ uses one scan and one buffer compaction per poll. Model labels must contain
 1–256 bytes and configured output limits must be 1–1,048,576 tokens before
 host access; these are local admission bounds, not vendor support guarantees.
 
+### Native HTTPS host transport (`vendor::HttpsBufferedTransport`)
+
+The native-only `HttpsBufferedTransport` is an actual
+`HostHttpStreamTransport` for a host that intentionally grants a provider
+connection. It uses the repository's existing pinned `reqwest`/Rustls HTTPS
+stack rather than adding a provider SDK or a dependency. The existing public
+`HttpsClient` cannot be used directly because it deliberately exposes only a
+buffered `GET`; this transport needs a bounded `POST` with host-attached
+authentication.
+
+A host constructs `ProviderHttpsTransportConfig` with all of the following:
+
+- exactly one `ProviderHttpsOrigin`, parsed as a bare `https` origin with no
+  user-info, path, query, or fragment. The adapter's path must remain a plain
+  API-relative path under that origin; redirects are disabled.
+- `ProviderHttpAuthentication::header(...)`, an opaque host-only header. It
+  admits both `authorization: Bearer …` for OpenAI and `x-api-key: …` for
+  Anthropic, has no secret getter, and redacts its value in debug output.
+- a TLS policy: pinned WebPKI roots or an explicit caller-supplied Rustls
+  configuration, plus the explicit `ProviderProxyPolicy::Disabled` policy.
+  The native client uses `no_proxy`, so neither proxy environment variables nor
+  implicit proxy discovery can alter the connection.
+- one timeout from 1 ns through 300 s and one wire-response ceiling no larger
+  than 8 MiB. Origins are capped at 2,048 bytes; authentication header names
+  at 64 bytes and secret values at 16 KiB before client construction. Request
+  protocol headers cannot supply authentication, host, framing, cookies, or
+  proxy credentials.
+
+This initial transport is deliberately **synchronous and buffered**. `start`
+performs the HTTPS request and retains a successful response within the exact
+wire bound; `poll` then yields at most 64 KiB at a time to preserve the SSE
+decoder's bounded framing. A timeout, non-success response, truncated read, or
+oversize response is conservatively reported after dispatch, so it is never an
+automatic retry claim. Calling `cancel` removes unread local bytes and reports
+local cancellation after dispatch; it cannot interrupt a blocked `start`, call
+a provider cancellation endpoint, or establish that remote work or billing
+stopped. The local authority tests cover origin/path/header smuggling,
+credential redaction, chunk bounds, and cancellation wording without calling a
+real provider.
+
 ## Nonclaims
 
 `StreamingModelHandler` is the optional generic-kernel bridge for an adapter
@@ -164,9 +205,10 @@ on an early refusal, and returns canonical schema bytes only after both a
 provider transport, generated clients, or Direct Runtime wiring.
 
 - **No live call, key, endpoint, or support claim.** The concrete adapters
-  normalize real vendor protocols but require a host-injected transport; their
-  fixture tests do not contact a vendor. Endpoint selection and authentication
-  remain host authority, outside source semantics and this SDK.
+  normalize real vendor protocols and may use an explicitly configured native
+  host transport; the local tests do not contact a vendor. Endpoint selection
+  and authentication remain host authority, outside source semantics and this
+  SDK.
 - **Cancellation is a request, not proof.** `CancellationSemantics` has no
   `Guaranteed` variant. `AdapterPoll::Failed { failure: ModelFailure::Cancelled, .. }`
   proves only that this process observed cancellation, never that a

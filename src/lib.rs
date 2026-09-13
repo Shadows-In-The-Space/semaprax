@@ -196,6 +196,7 @@ pub(crate) mod host_io_ops;
 mod host_ownership;
 pub mod job_evidence;
 pub mod job_fixture;
+pub mod job_runtime;
 pub(crate) mod network_io_ops;
 pub mod network_provider;
 mod prelude;

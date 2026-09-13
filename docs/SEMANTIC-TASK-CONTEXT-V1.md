@@ -182,4 +182,40 @@ selection under a real budget enforced -- not advisory -- at an exact
 boundary; and a cache-key digest sensitive to every field that determines the
 rendered output byte-for-byte. It does not claim natural-language goal
 understanding, cross-seed semantic deduplication, a working cache store,
-requirement/test/diagnostic-facing integration, or any CLI/MCP/SDK surface.
+requirement/test/diagnostic-facing integration, or an MCP route for structured
+goals. The compact CLI route is described below.
+
+## Multi-seed CLI selection
+
+The existing `compact task-context` route accepts the structured goal rather
+than requiring callers to use the Rust API for multiple seeds:
+
+```text
+semaprax compact task-context <file> <stable-id> [--goal text]
+  [--priority N] [--reason text]
+  [--seed stable-id [--priority N] [--reason text]]...
+  [--revision digest] [--tokenizer byte-v1|lexical-v1]
+  [--max-bytes N] [--max-tokens N]
+  [--encoding text|binary|model-text] [--replay <encoded>]
+```
+
+The positional root has default priority 1; additional seeds default to 0.
+Priority and reason apply to the most recently named seed, or to the root
+before the first `--seed`. Goal and reason text are untrusted explanatory data;
+they cannot alter semantic closure rules or grant access. The optional revision
+must match the freshly checked source before any selected output is emitted.
+The existing one-seed/default-byte invocation retains its exact output.
+
+The tokenizer defaults to `byte-v1`; `lexical-v1` remains explicitly approximate.
+The historical `--max-tokens` spelling names the selected unit budget and does
+not turn either option into a real model-token counter. Unknown tokenizer IDs
+refuse with `SPX-Z803`, unknown roots with `SPX-Z804`, and stale revisions with
+`SPX-Z801`. Replay regenerates the same selected context from current checked
+source before comparing the retained compact artifact. Task-specific flags are
+refused for other compact profiles. No cache or model benchmark is claimed.
+
+The CLI bounds the total seed count to 32, each seed ID/reason and goal to
+4096 bytes, revision input to 256 bytes, and tokenizer ID to 64 bytes. It
+checks the aggregate per-seed byte allowance (`max_bytes * seed_count`) against
+8 MiB before reading source. These are parser resource bounds, independent
+of the selected tokenizer’s accounting.

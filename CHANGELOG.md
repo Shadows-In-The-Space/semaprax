@@ -8,6 +8,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add an explicit native HTTPS transport for provider adapters (#181), with
+  injected credentials, bounded buffered responses and conservative dispatch
+  uncertainty. Extend compact task context with ordered seeds, revision binding
+  and selectable token accounting (#197). Add a host-driven single-job
+  checkpoint runtime and evidence-based recovery (#192).
+
 - Drive bounded retries and ordered failover through injected provider adapters
   (#179), preserving charged attempts and stopping on uncertain outcomes.
   Add host-transport protocol adapters for Responses and Messages (#181).

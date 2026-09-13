@@ -16,10 +16,18 @@
 //! that is intentionally not an automatic-retry signal.
 
 mod anthropic_messages;
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+mod http;
 mod openai_responses;
 mod transport;
 
 pub use anthropic_messages::AnthropicMessagesAdapter;
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+pub use http::{
+    HttpsBufferedTransport, ProviderHttpAuthentication, ProviderHttpsOrigin,
+    ProviderHttpsTlsPolicy, ProviderHttpsTransportConfig, ProviderHttpsTransportConfigError,
+    ProviderProxyPolicy, MAX_PROVIDER_HTTPS_RESPONSE_BYTES, MAX_PROVIDER_HTTP_CHUNK_BYTES,
+};
 pub use openai_responses::OpenAiResponsesAdapter;
 pub use transport::{
     HostHttpStream, HostHttpStreamTransport, ProviderHttpRequest, TransportFailure,

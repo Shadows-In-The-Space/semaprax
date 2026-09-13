@@ -2,18 +2,16 @@
 
 Audience: language users, tool authors, and compiler contributors.
 
-Status: first bounded slice of issue #192's durable-job profile. This tranche
-ships the dialect-agnostic, pure, effect-free decision procedures that govern
+Status: bounded durable host-runtime slice of issue #192's durable-job profile.
+This tranche ships the dialect-agnostic, pure, effect-free decision procedures that govern
 a job's lifecycle, lease legality, retry/backoff, idempotent enqueue,
 scheduling, cancellation, and — the issue's central word — **delivery
-uncertainty**, plus a Rust-only in-memory fixture that proves those decision
-procedures compose into a real job runner (crash/recovery, concurrent leases,
-retry, schedule catch-up). It does **not** ship a message broker, a durable
+uncertainty**, plus a Rust-only in-memory fixture and an explicit bounded
+checkpoint adapter that compose those procedures into host-driven recovery.
+It does **not** ship a message broker, a durable
 queue transport, a background scheduler thread, or any new host operation.
-See [Non-claims](#non-claims-and-remaining-work), and in particular
-[The #228 boundary](#the-228-boundary-what-blocks-a-checked-semaprax-caller)
-for exactly what a checked SEMAPRAX program can and cannot observe about an
-uncertain outcome today.
+See [Non-claims](#non-claims-and-remaining-work) for the remaining physical
+provider, clock, concurrency, and scheduler limits.
 
 ## Objective
 
@@ -225,62 +223,25 @@ profile: whether it comes from an operator, a reconciliation job that queries
 the external system, or another checked SEMAPRAX computation is a runner
 concern, not this pure layer's.
 
-### The #228 boundary: what blocks a checked SEMAPRAX caller
+### Checked publication outcomes and recovery uncertainty
 
-Everything above is a decision procedure over *already-known* outcome codes:
-given that a `kind` of `3` (uncertain) was observed, `std.jobs` tells a runner
-exactly what state that produces and exactly when a retry may proceed. That
-half is fully checked, deterministic, and executed on the interpreter, native
-C11, and Core Wasm lanes today, exactly like every other function in this
-package.
+[Host Operation Outcome v1](HOST-OPERATION-OUTCOME-V1.md) closes issue #228
+for the additive checked atomic-write route: a checked handler can receive
+`Published`, `NotPublished`, or `Uncertain` as an ordinary `std.fs` value.
+Only that provider-observed third result maps to `kind == 3`; an ordinary
+provider failure must remain a retryable or permanent handler outcome and may
+not be relabelled as uncertainty.
 
-What this tranche cannot do — and does not attempt to work around — is let a
-**checked SEMAPRAX-authored job handler observe its own uncertain outcome**.
-Issue #228 records the exact gap: every fallible host operation in this
-repository ([Bounded Language Network I/O
-v1](BOUNDED-LANGUAGE-NETWORK-IO-V1.md), file writes, and every other member of
-the closed host-operation table) **aborts the enclosing invocation on
-failure** rather than returning an inspectable value — "a nonzero status
-aborts the enclosing function exactly like any other fallible host-command
-operation" is the exact rule, unconditionally, for `net_connect`, `net_send`,
-`net_recv`, and the rest. A handler written in checked SEMAPRAX that performs
-a real effect (say, a `net_send` that may have reached its destination before
-the connection dropped) has exactly one bit of information available after a
-failure: the whole invocation stopped. It cannot distinguish "definitely
-failed before anything left the process" from "possibly succeeded, but I lost
-the connection before I could tell" — the three-way outcome issue #228 names
-("validated and published", "validation failed, nothing published",
-"published then I/O failed, outcome uncertain") cannot be produced by checked
-SEMAPRAX source today, for any handler, in any profile, not just this one.
-
-Consequently: **the `kind == 3` (uncertain) input to
-`retry_next_state_after_outcome` and `reconcile` can only be supplied by a
-host-side runner today**, exactly the way `std.db.transaction.next_on_connection_lost`
-is "the one transition driven by an external signal rather than a requested
-operation" and is only ever invoked from Rust in `database_fixture.rs`, never
-from checked SEMAPRAX source. `src/job_fixture.rs` (below) demonstrates this:
-its `JobStore::record_connection_uncertain` plays the same host-side role
-`DatabaseFixture::connection_lost` already plays for `std.db` — observing a
-failure the *Rust* layer cannot attribute to success or failure, and forcing
-the sticky, honest `UNCERTAIN` outcome rather than guessing. A checked
-SEMAPRAX-authored *handler function* gets no equivalent capability in this
-tranche, could not get one without exactly the new value-typed host operation
-issue #228 asks for, and this tranche deliberately does not invent a sentinel
-value or route around the verifier to fake one — issue #228 gates that
-behind its own independent review checkpoint (SPX-AI-019..025), not a bounded
-worker's self-approval.
-
-**The exact probe** a follow-on tranche needs once #228 lands: add a
-value-returning variant of one fallible host operation (network or
-filesystem) whose closed failure taxonomy includes a distinct "sent, outcome
-unknown" case (not merely "failed"/"succeeded"), thread that outcome kind
-through to `std.jobs.retry.next_state_after_outcome`'s `kind == 3` input from
-*checked SEMAPRAX source* instead of only from a Rust-side runner, and add a
-hostile-input regression proving a handler cannot forge `kind == 3` for an
-operation that never actually left the process (the taxonomy must distinguish
-"never attempted" from "attempted, outcome unknown"). Nothing in this
-package's public surface would need to change; only its caller would gain
-the ability checked SEMAPRAX handlers still lack.
+The bounded host adapter in `src/job_runtime.rs` validates a job payload with
+an exact `CompiledInteractionSchema` before dispatching an explicit host
+handler seam. It checkpoints the existing `JobStore` lifecycle as bounded,
+versioned bytes through caller-supplied CAS persistence, invokes no source text
+or ambient path/network API, and uses `complete_durable` for the ledger state.
+It records an unconfirmed durable completion as `UNCERTAIN`. On recovery, a
+checkpointed `RUNNING` attempt also becomes `UNCERTAIN` before any new claim;
+only a `LEASED` attempt that never began execution may expire back to
+`PENDING`. Reconciliation remains explicit, and `JobStore` still refuses an
+uncertain non-idempotent retry.
 
 ## Local evidence: `src/job_fixture.rs`
 
@@ -316,9 +277,46 @@ stuck-open prior transaction stands in for the crash in
 the job rests at `Uncertain` rather than presenting the handler's reported
 outcome as if it had been durably recorded. `complete` itself is unchanged
 and still exists for callers that do not need the ledger write; `job_evidence`
-does not yet log a `complete_durable` attempt as a distinct entry kind,
-which a follow-on tranche should add if a real adapter needs to replay this
-distinction.
+records `DurableCompleted` separately so recovery can distinguish a confirmed
+ledger outcome from one that must remain uncertain.
+
+## Host checkpoint runtime v1
+
+`src/job_runtime.rs` composes the existing lifecycle and evidence owners with
+an explicit `JobCheckpointStore` and `HostJobHandler`. Payload bytes must decode
+against the supplied compiler-derived interaction schema. The handler trait
+itself does not authenticate a compiled callable or deployment policy.
+
+`semaprax.job-runtime-checkpoint.v1` uses little-endian integers in this order:
+`SPXJOB01` magic; u16-length UTF-8 schema digest; u8 bound revision;
+u16-length idempotency key and payload descriptor; u32-length payload;
+u8 maximum attempts; canonical u8 idempotency boolean; canonical u8 schedule
+presence (if present, four u64 values: next tick, interval, occurrence bound,
+catch-up bound); u64 base and maximum backoff; u16 entry count; then each
+u8-length canonical evidence entry followed by its u64 tick, u32 worker ID,
+and u64 lease duration; finally u8 claimed state. Trailing bytes, malformed
+booleans, unknown entries and invalid replay transitions are refused.
+The complete document is capped at 16 KiB, with 64 entries, a 128-byte digest,
+256-byte key/descriptor and 4096-byte payload. The native file wrapper prefixes
+a u64 CAS generation, increased on every replacement.
+
+The native file store uses one caller-selected existing directory, fixed file
+names, an OS advisory lock released on process exit, a synced staged file and
+same-directory rename. It does not promise power-loss durability, hostile-root
+confinement or distributed locking. The checkpoint is the persistence boundary;
+`DatabaseFixture` remains an in-memory decision mirror, not a physical database
+transaction with application state.
+
+Execution checkpoints a claim and then `Running` before invoking the handler.
+Recovery replays the original attempt times, expires an unstarted lease at its
+recorded deadline, and turns a retained `Running` attempt into `Uncertain`.
+Checkpoint failure poisons that runtime instance: further mutation refuses
+until the caller recovers from storage. Evidence grants no authority; recovery
+requires explicit storage and the current schema. The revision byte follows
+the fixture's known-revision range, not a cryptographic handler identity.
+This runtime currently drives one job; automatic recurrence advancement,
+heartbeat/cancellation APIs, physical database integration and source-handler
+binding remain follow-on work.
 
 ## Job evidence: `src/job_evidence.rs`
 
@@ -333,8 +331,9 @@ lifecycle).
 
 `JobEvidenceLog` is an append-only, domain-separated SHA-256 hash chain over
 typed entries mirroring every `JobStore` transition (`Enqueued`, `Claimed`,
-`BegunExecution`, `Completed`, `ConnectionUncertain`, `ReconciledUncertain`,
-`Cancelled`); the chained digest after the last entry is the evidence root.
+`BegunExecution`, `Completed`, `DurableCompleted`, `ConnectionUncertain`,
+`ReconciledUncertain`, `Cancelled`, `LeaseExpired`); the chained digest after
+the last entry is the evidence root.
 `JobEvidenceLog::replay` **independently recomputes** the job's final
 lifecycle state from the recorded entries alone, reusing
 `job_fixture::decisions` (the same Rust mirror of `std.jobs` `job_fixture.rs`
@@ -366,20 +365,22 @@ tranche.
 
 ## Non-claims and remaining work
 
-This tranche adds no host operation, no new effect name, no new ABI, and
+This tranche adds no new checked host operation, effect name, or ABI, and
 touches no file under `src/hir`, `src/wasm`, `src/codegen`,
 `src/interpreter*`, `src/cleanup*`, or `src/cli`. Concretely, it does **not**:
 
-- **Run anything.** There is no background scheduler thread, no worker pool,
-  and no process that claims jobs on a timer. "A settlement or concurrency
-  model is proof data, not permission to perform a physical finalizer, spawn
-  runtime work, or publish an artifact" (`AGENTS.md`) applies exactly here:
-  this package's state machine is proof data a runner must obey, not a
-  runner.
-- **Surface delivery uncertainty to a checked SEMAPRAX handler.** See
-  [The #228 boundary](#the-228-boundary-what-blocks-a-checked-semaprax-caller)
-  above — this is the half of #192 this tranche cannot deliver, precisely
-  scoped, with the exact follow-on probe recorded.
+- **Run autonomously.** There is no scheduler thread, worker pool, timer, or
+  source evaluator. A host explicitly drives each claim with a worker ID,
+  tick, lease duration, checked schema, handler, and explicit checkpoint store.
+  The current handler seam admits payload bytes against a real compiled schema,
+  but does not itself prove a trait implementation dispatches compiled
+  SEMAPRAX code.
+- **Advance recurring runtime jobs.** The adapter persists and replays the
+  existing lifecycle transitions, but does not yet invoke
+  `advance_recurring_schedule` after a successful occurrence.
+- **Claim physical database durability.** `DatabaseFixture` remains an
+  in-memory transaction model. The physical checkpoint stores runtime/evidence
+  bytes only; it is not a database driver or an atomic application-data join.
 - **Model a real wall clock, time zone, or DST.** `schedule.*` takes an
   explicit `usize` tick supplied by the caller; there is no numeric cast in
   this language and no calendar library in this repository, so a real
@@ -421,14 +422,16 @@ touches no file under `src/hir`, `src/wasm`, `src/codegen`,
 ```sh
 cargo test --locked -p semaprax --lib job_fixture::
 cargo test --locked -p semaprax --lib job_evidence::
+cargo test --locked -p semaprax --lib job_runtime::
 cargo test --locked -p semaprax --test project -- standard_library::
 cargo test --locked -p semaprax --test documentation
 ```
 
 The first command covers the Rust-only in-memory fixture described above.
 The second covers the replayable job evidence log immediately above it,
-including its cross-checks against the live `JobStore`. The third covers
-`std/jobs`'s canonical formatting, stable identities,
+including its cross-checks against the live `JobStore`. The third covers the
+bounded checkpoint codec, physical-store CAS, hostile decode refusals, and
+evidence replay recovery. The fourth covers `std/jobs`'s canonical formatting, stable identities,
 examples, and conformance module once it is registered in
 `std/packages.json` and `std/catalog.json` (that registration, and the
 regenerated `docs/STANDARD-LIBRARY-CATALOG.md`, land in their own commit —

@@ -566,3 +566,6 @@ fn bound_model_policy_refuses_before_factory_and_keeps_prior_reservations() {
     })
     .unwrap();
 }
+
+#[path = "live_streaming/durable.rs"]
+mod durable;

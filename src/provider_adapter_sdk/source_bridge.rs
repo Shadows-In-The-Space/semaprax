@@ -1,10 +1,13 @@
 //! Offline SDK bridge for the ordinary source `ProposalSource` seam.
 //!
-//! This adapter intentionally exposes no checkpoint policy. A checkpointed
-//! source needs a host-bound request/prompt identity before its durable intent
-//! is appended; that identity is not carried by the SDK ABI yet.
+//! Checkpointing is opt-in. A checkpointed source derives its host-bound
+//! request/prompt identity before it acknowledges the durable intent; the
+//! ordinary SDK route remains one-pass and does not create journal rows.
 
 use crate::agent_lifecycle::iterative::driver::{ProposalRequest, ProposalSource};
+use crate::agent_lifecycle::iterative::source_live::{
+    SourceAttemptIdentity, SourceProposalOutcome, SourceProposalPolicy,
+};
 use crate::agent_proposal::CompiledAgentProposalSchema;
 use crate::agent_runtime::AgentCancellation;
 use crate::agent_runtime_v2::source_model::source_request_digest;
@@ -13,8 +16,12 @@ use crate::agent_runtime_v2::{
     SourceModelPolicyBinding,
 };
 use crate::diagnostic::{quote_json, Diagnostic};
-use crate::live_invocation::model_invoke::BudgetRefusal;
+use crate::live_invocation::model_invoke::{BudgetRefusal, ModelFailure};
+use crate::live_invocation::source_journal::{
+    source_response_digest, SourceAttemptFailure, SourceCheckpointSink, SourceJournalEntry,
+};
 use crate::live_invocation::InvocationClock;
+use crate::live_invocation::{CumulativeBudgetLedger, SourceInvocationClock};
 use crate::model_budget_policy::live_hook::ModelAttemptQuote;
 use crate::model_budget_policy::{
     AttemptKind, AttemptRequest, AttemptReservation, ModelPolicyLedger, ProviderPolicy,
@@ -97,7 +104,40 @@ pub struct StreamingSourceProposalAdapter<'a> {
     binding_capability: Option<SourceModelInvocationCapability>,
     policy: Option<SourceModelPolicySession<'a>>,
     pending_reservation: Option<AttemptReservation>,
+    last_dispatch: Option<SourceAdapterDispatchFact>,
+    checkpoint: Option<(String, usize, i64)>,
+    durable_cancellation: Option<AgentCancellation>,
+    durable_deadline_millis: Option<i64>,
     evidence: SourceModelEvidence,
+}
+
+/// Private terminal facts retained only until the caller projects one source
+/// proposal. They make the exact adapter settlement available to the durable
+/// wrapper without making raw response bytes part of public evidence.
+enum SourceAdapterDispatchFact {
+    Settled {
+        response: Vec<u8>,
+        usage: Option<(u64, u64, i64)>,
+    },
+    Failed {
+        reason: SourceAttemptFailure,
+        attempted_bytes: usize,
+    },
+}
+
+/// Complete one private adapter attempt.  Raw bytes remain available only
+/// until the durable checkpoint path records its closed settlement fact.
+enum SourceAdapterDispatch {
+    Settled {
+        canonical: String,
+        response: Vec<u8>,
+        usage: Option<(u64, u64, i64)>,
+    },
+    Failed {
+        diagnostics: Vec<Diagnostic>,
+        reason: SourceAttemptFailure,
+        attempted_bytes: usize,
+    },
 }
 
 impl<'a> StreamingSourceProposalAdapter<'a> {
@@ -118,6 +158,10 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
             binding_capability: None,
             policy: None,
             pending_reservation: None,
+            last_dispatch: None,
+            checkpoint: None,
+            durable_cancellation: None,
+            durable_deadline_millis: None,
             evidence: SourceModelEvidence::default(),
         }
     }
@@ -149,8 +193,35 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
             binding_capability: Some(binding_capability),
             policy: None,
             pending_reservation: None,
+            last_dispatch: None,
+            checkpoint: None,
+            durable_cancellation: None,
+            durable_deadline_millis: None,
             evidence: SourceModelEvidence::default(),
         })
+    }
+
+    pub fn new_bound_checkpointed(
+        factory: &'a mut dyn SourceAdapterFactory,
+        capability: AdapterInvocationCapability,
+        schema: &'a CompiledAgentProposalSchema,
+        binding: SourceModelBinding,
+        binding_capability: SourceModelInvocationCapability,
+        policy: SourceProposalPolicy<'_>,
+    ) -> Result<Self, Vec<Diagnostic>> {
+        if policy.deployment_binding != binding.digest()
+            || policy.response_limit != binding.max_response_bytes()
+            || policy.reservation_units <= 0
+        {
+            return Err(Self::refusal("source.model_checkpoint_binding"));
+        }
+        let mut source = Self::new_bound(factory, capability, schema, binding, binding_capability)?;
+        source.checkpoint = Some((
+            policy.deployment_binding.to_owned(),
+            policy.response_limit,
+            policy.reservation_units,
+        ));
+        Ok(source)
     }
 
     /// Constructs the opt-in source route whose model calls are admitted by
@@ -254,6 +325,18 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
         self.deadline_millis = Some(deadline_millis);
         self
     }
+
+    /// Attaches the caller-owned Source Live cancellation/deadline boundary
+    /// for one durable run. The cancellation handle is cloned atomically; the
+    /// clock itself remains borrowed only across `propose_checkpointed`.
+    pub(crate) fn configure_durable_boundary(
+        &mut self,
+        cancellation: &AgentCancellation,
+        deadline_millis: i64,
+    ) {
+        self.durable_cancellation = Some(cancellation.clone());
+        self.durable_deadline_millis = Some(deadline_millis);
+    }
     fn refusal(code: &'static str) -> Vec<Diagnostic> {
         vec![Diagnostic::io(
             code,
@@ -270,6 +353,10 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
         tokens_out: Option<u64>,
         cost_micros: Option<i64>,
     ) {
+        self.last_dispatch = Some(SourceAdapterDispatchFact::Failed {
+            reason: failure_from_terminal(terminal),
+            attempted_bytes: response.map_or(0, <[u8]>::len),
+        });
         if self.binding.is_some() {
             let reservation = self.pending_reservation.take();
             self.evidence.record(
@@ -283,24 +370,54 @@ impl<'a> StreamingSourceProposalAdapter<'a> {
             );
         }
     }
-}
 
-impl ProposalSource for StreamingSourceProposalAdapter<'_> {
-    fn check_deadline(&self) -> Result<(), Vec<Diagnostic>> {
-        if self.cancellation.is_some_and(|value| value.is_cancelled()) {
-            return Err(Self::refusal("source.adapter_cancelled"));
-        }
-        if self
-            .clock
-            .zip(self.deadline_millis)
-            .is_some_and(|(clock, deadline)| clock.now_millis() >= deadline)
-        {
-            return Err(Self::refusal("source.adapter_timeout"));
-        }
-        Ok(())
+    fn dispatch(&mut self, request: ProposalRequest<'_>) -> SourceAdapterDispatch {
+        self.dispatch_at(request, None)
     }
-    fn propose(&mut self, request: ProposalRequest<'_>) -> Result<String, Vec<Diagnostic>> {
-        self.check_deadline()?;
+
+    fn dispatch_at(
+        &mut self,
+        request: ProposalRequest<'_>,
+        source_clock: Option<&dyn SourceInvocationClock>,
+    ) -> SourceAdapterDispatch {
+        self.last_dispatch = None;
+        match self.propose_inner(request, source_clock) {
+            Ok(canonical) => match self.last_dispatch.take() {
+                Some(SourceAdapterDispatchFact::Settled { response, usage }) => {
+                    SourceAdapterDispatch::Settled {
+                        canonical,
+                        response,
+                        usage,
+                    }
+                }
+                _ => SourceAdapterDispatch::Failed {
+                    diagnostics: Self::refusal("source.adapter_settlement"),
+                    reason: SourceAttemptFailure::Refused,
+                    attempted_bytes: 0,
+                },
+            },
+            Err(diagnostics) => match self.last_dispatch.take() {
+                Some(SourceAdapterDispatchFact::Failed {
+                    reason,
+                    attempted_bytes,
+                }) => SourceAdapterDispatch::Failed {
+                    diagnostics,
+                    reason,
+                    attempted_bytes,
+                },
+                _ => SourceAdapterDispatch::Failed {
+                    diagnostics,
+                    reason: SourceAttemptFailure::Refused,
+                    attempted_bytes: 0,
+                },
+            },
+        }
+    }
+
+    fn checked_adapter_request(
+        &self,
+        request: &ProposalRequest<'_>,
+    ) -> Result<AdapterRequest, Vec<Diagnostic>> {
         if request.proposal_schema_digest != self.schema.schema().digest()
             || request.source_revision != self.schema.source_revision()
         {
@@ -329,18 +446,201 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
         {
             return Err(Self::refusal("source.adapter_request_bound"));
         }
-        let prompt = format!("{{\"schema\":\"semaprax.source-adapter-prompt.v1\",\"task_hex\":{},\"task_budget\":{},\"source_revision\":{},\"turn\":{},\"attempt\":{},\"remaining_iterations\":{},\"state\":{},\"observation\":{},\"previous_effect_hex\":{},\"previous_rejection\":{},\"proposal_schema\":{}}}", quote_json(&hex(&request.task.objective)), request.task.budget, quote_json(request.source_revision), request.turn, request.attempt, request.remaining_iterations, crate::agent_lifecycle::canonical_retained_value_json(request.state), crate::agent_lifecycle::canonical_retained_value_json(request.observation), request.previous_effect.map(hex).map_or_else(|| "null".to_owned(), |value| quote_json(&value)), request.previous_rejection.map_or_else(|| "null".to_owned(), quote_json), schema);
+        let prompt = canonical_prompt(request, &schema);
         if prompt.len() > max_request_bytes {
             return Err(Self::refusal("source.adapter_request_bound"));
         }
+        Ok(AdapterRequest {
+            request_bytes: prompt.into_bytes(),
+            max_response_bytes,
+        })
+    }
+
+    fn dispatch_failure(&mut self, reason: SourceAttemptFailure, attempted_bytes: usize) {
+        self.last_dispatch = Some(SourceAdapterDispatchFact::Failed {
+            reason,
+            attempted_bytes,
+        });
+    }
+
+    fn deadline_failure(&self) -> SourceAttemptFailure {
+        if self.cancellation.is_some_and(|value| value.is_cancelled())
+            || self
+                .durable_cancellation
+                .as_ref()
+                .is_some_and(|value| value.is_cancelled())
+        {
+            SourceAttemptFailure::Cancelled
+        } else {
+            SourceAttemptFailure::DeadlineExceeded
+        }
+    }
+
+    fn check_deadline_at(
+        &self,
+        source_clock: Option<&dyn SourceInvocationClock>,
+    ) -> Result<(), Vec<Diagnostic>> {
+        if self.cancellation.is_some_and(|value| value.is_cancelled())
+            || self
+                .durable_cancellation
+                .as_ref()
+                .is_some_and(|value| value.is_cancelled())
+        {
+            return Err(Self::refusal("source.adapter_cancelled"));
+        }
+        if self
+            .clock
+            .zip(self.deadline_millis)
+            .is_some_and(|(clock, deadline)| clock.now_millis() >= deadline)
+            || source_clock
+                .zip(self.durable_deadline_millis)
+                .is_some_and(|(clock, deadline)| clock.now_millis() >= deadline)
+        {
+            return Err(Self::refusal("source.adapter_timeout"));
+        }
+        Ok(())
+    }
+}
+
+impl ProposalSource for StreamingSourceProposalAdapter<'_> {
+    fn checkpoint_policy(&self) -> Option<SourceProposalPolicy<'_>> {
+        self.checkpoint
+            .as_ref()
+            .map(
+                |(binding, response_limit, reservation_units)| SourceProposalPolicy {
+                    deployment_binding: binding,
+                    response_limit: *response_limit,
+                    reservation_units: *reservation_units,
+                },
+            )
+    }
+
+    fn checkpoint_attempt_identity(
+        &self,
+        request: &ProposalRequest<'_>,
+    ) -> Result<SourceAttemptIdentity, Vec<Diagnostic>> {
         self.check_deadline()?;
         if self.binding.is_some() && !self.evidence.can_record() {
             return Err(Self::refusal("source.model_evidence_capacity"));
         }
-        let adapter_request = AdapterRequest {
-            request_bytes: prompt.into_bytes(),
-            max_response_bytes,
+        let adapter_request = self.checked_adapter_request(request)?;
+        let digest = source_request_digest(&adapter_request.request_bytes);
+        Ok(SourceAttemptIdentity {
+            request_digest: digest.clone(),
+            prompt_digest: digest,
+            request_bytes: adapter_request.request_bytes.len(),
+        })
+    }
+
+    fn propose_checkpointed(
+        &mut self,
+        request: ProposalRequest<'_>,
+        sink: &mut SourceCheckpointSink<'_>,
+        _ledger: &mut CumulativeBudgetLedger<'_>,
+        clock: &dyn SourceInvocationClock,
+    ) -> SourceProposalOutcome {
+        let turn = request.turn as u32;
+        let attempt = request.attempt as u32;
+        let identity = match self.checkpoint_attempt_identity(&request) {
+            Ok(value) => value,
+            Err(errors) => {
+                return SourceProposalOutcome {
+                    terminal_failure: None,
+                    result: Err(errors),
+                    model_dispatches: 0,
+                }
+            }
         };
+        let intent = match sink.attempt_intent(
+            turn,
+            attempt,
+            identity.request_digest,
+            identity.prompt_digest,
+            identity.request_bytes,
+        ) {
+            Ok(value) => value,
+            Err(_) => {
+                return SourceProposalOutcome {
+                    terminal_failure: None,
+                    result: Err(Self::refusal("source.model_checkpoint")),
+                    model_dispatches: 0,
+                }
+            }
+        };
+        if sink.append_at(intent, clock.now_millis()).is_err() {
+            return SourceProposalOutcome {
+                terminal_failure: None,
+                result: Err(Self::refusal("source.model_checkpoint")),
+                model_dispatches: 0,
+            };
+        }
+        let result = self.dispatch_at(request, Some(clock));
+        let entry = match &result {
+            SourceAdapterDispatch::Settled { response, .. } => SourceJournalEntry::AttemptSettled {
+                turn,
+                attempt,
+                response: response.clone(),
+                response_digest: source_response_digest(response),
+            },
+            SourceAdapterDispatch::Failed {
+                reason,
+                attempted_bytes,
+                ..
+            } => SourceJournalEntry::AttemptFailed {
+                turn,
+                attempt,
+                reason: *reason,
+                attempted_bytes: *attempted_bytes,
+            },
+        };
+        if sink.append_at(entry, clock.now_millis()).is_err() {
+            return SourceProposalOutcome {
+                terminal_failure: None,
+                result: Err(Self::refusal("source.model_checkpoint")),
+                model_dispatches: 1,
+            };
+        }
+        let result = match result {
+            SourceAdapterDispatch::Settled { canonical, .. } => Ok(canonical),
+            SourceAdapterDispatch::Failed { diagnostics, .. } => Err(diagnostics),
+        };
+        SourceProposalOutcome {
+            terminal_failure: None,
+            result,
+            model_dispatches: 1,
+        }
+    }
+
+    fn check_deadline(&self) -> Result<(), Vec<Diagnostic>> {
+        self.check_deadline_at(None)
+    }
+    fn propose(&mut self, request: ProposalRequest<'_>) -> Result<String, Vec<Diagnostic>> {
+        match self.dispatch(request) {
+            SourceAdapterDispatch::Settled { canonical, .. } => Ok(canonical),
+            SourceAdapterDispatch::Failed { diagnostics, .. } => Err(diagnostics),
+        }
+    }
+}
+
+impl StreamingSourceProposalAdapter<'_> {
+    fn propose_inner(
+        &mut self,
+        request: ProposalRequest<'_>,
+        source_clock: Option<&dyn SourceInvocationClock>,
+    ) -> Result<String, Vec<Diagnostic>> {
+        if let Err(diagnostics) = self.check_deadline_at(source_clock) {
+            self.dispatch_failure(self.deadline_failure(), 0);
+            return Err(diagnostics);
+        }
+        let adapter_request = self.checked_adapter_request(&request)?;
+        let max_response_bytes = adapter_request.max_response_bytes;
+        if let Err(diagnostics) = self.check_deadline_at(source_clock) {
+            self.dispatch_failure(self.deadline_failure(), 0);
+            return Err(diagnostics);
+        }
+        if self.binding.is_some() && !self.evidence.can_record() {
+            return Err(Self::refusal("source.model_evidence_capacity"));
+        }
         let policy_attempt =
             if let (Some(policy), Some(binding)) = (self.policy.as_mut(), self.binding.as_ref()) {
                 match policy.quoter.quote(&adapter_request, binding) {
@@ -412,7 +712,7 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
             );
             return Err(Self::refusal("source.adapter_negotiation"));
         }
-        if let Err(diagnostics) = self.check_deadline() {
+        if let Err(diagnostics) = self.check_deadline_at(source_clock) {
             self.record(
                 &adapter_request.request_bytes,
                 None,
@@ -421,6 +721,7 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                 None,
                 None,
             );
+            self.dispatch_failure(self.deadline_failure(), 0);
             return Err(diagnostics);
         }
         if adapter.start(&self.capability, &adapter_request).is_err() {
@@ -440,7 +741,7 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
         let mut completed = false;
         let mut usage: Option<(u64, u64, i64)> = None;
         for _ in 0..MAX_SOURCE_POLLS {
-            if let Err(diagnostics) = self.check_deadline() {
+            if let Err(diagnostics) = self.check_deadline_at(source_clock) {
                 adapter.cancel("source cancellation or deadline");
                 self.record(
                     &adapter_request.request_bytes,
@@ -450,12 +751,26 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                     usage.map(|value| value.1),
                     usage.map(|value| value.2),
                 );
+                self.dispatch_failure(self.deadline_failure(), bytes.len());
                 return Err(diagnostics);
             }
             match adapter.poll() {
                 AdapterPoll::Pending => continue,
                 AdapterPoll::Event(AdapterEvent::Delta(chunk)) => {
-                    if completed || bytes.len().saturating_add(chunk.len()) > max_response_bytes {
+                    if completed {
+                        adapter.cancel("source stream after completion");
+                        self.record(
+                            &adapter_request.request_bytes,
+                            Some(&bytes),
+                            "stream_refused",
+                            usage.map(|value| value.0),
+                            usage.map(|value| value.1),
+                            usage.map(|value| value.2),
+                        );
+                        self.dispatch_failure(SourceAttemptFailure::MalformedResponse, bytes.len());
+                        return Err(Self::refusal("source.adapter_stream"));
+                    }
+                    if bytes.len().saturating_add(chunk.len()) > max_response_bytes {
                         adapter.cancel("source stream bound");
                         self.record(
                             &adapter_request.request_bytes,
@@ -464,6 +779,13 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                             usage.map(|value| value.0),
                             usage.map(|value| value.1),
                             usage.map(|value| value.2),
+                        );
+                        self.dispatch_failure(
+                            SourceAttemptFailure::CapacityExceeded,
+                            bytes
+                                .len()
+                                .saturating_add(chunk.len())
+                                .min(max_response_bytes.saturating_add(1)),
                         );
                         return Err(Self::refusal("source.adapter_stream"));
                     }
@@ -478,6 +800,7 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                             usage.map(|value| value.1),
                             usage.map(|value| value.2),
                         );
+                        self.dispatch_failure(SourceAttemptFailure::MalformedResponse, bytes.len());
                         return Err(Self::refusal("source.adapter_decode"));
                     }
                 }
@@ -492,6 +815,7 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                             usage.map(|value| value.1),
                             usage.map(|value| value.2),
                         );
+                        self.dispatch_failure(SourceAttemptFailure::MalformedResponse, bytes.len());
                         return Err(Self::refusal("source.adapter_stream"));
                     }
                     completed = true;
@@ -516,12 +840,13 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                             usage.map(|value| value.1),
                             usage.map(|value| value.2),
                         );
+                        self.dispatch_failure(SourceAttemptFailure::MalformedResponse, bytes.len());
                         return Err(Self::refusal("source.adapter_usage"));
                     }
                     usage = Some((tokens_in, tokens_out, cost_micros));
                 }
                 AdapterPoll::Settled(settlement) => {
-                    if let Err(diagnostics) = self.check_deadline() {
+                    if let Err(diagnostics) = self.check_deadline_at(source_clock) {
                         adapter.cancel("source cancellation or deadline at settlement");
                         self.record(
                             &adapter_request.request_bytes,
@@ -531,6 +856,7 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                             settlement.usage.tokens_out,
                             settlement.usage.cost_micros,
                         );
+                        self.dispatch_failure(self.deadline_failure(), bytes.len());
                         return Err(diagnostics);
                     }
                     if !completed
@@ -551,6 +877,7 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                             settlement.usage.tokens_out,
                             settlement.usage.cost_micros,
                         );
+                        self.dispatch_failure(SourceAttemptFailure::MalformedResponse, bytes.len());
                         return Err(Self::refusal("source.adapter_stream"));
                     }
                     return match decoder.finish() {
@@ -563,6 +890,19 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                                 settlement.usage.tokens_out,
                                 settlement.usage.cost_micros,
                             );
+                            self.last_dispatch = Some(SourceAdapterDispatchFact::Settled {
+                                response: bytes,
+                                usage: match (
+                                    settlement.usage.tokens_in,
+                                    settlement.usage.tokens_out,
+                                    settlement.usage.cost_micros,
+                                ) {
+                                    (Some(tokens_in), Some(tokens_out), Some(cost_micros)) => {
+                                        Some((tokens_in, tokens_out, cost_micros))
+                                    }
+                                    _ => None,
+                                },
+                            });
                             Ok(value.canonical_json().to_owned())
                         }
                         _ => {
@@ -574,13 +914,17 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                                 settlement.usage.tokens_out,
                                 settlement.usage.cost_micros,
                             );
+                            self.dispatch_failure(
+                                SourceAttemptFailure::MalformedResponse,
+                                bytes.len(),
+                            );
                             Err(Self::refusal("source.adapter_decode"))
                         }
                     };
                 }
                 AdapterPoll::Failed {
                     failure,
-                    attempted_bytes: _,
+                    attempted_bytes,
                 } => {
                     adapter.cancel("source adapter failed");
                     self.record(
@@ -590,6 +934,10 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
                         usage.map(|value| value.0),
                         usage.map(|value| value.1),
                         usage.map(|value| value.2),
+                    );
+                    self.dispatch_failure(
+                        source_failure_from_model(failure),
+                        attempted_bytes.min(max_response_bytes.saturating_add(1)),
                     );
                     return Err(Self::refusal("source.adapter_failed"));
                 }
@@ -604,7 +952,52 @@ impl ProposalSource for StreamingSourceProposalAdapter<'_> {
             usage.map(|value| value.1),
             usage.map(|value| value.2),
         );
+        self.dispatch_failure(SourceAttemptFailure::Timeout, bytes.len());
         Err(Self::refusal("source.adapter_timeout"))
+    }
+}
+
+fn canonical_prompt(request: &ProposalRequest<'_>, schema: &str) -> String {
+    format!(
+        "{{\"schema\":\"semaprax.source-adapter-prompt.v1\",\"task_hex\":{},\"task_budget\":{},\"source_revision\":{},\"turn\":{},\"attempt\":{},\"remaining_iterations\":{},\"state\":{},\"observation\":{},\"previous_effect_hex\":{},\"previous_rejection\":{},\"proposal_schema\":{}}}",
+        quote_json(&hex(&request.task.objective)),
+        request.task.budget,
+        quote_json(request.source_revision),
+        request.turn,
+        request.attempt,
+        request.remaining_iterations,
+        crate::agent_lifecycle::canonical_retained_value_json(request.state),
+        crate::agent_lifecycle::canonical_retained_value_json(request.observation),
+        request
+            .previous_effect
+            .map(hex)
+            .map_or_else(|| "null".to_owned(), |value| quote_json(&value)),
+        request
+            .previous_rejection
+            .map_or_else(|| "null".to_owned(), quote_json),
+        schema,
+    )
+}
+
+fn failure_from_terminal(terminal: &str) -> SourceAttemptFailure {
+    match terminal {
+        "poll_budget_exhausted" => SourceAttemptFailure::Timeout,
+        "cancelled_or_timed_out" => SourceAttemptFailure::DeadlineExceeded,
+        "stream_refused" | "decode_refused" | "usage_refused" | "settlement_refused" => {
+            SourceAttemptFailure::MalformedResponse
+        }
+        _ => SourceAttemptFailure::Refused,
+    }
+}
+
+fn source_failure_from_model(failure: ModelFailure) -> SourceAttemptFailure {
+    match failure {
+        ModelFailure::Timeout => SourceAttemptFailure::Timeout,
+        ModelFailure::Cancelled => SourceAttemptFailure::Cancelled,
+        ModelFailure::CapacityExceeded => SourceAttemptFailure::CapacityExceeded,
+        ModelFailure::ProviderError => SourceAttemptFailure::ProviderError,
+        ModelFailure::MalformedResponse => SourceAttemptFailure::MalformedResponse,
+        ModelFailure::Refused => SourceAttemptFailure::Refused,
     }
 }
 

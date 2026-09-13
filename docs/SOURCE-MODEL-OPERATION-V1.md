@@ -102,9 +102,17 @@ transition and deployment policy admit them.
   source/deployment/invocation token and cost ceilings. It has no checked
   lifecycle retry transition, ordered failover provider list, or durable
   reservation state; retries, provider switches, and recovery remain refused.
-- This v1 route is nondurable. `Source Live Journal v2` and checkpointed host
-  sources keep their own contract; this change does not claim a Direct Runtime
-  v2 durable model path.
+- `new_bound_checkpointed` admits the unpriced bound route to
+  `run_live_bound_model_durable`. It derives the canonical request identity,
+  receives the Source Live Journal v2 intent ACK before factory construction or
+  adapter start, then records the exact bounded raw settlement bytes or a
+  closed attempted-byte failure. Recovery never redispatches an unresolved
+  intent. The journal binding also commits the typed registry and effective
+  effect ceilings through its derived program-root profile.
+- The `new_bound_with_policy` route remains nondurable: its in-memory,
+  nonrefundable `ModelPolicyLedger` has no durable reservation carry, so the
+  durable entry refuses it before adapter construction. Durable policy state,
+  retries, and provider switches remain unavailable.
 - It creates no target ABI. Native C11 and Core Wasm Agent-stage execution
   must consume this same checked request/evidence contract in their own parity
   profile.

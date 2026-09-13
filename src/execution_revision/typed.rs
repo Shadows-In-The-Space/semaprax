@@ -655,7 +655,10 @@ fn bind_runtime(
 
 #[path = "typed_durable.rs"]
 mod durable;
-pub use durable::AgentRuntimeV2DurableEvidence;
+pub use durable::{
+    AgentRuntimeV2DurableEvidence, AgentRuntimeV2DurableModelEvidence,
+    AgentRuntimeV2DurableModelFailure,
+};
 
 #[path = "typed_migration.rs"]
 pub(crate) mod migration;

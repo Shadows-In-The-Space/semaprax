@@ -440,22 +440,28 @@ impl<'a> SourceExecutionSession<'a> {
         self.guard()?;
         let turn = turn as u32;
         let attempt = attempt as u32;
-        let operation = "agent.read".to_owned();
+        let (operation, request_digest) = match driver.source_effect_identity(request)? {
+            Some(identity) => identity,
+            None => (
+                "agent.read".to_owned(),
+                digest(
+                    b"semaprax.source-effect-request.v2\0",
+                    format!(
+                        "{}:{}:{}",
+                        request.binding(),
+                        request.budget(),
+                        encode_value(&RetainedValue::Bytes(request.seal().to_vec()))
+                    )
+                    .as_bytes(),
+                ),
+            ),
+        };
         let replaying = self.next().is_some();
         self.expect(SourceJournalEntry::EffectIntent {
             turn,
             attempt,
             operation: operation.clone(),
-            request_digest: digest(
-                b"semaprax.source-effect-request.v2\0",
-                format!(
-                    "{}:{}:{}",
-                    request.binding(),
-                    request.budget(),
-                    encode_value(&RetainedValue::Bytes(request.seal().to_vec()))
-                )
-                .as_bytes(),
-            ),
+            request_digest,
         })?;
         if replaying {
             let next = self.next().cloned();
@@ -467,13 +473,17 @@ impl<'a> SourceExecutionSession<'a> {
                     operation: op,
                     observation,
                     ..
-                }) if t == turn && a == attempt && op == operation => Ok(Some(observation)),
+                }) if t == turn && a == attempt && op == operation => {
+                    driver.validate_replayed_read(request, Some(&observation))?;
+                    Ok(Some(observation))
+                }
                 Some(SourceJournalEntry::EffectFailed {
                     turn: t,
                     attempt: a,
                     operation: op,
                     reason,
                 }) if t == turn && a == attempt && op == operation => {
+                    driver.validate_replayed_read(request, None)?;
                     let status = match reason {
                         SourceEffectFailure::Cancelled => SourceTerminalStatus::Cancelled,
                         SourceEffectFailure::DeadlineExceeded => {

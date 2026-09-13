@@ -194,18 +194,32 @@ impl CompiledIterativeLifecycle {
         read: &mut dyn AgentReadOperation,
         store: &mut dyn CheckpointStore,
     ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
+        let mut driver = driver::ReadDriver { read };
+        self.run_live_durable_with_driver(request, source, &mut driver, store)
+    }
+
+    /// Internal typed-registry entry. It retains the one Source Live Journal
+    /// cursor while allowing a checked typed-effect dispatcher to supply the
+    /// existing driver boundary.
+    pub(crate) fn run_live_durable_with_driver(
+        &self,
+        request: SourceLiveRequest<'_>,
+        source: &mut dyn driver::ProposalSource,
+        driver: &mut dyn driver::IterativeDriver,
+        store: &mut dyn CheckpointStore,
+    ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
         let binding = request
             .policy
             .binding(self, request.task, request.budget)
             .map_err(|error| SourceLiveFailure::initial(error, None))?;
-        self.run_live_durable_bound(request, source, read, store, binding)
+        self.run_live_durable_bound(request, source, driver, store, binding)
     }
 
     fn run_live_durable_bound(
         &self,
         request: SourceLiveRequest<'_>,
         source: &mut dyn driver::ProposalSource,
-        read: &mut dyn AgentReadOperation,
+        driver: &mut dyn driver::IterativeDriver,
         store: &mut dyn CheckpointStore,
         binding: SourceInvocationBinding,
     ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
@@ -304,11 +318,10 @@ impl CompiledIterativeLifecycle {
         if let Err(errors) = session.opened() {
             return Err(session.failure(None, errors));
         }
-        let mut driver = driver::ReadDriver { read };
         match self.run_with_driver_live_session(
             request.task,
             source,
-            &mut driver,
+            driver,
             request.budget,
             request.cancellation,
             Some(&mut session),

@@ -65,6 +65,23 @@ pub(crate) trait IterativeDriver {
     fn before_effect(&mut self, _context: EffectContext<'_>) -> Result<(), Vec<Diagnostic>> {
         Ok(())
     }
+    /// A checked dispatcher may bind its own operation and exact request to
+    /// the existing source journal. None preserves the AgentRead v2 identity.
+    fn source_effect_identity(
+        &mut self,
+        _authorization: &AuthorizedRequest,
+    ) -> Result<Option<(String, String)>, Vec<Diagnostic>> {
+        Ok(None)
+    }
+    /// Revalidate an acknowledged effect without redispatch. Typed drivers
+    /// also restore their cumulative admission accounting at this boundary.
+    fn validate_replayed_read(
+        &mut self,
+        _authorization: &AuthorizedRequest,
+        _observation: Option<&[u8]>,
+    ) -> Result<(), Vec<Diagnostic>> {
+        Ok(())
+    }
     fn read(
         &mut self,
         authorization: &AuthorizedRequest,

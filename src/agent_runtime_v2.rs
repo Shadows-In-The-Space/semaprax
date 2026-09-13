@@ -3,8 +3,9 @@
 //! never instantiates the Runtime v1 action loop or converts typed calls to it.
 pub use crate::execution_revision::typed::{
     bind_agent_runtime_v2, bind_agent_runtime_v2_live, bind_linked_agent_runtime_v2,
-    AgentRuntimeV2, AgentRuntimeV2DurableEvidence, AgentRuntimeV2Evidence,
-    AgentRuntimeV2ModelEvidence, AgentRuntimeV2ModelFailure,
+    AgentRuntimeV2, AgentRuntimeV2DurableEvidence, AgentRuntimeV2DurableModelEvidence,
+    AgentRuntimeV2DurableModelFailure, AgentRuntimeV2Evidence, AgentRuntimeV2ModelEvidence,
+    AgentRuntimeV2ModelFailure,
 };
 
 pub mod checkpoint;

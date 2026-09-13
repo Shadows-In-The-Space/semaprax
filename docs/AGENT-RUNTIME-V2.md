@@ -68,15 +68,27 @@ provider/model selection whose declared capabilities satisfy the source
 requirements, adapter identity/profile, source revision, compiler Proposal
 grammar and current instance before the adapter can start. It retains redacted
 model-attempt evidence in additive EvidenceRoot v4. The ordinary `run_live`
-surface and its v3 root remain the compatibility route. This is a local,
-nondurable adapter binding; it makes no hosted-provider or target-runtime
-claim.
+surface and its v3 root remain the compatibility route. The one-pass bound
+adapter route is local; the separate explicit checkpointed route below adds
+only caller-store source-journal recovery. Neither claims a hosted provider or
+target-runtime transport.
 
 Its opt-in `new_bound_with_policy` route composes the existing
 `ModelPolicyLedger` with a host request-bound `ModelAttemptQuote`: source and
 deployment ceilings plus an invocation ceiling are intersected before a fresh
 attempt can construct an adapter. Current deployment documents bind one
 provider only; retry and failover transitions remain unavailable here.
+
+`new_bound_checkpointed` and `run_live_bound_model_durable` add the unpriced
+durable source route through the existing Source Live Journal v2 cursor. The
+adapter derives the exact canonical prompt identity, waits for the durable
+attempt-intent acknowledgement before factory construction or `start`, and
+then persists the raw bounded settlement or closed failure row. A retained
+unresolved intent refuses recovery rather than redispatching. The runtime
+derives a journal program-root profile from its ProgramRoot, typed registry,
+and effective effect ceilings, so a checkpoint cannot be reopened with a
+wider effect budget or a different registry. The priced in-memory policy route
+does not have durable reservation carry and is refused by this entry.
 
 `run_durable` consumes the same bound producer and a caller-owned single-writer
 checkpoint store. A retained snapshot must come from that authorized trusted

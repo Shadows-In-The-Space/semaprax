@@ -60,7 +60,8 @@ impl CompiledIterativeLifecycle {
             .policy
             .binding_priced(self, request.task, request.budget, pricing)
             .map_err(|error| SourceLiveFailure::initial(error, None))?;
-        self.run_live_durable_bound(request, source, read, store, binding)
+        let mut driver = driver::ReadDriver { read };
+        self.run_live_durable_bound(request, source, &mut driver, store, binding)
     }
 }
 
@@ -94,6 +95,7 @@ impl CompiledIterativeLifecycle {
             .policy
             .binding_with_io_limits(self, request.task, request.budget, pricing, limits)
             .map_err(|error| SourceLiveFailure::initial(error, None))?;
-        self.run_live_durable_bound(request, source, read, store, binding)
+        let mut driver = driver::ReadDriver { read };
+        self.run_live_durable_bound(request, source, &mut driver, store, binding)
     }
 }

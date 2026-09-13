@@ -11,6 +11,7 @@ license = "Apache-2.0"
 semaprax = { version = "=0.4.1", path = "../.." }
 same-file = "=1.0.6"
 serde_json = "=1.0.151"
+sha2 = "=0.11.0"
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 semaprax-native-rust-owned-data-package = { version = "=0.1.0", path = "../semaprax-native-rust-owned-data-package" }

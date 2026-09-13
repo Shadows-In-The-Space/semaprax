@@ -336,6 +336,7 @@ Audience: all documentation readers.
 - [Source Live Journal v1](SOURCE-LIVE-JOURNAL-V1.md)
 - [Source Live Journal v2](SOURCE-LIVE-JOURNAL-V2.md)
 - [Source live migration journal v3](SOURCE-LIVE-MIGRATION-V3.md)
+- [Private source live CLI v1](SOURCE-LIVE-CLI-V1.md)
 - [Live Invocation Persistence v1](LIVE-INVOCATION-PERSISTENCE-V1.md)
 - [Live Invocation Migration v1](LIVE-INVOCATION-MIGRATION-V1.md)
 - [Audit Capsule v1](AUDIT-CAPSULE-V1.md)

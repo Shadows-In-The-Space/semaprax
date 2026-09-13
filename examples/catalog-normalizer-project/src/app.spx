@@ -7,31 +7,13 @@ use function @id("std.data.json.dec.token_end") from std.data.json.dec as token_
 use function @id("std.data.json.dec.code_byte") from std.data.json.dec as dec_code_byte;
 use function @id("catalog_normalizer.limits.max_label_bytes") from catalog_normalizer.limits as max_label_bytes;
 
-// Only `std.data.json.dec` is a declared package dependency. This is a
-// real, measured constraint, not a style choice: `SPX-G171` (the Workspace
-// Semantic Graph builder's byte pre-bound) is exceeded well before this
-// module's own size is the limiting factor -- confirmed with minimal probe
-// projects (a trivial function importing only
-// `std.data.json.doc.is_document` and `std.data.json.dec.decoded_size`
-// together already exceeds the pre-bound) and reconfirmed repeatedly while
-// this module was cut down from a full multi-record implementation (with
-// `std.data.json.doc`-equivalent structural/schema scanning ported locally,
-// duplicate-id detection, checked-overflow accumulation and canonical JSON
-// envelope rendering) to the CNORM-012 slice below. See this session's
-// final report for the exact sequence of cuts and their measured effect;
-// none of the structural/schema/render layers fit inside the same budget
-// as `std.data.json.dec` itself once that layer's own AST cost is counted,
-// independent of raw source-byte size.
+// This module owns bounded JSON string decoding and label normalization.
+// The batch module owns line boundaries. Both are application code; full
+// record/schema validation and canonical response construction remain to be
+// composed before this example can satisfy the frozen catalog oracle.
 //
-// CNORM-012 demonstration surface. This project composes
-// `std.data.json.dec` (decode) with a locally ported ASCII-boundary trim
-// (`std.bytes.trim_start`/`trim_end`, not imported as a package for the
-// same budget reason) and demonstrates CNORM-010 (decode validity),
-// CNORM-011 (length bound) and CNORM-012 (the trim itself) directly over
-// one JSON string TOKEN. It does not parse a surrounding `{...}` record,
-// locate members by key, or implement CNORM-001..009/013..016/040..043 (see
-// this project's own final report for exactly why and what a wider budget
-// would need to unlock next).
+// CNORM-010..012 apply to one JSON string token. The surrounding record
+// parser will use these helpers after locating the id and label values.
 @id("catalog_normalizer.app.is_space")
 fn is_space(byte: u8) -> bool
 {

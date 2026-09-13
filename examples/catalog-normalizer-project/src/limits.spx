@@ -1,12 +1,7 @@
 module catalog_normalizer.limits;
 
-// Frozen bounds from docs/CATALOG-NORMALIZER-ORACLE-V1.md. Every constant
-// here is named after the CNORM requirement that defines it so a reviewer
-// can match this file back to the frozen document line by line. Only the
-// per-record bounds are kept: this slice does not implement the whole-body
-// limits (CNORM-002/003, `MAX_TOTAL_INPUT_BYTES`/`MAX_RECORDS`) because it
-// does not implement batch orchestration at all -- see
-// `catalog_normalizer.app`'s own header comment.
+// Frozen per-record bounds from docs/CATALOG-NORMALIZER-ORACLE-V1.md.
+// Whole-body and record-count bounds live in catalog_normalizer.batch.
 @id("catalog_normalizer.limits.max_line_bytes")
 fn max_line_bytes() -> usize
     ensures result == 512usize

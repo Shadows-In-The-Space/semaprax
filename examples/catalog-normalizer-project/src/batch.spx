@@ -1,0 +1,79 @@
+module catalog_normalizer.batch;
+
+// A terminal LF closes the last record; it never creates an additional one.
+// The one-byte LF body therefore contains zero records.
+@id("catalog_normalizer.batch.record-count")
+fn record_count(body: borrow Slice<u8>) -> usize
+{
+    let length = byte_len(body);
+    let mut index = 0usize;
+    let mut count = 0usize;
+    let mut at_start = true;
+    while index < length {
+        let byte = match byte_get(body, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        count = if at_start { count + 1usize } else { count };
+        at_start = byte == 10u8;
+        index = index + 1usize;
+        index < length
+    }
+    let only_line = length == 1usize && match byte_get(body, 0usize) { Option::Some { value } => value == 10u8, Option::None {} => false, };
+    if only_line { 0usize } else { count }
+}
+
+@id("catalog_normalizer.batch.line-start")
+fn line_start(body: borrow Slice<u8>, record: usize) -> usize
+{
+    let length = byte_len(body);
+    let mut index = 0usize;
+    let mut seen = 0usize;
+    let mut found = record == 0usize;
+    while index < length && !found {
+        let byte = match byte_get(body, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        seen = if byte == 10u8 { seen + 1usize } else { seen };
+        index = index + 1usize;
+        found = seen == record;
+        index < length && !found
+    }
+    index
+}
+
+@id("catalog_normalizer.batch.line-end")
+fn line_end(body: borrow Slice<u8>, start: usize) -> usize
+{
+    let length = byte_len(body);
+    let mut index = start;
+    let mut scanning = index < length;
+    while scanning {
+        let byte = match byte_get(body, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        index = if byte == 10u8 { index } else { index + 1usize };
+        scanning = byte != 10u8 && index < length;
+        scanning
+    }
+    index
+}
+
+@id("catalog_normalizer.batch.body-too-long")
+fn body_too_long(body: borrow Slice<u8>) -> bool
+{
+    byte_len(body) > 65536usize
+}
+
+@id("catalog_normalizer.batch.too-many-records")
+fn too_many_records(body: borrow Slice<u8>) -> bool
+{
+    record_count(body) > 256usize
+}
+
+@id("catalog_normalizer.batch.line-too-long")
+fn line_too_long(body: borrow Slice<u8>, record: usize) -> bool
+{
+    let start = line_start(body, record);
+    line_end(body, start) - start > 512usize
+}
+
+@id("catalog_normalizer.batch.line-empty")
+fn line_empty(body: borrow Slice<u8>, record: usize) -> bool
+{
+    let start = line_start(body, record);
+    line_end(body, start) == start
+}

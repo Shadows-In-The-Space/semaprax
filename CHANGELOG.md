@@ -8,6 +8,23 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add private `semaprax-full source-live run|resume|migrate` commands
+  (#113/#116), with held-directory checkpoints, exclusive writers, bounded
+  explicit task/read inputs and retained-Project bindings. A migration carries
+  the predecessor clock floor and nonrefundable work into one claimed
+  destination. Recorded-provider tests cover run, recovery and checked migration;
+  monetary pricing and the actual source repair workflow remain separate.
+
+- Extend the catalog-normalizer source application with bounded JSONL record
+  counting and line/body limits (#124). Seven application cases execute on
+  the interpreter, C11 at both optimization levels and Core Wasm; a terminal
+  newline counting mutation is rejected. Full record normalization remains.
+
+- Reduce the last-resort workspace graph construction estimate (#124) by
+  charging the largest sequential temporary import clone once. Imported
+  stubs release their discarded contract-vector buffers. Earlier accepted
+  receipts and the 18 MiB cap are preserved; core retries stay bounded.
+
 - Add a fifth held-out cross-language benchmark family for half-open booking
   conflicts (#106). Rust, TypeScript and SEMAPRAX share candidates across
   public and hidden runs; an inclusive-end mutation passes public cases and

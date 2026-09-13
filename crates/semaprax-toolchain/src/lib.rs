@@ -11,6 +11,9 @@ mod settled_report;
 /// Private, explicit OpenCode host adapter; compiler admission remains in `semaprax`.
 pub mod opencode_host;
 
+/// Explicit durable source-agent sessions in the private host.
+pub mod source_live_cli;
+
 /// Run ordinary doctor policy without discovering or spawning a worker.
 pub fn run_doctor(arguments: &[String]) -> Result<(String, u8), String> {
     semaprax::doctor::run(arguments)

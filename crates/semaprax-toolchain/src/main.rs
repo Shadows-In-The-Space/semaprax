@@ -7,6 +7,7 @@ static HOST: driver::PrivateHost = driver::PrivateHost {
         new_project::run(arguments).map_err(|error| (error.to_string(), error.exit_code()))
     },
     build_rust: semaprax_toolchain::build_rust,
+    source_live: semaprax_toolchain::source_live_cli::run,
     #[cfg(windows)]
     build_owned_npm: semaprax_toolchain::build_owned_npm,
 };

@@ -3891,7 +3891,6 @@ fn build_owned_inner(
         uses = checked_usage(uses, program.module_uses.len(), "uses", MAX_USES)?;
         programs.push(program);
     }
-
     crate::static_protocol::validate_workspace(&programs).map_err(|error| vec![error])?;
     let module_paths = index_modules(&programs)?;
     let authored = index_authored(&programs)?;
@@ -3916,7 +3915,7 @@ fn build_owned_inner(
     };
     retry_allowed &= frontend.is_none() || checkpoint.is_some();
     let mut core_builder_bytes = 0usize;
-    let mut second_attempt = false;
+    let mut fallback_mode = 1;
     let core = loop {
         #[cfg(test)]
         CORE_BUILD_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
@@ -3938,18 +3937,19 @@ fn build_owned_inner(
         // Drop every partial checked tree before computing or allocating the
         // next phase. Its debit remains in the maximum phase receipt.
         drop(core);
-        if second_attempt || !retry_allowed {
+        if fallback_mode >= 3 || !retry_allowed {
             return Err(vec![limit_error("builder_bytes", active_builder_limit())]);
         }
-        second_attempt = true;
-        if let (Some(cache), Some(checkpoint)) = (frontend.as_deref_mut(), checkpoint.take()) {
-            cache.rollback_core_attempt(checkpoint);
+        if let (Some(cache), Some(saved)) = (frontend.as_deref_mut(), checkpoint.take()) {
+            cache.rollback_core_attempt(saved);
+            checkpoint = cache.checkpoint_core_attempt();
         }
-        let (tighter, total) =
-            expected_projection::retention_prebound_mode(&programs, &authored, true, 2)?;
-        if tighter >= resolve_builder_bytes {
-            return Err(vec![limit_error("builder_bytes", active_builder_limit())]);
-        }
+        let (tighter, total) = expected_projection::next_retention_prebound(
+            &programs,
+            &authored,
+            resolve_builder_bytes,
+            &mut fallback_mode,
+        )?;
         if let Some(cache) = frontend.as_deref() {
             cache.checked_retention_prebound(total)?;
         }

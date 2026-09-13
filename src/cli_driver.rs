@@ -54,6 +54,7 @@ pub type NewProjectHook = fn(&[String]) -> Result<(PathBuf, &'static str), (Stri
 
 pub struct PrivateHost {
     pub new_project: NewProjectHook,
+    pub source_live: fn(&[String]) -> Result<String, (String, u8)>,
     pub build_rust: fn(&mut project::ProjectSnapshot, &Path) -> Result<(), Vec<Diagnostic>>,
     #[cfg(windows)]
     pub build_owned_npm: fn(&mut project::ProjectSnapshot, &Path) -> Result<(), Vec<Diagnostic>>,
@@ -120,6 +121,15 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
     };
     use cli::help::CommandId;
     match command_id {
+        CommandId::SourceLive => {
+            let host = require_private_host(host, "source-live")?;
+            let output = (host.source_live)(&args[1..]).map_err(|(error, code)| {
+                eprintln!("source-live: {error}");
+                code
+            })?;
+            print!("{output}");
+            Ok(())
+        }
         CommandId::Check => {
             let options = cli::project::parse_check_options(&args[1..])?;
             let json = options.json;

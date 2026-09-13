@@ -45,6 +45,8 @@ use identity_slots::{
 
 pub(super) struct SyntheticBuilderCosts {
     pub(super) raw_clone_and_hir: usize,
+    retained_clone_and_hir: usize,
+    transient_import_clone: usize,
     pub(super) runtime: usize,
 }
 
@@ -215,19 +217,21 @@ fn synthetic_builder_bytes_scoped(
     let hir_upper = fixed_hir_upper
         .checked_add(identity_occurrence_upper)
         .ok_or_else(|| vec![limit_error("builder_bytes", active_builder_limit())])?;
-    let retained_and_transient = checked_usage(
+    let retained_clone_and_hir = checked_usage(
         raw.total,
-        transient_import_clone,
+        hir_upper,
         "builder_bytes",
         active_builder_limit(),
     )?;
     Ok(SyntheticBuilderCosts {
         raw_clone_and_hir: checked_usage(
-            retained_and_transient,
-            hir_upper,
+            retained_clone_and_hir,
+            transient_import_clone,
             "builder_bytes",
             active_builder_limit(),
         )?,
+        retained_clone_and_hir,
+        transient_import_clone,
         runtime: runtime.total,
     })
 }
@@ -244,7 +248,13 @@ pub(super) fn checked_retention_prebound(
             match retention_prebound(programs, authored, true) {
                 Ok(costs) => Ok(costs),
                 Err(errors) if cost::is_builder_refusal(&errors) => {
-                    retention_prebound_mode(programs, authored, true, 2)
+                    match retention_prebound_mode(programs, authored, true, 2) {
+                        Ok(costs) => Ok(costs),
+                        Err(errors) if cost::is_builder_refusal(&errors) => {
+                            retention_prebound_mode(programs, authored, true, 3)
+                        }
+                        Err(errors) => Err(errors),
+                    }
                 }
                 Err(errors) => Err(errors),
             }
@@ -267,6 +277,12 @@ pub(super) fn retention_prebound_mode(
 ) -> Result<(usize, usize), Vec<Diagnostic>> {
     let mut resolve = 0usize;
     let mut runtime = 0usize;
+    // build_resolved_core calls synthetic_program once per source, in order.
+    // synthetic_program replaces each imported full-function clone's body and
+    // contracts before starting the next import; the finished synthetic
+    // module retains only its stub. Thus retained modules add, while at most
+    // one full imported body is transiently live across the whole loop.
+    let mut transient_peak = 0usize;
     for program in programs {
         let maximum = if dependency_scoped {
             Some(dependency_identity_max(program, authored, programs)?)
@@ -280,10 +296,15 @@ pub(super) fn retention_prebound_mode(
         };
         resolve = checked_usage(
             resolve,
-            costs.raw_clone_and_hir,
+            if layout_mode >= 3 {
+                costs.retained_clone_and_hir
+            } else {
+                costs.raw_clone_and_hir
+            },
             "builder_bytes",
             active_builder_limit(),
         )?;
+        transient_peak = transient_peak.max(costs.transient_import_clone);
         runtime = checked_usage(
             runtime,
             costs.runtime,
@@ -291,8 +312,39 @@ pub(super) fn retention_prebound_mode(
             active_builder_limit(),
         )?;
     }
+    if layout_mode >= 3 {
+        resolve = checked_usage(
+            resolve,
+            transient_peak,
+            "builder_bytes",
+            active_builder_limit(),
+        )?;
+    }
     let total = checked_usage(resolve, runtime, "builder_bytes", active_builder_limit())?;
     Ok((resolve, total))
+}
+
+/// Return the next strictly smaller core reservation after a real builder
+/// overflow. A refusal in one fallback is not authority to retry the same
+/// reservation or to skip an unrelated diagnostic. The caller owns attempt
+/// rollback and uses `layout_mode = 1` before the first retry, so modes 2
+/// and 3 are considered in order.
+pub(super) fn next_retention_prebound(
+    programs: &[Program],
+    authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
+    current: usize,
+    layout_mode: &mut u8,
+) -> Result<(usize, usize), Vec<Diagnostic>> {
+    while *layout_mode < 3 {
+        *layout_mode += 1;
+        match retention_prebound_mode(programs, authored, true, *layout_mode) {
+            Ok((resolve, total)) if resolve < current => return Ok((resolve, total)),
+            Ok(_) => continue,
+            Err(errors) if cost::is_builder_refusal(&errors) => continue,
+            Err(errors) => return Err(errors),
+        }
+    }
+    Err(vec![limit_error("builder_bytes", active_builder_limit())])
 }
 
 /// A synthetic module retains its own declarations and explicit imported
@@ -795,8 +847,11 @@ pub(super) fn synthetic_program(
             rewrite_type(&mut param.ty, target.module, program, programs)?;
         }
         rewrite_type(&mut function.return_type, target.module, program, programs)?;
-        function.requires.clear();
-        function.ensures.clear();
+        // Clearing would retain the cloned contracts' Vec capacities in every
+        // finished stub. Replace the vectors so the full imported contracts
+        // remain transient, matching the final peak-only pre-bound.
+        function.requires = Vec::new();
+        function.ensures = Vec::new();
         function.body = default_expr(
             &function.return_type,
             &type_declarations,
@@ -1868,99 +1923,5 @@ pub(super) fn verify_resolved_call_edges(
 }
 
 #[cfg(test)]
-mod identity_prebound_tests {
-    use super::{checked_retention_prebound, dependency_identity_max, retention_prebound};
-    use crate::ast::Program;
-    fn fixture(count: usize, padding: usize, reverse: bool) -> Vec<Program> {
-        let long = format!("consumer.{}", "x".repeat(padding));
-        let mut provider = String::from("module provider;\n");
-        for index in 0..count {
-            provider.push_str(&format!(
-                "@id(\"provider.f{index}\") fn f{index}(seed:i64)->i64 {{ seed+{index} }}\n"
-            ));
-        }
-        let mut consumer = format!("module consumer;\n@id(\"{long}\") fn target()->i64{{0}}\n");
-        if reverse {
-            consumer = consumer.replacen(
-                "module consumer;\n",
-                "module consumer;\nuse function @id(\"provider.f0\") from provider as f0;\n",
-                1,
-            );
-        } else {
-            provider = provider.replacen(
-                "module provider;\n",
-                &format!(
-                    "module provider;\nuse function @id(\"{long}\") from consumer as target;\n"
-                ),
-                1,
-            );
-        }
-        [provider, consumer]
-            .into_iter()
-            .enumerate()
-            .map(|(index, text)| {
-                crate::parse(
-                    &text,
-                    std::path::Path::new(if index == 0 {
-                        "provider.spx"
-                    } else {
-                        "consumer.spx"
-                    }),
-                )
-                .unwrap()
-            })
-            .collect()
-    }
-    #[test]
-    fn identity_prebound_preserves_every_legacy_accepted_receipt() {
-        let programs = fixture(3, 40, true);
-        let authored = super::super::index_authored(&programs).unwrap();
-        let old = retention_prebound(&programs, &authored, false).unwrap();
-        assert_eq!(
-            checked_retention_prebound(&programs, &authored).unwrap(),
-            old
-        );
-    }
-    #[test]
-    fn identity_prebound_excludes_reverse_dependent_names_only_after_refusal() {
-        let programs = fixture(310, 220, true);
-        let authored = super::super::index_authored(&programs).unwrap();
-        assert!(retention_prebound(&programs, &authored, false).is_err());
-        assert!(dependency_identity_max(&programs[0], &authored, &programs).unwrap() < 100);
-        assert_eq!(
-            checked_retention_prebound(&programs, &authored).unwrap(),
-            retention_prebound(&programs, &authored, true).unwrap()
-        );
-    }
-    #[test]
-    fn identity_prebound_still_charges_reachable_long_identities() {
-        let programs = fixture(800, 220, false);
-        let authored = super::super::index_authored(&programs).unwrap();
-        assert!(dependency_identity_max(&programs[0], &authored, &programs).unwrap() >= 220);
-        assert!(checked_retention_prebound(&programs, &authored).is_err());
-    }
-    #[test]
-    fn identity_prebound_json_cursor_package_is_bounded() {
-        let programs = [
-            (
-                "dec.spx",
-                include_str!("../../std/data-json-dec/src/dec.spx"),
-            ),
-            (
-                "examples.spx",
-                include_str!("../../std/data-json-dec/src/examples.spx"),
-            ),
-            (
-                "tests.spx",
-                include_str!("../../std/data-json-dec/src/tests.spx"),
-            ),
-            ("io.spx", include_str!("../../std/io/src/io.spx")),
-        ]
-        .into_iter()
-        .map(|(path, text)| crate::parse(text, std::path::Path::new(path)).unwrap())
-        .collect::<Vec<_>>();
-        let authored = super::super::index_authored(&programs).unwrap();
-        checked_retention_prebound(&programs, &authored)
-            .expect("complete JSON cursor dependency pre-bound");
-    }
-}
+#[path = "expected_projection/identity_prebound_tests.rs"]
+mod identity_prebound_tests;

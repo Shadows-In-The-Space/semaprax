@@ -2,6 +2,13 @@ module catalog_normalizer.tests;
 use function @id("catalog_normalizer.app.token_valid") from catalog_normalizer.app as token_valid;
 use function @id("catalog_normalizer.app.trimmed_matches") from catalog_normalizer.app as trimmed_matches;
 use function @id("catalog_normalizer.app.decoded_matches") from catalog_normalizer.app as decoded_matches;
+use function @id("catalog_normalizer.batch.record-count") from catalog_normalizer.batch as record_count;
+use function @id("catalog_normalizer.batch.line-start") from catalog_normalizer.batch as line_start;
+use function @id("catalog_normalizer.batch.line-end") from catalog_normalizer.batch as line_end;
+use function @id("catalog_normalizer.batch.body-too-long") from catalog_normalizer.batch as body_too_long;
+use function @id("catalog_normalizer.batch.too-many-records") from catalog_normalizer.batch as too_many_records;
+use function @id("catalog_normalizer.batch.line-too-long") from catalog_normalizer.batch as line_too_long;
+use function @id("catalog_normalizer.batch.line-empty") from catalog_normalizer.batch as line_empty;
 
 // `owned-data-api.v1` requires every function reachable from `[exports]
 // web` to be contract-free; `std.data.json.dec` uses `ensures` throughout
@@ -89,5 +96,42 @@ fn main() -> i64
     failed = failed + if test_label_internal_whitespace_preserved() == 0 { 0 } else { 4 };
     failed = failed + if test_label_multibyte_unicode_no_normalization() == 0 { 0 } else { 8 };
     failed = failed + if test_unterminated_string_rejected() == 0 { 0 } else { 16 };
+    failed = failed + if test_batch_boundaries() == 0 { 0 } else { 32 };
+    failed = failed + if test_batch_limits() == 0 { 0 } else { 64 };
     failed
+}
+
+@id("catalog_normalizer.tests.test-batch-boundaries")
+fn test_batch_boundaries() -> i64
+{
+    let empty = [0u8];
+    let one_lf = [10u8];
+    let two_lf = [10u8, 10u8];
+    let two = [97u8, 10u8, 98u8, 10u8];
+    let empty_view = array_as_slice(empty);
+    let zero = byte_range(empty_view, 0usize, 0usize);
+    if record_count(zero) == 0usize && record_count(array_as_slice(one_lf)) == 0usize && record_count(array_as_slice(two_lf)) == 2usize && line_empty(array_as_slice(two_lf), 0usize) && record_count(array_as_slice(two)) == 2usize && line_start(array_as_slice(two), 1usize) == 2usize && line_end(array_as_slice(two), 2usize) == 3usize && !line_empty(array_as_slice(two), 1usize) && !line_too_long(array_as_slice(two), 1usize) && !body_too_long(array_as_slice(two)) && !too_many_records(array_as_slice(two)) { 0 } else { 1 }
+}
+
+@id("catalog_normalizer.tests.test-batch-limits")
+fn test_batch_limits() -> i64
+{
+    let mut records = bytes_zeroed(513usize);
+    let initial = bytes_as_slice(records);
+    let exact_line = byte_range(initial, 0usize, 512usize);
+    let length_ok = !line_too_long(exact_line, 0usize) && line_too_long(initial, 0usize);
+    let mut index = 0usize;
+    while index < 513usize {
+        records = bytes_set(records, index, 97u8);
+        index = index + 2usize;
+        index < 513usize
+    }
+    let mut gap = 1usize;
+    while gap < 513usize {
+        records = bytes_set(records, gap, 10u8);
+        gap = gap + 2usize;
+        gap < 513usize
+    }
+    let records_view = bytes_as_slice(records);
+    if length_ok && record_count(records_view) == 257usize && too_many_records(records_view) { 0 } else { 1 }
 }

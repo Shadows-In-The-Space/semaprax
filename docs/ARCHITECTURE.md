@@ -96,6 +96,12 @@ and `src/cli_driver.rs`. The root retains dispatch;
 `src/cli_driver/source_execution.rs` owns single-file build, run, and diagnostic
 publication.
 The standalone binary supplies no private-host hooks.
+The private `source_live_cli` host supplies the versioned durable source CLI,
+held-directory checkpoint store and restart-stable clock. It derives bindings
+from retained Projects and explicit task/read snapshots, then uses the existing
+source journal and migration driver. A predecessor-held claim restricts CLI
+migration to one destination; neither journal hashes nor that claim authenticate
+a store replaced or rolled back by its owner.
 `crates/semaprax-toolchain` owns the `doctor` implementation and the held-parent
 staged publication behind its `new`; the compiler library owns the bounded
 standalone `new` route (`src/project/create.rs`), and both share one grammar and

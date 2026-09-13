@@ -181,7 +181,7 @@ the frozen prelude as its identity scope. Reverse-dependent test declarations
 cannot occur in that module's synthetic HIR and therefore cannot enlarge its
 identity bound. Every previously accepted estimate is retained exactly; the
 fallback runs only after a builder-limit refusal. Structural and string factors,
-the 16 MiB limit, and actual allocation charges remain unchanged.
+the 18 MiB limit, and actual allocation charges remain unchanged.
 
 If both estimates refuse, a third attempt accounts inline AST storage once:
 embedded String headers, and the audited inline expression and pattern fields,
@@ -210,13 +210,22 @@ strings, synthetic runtime structures, generic-instance estimates, and transient
 imported bodies retain their prior charges. Successful receipts from either
 earlier attempt remain byte-for-byte unchanged.
 
+If the raw-AST estimate also refuses, the final fallback sums retained
+synthetic AST/HIR costs across modules but charges one maximum transient
+full-function import clone across the sequential module loop. Each imported
+body and both contract-vector backing allocations are dropped before the
+next clone; completed modules retain only stubs with zero-capacity contract
+vectors. No clone is omitted from the peak bound. Earlier accepted estimates
+and receipts remain unchanged.
+
 At the production default builder limit, an unnested core phase that exceeds
-its budget after accepting an earlier estimate may retry once with the tighter
-raw-AST estimate. The failed partial core is dropped and private frontend
-attempt state is rolled back before retry. The recorded sequential-phase debit
-is the maximum of both attempts; no enclosing budget is reset or refunded.
+its budget after accepting an earlier estimate may retry with the raw-AST
+estimate, then with the final transient-peak estimate, only when each is
+strictly tighter. The failed partial core is dropped and private frontend
+attempt state is rolled back before each retry. The recorded sequential-phase
+debit is the maximum of all attempts; no enclosing budget is reset or refunded.
 Explicit smaller-limit invocations and nested budgets retain their original
-refusal behavior, and a successful first attempt retains its original receipt.
+core-refusal behavior, and a successful earlier attempt retains its receipt.
 
 The identity factor was re-derived from measurement. A declaration identity at
 one resolved occurrence is retained by the HIR node, the declaration, type and
@@ -245,8 +254,9 @@ expression as the body. Its pre-bound is therefore the signature at the
 resolved-structure rates plus that default expression, and the provider's
 contract and body are charged once, in the module that declares them. Building
 the stub clones one provider function transiently before replacing its body, so
-the largest single imported contract is charged once per module at the raw AST
-rate, with no structural expansion: no node of it becomes HIR. A type import is
+the largest single imported contract is charged once per module in the earlier
+estimates, or once across the sequential module loop in the final fallback,
+at the raw AST rate with no structural expansion: no node of it becomes HIR. A type import is
 retained in full and keeps its full charge. Before this split, every importing
 module re-charged each imported body as resolved structure, so a conformance
 module that imports every function its library exports cost a second complete

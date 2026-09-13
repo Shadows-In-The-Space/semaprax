@@ -1,0 +1,125 @@
+# Source live CLI v1
+
+Audience: private host operators and reviewers of the checked source execution route.
+
+Status: **private host implementation with local recorded-transport integration
+tests.** This CLI is a host adapter for the existing checked
+[source driver and journal](SOURCE-LIVE-JOURNAL-V2.md). It does not add a second
+replay engine, provider fallback, candidate publication path, or model-created
+authority.
+
+## Exact operator route
+
+Only the unpublished `semaprax-full` binary admits:
+
+```
+semaprax-full source-live run CONFIG CHECKPOINT --opencode ABS --scratch EMPTY_ABS
+semaprax-full source-live resume CONFIG CHECKPOINT --opencode ABS --scratch EMPTY_ABS
+semaprax-full source-live migrate OLD_CONFIG OLD_CHECKPOINT NEW_CONFIG NEW_CHECKPOINT FUNCTION STEPS --opencode ABS --scratch EMPTY_ABS
+```
+
+All operands are absolute except the stable migration function identity and
+positive checked-evaluator step limit. `run` requires a new, private checkpoint
+directory. `resume` requires its existing latest journal. `migrate` accepts
+only a committed v2 Suspend from the predecessor directory and a fresh or
+same-claim v3 destination directory. A v3 predecessor is explicitly refused
+by this CLI version; the checked embedding migration API has a separate
+A→B→C gate. The executable is the one explicitly chosen OpenCode binary, and
+every process attempt uses the fixed
+`opencode/muse-spark-1.3-contributor-free` profile without a paid fallback.
+Scratch must be a new empty absolute directory for each CLI invocation.
+
+A crash after fresh directory creation but before its first journal ACK can
+leave an empty directory. Both `run` (existing directory) and `resume` (no
+latest journal) refuse it. An operator may use a different new directory
+only after independently establishing that no journal or provider work began;
+the CLI does not infer that fact from an empty directory.
+
+`CONFIG` is one canonical JSON object, at most 8192 bytes, with exactly these
+keys: `schema` (`semaprax.source-live-cli.config.v1`), `manifest`,
+`source_path`, `agent_id`, `step_id`, `task_path`, `task_budget`, `read_path`,
+`deadline_millis`, `ceiling`, `reservation_units`, `max_iterations`,
+`max_stages`, `max_steps_per_stage`, `max_total_steps`, and `response_limit`.
+Unknown, duplicate, alternate-encoding, and negative or over-capacity fields
+are rejected before journal or provider work. JSON must use exact compact
+sorted-key serialization; a single final line feed is accepted. `manifest`,
+`task_path`, and `read_path` are absolute host selections; `source_path` is a
+relative Project `.spx` selector without `..`. The task and observation files
+are bounded to 65,536 bytes each. The observation file is an explicit fixed
+read snapshot, returned by the one injected `AgentReadOperation`; it is not a
+shell, test runner, candidate editor, or semantic validation tool.
+
+The host authenticates the retained Project, selects and checks its Agent
+role closure, derives its actual `ProgramRoot`, and derives the proposal
+grammar from the compiled source. The read snapshot bytes and fixed model are
+hashed into the deployment binding; changing the snapshot on resume changes
+the invocation identity and fails journal recovery. The task bytes, budget,
+source revision, ProgramRoot, schema, fixed charge, bounds, clock and deadline
+are bound by the existing `SourceInvocationBinding`. Neither submitted model
+text nor the checkpoint document supplies those host facts. The unit is
+`fixed_model_attempt_units.v1`, charged once per acknowledged attempt intent;
+provider-reported counters remain optional observations, never billing proof.
+
+## Latest store, clock and migration claim
+
+The Unix host holds the checkpoint directory by file descriptor and a
+nonblocking exclusive advisory lock. It refuses symlinked/nonphysical path
+components and non-private directories. A read preflights regular-file type
+and byte limit on the opened descriptor; a FIFO or replaced symlink cannot
+turn the bounded read into an unbounded wait. Each canonical journal
+generation is written to a new file, synced, renamed over the latest document
+through the held directory, then the directory is synced before the store
+ACK. A failed or ambiguous commit poisons the writer. Recovery loads the
+latest authoritative document under the same exclusive lock, validates the
+exact independently derived source binding, and restores the existing
+cumulative ledger. A store replacement by its owner or a valid rollback of
+the latest document cannot be authenticated by hashes alone.
+
+The CLI uses Unix epoch milliseconds as one restart-stable clock domain,
+with origin zero for a fresh v2 run and an absolute `deadline_millis` supplied
+in CONFIG. A v3 migration's origin is the authenticated predecessor latest
+checkpoint's last checked clock floor; repeating the same handoff derives the
+same origin from that predecessor terminal. Recovery does not reset that
+deadline. A regressed or expired continuation
+refuses; an already committed terminal is a read-only receipt and can be
+retrieved after expiry with zero model/effect dispatches. The OpenCode
+process timeout is no greater than 30 seconds or the invocation time
+remaining when this CLI traversal begins. The source clock is checked again
+before each attempt and after each settlement; a later child may cross the
+absolute deadline, in which case its result is withheld and its committed
+reservation remains charged.
+
+Before a v2→v3 migration can evaluate or run the destination, the predecessor
+store persists a single handoff claim under its held lock. The claim binds the
+checked handoff digest, destination directory and new invocation. The same
+destination/handoff may reopen its latest journal; another destination is
+refused. A crash after the claim but before destination settlement can leave
+the handoff unavailable pending explicit operator reconciliation. This is a
+cooperating-CLI single-destination rule, not a distributed transaction or
+proof against hostile owner rollback. The destination uses
+`prepare_source_live_migration` and the same source journal/driver; checked
+migration fuel is acknowledged before the pure evaluator, and the migrated
+State is schema-checked before first Observe. No Initialize is repeated.
+
+## Output and scope
+
+A completed run returns a bounded JSON receipt with terminal status,
+invocation, generation, chain, acknowledged model units and stage fuel, and
+this traversal's model/effect dispatch counts. It does not include raw model
+text, credentials, provider stderr, or a publication grant. A failure reports
+its selected status and last acknowledged counters; the journal remains the
+reviewable causal artifact. The CLI never rewrites authoritative `.spx`
+source or Git state. Real failed-check observation, semantic candidate
+preview, repair feedback, and approval-bound publication remain issue #116's
+separate vertical-slice work. No live provider, hosted CI, durable power-loss,
+or exactly-once physical delivery claim follows from local injected tests.
+
+The selected `source_live_cli::tests` suite passed nine tests locally. Its
+retained-Project fixture sends a recorded OpenCode run/export through the
+actual source adapter, then checks terminal resume and changed read, task,
+or policy refusal with zero further calls. A second fixture executes checked
+Suspend, pure StateB migration, destination completion, terminal recovery,
+and competing-destination claim refusal. Store tests cover exclusive locks,
+held-directory rename, poisoned writes, symlink/FIFO input refusal, and an
+empty fresh directory that neither mode silently resumes. These are local
+fixture results, not a live provider or power-loss test.

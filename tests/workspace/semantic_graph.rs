@@ -390,6 +390,7 @@ fn expected_projection_source_boundary_is_pure_and_keeps_shared_helpers_in_root(
         "pub(super) fn synthetic_builder_bytes(",
         "pub(super) fn checked_retention_prebound(",
         "pub(super) fn retention_prebound_mode(",
+        "pub(super) fn next_retention_prebound(",
         "pub(super) fn checked_builder_sum(left: usize, right: usize) -> Result<usize, Vec<Diagnostic>> {",
         "pub(super) fn rewrite_type_runtime_cost(",
         "pub(super) fn validate_dependency_dag(",

@@ -11,6 +11,7 @@ const EXECUTION_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v2
 const MIGRATED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v3\0";
 const PRICED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v4\0";
 const PRICED_MIGRATED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v4-migrated\0";
+const POLICY_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v6\0";
 
 fn kind(entry: &SourceJournalEntry) -> &'static str {
     match entry {
@@ -28,6 +29,8 @@ fn kind(entry: &SourceJournalEntry) -> &'static str {
         SourceJournalEntry::AttemptUsage { .. } => "attempt_usage",
         SourceJournalEntry::PricedAttemptIntent(_) => "priced_attempt_intent",
         SourceJournalEntry::PricedAttemptUsage(_) => "priced_attempt_usage",
+        SourceJournalEntry::PolicyAttemptIntent(_) => "policy_attempt_intent",
+        SourceJournalEntry::PolicyAttemptUsage { .. } => "policy_attempt_usage",
         SourceJournalEntry::ProposalRefused { .. } => "proposal_refused",
         SourceJournalEntry::ProposalAdmitted { .. } => "proposal_admitted",
         SourceJournalEntry::AuthorizationConsumed { .. } => "authorization_consumed",
@@ -71,6 +74,12 @@ fn turn_attempt(entry: &SourceJournalEntry) -> (Option<u32>, Option<u32>) {
             (Some(intent.turn), Some(intent.attempt))
         }
         SourceJournalEntry::PricedAttemptUsage(usage) => (Some(usage.turn), Some(usage.attempt)),
+        SourceJournalEntry::PolicyAttemptIntent(intent) => {
+            (Some(intent.turn), Some(intent.attempt))
+        }
+        SourceJournalEntry::PolicyAttemptUsage { turn, attempt, .. } => {
+            (Some(*turn), Some(*attempt))
+        }
     }
 }
 
@@ -109,6 +118,18 @@ fn encode_entry(entry: &SourceJournalEntry, seq: usize) -> String {
         SourceJournalEntry::PricedAttemptIntent(_) | SourceJournalEntry::PricedAttemptUsage(_) => {
             unreachable!("priced entries returned from encode_entry before field rendering")
         }
+        SourceJournalEntry::PolicyAttemptIntent(intent) => format!(
+            ",\"attempt_digest\":{},\"request_digest\":{},\"prompt_digest\":{},\"request_bytes\":{},\"reserved_units\":{},\"response_limit\":{},\"policy_ordinal\":{},\"policy_kind\":\"fresh\",\"provider\":{},\"reserved_context_tokens\":{},\"reserved_output_tokens\":{},\"reserved_cost_micros\":{}",
+            quote_json(&intent.attempt_digest), quote_json(&intent.request_digest), quote_json(&intent.prompt_digest),
+            intent.request_bytes, intent.reserved_units, intent.response_limit, intent.reservation.ordinal,
+            quote_json(&intent.reservation.provider_id), intent.reservation.reserved_context_tokens,
+            intent.reservation.reserved_output_tokens, intent.reservation.reserved_cost_micros),
+        SourceJournalEntry::PolicyAttemptUsage { ordinal, usage, .. } => match usage {
+            PolicyAttemptUsageV6::Unknown => format!(",\"policy_ordinal\":{},\"usage\":\"unknown\"", ordinal),
+            PolicyAttemptUsageV6::Observed { context_tokens, output_tokens, cost_micros } => format!(
+                ",\"policy_ordinal\":{},\"usage\":\"observed\",\"context_tokens\":{},\"output_tokens\":{},\"cost_micros\":{}",
+                ordinal, context_tokens, output_tokens, cost_micros),
+        },
         SourceJournalEntry::MigrationOpened { handoff_digest } =>
             format!(",\"handoff_digest\":{}", quote_json(handoff_digest)),
         SourceJournalEntry::MigrationEvaluationIntent { fuel, .. } =>
@@ -222,7 +243,9 @@ pub(super) fn encode_envelope(
     }
     let entries = encode_entries(journal.entries())?;
     let link = digest(
-        if journal.binding.io_limits().is_some() {
+        if journal.binding.policy_binding().is_some() {
+            POLICY_CHAIN_DOMAIN
+        } else if journal.binding.io_limits().is_some() {
             b"semaprax.live-invocation.source-chain.v5\0"
         } else if journal.binding.is_priced_migrated_profile() {
             PRICED_MIGRATED_CHAIN_DOMAIN
@@ -405,16 +428,20 @@ fn decode_entry(
             observation: string(map, "observation")?,
             feedback: string(map, "feedback")?,
         },
-        "attempt_intent" if !expected.is_priced_profile() => SourceJournalEntry::AttemptIntent {
-            turn: turn()?,
-            attempt: attempt()?,
-            attempt_digest: string(map, "attempt_digest")?,
-            request_digest: string(map, "request_digest")?,
-            prompt_digest: string(map, "prompt_digest")?,
-            request_bytes: usize_field(map, "request_bytes")?,
-            reserved_units: i64_field(map, "reserved_units")?,
-            response_limit: usize_field(map, "response_limit")?,
-        },
+        "attempt_intent"
+            if !expected.is_priced_profile() && expected.policy_binding().is_none() =>
+        {
+            SourceJournalEntry::AttemptIntent {
+                turn: turn()?,
+                attempt: attempt()?,
+                attempt_digest: string(map, "attempt_digest")?,
+                request_digest: string(map, "request_digest")?,
+                prompt_digest: string(map, "prompt_digest")?,
+                request_bytes: usize_field(map, "request_bytes")?,
+                reserved_units: i64_field(map, "reserved_units")?,
+                response_limit: usize_field(map, "response_limit")?,
+            }
+        }
         "attempt_settled" => SourceJournalEntry::AttemptSettled {
             turn: turn()?,
             attempt: attempt()?,
@@ -427,11 +454,13 @@ fn decode_entry(
             reason: tag(map, "reason", SourceAttemptFailure::parse)?,
             attempted_bytes: usize_field(map, "attempted_bytes")?,
         },
-        "attempt_usage" if !expected.is_priced_profile() => SourceJournalEntry::AttemptUsage {
-            turn: turn()?,
-            attempt: attempt()?,
-            reported: decode_usage(map)?,
-        },
+        "attempt_usage" if !expected.is_priced_profile() && expected.policy_binding().is_none() => {
+            SourceJournalEntry::AttemptUsage {
+                turn: turn()?,
+                attempt: attempt()?,
+                reported: decode_usage(map)?,
+            }
+        }
         "priced_attempt_intent" if expected.is_priced_profile() => {
             SourceJournalEntry::PricedAttemptIntent(
                 super::priced_v4::PricedAttemptIntentV4::decode(
@@ -451,6 +480,47 @@ fn decode_entry(
                     .priced_binding()
                     .ok_or(SourceJournalError::Binding)?,
             )?)
+        }
+        "policy_attempt_intent" if expected.policy_binding().is_some() => {
+            let kind = string(map, "policy_kind")?;
+            if kind != "fresh" {
+                return Err(SourceJournalError::Malformed);
+            }
+            SourceJournalEntry::PolicyAttemptIntent(PolicyAttemptIntentV6 {
+                turn: turn()?,
+                attempt: attempt()?,
+                attempt_digest: string(map, "attempt_digest")?,
+                request_digest: string(map, "request_digest")?,
+                prompt_digest: string(map, "prompt_digest")?,
+                request_bytes: usize_field(map, "request_bytes")?,
+                reserved_units: i64_field(map, "reserved_units")?,
+                response_limit: usize_field(map, "response_limit")?,
+                reservation: PolicyAttemptReservationV6 {
+                    ordinal: u64_field(map, "policy_ordinal")?,
+                    kind: crate::model_budget_policy::AttemptKind::Fresh,
+                    provider_id: string(map, "provider")?,
+                    reserved_context_tokens: u64_field(map, "reserved_context_tokens")?,
+                    reserved_output_tokens: u64_field(map, "reserved_output_tokens")?,
+                    reserved_cost_micros: i64_field(map, "reserved_cost_micros")?,
+                },
+            })
+        }
+        "policy_attempt_usage" if expected.policy_binding().is_some() => {
+            let usage = match string(map, "usage")?.as_str() {
+                "unknown" => PolicyAttemptUsageV6::Unknown,
+                "observed" => PolicyAttemptUsageV6::Observed {
+                    context_tokens: u64_field(map, "context_tokens")?,
+                    output_tokens: u64_field(map, "output_tokens")?,
+                    cost_micros: i64_field(map, "cost_micros")?,
+                },
+                _ => return Err(SourceJournalError::Malformed),
+            };
+            SourceJournalEntry::PolicyAttemptUsage {
+                turn: turn()?,
+                attempt: attempt()?,
+                ordinal: u64_field(map, "policy_ordinal")?,
+                usage,
+            }
         }
         "proposal_refused" => SourceJournalEntry::ProposalRefused {
             turn: turn()?,

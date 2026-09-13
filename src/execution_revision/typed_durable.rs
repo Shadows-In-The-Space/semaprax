@@ -4,15 +4,80 @@ use crate::agent_lifecycle::iterative::effects::{
     DurableTypedFailure, DurableTypedRun, TypedEffectHandler,
 };
 use crate::agent_lifecycle::iterative::source_live::{
-    SourceLiveFailure, SourceLiveOutcome, SourceLivePolicy, SourceLiveRequest,
+    SourceIoLimits, SourceLiveFailure, SourceLiveMigrationEndpoint, SourceLiveOutcome,
+    SourceLivePolicy, SourceLiveRequest,
 };
 use crate::agent_lifecycle::CheckpointStore;
-use crate::agent_runtime_v2::SourceModelEvidence;
+use crate::agent_runtime_v2::{SourceModelEvidence, SourceModelPolicyBinding};
 use crate::diagnostic::Diagnostic;
+use crate::live_invocation::source_journal::{SourceInvocationBinding, SourcePolicyBindingV6};
 use crate::live_invocation::SourceInvocationClock;
 use crate::provider_adapter_sdk::StreamingSourceProposalAdapter;
 
+#[path = "typed_durable/migration.rs"]
+mod migration;
+pub use migration::PreparedAgentRuntimeV2SourceMigration;
+
 impl AgentRuntimeV2 {
+    /// Produces the exact durable source-policy facts for this typed runtime.
+    /// The returned value binds the typed effect registry and narrowed effect
+    /// budget into the journal root; callers can retain it for a later checked
+    /// source migration, but it grants no source or provider operation.
+    pub fn source_live_model_policy(
+        &self,
+        binding: &crate::agent_runtime_v2::SourceModelBinding,
+        model_policy: &SourceModelPolicyBinding,
+        mut policy: SourceLivePolicy,
+    ) -> std::result::Result<SourceLivePolicy, Vec<Diagnostic>> {
+        if !binding.runtime_matches(
+            self.deployment.digest(),
+            self.instance.digest(),
+            self.lifecycle.proposal_schema().source_revision(),
+            self.lifecycle.proposal_schema().schema().digest(),
+        ) || !model_policy.matches(binding)
+            || policy.deployment_binding != binding.digest()
+            || policy.response_limit != binding.max_response_bytes()
+            || policy.reservation_units <= 0
+        {
+            return Err(vec![Diagnostic::io(
+                "source.model_durable_policy",
+                "typed durable source policy refused",
+            )]);
+        }
+        policy.deadline_millis = durable_policy_deadline(&policy, model_policy).map_err(|_| {
+            vec![Diagnostic::io(
+                "source.model_durable_policy",
+                "typed durable source policy refused",
+            )]
+        })?;
+        policy.program_root = Some(typed_source_program_root(
+            &self.program_root,
+            self.lifecycle.digest(),
+            self.effects,
+        ));
+        Ok(policy)
+    }
+
+    /// Forms a source-migration endpoint from this retained typed runtime.
+    /// Path and agent identity are revalidated by checked migration preparation;
+    /// this helper only prevents callers from substituting a different compiled
+    /// lifecycle for the runtime that produced the source checkpoint.
+    pub fn source_live_migration_endpoint<'a>(
+        &'a self,
+        source_path: &'a str,
+        agent_id: &'a str,
+        policy: &'a SourceLivePolicy,
+    ) -> SourceLiveMigrationEndpoint<'a> {
+        SourceLiveMigrationEndpoint {
+            project: self.project.as_ref(),
+            source_path,
+            agent_id,
+            lifecycle: self.lifecycle.source_lifecycle(),
+            policy,
+            budget: self.budget,
+        }
+    }
+
     /// Execute using a caller-owned single-writer checkpoint store.
     ///
     /// `retained_checkpoint` must be an acknowledged snapshot from that trusted
@@ -92,9 +157,20 @@ impl AgentRuntimeV2 {
                 ))
             }
         };
+        if source.model_policy_binding().is_some() {
+            return self.run_live_bound_model_durable_policy(
+                source,
+                handler,
+                policy,
+                clock,
+                cancellation,
+                retained_checkpoint,
+                store,
+                None,
+            );
+        }
         if !self.proposals.is_empty()
             || !source.model_evidence().attempts().is_empty()
-            || source.model_policy_binding().is_some()
             || policy.deployment_binding != binding.digest()
             || policy.response_limit != binding.max_response_bytes()
             || policy.reservation_units <= 0
@@ -137,6 +213,10 @@ impl AgentRuntimeV2 {
                     model_evidence,
                     evidence,
                     revision: self.revision,
+                    source_binding: None,
+                    source_policy: None,
+                    source_model_binding_digest: None,
+                    source_model_policy: None,
                 })
             }
             Err(failure) => {
@@ -158,6 +238,241 @@ impl AgentRuntimeV2 {
             }
         }
     }
+
+    /// Runs the additive V6 model-policy route with the existing V5
+    /// cumulative provider-I/O limits bound into its checkpoint identity.
+    /// The older entry retains its unpriced, no-I/O byte contract.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_live_bound_model_durable_with_io_limits(
+        self,
+        source: &mut StreamingSourceProposalAdapter<'_>,
+        handler: &mut dyn TypedEffectHandler,
+        policy: SourceLivePolicy,
+        clock: &dyn SourceInvocationClock,
+        cancellation: &AgentCancellation,
+        retained_checkpoint: Option<&str>,
+        store: &mut dyn CheckpointStore,
+        limits: &SourceIoLimits,
+    ) -> std::result::Result<AgentRuntimeV2DurableModelEvidence, AgentRuntimeV2DurableModelFailure>
+    {
+        self.run_live_bound_model_durable_policy(
+            source,
+            handler,
+            policy,
+            clock,
+            cancellation,
+            retained_checkpoint,
+            store,
+            Some(limits),
+        )
+    }
+
+    /// Runs the V6 durable source route whose acknowledged model intents
+    /// retain the exact #179 reservation and restore it before recovery can
+    /// continue. The older durable entry remains the unpriced V2 profile.
+    #[allow(clippy::too_many_arguments)]
+    fn run_live_bound_model_durable_policy(
+        self,
+        source: &mut StreamingSourceProposalAdapter<'_>,
+        handler: &mut dyn TypedEffectHandler,
+        mut policy: SourceLivePolicy,
+        clock: &dyn SourceInvocationClock,
+        cancellation: &AgentCancellation,
+        retained_checkpoint: Option<&str>,
+        store: &mut dyn CheckpointStore,
+        io_limits: Option<&SourceIoLimits>,
+    ) -> std::result::Result<AgentRuntimeV2DurableModelEvidence, AgentRuntimeV2DurableModelFailure>
+    {
+        let binding = match source.model_binding() {
+            Some(binding)
+                if binding.runtime_matches(
+                    self.deployment.digest(),
+                    self.instance.digest(),
+                    self.lifecycle.proposal_schema().source_revision(),
+                    self.lifecycle.proposal_schema().schema().digest(),
+                ) =>
+            {
+                binding
+            }
+            _ => {
+                return Err(AgentRuntimeV2DurableModelFailure::preflight(
+                    &self,
+                    source,
+                    "policy_binding",
+                ))
+            }
+        };
+        let policy_binding = match source.model_policy_binding() {
+            Some(policy_binding) if policy_binding.matches(binding) => policy_binding,
+            _ => {
+                return Err(AgentRuntimeV2DurableModelFailure::preflight(
+                    &self,
+                    source,
+                    "source_model_policy",
+                ))
+            }
+        };
+        policy = match self.source_live_model_policy(binding, policy_binding, policy) {
+            Ok(policy) => policy,
+            Err(_) => {
+                return Err(AgentRuntimeV2DurableModelFailure::preflight(
+                    &self,
+                    source,
+                    "policy_deadline",
+                ))
+            }
+        };
+        let model_deadline = policy.deadline_millis;
+        if !source.model_policy_deadline_matches(model_deadline) {
+            return Err(AgentRuntimeV2DurableModelFailure::preflight(
+                &self,
+                source,
+                "policy_deadline",
+            ));
+        }
+        if !self.proposals.is_empty()
+            || !source.model_evidence().attempts().is_empty()
+            || policy.deployment_binding != binding.digest()
+            || policy.response_limit != binding.max_response_bytes()
+            || policy.reservation_units <= 0
+        {
+            return Err(AgentRuntimeV2DurableModelFailure::preflight(
+                &self,
+                source,
+                "policy_source_preflight",
+            ));
+        }
+        let journal_policy = source_policy_binding_v6(binding, policy_binding).map_err(|_| {
+            AgentRuntimeV2DurableModelFailure::preflight(&self, source, "policy_journal")
+        })?;
+        let checkpoint_root =
+            typed_source_program_root(&self.program_root, self.lifecycle.digest(), self.effects);
+        let binding_digest = binding.digest().to_owned();
+        let policy_digest = policy_binding.digest().to_owned();
+        let retained_model_policy = policy_binding.clone();
+        let source_binding = match io_limits {
+            Some(limits) => policy.binding_with_model_policy_and_io_limits(
+                self.lifecycle.source_lifecycle(),
+                &self.task,
+                self.budget,
+                journal_policy.clone(),
+                limits,
+            ),
+            None => policy.binding_with_model_policy(
+                self.lifecycle.source_lifecycle(),
+                &self.task,
+                self.budget,
+                journal_policy.clone(),
+            ),
+        }
+        .map_err(|_| {
+            AgentRuntimeV2DurableModelFailure::preflight(&self, source, "policy_journal")
+        })?;
+        source.configure_durable_boundary(cancellation, policy.deadline_millis);
+        let request = SourceLiveRequest {
+            task: &self.task,
+            budget: self.budget,
+            policy: &policy,
+            clock,
+            cancellation,
+            checkpoint: retained_checkpoint,
+        };
+        let run = match io_limits {
+            Some(limits) => self
+                .lifecycle
+                .run_live_durable_source_with_model_policy_and_io_limits(
+                    request,
+                    journal_policy,
+                    limits,
+                    source,
+                    handler,
+                    self.effects,
+                    store,
+                ),
+            None => self.lifecycle.run_live_durable_source_with_model_policy(
+                request,
+                journal_policy,
+                source,
+                handler,
+                self.effects,
+                store,
+            ),
+        };
+        match run {
+            Ok(run) => {
+                let model_evidence = source.model_evidence().clone();
+                let evidence = durable_model_policy_evidence_root(
+                    &self,
+                    &run,
+                    &model_evidence,
+                    &binding_digest,
+                    &policy_digest,
+                    &checkpoint_root,
+                    "completed",
+                );
+                Ok(AgentRuntimeV2DurableModelEvidence {
+                    run,
+                    model_evidence,
+                    evidence,
+                    revision: self.revision,
+                    source_binding: Some(source_binding),
+                    source_policy: Some(policy),
+                    source_model_binding_digest: Some(binding_digest),
+                    source_model_policy: Some(retained_model_policy),
+                })
+            }
+            Err(failure) => {
+                let model_evidence = source.model_evidence().clone();
+                let evidence = durable_model_policy_failure_root(
+                    &self,
+                    &failure,
+                    &model_evidence,
+                    &binding_digest,
+                    &policy_digest,
+                    &checkpoint_root,
+                    "source_live_failed",
+                );
+                Err(AgentRuntimeV2DurableModelFailure {
+                    failure,
+                    model_evidence,
+                    evidence,
+                    revision: self.revision,
+                })
+            }
+        }
+    }
+}
+
+fn source_policy_binding_v6(
+    binding: &crate::agent_runtime_v2::SourceModelBinding,
+    policy: &SourceModelPolicyBinding,
+) -> std::result::Result<SourcePolicyBindingV6, ()> {
+    SourcePolicyBindingV6::new(
+        binding.digest().to_owned(),
+        policy.digest().to_owned(),
+        policy.provider_id().to_owned(),
+        policy.effective(),
+    )
+    .map_err(|_| ())
+}
+
+fn durable_policy_deadline(
+    policy: &SourceLivePolicy,
+    model: &SourceModelPolicyBinding,
+) -> std::result::Result<i64, ()> {
+    let model_deadline = if model.effective().limits().max_latency_millis == i64::MAX {
+        policy.deadline_millis
+    } else {
+        policy
+            .initial_millis
+            .checked_add(model.effective().limits().max_latency_millis)
+            .ok_or(())?
+    };
+    let deadline = policy.deadline_millis.min(model_deadline);
+    if deadline <= policy.initial_millis {
+        return Err(());
+    }
+    Ok(deadline)
 }
 
 fn typed_source_program_root(
@@ -187,6 +502,10 @@ pub struct AgentRuntimeV2DurableModelEvidence {
     model_evidence: SourceModelEvidence,
     evidence: ExecutionRoot,
     revision: ExecutionRoot,
+    source_binding: Option<SourceInvocationBinding>,
+    source_policy: Option<SourceLivePolicy>,
+    source_model_binding_digest: Option<String>,
+    source_model_policy: Option<SourceModelPolicyBinding>,
 }
 
 impl AgentRuntimeV2DurableModelEvidence {
@@ -201,6 +520,20 @@ impl AgentRuntimeV2DurableModelEvidence {
     }
     pub fn execution_revision(&self) -> &ExecutionRoot {
         &self.revision
+    }
+    /// Exact journal binding retained by the V6 source-policy route.
+    pub fn source_binding(&self) -> Option<&SourceInvocationBinding> {
+        self.source_binding.as_ref()
+    }
+    /// Effective policy retained by the V6 source-policy route.
+    pub fn source_policy(&self) -> Option<&SourceLivePolicy> {
+        self.source_policy.as_ref()
+    }
+    pub(crate) fn source_model_binding_digest(&self) -> Option<&str> {
+        self.source_model_binding_digest.as_deref()
+    }
+    pub(crate) fn source_model_policy(&self) -> Option<&SourceModelPolicyBinding> {
+        self.source_model_policy.as_ref()
     }
 }
 
@@ -302,6 +635,58 @@ fn durable_model_failure_root(
             "execution_revision": runtime.revision.digest(),
             "instance_root": runtime.instance.digest(),
             "source_model_binding": binding,
+            "typed_effect_profile": typed_profile,
+            "model_evidence": model_evidence.digest(),
+            "model_dispatches": failure.model_dispatches,
+            "effect_dispatches": failure.effect_dispatches,
+            "selected": failure.selected.map(|status| status.as_str()),
+            "status": status,
+        }),
+    )
+}
+
+fn durable_model_policy_evidence_root(
+    runtime: &AgentRuntimeV2,
+    run: &SourceLiveOutcome,
+    model_evidence: &SourceModelEvidence,
+    binding: &str,
+    policy_binding: &str,
+    typed_profile: &str,
+    status: &str,
+) -> ExecutionRoot {
+    root(
+        "semaprax.evidence-root.v5",
+        json!({
+            "execution_revision": runtime.revision.digest(),
+            "instance_root": runtime.instance.digest(),
+            "source_model_binding": binding,
+            "source_model_policy": policy_binding,
+            "typed_effect_profile": typed_profile,
+            "source_checkpoint": run.checkpoint.chain(),
+            "model_evidence": model_evidence.digest(),
+            "model_dispatches": run.model_dispatches,
+            "effect_dispatches": run.effect_dispatches,
+            "status": status,
+        }),
+    )
+}
+
+fn durable_model_policy_failure_root(
+    runtime: &AgentRuntimeV2,
+    failure: &SourceLiveFailure,
+    model_evidence: &SourceModelEvidence,
+    binding: &str,
+    policy_binding: &str,
+    typed_profile: &str,
+    status: &str,
+) -> ExecutionRoot {
+    root(
+        "semaprax.evidence-root.v5",
+        json!({
+            "execution_revision": runtime.revision.digest(),
+            "instance_root": runtime.instance.digest(),
+            "source_model_binding": binding,
+            "source_model_policy": policy_binding,
             "typed_effect_profile": typed_profile,
             "model_evidence": model_evidence.digest(),
             "model_dispatches": failure.model_dispatches,

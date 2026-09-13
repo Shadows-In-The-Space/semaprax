@@ -14,6 +14,11 @@ use super::identity::{digest, hex, looks_like_digest};
 mod execution;
 mod io_v5;
 pub use io_v5::{SourceIoLimits, SourceIoTotals};
+mod policy_v6;
+pub use policy_v6::{
+    PolicyAttemptIntentV6, PolicyAttemptReservationV6, PolicyAttemptUsageV6, SourcePolicyBindingV6,
+    SourcePolicyQuoteV6, SourcePolicyTotalsV6,
+};
 mod migration;
 mod priced_v4;
 mod validate;
@@ -21,7 +26,7 @@ mod wire;
 pub use crate::live_invocation::pricing::ProviderChargeObservation;
 pub(crate) use migration::{
     state_digest as source_migration_state_digest, task_digest as source_migration_task_digest,
-    PricedMigrationCarryV4, SourceMigrationCarry,
+    PolicyMigrationCarryV6, PricedMigrationCarryV4, SourceMigrationCarry,
 };
 pub use priced_v4::{
     PricedAttemptIntentV4, PricedAttemptUsageV4, PricedTotalsV4, SourceUsageObservationV4,
@@ -43,6 +48,8 @@ pub(crate) const SOURCE_PRICED_JOURNAL_SCHEMA: &str =
     "semaprax.live-invocation.source-persisted-journal.v4";
 pub(crate) const SOURCE_IO_JOURNAL_SCHEMA: &str =
     "semaprax.live-invocation.source-persisted-journal.v5";
+pub(crate) const SOURCE_POLICY_JOURNAL_SCHEMA: &str =
+    "semaprax.live-invocation.source-persisted-journal.v6";
 pub const MAX_SOURCE_ENTRIES: usize = 65_536;
 pub const MAX_SOURCE_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_SOURCE_RESPONSE_BYTES: usize = 65_536;
@@ -61,6 +68,7 @@ const CONTEXT_DOMAIN: &[u8] = b"semaprax.live-invocation.source-context-binding.
 const EXECUTION_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v2\0";
 const MIGRATED_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v3\0";
 const PRICED_MIGRATED_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v4-migrated\0";
+const POLICY_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v6\0";
 
 /// All caller-selected policy, program and task inputs to one source run.
 /// The resulting binding is opaque; a recovery caller must supply it again.
@@ -132,6 +140,13 @@ enum SourceProfile {
         max_total_steps: usize,
         pricing: priced_v4::PricedSourceBindingV4,
         carry: PricedMigrationCarryV4,
+    },
+    PolicyV6 {
+        evaluator: String,
+        max_steps_per_stage: usize,
+        max_total_steps: usize,
+        policy: policy_v6::SourcePolicyBindingV6,
+        carry: Option<PolicyMigrationCarryV6>,
     },
 }
 
@@ -288,6 +303,39 @@ impl SourceInvocationBinding {
         Ok(binding)
     }
 
+    /// Binds the additive V6 source-model policy profile. It has its own
+    /// invocation identity and journal schema, leaving fixed V4 pricing and
+    /// every older source profile byte-compatible.
+    pub(crate) fn bind_policy_execution(
+        seed: SourceInvocationSeed,
+        evaluator_profile: &str,
+        policy: policy_v6::SourcePolicyBindingV6,
+    ) -> Result<Self, SourceJournalError> {
+        if policy.limits.max_latency_millis != i64::MAX
+            && seed
+                .initial_millis
+                .checked_add(policy.limits.max_latency_millis)
+                .is_none_or(|latest| seed.deadline_millis > latest)
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        let mut binding = Self::bind_execution(seed, evaluator_profile)?;
+        let canonical = policy.canonical(&binding.invocation, binding.deadline_millis);
+        binding.invocation = digest(POLICY_ID_DOMAIN, canonical.as_bytes());
+        binding.profile = SourceProfile::PolicyV6 {
+            evaluator: evaluator_profile.to_owned(),
+            max_steps_per_stage: binding
+                .max_steps_per_stage()
+                .ok_or(SourceJournalError::Binding)?,
+            max_total_steps: binding
+                .max_total_steps()
+                .ok_or(SourceJournalError::Binding)?,
+            policy,
+            carry: None,
+        };
+        Ok(binding)
+    }
+
     pub fn is_execution_profile(&self) -> bool {
         matches!(
             &self.profile,
@@ -295,6 +343,7 @@ impl SourceInvocationBinding {
                 | SourceProfile::MigratedV3 { .. }
                 | SourceProfile::PricedV4 { .. }
                 | SourceProfile::PricedMigratedV4 { .. }
+                | SourceProfile::PolicyV6 { .. }
         )
     }
     pub(crate) fn priced_binding(&self) -> Option<&priced_v4::PricedSourceBindingV4> {
@@ -314,12 +363,23 @@ impl SourceInvocationBinding {
         match &self.profile {
             SourceProfile::MigratedV3 { carry, .. } => Some(carry),
             SourceProfile::PricedMigratedV4 { carry, .. } => Some(&carry.base),
+            SourceProfile::PolicyV6 {
+                carry: Some(carry), ..
+            } => Some(&carry.base),
             _ => None,
         }
     }
     pub(crate) fn priced_migration_carry(&self) -> Option<&PricedMigrationCarryV4> {
         match &self.profile {
             SourceProfile::PricedMigratedV4 { carry, .. } => Some(carry),
+            _ => None,
+        }
+    }
+    pub(crate) fn policy_migration_carry(&self) -> Option<&PolicyMigrationCarryV6> {
+        match &self.profile {
+            SourceProfile::PolicyV6 {
+                carry: Some(carry), ..
+            } => Some(carry),
             _ => None,
         }
     }
@@ -330,6 +390,9 @@ impl SourceInvocationBinding {
         match &self.profile {
             SourceProfile::MigratedV3 { carry, .. } => Some(&carry.handoff_digest),
             SourceProfile::PricedMigratedV4 { carry, .. } => Some(&carry.handoff_digest),
+            SourceProfile::PolicyV6 {
+                carry: Some(carry), ..
+            } => Some(&carry.handoff_digest),
             _ => None,
         }
     }
@@ -339,7 +402,8 @@ impl SourceInvocationBinding {
             SourceProfile::ExecutionV2 { evaluator, .. }
             | SourceProfile::MigratedV3 { evaluator, .. }
             | SourceProfile::PricedV4 { evaluator, .. }
-            | SourceProfile::PricedMigratedV4 { evaluator, .. } => Some(evaluator),
+            | SourceProfile::PricedMigratedV4 { evaluator, .. }
+            | SourceProfile::PolicyV6 { evaluator, .. } => Some(evaluator),
         }
     }
     pub fn max_steps_per_stage(&self) -> Option<usize> {
@@ -360,6 +424,10 @@ impl SourceInvocationBinding {
             | SourceProfile::PricedMigratedV4 {
                 max_steps_per_stage,
                 ..
+            }
+            | SourceProfile::PolicyV6 {
+                max_steps_per_stage,
+                ..
             } => Some(*max_steps_per_stage),
         }
     }
@@ -377,6 +445,9 @@ impl SourceInvocationBinding {
             }
             | SourceProfile::PricedMigratedV4 {
                 max_total_steps, ..
+            }
+            | SourceProfile::PolicyV6 {
+                max_total_steps, ..
             } => Some(*max_total_steps),
         }
     }
@@ -387,6 +458,9 @@ impl SourceInvocationBinding {
         self.max_stages
     }
     pub(crate) fn schema(&self) -> &'static str {
+        if self.policy_binding().is_some() {
+            return SOURCE_POLICY_JOURNAL_SCHEMA;
+        }
         if self.io.is_some() {
             return SOURCE_IO_JOURNAL_SCHEMA;
         }
@@ -397,6 +471,7 @@ impl SourceInvocationBinding {
             SourceProfile::PricedV4 { .. } | SourceProfile::PricedMigratedV4 { .. } => {
                 SOURCE_PRICED_JOURNAL_SCHEMA
             }
+            SourceProfile::PolicyV6 { .. } => SOURCE_POLICY_JOURNAL_SCHEMA,
         }
     }
 
@@ -426,6 +501,13 @@ impl SourceInvocationBinding {
     }
     pub const fn deadline_millis(&self) -> i64 {
         self.deadline_millis
+    }
+
+    pub(crate) fn policy_binding(&self) -> Option<&policy_v6::SourcePolicyBindingV6> {
+        match &self.profile {
+            SourceProfile::PolicyV6 { policy, .. } => Some(policy),
+            _ => None,
+        }
     }
 
     /// Checks the bind-time inputs available to a host proposal adapter.
@@ -746,6 +828,17 @@ pub enum SourceJournalEntry {
     /// V4 closes usage/charge evidence explicitly; Unknown is durable
     /// evidence, not a missing value or an inferred zero charge.
     PricedAttemptUsage(PricedAttemptUsageV4),
+    /// V6 records a request-bound ModelPolicyLedger reservation at the same
+    /// checkpoint-before-dispatch boundary as the ordinary source intent.
+    PolicyAttemptIntent(PolicyAttemptIntentV6),
+    /// V6 closes policy usage as Unknown or exact host observation. It never
+    /// refunds a reservation or establishes a provider billing claim.
+    PolicyAttemptUsage {
+        turn: u32,
+        attempt: u32,
+        ordinal: u64,
+        usage: PolicyAttemptUsageV6,
+    },
     ProposalRefused {
         turn: u32,
         attempt: u32,
@@ -1086,6 +1179,13 @@ impl<'a> SourceCheckpointSink<'a> {
                     .saturating_add(4_096),
                 5,
             ),
+            Some(SourceJournalEntry::PolicyAttemptIntent(intent)) => (
+                intent
+                    .response_limit
+                    .saturating_mul(2)
+                    .saturating_add(4_096),
+                5,
+            ),
             Some(SourceJournalEntry::EffectIntent { .. }) => (
                 MAX_SOURCE_EFFECT_BYTES
                     .saturating_mul(2)
@@ -1148,6 +1248,16 @@ impl<'a> SourceCheckpointSink<'a> {
         }
         Ok(execution::validate(&self.journal.binding, self.journal.entries())?.priced)
     }
+    pub fn policy_totals(&self) -> Result<Option<SourcePolicyTotalsV6>, SourceJournalError> {
+        if self.journal.binding.policy_binding().is_none() {
+            return Ok(None);
+        }
+        Ok(
+            execution::validate(&self.journal.binding, self.journal.entries())?
+                .policy
+                .map(|fold| fold.totals),
+        )
+    }
     pub const fn generation(&self) -> u64 {
         self.generation
     }
@@ -1166,10 +1276,17 @@ pub struct RecoveredSourceCheckpoint {
     committed_reserved_units: i64,
     committed_stage_fuel: u64,
     priced_totals: Option<PricedTotalsV4>,
+    policy_totals: Option<SourcePolicyTotalsV6>,
+    policy_reservations: Vec<PolicyAttemptReservationV6>,
     io_totals: Option<SourceIoTotals>,
 }
 
 impl RecoveredSourceCheckpoint {
+    /// Exact validated invocation binding retained with this checkpoint.
+    pub fn binding(&self) -> &SourceInvocationBinding {
+        &self.journal.binding
+    }
+
     pub fn program_root(&self) -> Option<&str> {
         self.journal.binding.program_root.as_deref()
     }
@@ -1231,6 +1348,12 @@ impl RecoveredSourceCheckpoint {
     pub fn priced_totals(&self) -> Option<&PricedTotalsV4> {
         self.priced_totals.as_ref()
     }
+    pub fn policy_totals(&self) -> Option<&SourcePolicyTotalsV6> {
+        self.policy_totals.as_ref()
+    }
+    pub fn policy_reservations(&self) -> &[PolicyAttemptReservationV6] {
+        &self.policy_reservations
+    }
     pub fn evaluator_profile(&self) -> Option<&str> {
         self.journal.binding.evaluator_profile()
     }
@@ -1260,6 +1383,7 @@ impl RecoveredSourceCheckpoint {
             Some(
                 SourceJournalEntry::AttemptIntent { .. }
                     | SourceJournalEntry::PricedAttemptIntent(_)
+                    | SourceJournalEntry::PolicyAttemptIntent(_)
                     | SourceJournalEntry::EffectIntent { .. }
             )
         )
@@ -1296,18 +1420,37 @@ pub fn recover_source_checkpoint(
     expected: &SourceInvocationBinding,
 ) -> Result<RecoveredSourceCheckpoint, SourceJournalError> {
     let (journal, generation, chain) = wire::decode_envelope(document, expected)?;
-    let (committed_reserved_units, committed_stage_fuel, priced_totals, io_totals) =
-        if expected.is_execution_profile() {
-            let fold = execution::validate(expected, journal.entries())?;
-            (fold.model_units, fold.stage_fuel, fold.priced, fold.io)
-        } else {
-            (
-                validate::validate(expected, journal.entries())?,
-                0,
-                None,
-                None,
-            )
-        };
+    let (
+        committed_reserved_units,
+        committed_stage_fuel,
+        priced_totals,
+        policy_totals,
+        policy_reservations,
+        io_totals,
+    ) = if expected.is_execution_profile() {
+        let fold = execution::validate(expected, journal.entries())?;
+        let (policy_totals, policy_reservations) =
+            fold.policy.map_or((None, Vec::new()), |value| {
+                (Some(value.totals), value.reservations)
+            });
+        (
+            fold.model_units,
+            fold.stage_fuel,
+            fold.priced,
+            policy_totals,
+            policy_reservations,
+            fold.io,
+        )
+    } else {
+        (
+            validate::validate(expected, journal.entries())?,
+            0,
+            None,
+            None,
+            Vec::new(),
+            None,
+        )
+    };
     Ok(RecoveredSourceCheckpoint {
         journal,
         generation,
@@ -1315,6 +1458,8 @@ pub fn recover_source_checkpoint(
         committed_reserved_units,
         committed_stage_fuel,
         priced_totals,
+        policy_totals,
+        policy_reservations,
         io_totals,
     })
 }

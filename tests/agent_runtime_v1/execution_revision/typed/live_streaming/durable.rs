@@ -361,3 +361,6 @@ fn durable_bound_source_completes_typed_effects_and_terminal_replay_is_idle() {
     })
     .unwrap();
 }
+
+#[path = "durable/policy_v6.rs"]
+mod policy_v6;

@@ -193,6 +193,10 @@ pub(super) fn fold(
                 totals.reserve(&io.limits, intent.request_bytes, intent.response_limit)?;
                 pending = Some((intent.turn, intent.attempt, intent.response_limit));
             }
+            SourceJournalEntry::PolicyAttemptIntent(intent) => {
+                totals.reserve(&io.limits, intent.request_bytes, intent.response_limit)?;
+                pending = Some((intent.turn, intent.attempt, intent.response_limit));
+            }
             SourceJournalEntry::AttemptSettled {
                 turn,
                 attempt,

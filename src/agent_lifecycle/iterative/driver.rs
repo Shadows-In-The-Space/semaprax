@@ -164,6 +164,45 @@ pub trait ProposalSource {
         Err(vec![bad("source.checkpoint_unsupported")])
     }
 
+    /// Optional first phase of the V6 durable policy route. It may quote the
+    /// exact canonical request but must not reserve, append, or dispatch.
+    fn policy_quote_checkpointed(
+        &mut self,
+        _request: &ProposalRequest<'_>,
+        _identity: &super::source_live::SourceAttemptIdentity,
+    ) -> Result<Option<crate::live_invocation::source_journal::SourcePolicyQuoteV6>, Vec<Diagnostic>>
+    {
+        Ok(None)
+    }
+
+    /// Optional second V6 phase. The source must reserve exactly `intent`,
+    /// acknowledge it through `sink`, and only then approach its provider.
+    fn propose_policy_checkpointed(
+        &mut self,
+        _request: ProposalRequest<'_>,
+        _quote: &crate::live_invocation::source_journal::SourcePolicyQuoteV6,
+        _intent: &crate::live_invocation::source_journal::PolicyAttemptIntentV6,
+        _sink: &mut crate::live_invocation::source_journal::SourceCheckpointSink<'_>,
+        _ledger: &mut crate::live_invocation::CumulativeBudgetLedger<'_>,
+        _clock: &dyn crate::live_invocation::SourceInvocationClock,
+    ) -> super::source_live::SourceProposalOutcome {
+        super::source_live::SourceProposalOutcome {
+            terminal_failure: None,
+            result: Err(vec![bad("source.policy_checkpoint_unsupported")]),
+            model_dispatches: 0,
+        }
+    }
+
+    /// Restores already independently validated V6 reservations before a
+    /// resumed source can continue. Implementations must not treat this as a
+    /// fresh policy ledger.
+    fn restore_policy_checkpointed(
+        &mut self,
+        _reservations: &[crate::live_invocation::source_journal::PolicyAttemptReservationV6],
+    ) -> Result<(), Vec<Diagnostic>> {
+        Ok(())
+    }
+
     fn propose_checkpointed(
         &mut self,
         _request: ProposalRequest<'_>,

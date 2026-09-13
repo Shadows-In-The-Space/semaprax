@@ -20,6 +20,7 @@ pub(super) struct ExecutionFold {
     pub effects: u32,
     pub attempts: u32,
     pub priced: Option<super::priced_v4::PricedTotalsV4>,
+    pub policy: Option<super::policy_v6::PolicyFoldV6>,
     pub io: Option<SourceIoTotals>,
     roles: Vec<SourceStageRole>,
 }
@@ -321,6 +322,7 @@ pub(super) fn validate(
     entries: &[SourceJournalEntry],
 ) -> Result<ExecutionFold, SourceJournalError> {
     let priced = binding.priced_binding();
+    let policy = binding.policy_binding();
     let mut projected = Vec::with_capacity(entries.len());
     for entry in entries {
         match entry {
@@ -355,12 +357,46 @@ pub(super) fn validate(
                     reported,
                 });
             }
+            SourceJournalEntry::PolicyAttemptIntent(intent) if policy.is_some() => {
+                if intent.attempt_digest
+                    != binding.attempt_digest(
+                        intent.turn,
+                        intent.attempt,
+                        &intent.request_digest,
+                        &intent.prompt_digest,
+                        intent.request_bytes,
+                    )
+                {
+                    return Err(SourceJournalError::Binding);
+                }
+                projected.push(SourceJournalEntry::AttemptIntent {
+                    turn: intent.turn,
+                    attempt: intent.attempt,
+                    attempt_digest: intent.attempt_digest.clone(),
+                    request_digest: intent.request_digest.clone(),
+                    prompt_digest: intent.prompt_digest.clone(),
+                    request_bytes: intent.request_bytes,
+                    reserved_units: intent.reserved_units,
+                    response_limit: intent.response_limit,
+                });
+            }
+            SourceJournalEntry::PolicyAttemptUsage { turn, attempt, .. } if policy.is_some() => {
+                // Token/cost evidence has its own exact V6 fold. The V2 causal
+                // projection only needs the closed attempt shape.
+                projected.push(SourceJournalEntry::AttemptUsage {
+                    turn: *turn,
+                    attempt: *attempt,
+                    reported: None,
+                });
+            }
             SourceJournalEntry::PricedAttemptIntent(_)
-            | SourceJournalEntry::PricedAttemptUsage(_) => {
+            | SourceJournalEntry::PricedAttemptUsage(_)
+            | SourceJournalEntry::PolicyAttemptIntent(_)
+            | SourceJournalEntry::PolicyAttemptUsage { .. } => {
                 return Err(SourceJournalError::Order);
             }
             SourceJournalEntry::AttemptIntent { .. } | SourceJournalEntry::AttemptUsage { .. }
-                if priced.is_some() =>
+                if priced.is_some() || policy.is_some() =>
             {
                 return Err(SourceJournalError::Order)
             }
@@ -370,6 +406,9 @@ pub(super) fn validate(
     let mut fold = validate_inner(binding, &projected)?;
     if priced.is_some() {
         fold.priced = Some(super::priced_v4::fold(binding, entries)?);
+    }
+    if policy.is_some() {
+        fold.policy = Some(super::policy_v6::fold(binding, entries)?);
     }
     fold.io = super::io_v5::fold(binding, entries)?;
     Ok(fold)

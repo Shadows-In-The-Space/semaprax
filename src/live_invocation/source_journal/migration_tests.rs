@@ -1,5 +1,6 @@
 use super::*;
 use crate::live_invocation::pricing::ValidatedPricing;
+use crate::model_budget_policy::{intersect, ModelBudgetLimits};
 
 #[derive(Default)]
 struct Store {
@@ -290,6 +291,262 @@ fn priced_predecessor() -> (SourceInvocationBinding, RecoveredSourceCheckpoint) 
     (binding, recovered)
 }
 
+fn policy_contract(
+    model: &str,
+    policy: &str,
+    provider: &str,
+    aggregate: u64,
+) -> SourcePolicyBindingV6 {
+    let limits = ModelBudgetLimits {
+        max_calls: 2,
+        max_retries: 0,
+        max_providers: 0,
+        max_context_tokens: 8,
+        max_output_tokens: 8,
+        max_aggregate_tokens: aggregate,
+        max_cost_micros: 100,
+        max_latency_millis: i64::MAX,
+    };
+    SourcePolicyBindingV6::new(
+        hash(model),
+        hash(policy),
+        provider.into(),
+        intersect(limits, limits, limits).unwrap(),
+    )
+    .unwrap()
+}
+fn policy_quote(policy: &str, request: &str, provider: &str) -> SourcePolicyQuoteV6 {
+    SourcePolicyQuoteV6 {
+        policy_binding_digest: hash(policy),
+        request_digest: hash(request),
+        provider_id: provider.into(),
+        context_tokens: 3,
+        output_tokens: 3,
+        estimated_cost_micros: 10,
+    }
+}
+
+fn policy_predecessor() -> (SourceInvocationBinding, RecoveredSourceCheckpoint) {
+    let binding = SourceInvocationBinding::bind_policy_execution(
+        priced_seed("priced-program-a"),
+        &hash("priced-evaluator"),
+        policy_contract("model-a", "policy-a", "provider.a", 12),
+    )
+    .unwrap();
+    let mut store = Store::default();
+    {
+        let mut sink = SourceCheckpointSink::new(&mut store, binding.clone());
+        sink.append_at(SourceJournalEntry::RunOpened, 10).unwrap();
+        sink.append_at(
+            SourceJournalEntry::StageReservation {
+                turn: 0,
+                attempt: None,
+                role: SourceStageRole::Initialize,
+                fuel: 10,
+            },
+            11,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::StageReservation {
+                turn: 0,
+                attempt: None,
+                role: SourceStageRole::Observe,
+                fuel: 10,
+            },
+            12,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::TurnObserved {
+                turn: 0,
+                state: hash("priced-state"),
+                observation: hash("priced-observation"),
+                feedback: hash("priced-feedback"),
+            },
+            13,
+        )
+        .unwrap();
+        let intent = sink
+            .policy_attempt_intent(
+                0,
+                0,
+                hash("priced-request"),
+                hash("priced-prompt"),
+                12,
+                policy_quote("policy-a", "priced-request", "provider.a"),
+            )
+            .unwrap();
+        sink.append_at(SourceJournalEntry::PolicyAttemptIntent(intent), 14)
+            .unwrap();
+        sink.append_at(
+            SourceJournalEntry::AttemptSettled {
+                turn: 0,
+                attempt: 0,
+                response: b"proposal".to_vec(),
+                response_digest: source_response_digest(b"proposal"),
+            },
+            15,
+        )
+        .unwrap();
+        let usage = sink
+            .policy_attempt_usage(0, 0, 0, PolicyAttemptUsageV6::Unknown)
+            .unwrap();
+        sink.append_at(usage, 15).unwrap();
+        sink.append_at(
+            SourceJournalEntry::ProposalAdmitted {
+                turn: 0,
+                attempt: 0,
+                proposal_digest: hash("priced-admitted"),
+            },
+            16,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::StageReservation {
+                turn: 0,
+                attempt: Some(0),
+                role: SourceStageRole::Authorize,
+                fuel: 10,
+            },
+            17,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::AuthorizationConsumed {
+                turn: 0,
+                attempt: 0,
+                grant_digest: hash("priced-grant"),
+            },
+            18,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::EffectIntent {
+                turn: 0,
+                attempt: 0,
+                operation: "read.fixture".into(),
+                request_digest: hash("priced-effect"),
+            },
+            19,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::EffectObserved {
+                turn: 0,
+                attempt: 0,
+                operation: "read.fixture".into(),
+                observation: b"result".to_vec(),
+                observation_digest: source_effect_digest(b"result"),
+            },
+            20,
+        )
+        .unwrap();
+        sink.append_at(
+            SourceJournalEntry::StageReservation {
+                turn: 0,
+                attempt: Some(0),
+                role: SourceStageRole::Reduce,
+                fuel: 10,
+            },
+            21,
+        )
+        .unwrap();
+        let carrier = b"true".to_vec();
+        sink.append_at(
+            SourceJournalEntry::Transition {
+                turn: 0,
+                attempt: 0,
+                case: SourceTransitionCase::Complete,
+                carrier_digest: digest(b"semaprax.agent-step.value.v2\0", &carrier),
+            },
+            22,
+        )
+        .unwrap();
+        let terminal = sink
+            .terminal_snapshot_entry(
+                Some(0),
+                SourceTerminalStatus::Complete,
+                Some(carrier),
+                SourceTerminalEvidenceInput {
+                    completed_stages: 4,
+                    omitted_stage_rows: 1,
+                    stage_rows: vec![
+                        SourceStageSummary {
+                            role: SourceStageRole::Initialize,
+                            function_id: hash("initialize"),
+                            outcome: SourceStageOutcome::Returned,
+                            steps_used: 2,
+                        },
+                        SourceStageSummary {
+                            role: SourceStageRole::Observe,
+                            function_id: hash("observe"),
+                            outcome: SourceStageOutcome::Returned,
+                            steps_used: 2,
+                        },
+                        SourceStageSummary {
+                            role: SourceStageRole::Authorize,
+                            function_id: hash("authorize"),
+                            outcome: SourceStageOutcome::Returned,
+                            steps_used: 2,
+                        },
+                    ],
+                    checked_run_evidence: None,
+                },
+            )
+            .unwrap();
+        sink.append_at(terminal, 22).unwrap();
+    }
+    let recovered = recover_source_checkpoint(&store.document, &binding).unwrap();
+    (binding, recovered)
+}
+
+fn policy_carry(
+    predecessor: &SourceInvocationBinding,
+    recovered: &RecoveredSourceCheckpoint,
+) -> PolicyMigrationCarryV6 {
+    let seed = priced_seed("priced-program-b");
+    let mut base = SourceMigrationCarry {
+        handoff_digest: String::new(),
+        previous_schema: predecessor.schema().into(),
+        previous_invocation: predecessor.invocation().into(),
+        previous_generation: recovered.generation(),
+        previous_chain: recovered.chain().into(),
+        previous_program_root: hash("priced-program-a"),
+        destination_program_root: hash("priced-program-b"),
+        old_state_id: "state.a".into(),
+        new_state_id: "state.b".into(),
+        migration_function: "migration.b".into(),
+        migration_closure: hash("policy-closure"),
+        task_digest: source_migration_task_digest(&seed.task, seed.task_budget),
+        carried_model_units: recovered.committed_reserved_units(),
+        carried_stage_fuel: recovered.committed_stage_fuel(),
+        carried_turns: 1,
+        carried_stages: 4,
+        carried_effects: 1,
+        carried_attempts: 1,
+        previous_ceiling: recovered.ceiling(),
+        previous_max_iterations: recovered.max_iterations(),
+        previous_max_stages: recovered.max_stages(),
+        previous_max_steps_per_stage: recovered.max_steps_per_stage().unwrap(),
+        previous_max_total_steps: recovered.max_total_steps().unwrap(),
+        previous_reservation_units: recovered.reservation_units(),
+        previous_unit: recovered.unit().into(),
+        previous_clock_domain: recovered.clock_domain().into(),
+        previous_last_checked_millis: recovered.last_checked_millis(),
+        previous_deadline_millis: recovered.deadline_millis(),
+        evaluation_steps: 10,
+    };
+    base.handoff_digest = base.digest();
+    PolicyMigrationCarryV6::from_predecessor(
+        base,
+        predecessor,
+        recovered,
+        &policy_contract("model-b", "policy-b", "provider.a", 12),
+    )
+    .unwrap()
+}
+
 fn priced_carry(
     predecessor: &SourceInvocationBinding,
     recovered: &RecoveredSourceCheckpoint,
@@ -330,6 +587,60 @@ fn priced_carry(
     base.handoff_digest = base.digest();
     PricedMigrationCarryV4::from_predecessor(base, predecessor, recovered, priced_contract(15))
         .unwrap()
+}
+
+#[test]
+fn policy_v6_migration_carries_exposure_and_refuses_tampering_or_widening() {
+    let (predecessor, recovered) = policy_predecessor();
+    let carry = policy_carry(&predecessor, &recovered);
+    assert_eq!(carry.totals.next_ordinal, 1);
+    assert_eq!(carry.reservations.len(), 1);
+    let destination_policy = policy_contract("model-b", "policy-b", "provider.a", 12);
+    let destination = SourceInvocationBinding::bind_policy_migrated_execution(
+        priced_destination_seed(),
+        &hash("priced-evaluator"),
+        carry.clone(),
+        destination_policy.clone(),
+    )
+    .unwrap();
+    let intent = SourceJournal::new(destination.clone())
+        .policy_attempt_intent(
+            1,
+            0,
+            hash("next-request"),
+            hash("next-prompt"),
+            12,
+            policy_quote("policy-b", "next-request", "provider.a"),
+        )
+        .unwrap();
+    assert_eq!(intent.reservation.ordinal, 1);
+    assert_ne!(
+        destination.policy_binding().unwrap().model_binding_digest,
+        predecessor.policy_binding().unwrap().model_binding_digest
+    );
+    let mut tampered = carry.clone();
+    tampered.totals.next_ordinal = 2;
+    assert!(SourceInvocationBinding::bind_policy_migrated_execution(
+        priced_destination_seed(),
+        &hash("priced-evaluator"),
+        tampered,
+        destination_policy.clone()
+    )
+    .is_err());
+    assert!(PolicyMigrationCarryV6::from_predecessor(
+        carry.base.clone(),
+        &predecessor,
+        &recovered,
+        &policy_contract("model-b", "policy-b", "provider.b", 12)
+    )
+    .is_err());
+    assert!(PolicyMigrationCarryV6::from_predecessor(
+        carry.base.clone(),
+        &predecessor,
+        &recovered,
+        &policy_contract("model-b", "policy-b", "provider.a", 13)
+    )
+    .is_err());
 }
 
 #[test]

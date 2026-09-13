@@ -33,6 +33,7 @@ fn sideband(entry: &SourceJournalEntry) -> bool {
         SourceJournalEntry::ReplayStageReservation { .. }
             | SourceJournalEntry::AttemptUsage { .. }
             | SourceJournalEntry::PricedAttemptUsage(_)
+            | SourceJournalEntry::PolicyAttemptUsage { .. }
     )
 }
 fn migration_preamble(entry: &SourceJournalEntry) -> bool {
@@ -223,6 +224,9 @@ impl<'a> SourceExecutionSession<'a> {
         source: &mut dyn ProposalSource,
         request: ProposalRequest<'_>,
     ) -> Result<String, Vec<Diagnostic>> {
+        if self.sink.journal().binding().policy_binding().is_some() {
+            return self.propose_policy(source, request);
+        }
         self.guard()?;
         let identity = source.checkpoint_attempt_identity(&request)?;
         let turn = request.turn as u32;
@@ -346,6 +350,121 @@ impl<'a> SourceExecutionSession<'a> {
             _ => Err(self.refuse(SourceTerminalStatus::Rejected, "source.response_mismatch")),
         }
     }
+    fn propose_policy(
+        &mut self,
+        source: &mut dyn ProposalSource,
+        request: ProposalRequest<'_>,
+    ) -> Result<String, Vec<Diagnostic>> {
+        self.guard()?;
+        let identity = source.checkpoint_attempt_identity(&request)?;
+        let turn = request.turn as u32;
+        let attempt = request.attempt as u32;
+        if let Some(SourceJournalEntry::PolicyAttemptIntent(prior)) = self.next().cloned() {
+            if prior.turn != turn
+                || prior.attempt != attempt
+                || prior.request_digest != identity.request_digest
+                || prior.prompt_digest != identity.prompt_digest
+                || prior.request_bytes != identity.request_bytes
+            {
+                return Err(self.refuse(SourceTerminalStatus::Rejected, "source.policy_replay"));
+            }
+            self.expect(SourceJournalEntry::PolicyAttemptIntent(prior))?;
+            let settled = self.next().cloned().ok_or_else(|| {
+                self.refuse(SourceTerminalStatus::Rejected, "source.uncertain_attempt")
+            })?;
+            self.cursor += 1;
+            return self.response(settled, turn, attempt);
+        }
+        if self.next().is_some() {
+            return Err(self.refuse(SourceTerminalStatus::Rejected, "source.policy_replay"));
+        }
+        let quote = source
+            .policy_quote_checkpointed(&request, &identity)?
+            .ok_or_else(|| self.refuse(SourceTerminalStatus::Rejected, "source.policy_quote"))?;
+        let intent = self
+            .sink
+            .policy_attempt_intent(
+                turn,
+                attempt,
+                identity.request_digest,
+                identity.prompt_digest,
+                identity.request_bytes,
+                quote.clone(),
+            )
+            .map_err(|_| {
+                self.refuse(
+                    SourceTerminalStatus::BudgetExhausted,
+                    "source.policy_budget",
+                )
+            })?;
+        let entry = SourceJournalEntry::PolicyAttemptIntent(intent.clone());
+        self.sink
+            .preflight_at(&entry, self.clock.now_millis())
+            .map_err(|error| self.journal_failure(error))?;
+        let start = self.sink.journal().entries().len();
+        let result = source.propose_policy_checkpointed(
+            request,
+            &quote,
+            &intent,
+            &mut self.sink,
+            &mut self.ledger,
+            self.clock,
+        );
+        self.model_dispatches = self
+            .model_dispatches
+            .saturating_add(result.model_dispatches);
+        let events: Vec<_> = self.sink.journal().entries()[start..]
+            .iter()
+            .filter(|entry| !sideband(entry))
+            .cloned()
+            .collect();
+        if events.first() != Some(&entry) || events.len() != 2 {
+            if self.sink.poisoned() {
+                self.journal_error = Some(SourceJournalError::Poisoned);
+            }
+            let pre_dispatch = (result.model_dispatches == 0
+                && self.sink.journal().entries().len() == start
+                && !self.sink.poisoned())
+            .then_some(result.terminal_failure)
+            .flatten()
+            .filter(|status| {
+                matches!(
+                    *status,
+                    SourceTerminalStatus::Cancelled
+                        | SourceTerminalStatus::DeadlineExceeded
+                        | SourceTerminalStatus::BudgetExhausted
+                )
+            });
+            if self.selected.is_none() {
+                self.selected = pre_dispatch;
+            }
+            self.selected
+                .get_or_insert(SourceTerminalStatus::ModelFailed);
+            return Err(result.result.err().unwrap_or_else(|| {
+                self.refuse(SourceTerminalStatus::Rejected, "source.policy_receipt")
+            }));
+        }
+        let recorded = self.response(events[1].clone(), turn, attempt);
+        if self.selected.is_none() {
+            self.selected = result.terminal_failure;
+        }
+        match (result.result, recorded) {
+            (Ok(actual), Ok(stored)) if actual == stored => {
+                self.guard()?;
+                Ok(stored)
+            }
+            (Err(mut errors), _) => {
+                if self.selected.is_none() {
+                    self.selected = Some(SourceTerminalStatus::ModelFailed);
+                }
+                errors.extend(self.guard().err().unwrap_or_default());
+                Err(errors)
+            }
+            (_, Err(errors)) => Err(errors),
+            _ => Err(self.refuse(SourceTerminalStatus::Rejected, "source.response_mismatch")),
+        }
+    }
+
     fn response(
         &mut self,
         entry: SourceJournalEntry,

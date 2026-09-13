@@ -192,6 +192,162 @@ impl PricedMigrationCarryV4 {
     }
 }
 
+/// V6 successor carry retains checked policy exposure and the global ordinal.
+/// It binds the V3 authority handoff but permits new model/policy identities
+/// only under that authority; provider changes are deliberately refused.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PolicyMigrationCarryV6 {
+    pub(crate) base: SourceMigrationCarry,
+    pub(crate) handoff_digest: String,
+    pub(crate) previous_provider_id: String,
+    pub(crate) previous_limits: crate::model_budget_policy::ModelBudgetLimits,
+    pub(crate) totals: SourcePolicyTotalsV6,
+    pub(crate) reservations: Vec<PolicyAttemptReservationV6>,
+    pub(crate) reservations_digest: String,
+}
+
+impl PolicyMigrationCarryV6 {
+    pub(crate) fn from_predecessor(
+        base: SourceMigrationCarry,
+        predecessor_binding: &SourceInvocationBinding,
+        predecessor: &RecoveredSourceCheckpoint,
+        destination: &SourcePolicyBindingV6,
+    ) -> Result<Self, SourceJournalError> {
+        let previous = predecessor_binding
+            .policy_binding()
+            .ok_or(SourceJournalError::Binding)?;
+        let totals = predecessor
+            .policy_totals()
+            .ok_or(SourceJournalError::Binding)?
+            .clone();
+        let reservations = predecessor.policy_reservations().to_vec();
+        if base.handoff_digest != base.digest()
+            || base.previous_schema != SOURCE_POLICY_JOURNAL_SCHEMA
+            || base.previous_invocation != predecessor_binding.invocation()
+            || predecessor.invocation() != predecessor_binding.invocation()
+            || base.previous_generation != predecessor.generation()
+            || base.previous_chain != predecessor.chain()
+            || base.carried_model_units != predecessor.committed_reserved_units()
+            || base.carried_stage_fuel != predecessor.committed_stage_fuel()
+            || base.previous_max_iterations != predecessor.max_iterations()
+            || base.previous_max_stages != predecessor.max_stages()
+            || base.previous_max_steps_per_stage
+                != predecessor
+                    .max_steps_per_stage()
+                    .ok_or(SourceJournalError::Binding)?
+            || base.previous_max_total_steps
+                != predecessor
+                    .max_total_steps()
+                    .ok_or(SourceJournalError::Binding)?
+            || base.previous_ceiling != predecessor.ceiling()
+            || base.previous_reservation_units != predecessor.reservation_units()
+            || base.previous_unit != predecessor.unit()
+            || base.previous_clock_domain != predecessor.clock_domain()
+            || base.previous_last_checked_millis != predecessor.last_checked_millis()
+            || base.previous_deadline_millis != predecessor.deadline_millis()
+            || destination.provider_id != previous.provider_id
+            || !policy_limits_narrow(&destination.limits, &previous.limits)
+            || totals.calls > previous.limits.max_calls
+            || totals
+                .exposure_context_tokens
+                .checked_add(totals.exposure_output_tokens)
+                .is_none_or(|value| value > previous.limits.max_aggregate_tokens)
+            || totals.exposure_cost_micros > previous.limits.max_cost_micros
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        let Some(SourceJournalEntry::TerminalSnapshot {
+            turn: Some(turn),
+            stages,
+            effects,
+            attempts,
+            ..
+        }) = predecessor.entries().last()
+        else {
+            return Err(SourceJournalError::Binding);
+        };
+        if base.carried_turns != turn.checked_add(1).ok_or(SourceJournalError::Capacity)?
+            || base.carried_stages != *stages
+            || base.carried_effects != *effects
+            || base.carried_attempts != *attempts
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        if totals.calls > destination.limits.max_calls
+            || totals
+                .exposure_context_tokens
+                .checked_add(totals.exposure_output_tokens)
+                .is_none_or(|value| value > destination.limits.max_aggregate_tokens)
+            || totals.exposure_cost_micros > destination.limits.max_cost_micros
+        {
+            return Err(SourceJournalError::Capacity);
+        }
+        let reservations_digest = policy_reservations_digest(&reservations);
+        let mut result = Self {
+            base,
+            handoff_digest: String::new(),
+            previous_provider_id: previous.provider_id.clone(),
+            previous_limits: previous.limits,
+            totals,
+            reservations,
+            reservations_digest,
+        };
+        result.handoff_digest = result.digest();
+        Ok(result)
+    }
+    pub(crate) fn digest(&self) -> String {
+        let limits = self.previous_limits;
+        let t = &self.totals;
+        let material = format!(
+            "{{\"schema\":\"semaprax.source-policy-migration-handoff.v6\",\"base_handoff\":{},\"provider\":{},\"max_calls\":{},\"max_context_tokens\":{},\"max_output_tokens\":{},\"max_aggregate_tokens\":{},\"max_cost_micros\":{},\"calls\":{},\"reserved_context_tokens\":{},\"reserved_output_tokens\":{},\"reserved_cost_micros\":{},\"observed_context_tokens\":{},\"observed_output_tokens\":{},\"observed_cost_micros\":{},\"exposure_context_tokens\":{},\"exposure_output_tokens\":{},\"exposure_cost_micros\":{},\"next_ordinal\":{},\"reservations_digest\":{}}}",
+            quote_json(&self.base.handoff_digest), quote_json(&self.previous_provider_id), limits.max_calls,
+            limits.max_context_tokens, limits.max_output_tokens, limits.max_aggregate_tokens,
+            limits.max_cost_micros, t.calls, t.reserved_context_tokens, t.reserved_output_tokens,
+            t.reserved_cost_micros, t.observed_context_tokens, t.observed_output_tokens,
+            t.observed_cost_micros, t.exposure_context_tokens, t.exposure_output_tokens,
+            t.exposure_cost_micros, t.next_ordinal, quote_json(&self.reservations_digest));
+        digest(
+            b"semaprax.live-invocation.source-policy-handoff.v6\0",
+            material.as_bytes(),
+        )
+    }
+}
+
+fn policy_reservations_digest(reservations: &[PolicyAttemptReservationV6]) -> String {
+    let rows = reservations
+        .iter()
+        .map(|value| {
+            format!(
+                "[{},\"fresh\",{}, {}, {}, {}]",
+                value.ordinal,
+                quote_json(&value.provider_id),
+                value.reserved_context_tokens,
+                value.reserved_output_tokens,
+                value.reserved_cost_micros
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    digest(
+        b"semaprax.live-invocation.source-policy-reservations.v6\0",
+        format!("[{}]", rows).as_bytes(),
+    )
+}
+
+fn policy_limits_narrow(
+    destination: &crate::model_budget_policy::ModelBudgetLimits,
+    previous: &crate::model_budget_policy::ModelBudgetLimits,
+) -> bool {
+    destination.max_calls <= previous.max_calls
+        && destination.max_retries <= previous.max_retries
+        && destination.max_providers <= previous.max_providers
+        && destination.max_context_tokens <= previous.max_context_tokens
+        && destination.max_output_tokens <= previous.max_output_tokens
+        && destination.max_aggregate_tokens <= previous.max_aggregate_tokens
+        && destination.max_cost_micros <= previous.max_cost_micros
+        && destination.max_latency_millis <= previous.max_latency_millis
+}
+
 pub(crate) fn task_digest(task: &[u8], budget: i64) -> String {
     let material = format!(
         "{{\"task\":{},\"budget\":{}}}",
@@ -356,7 +512,9 @@ impl SourceInvocationBinding {
             } else {
                 matches!(
                     carry.previous_schema.as_str(),
-                    SOURCE_EXECUTION_JOURNAL_SCHEMA | SOURCE_MIGRATED_JOURNAL_SCHEMA
+                    SOURCE_EXECUTION_JOURNAL_SCHEMA
+                        | SOURCE_MIGRATED_JOURNAL_SCHEMA
+                        | SOURCE_POLICY_JOURNAL_SCHEMA
                 )
             })
             || ![
@@ -522,6 +680,47 @@ impl SourceInvocationBinding {
             max_total_steps,
             pricing: priced,
             carry,
+        };
+        Ok(binding)
+    }
+}
+
+impl SourceInvocationBinding {
+    pub(crate) fn bind_policy_migrated_execution(
+        seed: SourceInvocationSeed,
+        evaluator_profile: &str,
+        carry: PolicyMigrationCarryV6,
+        policy: SourcePolicyBindingV6,
+    ) -> Result<Self, SourceJournalError> {
+        if policy.limits.max_latency_millis != i64::MAX
+            && seed
+                .initial_millis
+                .checked_add(policy.limits.max_latency_millis)
+                .is_none_or(|latest| seed.deadline_millis > latest)
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        let base = carry.base.clone();
+        let mut binding =
+            Self::bind_migrated_execution_inner(seed, evaluator_profile, base, false)?;
+        if carry.handoff_digest != carry.digest()
+            || policy.provider_id != carry.previous_provider_id
+            || !policy_limits_narrow(&policy.limits, &carry.previous_limits)
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        let canonical = policy.canonical(&binding.invocation, binding.deadline_millis);
+        binding.invocation = digest(super::POLICY_ID_DOMAIN, canonical.as_bytes());
+        binding.profile = SourceProfile::PolicyV6 {
+            evaluator: evaluator_profile.to_owned(),
+            max_steps_per_stage: binding
+                .max_steps_per_stage()
+                .ok_or(SourceJournalError::Binding)?,
+            max_total_steps: binding
+                .max_total_steps()
+                .ok_or(SourceJournalError::Binding)?,
+            policy,
+            carry: Some(carry),
         };
         Ok(binding)
     }

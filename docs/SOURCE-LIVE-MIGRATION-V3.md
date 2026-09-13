@@ -131,3 +131,25 @@ The private CLI admits one priced predecessor-to-destination handoff. It
 refuses unpriced-to-priced and priced-to-unpriced conversion rather than
 treating prior work as zero-priced, observed, or free. This does not claim
 provider billing, refunds, cross-store single consumption, or hosted execution.
+
+## Additive V6 policy carry
+
+The V6 source-policy successor uses the same checked migration authority and
+V3 preamble, but its handoff separately commits the predecessor V6 binding
+identity, exact policy limits, nonrefundable reserved/observed/exposure totals,
+next global policy ordinal, and a digest of all prior reservations. Recovery
+reconstructs these values only from an independently validated predecessor
+checkpoint. The destination must keep the same selected provider and narrow
+every policy ceiling; a provider switch is refused. Source/model/policy digest
+changes are permitted only after this accepted handoff. No V1--V5 migration
+wire is reinterpreted as V6.
+
+Typed V6 migration prepares through
+`AgentRuntimeV2::prepare_live_bound_model_durable_policy_migration_with_io_limits`
+(or the policy-only form). `source_live_model_policy` produces an owned checked
+policy with the exact typed effect root and absolute deadline;
+`source_live_migration_endpoint` borrows the retained typed lifecycle. The
+destination clock floor must be at least the predecessor's last checked time.
+The facade reuses linked runtime migration validation and the source journal's
+acknowledged migration/effect dispatcher. Terminal replay neither requotes nor
+redispatches provider or effect work. Raw V6 policy facts are crate-private.

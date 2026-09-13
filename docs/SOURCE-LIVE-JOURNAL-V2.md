@@ -195,3 +195,36 @@ The stored terminal remains immutable; no later failure rewrites its selection.
 schema and design record. The generic live-invocation persistence and migration
 contracts remain separate. V2 adds no migration path and does not widen the
 ordinary `run_live` contract.
+
+## Additive V6 model-policy profile
+
+V6 uses `semaprax.live-invocation.source-persisted-journal.v6` and a distinct
+binding and chain domain. It preserves every V1--V5 document and decoder. A
+V6 binding commits the source-model binding digest, policy-binding digest,
+selected provider, effective model-policy limits, and the existing absolute
+source deadline. The host supplies a request-digest-bound quote in a first,
+non-dispatching phase. The second phase must append and acknowledge one
+`PolicyAttemptIntent` before it approaches a provider. Adapter reservation of
+the exact preflighted intent precedes the store acknowledgement; a failed ACK
+does not refund it.
+
+Each policy intent contains a strictly ordered `Fresh` reservation with the
+selected provider, context/output token reservation, and estimated micro-cost.
+The journal independently folds exact ordinals, provider, turn/attempt scope,
+checked totals, and limits before a recovered adapter can restore its policy
+ledger. A closed `PolicyAttemptUsage` is either `Unknown` or exact observed
+usage. It never refunds a reservation. Later admission uses the checked maximum
+of reserved and observed exposure, so an observed overage is retained and can
+only close later capacity. Missing, malformed, or uncertain provider usage is
+Unknown; none is inferred as zero or billing proof.
+
+V6 may compose the existing V5 I/O reservation profile under its V6 schema.
+A recovered terminal needs no adapter restoration. Before any nonterminal V6
+continuation, the runtime supplies independently folded reservations to the
+explicit adapter restore hook. Unresolved intents remain uncertain and are
+never redispatched. Current V6 migration support preserves the selected
+provider; changing provider is intentionally refused rather than treated as a
+new durable policy chain. Model/policy identities may otherwise change only
+through an already-authorized source/deployment migration handoff. V6 has
+local targeted evidence only; it makes no hosted-provider, billing,
+reconciliation, or provider-switch-migration claim.

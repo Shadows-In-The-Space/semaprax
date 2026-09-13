@@ -480,6 +480,9 @@ impl AgentReadOperation for Dispatch<'_> {
 }
 
 impl CompiledTypedEffects {
+    pub(crate) fn source_lifecycle(&self) -> &CompiledIterativeLifecycle {
+        &self.lifecycle
+    }
     pub fn canonical_json(&self) -> &str {
         self.lifecycle.canonical_json()
     }

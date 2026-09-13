@@ -4,6 +4,7 @@ pub use crate::live_invocation::source_journal::{SourceIoLimits, SourceIoTotals}
 
 use super::*;
 mod migration;
+mod policy_v6;
 mod priced;
 pub use priced::SourceLivePricing;
 mod session;
@@ -20,6 +21,10 @@ pub use migration::{
     prepare_source_live_migration, prepare_source_live_migration_with_io_limits,
     prepare_source_live_priced_migration, PreparedSourceLiveMigration, SourceLiveMigrationEndpoint,
     SourceLiveMigrationRequest,
+};
+pub(crate) use migration::{
+    prepare_source_live_policy_migration_profiled,
+    prepare_source_live_policy_migration_with_io_limits_profiled, InvocationRootProfile,
 };
 pub(crate) use session::SourceExecutionSession;
 
@@ -294,6 +299,16 @@ impl CompiledIterativeLifecycle {
                 SourceJournalError::Binding,
                 recovered,
             ));
+        }
+        if binding.policy_binding().is_some() {
+            let reservations = recovered
+                .as_ref()
+                .map_or(&[][..], |checkpoint| checkpoint.policy_reservations());
+            source
+                .restore_policy_checkpointed(reservations)
+                .map_err(|_| {
+                    SourceLiveFailure::initial(SourceJournalError::Binding, recovered.clone())
+                })?;
         }
         let ledger = match recovered.as_ref() {
             Some(checkpoint) => {

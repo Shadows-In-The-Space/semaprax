@@ -134,6 +134,11 @@ charged replay reservations, optional usage observations, and terminal snapshots
 `source_journal/io_v5` owns additive cumulative request/response reservations
 and their nonrefundable migration carry; [Source Live I/O v5](SOURCE-LIVE-IO-V5.md)
 defines the bound limits and the private CLI v3 projection.
+`source_journal/policy_v6` owns independently folded quote reservations, observed
+and unknown exposure, and cumulative policy carry. Its V6 profile composes I/O
+limits and restores reservations before source continuation.
+`provider_adapter_sdk/source_bridge/policy` owns ordinary adapter quote admission
+and observed overage accounting; the journal remains the durable authority.
 `provider_adapter_sdk/bridge` implements the generic `ModelHandler` seam over
 explicit adapter capabilities. It streams deltas through the existing compiled
 Proposal decoder before the kernel's independent compiled-schema decode and

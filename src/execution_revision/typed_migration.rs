@@ -17,6 +17,43 @@ pub use durable::{
     resume_migrated_agent_runtime_v2, DurableMigrationFailure, ResumedMigratedAgentRuntimeV2,
 };
 
+/// Retained source identities selected by the existing checked typed migration
+/// association.  The live-source migration facade uses these only after
+/// `linked::programs` has validated the exact Project/agent relationship.
+pub(crate) struct LinkedSourceIdentity {
+    pub(crate) source_path: String,
+    pub(crate) agent_id: String,
+}
+
+pub(crate) fn validate_linked_source_migration(
+    previous: &AgentRuntimeV2,
+    destination: &AgentRuntimeV2,
+    migration: &str,
+) -> Result<(LinkedSourceIdentity, LinkedSourceIdentity)> {
+    let _ = linked::programs(previous, destination, migration)?;
+    Ok((
+        retained_source_identity(previous)?,
+        retained_source_identity(destination)?,
+    ))
+}
+
+fn retained_source_identity(runtime: &AgentRuntimeV2) -> Result<LinkedSourceIdentity> {
+    let deployment: serde_json::Value = serde_json::from_str(runtime.deployment.canonical_json())
+        .map_err(|_| refused("migration.deployment"))?;
+    let source_path = deployment["facts"]["source_path"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| refused("migration.source_path"))?;
+    let agent_id = deployment["facts"]["agent_id"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| refused("migration.agent_id"))?;
+    Ok(LinkedSourceIdentity {
+        source_path: source_path.to_owned(),
+        agent_id: agent_id.to_owned(),
+    })
+}
+
 /// An internally produced initial State, never constructed from submitted JSON.
 pub(crate) struct MigrationSeed {
     value: RetainedValue,

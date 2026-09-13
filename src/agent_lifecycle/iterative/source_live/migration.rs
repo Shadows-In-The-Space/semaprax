@@ -9,8 +9,9 @@ use crate::execution_revision::typed::migration::{
 use crate::hir::{DeclarationId, ResolvedType};
 use crate::interpreter::retained_call::{RetainedField, RetainedRecord};
 use crate::live_invocation::source_journal::{
-    recover_source_checkpoint, source_migration_state_digest, PricedMigrationCarryV4,
-    SourceJournalEntry, SourceMigrationCarry, SourceMigrationFailure, MAX_SOURCE_CARRIER_BYTES,
+    recover_source_checkpoint, source_migration_state_digest, PolicyMigrationCarryV6,
+    PricedMigrationCarryV4, SourceJournalEntry, SourceMigrationCarry, SourceMigrationFailure,
+    SourcePolicyBindingV6, MAX_SOURCE_CARRIER_BYTES,
 };
 use crate::project::ProjectRevision;
 use serde_json::Value;
@@ -38,6 +39,17 @@ pub struct SourceLiveMigrationRequest<'a> {
     /// An independently retained handoff expectation; it cannot be copied
     /// from the untrusted destination checkpoint being recovered.
     pub expected_handoff_digest: Option<&'a str>,
+}
+
+/// The checked root domain which migration carries into the destination
+/// binding. `Typed` is crate-private so only the retained typed migration
+/// facade can supply its already-validated derived roots.
+pub(crate) enum InvocationRootProfile {
+    Source,
+    Typed {
+        previous_program_root: String,
+        destination_program_root: String,
+    },
 }
 
 pub struct PreparedSourceLiveMigration<'a> {
@@ -167,11 +179,14 @@ fn decode_state(
 
 fn selected_project_program(
     endpoint: &SourceLiveMigrationEndpoint<'_>,
+    expected_policy_root: Option<&str>,
+    typed_profile: bool,
 ) -> Result<(String, String), SourceLiveFailure> {
     let root = checked(endpoint.project.program_root())?
         .program_root()
         .to_owned();
-    if endpoint.policy.program_root.as_deref() != Some(root.as_str()) {
+    let expected_policy_root = expected_policy_root.unwrap_or(root.as_str());
+    if endpoint.policy.program_root.as_deref() != Some(expected_policy_root) {
         return Err(refused("migration.project_root"));
     }
     let definition = endpoint
@@ -189,25 +204,32 @@ fn selected_project_program(
         endpoint.agent_id,
         &definition_source,
     ))?;
-    let compiled = checked(
-        crate::agent_lifecycle::iterative::compile_linked_agent_lifecycle(
-            selected,
-            &definition_source,
-            endpoint.lifecycle.step.id.as_str(),
-        ),
-    )?;
-    if compiled.digest() != endpoint.lifecycle.digest()
-        || compiled.canonical_json() != endpoint.lifecycle.canonical_json()
-    {
-        return Err(refused("migration.lifecycle_drift"));
+    if !typed_profile {
+        let compiled = checked(
+            crate::agent_lifecycle::iterative::compile_linked_agent_lifecycle(
+                selected,
+                &definition_source,
+                endpoint.lifecycle.step.id.as_str(),
+            ),
+        )?;
+        if compiled.digest() != endpoint.lifecycle.digest()
+            || compiled.canonical_json() != endpoint.lifecycle.canonical_json()
+        {
+            return Err(refused("migration.lifecycle_drift"));
+        }
     }
+    // A Typed profile carries the retained deployment-bound typed-effects
+    // lifecycle, which is intentionally not byte-equal to this generic
+    // lifecycle compilation. Its caller first verifies that exact typed
+    // lifecycle through `typed::migration::linked`; this path still resolves
+    // the raw Project definition and linked source association above.
     Ok((root, definition_source))
 }
 
 pub fn prepare_source_live_migration<'a>(
     request: SourceLiveMigrationRequest<'a>,
 ) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
-    prepare_source_live_migration_inner(request, None, None)
+    prepare_source_live_migration_inner(request, None, None, None, InvocationRootProfile::Source)
 }
 
 /// Preserves checked monetary history through the existing migration evaluator.
@@ -220,6 +242,8 @@ pub fn prepare_source_live_priced_migration<'a>(
         request,
         Some((previous_pricing, destination_pricing)),
         None,
+        None,
+        InvocationRootProfile::Source,
     )
 }
 
@@ -240,6 +264,81 @@ pub fn prepare_source_live_migration_with_io_limits<'a>(
         request,
         pricing,
         Some((previous_limits, destination_limits)),
+        None,
+        InvocationRootProfile::Source,
+    )
+}
+
+/// V6 policy migration retains nonrefundable policy exposure and the next
+/// global ordinal. Provider changes are refused; source/deployment policy
+/// identities may change only through this checked migration authority.
+pub(crate) fn prepare_source_live_policy_migration<'a>(
+    request: SourceLiveMigrationRequest<'a>,
+    previous_policy: &SourcePolicyBindingV6,
+    destination_policy: &SourcePolicyBindingV6,
+) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    prepare_source_live_migration_inner(
+        request,
+        None,
+        None,
+        Some((previous_policy, destination_policy)),
+        InvocationRootProfile::Source,
+    )
+}
+
+/// Composes V6 policy carry with the existing V5 I/O carry. Both predecessor
+/// profiles and both destination ceilings are verified by the one migration
+/// preparation path before it creates any destination checkpoint.
+pub(crate) fn prepare_source_live_policy_migration_with_io_limits<'a>(
+    request: SourceLiveMigrationRequest<'a>,
+    previous_policy: &SourcePolicyBindingV6,
+    destination_policy: &SourcePolicyBindingV6,
+    previous_limits: &SourceIoLimits,
+    destination_limits: &SourceIoLimits,
+) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    prepare_source_live_migration_inner(
+        request,
+        None,
+        Some((previous_limits, destination_limits)),
+        Some((previous_policy, destination_policy)),
+        InvocationRootProfile::Source,
+    )
+}
+
+/// The typed durable facade supplies retained, derived roots after it has
+/// checked its typed migration association. Raw projects remain independently
+/// validated by the shared preparation path.
+pub(crate) fn prepare_source_live_policy_migration_profiled<'a>(
+    request: SourceLiveMigrationRequest<'a>,
+    previous_policy: &SourcePolicyBindingV6,
+    destination_policy: &SourcePolicyBindingV6,
+    profile: InvocationRootProfile,
+) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    prepare_source_live_migration_inner(
+        request,
+        None,
+        None,
+        Some((previous_policy, destination_policy)),
+        profile,
+    )
+}
+
+/// Composes typed V6 policy carry and I/O carry without admitting caller
+/// supplied root strings to the public source migration route.
+pub(crate) fn prepare_source_live_policy_migration_with_io_limits_profiled<'a>(
+    request: SourceLiveMigrationRequest<'a>,
+    previous_policy: &SourcePolicyBindingV6,
+    destination_policy: &SourcePolicyBindingV6,
+    previous_limits: &SourceIoLimits,
+    destination_limits: &SourceIoLimits,
+    profile: InvocationRootProfile,
+) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    prepare_source_live_migration_inner(
+        request,
+        None,
+        Some((previous_limits, destination_limits)),
+        Some((previous_policy, destination_policy)),
+        profile,
     )
 }
 
@@ -247,27 +346,66 @@ fn prepare_source_live_migration_inner<'a>(
     request: SourceLiveMigrationRequest<'a>,
     pricing: Option<(&SourceLivePricing, &SourceLivePricing)>,
     io: Option<(&SourceIoLimits, &SourceIoLimits)>,
+    policy: Option<(&SourcePolicyBindingV6, &SourcePolicyBindingV6)>,
+    profile: InvocationRootProfile,
 ) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    if pricing.is_some() && policy.is_some() {
+        return Err(refused("migration.profile"));
+    }
     if request.previous_binding.priced_binding().is_some() != pricing.is_some() {
         return Err(refused("migration.pricing_profile"));
+    }
+    if request.previous_binding.policy_binding().is_some() != policy.is_some() {
+        return Err(refused("migration.policy_profile"));
     }
     if request.previous_binding.io_limits() != io.map(|(previous, _)| previous) {
         return Err(refused("migration.io_profile"));
     }
-    let (previous_root, _) = selected_project_program(&request.previous)?;
-    let (destination_root, destination_definition) =
-        selected_project_program(&request.destination)?;
-    if previous_root == destination_root {
+    let typed_roots = match &profile {
+        InvocationRootProfile::Source => None,
+        InvocationRootProfile::Typed {
+            previous_program_root,
+            destination_program_root,
+        } => Some((
+            previous_program_root.as_str(),
+            destination_program_root.as_str(),
+        )),
+    };
+    let typed_profile = matches!(&profile, InvocationRootProfile::Typed { .. });
+    let (previous_selected_root, _) = selected_project_program(
+        &request.previous,
+        typed_roots.map(|roots| roots.0),
+        typed_profile,
+    )?;
+    let (destination_selected_root, destination_definition) = selected_project_program(
+        &request.destination,
+        typed_roots.map(|roots| roots.1),
+        typed_profile,
+    )?;
+    if previous_selected_root == destination_selected_root {
         return Err(refused("migration.unchanged_project"));
     }
-    let previous_expected = match pricing {
-        Some((previous_pricing, _)) => request.previous.policy.binding_priced(
+    let (previous_root, destination_root) = match profile {
+        InvocationRootProfile::Source => (previous_selected_root, destination_selected_root),
+        InvocationRootProfile::Typed {
+            previous_program_root,
+            destination_program_root,
+        } => (previous_program_root, destination_program_root),
+    };
+    let previous_expected = match (pricing, policy) {
+        (_, Some((previous_policy, _))) => request.previous.policy.binding_with_model_policy(
+            request.previous.lifecycle,
+            request.task,
+            request.previous.budget,
+            previous_policy.clone(),
+        ),
+        (Some((previous_pricing, _)), None) => request.previous.policy.binding_priced(
             request.previous.lifecycle,
             request.task,
             request.previous.budget,
             previous_pricing,
         ),
-        None => request.previous.policy.binding(
+        (None, None) => request.previous.policy.binding(
             request.previous.lifecycle,
             request.task,
             request.previous.budget,
@@ -461,8 +599,30 @@ fn prepare_source_live_migration_inner<'a>(
             request.destination.budget,
         )
         .map_err(|error| SourceLiveFailure::initial(error, None))?;
-    let binding = match pricing {
-        Some((_, destination_pricing)) => {
+    let binding = match (pricing, policy) {
+        (_, Some((_, destination_policy))) => {
+            let policy_carry = PolicyMigrationCarryV6::from_predecessor(
+                carry.clone(),
+                request.previous_binding,
+                &previous,
+                destination_policy,
+            )
+            .map_err(|error| SourceLiveFailure::initial(error, None))?;
+            let policy = SourceInvocationBinding::bind_policy_migrated_execution(
+                seed,
+                &SourceLivePolicy::evaluator_profile(),
+                policy_carry,
+                destination_policy.clone(),
+            )
+            .map_err(|error| SourceLiveFailure::initial(error, None))?;
+            match io {
+                Some((_, destination_limits)) => {
+                    policy.with_io_limits(destination_limits.clone(), Some(&previous))
+                }
+                None => Ok(policy),
+            }
+        }
+        (Some((_, destination_pricing)), None) => {
             let destination_pricing = destination_pricing
                 .validated(&request.destination.policy.unit)
                 .map_err(|error| SourceLiveFailure::initial(error, None))?;
@@ -491,14 +651,14 @@ fn prepare_source_live_migration_inner<'a>(
                 )
             }
         }
-        None if io.is_some() => SourceInvocationBinding::bind_io_migrated_execution(
+        (None, None) if io.is_some() => SourceInvocationBinding::bind_io_migrated_execution(
             seed,
             &SourceLivePolicy::evaluator_profile(),
             carry.clone(),
             io.expect("checked").1.clone(),
             &previous,
         ),
-        None => SourceInvocationBinding::bind_migrated_execution(
+        (None, None) => SourceInvocationBinding::bind_migrated_execution(
             seed,
             &SourceLivePolicy::evaluator_profile(),
             carry.clone(),
@@ -549,6 +709,21 @@ impl<'a> PreparedSourceLiveMigration<'a> {
         self,
         source: &mut dyn driver::ProposalSource,
         read: &mut dyn AgentReadOperation,
+        store: &mut dyn CheckpointStore,
+        clock: &dyn SourceInvocationClock,
+        cancellation: &AgentCancellation,
+    ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
+        let mut driver = driver::ReadDriver { read };
+        self.run_with_driver(source, &mut driver, store, clock, cancellation)
+    }
+
+    /// Runs an already prepared migration through the checked driver supplied
+    /// by a retained execution facade. The public source route above retains
+    /// the ordinary read-driver adapter.
+    pub(crate) fn run_with_driver(
+        self,
+        source: &mut dyn driver::ProposalSource,
+        driver: &mut dyn driver::IterativeDriver,
         store: &mut dyn CheckpointStore,
         clock: &dyn SourceInvocationClock,
         cancellation: &AgentCancellation,
@@ -771,6 +946,14 @@ impl<'a> PreparedSourceLiveMigration<'a> {
             clock,
         )
         .map_err(|_| refused_with_checkpoint("migration.ledger_restore", &sink))?;
+        if self.binding.policy_binding().is_some() {
+            let checkpoint = sink
+                .checkpoint()
+                .map_err(|error| sink_failure(error, &sink))?;
+            source
+                .restore_policy_checkpointed(checkpoint.policy_reservations())
+                .map_err(|_| refused_with_checkpoint("migration.policy_restore", &sink))?;
+        }
         let mut session = SourceExecutionSession::new(sink, ledger, clock, cancellation);
         if let Err(errors) = session.opened() {
             return Err(session.failure(None, errors));
@@ -781,11 +964,10 @@ impl<'a> PreparedSourceLiveMigration<'a> {
             prior_stages: self.carry.carried_stages as usize,
             prior_effects: self.carry.carried_effects as usize,
         };
-        let mut runtime_driver = driver::ReadDriver { read };
         match self.destination.lifecycle.run_with_driver_live_seed(
             self.task,
             source,
-            &mut runtime_driver,
+            driver,
             self.destination.budget,
             cancellation,
             Some(&mut session),

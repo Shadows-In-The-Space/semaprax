@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add V6 durable source-model quote accounting with nonrefundable observed and
+  unknown usage, absolute deadlines, cumulative migration carry, and optional
+  request/response byte ceilings (#113). Retain observed quote overages in
+  ordinary source-model admission as well.
+
 - Retain exact generic model request/response reservations in the additive
   priced I/O envelope, cross-bind successor carry, and reject noncanonical
   recovery requests (#113). Add store-backed typed source-model execution with

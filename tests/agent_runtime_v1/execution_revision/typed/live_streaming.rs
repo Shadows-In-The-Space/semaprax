@@ -511,57 +511,65 @@ fn bound_model_policy_refuses_before_factory_and_keeps_prior_reservations() {
 
         // The first attempt's reservation remains spent. The second source
         // attempt is refused before adapter construction rather than refunded.
-        let runtime = bind(project, &root)?;
-        let binding = runtime.source_model_binding(identity())?;
-        let mut one_call = ModelBudgetLimits::unbounded();
-        one_call.max_calls = 1;
-        let policy = runtime.source_model_policy_binding(&binding, one_call)?;
-        let constructions = Rc::new(Cell::new(0));
-        let starts = Rc::new(Cell::new(0));
-        let mut factory = counted_factory(
-            vec![document("0"), document("1")],
-            Rc::clone(&constructions),
-            Rc::clone(&starts),
-        );
-        let cancellation = AgentCancellation::new();
-        let clock = StepClock::new(0);
-        let mut quoter = ExactPolicyQuoter;
-        let mut source = StreamingSourceProposalAdapter::new_bound_with_policy(
-            &mut factory,
-            AdapterInvocationCapability::grant("one attempt fixture"),
-            schema,
-            binding.clone(),
-            binding.invocation_capability(),
-            policy,
-            &mut quoter,
-            &cancellation,
-            &clock,
-            0,
-        )?;
-        let mut handler = Handler {
-            calls: Vec::new(),
-            wrong: false,
-        };
-        let result = runtime.run_live_bound_model(&mut source, &mut handler, &cancellation);
-        assert!(result.is_err());
-        let failure = result.err().expect("second attempt must remain charged");
-        assert_eq!(constructions.get(), 1);
-        assert_eq!(starts.get(), 1);
-        assert_eq!(failure.model_evidence().attempts().len(), 2);
-        assert_eq!(
-            failure.model_evidence().attempts()[0]
+        for observed_overage in [false, true] {
+            let runtime = bind(project.clone(), &root)?;
+            let binding = runtime.source_model_binding(identity())?;
+            let mut one_call = ModelBudgetLimits::unbounded();
+            if observed_overage {
+                // A zero quote is followed by one observed micro-unit. The
+                // resulting overage must prevent the second model dispatch.
+                one_call.max_cost_micros = 0;
+            } else {
+                one_call.max_calls = 1;
+            }
+            let policy = runtime.source_model_policy_binding(&binding, one_call)?;
+            let constructions = Rc::new(Cell::new(0));
+            let starts = Rc::new(Cell::new(0));
+            let mut factory = counted_factory(
+                vec![document("0"), document("1")],
+                Rc::clone(&constructions),
+                Rc::clone(&starts),
+            );
+            let cancellation = AgentCancellation::new();
+            let clock = StepClock::new(0);
+            let mut quoter = ExactPolicyQuoter;
+            let mut source = StreamingSourceProposalAdapter::new_bound_with_policy(
+                &mut factory,
+                AdapterInvocationCapability::grant("one attempt fixture"),
+                schema,
+                binding.clone(),
+                binding.invocation_capability(),
+                policy,
+                &mut quoter,
+                &cancellation,
+                &clock,
+                0,
+            )?;
+            let mut handler = Handler {
+                calls: Vec::new(),
+                wrong: false,
+            };
+            let result = runtime.run_live_bound_model(&mut source, &mut handler, &cancellation);
+            assert!(result.is_err());
+            let failure = result.err().expect("second attempt must remain charged");
+            assert_eq!(constructions.get(), 1);
+            assert_eq!(starts.get(), 1);
+            assert_eq!(failure.model_evidence().attempts().len(), 2);
+            assert_eq!(
+                failure.model_evidence().attempts()[0]
+                    .reservation()
+                    .unwrap()
+                    .ordinal(),
+                0
+            );
+            assert_eq!(
+                failure.model_evidence().attempts()[1].terminal(),
+                "policy_reservation_refused"
+            );
+            assert!(failure.model_evidence().attempts()[1]
                 .reservation()
-                .unwrap()
-                .ordinal(),
-            0
-        );
-        assert_eq!(
-            failure.model_evidence().attempts()[1].terminal(),
-            "policy_reservation_refused"
-        );
-        assert!(failure.model_evidence().attempts()[1]
-            .reservation()
-            .is_none());
+                .is_none());
+        }
         Ok(())
     })
     .unwrap();

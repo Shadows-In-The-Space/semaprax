@@ -7,9 +7,10 @@
 use super::*;
 use crate::agent_lifecycle::iterative::driver::{EffectContext, IterativeDriver, ProposalSource};
 use crate::agent_lifecycle::iterative::source_live::{
-    SourceLiveFailure, SourceLiveOutcome, SourceLiveRequest,
+    PreparedSourceLiveMigration, SourceLiveFailure, SourceLiveOutcome, SourceLiveRequest,
 };
 use crate::agent_lifecycle::CheckpointStore;
+use crate::live_invocation::source_journal::{SourceIoLimits, SourcePolicyBindingV6};
 
 struct LiveDispatch<'a> {
     dispatch: Dispatch<'a>,
@@ -299,5 +300,127 @@ impl CompiledTypedEffects {
         };
         self.lifecycle
             .run_live_durable_with_driver(request, source, &mut dispatch, store)
+    }
+
+    /// V6 durable source route with an explicit, host-validated model policy.
+    /// It keeps the existing typed-effect dispatcher and one source cursor.
+    pub(crate) fn run_live_durable_source_with_model_policy(
+        &self,
+        request: SourceLiveRequest<'_>,
+        policy: SourcePolicyBindingV6,
+        source: &mut dyn ProposalSource,
+        handler: &mut dyn TypedEffectHandler,
+        effects: EffectBudget,
+        store: &mut dyn CheckpointStore,
+    ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
+        let budget = EffectBudget {
+            max_calls: effects.max_calls.min(self.limits.max_calls),
+            max_argument_bytes: effects
+                .max_argument_bytes
+                .min(self.limits.max_argument_bytes),
+            max_result_bytes: effects.max_result_bytes.min(self.limits.max_result_bytes),
+            max_total_bytes: effects.max_total_bytes.min(self.limits.max_total_bytes),
+        };
+        let mut dispatch = LiveDispatch {
+            dispatch: Dispatch {
+                compiled: self,
+                proposals: &[],
+                handler,
+                budget,
+                dispatched: 0,
+                arguments: 0,
+                results: 0,
+                failure: None,
+            },
+            proposal: None,
+        };
+        self.lifecycle.run_live_durable_with_model_policy(
+            request,
+            policy,
+            source,
+            &mut dispatch,
+            store,
+        )
+    }
+
+    /// V6 model policy and V5 cumulative I/O limits share this typed-effect
+    /// dispatcher and one journal cursor.
+    pub(crate) fn run_live_durable_source_with_model_policy_and_io_limits(
+        &self,
+        request: SourceLiveRequest<'_>,
+        policy: SourcePolicyBindingV6,
+        limits: &SourceIoLimits,
+        source: &mut dyn ProposalSource,
+        handler: &mut dyn TypedEffectHandler,
+        effects: EffectBudget,
+        store: &mut dyn CheckpointStore,
+    ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
+        let budget = EffectBudget {
+            max_calls: effects.max_calls.min(self.limits.max_calls),
+            max_argument_bytes: effects
+                .max_argument_bytes
+                .min(self.limits.max_argument_bytes),
+            max_result_bytes: effects.max_result_bytes.min(self.limits.max_result_bytes),
+            max_total_bytes: effects.max_total_bytes.min(self.limits.max_total_bytes),
+        };
+        let mut dispatch = LiveDispatch {
+            dispatch: Dispatch {
+                compiled: self,
+                proposals: &[],
+                handler,
+                budget,
+                dispatched: 0,
+                arguments: 0,
+                results: 0,
+                failure: None,
+            },
+            proposal: None,
+        };
+        self.lifecycle
+            .run_live_durable_with_model_policy_and_io_limits(
+                request,
+                policy,
+                limits,
+                source,
+                &mut dispatch,
+                store,
+            )
+    }
+
+    /// Continues an already checked Source Live migration with the same typed
+    /// effect identity and replay validation as the direct durable route.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn run_prepared_source_migration(
+        &self,
+        prepared: PreparedSourceLiveMigration<'_>,
+        source: &mut dyn ProposalSource,
+        handler: &mut dyn TypedEffectHandler,
+        effects: EffectBudget,
+        store: &mut dyn CheckpointStore,
+        clock: &dyn crate::live_invocation::SourceInvocationClock,
+        cancellation: &AgentCancellation,
+    ) -> Result<SourceLiveOutcome, SourceLiveFailure> {
+        let budget = EffectBudget {
+            max_calls: effects.max_calls.min(self.limits.max_calls),
+            max_argument_bytes: effects
+                .max_argument_bytes
+                .min(self.limits.max_argument_bytes),
+            max_result_bytes: effects.max_result_bytes.min(self.limits.max_result_bytes),
+            max_total_bytes: effects.max_total_bytes.min(self.limits.max_total_bytes),
+        };
+        let mut dispatch = LiveDispatch {
+            dispatch: Dispatch {
+                compiled: self,
+                proposals: &[],
+                handler,
+                budget,
+                dispatched: 0,
+                arguments: 0,
+                results: 0,
+                failure: None,
+            },
+            proposal: None,
+        };
+        prepared.run_with_driver(source, &mut dispatch, store, clock, cancellation)
     }
 }

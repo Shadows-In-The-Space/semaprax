@@ -657,7 +657,7 @@ fn bind_runtime(
 mod durable;
 pub use durable::{
     AgentRuntimeV2DurableEvidence, AgentRuntimeV2DurableModelEvidence,
-    AgentRuntimeV2DurableModelFailure,
+    AgentRuntimeV2DurableModelFailure, PreparedAgentRuntimeV2SourceMigration,
 };
 
 #[path = "typed_migration.rs"]

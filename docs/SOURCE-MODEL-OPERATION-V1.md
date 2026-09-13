@@ -90,6 +90,15 @@ model rows. The iterative source lifecycle also has no automatic retry
 transition, so retries and failovers remain refused until a checked lifecycle
 transition and deployment policy admit them.
 
+`new_bound_checkpointed_with_policy` is the additive V6 durable form. Its
+request-bound quote is checked without reserving; the journal constructs the
+exact policy intent and the adapter reserves only that intent before its store
+acknowledgement and provider start. The durable deadline is the earlier of the
+source journal's absolute deadline and `initial_millis + max_latency_millis`;
+checked overflow refuses. The runtime requires the adapter ledger to use that
+exact resulting instant, and recovery reuses the acknowledged instant instead
+of starting a fresh latency window.
+
 ## Security and nonclaims
 
 - A model response remains untrusted Proposal text. Compiler decode precedes
@@ -111,8 +120,14 @@ transition and deployment policy admit them.
   effect ceilings through its derived program-root profile.
 - The `new_bound_with_policy` route remains nondurable: its in-memory,
   nonrefundable `ModelPolicyLedger` has no durable reservation carry, so the
-  durable entry refuses it before adapter construction. Durable policy state,
-  retries, and provider switches remain unavailable.
+  durable entry refuses it before adapter construction. Use the combined V6
+  constructor for durable policy state. Retries and provider switches remain
+  unavailable.
+- The V6 checkpointed policy route folds acknowledged quote reservations before
+  recovery can continue. Reported usage may exceed a quote: it is retained as
+  observed exposure and can only exhaust later admission; it never refunds a
+  token or cost reservation. Missing or malformed settlement usage is
+  explicitly unknown.
 - It creates no target ABI. Native C11 and Core Wasm Agent-stage execution
   must consume this same checked request/evidence contract in their own parity
   profile.

@@ -1,147 +1,39 @@
-# SEMAPRAX saved-source editor adapter
+# Semaprax for Visual Studio Code
 
-Experimental. A focused local Visual Studio Code Extension Host run passed for
-exact subject `2888f84f123b7caa44aa6807388d98f851d4beaf`; the standalone
-50-case controller suite remains separate. The additive 97-case controller and
-real-host candidate-task scenario passed for exact subject
-`3fccd30b861d48c9d404eb2698fa2eff510569af` in Visual Studio Code 1.136.1 on
-Darwin arm64. This zero-build CommonJS extension uses only
-VS Code APIs and Node built-ins. No npm dependencies, bundling, telemetry,
-webviews, language server, automatic process startup, or publication command.
-It is not a packaged or marketplace release. The exact local execution claim is bounded by the evidence contract below.
+Official Visual Studio Code support for the Semaprax programming language.
 
-## Syntax highlighting
+Semaprax is an experimental AI-agent-native systems programming language built around stable semantic identity, compiler-checked meaning, explicit effects, ownership, contracts, typed transformations, and reproducible source review.
 
-Opening a `.spx` file gives SEMAPRAX highlighting, `//` comment toggling,
-bracket matching, and auto-closing pairs without starting a session. This is
-the declarative `languages` and `grammars` contribution in `package.json`
-backed by `syntaxes/semaprax.tmLanguage.json` and
-`language-configuration.json`; it runs no code and needs no compiler path.
-The repository's documentation gate checks that the grammar names every
-keyword the parser recognises, so the highlighting cannot silently lag the
-language. The grammar itself provides no completion or navigation.
-This is also the one grammar this repository would reuse for GitHub-hosted
-`.spx` highlighting; see [GitHub Linguist submission v1](../../docs/GITHUB-LINGUIST-SUBMISSION-V1.md)
-for the interim `.gitattributes` override and what native GitHub recognition
-still requires.
+> **Preview software**
+> Semaprax is currently pre-alpha research software. The language, graph schemas, diagnostics, ABIs, and editor workflows may change. Do not use it for production or safety-critical workloads yet.
 
-## Check on save
+## What you get
 
-Saving a `.spx` file or `semaprax.toml` runs the compiler named by the
-**user/machine** setting `semaprax.compilerPath` as
-`check <subject> --json`, where the subject is the nearest `semaprax.toml`
-walking up from the saved file, or the file alone when no manifest exists. Each
-JSON diagnostic line becomes an editor diagnostic with the message
-`code: message` and the compiler's help on a following line; entries for files
-the re-check no longer reports are cleared. The compiler reports UTF-8 byte
-offsets and a Unicode-scalar column, and VS Code positions are UTF-16 code
-units, so the span is translated against the exact saved bytes of the file it
-names: `editors/vscode/positions.js` is the one mapper diagnostics,
-declaration navigation, and code lenses share. It handles CRLF, supplementary
-characters, combining sequences, tabs, and the end of file, and rejects an
-offset that is not on a UTF-8 boundary, runs backwards, or lies past the saved
-source. When the saved bytes are unreadable or the offsets do not fit them, the
-range falls back to the compiler's one-based line and column with the span's
-byte width, which is exact on ASCII. A bare position is one character wide. A
-file the editor changed while the compiler ran is never given the older run's
-positions: the run is reported as failed and the previous diagnostics stay. `SEMAPRAX: Check Project` runs the
-same check explicitly for the active file's project or the first workspace
-folder, and names the setting to fill when `semaprax.compilerPath` is empty.
-`semaprax.checkOnSave` (default `true`, machine scope) turns the save trigger
-off. With an empty `semaprax.compilerPath` nothing runs. The binary is invoked
-directly, never through a shell, never discovered, and never taken from
-workspace settings; the child's combined output is capped at 4 MiB and its run
-at 30 seconds, after which it is killed and the failure is written to the
-`SEMAPRAX Check` output channel. `check` is read-only: this feature builds
-nothing, publishes nothing, writes no file, and starts no saved-source session.
-A run is published only when the adapter can classify it. `check` exits 0
-after printing exactly one `{"status":"verified", …}` record and no error, and
-exits 1 after printing at least one error diagnostic and no verified record.
-Any other combination — a killed or unstartable child, a foreign exit status,
-a line that is neither a diagnostic nor the verified record, an error with
-status 0, or a verified record with status 1 — is a check failure: the
-previously published diagnostics stay exactly as they were, the reason is
-written to the `SEMAPRAX Check` output channel, and `SEMAPRAX: Check Project`
-reports the failure and that the visible diagnostics may be stale. A check that
-a newer check of the same subject superseded publishes nothing either. The
-adapter never reports a clean project from output it could not read.
-`test/diagnostics.test.js` covers manifest discovery, malformed-line skipping,
-severity/range mapping, appended help, stale clearing, the exit-status and
-output classification matrix, retention of the previous ledger across every
-failure, and the byte and time bounds against a scripted child.
+- `.spx` syntax highlighting, bracket matching, comment toggling, and auto-closing pairs
+- Compiler diagnostics on save and explicit project checks
+- Semantic navigation by stable declaration identity instead of text matching
+- Cross-project caller discovery and code lenses
+- Ownership, contract, and effect inspection
+- Safe semantic rename workflows
+- Saved-source candidate sessions with immutable source-diff previews
+- Compiler-admitted repair proposals for rejected transformations
+- Typed-hole workflows with checked fill suggestions
+- Candidate interpreter-test tasks with explicit cancellation and bounded authority
+- Agent-definition inspection and trace/evidence transcript viewing
 
-## Navigate by meaning
+The extension does not silently discover or download a compiler, and it does not grant itself build, commit, approval, publication, or network authority.
 
-With `semaprax.compilerPath` set, three commands and one code-lens provider
-read the saved active `.spx` file through the compiler's read-only `query` and
-`doc` routes; nothing runs on a dirty buffer. The query subject is resolved
-exactly as check-on-save resolves one: the nearest `semaprax.toml` walking up
-from the file, or the file alone. A module with `use` imports has no standalone
-meaning — the compiler answers `SPX-G172` — so a project-owned file is read
-through `query <manifest> --json` and its `semaprax.project-query.v1` result,
-whose matches carry their own `path` and `source_revision` under the project's
-`project_revision` and `graph_revision`. A match naming an absolute path or one
-that escapes the project root is dropped, never opened. Declarations and
-callers therefore span the whole project, and a selection opens the
-authenticated file the match was found in.
-`SEMAPRAX: Go to Declaration by Stable ID` lists every declaration of the
-module (name, kind, `@id`, canonical header) and moves the cursor to the chosen
-declaration's name token, translating the compiler's byte span against the
-saved source through the same mapper check-on-save uses. A query whose document
-changed while the compiler ran is refused rather than applied to positions that
-no longer describe it, and code lenses for such a document are withheld until
-the next request. `SEMAPRAX: Show Callers of a Declaration` asks for a function or
-method, then lists the declarations whose bodies call it, from the compiler's
-persistent call index rather than a text search, and jumps to the chosen
-caller. `SEMAPRAX: Show Module Documentation` opens the Markdown page
-`semaprax doc` renders beside the source. Code lenses above each declaration
-show its `@id` (or that the identity is automatic), its `uses { … }` effects
-when it declares any, and its `requires`/`ensures` counts when it declares
-contracts; `semaprax.codeLens` (default `true`, machine scope) turns them off.
-`SEMAPRAX: Show Ownership, Contracts, and Effects` asks for a function or
-method and opens the compiler's bounded `context` document for it, which for a
-project-owned file is the project's own `context <manifest> <id>` route (the
-compiler admits no `--filters` there, so the whole bounded projection is
-shown; a standalone file keeps depth one, the `contracts`, `ownership`, and
-`effects` facets, and an 8 KiB budget) beside the source, so parameter and
-result ownership modes, contract clauses, and effect sets are read from the
-checked graph rather than inferred from text.
-`SEMAPRAX: Inspect Agent Definition` runs `agent inspect` on the saved active
-AgentDefinition v1 `.json` file and opens its AgentGraph v1 beside it.
-`SEMAPRAX: Safe Rename by Stable ID` asks for a function or method and a new
-lowercase name, authors the one-line semantic patch `base <revision>` /
-`rename <id> to <name>` in a temporary file, shows the compiler's `impact`
-analysis (how many declarations change and which consumers), and only on
-confirmation lets the compiler's replay-checked `patch` route rewrite the
-saved file; the stable identity never changes and the temporary patch is
-removed afterwards. A standalone patch rewrites one file, so a project-owned
-file is not renamed here at all: that command reports the boundary and points
-at the saved-source session's replay-checked `rename_declaration` typed intent,
-which is the project semantic workflow. `SEMAPRAX: Show Cleanup Plan` opens the
-canonical cleanup plan the module graph records for a chosen function, exactly
-as `graph` emits it, so cleanup order is read rather than inferred.
+## Requirements
 
-`doc` and `graph` are module routes over one standalone executable module.
-A module with `use` imports, and a library module without `fn main`, has
-neither, and there is no project route for either today, so
-`SEMAPRAX: Show Module Documentation` and `SEMAPRAX: Show Cleanup Plan` name
-that boundary alongside the compiler's own diagnostic instead of leaving it
-unexplained. Everything else — declarations, callers, code lenses, ownership
-and contracts — resolves through the project. `SEMAPRAX: Run Agent
-Transcript (Trace/Evidence)` takes the saved active AgentDefinition v1 file,
-asks for a task and a transcript document, and opens the scripted run's
-trace, evidence, or receipt from `agent run`; the run has no provider, tool,
-or network authority.
-Every run is bounded exactly like check-on-save (4 MiB, 30 seconds, direct
-spawn without a shell, never workspace settings) and its failure is written to
-the `SEMAPRAX Check` output channel. `test/navigation.test.js` covers the
-argument vectors, result validation, source-ordered items, zero-based ranges,
-lens titles, and the byte and time bounds against a scripted child.
+Install a compatible Semaprax compiler and configure its absolute path in VS Code user settings:
 
-## Saved-source session
+```json
+{
+  "semaprax.compilerPath": "/absolute/path/to/semaprax"
+}
+```
 
-Load this directory as a development extension using VS Code's extension
-development host. Configure these **user/machine settings**, all absolute paths:
+For saved-source sessions, also configure the project manifest and host policy:
 
 ```json
 {
@@ -151,141 +43,107 @@ development host. Configure these **user/machine settings**, all absolute paths:
 }
 ```
 
-Workspace and folder overrides are rejected even if supplied manually. A trusted
-local filesystem workspace and saved source/manifest buffers are required.
-The explicit Start command invokes the selected binary directly, without a shell:
-`serve-workspace-mcp <manifest> <host-policy>`. Nothing downloads or builds it.
-The existing host-policy v1–v7 parser remains authoritative. Prefer a policy with
-candidate preparation enabled and builds and Git commit disabled. Candidate
-interpreter tests are unavailable unless startup policy selects fixed test limits. Enable
-diagnostics in the host policy only if you want the optional attempt workflow
-below. The adapter cannot widen policy and its own fixed allowlist excludes
-builds, direct synchronous tests, commit approval, source publication and archive
-restoration even if the supplied policy grants them.
+These are machine-scoped settings. Workspace and folder overrides are intentionally not trusted for compiler or host-policy selection.
 
-Use the command palette in this order:
+## Quick start
 
-1. **Start Saved-Source Session** negotiates MCP 2025-11-25, reads the paginated
-   host-selected tool catalog and opens the held workspace image.
-2. **Open Candidate**, then **Select Stable Target ID**. IDs are explicit inputs;
-   the compiler's target catalog checks them. No display-name guessing occurs.
-3. **Show Target Change Catalog**, or **New Typed Intent Scratch**. The latter
-   shows the selected constructor descriptor and opens an untitled JSON buffer
-   containing `kind` and `target`. Fill its required fields using the catalog.
-4. **Apply Active Typed Intent** submits only that tracked scratch buffer to the
-   exact selected candidate/target. The compiler independently checks and replays
-   the complete intention; the extension is not a semantic verifier. Integers
-   beyond JavaScript's safe range reject instead of being silently rounded.
-5. **Preview Candidate Source Diff** reconstructs the bounded source-review
-   report, verifies its canonical report digest and each source/diff digest,
-   then displays the selected base/candidate text through read-only virtual
-   documents. It performs no `WorkspaceEdit`, filesystem write or arbitrary path
-   read. Source paths are validated labels, not filesystem access instructions.
+1. Install or build Semaprax from the main repository.
+2. Open a project containing `.spx` files.
+3. Set `semaprax.compilerPath` to your Semaprax binary.
+4. Save an `.spx` file to get compiler diagnostics, or run **SEMAPRAX: Check Project** from the command palette.
+5. Use semantic commands such as **Go to Declaration by Stable ID**, **Show Callers of a Declaration**, and **Show Ownership, Contracts, and Effects**.
 
-**Run Candidate Interpreter Tests** uses Semaprax's explicit
-`candidate/test-task-*` methods when all four are in the startup-selected tool
-catalogue. These are Semaprax tools, not MCP standard task augmentation. The
-start response is queued behind a one-shot gate; polling releases the bounded
-interpreter worker. **Cancel Candidate Interpreter Tests** and the cancellable
-VS Code progress notification request cooperative cancellation. Cancellation is
-sticky, but completion may win if it was already terminal. Source drift, refresh,
-finish or stop invalidates the editor handle, requests cancellation and discards
-late results. A completed report is accepted only after exact revision, authority,
-blind-spot, schema, pagination and digest checks. It claims no native or Wasm
-runtime, deployment, generated-artifact, external API, runtime-environment or
-external-consumer coverage. Builds and commits remain non-cancellable and absent.
+To try Semaprax without installing it globally:
 
-For diagnostic recovery, **Try Active Typed Intent with Diagnostics** preserves
-a rejected attempt separately from the valid candidate. **Show Rejected Attempt
-Summary** and **Show Retained Attempt Diagnostics** inspect it; the latter
-verifies the bounded report's exact bytes and displays diagnostic locations as
-descriptions, never source navigation. **Show Compiler-Admitted Repair Catalog**
-displays available proposals. **Select and Apply Exact Diagnostic Repair** asks
-you to select a proposal, then sends only its exact repair ID and attempt
-revision. Displayed intentions and potentially rounded numbers are never
-resubmitted as repairs. The accepted candidate can use the existing source diff.
-**Discard Diagnostic Attempt** releases the attempt without changing source.
-These commands require the existing host policy to expose diagnostics; ordinary
-Apply remains fail-fast. There is no automatic repair, policy change or retry.
+```sh
+git clone https://github.com/wavect/semaprax.git
+cd semaprax
+cargo run --locked -p semaprax -- check examples/meaning.spx
+cargo run --locked -p semaprax -- run examples/meaning.spx
+```
 
-Source or manifest edits invalidate candidate selection and visible previews.
-Unsaved buffers must first be saved or reverted. **Preview and Explicitly Refresh
-Saved Source** asks the server to authenticate a new snapshot, then requires an
-explicit confirmation before replacing the held image. Open a new candidate
-afterward. The adapter does not silently rebase old candidates. Watcher events
-are only invalidation hints; every semantic call still uses exact server-bound
-image/candidate revisions and server source authentication. Manifest configuration
-changes that the host refuses require a new explicitly configured session.
+See the repository's [installation guide](../../docs/INSTALL.md) for prerequisites and installation options.
 
-For incomplete work, **Open Typed Hole** plans a body, body-expression or
-contract-expression replacement. Choose expression identities from the
-compiler catalogue. Once a draft exists, choices come from that draft's current
-last-valid state, so more holes can be opened after earlier fills. **Select Pending
-Hole**, **Show Descriptive Hole Summary**, **Show Hole Facet Page or Next Page**
-and **Show Full Hole Context (Unbundled)** inspect the current draft without
-exposing it as valid source. Facet pages are
-expanded explicitly and remain bound to that exact hole context. **Show Typed
-Hole Constructor Schemas** displays the compiler's recursive expression grammar
-without fetching schema references or claiming semantic admission.
+## Saved-source and typed-intent workflows
 
-**New Hole Fill Scratch** creates a typed-expression JSON document bound to the
-selected draft revision and hole. **Choose Checked Hole Fill for Scratch** can
-instead request bounded compiler suggestions and copy one explicitly selected
-expression into the same kind of scratch. The command requires the host's
-`hole/fill-suggestions` method. It shows accepted/considered counts and whether
-the finite search was exhausted; empty results do not prove no valid fill exists.
-Suggestions passed source replay, not tests or proof of the desired behavior.
-Selecting one never adopts its preview digest or fills the hole automatically.
-You can inspect or edit it before **Fill Selected Hole from Active Scratch**
-submits it through ordinary compiler admission. Rejected fills preserve the draft; successful
-changes invalidate older fill scratches and navigation references. Select the
-next pending hole and create a fresh scratch. Only **Complete Ready Draft as
-Candidate** releases a candidate for source review after every hole is filled. **Discard
-Typed-Hole Draft** returns to the original candidate without source writes.
+The advanced editor workflow is intentionally explicit. A session is bound to saved source, a selected manifest, and a selected host policy. Candidate changes are prepared in memory, tied to exact revisions, and reviewed before any separately-authorized publication step.
 
-An active draft, even one ready to complete, blocks ordinary candidate changes
-and source-diff preview. Stop, source drift and refresh clear its editor state.
-Superseded in-memory draft handles are released after successful transitions;
-a failed release terminates the session without pretending that the preceding
-operation was rolled back. There is no automatic retry or publication.
+A typical flow is:
 
-Only one protocol request can be pending. The Cancel command can mark the active
-test controller while its current request is pending; the controller sends the
-explicit cancellation request sequentially. Requests are capped at 128 KiB outer
-MCP and 64 KiB inner v5, responses at 8 MiB, source reviews at 16 MiB and 16 files,
-and virtual-document references at 64 and 32 MiB total per session. Requests time out after 30
-seconds. A response is assembled from the chunks it arrives in: the retained
-fragments are counted rather than concatenated for the cap check, each chunk is
-scanned for the newline delimiter once, and each byte is copied at most once
-into the frame it completes, so a legal fragmented response costs work
-proportional to its length rather than to the square of its fragment count.
-Framing, identity, protocol or digest failures terminate the session;
-there is no automatic restart or mutation retry. Ordinary rejected intentions
-preserve the last valid candidate for correction. Source authentication or stale
-image errors invalidate candidate UI and require explicit refresh. Stop remains available while a
-request is pending. Session process errors never imply that a source transaction
-was approved or published. This adapter never calls those transactions.
+1. **SEMAPRAX: Start Saved-Source Session**
+2. **SEMAPRAX: Open Candidate**
+3. **SEMAPRAX: Select Stable Target ID**
+4. **SEMAPRAX: Show Target Change Catalog** or **New Typed Intent Scratch**
+5. **SEMAPRAX: Apply Active Typed Intent**
+6. **SEMAPRAX: Preview Candidate Source Diff**
 
-The generated virtual diff is a review of an immutable in-memory candidate. It
-does not save that candidate into canonical source. Use separately authorized
-SEMAPRAX tools for publication; this extension intentionally has no such route.
+For incomplete work, the extension also exposes typed-hole planning, contextual inspection, checked suggestions, exact fill submission, and explicit draft completion.
 
-Authored Node tests live in `test/`. They use the built-in `node:test` runner and
-mock processes to cover protocol bounds, exact inner envelopes, rejected tool
-authority, timeouts, duplicate keys, canonical source-review digests and hostile
-chunk/path inputs. Additional authored cases cover typed-hole lifecycle,
-context/reference binding, failed fills and explicit completion. Suggestion
-controller cases cover exact summary/report bindings, bounded expression
-grammar, stale and asynchronous failures, and no implicit preview adoption. Repair cases
-use schema-shaped mock responses to cover exact selectors, bound raw diagnostic
-reports, malformed responses and failed handle retirement. Task-controller cases
-cover exact queued and terminal states, sticky cancellation, bounded report
-chunks, digest binding, authority and blind spots. Verification can use
-`node --test test/*.test.js`; no VS Code or compiler process is started by those tests.
-The separate `scripts/graph-operational-vscode-host-evidence.py` v2 runner
-provisions an actual Extension Host plus compiler task-cancellation scenario and
-must be reported only for the exact clean subject it succeeded on.
+## Safety and authority boundaries
 
-Implementation references: [VS Code workspace trust](https://code.visualstudio.com/api/extension-guides/workspace-trust),
-[virtual documents](https://code.visualstudio.com/api/extension-guides/virtual-documents),
-and [configuration contributions](https://code.visualstudio.com/api/references/contribution-points#contributes.configuration).
+The extension is designed around narrow local authority:
+
+- compiler paths come from user/machine settings, never workspace settings
+- compiler processes are invoked directly, never through a shell
+- check/navigation runs are bounded by time and output limits
+- dirty or changed source invalidates revision-sensitive results instead of reusing stale positions
+- source review is shown through read-only virtual documents
+- candidate operations remain revision-bound
+- build, commit, approval, publication, arbitrary package installation, and direct native execution are intentionally outside the extension command surface
+
+The compiler remains the semantic verifier. The extension does not infer semantic correctness from editor text.
+
+## Commands
+
+Open the VS Code command palette and search for `SEMAPRAX:`. The extension currently contributes commands for:
+
+- project checking
+- saved-source session start/stop/refresh
+- candidate creation and target selection
+- typed intents and diagnostic recovery
+- compiler-admitted repairs
+- source-diff preview
+- candidate interpreter-test tasks and cancellation
+- typed-hole planning and filling
+- declaration navigation and caller discovery
+- documentation, ownership, contracts, effects, and cleanup-plan inspection
+- safe rename
+- agent inspection and trace/evidence transcripts
+
+## Settings
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `semaprax.compilerPath` | empty | Absolute Semaprax compiler path |
+| `semaprax.checkOnSave` | `true` | Run read-only project/file checks when saved |
+| `semaprax.codeLens` | `true` | Show stable identity, effects, and contract metadata above declarations |
+| `semaprax.manifestPath` | empty | Absolute `semaprax.toml` path for saved-source sessions |
+| `semaprax.hostPolicyPath` | empty | Absolute existing host-policy JSON path |
+
+## Project links
+
+- [Semaprax repository](https://github.com/wavect/semaprax)
+- [Getting started](https://github.com/wavect/semaprax#readme)
+- [Installation guide](https://github.com/wavect/semaprax/blob/main/docs/INSTALL.md)
+- [Agent quick reference](https://github.com/wavect/semaprax/blob/main/docs/AGENT-QUICK-REFERENCE.md)
+- [Issue tracker](https://github.com/wavect/semaprax/issues)
+
+## Deep technical notes and verification evidence
+
+The previous editor-adapter README contained detailed protocol, evidence, task-controller, typed-hole, repair, navigation, and authority-boundary documentation. It is preserved verbatim in [TECHNICAL.md](TECHNICAL.md) so Marketplace users get a concise landing page without losing the implementation evidence and exact behavioral boundaries.
+
+## Development
+
+This extension is intentionally zero-build CommonJS and uses VS Code APIs plus Node built-ins.
+
+Run the authored Node tests with:
+
+```sh
+node --test test/*.test.js
+```
+
+The repository also contains a real VS Code Extension Host evidence runner for integration-level verification against exact source subjects.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

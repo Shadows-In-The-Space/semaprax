@@ -8,6 +8,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Pin cumulative durable source reservation boundaries at zero, exact, and
+  one-unit-over ceilings; terminal recovery retains accounting with zero
+  new proposal, model, or effect dispatches (Refs #113).
+
 - Exercise eight borrowed byte-view call compositions across interpreter,
   C11 O0/O2 and Core Wasm, including offset-sensitive forwarded views,
   comparator rejection and the stable escaping-view diagnostic (Refs #103).

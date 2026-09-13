@@ -7,6 +7,8 @@
 
 #[path = "adversarial_tests.rs"]
 mod adversarial_tests;
+#[path = "budget_boundaries.rs"]
+mod budget_boundaries;
 
 use super::*;
 use crate::agent_lifecycle::iterative::driver::{ProposalRequest, ProposalSource};

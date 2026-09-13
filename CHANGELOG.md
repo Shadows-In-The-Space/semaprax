@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add exact SDK-envelope byte reservations to durable retries with frozen V2
+  journal preservation, canonical V3 recovery, and post-poll cancellation
+  checks (#179). Tighten provider conformance around request admission,
+  completion, final bytes, and usage regressions with corpus V2 (#181).
+
 - Add a checked two-call offline repair loop and private CLI demo with
   bounded candidate edits, diagnostic feedback, read-only review evidence,
   and terminal journal replay (#116). Extend imported owned cursor failure

@@ -5,16 +5,19 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::adapter::{AdapterEvent, AdapterInvocationCapability, AdapterRequest};
+use super::adapter::{
+    AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterRequest, AdapterSettlement,
+};
 use super::capability::{RequiredCapabilities, StructuredOutputMode};
 use super::conformance::{
-    run_conformance_suite, DriveOutcome, ExpectedOutcome, CASE_CAPABILITY_NEGOTIATION,
-    CASE_DRIVE_TO_SETTLEMENT, DRIVE_CONTRADICTORY_USAGE, DRIVE_DUPLICATE_COMPLETION,
-    DRIVE_EVENT_AFTER_COMPLETION, DRIVE_LATE_AFTER_CANCEL, DRIVE_OVERSIZED,
+    drive_to_settlement, run_conformance_suite, DriveOutcome, ExpectedOutcome, CASE_CAPABILITY_NEGOTIATION,
+    CASE_DRIVE_TO_SETTLEMENT, CASE_REQUEST_LIMIT_ADMISSION, DRIVE_CONTRADICTORY_USAGE,
+    DRIVE_DUPLICATE_COMPLETION, DRIVE_EVENT_AFTER_COMPLETION, DRIVE_LATE_AFTER_CANCEL,
+    DRIVE_MISSING_COMPLETION, DRIVE_OVERSIZED, DRIVE_SETTLEMENT_MISMATCH,
 };
 use super::fixture_adapters::{
-    usage, PanicsOnStartAdapter, RecordedReplayAdapter, ScriptedBatchAdapter,
-    ScriptedStreamingAdapter,
+    base_capabilities, usage, PanicsOnStartAdapter, RecordedReplayAdapter, ScriptedAdapter,
+    ScriptedBatchAdapter, ScriptedStreamingAdapter,
 };
 use super::hostile;
 use crate::live_invocation::model_invoke::ModelFailure;
@@ -60,7 +63,7 @@ fn a_non_streaming_batch_adapter_passes_the_full_conformance_suite() {
         },
     );
     assert!(report.all_passed(), "report: {report:?}");
-    assert_eq!(report.cases.len(), 2);
+    assert_eq!(report.cases.len(), 3);
 }
 
 #[test]
@@ -227,6 +230,68 @@ fn negotiation_refuses_an_adapter_that_declares_an_unsafe_class_as_retryable() {
     assert!(negotiation.detail.contains("UnsafeRetryableClassDeclared"));
 }
 
+#[test]
+fn actual_request_limits_refuse_before_start_even_when_declaration_negotiation_is_permissive() {
+    for (request_bytes, response_bytes, expected) in [
+        (
+            vec![b'x'; 5],
+            4_096,
+            "ADAPTER-REQUEST-BYTES-EXCEED-DECLARATION",
+        ),
+        (
+            b"ok".to_vec(),
+            65_537,
+            "ADAPTER-RESPONSE-LIMIT-EXCEEDS-DECLARATION",
+        ),
+    ] {
+        let mut caps = base_capabilities("hostile-request-limit", true);
+        caps.max_request_bytes = 4;
+        caps.max_response_bytes = 65_536;
+        let mut adapter = PanicsOnStartAdapter::new(caps);
+        let report = run_conformance_suite(
+            &mut adapter,
+            &cap(),
+            &permissive_requirement(),
+            &AdapterRequest {
+                request_bytes,
+                max_response_bytes: response_bytes,
+            },
+            None,
+            &ExpectedOutcome::Settled {
+                response_bytes: Vec::new(),
+            },
+        );
+        assert_eq!(report.cases.len(), 2);
+        assert!(report.case(CASE_CAPABILITY_NEGOTIATION).unwrap().passed);
+        let admission = report.case(CASE_REQUEST_LIMIT_ADMISSION).unwrap();
+        assert!(!admission.passed);
+        assert!(admission.detail.contains(expected), "{admission:?}");
+    }
+}
+
+#[test]
+fn direct_driver_refuses_declared_request_limits_before_start() {
+    let mut caps = base_capabilities("direct-request-limit", false);
+    caps.max_request_bytes = 4;
+    let mut adapter = PanicsOnStartAdapter::new(caps);
+    let outcome = drive_to_settlement(
+        &mut adapter,
+        &cap(),
+        &AdapterRequest {
+            request_bytes: vec![b'x'; 5],
+            max_response_bytes: 16,
+        },
+        None,
+    );
+    assert!(matches!(
+        outcome,
+        DriveOutcome::Refused {
+            code: "ADAPTER-REQUEST-BYTES-EXCEED-DECLARATION",
+            ..
+        }
+    ));
+}
+
 // ---------------------------------------------------------------------
 // "Write at least one deliberately broken adapter and show the suite
 // rejecting it, with the specific conformance failure named." Six named
@@ -263,6 +328,8 @@ const ALL_HOSTILE_CODES: &[&str] = &[
     DRIVE_OVERSIZED,
     DRIVE_LATE_AFTER_CANCEL,
     DRIVE_EVENT_AFTER_COMPLETION,
+    DRIVE_MISSING_COMPLETION,
+    DRIVE_SETTLEMENT_MISMATCH,
 ];
 
 fn assert_no_other_hostile_code_appears(detail: &str, own_code: &str) {
@@ -347,6 +414,146 @@ fn the_deliberately_broken_late_data_after_cancel_adapter_is_rejected_by_name() 
     assert_drive_refused_with(&report, DRIVE_LATE_AFTER_CANCEL);
     let drive = report.case(CASE_DRIVE_TO_SETTLEMENT).unwrap();
     assert_no_other_hostile_code_appears(&drive.detail, DRIVE_LATE_AFTER_CANCEL);
+}
+
+#[test]
+fn a_streaming_adapter_that_settles_without_completed_is_rejected_by_name() {
+    let mut adapter = ScriptedAdapter::new(
+        base_capabilities("hostile-missing-completion", true),
+        vec![
+            AdapterPoll::Event(AdapterEvent::Delta(b"partial".to_vec())),
+            AdapterPoll::Settled(AdapterSettlement {
+                response_bytes: b"partial".to_vec(),
+                usage: usage(1, 1, 1),
+            }),
+        ],
+        true,
+    );
+    let report = run_conformance_suite(
+        &mut adapter,
+        &cap(),
+        &permissive_requirement(),
+        &request(4096),
+        None,
+        &ExpectedOutcome::Settled {
+            response_bytes: b"partial".to_vec(),
+        },
+    );
+    assert_drive_refused_with(&report, DRIVE_MISSING_COMPLETION);
+    assert_no_other_hostile_code_appears(
+        &report.case(CASE_DRIVE_TO_SETTLEMENT).unwrap().detail,
+        DRIVE_MISSING_COMPLETION,
+    );
+}
+
+#[test]
+fn a_settlement_that_disagrees_with_its_deltas_is_rejected_by_name() {
+    let mut adapter = ScriptedAdapter::new(
+        base_capabilities("hostile-settlement-mismatch", true),
+        vec![
+            AdapterPoll::Event(AdapterEvent::Delta(b"streamed".to_vec())),
+            AdapterPoll::Event(AdapterEvent::Completed),
+            AdapterPoll::Settled(AdapterSettlement {
+                response_bytes: b"forged".to_vec(),
+                usage: usage(1, 1, 1),
+            }),
+        ],
+        true,
+    );
+    let report = run_conformance_suite(
+        &mut adapter,
+        &cap(),
+        &permissive_requirement(),
+        &request(4096),
+        None,
+        &ExpectedOutcome::Settled {
+            response_bytes: b"streamed".to_vec(),
+        },
+    );
+    assert_drive_refused_with(&report, DRIVE_SETTLEMENT_MISMATCH);
+    assert_no_other_hostile_code_appears(
+        &report.case(CASE_DRIVE_TO_SETTLEMENT).unwrap().detail,
+        DRIVE_SETTLEMENT_MISMATCH,
+    );
+}
+
+#[test]
+fn an_empty_delta_still_binds_terminal_settlement_bytes() {
+    let mut adapter = ScriptedAdapter::new(
+        base_capabilities("hostile-empty-delta-settlement-mismatch", true),
+        vec![
+            AdapterPoll::Event(AdapterEvent::Delta(Vec::new())),
+            AdapterPoll::Event(AdapterEvent::Completed),
+            AdapterPoll::Settled(AdapterSettlement {
+                response_bytes: b"forged".to_vec(),
+                usage: usage(1, 1, 1),
+            }),
+        ],
+        true,
+    );
+    let report = run_conformance_suite(
+        &mut adapter,
+        &cap(),
+        &permissive_requirement(),
+        &request(4096),
+        None,
+        &ExpectedOutcome::Settled {
+            response_bytes: Vec::new(),
+        },
+    );
+    assert_drive_refused_with(&report, DRIVE_SETTLEMENT_MISMATCH);
+    assert_no_other_hostile_code_appears(
+        &report.case(CASE_DRIVE_TO_SETTLEMENT).unwrap().detail,
+        DRIVE_SETTLEMENT_MISMATCH,
+    );
+}
+
+#[test]
+fn terminal_usage_that_regresses_from_streamed_usage_is_rejected_by_name() {
+    let mut adapter = ScriptedAdapter::new(
+        base_capabilities("hostile-terminal-usage", true),
+        vec![
+            AdapterPoll::Event(AdapterEvent::Usage {
+                tokens_in: 10,
+                tokens_out: 8,
+                cost_micros: 50,
+            }),
+            AdapterPoll::Event(AdapterEvent::Completed),
+            AdapterPoll::Settled(AdapterSettlement {
+                response_bytes: Vec::new(),
+                usage: usage(10, 7, 50),
+            }),
+        ],
+        true,
+    );
+    let report = run_conformance_suite(
+        &mut adapter,
+        &cap(),
+        &permissive_requirement(),
+        &request(4096),
+        None,
+        &ExpectedOutcome::Settled {
+            response_bytes: Vec::new(),
+        },
+    );
+    assert_drive_refused_with(&report, DRIVE_CONTRADICTORY_USAGE);
+    assert_no_other_hostile_code_appears(
+        &report.case(CASE_DRIVE_TO_SETTLEMENT).unwrap().detail,
+        DRIVE_CONTRADICTORY_USAGE,
+    );
+}
+
+#[test]
+fn an_eventless_batch_settlement_stays_admitted_but_is_still_response_bounded() {
+    let mut adapter = ScriptedBatchAdapter::new(vec![b'x'; 65], usage(1, 1, 1));
+    let outcome = super::conformance::drive_to_settlement(&mut adapter, &cap(), &request(64), None);
+    assert!(matches!(
+        outcome,
+        DriveOutcome::Refused {
+            code: DRIVE_OVERSIZED,
+            ..
+        }
+    ));
 }
 
 #[test]

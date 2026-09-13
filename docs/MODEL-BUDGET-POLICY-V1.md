@@ -326,3 +326,30 @@ profile deliberately has no migration or cross-deployment continuation route:
 a changed deployment root, instance root, provider order, policy limit, or
 absolute deadline requires a separately authorized new invocation rather than
 reusing an existing retry chain.
+
+## Additive durable byte accounting v3
+
+`run_durable_byte_policy_invocation` uses the same retry scheduler with a V3
+checkpoint envelope. The envelope quotes the frozen canonical V2 journal
+byte-for-byte and binds four integer byte ceilings: per-request, per-response,
+cumulative input, and cumulative reserved output. The binding derives the
+minimum retained source and deployment ceilings; invocation limits may only
+narrow them. Byte limits are never interpreted as model-token counts.
+
+Before constructing a journal or replaying it, the route uses the scheduler's
+own bounded request projector to prove that the plan names the exact serialized
+SDK envelope length and response capacity. Every attempt reserves that input
+length and the entire bounded response capacity before its intent is committed
+and before adapter construction. Safe retries and fallbacks are separately
+charged. No successful, failed, cancelled, or unknown result refunds capacity.
+
+The outer document is bounded to 1,048,576 bytes. Recovery validates the frozen
+inner journal, reconstructs every byte reservation and observation, and compares
+the complete canonical outer bytes. Changed limits, noncanonical bytes, stale
+plans, and impossible observations fail before adapter construction. Terminal
+responses are schema-checked and replayed without model calls. An unacknowledged
+outcome leaves its durable intent uncertain; it cannot authorize redispatch.
+
+This is host-side admission and observed-result checking. It cannot prove a
+remote provider stopped sending or billing, and it grants no endpoint, model,
+storage, or publication authority. V2 entry points and wire bytes remain frozen.

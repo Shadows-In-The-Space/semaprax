@@ -196,10 +196,13 @@ pub struct CredentialHoldingAdapter {
 impl CredentialHoldingAdapter {
     #[must_use]
     pub fn new(held_credential: impl Into<String>) -> Self {
-        let script = vec![AdapterPoll::Settled(AdapterSettlement {
-            response_bytes: b"ok".to_vec(),
-            usage: usage(1, 1, 1),
-        })];
+        let script = vec![
+            AdapterPoll::Event(AdapterEvent::Completed),
+            AdapterPoll::Settled(AdapterSettlement {
+                response_bytes: b"ok".to_vec(),
+                usage: usage(1, 1, 1),
+            }),
+        ];
         Self {
             inner: ScriptedAdapter::new(
                 hostile_capabilities("credential-holding-adapter"),

@@ -21,7 +21,7 @@ const REPORT_DOMAIN: &[u8] = b"semaprax.provider-adapter-conformance-report.v1\0
 /// runs. Versioned so a report can be compared against exactly the corpus
 /// that produced it; widening the corpus is a new identifier, never a
 /// silent reinterpretation of an old report.
-pub const TEST_CORPUS_ID: &str = "semaprax.provider-adapter-conformance-corpus.v1";
+pub const TEST_CORPUS_ID: &str = "semaprax.provider-adapter-conformance-corpus.v2";
 
 /// Standing nonclaims every report carries, regardless of outcome. These
 /// are never narrowed by a passing case: a report proves what ran, not

@@ -16,7 +16,8 @@ use crate::live_invocation::{
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-use super::{EffectiveModelBudget, ProviderPolicy};
+use super::{DurableByteBudget, EffectiveModelBudget, ProviderPolicy};
+use crate::provider_adapter_sdk::AdapterRequest;
 
 const BINDING_DOMAIN: &[u8] = b"semaprax.generic-model-policy.binding.v2\0";
 const MAX_PROVIDER_ID_BYTES: usize = 256;
@@ -37,6 +38,8 @@ pub enum DurablePolicyBindingRefusal {
     RetainedLimitMismatch { dimension: &'static str },
     ProviderNotDeploymentSelected { provider: String },
     ContextLimitExceedsDeployment { requested: u64, max: u64 },
+    RetainedByteLimitMismatch { dimension: &'static str },
+    AdapterRequestBytesExceeded { dimension: &'static str },
 }
 
 /// An invocation- and retained-execution-root-bound ordered provider policy.
@@ -57,6 +60,7 @@ pub struct DurablePolicyBinding {
     policy: ProviderPolicy,
     model_selections: Option<Vec<DeploymentModelSelection>>,
     limits: EffectiveModelBudget,
+    retained_byte_budget: Option<DurableByteBudget>,
     deadline_millis: Option<i64>,
     digest: String,
 }
@@ -210,6 +214,7 @@ impl DurablePolicyBinding {
             });
         }
         check_retained_limits(deployment, limits)?;
+        let retained_byte_budget = retained_byte_budget(deployment)?;
         let deployment_context_limit = selected
             .iter()
             .map(|item| item.max_context_tokens())
@@ -274,6 +279,7 @@ impl DurablePolicyBinding {
             policy,
             model_selections: Some(selected),
             limits,
+            retained_byte_budget: Some(retained_byte_budget),
             deadline_millis,
             digest: digest(BINDING_DOMAIN, canonical.as_bytes()),
         })
@@ -311,6 +317,80 @@ impl DurablePolicyBinding {
     }
     pub(crate) fn limits(&self) -> EffectiveModelBudget {
         self.limits
+    }
+
+    /// Narrows the byte limits already retained in this binding. The caller
+    /// supplies an invocation ceiling, never a replacement authority.
+    pub fn narrow_byte_budget(
+        &self,
+        invocation: DurableByteBudget,
+    ) -> Result<DurableByteBudget, DurablePolicyBindingRefusal> {
+        let retained = self
+            .retained_byte_budget
+            .ok_or(DurablePolicyBindingRefusal::ExecutionRootMismatch)?;
+        for (dimension, requested, maximum) in [
+            (
+                "max_provider_request_bytes",
+                invocation.max_request_bytes,
+                retained.max_request_bytes,
+            ),
+            (
+                "max_provider_response_bytes",
+                invocation.max_response_bytes,
+                retained.max_response_bytes,
+            ),
+            (
+                "max_total_provider_input_bytes",
+                invocation.max_total_input_bytes,
+                retained.max_total_input_bytes,
+            ),
+            (
+                "max_total_provider_output_bytes",
+                invocation.max_total_output_bytes,
+                retained.max_total_output_bytes,
+            ),
+        ] {
+            if requested > maximum {
+                return Err(DurablePolicyBindingRefusal::RetainedByteLimitMismatch { dimension });
+            }
+        }
+        Ok(invocation)
+    }
+
+    /// Checks the actual canonical SDK envelope, rather than the logical
+    /// task/observation bytes or a host-supplied plan field. The returned
+    /// budget is suitable for a V3 byte ledger to reserve this exact input
+    /// and the adapter's declared response capacity before factory/start.
+    pub fn byte_budget_for_adapter(
+        &self,
+        invocation: DurableByteBudget,
+        adapter_request: &AdapterRequest,
+    ) -> Result<DurableByteBudget, DurablePolicyBindingRefusal> {
+        let budget = self.narrow_byte_budget(invocation)?;
+        let request_bytes = u64::try_from(adapter_request.request_bytes.len()).map_err(|_| {
+            DurablePolicyBindingRefusal::AdapterRequestBytesExceeded {
+                dimension: "max_provider_request_bytes",
+            }
+        })?;
+        let response_bytes = u64::try_from(adapter_request.max_response_bytes).map_err(|_| {
+            DurablePolicyBindingRefusal::AdapterRequestBytesExceeded {
+                dimension: "max_provider_response_bytes",
+            }
+        })?;
+        if request_bytes > budget.max_request_bytes || request_bytes > budget.max_total_input_bytes
+        {
+            return Err(DurablePolicyBindingRefusal::AdapterRequestBytesExceeded {
+                dimension: "max_provider_request_bytes",
+            });
+        }
+        if response_bytes > budget.max_response_bytes
+            || response_bytes > budget.max_total_output_bytes
+        {
+            return Err(DurablePolicyBindingRefusal::AdapterRequestBytesExceeded {
+                dimension: "max_provider_response_bytes",
+            });
+        }
+        Ok(budget)
     }
 
     pub(crate) fn request_matches(
@@ -352,6 +432,12 @@ impl DurablePolicyBinding {
             policy,
             model_selections: None,
             limits,
+            retained_byte_budget: Some(DurableByteBudget {
+                max_request_bytes: u64::MAX,
+                max_response_bytes: u64::MAX,
+                max_total_input_bytes: u64::MAX,
+                max_total_output_bytes: u64::MAX,
+            }),
             deadline_millis: None,
             digest: "sha256:test-binding".into(),
         }
@@ -448,6 +534,35 @@ fn check_retained_limits(
     Ok(())
 }
 
+/// The byte dimensions are exact shared units in both retained documents, so
+/// V3 can take their minimum without treating bytes as token evidence.
+fn retained_byte_budget(
+    deployment: &BoundAgentDeployment,
+) -> Result<DurableByteBudget, DurablePolicyBindingRefusal> {
+    let source = retained_limits(
+        deployment.semantic_definition().canonical_json(),
+        "ceilings",
+    )?;
+    let bound = retained_limits(deployment.deployment().canonical_json(), "limits")?;
+    let limit = |key: &'static str| {
+        let source = source
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or(DurablePolicyBindingRefusal::ExecutionRootMismatch)?;
+        let bound = bound
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or(DurablePolicyBindingRefusal::ExecutionRootMismatch)?;
+        Ok(source.min(bound))
+    };
+    Ok(DurableByteBudget {
+        max_request_bytes: limit("max_provider_request_bytes")?,
+        max_response_bytes: limit("max_provider_response_bytes")?,
+        max_total_input_bytes: limit("max_total_provider_input_bytes")?,
+        max_total_output_bytes: limit("max_total_provider_output_bytes")?,
+    })
+}
+
 fn retained_limits(
     source: &str,
     field: &str,
@@ -456,4 +571,59 @@ fn retained_limits(
         .ok()
         .and_then(|document| document.get(field)?.as_object().cloned())
         .ok_or(DurablePolicyBindingRefusal::ExecutionRootMismatch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::live_invocation::{LiveInvocationId, LiveInvocationSeed};
+    use crate::model_budget_policy::{intersect, ModelBudgetLimits, ProviderSlot};
+
+    fn binding() -> DurablePolicyBinding {
+        let mut limits = ModelBudgetLimits::unbounded();
+        limits.max_calls = 1;
+        let limits = intersect(limits, limits, limits).unwrap();
+        DurablePolicyBinding::fixture(
+            LiveInvocationId::derive(&LiveInvocationSeed {
+                program_root: "sha256:program".into(),
+                deployment_policy: "sha256:test-policy".into(),
+                task: b"task".to_vec(),
+                budget: 1,
+                interaction_schema_digest: "sha256:schema".into(),
+                approved_providers: vec!["primary".into()],
+            }),
+            ProviderPolicy::new(vec![ProviderSlot::authorized("primary")]),
+            limits,
+            b"task",
+            "sha256:schema",
+            1,
+        )
+    }
+
+    #[test]
+    fn fixture_byte_projection_accepts_narrowing_and_checks_exact_envelope() {
+        let binding = binding();
+        let budget = DurableByteBudget {
+            max_request_bytes: 4,
+            max_response_bytes: 5,
+            max_total_input_bytes: 8,
+            max_total_output_bytes: 10,
+        };
+        let request = AdapterRequest {
+            request_bytes: b"four".to_vec(),
+            max_response_bytes: 5,
+        };
+        assert_eq!(
+            binding.byte_budget_for_adapter(budget, &request),
+            Ok(budget)
+        );
+        let oversized = AdapterRequest {
+            request_bytes: b"five!".to_vec(),
+            max_response_bytes: 5,
+        };
+        assert!(matches!(
+            binding.byte_budget_for_adapter(budget, &oversized),
+            Err(DurablePolicyBindingRefusal::AdapterRequestBytesExceeded { .. })
+        ));
+    }
 }

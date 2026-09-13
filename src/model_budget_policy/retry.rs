@@ -880,7 +880,36 @@ impl<'a> RetryFailoverScheduler<'a> {
                     Some(SchedulerRefusal::DeadlineExceededAfterDispatch),
                 );
             }
-            match adapter.poll() {
+            let poll = adapter.poll();
+            let observed_after_poll = match &poll {
+                AdapterPoll::Failed {
+                    attempted_bytes, ..
+                } => *attempted_bytes,
+                AdapterPoll::Event(AdapterEvent::Delta(chunk)) => {
+                    bytes.len().saturating_add(chunk.len())
+                }
+                AdapterPoll::Settled(settlement) => settlement.response_bytes.len(),
+                _ => bytes.len(),
+            };
+            if self.cancellation.is_cancelled() {
+                adapter.cancel("model policy cancellation after poll");
+                return failed(
+                    AttemptOutcomeClass::Uncertain,
+                    Some(ModelFailure::Cancelled),
+                    observed_after_poll,
+                    Some(SchedulerRefusal::CancelledAfterDispatch),
+                );
+            }
+            if self.ledger.check_deadline().is_err() {
+                adapter.cancel("model policy deadline after poll");
+                return failed(
+                    AttemptOutcomeClass::Uncertain,
+                    Some(ModelFailure::Timeout),
+                    observed_after_poll,
+                    Some(SchedulerRefusal::DeadlineExceededAfterDispatch),
+                );
+            }
+            match poll {
                 AdapterPoll::Pending => {}
                 AdapterPoll::Event(AdapterEvent::Delta(chunk)) => {
                     if completed {
@@ -943,24 +972,8 @@ impl<'a> RetryFailoverScheduler<'a> {
                             return protocol_failure(bytes.len(), "ADAPTER-CONTRADICTORY-USAGE");
                         }
                     }
-                    if self.cancellation.is_cancelled() {
-                        adapter.cancel("model policy cancellation before publication");
-                        return failed(
-                            AttemptOutcomeClass::Uncertain,
-                            Some(ModelFailure::Cancelled),
-                            bytes.len(),
-                            Some(SchedulerRefusal::CancelledAfterDispatch),
-                        );
-                    }
-                    if self.ledger.check_deadline().is_err() {
-                        adapter.cancel("model policy deadline before publication");
-                        return failed(
-                            AttemptOutcomeClass::Uncertain,
-                            Some(ModelFailure::Timeout),
-                            bytes.len(),
-                            Some(SchedulerRefusal::DeadlineExceededAfterDispatch),
-                        );
-                    }
+                    // The shared post-poll checkpoint above covers
+                    // cancellation and deadline before this publication.
                     let response_bytes = bytes;
                     if response_bytes.len() > adapter_request.max_response_bytes {
                         adapter.cancel("settled response byte bound");
@@ -1482,4 +1495,5 @@ mod tests {
             }
         ));
     }
+    mod cancellation_tests;
 }

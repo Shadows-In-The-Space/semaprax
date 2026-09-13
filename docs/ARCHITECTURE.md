@@ -148,6 +148,11 @@ charges in memory without claiming generic-journal crash recovery.
 `model_budget_policy/retry` owns bounded in-process adapter attempt scheduling
 and the reservation trail. It consumes an explicit provider factory and host
 backoff/classification seams; it adds no durable journal or deployment authority.
+`model_budget_policy/durable` derives retained execution and deployment limits.
+`live_invocation/policy_kernel` and `policy_kernel_v3` compose that scheduler
+with caller-owned checkpoints; the V3 journal binds exact SDK envelope-byte
+reservations beside frozen V2 policy bytes. Journal recovery validates all
+retained associations before the scheduler can construct an adapter.
 `provider_adapter_sdk/vendor` owns Responses and Messages wire normalization
 behind the explicit `HostHttpStreamTransport` seam. The host retains origin,
 TLS, proxy and credential configuration; compiler-derived Proposal admission

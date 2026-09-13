@@ -586,4 +586,6 @@ mod tests {
         );
         assert_eq!(trace.borrow().as_slice(), ["primary", "fallback"]);
     }
+
+    mod v3_tests;
 }

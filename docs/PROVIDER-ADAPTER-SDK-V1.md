@@ -84,16 +84,21 @@ and enforces the rules a conforming adapter must never violate:
 
 | Rule | Violation code |
 | --- | --- |
-| Exactly one `Completed` per request | `ADAPTER-DUPLICATE-COMPLETION` |
+| A streaming or eventful attempt has exactly one `Completed` before settlement | `ADAPTER-DUPLICATE-COMPLETION` / `ADAPTER-SETTLED-WITHOUT-COMPLETION` |
 | No event after `cancel()` was called | `ADAPTER-LATE-AFTER-CANCEL` |
-| Usage never regresses across snapshots | `ADAPTER-CONTRADICTORY-USAGE` |
-| Concatenated response stays within the declared bound | `ADAPTER-OVERSIZED-RESPONSE` |
+| Usage never regresses across snapshots or from a snapshot to settlement | `ADAPTER-CONTRADICTORY-USAGE` |
+| Delta and terminal batch response stay within the request bound | `ADAPTER-OVERSIZED-RESPONSE` |
+| Terminal bytes exactly equal ordered Deltas whenever any Delta was emitted | `ADAPTER-SETTLEMENT-MISMATCH` |
 | No `Delta`/`Usage` after `Completed` | `ADAPTER-EVENT-AFTER-COMPLETION` |
 | A terminal outcome is reached within a bounded poll budget | `ADAPTER-POLL-BUDGET-EXCEEDED` |
 
-A mid-stream disconnect (the adapter itself returns `Failed`) is not a
-violation of any of these: the driver surfaces it unchanged, matching
-`ModelFailure`'s existing closed vocabulary.
+An eventless non-streaming batch settlement remains admitted, but its terminal
+bytes are still bounded. `run_conformance_suite` separately verifies concrete
+request bytes and response allowance against the declared adapter maxima before
+it calls `start`; `drive_to_settlement` is the lower event normalizer and assumes
+that admission already happened. A mid-stream disconnect (the adapter itself
+returns `Failed`) is not a violation of any of these: the driver surfaces it
+unchanged, matching `ModelFailure`'s existing closed vocabulary.
 
 ### The report (`report.rs`)
 

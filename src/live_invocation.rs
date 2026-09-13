@@ -46,7 +46,9 @@ pub mod migration;
 pub mod model_invoke;
 pub mod persistence;
 pub(crate) mod policy_journal;
+pub(crate) mod policy_journal_v3;
 pub(crate) mod policy_kernel;
+pub(crate) mod policy_kernel_v3;
 pub mod priced;
 pub(crate) mod pricing;
 pub mod source_journal;
@@ -88,11 +90,10 @@ pub use persistence::{
     RecoveryError, PERSISTED_JOURNAL_SCHEMA, PERSISTED_PRICED_IO_JOURNAL_SCHEMA,
     PERSISTED_PRICED_JOURNAL_SCHEMA,
 };
+pub use policy_kernel_v3::run_durable_byte_policy_invocation;
+pub use policy_kernel::{run_durable_policy_invocation, DurablePolicyRun, DurablePolicyRunError};
 pub use priced::{
     run_priced_live_invocation, GenericPricing, PricedInvocationState,
     PricedLiveInvocationHandlers, PricedLiveKernelRun, PricedMigrationError, PricedWorkBudgetHook,
-};
-pub use policy_kernel::{
-    run_durable_policy_invocation, DurablePolicyRun, DurablePolicyRunError,
 };
 pub use pricing::{PricingConfigError, ValidatedPricing};

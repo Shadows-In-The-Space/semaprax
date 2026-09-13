@@ -358,7 +358,7 @@ fn durable_policy_binding_rederives_retained_execution_seed_and_schema() {
             ModelBudgetLimits::unbounded(),
         )
         .unwrap();
-        DurablePolicyBinding::bind(
+        let byte_binding = DurablePolicyBinding::bind(
             &execution,
             &deployment,
             &schema,
@@ -368,6 +368,40 @@ fn durable_policy_binding_rederives_retained_execution_seed_and_schema() {
             0,
         )
         .unwrap();
+
+        let definition: serde_json::Value =
+            serde_json::from_str(deployment.semantic_definition().canonical_json()).unwrap();
+        let deployed: serde_json::Value =
+            serde_json::from_str(deployment.deployment().canonical_json()).unwrap();
+        let ceiling = |key: &str| {
+            definition["ceilings"][key]
+                .as_u64()
+                .unwrap()
+                .min(deployed["limits"][key].as_u64().unwrap())
+        };
+        let bytes = semaprax::model_budget_policy::DurableByteBudget {
+            max_request_bytes: ceiling("max_provider_request_bytes"),
+            max_response_bytes: ceiling("max_provider_response_bytes"),
+            max_total_input_bytes: ceiling("max_total_provider_input_bytes"),
+            max_total_output_bytes: ceiling("max_total_provider_output_bytes"),
+        };
+        assert_eq!(byte_binding.narrow_byte_budget(bytes), Ok(bytes));
+        for dimension in 0..4 {
+            let mut widened = bytes;
+            let value = match dimension {
+                0 => &mut widened.max_request_bytes,
+                1 => &mut widened.max_response_bytes,
+                2 => &mut widened.max_total_input_bytes,
+                _ => &mut widened.max_total_output_bytes,
+            };
+            *value = value
+                .checked_add(1)
+                .expect("bounded retained fixture ceiling");
+            assert!(matches!(
+                byte_binding.narrow_byte_budget(widened),
+                Err(DurablePolicyBindingRefusal::RetainedByteLimitMismatch { .. })
+            ));
+        }
 
         let mut swapped_seed = seed.clone();
         swapped_seed.task.push(b'!');

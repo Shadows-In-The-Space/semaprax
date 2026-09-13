@@ -69,14 +69,19 @@
 
 pub mod classification;
 pub mod durable;
+pub mod durable_bytes;
 pub mod ledger;
 pub mod limits;
 pub mod live_hook;
 pub mod provider_policy;
 pub mod retry;
 
-pub use live_hook::ModelAttemptQuote;
 pub use durable::{DurablePolicyBinding, DurablePolicyBindingRefusal};
+pub use durable_bytes::{
+    DurableByteBudget, DurableByteLedger, DurableByteObservation, DurableByteRefusal,
+    DurableByteReservation,
+};
+pub use live_hook::ModelAttemptQuote;
 
 pub use classification::{retry_is_permitted, AttemptOutcomeClass};
 pub use ledger::{
@@ -87,7 +92,7 @@ pub use limits::{intersect, EffectiveModelBudget, ModelBudgetLimits, PolicyRejec
 pub use provider_policy::{ProviderPolicy, ProviderRefusal, ProviderSlot};
 pub use retry::{
     AdapterAttemptPlan, AdapterAttemptResult, AdapterFactoryRefusal, FailureClassifier,
-    NoDelayBackoff, ProviderAdapterFactory, RetryAttemptEvidence, RetryBackoff,
-    RetryBackoffRefusal, RetryFailoverOutcome, RetryFailoverRun, RetryFailoverScheduler,
-    RetryAttemptJournal, SchedulerRefusal, MAX_ATTEMPT_POLLS, MAX_RETAINED_ATTEMPTS,
+    NoDelayBackoff, ProviderAdapterFactory, RetryAttemptEvidence, RetryAttemptJournal,
+    RetryBackoff, RetryBackoffRefusal, RetryFailoverOutcome, RetryFailoverRun,
+    RetryFailoverScheduler, SchedulerRefusal, MAX_ATTEMPT_POLLS, MAX_RETAINED_ATTEMPTS,
 };

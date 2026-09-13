@@ -14,7 +14,8 @@ use crate::diagnostic::quote_json;
 use crate::live_invocation::model_invoke::ModelFailure;
 
 use super::adapter::{
-    AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterRequest, ProviderAdapter,
+    AdapterEvent, AdapterInvocationCapability, AdapterPoll, AdapterRequest, AdapterUsage,
+    ProviderAdapter,
 };
 use super::capability::{negotiate, AdapterCapabilities, RequiredCapabilities};
 use super::report::{
@@ -37,6 +38,12 @@ pub const DRIVE_OVERSIZED: &str = "ADAPTER-OVERSIZED-RESPONSE";
 /// A `Delta` or `Usage` event arrived after `Completed` but before
 /// settlement.
 pub const DRIVE_EVENT_AFTER_COMPLETION: &str = "ADAPTER-EVENT-AFTER-COMPLETION";
+/// A streaming or eventful adapter settled without the required `Completed`
+/// event. An eventless non-streaming batch settlement remains admitted.
+pub const DRIVE_MISSING_COMPLETION: &str = "ADAPTER-SETTLED-WITHOUT-COMPLETION";
+/// An adapter's terminal bytes disagreed with the ordered `Delta` bytes it
+/// already emitted for this request.
+pub const DRIVE_SETTLEMENT_MISMATCH: &str = "ADAPTER-SETTLEMENT-MISMATCH";
 /// The adapter never reached a terminal outcome within the driver's bounded
 /// poll budget. Never an infinite loop: this driver always terminates.
 pub const DRIVE_POLL_BUDGET_EXCEEDED: &str = "ADAPTER-POLL-BUDGET-EXCEEDED";
@@ -55,8 +62,9 @@ struct UsageSnapshot {
 /// request/response cycle.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DriveOutcome {
-    /// The adapter settled cleanly. `response_bytes` is every `Delta`
-    /// concatenated in the order it was observed.
+    /// The adapter settled cleanly. `response_bytes` is every emitted
+    /// `Delta` concatenated in the order it was observed, or the terminal
+    /// batch bytes when no `Delta` was emitted.
     Settled { response_bytes: Vec<u8> },
     /// The driver refused to continue: `code` names the exact rule
     /// violated, matching one of the `DRIVE_*` constants above.
@@ -79,6 +87,14 @@ pub fn drive_to_settlement(
     request: &AdapterRequest,
     cancel_after_events: Option<usize>,
 ) -> DriveOutcome {
+    // Capture the declaration before dispatch. A mutable implementation must
+    // not evade its streaming completion duty by changing this self-report
+    // during `start` or `poll`.
+    let caps = adapter.capabilities();
+    if let Some((code, reason)) = request_limit_refusal(caps, request) {
+        return DriveOutcome::Refused { code, reason };
+    }
+    let declared_streaming = caps.supports_streaming;
     if let Err(refusal) = adapter.start(capability, request) {
         return DriveOutcome::Refused {
             code: "ADAPTER-START-REFUSED",
@@ -87,8 +103,10 @@ pub fn drive_to_settlement(
     }
 
     let mut response_bytes = Vec::new();
+    let mut saw_delta = false;
     let mut last_usage: Option<UsageSnapshot> = None;
     let mut completed = false;
+    let mut saw_event = false;
     let mut cancelled = false;
     let mut events_seen = 0usize;
 
@@ -104,6 +122,7 @@ pub fn drive_to_settlement(
         match adapter.poll() {
             AdapterPoll::Pending => continue,
             AdapterPoll::Event(event) => {
+                saw_event = true;
                 if cancelled {
                     return DriveOutcome::Refused {
                         code: DRIVE_LATE_AFTER_CANCEL,
@@ -115,6 +134,7 @@ pub fn drive_to_settlement(
                 }
                 match event {
                     AdapterEvent::Delta(chunk) => {
+                        saw_delta = true;
                         if completed {
                             return DriveOutcome::Refused {
                                 code: DRIVE_EVENT_AFTER_COMPLETION,
@@ -187,11 +207,41 @@ pub fn drive_to_settlement(
                         reason: "settlement arrived after cancel() was called".to_owned(),
                     };
                 }
-                // Trust the driver's own concatenation over whatever the
-                // adapter separately claims as `response_bytes`, when the
-                // adapter emitted at least one Delta: an adapter's own
-                // `response_bytes` field is informational only, matching
-                // `AdapterPoll::Settled`'s own doc comment.
+                // An eventless non-streaming batch response has no stream
+                // completion marker to compare. Every streaming attempt, and
+                // every attempt that emitted any event, must end with exactly
+                // one Completed before its terminal settlement.
+                if (declared_streaming || saw_event) && !completed {
+                    return DriveOutcome::Refused {
+                        code: DRIVE_MISSING_COMPLETION,
+                        reason: "adapter settled without Completed".to_owned(),
+                    };
+                }
+                if settlement.response_bytes.len() > request.max_response_bytes {
+                    return DriveOutcome::Refused {
+                        code: DRIVE_OVERSIZED,
+                        reason: format!(
+                            "terminal response exceeded the {}-byte bound",
+                            request.max_response_bytes
+                        ),
+                    };
+                }
+                if saw_delta && settlement.response_bytes != response_bytes {
+                    return DriveOutcome::Refused {
+                        code: DRIVE_SETTLEMENT_MISMATCH,
+                        reason: "terminal response bytes disagree with ordered Delta bytes"
+                            .to_owned(),
+                    };
+                }
+                if let Some(previous) = last_usage {
+                    if settlement_usage_regresses(&settlement.usage, previous) {
+                        return DriveOutcome::Refused {
+                            code: DRIVE_CONTRADICTORY_USAGE,
+                            reason: "terminal usage regressed from a streamed usage snapshot"
+                                .to_owned(),
+                        };
+                    }
+                }
                 let bytes = if response_bytes.is_empty() {
                     settlement.response_bytes
                 } else {
@@ -216,6 +266,18 @@ pub fn drive_to_settlement(
         code: DRIVE_POLL_BUDGET_EXCEEDED,
         reason: format!("adapter did not reach a terminal outcome within {MAX_DRIVE_POLLS} polls"),
     }
+}
+
+fn settlement_usage_regresses(settlement: &AdapterUsage, previous: UsageSnapshot) -> bool {
+    settlement
+        .tokens_in
+        .is_some_and(|value| value < previous.tokens_in)
+        || settlement
+            .tokens_out
+            .is_some_and(|value| value < previous.tokens_out)
+        || settlement
+            .cost_micros
+            .is_some_and(|value| value < previous.cost_micros)
 }
 
 fn event_name(event: &AdapterEvent) -> &'static str {
@@ -312,7 +374,53 @@ pub fn render_capabilities(caps: &AdapterCapabilities) -> String {
 }
 
 pub const CASE_CAPABILITY_NEGOTIATION: &str = "capability_negotiation";
+/// The concrete request fits the adapter limits declared by the admitted
+/// capability row. This is checked after declaration-only negotiation and
+/// before `ProviderAdapter::start`.
+pub const CASE_REQUEST_LIMIT_ADMISSION: &str = "request_limit_admission";
 pub const CASE_DRIVE_TO_SETTLEMENT: &str = "drive_to_settlement";
+
+fn request_limit_refusal(
+    caps: &AdapterCapabilities,
+    request: &AdapterRequest,
+) -> Option<(&'static str, String)> {
+    if request.request_bytes.len() > caps.max_request_bytes {
+        return Some((
+            "ADAPTER-REQUEST-BYTES-EXCEED-DECLARATION",
+            format!(
+                "request has {} bytes but adapter declares {}",
+                request.request_bytes.len(),
+                caps.max_request_bytes,
+            ),
+        ));
+    }
+    if request.max_response_bytes > caps.max_response_bytes {
+        return Some((
+            "ADAPTER-RESPONSE-LIMIT-EXCEEDS-DECLARATION",
+            format!(
+                "request permits {} response bytes but adapter declares {}",
+                request.max_response_bytes, caps.max_response_bytes,
+            ),
+        ));
+    }
+    None
+}
+
+fn report_with_cases(
+    caps: AdapterCapabilities,
+    observed_capabilities: String,
+    cases: Vec<ReportCaseResult>,
+) -> ConformanceReport {
+    ConformanceReport {
+        adapter_identity: caps.adapter_identity,
+        adapter_version: caps.adapter_version,
+        provider_profile: caps.provider_profile,
+        test_corpus_id: TEST_CORPUS_ID.to_owned(),
+        observed_capabilities,
+        cases,
+        nonclaims: standard_nonclaims(),
+    }
+}
 
 /// Runs the shared corpus against one adapter instance: capability
 /// negotiation, then (only if negotiation admits the adapter) one driven
@@ -346,17 +454,23 @@ pub fn run_conformance_suite(
                 passed: false,
                 detail: format!("{refusal:?}"),
             });
-            return ConformanceReport {
-                adapter_identity: caps.adapter_identity,
-                adapter_version: caps.adapter_version,
-                provider_profile: caps.provider_profile,
-                test_corpus_id: TEST_CORPUS_ID.to_owned(),
-                observed_capabilities,
-                cases,
-                nonclaims: standard_nonclaims(),
-            };
+            return report_with_cases(caps, observed_capabilities, cases);
         }
     }
+
+    if let Some((code, reason)) = request_limit_refusal(&caps, request) {
+        cases.push(ReportCaseResult {
+            case_name: CASE_REQUEST_LIMIT_ADMISSION,
+            passed: false,
+            detail: format!("{code}: {reason}"),
+        });
+        return report_with_cases(caps, observed_capabilities, cases);
+    }
+    cases.push(ReportCaseResult {
+        case_name: CASE_REQUEST_LIMIT_ADMISSION,
+        passed: true,
+        detail: String::new(),
+    });
 
     let outcome = drive_to_settlement(adapter, capability, request, cancel_after_events);
     let passed = drive_outcome_matches(&outcome, expected);
@@ -366,15 +480,7 @@ pub fn run_conformance_suite(
         detail: describe_outcome(&outcome),
     });
 
-    ConformanceReport {
-        adapter_identity: caps.adapter_identity,
-        adapter_version: caps.adapter_version,
-        provider_profile: caps.provider_profile,
-        test_corpus_id: TEST_CORPUS_ID.to_owned(),
-        observed_capabilities,
-        cases,
-        nonclaims: standard_nonclaims(),
-    }
+    report_with_cases(caps, observed_capabilities, cases)
 }
 
 fn standard_nonclaims() -> Vec<&'static str> {

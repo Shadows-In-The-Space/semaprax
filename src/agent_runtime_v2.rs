@@ -4,9 +4,16 @@
 pub use crate::execution_revision::typed::{
     bind_agent_runtime_v2, bind_agent_runtime_v2_live, bind_linked_agent_runtime_v2,
     AgentRuntimeV2, AgentRuntimeV2DurableEvidence, AgentRuntimeV2Evidence,
+    AgentRuntimeV2ModelEvidence, AgentRuntimeV2ModelFailure,
 };
 
 pub mod checkpoint;
+pub mod source_model;
+
+pub use source_model::{
+    SourceModelAdapterIdentity, SourceModelAttemptEvidence, SourceModelBinding,
+    SourceModelEvidence, SourceModelInvocationCapability,
+};
 
 pub use crate::execution_revision::typed::{
     migrate_suspended_agent_runtime_v2, resume_migrated_agent_runtime_v2,

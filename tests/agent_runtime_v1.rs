@@ -618,6 +618,8 @@ struct NeverHost;
 
     let public_source = include_str!("../src/agent_runtime.rs");
     let private_source = include_str!("../src/agent_runtime/private.rs");
+    let private_deadline_source = include_str!("../src/agent_runtime/private/deadline.rs");
+    let private_accounting_source = include_str!("../src/agent_runtime/private/accounting.rs");
     let compatibility_source = include_str!("../src/agent_runtime/compatibility.rs");
     for forbidden in [
         "std::net::",
@@ -635,6 +637,14 @@ struct NeverHost;
         assert!(
             !private_source.contains(forbidden),
             "private source contains {forbidden}"
+        );
+        assert!(
+            !private_deadline_source.contains(forbidden),
+            "private deadline source contains {forbidden}"
+        );
+        assert!(
+            !private_accounting_source.contains(forbidden),
+            "private accounting source contains {forbidden}"
         );
         assert!(
             !compatibility_source.contains(forbidden),

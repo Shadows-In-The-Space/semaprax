@@ -14,11 +14,17 @@ authority and recovery contract per #108's review checkpoint.
 This is a design checkpoint with a small executable reference, per #108's
 bounded scope ("Produce one owned design and a small executable
 journal/reference state machine... not permission to rewrite the frozen
-runtime"). It does not touch `agent_lifecycle`, `agent_runtime_v2`, HIR, or
-the parser. Wiring `model.invoke` into the compiled Agent pipeline (source
-syntax, HIR node, deployment provider/model binding, the real compiler-
-derived proposal grammar, the real `agent_lifecycle::authorization` mint) is
-downstream implementation work against the traits this document fixes.
+runtime"). This reference kernel remains separate from the compiled pipeline.
+Later source-role lowering and the typed live driver now execute a declared
+`propose` model role through an injected source adapter and compiler-derived
+proposal decoding. That route is described by
+[Language-native Agent Lowering](LANGUAGE-NATIVE-AGENT-LOWERING-V1.md) and
+[Agent Runtime v2](AGENT-RUNTIME-V2.md); it does not require a literal new
+`model.invoke` source expression. The checkpointed compiled-source route uses
+[Source Live Journal v2](SOURCE-LIVE-JOURNAL-V2.md) and its additive profiles.
+The existence of those routes does not establish exact adapter/deployment
+binding, model evidence in every runtime root, or hosted support for this
+reference contract; those requirements must be assessed at the executing API.
 
 ## Why a new module instead of extending typed effects v3
 

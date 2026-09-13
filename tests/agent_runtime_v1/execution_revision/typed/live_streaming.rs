@@ -10,7 +10,7 @@ use semaprax::agent_lifecycle::iterative::{
 };
 use semaprax::agent_lifecycle::LifecycleTask;
 use semaprax::agent_runtime::AgentCancellation;
-use semaprax::agent_runtime_v2::bind_agent_runtime_v2_live;
+use semaprax::agent_runtime_v2::{bind_agent_runtime_v2_live, SourceModelAdapterIdentity};
 use semaprax::execution_revision::ProgramRootRef;
 use semaprax::project::with_authenticated_project;
 use semaprax::provider_adapter_sdk::fixture_adapters::{
@@ -143,16 +143,27 @@ fn direct_runtime_v2_streams_checked_source_proposals_before_effect_authorizatio
             })
             .collect();
         let mut adapter_factory = make_factory(documents);
-        let mut source = StreamingSourceProposalAdapter::new(
+        let binding = runtime.source_model_binding(SourceModelAdapterIdentity {
+            provider_id: "fake.local".to_owned(),
+            model_id: "fake-basic".to_owned(),
+            adapter_identity: "scripted-streaming-adapter".to_owned(),
+            adapter_version: "1.0.0".to_owned(),
+            provider_profile: "fixture".to_owned(),
+        })?;
+        let mut source = StreamingSourceProposalAdapter::new_bound(
             &mut adapter_factory,
             AdapterInvocationCapability::grant("offline direct-runtime fixture"),
             schema,
-        );
+            binding.clone(),
+            binding.invocation_capability(),
+        )?;
         let mut handler = Handler {
             calls: Vec::new(),
             wrong: false,
         };
-        let evidence = runtime.run_live(&mut source, &mut handler, &AgentCancellation::new())?;
+        let evidence = runtime
+            .run_live_bound_model(&mut source, &mut handler, &AgentCancellation::new())
+            .map_err(|failure| failure.diagnostics().to_vec())?;
         assert_eq!(
             evidence.run().lifecycle().status(),
             IterativeStatus::Complete
@@ -161,6 +172,54 @@ fn direct_runtime_v2_streams_checked_source_proposals_before_effect_authorizatio
             handler.calls,
             ["fixture.read", "fixture.read.second", "fixture.read"]
         );
+        assert_eq!(evidence.model_evidence().attempts().len(), 3);
+        assert_eq!(
+            evidence.model_evidence().attempts()[0].terminal(),
+            "admitted"
+        );
+        let admitted_root = evidence.evidence_root().digest().to_owned();
+
+        // The same scripted response bytes cannot be joined to a substituted
+        // host adapter label: the retained binding digest changes the v4 root
+        // and the adapter never starts under the wrong label.
+        let substituted = bind(snapshot.retain_revision(), &root)?;
+        let substituted_binding = substituted.source_model_binding(SourceModelAdapterIdentity {
+            provider_id: "fake.local".to_owned(),
+            model_id: "fake-basic".to_owned(),
+            adapter_identity: "substituted-streaming-adapter".to_owned(),
+            adapter_version: "1.0.0".to_owned(),
+            provider_profile: "fixture".to_owned(),
+        })?;
+        let document =
+            crate::agent_lifecycle_v1::proposal(schema.schema().digest(), "5", false, "0");
+        let mut adapter_factory = make_factory(vec![document]);
+        let mut source = StreamingSourceProposalAdapter::new_bound(
+            &mut adapter_factory,
+            AdapterInvocationCapability::grant("offline substituted fixture"),
+            schema,
+            substituted_binding.clone(),
+            substituted_binding.invocation_capability(),
+        )?;
+        let mut never = Handler {
+            calls: Vec::new(),
+            wrong: false,
+        };
+        let substitution =
+            substituted.run_live_bound_model(&mut source, &mut never, &AgentCancellation::new());
+        assert!(substitution.is_err());
+        let substitution = substitution.err().expect("substitution is refused");
+        assert_eq!(substitution.model_evidence().attempts().len(), 1);
+        assert_ne!(substitution.evidence_root().digest(), admitted_root);
+        assert!(never.calls.is_empty());
+
+        // A source with an earlier attempt cannot carry that evidence into a
+        // new invocation, and the refusal does not add another observation.
+        let reused = bind(snapshot.retain_revision(), &root)?;
+        let reuse = reused.run_live_bound_model(&mut source, &mut never, &AgentCancellation::new());
+        assert!(reuse.is_err());
+        let reuse = reuse.err().expect("reused source is refused");
+        assert!(reuse.model_evidence().attempts().is_empty());
+        assert_eq!(source.model_evidence().attempts().len(), 1);
 
         let hostile = bind(snapshot.retain_revision(), &root)?;
         let mut adapter_factory = make_factory(vec!["!".to_owned()]);

@@ -8,6 +8,15 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Bind typed live model operations to deployment selection and commit their
+  redacted attempt evidence in an additive execution root (#177). Propagate
+  remaining host deadlines and distinguish reserved, observed and unknown
+  provider charges in a separate Runtime v1 receipt (#113).
+
+- Add counterbalanced pilot scheduling, isolated MCP tools for both comparison
+  lanes, retained candidate source bytes and exact transport archives (#105).
+  Trial capture remains separate from eligible observations and review.
+
 - Preserve pre-dispatch OpenCode cancellation as a zero-call cancellation
   failure (#113). A changed journal or claimed dispatch without a receipt
   remains a model failure; unresolved attempts cannot become clean refusals.

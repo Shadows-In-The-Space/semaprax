@@ -62,6 +62,16 @@ completed stream whose settlement bytes disagree. The supplied source remains
 an explicit host capability; this route creates no transport, provider, or
 checkpoint authority.
 
+[Source Model Operation v1](SOURCE-MODEL-OPERATION-V1.md) adds the bounded
+`run_live_bound_model` route. It commits one deployment-admitted
+provider/model selection whose declared capabilities satisfy the source
+requirements, adapter identity/profile, source revision, compiler Proposal
+grammar and current instance before the adapter can start. It retains redacted
+model-attempt evidence in additive EvidenceRoot v4. The ordinary `run_live`
+surface and its v3 root remain the compatibility route. This is a local,
+nondurable adapter binding; it makes no hosted-provider or target-runtime
+claim.
+
 `run_durable` consumes the same bound producer and a caller-owned single-writer
 checkpoint store. A retained snapshot must come from that authorized trusted
 store; hashes do not authenticate host observations. The private producer

@@ -10,9 +10,11 @@ iterative source lifecycle. It is implemented by
 `live_invocation::source_journal`. The ordinary `run_live` API remains an
 unchanged, nondurable route. This document records implementation semantics;
 its focused local gates exercise checked execution and injected host boundaries.
-It does not claim hosted execution, live-provider execution, a CLI surface,
-migration, or runtime durability beyond the supplied
-`CheckpointStore` contract.
+This v2 contract alone does not claim hosted execution, live-provider execution,
+or runtime durability beyond the supplied `CheckpointStore` contract. The
+additive [source migration v3](SOURCE-LIVE-MIGRATION-V3.md) and
+[private host CLI](SOURCE-LIVE-CLI-V1.md) specify their implemented routes and
+separate local evidence.
 
 ## Route and ownership
 

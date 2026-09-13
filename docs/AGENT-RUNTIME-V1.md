@@ -2,9 +2,9 @@
 
 Audience: maintainers, host integrators, and compiler contributors.
 
-Status: the A+B private proof and additive C1 injected-host Rust API are hosted
-green. It does
-not add language syntax, compiler semantics, a provider transport, a CLI, or a
+Status: the A+B private proof and additive C1 injected-host Rust API were hosted
+green at the recorded revision below. The newer remaining-deadline and accounting-receipt
+additions have local targeted evidence only; hosted revalidation is pending. It does not add language syntax, compiler semantics, a provider transport, a CLI, or a
 backend.
 
 ## Boundary
@@ -15,14 +15,21 @@ or registered read-only tool actions. Model output is data, never authority.
 Each tool is selected from the admitted catalog; its closed scalar-object
 schema, read effect, capabilities, policy epoch, cancellation state, deadline,
 and remaining budgets are checked immediately before its single invocation.
-The runtime supplies the call identity. Tools and uncertain provider attempts
-are never retried.
+Elapsed time at the exact limit is expired. Immediately after local admission
+evidence is prepared and before either external dispatch, the runtime supplies
+the host a positive remaining monotonic deadline budget. Tools and uncertain
+provider attempts are never retried.
 
 The injected `AgentHost` owns provider credentials and transport. Provider and
 tool bytes enter runtime-owned bounded sinks incrementally. No built-in HTTP,
 provider SDK, local process, environment, home-directory credential lookup,
 filesystem mutation, durable memory, wallet, payment, signing, or asset
 authority exists. Cancellation is cooperative, not forced preemption.
+Legacy hosts that implement only `invoke_tool` receive the additive default
+deadline hook: their runtime-owned sink still refuses late bytes and no late
+result is published, but the runtime cannot physically interrupt a blocking
+legacy call before it returns. Hosts that need a bounded physical tool
+operation implement the deadline-aware hook.
 
 The additive generated [Proposal-to-Runtime compatibility
 adapter](AGENT-PROPOSAL-RUNTIME-V1-COMPATIBILITY-V1.md) lives outside this
@@ -45,12 +52,16 @@ The private tranche implements the frozen schemas:
 - `semaprax.agent-runtime-trace.v1`
 - `semaprax.agent-runtime-evidence.v1`
 
+The separate authority-free projection uses `semaprax.agent-runtime-accounting-receipt.v1`; it does not alter any frozen Trace or Evidence bytes.
+
 Documents are compact canonical UTF-8 JSON with one terminal LF, exact key and
 array order, closed types, no duplicate or extra keys, and depth at most 16.
 External digest strings are lowercase `sha256:` values over the frozen domain
 and exact document bytes. Raw prompts, actions, tool results, provider errors,
 and credentials are absent from Trace and Evidence; those artifacts retain
 only bounded identities, decisions, lengths, usage, statuses, and digests.
+
+Each accounting receipt is independently canonical and links the run id plus exact Trace and Evidence digests. Its ordered provider attempts retain the existing reserved USD-microunit ceiling, then mark a charge as `observed` only when a successful provider response carries an explicit closed usage report. A default or missing report, a failed attempt, and any response rejected after dispatch remain `unknown`; an explicit all-zero report is observed zero. Receipt totals distinguish reserved, observed, and unknown exposure without creating billing, settlement, retry, or transport authority.
 
 The run loop is single-threaded (`max_concurrency` is exactly 1), bounded to 16
 turns, 32 provider attempts, 32 tool calls, five minutes, and one decreasing
@@ -91,12 +102,17 @@ invocation, provider quality, live transport, or a Runtime v2 surface.
 The public Rust surface owns an opaque `Agent<H: AgentHost>`, monotonic shared
 `AgentCancellation`, runtime-owned streaming sinks, closed provider attempt and
 usage values, and an opaque `AgentRun` exposing only status, an untrusted final
-message, and canonical Trace/Evidence bytes and digests. The injected, unsealed
+message, canonical Trace/Evidence bytes and digests, and an authority-free accounting receipt/digest.
+The receipt reports bounded reservation, observed reported charge, and unknown exposure; it cannot settle or bill. The injected, unsealed
 host owns its provider transport and declared read-only tool implementations.
 Its policy, elapsed-time, boundary-probe, and tokenization methods are pure local
 accounting observations; only provider attempts and tool invocation are external
 boundaries. A host that violates that contract is outside v1 evidence. The
-runtime neither proves host side effects absent nor mints tool authority.
+provider boundary receives its positive remaining monotonic budget. The
+additive tool deadline hook delegates to the original tool boundary for legacy
+hosts, so only a host that implements the hook can physically bound that
+invocation. The runtime neither proves host side effects absent nor mints tool
+authority.
 
 The fixture documents have these executable raw SHA-256 known answers
 (including the terminal LF):

@@ -845,21 +845,66 @@ def run(
     }
 
 
+def make_schedule(manifest_path):
+    """Order authenticated pairs without changing any candidate-visible bytes.
+
+    Rotate task position each repetition and alternate the first lane for
+    successive pairs. An odd pair count necessarily leaves one extra first
+    position for one lane; retain that imbalance explicitly.
+    """
+    matrix = atc.make_matrix(manifest_path)
+    tasks = list(dict.fromkeys(row["task"] for row in matrix["rows"]))
+    lanes = list(dict.fromkeys(row["lane"] for row in matrix["rows"]))
+    if len(lanes) != 2 or not tasks:
+        raise RunnerFailure("paired schedule requires tasks and exactly two available lanes")
+    trials = sorted({row["trial"] for row in matrix["rows"]})
+    inventory = {(row["task"], row["lane"], row["trial"]): row
+                 for row in matrix["rows"]}
+    rows = []
+    first_counts = dict.fromkeys(lanes, 0)
+    for repetition, trial in enumerate(trials):
+        offset = repetition % len(tasks)
+        for task in tasks[offset:] + tasks[:offset]:
+            pair = len(rows) // 2
+            ordered = lanes if pair % 2 == 0 else lanes[::-1]
+            first_counts[ordered[0]] += 1
+            for lane in ordered:
+                rows.append(inventory[(task, lane, trial)])
+    if len(rows) != len(inventory) or len(inventory) != len(matrix["rows"]):
+        raise RunnerFailure("schedule inventory differs from the complete matrix")
+    return {
+        "schema": "semaprax.agent-task-comparison-schedule.v1",
+        "algorithm": "rotating-tasks-alternating-pairs-v1",
+        "matrix": matrix,
+        "matrix_sha256": digest(canonical(matrix)),
+        "rows": rows,
+        "first_lane_counts": first_counts,
+        "claims": {"execution": "not_performed", "comparative_result": "not_observed"},
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("run",))
+    parser.add_argument("command", choices=("run", "schedule"))
     parser.add_argument("--manifest", default="benchmarks/agent-task-comparison-v1/manifest.json")
-    parser.add_argument("--task", required=True)
-    parser.add_argument("--lane", required=True)
-    parser.add_argument("--trial", type=int, required=True)
+    parser.add_argument("--task", required=False)
+    parser.add_argument("--lane", required=False)
+    parser.add_argument("--trial", type=int)
     parser.add_argument("--runner", choices=("fixture", "live"), default="fixture")
     parser.add_argument("--fixture-script")
-    parser.add_argument("--evidence-dir", required=True, help="repository-relative output directory")
+    parser.add_argument("--evidence-dir", required=False, help="repository-relative output directory")
     parser.add_argument("--provider-config")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--work-dir", help="sandbox parent directory (defaults to the OS temp directory)")
     parser.add_argument("--compiler", help="explicit Semaprax binary for compiler-derived owned-task evidence")
     arguments = parser.parse_args()
+
+    if arguments.command == "schedule":
+        print(json.dumps(make_schedule(arguments.manifest), indent=2, sort_keys=True))
+        return
+    for name in ("task", "lane", "trial", "evidence_dir"):
+        if getattr(arguments, name) is None:
+            parser.error(f"run requires --{name.replace('_', '-')}")
 
     evidence_dir = ROOT / arguments.evidence_dir
     try:

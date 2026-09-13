@@ -375,6 +375,8 @@ pub struct AgentRun {
     trace_digest: String,
     evidence: String,
     evidence_digest: String,
+    accounting_receipt: String,
+    accounting_receipt_digest: String,
     status: AgentRunStatus,
     replay: private::EvidenceReplay,
 }
@@ -424,23 +426,49 @@ pub enum AgentProviderDisposition {
 }
 
 /// Closed provider-reported usage for one attempt.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq)]
 pub struct AgentProviderUsage {
     input_tokens: u64,
     output_tokens: u64,
     usd_microunits: u64,
+    reported: bool,
+}
+
+impl Default for AgentProviderUsage {
+    /// An omitted usage report is unknown, even though its numeric accessors are zero.
+    fn default() -> Self {
+        Self {
+            input_tokens: 0,
+            output_tokens: 0,
+            usd_microunits: 0,
+            reported: false,
+        }
+    }
+}
+
+impl PartialEq for AgentProviderUsage {
+    fn eq(&self, other: &Self) -> bool {
+        self.input_tokens == other.input_tokens
+            && self.output_tokens == other.output_tokens
+            && self.usd_microunits == other.usd_microunits
+    }
 }
 
 impl AgentProviderUsage {
-    /// Constructs closed provider-reported usage.
+    /// Constructs an explicit provider usage report. Zero values remain reported.
     pub const fn new(input_tokens: u64, output_tokens: u64, usd_microunits: u64) -> Self {
         Self {
             input_tokens,
             output_tokens,
             usd_microunits,
+            reported: true,
         }
     }
 
+    /// Returns whether the provider explicitly reported usage.
+    pub const fn is_reported(&self) -> bool {
+        self.reported
+    }
     /// Returns reported input tokens.
     pub const fn input_tokens(&self) -> u64 {
         self.input_tokens
@@ -458,8 +486,9 @@ impl AgentProviderUsage {
 /// Caller-injected provider and read-only tool host.
 ///
 /// Observation, probing, and tokenization methods are pure local observations.
-/// Only `attempt_provider` and `invoke_tool` may cross an external-effect
-/// boundary. Implementations that violate this contract are outside v1.
+/// Only `attempt_provider` and the tool-invocation methods may cross an
+/// external-effect boundary. Implementations that violate this contract are
+/// outside v1.
 pub trait AgentHost {
     /// Returns the current monotonic policy epoch as a pure observation.
     fn policy_epoch(&self) -> u64;
@@ -470,12 +499,15 @@ pub trait AgentHost {
     /// Counts request tokens locally without crossing an external boundary.
     fn tokenize(&mut self, tokenizer_id: &str, request: &str) -> Option<u64>;
     /// Performs the sole provider external boundary and streams into `sink`.
+    ///
+    /// `remaining_deadline_ms` is the positive remaining monotonic budget at
+    /// admission. Hosts must apply it to the provider operation itself.
     fn attempt_provider(
         &mut self,
         provider_id: &str,
         model_id: &str,
         request: &str,
-        deadline_ms: u64,
+        remaining_deadline_ms: u64,
         sink: &mut AgentProviderSink,
     ) -> AgentProviderAttempt;
     /// Invokes one contractually read-only registered tool external boundary.
@@ -486,6 +518,22 @@ pub trait AgentHost {
         arguments_json: &str,
         sink: &mut AgentToolResultSink,
     ) -> bool;
+    /// Invokes one read-only tool with the positive remaining monotonic budget.
+    ///
+    /// This additive hook preserves existing hosts while allowing deadline-aware
+    /// hosts to bound their physical tool invocation. The default delegates to
+    /// the original boundary for source compatibility.
+    fn invoke_tool_with_deadline(
+        &mut self,
+        call_id: &str,
+        tool_id: &str,
+        arguments_json: &str,
+        remaining_deadline_ms: u64,
+        sink: &mut AgentToolResultSink,
+    ) -> bool {
+        let _ = remaining_deadline_ms;
+        self.invoke_tool(call_id, tool_id, arguments_json, sink)
+    }
 }
 
 /// Pure boundary observations used by runtime-owned streaming sinks.
@@ -550,7 +598,7 @@ impl AgentProviderSink {
             self.boundary = Some(AgentRunStatus::Cancelled);
             return false;
         }
-        if self.probe.elapsed_ms() > self.deadline_ms {
+        if self.probe.elapsed_ms() >= self.deadline_ms {
             self.boundary = Some(AgentRunStatus::DeadlineExceeded);
             return false;
         }
@@ -622,7 +670,7 @@ impl AgentToolResultSink {
             self.boundary = Some(AgentRunStatus::Cancelled);
             return false;
         }
-        if self.probe.elapsed_ms() > self.deadline_ms {
+        if self.probe.elapsed_ms() >= self.deadline_ms {
             self.boundary = Some(AgentRunStatus::DeadlineExceeded);
             return false;
         }
@@ -710,6 +758,14 @@ impl AgentRun {
     /// Returns the domain-separated Evidence digest.
     pub fn evidence_digest(&self) -> &str {
         &self.evidence_digest
+    }
+    /// Returns the canonical authority-free accounting receipt including its terminal LF.
+    pub fn accounting_receipt(&self) -> &str {
+        &self.accounting_receipt
+    }
+    /// Returns the domain-separated accounting receipt digest.
+    pub fn accounting_receipt_digest(&self) -> &str {
+        &self.accounting_receipt_digest
     }
 
     pub(crate) fn economic_binding(&self) -> EconomicAgentBinding<'_> {

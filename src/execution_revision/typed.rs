@@ -9,6 +9,11 @@ use crate::agent_lifecycle::iterative::effects::{
     compile_typed_effects, CompiledTypedEffects, EffectBudget, EffectOperation, TypedEffectHandler,
     TypedEffectRun,
 };
+use crate::agent_runtime_v2::source_model::SourceModelContract;
+use crate::agent_runtime_v2::{
+    SourceModelAdapterIdentity, SourceModelBinding, SourceModelEvidence,
+};
+use crate::provider_adapter_sdk::StreamingSourceProposalAdapter;
 
 pub const MAX_ITERATIVE_PROPOSAL_BYTES: usize = 2 * 1024 * 1024;
 
@@ -23,6 +28,7 @@ pub struct AgentRuntimeV2 {
     proposals: Vec<String>,
     budget: IterativeBudget,
     effects: EffectBudget,
+    source_model: SourceModelContract,
 }
 impl AgentRuntimeV2 {
     pub fn deployment_root(&self) -> &ExecutionRoot {
@@ -105,6 +111,105 @@ impl AgentRuntimeV2 {
     pub fn proposal_schema(&self) -> &crate::agent_proposal::CompiledAgentProposalSchema {
         self.lifecycle.proposal_schema()
     }
+
+    /// Derives facts for one explicit streaming adapter selection. The caller
+    /// supplies this binding and its derived token to the adapter constructor;
+    /// neither value creates a provider nor a transport capability.
+    pub fn source_model_binding(
+        &self,
+        adapter: SourceModelAdapterIdentity,
+    ) -> Result<SourceModelBinding> {
+        self.source_model
+            .bind(self.deployment.digest(), self.instance.digest(), adapter)
+            .map_err(|detail| refused(detail))
+    }
+
+    /// Consumes the bound streaming source-model route. It is additive to the
+    /// ordinary `run_live` API, which remains the compatibility seam for an
+    /// arbitrary caller-owned proposal source.
+    pub fn run_live_bound_model(
+        self,
+        source: &mut StreamingSourceProposalAdapter<'_>,
+        read: &mut dyn TypedEffectHandler,
+        cancellation: &AgentCancellation,
+    ) -> std::result::Result<AgentRuntimeV2ModelEvidence, AgentRuntimeV2ModelFailure> {
+        // The source retains its binding internally. The runtime derives the
+        // same source/schema/root facts before it permits the first factory
+        // call; adapter identity comparison itself happens after construction
+        // and before `ProviderAdapter::start`.
+        if !self.proposals.is_empty() {
+            return Err(AgentRuntimeV2ModelFailure::new(
+                refused("live source runtime cannot replace a bound proposal inventory"),
+                SourceModelEvidence::default(),
+                &self,
+                None,
+                "preflight.proposal_inventory",
+            ));
+        }
+        if !source.model_evidence().attempts().is_empty() {
+            return Err(AgentRuntimeV2ModelFailure::new(
+                refused("source.model_evidence_reused"),
+                SourceModelEvidence::default(),
+                &self,
+                None,
+                "preflight.evidence_reused",
+            ));
+        }
+        if source.model_binding().is_none_or(|binding| {
+            !binding.runtime_matches(
+                self.deployment.digest(),
+                self.instance.digest(),
+                self.lifecycle.proposal_schema().source_revision(),
+                self.lifecycle.proposal_schema().schema().digest(),
+            )
+        }) {
+            return Err(AgentRuntimeV2ModelFailure::new(
+                refused("source.model_binding"),
+                SourceModelEvidence::default(),
+                &self,
+                None,
+                "preflight.binding",
+            ));
+        }
+        let binding_digest = source
+            .model_binding()
+            .expect("checked source model binding")
+            .digest()
+            .to_owned();
+        let run = self.lifecycle.run_live(
+            &self.task,
+            source,
+            read,
+            self.budget,
+            self.effects,
+            cancellation,
+        );
+        match run {
+            Ok(run) => {
+                let model_evidence = source.model_evidence().clone();
+                let evidence = model_evidence_root(
+                    &self,
+                    run.evidence_digest(),
+                    &model_evidence,
+                    Some(&binding_digest),
+                    "completed",
+                );
+                Ok(AgentRuntimeV2ModelEvidence {
+                    run,
+                    model_evidence,
+                    evidence,
+                    revision: self.revision,
+                })
+            }
+            Err(diagnostics) => Err(AgentRuntimeV2ModelFailure::new(
+                diagnostics,
+                source.model_evidence().clone(),
+                &self,
+                Some(&binding_digest),
+                "lifecycle_failed",
+            )),
+        }
+    }
 }
 
 pub struct AgentRuntimeV2Evidence {
@@ -122,6 +227,86 @@ impl AgentRuntimeV2Evidence {
     pub fn execution_revision(&self) -> &ExecutionRoot {
         &self.revision
     }
+}
+
+/// Evidence for one successfully completed bound streaming model route.
+pub struct AgentRuntimeV2ModelEvidence {
+    run: TypedEffectRun,
+    model_evidence: SourceModelEvidence,
+    evidence: ExecutionRoot,
+    revision: ExecutionRoot,
+}
+impl AgentRuntimeV2ModelEvidence {
+    pub fn run(&self) -> &TypedEffectRun {
+        &self.run
+    }
+    pub fn model_evidence(&self) -> &SourceModelEvidence {
+        &self.model_evidence
+    }
+    pub fn evidence_root(&self) -> &ExecutionRoot {
+        &self.evidence
+    }
+    pub fn execution_revision(&self) -> &ExecutionRoot {
+        &self.revision
+    }
+}
+
+/// A bound streaming source failure retains redacted model-attempt evidence.
+/// The source adapter never returns raw prompt or response bytes through it.
+pub struct AgentRuntimeV2ModelFailure {
+    diagnostics: Vec<Diagnostic>,
+    model_evidence: SourceModelEvidence,
+    evidence: ExecutionRoot,
+    revision: ExecutionRoot,
+}
+impl AgentRuntimeV2ModelFailure {
+    fn new(
+        diagnostics: Vec<Diagnostic>,
+        model_evidence: SourceModelEvidence,
+        runtime: &AgentRuntimeV2,
+        binding_digest: Option<&str>,
+        status: &'static str,
+    ) -> Self {
+        let evidence = model_evidence_root(runtime, "", &model_evidence, binding_digest, status);
+        Self {
+            diagnostics,
+            model_evidence,
+            evidence,
+            revision: runtime.revision.clone(),
+        }
+    }
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+    pub fn model_evidence(&self) -> &SourceModelEvidence {
+        &self.model_evidence
+    }
+    pub fn evidence_root(&self) -> &ExecutionRoot {
+        &self.evidence
+    }
+    pub fn execution_revision(&self) -> &ExecutionRoot {
+        &self.revision
+    }
+}
+
+fn model_evidence_root(
+    runtime: &AgentRuntimeV2,
+    typed_effect_evidence: &str,
+    model_evidence: &SourceModelEvidence,
+    binding_digest: Option<&str>,
+    status: &str,
+) -> ExecutionRoot {
+    root(
+        "semaprax.evidence-root.v4",
+        json!({
+            "execution_revision": runtime.revision.digest(),
+            "instance_root": runtime.instance.digest(),
+            "typed_effect_evidence": if typed_effect_evidence.is_empty() { None } else { Some(typed_effect_evidence) },
+            "source_model_binding": binding_digest,
+            "source_model_evidence": model_evidence.digest(),
+            "source_model_status": status,
+        }),
+    )
 }
 
 /// Compile the deployed Step reducer directly from the selected retained source.
@@ -325,6 +510,8 @@ fn bind_runtime(
     };
     let deployed_turns = limit("max_turns")?;
     let deployed_calls = limit("max_tool_calls")?;
+    let deployed_model_request_bytes = limit("max_provider_request_bytes")?;
+    let deployed_model_response_bytes = limit("max_provider_response_bytes")?;
     let effective_budget = IterativeBudget {
         max_iterations: budget
             .max_iterations
@@ -364,6 +551,18 @@ fn bind_runtime(
             "agent_id": agent_id, "step_type_id": step_type_id, "typed_registry": lifecycle.digest(),
         }),
     );
+    let source_model = SourceModelContract::new(
+        bound.deployment().digest(),
+        bound.digest(),
+        lifecycle.proposal_schema().source_revision(),
+        lifecycle.proposal_schema().schema().digest(),
+        bound.granted_capabilities(),
+        bound.required_model_capabilities(),
+        bound.model_selections(),
+        deployed_model_request_bytes,
+        deployed_model_response_bytes,
+    )
+    .map_err(|detail| refused(detail))?;
     let proposal_digests: Vec<_> = proposals
         .iter()
         .map(|source| input_digest(source.as_bytes()))
@@ -399,6 +598,7 @@ fn bind_runtime(
         proposals: proposals.to_vec(),
         budget: effective_budget,
         effects,
+        source_model,
     })
 }
 

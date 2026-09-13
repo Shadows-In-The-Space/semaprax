@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -28,17 +29,12 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(permissions["task"], "deny")
         self.assertEqual(permissions["external_directory"], "deny")
 
-    def test_source_first_only(self):
-        with tempfile.TemporaryDirectory() as temp:
-            with self.assertRaises(pilot.PilotFailure):
-                pilot.run_tuple(
-                    "signature-migration-v1",
-                    "semaprax-graph-operational",
-                    1,
-                    "unused",
-                    str(Path(sys.executable).resolve(strict=True)),
-                    Path(temp) / "new",
-                )
+    def test_graph_lane_denies_native_source_tools(self):
+        permissions = pilot.policy("semaprax-graph-operational")["agent"][pilot.AGENT]["permission"]
+        for tool in ("read", "glob", "grep", "list", "edit"):
+            self.assertEqual(permissions[tool], "deny")
+        self.assertEqual(permissions["bash"], {"*": "deny"})
+        self.assertEqual(permissions["semaprax_*"], "allow")
 
     def test_new_evidence_required(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -52,8 +48,71 @@ class PilotTests(unittest.TestCase):
                     Path(temp),
                 )
 
+    def test_archived_provider_counters_do_not_estimate_tokens(self):
+        body = (ROOT / "scripts/fixtures/opencode-provider-smoke-v1/session.json").read_bytes()
+        counters = pilot.provider_usage(body, pilot.MODEL)
+        self.assertEqual(counters["status"], "observed")
+        self.assertEqual((counters["model_input_tokens"], counters["model_output_tokens"]), (4437, 18))
+
+    def test_gateway_counter_excludes_harness_drift(self):
+        event = lambda argv, out, err, code: {
+            "argv_b64": pilot.base64.b64encode(argv).decode(),
+            "stdout_b64": pilot.base64.b64encode(out).decode(),
+            "stderr_b64": pilot.base64.b64encode(err).decode(),
+            "returncode": code,
+        }
+        body = b"\n".join(
+            json.dumps(item).encode()
+            for item in (event(b"graph\0src/core.spx", b"{}", b"", 0), event(b"pilot-drift\0graph", b"", b"", 0))
+        )
+        diagnostics = pilot.gateway_diagnostics(body)
+        self.assertEqual(diagnostics["gateway_invocations"], 1)
+        self.assertEqual(diagnostics["gateway_argv_bytes"], len(b"graph\0src/core.spx"))
+
 
 class SubprocessBoundaryTests(unittest.TestCase):
+    def test_gateway_rejects_embedded_absolute_output_path(self):
+        with tempfile.TemporaryDirectory(prefix="spx-gateway-test-") as temp:
+            state = Path(temp)
+            candidate = state / "candidate"
+            (candidate / "src").mkdir(parents=True)
+            (candidate / "src/core.spx").write_text("module sample;\n")
+            gateway, _, _, configuration = pilot.install_gateway(
+                Path(sys.executable).resolve(strict=True), state, candidate,
+                "semaprax-graph-operational",
+            )
+            environment = dict(os.environ, SEMAPRAX_PILOT_GATEWAY=configuration)
+            completed = subprocess.run(
+                [gateway, "graph", "--output=/tmp/pilot-escape"],
+                env=environment, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, check=False,
+            )
+            self.assertEqual(completed.returncode, 126)
+            self.assertIn(b"option path escapes candidate", completed.stderr)
+
+    def test_source_write_refuses_a_stale_precondition(self):
+        with tempfile.TemporaryDirectory(prefix="spx-gateway-test-") as temp:
+            state = Path(temp)
+            candidate = state / "candidate"
+            target = candidate / "src/core.spx"
+            target.parent.mkdir(parents=True)
+            target.write_text("module before;\n")
+            gateway, _, _, configuration = pilot.install_gateway(
+                pilot.provision_semaprax(Path(sys.executable).resolve(strict=True), state)[0],
+                state, candidate, "semaprax-source-first",
+            )
+            environment = dict(os.environ, SEMAPRAX_PILOT_GATEWAY=configuration)
+            stale_digest = pilot.sha(target.read_bytes())
+            target.write_text("module injected;\n")
+            completed = subprocess.run(
+                [gateway, "pilot-write-source", "src/core.spx", stale_digest,
+                 pilot.base64.b64encode(b"module overwrite;\n").decode()],
+                env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            )
+            self.assertEqual(completed.returncode, 126)
+            self.assertEqual(target.read_text(), "module injected;\n")
+            self.assertIn(b"precondition is stale", completed.stderr)
+
     def test_output_cap_kills_continuous_writer(self):
         old = pilot.CAP
         pilot.CAP = 1024
@@ -165,12 +224,11 @@ class SubprocessBoundaryTests(unittest.TestCase):
 
 class TupleTransportTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("sandbox-exec"), "sandbox-exec unavailable")
-    def test_real_wrapped_run_and_export_archive_their_boundary_proof(self):
+    def test_source_and_graph_wrapped_runs_archive_their_boundary_proof(self):
         with tempfile.TemporaryDirectory(prefix="spx-stub-test-") as temp:
             root = Path(temp).resolve()
             evidence_parent = root / "evidence-parent"
             evidence_parent.mkdir()
-            evidence = evidence_parent / "run"
             hidden = evidence_parent / "hidden-rubric.json"
             hidden.write_text("rubric")
             outside = root / "outside"
@@ -200,7 +258,6 @@ class TupleTransportTests(unittest.TestCase):
                 "assert all(Path(os.environ[x]).parent == config.parent for x in ('XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME','TMPDIR'))\n"
                 "compiler=shutil.which('semaprax')\n"
                 "assert compiler and Path(compiler).parent == config.parent/'bin'\n"
-                "assert subprocess.run(['semaprax','--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0\n"
                 "for item in protected:\n"
                 "    try: Path(item).read_bytes()\n"
                 "    except OSError: pass\n"
@@ -223,15 +280,15 @@ class TupleTransportTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"PILOT_TEST_SECRET": "must-not-pass"}):
                 compiler_source = Path(sys.executable).resolve(strict=True)
                 compiler_before = compiler_source.read_bytes()
-                record = pilot.run_tuple(
-                    "signature-migration-v1",
-                    "semaprax-source-first",
-                    1,
-                    stub,
-                    str(compiler_source),
-                    evidence,
-                    10,
-                )
+                records = {
+                    lane: pilot.run_tuple(
+                        "signature-migration-v1", lane, 1, stub,
+                        str(compiler_source), evidence_parent / lane, 10,
+                    )
+                    for lane in ("semaprax-source-first", "semaprax-graph-operational")
+                }
+            record = records["semaprax-source-first"]
+            evidence = evidence_parent / "semaprax-source-first"
             self.assertEqual(compiler_source.read_bytes(), compiler_before)
             self.assertEqual(record["semaprax_sha256"], pilot.sha(compiler_before))
             self.assertEqual(record["status"], "ineligible")
@@ -251,6 +308,11 @@ class TupleTransportTests(unittest.TestCase):
                 record["stdout_sha256"],
                 pilot.sha((evidence / "stdout.jsonl").read_bytes()),
             )
+            for lane, lane_record in records.items():
+                lane_evidence = evidence_parent / lane
+                self.assertEqual(lane_record["status"], "ineligible")
+                self.assertTrue((lane_evidence / "candidate-source.json").is_file())
+                self.assertTrue((lane_evidence / "mcp-wire.jsonl").is_file())
 
 
 if __name__ == "__main__":

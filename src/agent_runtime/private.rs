@@ -2,8 +2,18 @@ use super::*;
 use std::fmt;
 use std::fmt::Write as _;
 
+mod accounting;
+mod deadline;
 #[cfg(test)]
 mod economic_tests;
+
+#[cfg(test)]
+pub(super) use accounting::replay_accounting_receipt;
+use accounting::{
+    account_partial_provider, account_uncertain, observe_provider_attempt, receipt_digest,
+    reconcile_accounting_receipt, render_accounting_receipt, reserve_provider_attempt,
+};
+use deadline::{boundary_termination, remaining_deadline_ms, termination_for_status};
 
 #[derive(Clone, Default, Eq, PartialEq)]
 struct EvidenceBudget {
@@ -42,6 +52,7 @@ struct RunState {
     task_bytes: u64,
     task_nonce: String,
     external_effect_crossed: bool,
+    provider_accounting: Vec<accounting::ProviderAccounting>,
 }
 
 pub(super) struct EvidenceReplay {
@@ -1012,6 +1023,7 @@ fn run_bounded<H: AgentHost>(
         task_bytes: task.source.len() as u64,
         task_nonce: task.nonce.clone(),
         external_effect_crossed: false,
+        provider_accounting: Vec::new(),
     };
     push_event(
         &mut state,
@@ -1747,17 +1759,37 @@ fn provider_turn<H: AgentHost>(
             state.usage = previous_usage;
             return Err(diagnostic);
         }
+        let remaining_deadline_ms =
+            match remaining_deadline_ms(profile, host, cancellation, policy_epoch) {
+                Ok(remaining) => remaining,
+                Err(termination) if termination.status == RunStatus::Cancelled => {
+                    state.events.pop();
+                    state.usage = previous_usage;
+                    return Err(operational("SPX-I220", "Agent Runtime run was cancelled"));
+                }
+                Err(termination) => {
+                    state.events.pop();
+                    state.usage = previous_usage;
+                    state.termination = termination;
+                    return Ok(None);
+                }
+            };
         if cancellation.is_cancelled() {
             state.events.pop();
             state.usage = previous_usage;
             return Err(operational("SPX-I220", "Agent Runtime run was cancelled"));
+        }
+        if let Err(diagnostic) = reserve_provider_attempt(state, route) {
+            state.events.pop();
+            state.usage = previous_usage;
+            return Err(diagnostic);
         }
         state.external_effect_crossed = true;
         let attempt = host.attempt_provider(
             &model.provider_id,
             &model.model_id,
             &route.request,
-            profile.limits.max_elapsed_ms,
+            remaining_deadline_ms,
             &mut sink,
         );
         if cancellation.is_cancelled() && sink.boundary.is_none() {
@@ -2012,6 +2044,7 @@ fn provider_turn<H: AgentHost>(
             )?;
             return Ok(None);
         }
+        observe_provider_attempt(state, attempt.usage, route)?;
         checked_add(
             &mut state.usage.provider_output_bytes,
             response.len() as u64,
@@ -2183,13 +2216,27 @@ fn execute_tool<H: AgentHost>(
         MAX_JSON_DEPTH + 4,
     )?;
     preflight_external_capacity(profile, state, ExternalBoundary::Tool(model, &tool_id))?;
+    let remaining_deadline_ms =
+        match remaining_deadline_ms(profile, host, cancellation, policy_epoch) {
+            Ok(remaining) => remaining,
+            Err(termination) => {
+                state.termination = termination;
+                return Ok(());
+            }
+        };
     if cancellation.is_cancelled() {
         state.termination =
             termination_from_diagnostic(operational("SPX-I220", "Agent Runtime run was cancelled"));
         return Ok(());
     }
     state.external_effect_crossed = true;
-    let invocation = host.invoke_tool(&call_id, &tool_id, &arguments_json, &mut sink);
+    let invocation = host.invoke_tool_with_deadline(
+        &call_id,
+        &tool_id,
+        &arguments_json,
+        remaining_deadline_ms,
+        &mut sink,
+    );
     if cancellation.is_cancelled() && sink.boundary.is_none() {
         sink.boundary = Some(RunStatus::Cancelled);
     }
@@ -2462,44 +2509,6 @@ fn finish_failed_tool_result(
     )
 }
 
-fn boundary_termination<H: AgentHost>(
-    profile: &Profile,
-    host: &H,
-    cancellation: &AgentCancellation,
-    policy_epoch: u64,
-) -> Option<Termination> {
-    if cancellation.is_cancelled() {
-        return Some(termination_from_diagnostic(operational(
-            "SPX-I220",
-            "Agent Runtime run was cancelled",
-        )));
-    }
-    if host.elapsed_ms() > profile.limits.max_elapsed_ms {
-        return Some(termination_from_diagnostic(operational(
-            "SPX-I221",
-            "Agent Runtime deadline was exceeded",
-        )));
-    }
-    if host.policy_epoch() != policy_epoch {
-        return Some(termination_from_diagnostic(g207("policy revoked")));
-    }
-    None
-}
-
-fn termination_for_status(status: RunStatus) -> Termination {
-    match status {
-        RunStatus::Cancelled => {
-            termination_from_diagnostic(operational("SPX-I220", "Agent Runtime run was cancelled"))
-        }
-        RunStatus::DeadlineExceeded => termination_from_diagnostic(operational(
-            "SPX-I221",
-            "Agent Runtime deadline was exceeded",
-        )),
-        RunStatus::PolicyRejected => termination_from_diagnostic(g207("policy revoked")),
-        _ => termination_from_diagnostic(g209()),
-    }
-}
-
 fn route<H: AgentHost>(
     profile: &Profile,
     host: &mut H,
@@ -2665,47 +2674,6 @@ fn authorize_tool(profile: &Profile, tool_id: &str, arguments: &Value) -> Result
     validate_schema(arguments, &tool.arguments_schema, MAX_TOOL_ARGUMENT_BYTES)
         .map_err(|_| g207("arguments schema mismatch"))?;
     Ok(())
-}
-
-fn account_uncertain(
-    usage: &mut Usage,
-    sink: &ProviderSink,
-    reported: ProviderUsage,
-    route: &Route,
-    limits: EffectiveLimits,
-) -> Result<(), Diagnostic> {
-    if reported.input_tokens > route.input_tokens
-        || reported.output_tokens > route.output_token_reservation
-        || reported.usd_microunits > route.reserved_cost
-    {
-        return Err(operational(
-            "SPX-I218",
-            "Agent Runtime provider adapter failed: usage invalid",
-        ));
-    }
-    checked_add(
-        &mut usage.provider_output_bytes,
-        sink.bytes.len() as u64,
-        "total_provider_output_bytes",
-        limits.max_total_provider_output_bytes,
-    )?;
-    checked_add(
-        &mut usage.reported_model_output_tokens,
-        reported.output_tokens,
-        "reported_model_output_tokens",
-        limits.max_reported_model_output_tokens,
-    )?;
-    Ok(())
-}
-
-fn account_partial_provider(
-    state: &mut RunState,
-    sink: &ProviderSink,
-    reported: ProviderUsage,
-    route: &Route,
-    limits: EffectiveLimits,
-) -> Result<(), Diagnostic> {
-    account_uncertain(&mut state.usage, sink, reported, route, limits)
 }
 
 fn push_final_event(
@@ -3105,11 +3073,17 @@ fn render_bundle(
         return Err(g208("evidence_bytes", profile.limits.max_evidence_bytes));
     }
     replay_evidence_inner(&evidence, profile, &state, &trace, &budget)?;
+    let evidence_digest = digest(EVIDENCE_DOMAIN, evidence.as_bytes());
+    let accounting_receipt = render_accounting_receipt(&state, &trace_digest, &evidence_digest)?;
+    reconcile_accounting_receipt(&accounting_receipt, &state, &trace_digest, &evidence_digest)?;
+    let accounting_receipt_digest = receipt_digest(&accounting_receipt);
     Ok(AgentRuntimeEvidence {
         trace,
         trace_digest,
-        evidence_digest: digest(EVIDENCE_DOMAIN, evidence.as_bytes()),
         evidence,
+        evidence_digest,
+        accounting_receipt,
+        accounting_receipt_digest,
         status: state.termination.status,
         replay: EvidenceReplay { state, budget },
     })

@@ -65,6 +65,24 @@ class ScratchEvidenceMixin:
         return directory
 
 
+class ScheduleTests(unittest.TestCase):
+    def test_complete_counterbalanced_schedule_preserves_authenticated_tuples(self):
+        result = runner.make_schedule(MANIFEST)
+        self.assertEqual(result, runner.make_schedule(MANIFEST))
+        rows = result["rows"]
+        self.assertEqual(len(rows), 18)
+        key = lambda row: (row["task"], row["lane"], row["trial"])
+        self.assertEqual(sorted(rows, key=key), sorted(result["matrix"]["rows"], key=key))
+        self.assertEqual(len({key(row) for row in rows}), 18)
+        self.assertEqual(sorted(result["first_lane_counts"].values()), [4, 5])
+        for first, second in zip(rows[::2], rows[1::2]):
+            self.assertEqual((first["task"], first["trial"]), (second["task"], second["trial"]))
+            self.assertNotEqual(first["lane"], second["lane"])
+        for position in range(3):
+            self.assertEqual(len({rows[repetition * 6 + position * 2]["task"]
+                                  for repetition in range(3)}), 3)
+
+
 class DeterminismTests(ScratchEvidenceMixin, unittest.TestCase):
     def test_two_runs_of_the_same_tuple_produce_byte_identical_ledger_and_observation(self):
         first = self.make_evidence_dir()

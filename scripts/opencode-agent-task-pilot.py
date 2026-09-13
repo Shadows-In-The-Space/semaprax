@@ -2,6 +2,7 @@
 """One isolated, evidence-first OpenCode tuple transport (no matrix scheduler)."""
 
 import argparse
+import base64
 import hashlib
 import importlib.util
 import json
@@ -15,6 +16,9 @@ import tempfile
 import time
 from pathlib import Path
 
+from opencode_agent_task_pilot.artifacts import archive_candidate, collect_source_bytes
+from opencode_agent_task_pilot.evidence import gateway_diagnostics, mcp_tool_metrics, provider_usage
+
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = "opencode/muse-spark-1.3-contributor-free"
 AGENT = "semaprax-pilot"
@@ -22,7 +26,10 @@ CAP = 1_048_576
 
 
 class PilotFailure(Exception):
-    pass
+    def __init__(self, message, stdout=b"", stderr=b""):
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 def load_runner():
@@ -52,31 +59,48 @@ def inside(parent, child):
         return False
 
 
-def policy():
+def policy(lane="semaprax-source-first", mcp=None):
     # OpenCode documented v1 permission keys; seatbelt remains the OS boundary.
-    return {
+    if lane not in ("semaprax-source-first", "semaprax-graph-operational"):
+        raise PilotFailure("pilot lane is not available")
+    graph_lane = lane == "semaprax-graph-operational"
+    permissions = {
+        "*": "deny",
+        "bash": {"*": "deny"},
+        "webfetch": "deny",
+        "websearch": "deny",
+        "task": "deny",
+        "external_directory": "deny",
+    }
+    if graph_lane:
+        # The graph lane has no ambient raw source surface. Its gateway logs
+        # bounded semantic inspection, proposal materialization and apply
+        # commands; the only source mutation is a compiler patch/apply call.
+        permissions.update({key: "deny" for key in ("read", "glob", "grep", "list", "edit")})
+    else:
+        # Source-first remains conventional canonical source work, but its
+        # reads and writes go through the same argv MCP transport so the
+        # stale trigger and byte counters are evidence rather than guesses.
+        permissions.update({key: "deny" for key in ("read", "glob", "grep", "list", "edit")})
+    permissions["semaprax_*"] = "allow"
+    config = {
         "$schema": "https://opencode.ai/config.json",
         "model": MODEL,
         "agent": {
             AGENT: {
                 "mode": "primary",
                 "model": MODEL,
-                "permission": {
-                    "*": "deny",
-                    "read": "allow",
-                    "glob": "allow",
-                    "grep": "allow",
-                    "list": "allow",
-                    "edit": "allow",
-                    "bash": {"*": "deny", "semaprax *": "allow"},
-                    "webfetch": "deny",
-                    "websearch": "deny",
-                    "task": "deny",
-                    "external_directory": "deny",
-                },
+                "permission": permissions,
             }
         },
     }
+    if mcp is not None:
+        config["mcp"] = mcp
+    return config
+
+
+def ineligibility_reason(lane):
+    return "blinded review and complete ledger metric mapping are not observed"
 
 
 def bounded(argv, cwd, timeout, env=None, check=True):
@@ -150,9 +174,9 @@ def bounded(argv, cwd, timeout, env=None, check=True):
     p.stdout.close()
     p.stderr.close()
     if failure:
-        raise PilotFailure(failure)
+        raise PilotFailure(failure, out, err)
     if check and p.returncode:
-        raise PilotFailure(f"subprocess exited {p.returncode}: {err[:300]!r}")
+        raise PilotFailure(f"subprocess exited {p.returncode}: {err[:300]!r}", out, err)
     return out, err, p.returncode
 
 
@@ -293,6 +317,255 @@ def provision_semaprax(source, state):
     return destination, after
 
 
+def prepare_drift(binding, candidate, state):
+    """Bind the manifest-authenticated stale edit for the gateway trigger."""
+    declared = binding["drift_patch"]
+    if declared is None:
+        return None
+    patch = (ROOT / declared["path"]).read_bytes()
+    if runner.digest(patch) != declared["sha256"]:
+        raise PilotFailure("drift patch bytes disagree with the manifest binding")
+    target = Path(candidate) / "src" / "core.spx"
+    before = target.read_bytes()
+    after = runner.apply_unified_diff_single_hunk(before, patch, "src/core.spx")
+    if before == after:
+        raise PilotFailure("manifest drift patch does not change the candidate")
+    payload = {
+        "target": "src/core.spx",
+        "before_b64": base64.b64encode(before).decode("ascii"),
+        "after_b64": base64.b64encode(after).decode("ascii"),
+        "before_sha256": sha(before),
+        "after_sha256": sha(after),
+        "applied": False,
+    }
+    path = Path(state) / "drift.json"
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def install_gateway(compiler, state, candidate, lane, drift=None):
+    """Install a recorded, lane-limited compiler command gateway."""
+    compiler = Path(compiler).resolve(strict=True)
+    state = Path(state).resolve(strict=True)
+    candidate = Path(candidate).resolve(strict=True)
+    real = compiler.with_name("semaprax-real")
+    compiler.replace(real)
+    log = state / "gateway.jsonl"
+    config = json.dumps(
+        {"candidate": str(candidate), "lane": lane, "log": str(log), "real": str(real),
+         "drift": None if drift is None else str(Path(drift).resolve(strict=True))},
+        sort_keys=True,
+    )
+    wrapper = r'''#!/usr/bin/env python3
+import base64, hashlib, json, os, selectors, signal, subprocess, sys, time
+from pathlib import Path
+
+cfg = json.loads(os.environ["SEMAPRAX_PILOT_GATEWAY"])
+candidate = Path(cfg["candidate"]).resolve()
+CAP = 1048576
+LOG_CAP = 32 * CAP
+source = {"pilot-read", "pilot-write-source", "check", "fmt", "run", "test", "--version"}
+graph = {
+    "graph", "context", "query", "impact", "review", "patch-evidence",
+    "patch-with-evidence", "workspace-init", "semantic-workspace-init",
+    "semantic-workspace-change-preview", "semantic-workspace-change-evidence",
+    "verify-semantic-workspace-change-evidence",
+    "apply-semantic-workspace-change-evidence",
+    "semantic-workspace-structural-change-preview",
+    "semantic-workspace-operations-derive", "workspace-snapshot",
+    "workspace-graph", "workspace-context", "workspace-impact",
+    "workspace-review", "workspace-preview", "workspace-apply",
+    "workspace-patch-evidence", "verify-workspace-patch-evidence",
+    "workspace-apply-with-evidence", "patch", "check", "run", "test",
+    "--version", "pilot-write",
+}
+def record(argv, output, error, code):
+    event = {"argv_b64": base64.b64encode("\0".join(argv).encode()).decode(),
+        "stdout_b64": base64.b64encode(output).decode(),
+        "stderr_b64": base64.b64encode(error).decode(), "returncode": code}
+    body = json.dumps(event, sort_keys=True).encode() + b"\n"
+    log = Path(cfg["log"])
+    if (log.stat().st_size if log.exists() else 0) + len(body) > LOG_CAP:
+        raise ValueError("gateway log exceeds cap")
+    with open(log, "ab") as stream: stream.write(body)
+def denied(message):
+    error = (message + "\n").encode()
+    try: record(sys.argv[1:], b"", error, 126)
+    except ValueError: pass
+    sys.stderr.buffer.write(error)
+    raise SystemExit(126)
+def reserve_log():
+    log = Path(cfg["log"])
+    if (log.stat().st_size if log.exists() else 0) + 4 * CAP > LOG_CAP:
+        denied("gateway log capacity exhausted before dispatch")
+def apply_drift(args):
+    drift_path = cfg.get("drift")
+    identifying = {"graph", "context", "query", "workspace-graph", "workspace-context"}
+    command = args[0]
+    source_read = False
+    if command == "pilot-read" and len(args) == 2:
+        try:
+            source_read = (candidate / Path(args[1])).resolve() == candidate / "src" / "core.spx"
+        except OSError:
+            source_read = False
+    if not drift_path or (command not in identifying and not source_read):
+        return
+    value = json.loads(Path(drift_path).read_text())
+    if value.get("applied"):
+        return
+    if value.get("target") != "src/core.spx":
+        denied("invalid drift target")
+    target = candidate / "src" / "core.spx"
+    before = base64.b64decode(value["before_b64"], validate=True)
+    after = base64.b64decode(value["after_b64"], validate=True)
+    if target.read_bytes() != before:
+        denied("candidate changed before required drift injection")
+    target.write_bytes(after)
+    value["applied"] = True
+    Path(drift_path).write_text(json.dumps(value, sort_keys=True))
+    record(["pilot-drift", command], json.dumps({"after_sha256": value["after_sha256"],
+        "before_sha256": value["before_sha256"], "trigger": command}, sort_keys=True).encode(), b"", 0)
+args = sys.argv[1:]
+if not args: denied("missing semaprax command")
+allowed = graph if cfg["lane"] == "semaprax-graph-operational" else source
+if args[0] not in allowed: denied("command denied by pilot lane")
+for value in args[1:]:
+    path = Path(value)
+    if path.is_absolute():
+        try: path.resolve().relative_to(candidate)
+        except ValueError: denied("path escapes candidate")
+    elif ".." in path.parts: denied("path escapes candidate")
+    if "=" in value:
+        _, operand = value.split("=", 1)
+        embedded = Path(operand)
+        if operand.startswith("/"):
+            try: embedded.resolve().relative_to(candidate)
+            except ValueError: denied("option path escapes candidate")
+        elif ".." in embedded.parts:
+            denied("option path escapes candidate")
+reserve_log()
+if args[0] == "pilot-write":
+    if len(args) != 3: denied("pilot-write expects relative path and base64 bytes")
+    target = Path(args[1])
+    if target.is_absolute() or target.parts[:1] != (".pilot",) or ".." in target.parts:
+        denied("pilot-write target denied")
+    if target.suffix not in {".json", ".spatch", ".wspatch"}: denied("pilot-write artifact suffix denied")
+    try: body = base64.b64decode(args[2], validate=True)
+    except Exception: denied("pilot-write body is not canonical base64")
+    if len(body) > 1048576: denied("pilot-write body exceeds cap")
+    destination = (candidate / target).resolve()
+    try: destination.relative_to(candidate)
+    except ValueError: denied("pilot-write target escapes candidate")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(body)
+    output = b"pilot artifact written\n"
+    record(args, output, b"", 0)
+    sys.stdout.buffer.write(output)
+    raise SystemExit(0)
+if args[0] == "pilot-read":
+    if len(args) != 2: denied("pilot-read expects one candidate-relative path")
+    target = (candidate / Path(args[1])).resolve()
+    try: target.relative_to(candidate)
+    except ValueError: denied("pilot-read target escapes candidate")
+    if (target.is_symlink() or not target.is_file() or target.stat().st_nlink != 1
+            or target.stat().st_size > 1048576
+            or (target.suffix != ".spx" and target.name != "semaprax.toml")):
+        denied("pilot-read target is not a bounded regular file")
+    source_bytes = target.read_bytes()
+    try: source_text = source_bytes.decode("utf-8")
+    except UnicodeDecodeError: denied("pilot-read source is not UTF-8")
+    output = json.dumps({"sha256": hashlib.sha256(source_bytes).hexdigest(),
+        "text": source_text}, sort_keys=True, ensure_ascii=False).encode()
+    # The internal gateway archive retains the exact source bytes read before
+    # the drift, while the MCP response includes the matching conditional-edit
+    # digest for the source-first agent.
+    record(args, source_bytes, b"", 0)
+    apply_drift(args)
+    sys.stdout.buffer.write(output)
+    raise SystemExit(0)
+if args[0] == "pilot-write-source":
+    if len(args) != 4: denied("pilot-write-source expects relative path, expected sha256 and base64 bytes")
+    target = (candidate / Path(args[1])).resolve()
+    try: target.relative_to(candidate)
+    except ValueError: denied("pilot-write-source target escapes candidate")
+    if target.is_symlink() or not target.is_file() or target.stat().st_nlink != 1 or target.suffix != ".spx":
+        denied("pilot-write-source target is not a source file")
+    expected = args[2]
+    if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+        denied("pilot-write-source expected sha256 is invalid")
+    if hashlib.sha256(target.read_bytes()).hexdigest() != expected:
+        denied("pilot-write-source precondition is stale")
+    try: body = base64.b64decode(args[3], validate=True)
+    except Exception: denied("pilot-write-source body is not canonical base64")
+    if len(body) > 1048576: denied("pilot-write-source body exceeds cap")
+    target.write_bytes(body)
+    output = b"source written\n"
+    record(args, output, b"", 0)
+    sys.stdout.buffer.write(output)
+    raise SystemExit(0)
+def invoke_real(argv):
+    try:
+        process = subprocess.Popen([cfg["real"], *argv], cwd=candidate, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    except OSError as error:
+        return b"", ("compiler gateway spawn failed: " + str(error) + "\n").encode(), 125
+    streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+    selector = selectors.DefaultSelector()
+    for stream in streams: selector.register(stream, selectors.EVENT_READ)
+    deadline = time.monotonic() + 60
+    failure = None
+    try:
+        while selector.get_map():
+            left = deadline - time.monotonic()
+            if left <= 0: failure = "compiler gateway timeout"; break
+            for key, _ in selector.select(min(left, 0.25)):
+                chunk = os.read(key.fileobj.fileno(), 65536)
+                if not chunk: selector.unregister(key.fileobj); continue
+                streams[key.fileobj].extend(chunk)
+                if sum(map(len, streams.values())) > CAP:
+                    failure = "compiler gateway output exceeds cap"; break
+            if failure: break
+        if failure:
+            return bytes(streams[process.stdout]), bytes(streams[process.stderr]) + (failure + "\n").encode(), 124
+        return bytes(streams[process.stdout]), bytes(streams[process.stderr]), process.wait(timeout=max(0.001, deadline - time.monotonic()))
+    finally:
+        try: os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        process.wait()
+        selector.close()
+        for stream in streams: stream.close()
+output, error, code = invoke_real(args)
+record(args, output, error, code)
+apply_drift(args)
+sys.stdout.buffer.write(output)
+sys.stderr.buffer.write(error)
+raise SystemExit(code)
+'''
+    compiler.write_text(wrapper, encoding="utf-8")
+    compiler.chmod(0o700)
+    return compiler, real, log, config
+
+
+def graph_mcp_config(state, gateway, gateway_config):
+    """Copy the stdlib-only MCP process into private state for graph trials."""
+    source = ROOT / "scripts/opencode_agent_task_pilot/mcp_gateway.py"
+    server = Path(state) / "mcp_gateway.py"
+    body = source.read_bytes()
+    server.write_bytes(body)
+    server.chmod(0o700)
+    if server.read_bytes() != body:
+        raise PilotFailure("MCP gateway copy changed")
+    wire = Path(state) / "mcp-wire.jsonl"
+    return {
+        "semaprax": {
+            "type": "local",
+            "command": ["/usr/bin/python3", str(server), str(gateway), str(wire)],
+            "enabled": True,
+            "environment": {"SEMAPRAX_PILOT_GATEWAY": gateway_config},
+        }
+    }, wire
+
+
 def private_environment(state, config, compiler_bin):
     """Keep inherited credentials and user home out of the model process."""
     paths = {
@@ -315,8 +588,8 @@ def private_environment(state, config, compiler_bin):
 
 
 def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
-    if lane != "semaprax-source-first":
-        raise PilotFailure("this transport currently supports source-first only")
+    if lane not in ("semaprax-source-first", "semaprax-graph-operational"):
+        raise PilotFailure("pilot lane is not available")
     if trial < 1 or timeout <= 0:
         raise PilotFailure("trial and timeout must be positive")
     evidence = Path(evidence)
@@ -333,13 +606,42 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
         raise PilotFailure(f"unknown task: {task}")
     prompt = json.loads((ROOT / binding["path"]).read_text(encoding="utf-8"))["prompt"]
     original = original_repository_root()
-    sandbox, candidate = runner.create_sandbox(binding)
-    before = snapshot(candidate)
+    evidence.mkdir()
+    sandbox = None
+    candidate = None
+    before = None
+    baseline_sources = None
+    original_before = None
+    after = None
+    out = b""
+    err = b""
+    exported = b""
+    gateway_log = b""
+    mcp_wire = b""
+    profile_bytes = b""
+    session = None
+    compiler_digest = None
+    elapsed = None
+    failure = None
+    candidate_archive = None
+    candidate_archive_failure = None
+    acceptance_rows = None
+    acceptance_error = None
+    validation_wall_ns = None
+    review_package = None
+    drift_applications = 0
+    gateway_diagnostic = {"status": "unavailable", "reason": "gateway was not reached"}
+    mcp_metrics = {"status": "unavailable", "reason": "MCP tools/call wire was not available"}
+    model_counters = {"status": "unavailable", "reason": "session export was not available"}
+    result = None
     try:
+        sandbox, candidate = runner.create_sandbox(binding)
+        before = snapshot(candidate)
+        baseline_sources = collect_source_bytes(candidate)
+        original_before = snapshot(runner.fixture_root_for(binding))
         with tempfile.TemporaryDirectory(prefix="spx-opencode-pilot-") as temp:
             host = Path(temp).resolve()
             config = host / "opencode.json"
-            config.write_text(json.dumps(policy(), sort_keys=True))
             user_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
             profile = host / "seatbelt.sb"
             profile.write_text(
@@ -347,6 +649,7 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
                     candidate, (ROOT, original, evidence.parent, user_home), host
                 )
             )
+            profile_bytes = profile.read_bytes()
             protected_files = {
                 ROOT / "benchmarks/agent-task-comparison-v1/manifest.json",
                 original / "benchmarks/agent-task-comparison-v1/manifest.json",
@@ -355,31 +658,50 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
                 profile, candidate / "semaprax.toml", protected_files, candidate, host
             )
             compiler, compiler_digest = provision_semaprax(semaprax, host)
-            env = private_environment(host, config, compiler.parent)
-            start = time.monotonic_ns()
-            out, err, _ = bounded(
-                sandboxed(
-                    opencode,
-                    profile,
-                    [
-                        "run",
-                        "--pure",
-                        "--agent",
-                        AGENT,
-                        "--model",
-                        MODEL,
-                        "--format",
-                        "json",
-                        "--dir",
-                        str(candidate),
-                        prompt,
-                    ],
-                ),
-                host,
-                timeout,
-                env,
+            drift = prepare_drift(binding, candidate, host)
+            compiler, real_compiler, gateway, gateway_config = install_gateway(
+                compiler, host, candidate, lane, drift
             )
-            elapsed = time.monotonic_ns() - start
+            mcp, wire = graph_mcp_config(host, gateway, gateway_config)
+            config.write_text(json.dumps(policy(lane, mcp), sort_keys=True))
+            env = private_environment(host, config, compiler.parent)
+            env["SEMAPRAX_PILOT_GATEWAY"] = gateway_config
+            start = time.monotonic_ns()
+            try:
+                out, err, _ = bounded(
+                    sandboxed(
+                        opencode,
+                        profile,
+                        [
+                            "run", "--pure", "--agent", AGENT, "--model", MODEL,
+                            "--format", "json", "--dir", str(candidate), prompt,
+                        ],
+                    ),
+                    host,
+                    timeout,
+                    env,
+                )
+            except PilotFailure as error:
+                out, err = error.stdout, error.stderr
+                gateway_log = gateway.read_bytes() if gateway.exists() else b""
+                mcp_wire = wire.read_bytes() if wire.exists() else b""
+                raise
+            finally:
+                elapsed = time.monotonic_ns() - start
+                if drift is not None:
+                    drift_applications = int(
+                        json.loads(drift.read_text(encoding="utf-8"))["applied"]
+                    )
+            gateway_log = gateway.read_bytes() if gateway.exists() else b""
+            mcp_wire = wire.read_bytes() if wire.exists() else b""
+            try:
+                mcp_metrics = mcp_tool_metrics(mcp_wire)
+            except ValueError as error:
+                mcp_metrics = {"status": "unavailable", "reason": str(error)}
+            try:
+                gateway_diagnostic = gateway_diagnostics(gateway_log)
+            except ValueError as error:
+                gateway_diagnostic = {"status": "unavailable", "reason": str(error)}
             try:
                 session = next(
                     (
@@ -393,40 +715,111 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
                 raise PilotFailure("raw stream is not valid JSONL") from error
             if not isinstance(session, str) or not session:
                 raise PilotFailure("raw stream lacks session id")
-            exported, _, _ = bounded(
-                sandboxed(opencode, profile, ["export", session, "--pure"]),
-                host,
-                timeout,
-                env,
-            )
+            try:
+                exported, _, _ = bounded(
+                    sandboxed(opencode, profile, ["export", session, "--pure"]),
+                    host, timeout, env,
+                )
+            except PilotFailure as error:
+                if not err:
+                    err = error.stderr
+                gateway_log = gateway.read_bytes() if gateway.exists() else b""
+                mcp_wire = wire.read_bytes() if wire.exists() else b""
+                raise
+            model_counters = provider_usage(exported, MODEL)
             after = snapshot(candidate)
-            evidence.mkdir()
-            (evidence / "stdout.jsonl").write_bytes(out)
-            (evidence / "stderr.txt").write_bytes(err)
-            (evidence / "session.json").write_bytes(exported)
-            (evidence / "seatbelt.sb").write_bytes(profile.read_bytes())
-            record = {
+            gateway_log = gateway.read_bytes() if gateway.exists() else b""
+            mcp_wire = wire.read_bytes() if wire.exists() else b""
+            original_after = snapshot(runner.fixture_root_for(binding))
+            validation_started = time.monotonic_ns()
+            try:
+                acceptance = runner.independent_acceptance(
+                    task, candidate, drift_applications, binding, before, after,
+                    real_compiler, original_before, original_after, after,
+                )
+                acceptance_rows = acceptance[0] if isinstance(acceptance, tuple) else acceptance
+                if isinstance(acceptance, tuple):
+                    review_package = acceptance[1]
+            except Exception as error:
+                acceptance_error = str(error)
+                raise
+            finally:
+                validation_wall_ns = time.monotonic_ns() - validation_started
+            result = {
                 "schema": "semaprax.opencode-agent-task-pilot.v1",
                 "status": "ineligible",
-                "reason": "blinded review and ledger metric mapping are not implemented",
-                "task": task,
-                "lane": lane,
-                "trial": trial,
-                "model": MODEL,
-                "semaprax_sha256": compiler_digest,
-                "session_id": session,
-                "wall_ns": elapsed,
-                "before": before,
-                "after": after,
-                "stdout_sha256": sha(out),
-                "session_sha256": sha(exported),
+                "reason": ineligibility_reason(lane),
+                "task": task, "lane": lane, "trial": trial, "model": MODEL,
+                "semaprax_sha256": compiler_digest, "session_id": session,
+                "wall_ns": elapsed, "before": before, "after": after,
+                "stdout_sha256": sha(out), "session_sha256": sha(exported),
+                "drift_applications": drift_applications,
+                "acceptance": acceptance_rows,
+                "provider_usage": model_counters,
+                "gateway_diagnostics": gateway_diagnostic,
+                "mcp_tool_metrics": mcp_metrics,
             }
-            (evidence / "record.json").write_text(
-                json.dumps(record, sort_keys=True) + "\n"
-            )
-            return record
+    except Exception as error:
+        failure = str(error)
+        raise
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
+        if candidate is not None and after is None:
+            try:
+                after = snapshot(candidate)
+            except Exception:
+                after = None
+        if candidate is not None and baseline_sources is not None:
+            try:
+                candidate_archive = archive_candidate(candidate, evidence, baseline_sources)
+            except Exception as error:
+                candidate_archive_failure = str(error)
+        for name, body in (
+            ("stdout.jsonl", out), ("stderr.txt", err), ("session.json", exported),
+            ("gateway.jsonl", gateway_log), ("mcp-wire.jsonl", mcp_wire),
+            ("seatbelt.sb", profile_bytes),
+        ):
+            (evidence / name).write_bytes(body)
+        if gateway_diagnostic["status"] == "unavailable" and gateway_log:
+            try:
+                gateway_diagnostic = gateway_diagnostics(gateway_log)
+            except ValueError as error:
+                gateway_diagnostic = {"status": "unavailable", "reason": str(error)}
+        if mcp_metrics["status"] == "unavailable" and mcp_wire:
+            try:
+                mcp_metrics = mcp_tool_metrics(mcp_wire)
+            except ValueError as error:
+                mcp_metrics = {"status": "unavailable", "reason": str(error)}
+        if review_package is not None:
+            (evidence / "review-package.json").write_text(json.dumps(review_package, sort_keys=True) + "\n")
+        record = {
+            "schema": "semaprax.opencode-agent-task-pilot.v1",
+            "status": "ineligible",
+            "reason": ineligibility_reason(lane),
+            "task": task, "lane": lane, "trial": trial, "model": MODEL,
+            "semaprax_sha256": compiler_digest, "session_id": session,
+            "wall_ns": elapsed, "before": before, "after": after,
+            "stdout_sha256": sha(out), "stderr_sha256": sha(err),
+            "session_sha256": sha(exported), "gateway_sha256": sha(gateway_log),
+            "mcp_wire_sha256": sha(mcp_wire),
+            "drift_applications": drift_applications,
+            "acceptance": acceptance_rows,
+            "acceptance_error": acceptance_error,
+            "validation_wall_ns": validation_wall_ns,
+            "validation_wall_ms": None if validation_wall_ns is None else validation_wall_ns // 1_000_000,
+            "review_package": "review-package.json" if review_package is not None else None,
+            "candidate_archive": candidate_archive,
+            "candidate_archive_error": candidate_archive_failure,
+            "provider_usage": model_counters,
+            "gateway_diagnostics": gateway_diagnostic,
+            "mcp_tool_metrics": mcp_metrics,
+            "outcome": "failed" if failure else "completed",
+            "failure": failure,
+        }
+        (evidence / "record.json").write_text(json.dumps(record, sort_keys=True) + "\n")
+        if sandbox is not None:
+            shutil.rmtree(sandbox, ignore_errors=True)
+        result = record
+    return result
 
 
 def main():

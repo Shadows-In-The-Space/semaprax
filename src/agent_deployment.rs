@@ -118,6 +118,35 @@ pub struct AgentDeployment {
     digest: String,
 }
 
+/// One deployment-admitted provider/model pair.
+///
+/// This is a read-only projection of an already validated deployment. It
+/// intentionally omits credentials, endpoints and transport configuration;
+/// a runtime may use it only to check a host-selected adapter identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeploymentModelSelection {
+    provider_id: String,
+    model_id: String,
+    capabilities: Vec<String>,
+}
+
+impl DeploymentModelSelection {
+    #[must_use]
+    pub fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
+
+    #[must_use]
+    pub fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    #[must_use]
+    pub fn capabilities(&self) -> &[String] {
+        &self.capabilities
+    }
+}
+
 impl AgentDeployment {
     /// Returns the deployment's own stable identity.
     #[must_use]
@@ -194,6 +223,57 @@ impl BoundAgentDeployment {
     #[must_use]
     pub fn runtime_v1_profile(&self) -> &str {
         self.compiled_v1.runtime_v1_profile()
+    }
+
+    /// Returns the exact provider/model pairs already admitted by this
+    /// deployment. This is a projection of validated closed document data,
+    /// never a transport or credential lookup.
+    #[must_use]
+    pub fn model_selections(&self) -> Vec<DeploymentModelSelection> {
+        self.deployment
+            .parsed
+            .models
+            .as_array()
+            .expect("admitted deployment models remain an array")
+            .iter()
+            .map(|row| DeploymentModelSelection {
+                provider_id: row
+                    .get("provider_id")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("admitted model retains provider_id")
+                    .to_owned(),
+                model_id: row
+                    .get("model_id")
+                    .and_then(serde_json::Value::as_str)
+                    .expect("admitted model retains model_id")
+                    .to_owned(),
+                capabilities: row
+                    .get("capabilities")
+                    .and_then(serde_json::Value::as_array)
+                    .expect("admitted model retains capabilities")
+                    .iter()
+                    .map(|value| {
+                        value
+                            .as_str()
+                            .expect("admitted model capability remains text")
+                            .to_owned()
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Returns the deployment's validated explicit capability grants.
+    #[must_use]
+    pub fn granted_capabilities(&self) -> &[String] {
+        &self.deployment.parsed.granted_capabilities
+    }
+
+    /// Returns the source contract's model capability requirements that the
+    /// admitted deployment model rows were checked to satisfy.
+    #[must_use]
+    pub fn required_model_capabilities(&self) -> &[String] {
+        &self.definition.parsed.required_model_capabilities
     }
 
     /// Instantiates the bound product through its exact Runtime v1 projection.

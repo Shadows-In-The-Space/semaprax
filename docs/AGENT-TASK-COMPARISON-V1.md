@@ -132,6 +132,41 @@ reviewer or publication host; all outcome and comparison claims remain
 unobserved. The external harness must still archive actual evidence and produce
 the separate observation object accepted by the report command.
 
+Before executing the paired pilot, archive its counterbalanced order outside
+candidate-visible task bytes:
+
+```sh
+python3 scripts/agent-task-comparison-runner.py schedule > schedule.json
+```
+
+The private `semaprax.agent-task-comparison-schedule.v1` document embeds the
+existing authenticated matrix and its canonical SHA-256, then orders its exact
+rows without changing their trial hashes. `rotating-tasks-alternating-pairs-v1`
+rotates task position each repetition and alternates which lane runs first in
+each adjacent pair. The eighteen-row pilot has nine pairs, so first positions
+are necessarily split five/four; `first_lane_counts` records that imbalance.
+Generate the final schedule after freezing the runner and repository revision.
+It is an execution order only: it supplies no trial observations, reviewer
+measurements, provider configuration, or execution authority.
+
+The private `opencode-agent-task-pilot.py` transport uses a local MCP argv tool
+for both lanes. Source-first exposes bounded source reads and writes with an
+expected preimage digest plus ordinary compiler commands; graph-operational
+exposes semantic compiler operations and bounded patch-artifact creation.
+Native OpenCode shell/read/edit tools are denied. The host retains exact MCP
+frames, provider exports, source bytes/diffs, independent acceptance results,
+and monotonic validation duration, including failures. The owned task also
+retains its generated review package. Local source/graph stub execution and
+MCP discovery establish transport behavior, not real-model observations.
+
+Captured records remain explicitly ineligible until all required context,
+recovery, intervention and blinded-review measurements exist and pass the
+existing ledger/observation audit. Provider export counters are reported
+observations, not billing proof. Internal gateway argv/stdio counts are
+separate diagnostics; only archived external MCP frames supply tool traffic
+measurements. The transport uses OpenCode's documented
+[local MCP configuration](https://opencode.ai/docs/mcp-servers/).
+
 ## Typed event-ledger derivation
 
 An external harness can derive the observation metrics from a canonical typed

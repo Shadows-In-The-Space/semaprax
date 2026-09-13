@@ -210,6 +210,12 @@ schemas using the live bridge's shared request projection.
 additive evidence and its zero-dispatch replay.
 [Model Call Journal Receipt v1](MODEL-CALL-JOURNAL-RECEIPT-V1.md) owns this
 additive schema separately from the enriched host-metadata receipt contract.
+`agent_runtime_v2/source_model` owns the additive source-model binding and
+redacted attempt observations. The bound streaming adapter checks deployment
+selection and compiler schema before dispatch; `execution_revision/typed`
+joins that exact binding, attempt digest and closed outcome into EvidenceRoot
+v4. The compatibility live route retains v3 roots. This addition is nondurable;
+[Source Model Operation v1](SOURCE-MODEL-OPERATION-V1.md) owns its scope.
 `agent_lifecycle/iterative/source_live` owns the one ledger and replay cursor;
 its optional session hooks reuse the checked loop in `iterative/driver/live`
 for fresh and recovered execution. Replayed stages reserve fresh fuel before
@@ -229,8 +235,9 @@ exclusive writer ownership remain caller obligations across both checkpoints.
 The private adapter's `source_checkpoint` module records explicit model attempts
 through that sink. Its `durable_source` wrapper borrows the driver's ledger for
 one attempt, acknowledges intent before transport and settlement before exposing
-response text, and records optional usage in the same journal. A durable source
-CLI remains separate work. An in-memory receipt is not a checkpoint.
+response text, and records optional usage in the same journal. The private `source_live_cli`
+host composes that adapter with an explicit filesystem checkpoint store for
+run, resume and checked migration. An in-memory receipt is not a checkpoint.
 Pre-dispatch host cancellation returns a `Cancelled` source-live failure with
 no attempt intent or provider dispatch. Adapter-local cancellation, deadline
 or budget classification without a receipt is accepted only when the journal

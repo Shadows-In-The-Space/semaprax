@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use sha2::{Digest, Sha256};
 
 use super::private::{
-    new_agent, parse_profile, parse_task, preflight_terminal_for_test, replay_evidence,
-    replay_trace, terminal_diagnostics_for_test,
+    new_agent, parse_profile, parse_task, preflight_terminal_for_test, replay_accounting_receipt,
+    replay_evidence, replay_trace, terminal_diagnostics_for_test,
 };
 use super::*;
 
@@ -79,11 +79,7 @@ impl AgentHost for FakeHost {
         assert!(sink.push(&response.as_bytes()[response.len() / 2..]));
         ProviderAttempt {
             disposition: ProviderDisposition::Succeeded,
-            usage: ProviderUsage {
-                input_tokens: request.len() as u64,
-                output_tokens: response.len() as u64,
-                usd_microunits: 0,
-            },
+            usage: ProviderUsage::new(request.len() as u64, response.len() as u64, 0),
         }
     }
     fn invoke_tool(&mut self, _: &str, tool_id: &str, _: &str, sink: &mut ToolResultSink) -> bool {
@@ -260,7 +256,7 @@ impl ScriptHost {
         match fault {
             BoundaryFault::None => {}
             BoundaryFault::Cancel => self.probe.cancelled.set(true),
-            BoundaryFault::Deadline => self.probe.elapsed.set(1_001),
+            BoundaryFault::Deadline => self.probe.elapsed.set(1_000),
             BoundaryFault::Revoke => self.probe.epoch.set(8),
         }
     }
@@ -672,109 +668,8 @@ fn provider_streaming_retry_and_uncertainty_are_exact() {
     assert!(artifact.evidence.contains("SPX-I218"));
 }
 
-#[test]
-fn cancellation_deadline_and_policy_revocation_close_provider_and_tool_sinks() {
-    for (fault, status, code) in [
-        (BoundaryFault::Cancel, RunStatus::Cancelled, "SPX-I220"),
-        (
-            BoundaryFault::Deadline,
-            RunStatus::DeadlineExceeded,
-            "SPX-I221",
-        ),
-        (BoundaryFault::Revoke, RunStatus::PolicyRejected, "SPX-G207"),
-    ] {
-        let mut host = ScriptHost::final_only("unreachable");
-        host.revoke_after_admission = matches!(fault, BoundaryFault::Revoke);
-        let probe = host.probe.clone();
-        let cancellation = AgentCancellation::new();
-        let provider_calls = Rc::clone(&host.provider_calls);
-        let tool_calls = Rc::clone(&host.tool_calls);
-        let profile_source = fixture_profile();
-        let mut agent = Agent::new(&profile_source, host, cancellation.clone()).unwrap();
-        match fault {
-            BoundaryFault::Cancel => cancellation.cancel(),
-            BoundaryFault::Deadline => probe.elapsed.set(1_001),
-            BoundaryFault::Revoke => {}
-            BoundaryFault::None => unreachable!(),
-        }
-        if matches!(fault, BoundaryFault::Cancel) {
-            let diagnostics = match agent.run(&fixture_task()) {
-                Ok(_) => panic!("pre-effect cancellation produced an artifact"),
-                Err(diagnostics) => diagnostics,
-            };
-            assert_eq!(diagnostics.len(), 1);
-            assert_eq!(diagnostics[0].code, code);
-            assert_eq!(diagnostics[0].message, "Agent Runtime run was cancelled");
-        } else {
-            let artifact = agent.run(&fixture_task()).unwrap();
-            assert!(artifact.status == status);
-            assert!(artifact.evidence.contains(code));
-        }
-        assert_eq!(provider_calls.get(), 0);
-        assert_eq!(tool_calls.get(), 0);
-
-        let mut host = ScriptHost::final_only("unreachable");
-        host.provider_fault = fault;
-        let cancellation = AgentCancellation::new();
-        if matches!(fault, BoundaryFault::Cancel) {
-            host.provider_fault = BoundaryFault::None;
-        }
-        let mut agent = Agent::new(&fixture_profile(), host, cancellation.clone()).unwrap();
-        if matches!(fault, BoundaryFault::Cancel) {
-            cancellation.cancel();
-        }
-        if matches!(fault, BoundaryFault::Cancel) {
-            let diagnostics = match agent.run(&fixture_task()) {
-                Ok(_) => panic!("pre-effect cancellation produced an artifact"),
-                Err(diagnostics) => diagnostics,
-            };
-            assert_eq!(diagnostics.len(), 1);
-            assert_eq!(diagnostics[0].code, code);
-        } else {
-            let artifact = agent.run(&fixture_task()).unwrap();
-            assert!(artifact.status == status);
-            assert!(artifact.evidence.contains(code));
-            assert!(!artifact.trace.contains("unreachable"));
-        }
-
-        let mut host = ScriptHost::final_only("done");
-        host.attempts = vec![
-            (
-                ProviderDisposition::Succeeded,
-                vec![tool_action("fixture.read", "{\"query\":\"alpha\"}")],
-                ProviderUsage::default(),
-            ),
-            (
-                ProviderDisposition::Succeeded,
-                vec![final_action("done")],
-                ProviderUsage::default(),
-            ),
-        ];
-        host.tool_fault = fault;
-        let cancellation = AgentCancellation::new();
-        if matches!(fault, BoundaryFault::Cancel) {
-            host.tool_fault = BoundaryFault::None;
-        }
-        let mut agent = Agent::new(&fixture_profile(), host, cancellation.clone()).unwrap();
-        let artifact = if matches!(fault, BoundaryFault::Cancel) {
-            // Existing private fault injection cannot access the runtime-owned bit;
-            // the public integration corpus exercises cancellation during tool push.
-            cancellation.cancel();
-            let diagnostics = match agent.run(&fixture_task()) {
-                Ok(_) => panic!("pre-effect cancellation produced an artifact"),
-                Err(diagnostics) => diagnostics,
-            };
-            assert_eq!(diagnostics.len(), 1);
-            assert_eq!(diagnostics[0].code, code);
-            continue;
-        } else {
-            agent.run(&fixture_task()).unwrap()
-        };
-        assert!(artifact.status == status);
-        assert!(artifact.evidence.contains(code));
-        assert!(!artifact.trace.contains("\"status\":\"succeeded\",\"usage\":{\"provider_input_bytes\":0,\"provider_output_bytes\":0,\"reported_model_input_tokens\":0,\"reported_model_output_tokens\":0,\"usd_microunits\":0,\"tool_argument_bytes\":0,\"tool_result_bytes\":"));
-    }
-}
+mod accounting;
+mod deadline;
 
 #[test]
 fn tool_authority_schema_and_preinvoke_budgets_fail_without_a_call() {

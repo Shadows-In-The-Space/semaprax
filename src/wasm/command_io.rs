@@ -18,6 +18,7 @@ pub(super) struct CommandPlan {
     pub(super) function_id: DeclarationId,
     pub(super) wasm_export: String,
     operation_profile: crate::command_io_ops::CommandOperationProfile,
+    http_post: bool,
 }
 
 pub(super) fn prepare(
@@ -75,6 +76,8 @@ pub(super) fn prepare(
         function_id: function.id.clone(),
         wasm_export: super::data_exports::raw_symbol(command_id),
         operation_profile,
+        http_post: operation_profile == crate::command_io_ops::CommandOperationProfile::HttpV1
+            && super::http_io::program_uses_https_post(program),
     })
 }
 
@@ -89,6 +92,10 @@ impl CommandPlan {
 
     pub(super) fn is_http_command(&self) -> bool {
         self.operation_profile == crate::command_io_ops::CommandOperationProfile::HttpV1
+    }
+
+    pub(super) fn is_http_post_command(&self) -> bool {
+        self.is_http_command() && self.http_post
     }
 
     pub(super) fn is_filesystem_command(&self) -> bool {
@@ -131,7 +138,7 @@ impl CommandPlan {
         } else if self.is_network_command() {
             IMPORT_COUNT + super::network_io::IMPORT_COUNT
         } else if self.is_http_command() {
-            IMPORT_COUNT + super::http_io::IMPORT_COUNT
+            IMPORT_COUNT + super::http_io::IMPORT_COUNT + u32::from(self.is_http_post_command())
         } else if self.is_filesystem_command() {
             IMPORT_COUNT
                 + super::filesystem_ops::IMPORT_COUNT

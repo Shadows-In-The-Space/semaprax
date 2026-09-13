@@ -27,6 +27,9 @@ use super::{
 };
 use crate::network_io_ops;
 
+/// Largest host-supplied HTTPS POST origin allowlist.
+pub const MAX_HTTPS_POST_ORIGINS: usize = 8;
+
 /// A [`NetworkProvider`] over blocking `std::net` sockets.
 ///
 /// **This opens real network connections.** Plain operations send cleartext;
@@ -45,6 +48,8 @@ pub struct TcpNetworkProvider {
     resolver: Arc<dyn NameResolver>,
     #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
     https_client: Option<crate::https_client::HttpsClient>,
+    #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+    https_post_origins: Vec<reqwest::Url>,
 }
 
 /// One established transport. The TLS variants keep the connection and the
@@ -144,6 +149,8 @@ impl Default for TcpNetworkProvider {
             resolver: Arc::new(SystemResolver::new()),
             #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
             https_client,
+            #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+            https_post_origins: Vec::new(),
         }
     }
 }
@@ -152,6 +159,25 @@ impl TcpNetworkProvider {
     /// Create a provider holding no connections.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a provider whose side-effecting HTTPS POST operation is
+    /// restricted to these host-selected origins. An empty list is valid and
+    /// denies every POST request.
+    #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+    pub fn with_https_post_origins(origins: &[&str]) -> Result<Self, HttpFailure> {
+        let mut provider = Self::new();
+        provider.set_https_post_origins(origins)?;
+        Ok(provider)
+    }
+
+    /// Replace the host-selected HTTPS POST origin allowlist. Every entry is
+    /// a canonical HTTPS origin without credentials, path, query, or fragment.
+    /// A failed update preserves the previous allowlist.
+    #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+    pub fn set_https_post_origins(&mut self, origins: &[&str]) -> Result<(), HttpFailure> {
+        self.https_post_origins = parse_https_post_origins(origins)?;
+        Ok(())
     }
 
     /// Create a provider with an explicitly constructed Rustls client policy.
@@ -323,6 +349,88 @@ fn classify_wait_error(error: &std::io::Error) -> Result<WaitState, NetworkFailu
     }
 }
 
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+fn parse_https_post_origins(origins: &[&str]) -> Result<Vec<reqwest::Url>, HttpFailure> {
+    if origins.len() > MAX_HTTPS_POST_ORIGINS {
+        return Err(HttpFailure::AuthorityDenied);
+    }
+    origins
+        .iter()
+        .map(|origin| {
+            let parsed = reqwest::Url::parse(origin).map_err(|_| HttpFailure::AuthorityDenied)?;
+            if origin.is_empty()
+                || origin.len() > crate::https_client::MAX_HTTPS_POST_URL_BYTES
+                || parsed.scheme() != "https"
+                || parsed.host_str().is_none()
+                || has_https_userinfo(origin)
+                || parsed.password().is_some()
+                || parsed.path() != "/"
+                || parsed.query().is_some()
+                || parsed.fragment().is_some()
+            {
+                return Err(HttpFailure::AuthorityDenied);
+            }
+            Ok(parsed)
+        })
+        .collect()
+}
+
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+fn parse_https_post_url(url: &str) -> Result<reqwest::Url, HttpFailure> {
+    if url.is_empty()
+        || url.len() > crate::https_client::MAX_HTTPS_POST_URL_BYTES
+        || url.as_bytes().contains(&0)
+    {
+        return Err(HttpFailure::InvalidUrl);
+    }
+    let parsed = reqwest::Url::parse(url).map_err(|_| HttpFailure::InvalidUrl)?;
+    if parsed.scheme() != "https" {
+        return Err(HttpFailure::InsecureScheme);
+    }
+    if parsed.host_str().is_none()
+        || has_https_userinfo(url)
+        || parsed.password().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(HttpFailure::InvalidUrl);
+    }
+    Ok(parsed)
+}
+
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+fn has_https_userinfo(url: &str) -> bool {
+    let Some((_, authority_and_rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority_end = authority_and_rest
+        .bytes()
+        .position(|byte| matches!(byte, b'/' | b'?' | b'#'))
+        .unwrap_or(authority_and_rest.len());
+    authority_and_rest[..authority_end].contains('@')
+}
+
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+fn same_https_origin(left: &reqwest::Url, right: &reqwest::Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+fn map_https_error(error: crate::https_client::HttpsError) -> HttpFailure {
+    match error {
+        crate::https_client::HttpsError::InvalidConfiguration => HttpFailure::ResponseTooLarge,
+        crate::https_client::HttpsError::InvalidUrl => HttpFailure::InvalidUrl,
+        crate::https_client::HttpsError::InsecureScheme => HttpFailure::InsecureScheme,
+        // Once Reqwest starts a POST, it cannot prove whether the peer
+        // observed the request. The closed provider surface deliberately
+        // keeps every such failure as conservative transport uncertainty.
+        crate::https_client::HttpsError::TransportFailed => HttpFailure::TransportFailed,
+        crate::https_client::HttpsError::ResponseTooLarge => HttpFailure::ResponseTooLarge,
+        crate::https_client::HttpsError::UnsupportedVersion => HttpFailure::UnsupportedVersion,
+    }
+}
+
 impl NetworkProvider for TcpNetworkProvider {
     #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
     fn https_get(&mut self, url: &str, max: usize) -> Result<Vec<u8>, HttpFailure> {
@@ -330,14 +438,26 @@ impl NetworkProvider for TcpNetworkProvider {
             .https_client
             .as_ref()
             .ok_or(HttpFailure::TransportFailed)?;
-        client.get_canonical(url, max).map_err(|error| match error {
-            crate::https_client::HttpsError::InvalidConfiguration => HttpFailure::ResponseTooLarge,
-            crate::https_client::HttpsError::InvalidUrl => HttpFailure::InvalidUrl,
-            crate::https_client::HttpsError::InsecureScheme => HttpFailure::InsecureScheme,
-            crate::https_client::HttpsError::TransportFailed => HttpFailure::TransportFailed,
-            crate::https_client::HttpsError::ResponseTooLarge => HttpFailure::ResponseTooLarge,
-            crate::https_client::HttpsError::UnsupportedVersion => HttpFailure::UnsupportedVersion,
-        })
+        client.get_canonical(url, max).map_err(map_https_error)
+    }
+
+    #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+    fn https_post(&mut self, url: &str, body: &[u8], max: usize) -> Result<Vec<u8>, HttpFailure> {
+        let parsed = parse_https_post_url(url)?;
+        if !self
+            .https_post_origins
+            .iter()
+            .any(|origin| same_https_origin(origin, &parsed))
+        {
+            return Err(HttpFailure::AuthorityDenied);
+        }
+        let client = self
+            .https_client
+            .as_ref()
+            .ok_or(HttpFailure::TransportFailed)?;
+        client
+            .post_canonical(url, body, max)
+            .map_err(map_https_error)
     }
 
     fn connect(&mut self, host: &str, port: u16) -> Result<ProviderConnection, NetworkFailure> {
@@ -537,6 +657,10 @@ mod deadline_tests;
 #[cfg(test)]
 #[path = "tcp/tls_rejection_tests.rs"]
 mod tls_rejection_tests;
+
+#[cfg(test)]
+#[path = "tcp/https_post_tests.rs"]
+mod https_post_tests;
 
 #[cfg(test)]
 mod tests {

@@ -180,3 +180,7 @@ regression, and a request-timeout regression for the reusable client.
 Live browser-fetch authority, multi-engine browser evidence, HTTP/3,
 structured asynchronous execution, cross-platform libcurl provisioning, and
 language/backend task lowering remain open.
+
+[HTTPS Client I/O v2](HTTPS-CLIENT-IO-V2.md) adds bounded POST with explicit
+destination authorization and fixture v4; it does not change the GET contract
+or promote its local evidence to hosted support.

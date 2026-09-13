@@ -179,6 +179,17 @@ pub trait NetworkProvider {
         Err(HttpFailure::AuthorityDenied)
     }
 
+    /// POST bytes only under an explicit destination authorization. A transport
+    /// failure may follow dispatch and never authorizes an automatic retry.
+    fn https_post(
+        &mut self,
+        _url: &str,
+        _body: &[u8],
+        _max: usize,
+    ) -> Result<Vec<u8>, HttpFailure> {
+        Err(HttpFailure::AuthorityDenied)
+    }
+
     /// Open a connection to `host:port`.
     fn connect(&mut self, host: &str, port: u16) -> Result<ProviderConnection, NetworkFailure>;
 

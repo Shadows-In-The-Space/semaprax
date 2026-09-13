@@ -65,10 +65,12 @@ pub(super) fn flow(
                 conservative_payload_bytes: crate::filesystem_ops::MAX_FILE_BYTES,
             })
         }
-        ResolvedHostCommandOperation::HttpsGet => Some(CapacityFlow::BytesCopy {
-            site,
-            conservative_payload_bytes: crate::network_io_ops::MAX_CHUNK_BYTES,
-        }),
+        ResolvedHostCommandOperation::HttpsGet | ResolvedHostCommandOperation::HttpsPost => {
+            Some(CapacityFlow::BytesCopy {
+                site,
+                conservative_payload_bytes: crate::network_io_ops::MAX_CHUNK_BYTES,
+            })
+        }
         ResolvedHostCommandOperation::EnvLen
         | ResolvedHostCommandOperation::EnvNameUtf8
         | ResolvedHostCommandOperation::EnvValueUtf8

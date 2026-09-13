@@ -25,6 +25,8 @@ pub(crate) const NET_LISTEN_NAME: &str = "net_listen";
 pub(crate) const NET_ACCEPT_NAME: &str = "net_accept";
 pub(crate) const NET_CLOSE_LISTENER_NAME: &str = "net_close_listener";
 pub(crate) const NET_TLS_ACCEPT_NAME: &str = "net_tls_accept";
+pub(crate) const HTTPS_POST_NAME: &str = "https_post";
+pub(crate) const HTTPS_POST_ID: &str = "core.host.https-post";
 pub(crate) const HTTPS_GET_NAME: &str = "https_get";
 
 pub(crate) const NET_CONNECT_ID: &str = "core.host.net-connect";
@@ -132,7 +134,7 @@ pub(crate) const WAIT_READABLE: u64 = 1;
 pub(crate) const WAIT_CLOSED: u64 = 2;
 
 #[cfg_attr(not(test), allow(dead_code))]
-pub(crate) const OPERATIONS: [ResolvedHostCommandOperation; 12] = [
+pub(crate) const OPERATIONS: [ResolvedHostCommandOperation; 13] = [
     ResolvedHostCommandOperation::NetConnect,
     ResolvedHostCommandOperation::NetSend,
     ResolvedHostCommandOperation::NetRecv,
@@ -145,6 +147,7 @@ pub(crate) const OPERATIONS: [ResolvedHostCommandOperation; 12] = [
     ResolvedHostCommandOperation::NetCloseListener,
     ResolvedHostCommandOperation::NetTlsAccept,
     ResolvedHostCommandOperation::HttpsGet,
+    ResolvedHostCommandOperation::HttpsPost,
 ];
 
 pub(crate) const fn is_network(op: ResolvedHostCommandOperation) -> bool {
@@ -162,11 +165,15 @@ pub(crate) const fn is_network(op: ResolvedHostCommandOperation) -> bool {
             | ResolvedHostCommandOperation::NetCloseListener
             | ResolvedHostCommandOperation::NetTlsAccept
             | ResolvedHostCommandOperation::HttpsGet
+            | ResolvedHostCommandOperation::HttpsPost
     )
 }
 
 pub(crate) const fn is_http(op: ResolvedHostCommandOperation) -> bool {
-    matches!(op, ResolvedHostCommandOperation::HttpsGet)
+    matches!(
+        op,
+        ResolvedHostCommandOperation::HttpsGet | ResolvedHostCommandOperation::HttpsPost
+    )
 }
 
 pub(crate) const fn is_service(op: ResolvedHostCommandOperation) -> bool {
@@ -194,6 +201,7 @@ pub(crate) fn by_name(name: &str) -> Option<ResolvedHostCommandOperation> {
         NET_CLOSE_LISTENER_NAME => Some(ResolvedHostCommandOperation::NetCloseListener),
         NET_TLS_ACCEPT_NAME => Some(ResolvedHostCommandOperation::NetTlsAccept),
         HTTPS_GET_NAME => Some(ResolvedHostCommandOperation::HttpsGet),
+        HTTPS_POST_NAME => Some(ResolvedHostCommandOperation::HttpsPost),
         _ => None,
     }
 }
@@ -212,6 +220,7 @@ pub(crate) fn by_id(id: &str) -> Option<ResolvedHostCommandOperation> {
         NET_CLOSE_LISTENER_ID => Some(ResolvedHostCommandOperation::NetCloseListener),
         NET_TLS_ACCEPT_ID => Some(ResolvedHostCommandOperation::NetTlsAccept),
         HTTPS_GET_ID => Some(ResolvedHostCommandOperation::HttpsGet),
+        HTTPS_POST_ID => Some(ResolvedHostCommandOperation::HttpsPost),
         _ => None,
     }
 }
@@ -232,6 +241,7 @@ pub(crate) const fn name(op: ResolvedHostCommandOperation) -> &'static str {
         ResolvedHostCommandOperation::NetCloseListener => NET_CLOSE_LISTENER_NAME,
         ResolvedHostCommandOperation::NetTlsAccept => NET_TLS_ACCEPT_NAME,
         ResolvedHostCommandOperation::HttpsGet => HTTPS_GET_NAME,
+        ResolvedHostCommandOperation::HttpsPost => HTTPS_POST_NAME,
         _ => unreachable!(),
     }
 }
@@ -250,6 +260,7 @@ pub(crate) const fn id(op: ResolvedHostCommandOperation) -> &'static str {
         ResolvedHostCommandOperation::NetCloseListener => NET_CLOSE_LISTENER_ID,
         ResolvedHostCommandOperation::NetTlsAccept => NET_TLS_ACCEPT_ID,
         ResolvedHostCommandOperation::HttpsGet => HTTPS_GET_ID,
+        ResolvedHostCommandOperation::HttpsPost => HTTPS_POST_ID,
         _ => unreachable!(),
     }
 }
@@ -269,7 +280,9 @@ pub(crate) const fn effect(op: ResolvedHostCommandOperation) -> &'static str {
         ResolvedHostCommandOperation::NetRecv
         | ResolvedHostCommandOperation::NetStreamStdout
         | ResolvedHostCommandOperation::NetWait => NETWORK_READ_EFFECT,
-        ResolvedHostCommandOperation::HttpsGet => NETWORK_HTTP_EFFECT,
+        ResolvedHostCommandOperation::HttpsGet | ResolvedHostCommandOperation::HttpsPost => {
+            NETWORK_HTTP_EFFECT
+        }
         _ => unreachable!(),
     }
 }
@@ -300,33 +313,34 @@ pub(crate) const fn arity(op: ResolvedHostCommandOperation) -> usize {
         | ResolvedHostCommandOperation::NetStreamStdout
         | ResolvedHostCommandOperation::NetWait => 2,
         ResolvedHostCommandOperation::HttpsGet => 2,
+        ResolvedHostCommandOperation::HttpsPost => 3,
         _ => unreachable!(),
     }
 }
 
 pub(crate) const fn ast_return_type(op: ResolvedHostCommandOperation) -> Type {
     match op {
-        ResolvedHostCommandOperation::NetRecv | ResolvedHostCommandOperation::HttpsGet => {
-            Type::Bytes
-        }
+        ResolvedHostCommandOperation::NetRecv
+        | ResolvedHostCommandOperation::HttpsGet
+        | ResolvedHostCommandOperation::HttpsPost => Type::Bytes,
         _ => Type::Usize,
     }
 }
 
 pub(crate) const fn return_type(op: ResolvedHostCommandOperation) -> ResolvedType {
     match op {
-        ResolvedHostCommandOperation::NetRecv | ResolvedHostCommandOperation::HttpsGet => {
-            ResolvedType::Bytes
-        }
+        ResolvedHostCommandOperation::NetRecv
+        | ResolvedHostCommandOperation::HttpsGet
+        | ResolvedHostCommandOperation::HttpsPost => ResolvedType::Bytes,
         _ => ResolvedType::Usize,
     }
 }
 
 pub(crate) const fn result_ownership(op: ResolvedHostCommandOperation) -> OwnershipMode {
     match op {
-        ResolvedHostCommandOperation::NetRecv | ResolvedHostCommandOperation::HttpsGet => {
-            OwnershipMode::Own
-        }
+        ResolvedHostCommandOperation::NetRecv
+        | ResolvedHostCommandOperation::HttpsGet
+        | ResolvedHostCommandOperation::HttpsPost => OwnershipMode::Own,
         _ => OwnershipMode::Value,
     }
 }
@@ -337,7 +351,9 @@ pub(crate) const fn result_ownership(op: ResolvedHostCommandOperation) -> Owners
 pub(crate) const fn admitted_in_while(op: ResolvedHostCommandOperation) -> bool {
     !matches!(
         op,
-        ResolvedHostCommandOperation::NetRecv | ResolvedHostCommandOperation::HttpsGet
+        ResolvedHostCommandOperation::NetRecv
+            | ResolvedHostCommandOperation::HttpsGet
+            | ResolvedHostCommandOperation::HttpsPost
     )
 }
 
@@ -368,6 +384,11 @@ const fn param_types(
         ResolvedHostCommandOperation::NetWait => &[
             ("handle", ParamMode::Value, Type::Usize),
             ("timeout_ms", ParamMode::Value, Type::Usize),
+        ],
+        ResolvedHostCommandOperation::HttpsPost => &[
+            ("url", ParamMode::Borrow, Type::SliceU8),
+            ("body", ParamMode::Borrow, Type::SliceU8),
+            ("max", ParamMode::Value, Type::Usize),
         ],
         ResolvedHostCommandOperation::HttpsGet => &[
             ("url", ParamMode::Borrow, Type::SliceU8),
@@ -426,7 +447,9 @@ mod tests {
             assert_eq!(by_name(name(op)), Some(op));
             assert_eq!(by_id(id(op)), Some(op));
             assert!(
-                id(op).starts_with("core.host.net-") || id(op) == HTTPS_GET_ID,
+                id(op).starts_with("core.host.net-")
+                    || id(op) == HTTPS_GET_ID
+                    || id(op) == HTTPS_POST_ID,
                 "unexpected network operation id: {}",
                 id(op)
             );

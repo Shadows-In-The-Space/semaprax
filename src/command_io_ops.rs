@@ -814,7 +814,9 @@ fn legacy() -> bool uses { network.connect, process.stdout.write } {
                 admitted_in_while(op),
                 !matches!(
                     op,
-                    ResolvedHostCommandOperation::NetRecv | ResolvedHostCommandOperation::HttpsGet
+                    ResolvedHostCommandOperation::NetRecv
+                        | ResolvedHostCommandOperation::HttpsGet
+                        | ResolvedHostCommandOperation::HttpsPost
                 ),
                 "{op:?}"
             );

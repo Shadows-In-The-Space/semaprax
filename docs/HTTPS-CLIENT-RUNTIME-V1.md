@@ -52,3 +52,7 @@ adapter uses libcurl with compiler-owned Mozilla roots and the same bounded
 canonical response contract. HTTP/3, server request parsing, live browser Fetch
 authority, structured async integration, observability, cross-platform libcurl
 provisioning, and broad target conformance remain open.
+
+[HTTPS Client I/O v2](HTTPS-CLIENT-IO-V2.md) adds bounded POST with explicit
+destination authorization and fixture v4; it does not change the GET contract
+or promote its local evidence to hosted support.

@@ -65,6 +65,20 @@ fn client_trusting_the_test_root() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
+/// The existing private-root loopback pair, shared with HTTPS POST evidence.
+pub(super) fn trusted_loopback_tls_configs() -> (rustls::ClientConfig, rustls::ServerConfig) {
+    let client = client_trusting_the_test_root();
+    let certificate = rustls::pki_types::CertificateDer::from(decode64(LEAF));
+    let private = rustls::pki_types::PrivatePkcs8KeyDer::from(decode64(LEAF_KEY));
+    let server = rustls::ServerConfig::builder_with_provider(crypto())
+        .with_safe_default_protocol_versions()
+        .expect("ring has safe protocol versions")
+        .with_no_client_auth()
+        .with_single_cert(vec![certificate], private.into())
+        .expect("the test key matches its certificate");
+    (client, server)
+}
+
 /// A loopback TLS server presenting `cert`/`key`, which runs one handshake and
 /// then goes away. A rejected handshake is an expected outcome, so nothing
 /// here asserts the server side succeeded.

@@ -10,6 +10,12 @@ use std::time::Duration;
 
 /// Largest response body accepted by the convenience client.
 pub const MAX_HTTPS_BODY_BYTES: usize = 1_048_576;
+/// Largest URL accepted by the side-effecting POST entry point.
+pub const MAX_HTTPS_POST_URL_BYTES: usize = 2_048;
+/// Largest request body accepted by the side-effecting POST entry point.
+pub const MAX_HTTPS_POST_BODY_BYTES: usize = 65_536;
+/// Largest canonical response accepted by the side-effecting POST entry point.
+pub const MAX_HTTPS_POST_RESPONSE_BYTES: usize = 65_536;
 /// Largest redirect chain a client may configure.
 pub const MAX_HTTPS_REDIRECTS: usize = 10;
 /// Largest idle connection pool retained for one origin.
@@ -176,6 +182,7 @@ impl Default for HttpsClientConfig {
 #[derive(Clone, Debug)]
 pub struct HttpsClient {
     client: reqwest::blocking::Client,
+    post_client: reqwest::blocking::Client,
 }
 
 impl HttpsClient {
@@ -188,7 +195,7 @@ impl HttpsClient {
     }
 
     /// Construct a client around an explicit Rustls policy, preserving the
-    /// same redirect, pooling, timeout, and HTTPS-only bounds.
+    /// same pooling, timeout, and HTTPS-only bounds.
     pub fn with_tls_config(
         config: HttpsClientConfig,
         tls: rustls::ClientConfig,
@@ -223,6 +230,36 @@ impl HttpsClient {
                 .with_no_client_auth()
             }
         };
+        let client = Self::build_transport_client(
+            config,
+            tls.clone(),
+            https_only,
+            reqwest::redirect::Policy::limited(config.max_redirects),
+            false,
+        )?;
+        // POST has a separate client because Reqwest's redirect and retry
+        // policies are client-wide. A side-effecting request must never be
+        // replayed or redirected by this convenience transport.
+        let post_client = Self::build_transport_client(
+            config,
+            tls,
+            https_only,
+            reqwest::redirect::Policy::none(),
+            true,
+        )?;
+        Ok(Self {
+            client,
+            post_client,
+        })
+    }
+
+    fn build_transport_client(
+        config: HttpsClientConfig,
+        tls: rustls::ClientConfig,
+        https_only: bool,
+        redirects: reqwest::redirect::Policy,
+        never_retry: bool,
+    ) -> Result<reqwest::blocking::Client, HttpsError> {
         let mut builder = reqwest::blocking::Client::builder()
             .no_proxy()
             .tls_backend_preconfigured(tls)
@@ -230,12 +267,14 @@ impl HttpsClient {
             .connect_timeout(config.timeout)
             .pool_idle_timeout(config.timeout)
             .pool_max_idle_per_host(config.max_idle_per_host)
-            .redirect(reqwest::redirect::Policy::limited(config.max_redirects));
+            .redirect(redirects);
         if https_only {
             builder = builder.https_only(true);
         }
-        let client = builder.build().map_err(|_| HttpsError::TransportFailed)?;
-        Ok(Self { client })
+        if never_retry {
+            builder = builder.retry(reqwest::retry::never());
+        }
+        builder.build().map_err(|_| HttpsError::TransportFailed)
     }
 
     /// Fetch one HTTPS resource and publish it only after the complete body
@@ -257,6 +296,50 @@ impl HttpsClient {
         self.get(url, max_bytes)?.canonical_http1_bytes(max_bytes)
     }
 
+    /// Submit one bounded HTTPS POST request without following redirects or
+    /// retrying. Callers that expose this to untrusted input must first apply
+    /// their own explicit origin authority policy.
+    pub fn post(
+        &self,
+        url: &str,
+        body: &[u8],
+        max_response_bytes: usize,
+    ) -> Result<HttpsResponse, HttpsError> {
+        if url.is_empty() || url.len() > MAX_HTTPS_POST_URL_BYTES || url.as_bytes().contains(&0) {
+            return Err(HttpsError::InvalidUrl);
+        }
+        if body.len() > MAX_HTTPS_POST_BODY_BYTES
+            || max_response_bytes == 0
+            || max_response_bytes > MAX_HTTPS_POST_RESPONSE_BYTES
+        {
+            return Err(HttpsError::InvalidConfiguration);
+        }
+        let parsed = reqwest::Url::parse(url).map_err(|_| HttpsError::InvalidUrl)?;
+        if parsed.scheme() != "https" {
+            return Err(HttpsError::InsecureScheme);
+        }
+        if parsed.host_str().is_none()
+            || has_url_userinfo(url)
+            || parsed.password().is_some()
+            || parsed.fragment().is_some()
+        {
+            return Err(HttpsError::InvalidUrl);
+        }
+        self.post_parsed(parsed, body, max_response_bytes)
+    }
+
+    /// Submit one POST request and normalize the response into bytes accepted
+    /// by the existing `std.http` HTTP/1 parser.
+    pub fn post_canonical(
+        &self,
+        url: &str,
+        body: &[u8],
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, HttpsError> {
+        self.post(url, body, max_bytes)?
+            .canonical_http1_bytes(max_bytes)
+    }
+
     fn get_parsed(
         &self,
         url: reqwest::Url,
@@ -267,6 +350,29 @@ impl HttpsClient {
             .get(url)
             .send()
             .map_err(|_| HttpsError::TransportFailed)?;
+        Self::collect_response(response, max_body_bytes)
+    }
+
+    fn post_parsed(
+        &self,
+        url: reqwest::Url,
+        body: &[u8],
+        max_response_bytes: usize,
+    ) -> Result<HttpsResponse, HttpsError> {
+        let response = self
+            .post_client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .body(body.to_vec())
+            .send()
+            .map_err(|_| HttpsError::TransportFailed)?;
+        Self::collect_response(response, max_response_bytes)
+    }
+
+    fn collect_response(
+        response: reqwest::blocking::Response,
+        max_body_bytes: usize,
+    ) -> Result<HttpsResponse, HttpsError> {
         if response
             .content_length()
             .is_some_and(|length| length > max_body_bytes as u64)
@@ -310,6 +416,17 @@ impl HttpsClient {
             body,
         })
     }
+}
+
+fn has_url_userinfo(url: &str) -> bool {
+    let Some((_, authority_and_rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority_end = authority_and_rest
+        .bytes()
+        .position(|byte| matches!(byte, b'/' | b'?' | b'#'))
+        .unwrap_or(authority_and_rest.len());
+    authority_and_rest[..authority_end].contains('@')
 }
 
 #[cfg(test)]

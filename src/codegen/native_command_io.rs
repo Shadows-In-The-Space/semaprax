@@ -343,7 +343,16 @@ pub(super) fn emit_runner(output: &mut impl COutput, command_symbol: &str) {
 
 pub(super) fn emit_process_adapter(output: &mut impl COutput) {
     output.push_str(
-        r#"#if defined(_WIN32)
+        r#"#ifndef SPX_LANGUAGE_COMMAND_RAW_ARGUMENT_LIMIT_V1
+#define SPX_LANGUAGE_COMMAND_RAW_ARGUMENT_LIMIT_V1 SPX_COMMAND_ARGUMENT_LIMIT_V1
+#endif
+
+#ifndef SPX_LANGUAGE_COMMAND_RUN_V1
+#define SPX_LANGUAGE_COMMAND_RUN_V1(input, result) \
+    spx_language_command_run_v1((input), (result))
+#endif
+
+#if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
 #include <limits.h>
@@ -412,7 +421,7 @@ static int spx_language_command_finish_v1(
 ) {
     int exit_code = 2;
     if (arena != NULL && result != NULL && input != NULL &&
-        spx_language_command_run_v1(input, result) &&
+        SPX_LANGUAGE_COMMAND_RUN_V1(input, result) &&
         result->semantic_success &&
         spx_language_command_flush_v1(
             stderr,
@@ -441,7 +450,7 @@ static int spx_language_command_finish_v1(
 #if defined(_WIN32)
 int wmain(int argc, wchar_t **argv) {
     if (_setmode(_fileno(stderr), _O_BINARY) == -1 ||
-        argc < 1 || argc > (int)SPX_COMMAND_ARGUMENT_LIMIT_V1 + 1 ||
+        argc < 1 || argc > (int)SPX_LANGUAGE_COMMAND_RAW_ARGUMENT_LIMIT_V1 + 1 ||
         argv == NULL ||
         _setmode(_fileno(stdin), _O_BINARY) == -1 ||
         _setmode(_fileno(stdout), _O_BINARY) == -1) {
@@ -456,9 +465,12 @@ int wmain(int argc, wchar_t **argv) {
         return spx_language_command_fail_v1();
     }
     struct spx_language_command_input_v1 input = {0};
-    input.argument_count = (uint32_t)(argc - 1);
+#if defined(SPX_HTTPS_POST_OPTIONS_V1)
+    spx_https_process_options_reset_v1();
+    bool spx_host_options = true;
+#endif
     uint64_t used = UINT64_C(0);
-    for (uint32_t index = UINT32_C(0); index < input.argument_count; ++index) {
+    for (uint32_t index = UINT32_C(0); index < (uint32_t)(argc - 1); ++index) {
         const wchar_t *argument = argv[index + UINT32_C(1)];
         if (argument == NULL) return spx_language_command_finish_v1(arena, result, NULL);
         size_t wide_length = 0u;
@@ -482,7 +494,22 @@ int wmain(int argc, wchar_t **argv) {
         ) != required) {
             return spx_language_command_finish_v1(arena, result, NULL);
         }
-        input.arguments[index] = (spx_str_v1){
+#if defined(SPX_HTTPS_POST_OPTIONS_V1)
+        if (spx_host_options) {
+            int option = spx_https_process_argument_v1(
+                required == 0 ? NULL : arena + (size_t)used, (uint64_t)required
+            );
+            if (option < 0) return spx_language_command_finish_v1(arena, result, NULL);
+            if (option > 0) {
+                used += (uint64_t)required;
+                continue;
+            }
+            spx_host_options = false;
+        }
+#endif
+        if (input.argument_count >= SPX_COMMAND_ARGUMENT_LIMIT_V1)
+            return spx_language_command_finish_v1(arena, result, NULL);
+        input.arguments[input.argument_count++] = (spx_str_v1){
             .data = required == 0 ? NULL : arena + (size_t)used,
             .len = (uint64_t)required
         };
@@ -491,7 +518,7 @@ int wmain(int argc, wchar_t **argv) {
 #else
 int main(int argc, char **argv) {
     if (signal(SIGPIPE, SIG_IGN) == SIG_ERR ||
-        argc < 1 || argc > (int)SPX_COMMAND_ARGUMENT_LIMIT_V1 + 1 || argv == NULL) {
+        argc < 1 || argc > (int)SPX_LANGUAGE_COMMAND_RAW_ARGUMENT_LIMIT_V1 + 1 || argv == NULL) {
         return spx_language_command_fail_v1();
     }
     uint8_t *arena = (uint8_t *)malloc((size_t)SPX_COMMAND_INPUT_CAPACITY_V1);
@@ -503,9 +530,12 @@ int main(int argc, char **argv) {
         return spx_language_command_fail_v1();
     }
     struct spx_language_command_input_v1 input = {0};
-    input.argument_count = (uint32_t)(argc - 1);
+#if defined(SPX_HTTPS_POST_OPTIONS_V1)
+    spx_https_process_options_reset_v1();
+    bool spx_host_options = true;
+#endif
     uint64_t used = UINT64_C(0);
-    for (uint32_t index = UINT32_C(0); index < input.argument_count; ++index) {
+    for (uint32_t index = UINT32_C(0); index < (uint32_t)(argc - 1); ++index) {
         const char *argument = argv[index + UINT32_C(1)];
         if (argument == NULL) return spx_language_command_finish_v1(arena, result, NULL);
         uint64_t length = UINT64_C(0);
@@ -514,8 +544,18 @@ int main(int argc, char **argv) {
             !spx_command_utf8_v1((const uint8_t *)argument, length)) {
             return spx_language_command_finish_v1(arena, result, NULL);
         }
+#if defined(SPX_HTTPS_POST_OPTIONS_V1)
+        if (spx_host_options) {
+            int option = spx_https_process_argument_v1((const uint8_t *)argument, length);
+            if (option < 0) return spx_language_command_finish_v1(arena, result, NULL);
+            if (option > 0) continue;
+            spx_host_options = false;
+        }
+#endif
         if (length != UINT64_C(0)) memcpy(arena + (size_t)used, argument, (size_t)length);
-        input.arguments[index] = (spx_str_v1){
+        if (input.argument_count >= SPX_COMMAND_ARGUMENT_LIMIT_V1)
+            return spx_language_command_finish_v1(arena, result, NULL);
+        input.arguments[input.argument_count++] = (spx_str_v1){
             .data = length == UINT64_C(0) ? NULL : arena + (size_t)used,
             .len = length
         };

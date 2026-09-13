@@ -4,6 +4,7 @@ use super::super::http_io as boundary;
 use super::*;
 
 const MAX_URL_BYTES: i64 = 2_048;
+const MAX_BODY_BYTES: i64 = crate::network_io_ops::MAX_CHUNK_BYTES as i64;
 const MAX_RESPONSE_BYTES: i64 = crate::network_io_ops::MAX_CHUNK_BYTES as i64;
 const INVALID_URL: i32 = crate::network_io_ops::HTTP_INVALID_URL as i32;
 const RESPONSE_TOO_LARGE: i32 = crate::network_io_ops::HTTP_RESPONSE_TOO_LARGE as i32;
@@ -21,29 +22,49 @@ impl Emitter<'_> {
         use crate::hir::ResolvedHostCommandOperation as Op;
         let stdout = super::super::host_output::COMMAND_STDOUT_GLOBALS;
         let stderr = super::super::host_output::COMMAND_STDERR_GLOBALS;
-        if call.operation != Op::HttpsGet {
+        if !matches!(call.operation, Op::HttpsGet | Op::HttpsPost) {
             return Err(error("non-HTTPS operation reached the HTTPS lowering"));
         }
         self.require_scalar(&arguments[0], &ResolvedType::SliceU8, "https_get URL")?;
-        self.require_scalar(
-            &arguments[1],
-            &ResolvedType::Usize,
-            "https_get response bound",
-        )?;
+        let (body, max, import) = match call.operation {
+            Op::HttpsGet => (None, &arguments[1], boundary::GET_IMPORT),
+            Op::HttpsPost => (Some(&arguments[1]), &arguments[2], boundary::POST_IMPORT),
+            _ => unreachable!("HTTPS operation was checked above"),
+        };
+        self.require_scalar(max, &ResolvedType::Usize, "HTTPS response bound")?;
         self.stage_slice_carrier(&arguments[0], local);
         self.emit_carrier_length(local);
         self.emit_outside_one_to(MAX_URL_BYTES);
         self.emit_http_failure_if_code(&expr.id, INVALID_URL)?;
-        self.get_scalar(&arguments[1]);
+        if let Some(body) = body {
+            self.require_scalar(body, &ResolvedType::SliceU8, "https_post body")?;
+            let Value::Scalar {
+                local: body_local, ..
+            } = body
+            else {
+                return Err(error("https_post body is not scalar"));
+            };
+            self.stage_slice_carrier(body, *body_local);
+            self.emit_carrier_length(*body_local);
+            self.emit_outside_one_to(MAX_BODY_BYTES);
+            self.emit_http_failure_if_code(&expr.id, RESPONSE_TOO_LARGE)?;
+        }
+        self.get_scalar(max);
         self.emit_outside_one_to(MAX_RESPONSE_BYTES);
         self.emit_http_failure_if_code(&expr.id, RESPONSE_TOO_LARGE)?;
 
         self.emit_carrier_root_and_length(local);
-        self.get_scalar(&arguments[1]);
+        if let Some(Value::Scalar {
+            local: body_local, ..
+        }) = body
+        {
+            self.emit_carrier_root_and_length(*body_local);
+        }
+        self.get_scalar(max);
         self.output.push(0xa7);
         self.emit_pointer(pointer);
         self.output.push(0x10);
-        write_u32(self.output, boundary::GET_IMPORT);
+        write_u32(self.output, import);
         self.output.push(0x21);
         write_u32(self.output, self.plan.status);
 
@@ -70,7 +91,7 @@ impl Emitter<'_> {
         self.output.extend([0x71, 0x45, 0x72]);
         self.emit_load_out(pointer);
         self.output.push(0xa7);
-        self.get_scalar(&arguments[1]);
+        self.get_scalar(max);
         self.output.extend([0xa7, 0x4b, 0x72]);
         self.emit_command_failure_if(&expr.id, stdout, stderr)?;
         self.emit_load_out(pointer);

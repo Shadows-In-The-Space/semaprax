@@ -729,8 +729,10 @@ generated target ambient network authority. `src/network_provider/tcp.rs`
 owns the lower Rustls client/server stream policy, including explicit
 server-config injection and accepted-stream settlement. See [HTTPS Client
 Runtime v1](HTTPS-CLIENT-RUNTIME-V1.md).
-`src/interpreter/network.rs` owns the source-visible `https_get` capacity and
-status boundary described by [HTTPS Client I/O v1](HTTPS-CLIENT-IO-V1.md).
+`src/interpreter/network.rs` owns source-visible GET/POST capacity and status
+boundaries described by [HTTPS Client I/O v1](HTTPS-CLIENT-IO-V1.md) and
+[v2](HTTPS-CLIENT-IO-V2.md). The POST destination policy remains host-owned;
+fixture v4 binds exact request bodies without granting physical network authority.
 `src/wasm/http_io.rs` and `src/wasm/aggregate/http_io.rs` own its distinct
 Core-Wasm import/status boundary and owned-result authentication;
 `src/project/npm/https_command.rs` and `https_runtime.mjs` own the replayable

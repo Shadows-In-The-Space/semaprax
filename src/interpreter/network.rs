@@ -251,6 +251,32 @@ impl<'a> NetworkState<'a> {
             .map_err(|_| http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE))?;
         Ok(response)
     }
+    fn https_post(&mut self, url: &[u8], body: &[u8], max: u64) -> Result<Vec<u8>, Flow> {
+        if url.is_empty() || url.len() > 2_048 || url.contains(&0) {
+            return Err(http_failure(network_io_ops::HTTP_INVALID_URL));
+        }
+        let url =
+            std::str::from_utf8(url).map_err(|_| http_failure(network_io_ops::HTTP_INVALID_URL))?;
+        if max == 0
+            || max > network_io_ops::MAX_CHUNK_BYTES
+            || body.len() > network_io_ops::MAX_CHUNK_BYTES as usize
+        {
+            return Err(http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE));
+        }
+        // Charge attempted outbound bytes before dispatch; failures do not refund.
+        self.charge(body.len())
+            .map_err(|_| http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE))?;
+        let response = self
+            .provider
+            .https_post(url, body, max as usize)
+            .map_err(provider_http_failure)?;
+        if response.len() > max as usize {
+            return Err(http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE));
+        }
+        self.charge(response.len())
+            .map_err(|_| http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE))?;
+        Ok(response)
+    }
 }
 
 fn failure(code: u32) -> Flow {
@@ -376,6 +402,43 @@ impl Evaluator<'_> {
                     return Err(http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE));
                 }
                 let response = network.https_get(url.bytes(), *max)?;
+                let length = u64::try_from(response.len())
+                    .map_err(|_| http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE))?;
+                let next_payload = self
+                    .allocated_byte_payload
+                    .checked_add(length)
+                    .ok_or_else(|| http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE))?;
+                if next_payload > crate::byte_data_capacity::MAX_OWNED_BYTE_PAYLOAD_BYTES {
+                    return Err(http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE));
+                }
+                self.next_byte_allocation = next_count;
+                self.allocated_byte_payload = next_payload;
+                Ok(Value::Bytes(OwnedBytesValue {
+                    allocation: next_count,
+                    bytes: Arc::from(response),
+                }))
+            }
+            (
+                Operation::HttpsPost,
+                [Value::BorrowedSlice(url), Value::BorrowedSlice(body), Value::Usize(max)],
+            ) => {
+                let next_count = self
+                    .next_byte_allocation
+                    .checked_add(1)
+                    .ok_or_else(|| http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE))?;
+                if next_count > crate::byte_data_capacity::MAX_BYTES_COPY_SITES {
+                    return Err(http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE));
+                }
+                if self
+                    .allocated_byte_payload
+                    .checked_add(*max)
+                    .is_none_or(|next| {
+                        next > crate::byte_data_capacity::MAX_OWNED_BYTE_PAYLOAD_BYTES
+                    })
+                {
+                    return Err(http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE));
+                }
+                let response = network.https_post(url.bytes(), body.bytes(), *max)?;
                 let length = u64::try_from(response.len())
                     .map_err(|_| http_failure(network_io_ops::HTTP_RESPONSE_TOO_LARGE))?;
                 let next_payload = self

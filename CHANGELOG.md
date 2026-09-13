@@ -8,6 +8,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add checked-source HTTPS POST across explicit provider, native C11 and
+  Core-Wasm/npm fixture paths (#193), with bounded body/response bytes, explicit
+  destination authorization and no automatic retry or redirect for POST.
+
 - Add an explicit native HTTPS transport for provider adapters (#181), with
   injected credentials, bounded buffered responses and conservative dispatch
   uncertainty. Extend compact task context with ordered seeds, revision binding

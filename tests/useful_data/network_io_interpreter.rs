@@ -708,3 +708,34 @@ fn a_credential_bearing_url_never_reaches_a_status_or_transcript() {
         "the requested host leaked into the invocation result: {rendered}"
     );
 }
+
+#[test]
+fn https_post_checked_source_replays_exact_payload_and_preserves_failure_queue() {
+    let source = https_program(b"https://example.test/data", 1024).replace(
+        "let response = https_get(array_as_slice(url), 1024usize);",
+        "let body = [111u8, 107u8];\n    let response = https_post(array_as_slice(url), array_as_slice(body), 1024usize);",
+    );
+    let fixture = r#"{"schema":"semaprax.network-fixture.v4","connections":[],"https":[],"https_post":[{"url":"https://example.test/data","body":"ok","response":"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"}]}"#;
+    let mut provider = FixtureNetworkProvider::from_json(fixture).unwrap();
+    let wrong = source.replace("[111u8, 107u8]", "[110u8, 111u8]");
+    assert_eq!(http_failure_code(&run(&wrong, &mut provider)), 3);
+    let small = source.replace("1024usize", "1usize");
+    assert_eq!(http_failure_code(&run(&small, &mut provider)), 4);
+    expect_true(&run(&source, &mut provider));
+    assert_eq!(http_failure_code(&run(&source, &mut provider)), 3);
+    let mut denied = DeniedNetworkProvider;
+    assert_eq!(http_failure_code(&run(&source, &mut denied)), 6);
+
+    let parsed = parse(&source, Path::new("post.spx")).unwrap();
+    let canonical = semaprax::format::canonical(&parsed);
+    let reparsed = parse(&canonical, Path::new("post.spx")).unwrap();
+    assert_eq!(semaprax::format::canonical(&reparsed), canonical);
+    assert!(semaprax::graph::to_json(&reparsed)
+        .unwrap()
+        .contains("core.host.https-post"));
+    let missing_effect = source.replace("network.http", "process.stdout.write");
+    let diagnostics = semaprax::check(&missing_effect, Path::new("post.spx")).unwrap_err();
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "SPX-E102"));
+}

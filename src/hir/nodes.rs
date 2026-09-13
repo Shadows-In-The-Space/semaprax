@@ -475,6 +475,7 @@ pub enum ResolvedHostCommandOperation {
     NetCloseListener,
     NetTlsAccept,
     HttpsGet,
+    HttpsPost,
     FileRead,
     FileWriteNew,
     FileStat,

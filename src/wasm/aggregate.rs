@@ -1718,8 +1718,9 @@ fn emit_byte_exports_profile(
     });
     let network_import_types =
         network_io.then(|| super::network_io::intern_import_types(&mut types, &mut type_indexes));
-    let http_import_type =
-        http_io.then(|| super::http_io::intern_import_type(&mut types, &mut type_indexes));
+    let http_post = command_io.is_some_and(super::command_io::CommandPlan::is_http_post_command);
+    let http_import_types = http_io
+        .then(|| super::http_io::intern_import_types(&mut types, &mut type_indexes, http_post));
     let filesystem_import_types = filesystem_ops
         .then(|| super::filesystem_ops::intern_import_types(&mut types, &mut type_indexes));
     let filesystem_versions =
@@ -1820,8 +1821,8 @@ fn emit_byte_exports_profile(
     if let Some(types) = &network_import_types {
         super::network_io::emit_imports(&mut imports, types);
     }
-    if let Some(ty) = http_import_type {
-        super::http_io::emit_import(&mut imports, ty);
+    if let Some(types) = &http_import_types {
+        super::http_io::emit_imports(&mut imports, types);
     }
     if let Some(types) = &filesystem_import_types {
         super::filesystem_ops::emit_imports(&mut imports, types);
@@ -6513,7 +6514,7 @@ impl Emitter<'_> {
             _ => {
                 return Err(error(
                     "Vec element type is outside the admitted scalar profile",
-                ))
+                ));
             }
         }
         Ok(())
@@ -6534,7 +6535,7 @@ impl Emitter<'_> {
             _ => {
                 return Err(error(
                     "Vec element type is outside the admitted scalar profile",
-                ))
+                ));
             }
         }
         self.output.push(0x21);

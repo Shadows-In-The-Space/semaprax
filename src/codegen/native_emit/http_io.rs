@@ -2,8 +2,9 @@
 //!
 //! This profile is emitted only for an authenticated Project-v13 command. A
 //! single invocation-owned libcurl easy handle retains its connection cache;
-//! the generated runner grants authority, executes the command, settles the
-//! handle on every path, and publishes output only afterwards.
+//! the generated runner grants GET authority, accepts an explicit POST origin
+//! allowlist, settles the handle on every path, and publishes output only
+//! afterwards.
 
 use std::collections::HashMap;
 
@@ -90,6 +91,32 @@ pub(super) fn emit_runtime(output: &mut impl COutput, program: &ResolvedProgram)
     emit_constants(output);
     emit_mozilla_roots(output);
     output.push_str(HTTPS_RUNTIME_C);
+    if program_uses_https_post(program) {
+        output.push_str(POST_PROCESS_OPTIONS_C);
+    }
+}
+
+fn program_uses_https_post(program: &ResolvedProgram) -> bool {
+    program
+        .functions
+        .iter()
+        .chain(
+            program
+                .function_instances
+                .iter()
+                .map(|instance| &instance.function),
+        )
+        .any(|function| {
+            let mut found = false;
+            crate::hir::function_value::walk(function, |expression| {
+                found |= matches!(
+                    &expression.kind,
+                    hir::ResolvedExprKind::HostCommandCall(call)
+                        if call.operation == hir::ResolvedHostCommandOperation::HttpsPost
+                );
+            });
+            found
+        })
 }
 
 fn emit_constants(output: &mut impl COutput) {
@@ -103,9 +130,11 @@ fn emit_constants(output: &mut impl COutput) {
          #define SPX_HTTP_UNSUPPORTED_VERSION_V1 UINT32_C({unsupported_version})\n\
          #define SPX_HTTP_AUTHORITY_DENIED_V1 UINT32_C({authority_denied})\n\
          #define SPX_HTTP_MAX_URL_BYTES_V1 UINT64_C(2048)\n\
+         #define SPX_HTTP_MAX_REQUEST_BYTES_V1 UINT64_C({max_request})\n\
          #define SPX_HTTP_MAX_RESPONSE_BYTES_V1 UINT64_C({max_response})\n\
          #define SPX_HTTP_MAX_TOTAL_BYTES_V1 UINT64_C({max_total})\n\
          #define SPX_HTTP_MAX_HEADERS_V1 UINT64_C(128)\n\
+         #define SPX_HTTP_MAX_POST_ORIGINS_V1 UINT32_C(8)\n\
          #define SPX_HTTP_TIMEOUT_MILLIS_V1 30000L\n\
          #define SPX_HTTP_MAX_REDIRECTS_V1 10L\n\
          #define SPX_HTTP_MAX_CONNECTIONS_V1 8L",
@@ -116,6 +145,7 @@ fn emit_constants(output: &mut impl COutput) {
         response_too_large = ops::HTTP_RESPONSE_TOO_LARGE,
         unsupported_version = ops::HTTP_UNSUPPORTED_VERSION,
         authority_denied = ops::HTTP_AUTHORITY_DENIED,
+        max_request = ops::MAX_CHUNK_BYTES,
         max_response = ops::MAX_CHUNK_BYTES,
         max_total = ops::MAX_TOTAL_BYTES,
     )
@@ -129,6 +159,18 @@ fn emit_mozilla_roots(output: &mut impl COutput) {
     }
     output.push_str(";\n");
 }
+
+const POST_PROCESS_OPTIONS_C: &str = r#"
+/* The process adapter recognizes this explicit, prefix-only host option. It
+   never consults an environment variable, proxy setting, or ambient config. */
+#define SPX_HTTPS_POST_OPTIONS_V1 1
+#define SPX_LANGUAGE_COMMAND_RAW_ARGUMENT_LIMIT_V1 \
+    (SPX_COMMAND_ARGUMENT_LIMIT_V1 + SPX_HTTP_MAX_POST_ORIGINS_V1)
+#define SPX_LANGUAGE_COMMAND_RUN_V1(input, result) \
+    spx_https_command_run_with_post_allowlist_v1( \
+        (input), &spx_https_process_allowlist_v1, (result) \
+    )
+"#;
 
 const HTTPS_RUNTIME_C: &str = r#"
 #include <curl/curl.h>
@@ -144,6 +186,11 @@ struct spx_http_header_v1 {
     uint32_t value_length;
 };
 
+struct spx_https_post_allowlist_v1 {
+    uint32_t origin_count;
+    spx_slice_u8_v1 origins[SPX_HTTP_MAX_POST_ORIGINS_V1];
+};
+
 struct spx_https_state_v1 {
     bool granted;
     bool overflow;
@@ -154,11 +201,18 @@ struct spx_https_state_v1 {
     size_t header_bytes_length;
     size_t header_count;
     CURL *client;
+    const struct spx_https_post_allowlist_v1 *post_allowlist;
     uint8_t body[SPX_HTTP_MAX_RESPONSE_BYTES_V1];
     uint8_t header_bytes[SPX_HTTP_MAX_RESPONSE_BYTES_V1];
     uint8_t canonical[SPX_HTTP_MAX_RESPONSE_BYTES_V1];
     struct spx_http_header_v1 headers[SPX_HTTP_MAX_HEADERS_V1];
 };
+
+/* The generated CLI writes this only from explicit leading
+   --spx-https-post-origin=<canonical-origin> options. Library hosts instead
+   pass their allowlist directly to spx_https_command_run_with_post_allowlist_v1. */
+static __attribute__((unused)) struct spx_https_post_allowlist_v1
+    spx_https_process_allowlist_v1;
 
 struct spx_https_command_state_v1 {
     struct spx_language_command_state_v1 command;
@@ -415,6 +469,170 @@ static bool spx_http_https_scheme_v1(const uint8_t *url, uint64_t length) {
     return memcmp(url + 5u, scheme + 5u, 3u) == 0;
 }
 
+static bool spx_http_ascii_equal_ci_v1(const char *left, const char *right) {
+    if (left == NULL || right == NULL) return false;
+    while (*left != '\0' && *right != '\0') {
+        unsigned char a = (unsigned char)*left++;
+        unsigned char b = (unsigned char)*right++;
+        if (a >= (unsigned char)'A' && a <= (unsigned char)'Z') a += 32u;
+        if (b >= (unsigned char)'A' && b <= (unsigned char)'Z') b += 32u;
+        if (a != b) return false;
+    }
+    return *left == '\0' && *right == '\0';
+}
+
+/* Parse a policy origin or requested URL with libcurl's URL parser, so the
+   allowlist compares the same normalized scheme, host, and known-default port
+   that libcurl will dispatch. Policy origins must have no path, query,
+   fragment, user, or password. */
+static bool spx_http_url_parts_v1(
+    spx_slice_u8_v1 input,
+    bool policy_origin,
+    CURLU **parts_out
+) {
+    if (parts_out == NULL || (input.len != UINT64_C(0) && input.ptr == NULL) ||
+        input.len == UINT64_C(0) || input.len > SPX_HTTP_MAX_URL_BYTES_V1 ||
+        !spx_command_utf8_v1(input.ptr, input.len)) return false;
+    char text[SPX_HTTP_MAX_URL_BYTES_V1 + 1u];
+    for (uint64_t index = UINT64_C(0); index < input.len; ++index) {
+        if (input.ptr[index] == UINT8_C(0)) return false;
+    }
+    memcpy(text, input.ptr, (size_t)input.len);
+    text[input.len] = '\0';
+    CURLU *parts = curl_url();
+    if (parts == NULL) return false;
+    CURLUcode parsed = curl_url_set(parts, CURLUPART_URL, text, 0u);
+    char *scheme = NULL;
+    char *host = NULL;
+    char *port = NULL;
+    bool valid = parsed == CURLUE_OK &&
+        curl_url_get(parts, CURLUPART_SCHEME, &scheme, 0u) == CURLUE_OK &&
+        curl_url_get(parts, CURLUPART_HOST, &host, 0u) == CURLUE_OK &&
+        curl_url_get(parts, CURLUPART_PORT, &port, CURLU_DEFAULT_PORT) == CURLUE_OK &&
+        spx_http_ascii_equal_ci_v1(scheme, "https") && host[0] != '\0' && port[0] != '\0';
+    if (valid) {
+        char *fragment = NULL;
+        char *user = NULL;
+        char *password = NULL;
+        bool has_fragment = curl_url_get(parts, CURLUPART_FRAGMENT, &fragment, 0u) == CURLUE_OK;
+        bool has_user = curl_url_get(parts, CURLUPART_USER, &user, 0u) == CURLUE_OK;
+        bool has_password = curl_url_get(parts, CURLUPART_PASSWORD, &password, 0u) == CURLUE_OK;
+        valid = !has_fragment && !has_user && !has_password;
+        curl_free(fragment);
+        curl_free(user);
+        curl_free(password);
+        if (policy_origin && valid) {
+            char *path = NULL;
+            char *query = NULL;
+            bool has_path = curl_url_get(parts, CURLUPART_PATH, &path, 0u) == CURLUE_OK;
+            bool has_query = curl_url_get(parts, CURLUPART_QUERY, &query, 0u) == CURLUE_OK;
+            /* CURLU may materialize an absent origin path as `/`; it has the
+               same origin and is safe to accept as a host policy spelling. */
+            valid = (!has_path || strcmp(path, "/") == 0) && !has_query;
+            curl_free(path);
+            curl_free(query);
+        }
+    }
+    curl_free(scheme);
+    curl_free(host);
+    curl_free(port);
+    if (!valid) {
+        curl_url_cleanup(parts);
+        return false;
+    }
+    *parts_out = parts;
+    return true;
+}
+
+static bool spx_http_same_origin_v1(CURLU *left, CURLU *right) {
+    char *left_scheme = NULL;
+    char *left_host = NULL;
+    char *left_port = NULL;
+    char *right_scheme = NULL;
+    char *right_host = NULL;
+    char *right_port = NULL;
+    bool same =
+        curl_url_get(left, CURLUPART_SCHEME, &left_scheme, 0u) == CURLUE_OK &&
+        curl_url_get(left, CURLUPART_HOST, &left_host, 0u) == CURLUE_OK &&
+        curl_url_get(left, CURLUPART_PORT, &left_port, CURLU_DEFAULT_PORT) == CURLUE_OK &&
+        curl_url_get(right, CURLUPART_SCHEME, &right_scheme, 0u) == CURLUE_OK &&
+        curl_url_get(right, CURLUPART_HOST, &right_host, 0u) == CURLUE_OK &&
+        curl_url_get(right, CURLUPART_PORT, &right_port, CURLU_DEFAULT_PORT) == CURLUE_OK &&
+        spx_http_ascii_equal_ci_v1(left_scheme, right_scheme) &&
+        spx_http_ascii_equal_ci_v1(left_host, right_host) && strcmp(left_port, right_port) == 0;
+    curl_free(left_scheme);
+    curl_free(left_host);
+    curl_free(left_port);
+    curl_free(right_scheme);
+    curl_free(right_host);
+    curl_free(right_port);
+    return same;
+}
+
+static bool spx_https_post_allowlist_valid_v1(
+    const struct spx_https_post_allowlist_v1 *allowlist
+) {
+    if (allowlist == NULL) return true;
+    if (allowlist->origin_count > SPX_HTTP_MAX_POST_ORIGINS_V1) return false;
+    for (uint32_t index = UINT32_C(0); index < allowlist->origin_count; ++index) {
+        CURLU *parts = NULL;
+        if (!spx_http_url_parts_v1(allowlist->origins[index], true, &parts)) return false;
+        curl_url_cleanup(parts);
+    }
+    return true;
+}
+
+static bool spx_https_post_allowed_v1(
+    const struct spx_https_state_v1 *state,
+    spx_slice_u8_v1 url
+) {
+    if (state == NULL || state->post_allowlist == NULL) return false;
+    CURLU *requested = NULL;
+    if (!spx_http_url_parts_v1(url, false, &requested)) return false;
+    bool allowed = false;
+    for (uint32_t index = UINT32_C(0);
+         index < state->post_allowlist->origin_count;
+         ++index) {
+        CURLU *origin = NULL;
+        if (spx_http_url_parts_v1(state->post_allowlist->origins[index], true, &origin) &&
+            spx_http_same_origin_v1(requested, origin)) allowed = true;
+        if (origin != NULL) curl_url_cleanup(origin);
+        if (allowed) break;
+    }
+    curl_url_cleanup(requested);
+    return allowed;
+}
+
+static __attribute__((unused)) void spx_https_process_options_reset_v1(void) {
+    memset(&spx_https_process_allowlist_v1, 0, sizeof(spx_https_process_allowlist_v1));
+}
+
+/* Return one when this is a consumed host option, zero for the first source
+   argument, and minus one for a malformed or over-capacity host option. */
+static __attribute__((unused)) int spx_https_process_argument_v1(
+    const uint8_t *argument,
+    uint64_t length
+) {
+    static const char prefix[] = "--spx-https-post-origin=";
+    const uint64_t prefix_length = (uint64_t)(sizeof(prefix) - 1u);
+    if (argument == NULL || length < prefix_length ||
+        memcmp(argument, prefix, (size_t)prefix_length) != 0) return 0;
+    if (spx_https_process_allowlist_v1.origin_count >= SPX_HTTP_MAX_POST_ORIGINS_V1)
+        return -1;
+    spx_slice_u8_v1 origin = {
+        .ptr = length == prefix_length ? NULL : argument + (size_t)prefix_length,
+        .len = length - prefix_length
+    };
+    if (origin.len == UINT64_C(0) || origin.len > SPX_HTTP_MAX_URL_BYTES_V1 ||
+        !spx_command_utf8_v1(origin.ptr, origin.len)) return -1;
+    for (uint64_t index = UINT64_C(0); index < origin.len; ++index) {
+        if (origin.ptr[index] == UINT8_C(0)) return -1;
+    }
+    spx_https_process_allowlist_v1
+        .origins[spx_https_process_allowlist_v1.origin_count++] = origin;
+    return 1;
+}
+
 static __attribute__((unused)) spx_status_token spx_host_https_get_v1(
     struct spx_context *spx_ctx,
     spx_slice_u8_v1 url,
@@ -534,6 +752,149 @@ static __attribute__((unused)) spx_status_token spx_host_https_get_v1(
     return SPX_STATUS_SUCCESS;
 }
 
+static __attribute__((unused)) spx_status_token spx_host_https_post_v1(
+    struct spx_context *spx_ctx,
+    spx_slice_u8_v1 url,
+    spx_slice_u8_v1 body,
+    uint64_t max,
+    spx_bytes_v1 *result_out
+) {
+    if (result_out == NULL) spx_runtime_invariant_failure("https_post result slot is unavailable");
+    *result_out = (spx_bytes_v1){ .ptr = NULL, .len = UINT64_C(0) };
+    struct spx_https_state_v1 *state = spx_https_state_v1(spx_ctx);
+    spx_slice_u8_require_valid(url);
+    spx_slice_u8_require_valid(body);
+    if (url.len == UINT64_C(0) || url.len > SPX_HTTP_MAX_URL_BYTES_V1 ||
+        !spx_command_utf8_v1(url.ptr, url.len)) {
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_INVALID_URL_V1);
+    }
+    for (uint64_t index = UINT64_C(0); index < url.len; ++index) {
+        if (url.ptr[index] == UINT8_C(0)) {
+            return spx_http_status_v1(spx_ctx, SPX_HTTP_INVALID_URL_V1);
+        }
+    }
+    if (!spx_http_https_scheme_v1(url.ptr, url.len)) {
+        bool has_scheme = false;
+        for (uint64_t index = UINT64_C(0); index < url.len; ++index) {
+            if (url.ptr[index] == (uint8_t)':') { has_scheme = true; break; }
+        }
+        return spx_http_status_v1(
+            spx_ctx, has_scheme ? SPX_HTTP_INSECURE_SCHEME_V1 : SPX_HTTP_INVALID_URL_V1
+        );
+    }
+    if (body.len > SPX_HTTP_MAX_REQUEST_BYTES_V1 ||
+        max == UINT64_C(0) || max > SPX_HTTP_MAX_RESPONSE_BYTES_V1) {
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_RESPONSE_TOO_LARGE_V1);
+    }
+    CURLU *requested = NULL;
+    if (!spx_http_url_parts_v1(url, false, &requested)) {
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_INVALID_URL_V1);
+    }
+    curl_url_cleanup(requested);
+    if (!state->granted || !spx_https_post_allowed_v1(state, url)) {
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_AUTHORITY_DENIED_V1);
+    }
+    if (state->client == NULL) return spx_http_status_v1(spx_ctx, SPX_HTTP_TRANSPORT_FAILED_V1);
+
+    char url_text[SPX_HTTP_MAX_URL_BYTES_V1 + 1u];
+    memcpy(url_text, url.ptr, (size_t)url.len);
+    url_text[url.len] = '\0';
+    state->max = max;
+    state->overflow = false;
+    state->malformed_header = false;
+    state->body_length = 0u;
+    state->header_bytes_length = 0u;
+    state->header_count = 0u;
+    struct curl_blob roots = {
+        .data = (void *)spx_https_mozilla_roots_v1,
+        .len = sizeof(spx_https_mozilla_roots_v1) - 1u,
+        .flags = CURL_BLOB_NOCOPY
+    };
+    curl_easy_reset(state->client);
+    struct curl_slist *request_headers = curl_slist_append(
+        NULL, "content-type: application/octet-stream"
+    );
+    if (request_headers == NULL) {
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_TRANSPORT_FAILED_V1);
+    }
+    CURLcode option = CURLE_OK;
+#define SPX_CURL_SET_V1(setting, value) \
+    do { if (option == CURLE_OK) option = curl_easy_setopt(state->client, setting, value); } while (0)
+    SPX_CURL_SET_V1(CURLOPT_URL, url_text);
+    SPX_CURL_SET_V1(CURLOPT_POST, 1L);
+    SPX_CURL_SET_V1(CURLOPT_POSTFIELDS, body.len == UINT64_C(0) ? "" : (const char *)body.ptr);
+    SPX_CURL_SET_V1(CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)body.len);
+    SPX_CURL_SET_V1(CURLOPT_HTTPHEADER, request_headers);
+    SPX_CURL_SET_V1(CURLOPT_PROTOCOLS_STR, "https");
+    SPX_CURL_SET_V1(CURLOPT_REDIR_PROTOCOLS_STR, "https");
+    SPX_CURL_SET_V1(CURLOPT_FOLLOWLOCATION, 0L);
+    SPX_CURL_SET_V1(CURLOPT_MAXCONNECTS, SPX_HTTP_MAX_CONNECTIONS_V1);
+    SPX_CURL_SET_V1(CURLOPT_CONNECTTIMEOUT_MS, SPX_HTTP_TIMEOUT_MILLIS_V1);
+    SPX_CURL_SET_V1(CURLOPT_TIMEOUT_MS, SPX_HTTP_TIMEOUT_MILLIS_V1);
+    SPX_CURL_SET_V1(CURLOPT_NOSIGNAL, 1L);
+    SPX_CURL_SET_V1(CURLOPT_PROXY, "");
+    SPX_CURL_SET_V1(CURLOPT_SSL_VERIFYPEER, 1L);
+    SPX_CURL_SET_V1(CURLOPT_SSL_VERIFYHOST, 2L);
+    SPX_CURL_SET_V1(
+        CURLOPT_SSLVERSION,
+        (long)(CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_TLSv1_3)
+    );
+    SPX_CURL_SET_V1(CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_2TLS);
+    SPX_CURL_SET_V1(CURLOPT_WRITEFUNCTION, spx_http_body_v1);
+    SPX_CURL_SET_V1(CURLOPT_WRITEDATA, state);
+    SPX_CURL_SET_V1(CURLOPT_HEADERFUNCTION, spx_http_header_v1);
+    SPX_CURL_SET_V1(CURLOPT_HEADERDATA, state);
+    if (spx_https_ca_info_v1 != NULL) {
+        SPX_CURL_SET_V1(CURLOPT_CAINFO, spx_https_ca_info_v1);
+    } else {
+        SPX_CURL_SET_V1(CURLOPT_CAINFO_BLOB, &roots);
+    }
+#undef SPX_CURL_SET_V1
+    if (option != CURLE_OK) {
+        curl_slist_free_all(request_headers);
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_TRANSPORT_FAILED_V1);
+    }
+
+    /* One curl_easy_perform is the whole POST dispatch: errors after it are
+       conservatively transport failures and this runtime never retries. */
+    CURLcode performed = curl_easy_perform(state->client);
+    curl_slist_free_all(request_headers);
+    if (state->overflow) return spx_http_status_v1(spx_ctx, SPX_HTTP_RESPONSE_TOO_LARGE_V1);
+    if (state->malformed_header) return spx_http_status_v1(spx_ctx, SPX_HTTP_TRANSPORT_FAILED_V1);
+    if (performed == CURLE_URL_MALFORMAT || performed == CURLE_UNSUPPORTED_PROTOCOL) {
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_INVALID_URL_V1);
+    }
+    if (performed != CURLE_OK) return spx_http_status_v1(spx_ctx, SPX_HTTP_TRANSPORT_FAILED_V1);
+
+    long status = 0L;
+    long http_version = CURL_HTTP_VERSION_NONE;
+    if (curl_easy_getinfo(state->client, CURLINFO_RESPONSE_CODE, &status) != CURLE_OK ||
+        curl_easy_getinfo(state->client, CURLINFO_HTTP_VERSION, &http_version) != CURLE_OK ||
+        status < 100L || status > 999L) {
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_TRANSPORT_FAILED_V1);
+    }
+    const char *version = NULL;
+    switch (http_version) {
+        case CURL_HTTP_VERSION_1_0: version = "1.0"; break;
+        case CURL_HTTP_VERSION_1_1: version = "1.1"; break;
+        case CURL_HTTP_VERSION_2_0: version = "2"; break;
+        case CURL_HTTP_VERSION_3: version = "3"; break;
+        default: return spx_http_status_v1(spx_ctx, SPX_HTTP_UNSUPPORTED_VERSION_V1);
+    }
+    size_t result_length = 0u;
+    if (!spx_http_render_v1(state, status, version, &result_length) ||
+        result_length > (size_t)(SPX_HTTP_MAX_TOTAL_BYTES_V1 - state->total_bytes)) {
+        return spx_http_status_v1(spx_ctx, SPX_HTTP_RESPONSE_TOO_LARGE_V1);
+    }
+    uint8_t *copy = (uint8_t *)malloc(result_length);
+    if (copy == NULL) return spx_http_status_v1(spx_ctx, SPX_HTTP_TRANSPORT_FAILED_V1);
+    memcpy(copy, state->canonical, result_length);
+    state->total_bytes += result_length;
+    result_out->ptr = copy;
+    result_out->len = result_length;
+    return SPX_STATUS_SUCCESS;
+}
+
 static void spx_https_settle_v1(struct spx_https_state_v1 *state) {
     if (state == NULL) return;
     state->granted = false;
@@ -545,19 +906,25 @@ static void spx_https_settle_v1(struct spx_https_state_v1 *state) {
 pub(super) fn emit_runner(output: &mut impl COutput, command_symbol: &str) {
     writeln!(
         output,
-        r#"int {run_symbol}(
+        r#"int spx_https_command_run_with_post_allowlist_v1(
     const struct spx_language_command_input_v1 *input,
+    const struct spx_https_post_allowlist_v1 *post_allowlist,
     struct spx_language_command_result_v1 *result_out
 ) {{
     if (result_out == NULL) return 0;
     memset(result_out, 0, sizeof(*result_out));
     if (!spx_language_command_input_is_valid_v1(input)) return 0;
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) return 0;
+    if (!spx_https_post_allowlist_valid_v1(post_allowlist)) {{
+        curl_global_cleanup();
+        return 0;
+    }}
     struct spx_status_entry spx_status_entries[UINT32_C(1)];
     struct spx_https_command_state_v1 state = {{0}};
     state.command.input = input;
     state.https.client = curl_easy_init();
     state.https.granted = true;
+    state.https.post_allowlist = post_allowlist;
     struct spx_context spx_ctx = {{0}};
     if (!spx_context_init(
         &spx_ctx, UINT64_C(1), spx_status_entries, UINT32_C(1), NULL, NULL, &state
@@ -614,6 +981,13 @@ pub(super) fn emit_runner(output: &mut impl COutput, command_symbol: &str) {
     memset(&state, 0, sizeof(state));
     return 1;
 }}
+
+int {run_symbol}(
+    const struct spx_language_command_input_v1 *input,
+    struct spx_language_command_result_v1 *result_out
+) {{
+    return spx_https_command_run_with_post_allowlist_v1(input, NULL, result_out);
+}}
 "#,
         run_symbol = native_command_io::RUN_SYMBOL,
     )
@@ -669,6 +1043,28 @@ mod tests {
         let response = include_str!("../../../examples/https-project/src/response.spx");
         let (_, declarations) = response.split_once("\n\n").unwrap();
         format!("{source}\n\n{declarations}")
+    }
+
+    fn source_for_post(url: &str) -> String {
+        let url = url
+            .bytes()
+            .map(|byte| format!("{byte}u8"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            r#"
+module native.https_post;
+permit {{ network.http, process.stdout.write }}
+@id("native.https_post.run")
+fn run() -> bool uses {{ network.http, process.stdout.write }} {{
+    let url = [{url}];
+    let body = [111u8, 107u8];
+    let response = https_post(array_as_slice(url), array_as_slice(body), 1024usize);
+    stdout_append(bytes_as_slice(response)) > 0usize
+}}
+@id("main") fn main() -> i64 {{ 0 }}
+"#
+        )
     }
 
     fn c_string(path: &Path) -> String {
@@ -750,6 +1146,10 @@ mod tests {
         let source = source_for(&format!("https://localhost:{port}/data"));
         let ast = crate::parse(&source, Path::new("native-https-loopback.spx")).unwrap();
         let emitted = emit_c_with_https_io(&ast, "https-client.fetch").unwrap();
+        assert!(
+            !emitted.contains("#define SPX_HTTPS_POST_OPTIONS_V1 1"),
+            "GET-only command must preserve --spx-https-post-origin as a source argument"
+        );
         let configured = emitted.replacen(
             "static const char *spx_https_ca_info_v1 = NULL;",
             &format!(
@@ -788,6 +1188,141 @@ mod tests {
             .stdout
             .windows(b"transfer-encoding".len())
             .any(|window| window == b"transfer-encoding"));
+    }
+
+    #[test]
+    fn generated_c11_https_post_requires_an_explicit_origin_and_sends_bytes() {
+        let fixture = Fixture(std::env::temp_dir().join(format!(
+            "semaprax-native-https-post-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::Relaxed)
+        )));
+        std::fs::create_dir(&fixture.0).unwrap();
+        let cert = fixture.0.join("localhost.pem");
+        let key = fixture.0.join("localhost-key.pem");
+        let generated = Command::new("openssl")
+            .args(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout"])
+            .arg(&key)
+            .arg("-out")
+            .arg(&cert)
+            .args([
+                "-subj",
+                "/CN=localhost",
+                "-addext",
+                "subjectAltName=DNS:localhost",
+                "-days",
+                "1",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(
+            generated.success(),
+            "openssl did not create the TLS fixture"
+        );
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let url = format!("https://localhost:{port}/post");
+        let ast = crate::parse(&source_for_post(&url), Path::new("native-https-post.spx")).unwrap();
+        let emitted = emit_c_with_https_io(&ast, "native.https_post.run").unwrap();
+        assert!(emitted.contains("spx_host_https_post_v1"));
+        assert!(emitted.contains("CURLOPT_FOLLOWLOCATION, 0L"));
+        assert!(emitted.contains("content-type: application/octet-stream"));
+        assert!(emitted.contains("spx_http_url_parts_v1(url, false, &requested)"));
+        let configured = emitted.replacen(
+            "static const char *spx_https_ca_info_v1 = NULL;",
+            &format!(
+                "static const char *spx_https_ca_info_v1 = \"{}\";",
+                c_string(&cert)
+            ),
+            1,
+        );
+        let executable = fixture.0.join("client");
+        crate::codegen::compile_native_https_command_executable(&configured, &executable).unwrap();
+
+        let denied = Command::new(&executable).output().unwrap();
+        assert!(!denied.status.success());
+        assert_eq!(denied.stderr, b"SEMAPRAX language command failed\n");
+
+        let server_script = fixture.0.join("post_server.py");
+        std::fs::write(
+            &server_script,
+            r#"import socket, ssl, sys
+port, cert, key, ready = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+listener = socket.socket()
+listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+listener.bind(("127.0.0.1", port))
+listener.listen(1)
+listener.settimeout(5)
+open(ready, "wb").close()
+raw, _ = listener.accept()
+raw.settimeout(5)
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(cert, key)
+stream = context.wrap_socket(raw, server_side=True)
+request = b""
+while b"\r\n\r\n" not in request:
+    chunk = stream.recv(4096)
+    if not chunk: sys.exit(2)
+    request += chunk
+head, body = request.split(b"\r\n\r\n", 1)
+length = next((int(line.split(b":", 1)[1]) for line in head.split(b"\r\n") if line.lower().startswith(b"content-length:")), -1)
+while len(body) < length:
+    chunk = stream.recv(4096)
+    if not chunk: sys.exit(3)
+    body += chunk
+if not head.startswith(b"POST /post HTTP/") or body != b"ok" or b"content-type: application/octet-stream" not in head.lower():
+    sys.exit(4)
+stream.sendall(b"HTTP/1.1 201 Created\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
+stream.close()
+listener.close()
+"#,
+        )
+        .unwrap();
+        let ready = fixture.0.join("post-server-ready");
+        let server = Command::new("python3")
+            .arg(&server_script)
+            .arg(port.to_string())
+            .arg(&cert)
+            .arg(&key)
+            .arg(&ready)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        for _ in 0..50 {
+            if ready.exists() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if !ready.exists() {
+            let mut server = server;
+            let _ = server.kill();
+            let _ = server.wait();
+            panic!("POST fixture did not become ready");
+        }
+        let allowed = Command::new(&executable)
+            .arg(format!("--spx-https-post-origin=https://LOCALHOST:{port}"))
+            .env("HTTPS_PROXY", "http://127.0.0.1:9")
+            .output()
+            .unwrap();
+        let server_result = server.wait_with_output().unwrap();
+        assert!(
+            server_result.status.success(),
+            "POST fixture failed: {}",
+            String::from_utf8_lossy(&server_result.stderr)
+        );
+        assert!(
+            allowed.status.success(),
+            "native POST failed: {}",
+            String::from_utf8_lossy(&allowed.stderr)
+        );
+        assert!(allowed.stdout.ends_with(b"\r\n\r\nOK"));
     }
 
     /// Opt-in public-PKI smoke for the compiler-owned Mozilla root bundle.

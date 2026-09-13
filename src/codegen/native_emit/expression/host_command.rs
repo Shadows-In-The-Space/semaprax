@@ -102,7 +102,9 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                     | Operation::FileWriteAtomicChecked => {
                         self.emit_filesystem_command_expr(expr, call)?
                     }
-                    Operation::HttpsGet => self.emit_https_command_expr(expr, call)?,
+                    Operation::HttpsGet | Operation::HttpsPost => {
+                        self.emit_https_command_expr(expr, call)?
+                    }
                     Operation::NetTlsConnect
                     | Operation::NetListen
                     | Operation::NetAccept
@@ -241,26 +243,45 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         use hir::ResolvedHostCommandOperation as Operation;
 
         if self.output_profile != NativeOutputProfile::HttpsCommandIo
-            || call.operation != Operation::HttpsGet
-            || call.args.len() != 2
+            || !matches!(call.operation, Operation::HttpsGet | Operation::HttpsPost)
+            || call.args.len()
+                != if call.operation == Operation::HttpsGet {
+                    2
+                } else {
+                    3
+                }
         {
             return Err(backend_error(
-                "https_get requires the native HTTPS command profile",
+                "HTTPS operations require the native HTTPS command profile",
             ));
         }
         let url = self.emit_expr(&call.args[0])?;
-        self.require_type(&url.ty, &ResolvedType::SliceU8, "https_get URL")?;
-        let max = self.emit_expr(&call.args[1])?;
-        self.require_type(&max.ty, &ResolvedType::Usize, "https_get bound")?;
+        self.require_type(&url.ty, &ResolvedType::SliceU8, "HTTPS URL")?;
+        let (body, max) = if call.operation == Operation::HttpsPost {
+            let body = self.emit_expr(&call.args[1])?;
+            self.require_type(&body.ty, &ResolvedType::SliceU8, "https_post body")?;
+            (Some(body), self.emit_expr(&call.args[2])?)
+        } else {
+            (None, self.emit_expr(&call.args[1])?)
+        };
+        self.require_type(&max.ty, &ResolvedType::Usize, "HTTPS response bound")?;
         let plan = self
             .bytes_plan
             .ok_or_else(|| backend_error("https_get owned result has no cleanup plan"))?;
         let temporary = plan
             .value(&crate::cleanup_plan::StorageId::Temporary(expr.id.clone()))?
             .to_owned();
+        let helper = if call.operation == Operation::HttpsPost {
+            "spx_host_https_post_v1"
+        } else {
+            "spx_host_https_get_v1"
+        };
+        let arguments = body.map_or_else(
+            || format!("{}, {}", url.code, max.code),
+            |body| format!("{}, {}, {}", url.code, body.code, max.code),
+        );
         self.line(&format!(
-            "spx_status = spx_host_https_get_v1(spx_ctx, {}, {}, &{temporary});",
-            url.code, max.code
+            "spx_status = {helper}(spx_ctx, {arguments}, &{temporary});"
         ));
         self.line("if (spx_status != SPX_STATUS_SUCCESS) goto spx_epilogue;");
         let transitions = plan.apply_at(&expr.id)?;
@@ -270,7 +291,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
         Ok(CValue {
             code: plan
                 .result_at(&expr.id)
-                .ok_or_else(|| backend_error("https_get has no canonical owned result transfer"))?
+                .ok_or_else(|| backend_error("HTTPS call has no canonical owned result transfer"))?
                 .to_owned(),
             ty: ResolvedType::Bytes,
         })

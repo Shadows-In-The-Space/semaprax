@@ -38,6 +38,7 @@ use crate::diagnostic::Diagnostic;
 /// The exact schema identity a fixture document must carry.
 pub const FIXTURE_SCHEMA: &str = "semaprax.network-fixture.v1";
 pub const FIXTURE_SCHEMA_V2: &str = "semaprax.network-fixture.v2";
+pub const FIXTURE_SCHEMA_V4: &str = "semaprax.network-fixture.v4";
 pub const FIXTURE_SCHEMA_V3: &str = "semaprax.network-fixture.v3";
 /// Maximum canonical fixture document bytes accepted by any host lane.
 pub const MAX_NETWORK_FIXTURE_BYTES: usize = 1_048_576;
@@ -84,6 +85,13 @@ pub struct FixtureNetworkProvider {
     listeners: Vec<FixtureListener>,
     next_listener: usize,
     https: VecDeque<FixtureHttpsRequest>,
+    https_post: Option<VecDeque<FixtureHttpsPost>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FixtureHttpsPost {
+    request: FixtureHttpsRequest,
+    body: Vec<u8>,
 }
 
 fn fixture_error(message: impl Into<String>) -> Diagnostic {
@@ -105,7 +113,12 @@ impl FixtureNetworkProvider {
             .as_object()
             .ok_or_else(|| fixture_error("network fixture must be a JSON object"))?;
         for key in root.keys() {
-            if key != "schema" && key != "connections" && key != "listeners" && key != "https" {
+            if key != "schema"
+                && key != "connections"
+                && key != "listeners"
+                && key != "https"
+                && key != "https_post"
+            {
                 return Err(fixture_error(format!(
                     "network fixture has unknown key `{key}`"
                 )));
@@ -115,6 +128,7 @@ impl FixtureNetworkProvider {
             Some(FIXTURE_SCHEMA) => FIXTURE_SCHEMA,
             Some(FIXTURE_SCHEMA_V2) => FIXTURE_SCHEMA_V2,
             Some(FIXTURE_SCHEMA_V3) => FIXTURE_SCHEMA_V3,
+            Some(FIXTURE_SCHEMA_V4) => FIXTURE_SCHEMA_V4,
             _ => {
                 return Err(fixture_error(format!(
                     "network fixture must declare `schema`: \"{FIXTURE_SCHEMA}\", \"{FIXTURE_SCHEMA_V2}\", or \"{FIXTURE_SCHEMA_V3}\""
@@ -124,11 +138,37 @@ impl FixtureNetworkProvider {
         if schema == FIXTURE_SCHEMA && root.contains_key("listeners") {
             return Err(fixture_error("network fixture v1 cannot carry listeners"));
         }
-        if schema != FIXTURE_SCHEMA_V3 && root.contains_key("https") {
+        if !matches!(schema, FIXTURE_SCHEMA_V3 | FIXTURE_SCHEMA_V4) && root.contains_key("https") {
             return Err(fixture_error(
-                "only network fixture v3 can carry HTTPS requests",
+                "only network fixture v3 or v4 can carry HTTPS requests",
             ));
         }
+        if schema != FIXTURE_SCHEMA_V4 && root.contains_key("https_post") {
+            return Err(fixture_error(
+                "only network fixture v4 can carry HTTPS POST requests",
+            ));
+        }
+        if schema == FIXTURE_SCHEMA_V4 && !root.get("https").is_some_and(Value::is_array) {
+            return Err(fixture_error("network fixture v4 requires a `https` array"));
+        }
+        let https_post = if schema == FIXTURE_SCHEMA_V4 {
+            let requests = root
+                .get("https_post")
+                .and_then(Value::as_array)
+                .filter(|items| items.len() <= MAX_HTTPS_FIXTURE_REQUESTS)
+                .ok_or_else(|| {
+                    fixture_error("network fixture v4 requires a bounded `https_post` array")
+                })?;
+            Some(
+                requests
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| parse_https_post(index, value))
+                    .collect::<Result<VecDeque<_>, _>>()?,
+            )
+        } else {
+            None
+        };
         let connections = root
             .get("connections")
             .and_then(Value::as_array)
@@ -188,6 +228,7 @@ impl FixtureNetworkProvider {
             listeners,
             next_listener: 0,
             https,
+            https_post,
         })
     }
 
@@ -238,6 +279,42 @@ fn parse_https_request(index: usize, value: &Value) -> Result<FixtureHttpsReques
         .as_bytes()
         .to_vec();
     Ok(FixtureHttpsRequest { url, response })
+}
+
+fn parse_https_post(index: usize, value: &Value) -> Result<FixtureHttpsPost, Diagnostic> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| fixture_error("HTTPS POST entry must be an object"))?;
+    if object.len() != 3
+        || object
+            .keys()
+            .any(|key| !["url", "body", "response"].contains(&key.as_str()))
+    {
+        return Err(fixture_error(
+            "HTTPS POST entry must contain exactly url, body, response",
+        ));
+    }
+    let body = object
+        .get("body")
+        .and_then(Value::as_str)
+        .filter(|body| body.len() <= crate::network_io_ops::MAX_CHUNK_BYTES as usize)
+        .ok_or_else(|| fixture_error("HTTPS POST body must be a bounded string"))?
+        .as_bytes()
+        .to_vec();
+    let mut get = object.clone();
+    get.remove("body");
+    let request = parse_https_request(index, &Value::Object(get))?;
+    if request.url.contains('#')
+        || request.url[8..]
+            .split('/')
+            .next()
+            .is_some_and(|authority| authority.contains('@'))
+    {
+        return Err(fixture_error(
+            "HTTPS POST URL cannot contain credentials or a fragment",
+        ));
+    }
+    Ok(FixtureHttpsPost { request, body })
 }
 
 fn parse_connection(
@@ -415,6 +492,29 @@ impl FixtureConnection {
 }
 
 impl NetworkProvider for FixtureNetworkProvider {
+    fn https_post(&mut self, url: &str, body: &[u8], max: usize) -> Result<Vec<u8>, HttpFailure> {
+        let queue = self
+            .https_post
+            .as_mut()
+            .ok_or(HttpFailure::AuthorityDenied)?;
+        let entry = queue.front().ok_or(HttpFailure::TransportFailed)?;
+        if max == 0
+            || max > crate::network_io_ops::MAX_CHUNK_BYTES as usize
+            || body.len() > crate::network_io_ops::MAX_CHUNK_BYTES as usize
+            || entry.request.response.len() > max
+        {
+            return Err(HttpFailure::ResponseTooLarge);
+        }
+        if entry.request.url != url || entry.body != body {
+            return Err(HttpFailure::TransportFailed);
+        }
+        Ok(queue
+            .pop_front()
+            .expect("checked POST entry")
+            .request
+            .response)
+    }
+
     fn https_get(&mut self, url: &str, max: usize) -> Result<Vec<u8>, HttpFailure> {
         let request = self.https.front().ok_or(HttpFailure::TransportFailed)?;
         if request.url != url {
@@ -765,6 +865,52 @@ mod tests {
                     .code,
                 FIXTURE_DIAGNOSTIC_CODE
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod post_tests {
+    use super::*;
+
+    #[test]
+    fn v4_post_bounds_and_version_authority_fail_closed() {
+        let document = |body: &str| {
+            serde_json::json!({
+                "schema": FIXTURE_SCHEMA_V4, "connections": [], "https": [],
+                "https_post": [{"url": "https://example.test/", "body": body, "response": "ok"}]
+            })
+            .to_string()
+        };
+        let body = "x".repeat(crate::network_io_ops::MAX_CHUNK_BYTES as usize);
+        let mut provider = FixtureNetworkProvider::from_json(&document(&body)).unwrap();
+        assert_eq!(
+            provider.https_post("https://example.test/", body.as_bytes(), 2),
+            Ok(b"ok".to_vec())
+        );
+        assert!(FixtureNetworkProvider::from_json(&document(&(body + "x"))).is_err());
+        for schema in [FIXTURE_SCHEMA, FIXTURE_SCHEMA_V2, FIXTURE_SCHEMA_V3] {
+            assert!(FixtureNetworkProvider::from_json(
+                &document("ok").replace(FIXTURE_SCHEMA_V4, schema)
+            )
+            .is_err());
+        }
+        let mut legacy = FixtureNetworkProvider::from_json(
+            r#"{"schema":"semaprax.network-fixture.v3","connections":[],"https":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            legacy.https_post("https://example.test/", b"ok", 2),
+            Err(HttpFailure::AuthorityDenied)
+        );
+        for url in [
+            "https://user@example.test/",
+            "https://example.test/#fragment",
+        ] {
+            assert!(FixtureNetworkProvider::from_json(
+                &document("ok").replace("https://example.test/", url)
+            )
+            .is_err());
         }
     }
 }

@@ -5,7 +5,7 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use crate::diagnostic::{quote_json, Diagnostic};
-use crate::hir::ResolvedProgram;
+use crate::hir::{ResolvedExprKind, ResolvedHostCommandOperation, ResolvedProgram};
 use crate::project::{
     ProjectManifest, PROJECT_HTTPS_COMMAND_CAPABILITIES_V1, PROJECT_LANGUAGE_COMMAND_INPUT_V1,
     PROJECT_PROFILE_HTTPS_COMMAND_IO_V1, PROJECT_SCHEMA_V13,
@@ -58,7 +58,13 @@ pub(super) fn prepare(
         .ok_or_else(|| package_error("HTTPS npm package requires a command"))?;
     let wasm = crate::wasm::emit_resolved_https_command_io_v1(program, command)?;
     let recipe = super::render_semantic_recipe(program)?;
-    let artifacts = render_package(manifest.name(), version, command, &wasm);
+    let artifacts = render_package(
+        manifest.name(),
+        version,
+        command,
+        &wasm,
+        requires_fixture_v4(program),
+    );
     let artifact_bytes = artifacts.iter().try_fold(0usize, |total, item| {
         total
             .checked_add(item.bytes.len())
@@ -94,21 +100,37 @@ pub(super) fn prepare(
     Ok(build)
 }
 
-fn render_package(name: &str, version: &str, command: &str, wasm: &[u8]) -> [NpmArtifact; 6] {
+fn render_package(
+    name: &str,
+    version: &str,
+    command: &str,
+    wasm: &[u8],
+    fixture_v4: bool,
+) -> [NpmArtifact; 6] {
     let wasm_sha256 = format!("{:x}", crate::digest_hex::LowerHex(Sha256::digest(wasm)));
     let runtime = include_str!("https_runtime.mjs")
         .replace("__SPX_HASH__", &quote_json(&wasm_sha256))
         .replace("__SPX_COMMAND__", &quote_json(&raw_symbol(command)));
     let bindings =
         "export { createFixture, createInvocation, instantiate } from './semaprax.js';\n";
-    let declarations = "export interface HttpsFixtureRequest { readonly url: string; readonly response: string; }\nexport interface HttpsFixtureDocument { readonly schema: 'semaprax.network-fixture.v3'; readonly connections: readonly []; readonly listeners?: readonly []; readonly https: readonly HttpsFixtureRequest[]; }\nexport interface HttpsCommandResult { readonly result: boolean; readonly stdout: Uint8Array; readonly stderr: Uint8Array; }\nexport declare function createFixture(document: HttpsFixtureDocument): object;\nexport declare function createInvocation(argv: readonly string[], stdin: Uint8Array, fixture: object): object;\nexport declare function instantiate(wasm: Uint8Array, invocation: object): Promise<HttpsCommandResult>;\n";
+    let declarations = "export interface HttpsFixtureRequest { readonly url: string; readonly response: string; }\nexport interface HttpsPostFixtureRequest { readonly url: string; readonly body: string; readonly response: string; }\nexport interface HttpsFixtureDocumentV3 { readonly schema: 'semaprax.network-fixture.v3'; readonly connections: readonly []; readonly listeners?: readonly []; readonly https: readonly HttpsFixtureRequest[]; }\nexport interface HttpsFixtureDocumentV4 { readonly schema: 'semaprax.network-fixture.v4'; readonly connections: readonly []; readonly listeners?: readonly []; readonly https: readonly HttpsFixtureRequest[]; readonly https_post: readonly HttpsPostFixtureRequest[]; }\nexport type HttpsFixtureDocument = HttpsFixtureDocumentV3 | HttpsFixtureDocumentV4;\nexport interface HttpsCommandResult { readonly result: boolean; readonly stdout: Uint8Array; readonly stderr: Uint8Array; }\nexport declare function createFixture(document: HttpsFixtureDocument): object;\nexport declare function createInvocation(argv: readonly string[], stdin: Uint8Array, fixture: object): object;\nexport declare function instantiate(wasm: Uint8Array, invocation: object): Promise<HttpsCommandResult>;\n";
+    let provider = if fixture_v4 {
+        "fixture-only.v4"
+    } else {
+        "fixture-only.v3"
+    };
     let metadata = format!(
-        "{{\"schema\":\"semaprax.https-command-io.v1\",\"package\":{},\"version\":{},\"command\":{},\"input\":\"argv-utf8+stdin-bytes.v1\",\"provider\":\"fixture-only.v3\",\"capabilities\":[\"network.http\",\"process.args.read\",\"process.stderr.write\",\"process.stdin.read\",\"process.stdout.write\"],\"wasm\":{{\"path\":\"app.wasm\",\"sha256\":{}}}}}\n",
-        quote_json(name), quote_json(version), quote_json(command), quote_json(&wasm_sha256)
+        "{{\"schema\":\"semaprax.https-command-io.v1\",\"package\":{},\"version\":{},\"command\":{},\"input\":\"argv-utf8+stdin-bytes.v1\",\"provider\":{},\"capabilities\":[\"network.http\",\"process.args.read\",\"process.stderr.write\",\"process.stdin.read\",\"process.stdout.write\"],\"wasm\":{{\"path\":\"app.wasm\",\"sha256\":{}}}}}\n",
+        quote_json(name),
+        quote_json(version),
+        quote_json(command),
+        quote_json(provider),
+        quote_json(&wasm_sha256)
     );
     let package = format!(
         "{{\"name\":{},\"version\":{},\"type\":\"module\",\"sideEffects\":false,\"exports\":{{\".\":{{\"types\":\"./semaprax.bindings.d.ts\",\"import\":\"./semaprax.bindings.js\"}},\"./app.wasm\":\"./app.wasm\",\"./manifest\":\"./semaprax.https.json\"}}}}\n",
-        quote_json(name), quote_json(version)
+        quote_json(name),
+        quote_json(version)
     );
     [
         artifact("app.wasm", wasm),
@@ -158,13 +180,42 @@ pub(super) fn validate_replayed(
     let program = crate::hir::resolve(&ast)
         .map_err(|_| package_error("HTTPS npm semantic recipe does not resolve"))?;
     let wasm = crate::wasm::emit_resolved_https_command_io_v1(&program, command)?;
-    let expected = render_package(identity.package, identity.version, command, &wasm);
+    let expected = render_package(
+        identity.package,
+        identity.version,
+        command,
+        &wasm,
+        requires_fixture_v4(&program),
+    );
     if artifacts != &expected {
         return Err(package_error(
             "HTTPS npm artifacts disagree with semantic replay",
         ));
     }
     Ok(())
+}
+
+fn requires_fixture_v4(program: &ResolvedProgram) -> bool {
+    program
+        .functions
+        .iter()
+        .chain(
+            program
+                .function_instances
+                .iter()
+                .map(|instance| &instance.function),
+        )
+        .any(|function| {
+            let mut found = false;
+            crate::hir::function_value::walk(function, |expression| {
+                found |= matches!(
+                    &expression.kind,
+                    ResolvedExprKind::HostCommandCall(call)
+                        if call.operation == ResolvedHostCommandOperation::HttpsPost
+                );
+            });
+            found
+        })
 }
 
 fn artifact_bytes<'a>(artifacts: &'a [NpmArtifact; 6], path: &str) -> Result<&'a [u8], Diagnostic> {
@@ -174,3 +225,7 @@ fn artifact_bytes<'a>(artifacts: &'a [NpmArtifact; 6], path: &str) -> Result<&'a
         .map(NpmArtifact::bytes)
         .ok_or_else(|| package_error(format!("HTTPS npm artifact `{path}` is absent")))
 }
+
+#[cfg(test)]
+#[path = "https_command/tests.rs"]
+mod tests;

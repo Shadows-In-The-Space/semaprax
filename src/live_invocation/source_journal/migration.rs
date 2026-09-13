@@ -5,6 +5,8 @@
 use super::*;
 
 const HANDOFF_DOMAIN: &[u8] = b"semaprax.live-invocation.source-migration-handoff.v3\0";
+const PRICED_HANDOFF_DOMAIN: &[u8] =
+    b"semaprax.live-invocation.source-priced-migration-handoff.v4\0";
 const STATE_DOMAIN: &[u8] = b"semaprax.live-invocation.source-migrated-state.v3\0";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -70,6 +72,126 @@ impl SourceMigrationCarry {
     }
 }
 
+/// Additive V4 migration identity.  The contained V3 carry preserves the
+/// one migration prefix; the priced digest separately binds monetary history.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PricedMigrationCarryV4 {
+    pub(crate) base: SourceMigrationCarry,
+    pub(crate) handoff_digest: String,
+    pub(crate) monetary: crate::live_invocation::pricing::PricedMonetaryCarry,
+}
+
+impl PricedMigrationCarryV4 {
+    pub(crate) fn from_predecessor(
+        base: SourceMigrationCarry,
+        predecessor_binding: &SourceInvocationBinding,
+        predecessor: &RecoveredSourceCheckpoint,
+        destination_pricing: crate::live_invocation::pricing::ValidatedPricing,
+    ) -> Result<Self, SourceJournalError> {
+        let predecessor_pricing = predecessor_binding
+            .priced_binding()
+            .ok_or(SourceJournalError::Binding)?
+            .pricing()
+            .clone();
+        if base.handoff_digest != base.digest()
+            || base.previous_schema != predecessor_binding.schema()
+            || predecessor_binding.invocation() != predecessor.invocation()
+            || base.previous_invocation != predecessor_binding.invocation()
+            || base.previous_generation != predecessor.generation()
+            || base.previous_chain != predecessor.chain()
+            || base.carried_model_units != predecessor.committed_reserved_units()
+            || base.carried_stage_fuel != predecessor.committed_stage_fuel()
+            || base.previous_max_iterations != predecessor.max_iterations()
+            || base.previous_max_stages != predecessor.max_stages()
+            || base.previous_max_steps_per_stage
+                != predecessor
+                    .max_steps_per_stage()
+                    .ok_or(SourceJournalError::Binding)?
+            || base.previous_max_total_steps
+                != predecessor
+                    .max_total_steps()
+                    .ok_or(SourceJournalError::Binding)?
+            || base.previous_ceiling != predecessor.ceiling()
+            || base.previous_reservation_units != predecessor.reservation_units()
+            || base.previous_unit != predecessor.unit()
+            || base.previous_clock_domain != predecessor.clock_domain()
+            || base.previous_last_checked_millis != predecessor.last_checked_millis()
+            || base.previous_deadline_millis != predecessor.deadline_millis()
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        let Some(SourceJournalEntry::TerminalSnapshot {
+            turn: Some(turn),
+            stages,
+            effects,
+            attempts,
+            ..
+        }) = predecessor.entries().last()
+        else {
+            return Err(SourceJournalError::Binding);
+        };
+        if base.carried_turns != turn.checked_add(1).ok_or(SourceJournalError::Capacity)?
+            || base.carried_stages != *stages
+            || base.carried_effects != *effects
+            || base.carried_attempts != *attempts
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        let totals = predecessor
+            .priced_totals()
+            .ok_or(SourceJournalError::Binding)?;
+        if totals.currency != predecessor_pricing.currency()
+            || totals.minor_unit_exponent != predecessor_pricing.minor_unit_exponent()
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        let local_ordinals = predecessor
+            .entries()
+            .iter()
+            .filter(|entry| matches!(entry, SourceJournalEntry::PricedAttemptIntent(_)))
+            .count();
+        let base_ordinal = predecessor_binding
+            .priced_migration_carry()
+            .map_or(0, |carry| carry.monetary.next_ordinal());
+        let next_ordinal = base_ordinal
+            .checked_add(u32::try_from(local_ordinals).map_err(|_| SourceJournalError::Capacity)?)
+            .ok_or(SourceJournalError::Capacity)?;
+        let monetary = crate::live_invocation::pricing::PricedMonetaryCarry::from_validated(
+            predecessor_pricing,
+            totals.reserved_minor,
+            totals.observed_charge_minor,
+            totals.unknown_charge_reservation_minor,
+            totals.observed_over_reservation_minor,
+            next_ordinal,
+        )
+        .map_err(|_| SourceJournalError::Binding)?;
+        monetary
+            .validate_destination(&destination_pricing)
+            .map_err(|_| SourceJournalError::Binding)?;
+        let mut result = Self {
+            base,
+            handoff_digest: String::new(),
+            monetary,
+        };
+        result.handoff_digest = result.digest();
+        Ok(result)
+    }
+
+    pub(crate) fn digest(&self) -> String {
+        let pricing = self.monetary.pricing();
+        let material = format!(
+            "{{\"schema\":\"semaprax.source-priced-migration-handoff.v4\",\"base_handoff\":{},\"work_unit\":{},\"currency\":{},\"minor_unit_exponent\":{},\"price_per_work_unit_minor\":{},\"previous_money_ceiling_minor\":{},\"reserved_minor\":{},\"observed_charge_minor\":{},\"unknown_charge_reservation_minor\":{},\"observed_over_reservation_minor\":{},\"next_money_ordinal\":{}}}",
+            quote_json(&self.base.handoff_digest), quote_json(pricing.work_unit()),
+            quote_json(pricing.currency()), pricing.minor_unit_exponent(),
+            pricing.price_per_work_unit_minor(), pricing.ceiling_minor(),
+            self.monetary.reserved_minor(), self.monetary.observed_minor(),
+            self.monetary.unknown_reservation_minor(),
+            self.monetary.observed_over_reservation_minor(), self.monetary.next_ordinal(),
+        );
+        digest(PRICED_HANDOFF_DOMAIN, material.as_bytes())
+    }
+}
+
 pub(crate) fn task_digest(task: &[u8], budget: i64) -> String {
     let material = format!(
         "{{\"task\":{},\"budget\":{}}}",
@@ -124,7 +246,7 @@ pub(super) fn prefix(
         attempts: carry.carried_attempts,
     };
     if !matches!(entries.first(), Some(SourceJournalEntry::MigrationOpened { handoff_digest })
-        if handoff_digest == &carry.handoff_digest)
+        if Some(handoff_digest.as_str()) == binding.migration_handoff_digest())
     {
         return Err(SourceJournalError::Order);
     }
@@ -261,6 +383,93 @@ impl SourceInvocationBinding {
             evaluator: evaluator_profile.to_owned(),
             max_steps_per_stage,
             max_total_steps,
+            carry,
+        };
+        Ok(binding)
+    }
+
+    /// Binds a priced successor while retaining the single V3 migration
+    /// prefix.  The carry is derived from a validated priced predecessor;
+    /// arbitrary monetary totals never enter this constructor.
+    pub(crate) fn bind_priced_migrated_execution(
+        seed: SourceInvocationSeed,
+        evaluator_profile: &str,
+        carry: PricedMigrationCarryV4,
+        pricing: crate::live_invocation::pricing::ValidatedPricing,
+    ) -> Result<Self, SourceJournalError> {
+        let base = &carry.base;
+        let prior_task = task_digest(&seed.task, seed.task_budget);
+        if carry.handoff_digest != carry.digest()
+            || base.handoff_digest != base.digest()
+            || !matches!(base.previous_schema.as_str(), SOURCE_PRICED_JOURNAL_SCHEMA)
+            || ![
+                &base.handoff_digest,
+                &base.previous_invocation,
+                &base.previous_chain,
+                &base.previous_program_root,
+                &base.destination_program_root,
+                &base.migration_closure,
+                &base.task_digest,
+            ]
+            .into_iter()
+            .all(|value| looks_like_digest(value))
+            || ![
+                &base.old_state_id,
+                &base.new_state_id,
+                &base.migration_function,
+            ]
+            .into_iter()
+            .all(|value| valid_token(value, 240))
+            || base.previous_program_root == base.destination_program_root
+            || seed.program_root.as_deref() != Some(base.destination_program_root.as_str())
+            || prior_task != base.task_digest
+            || base.carried_model_units < 0
+            || base.carried_model_units > seed.ceiling
+            || seed.ceiling > base.previous_ceiling
+            || seed.max_iterations > base.previous_max_iterations
+            || seed.max_stages > base.previous_max_stages
+            || seed.max_steps_per_stage > base.previous_max_steps_per_stage
+            || seed.max_total_steps > base.previous_max_total_steps
+            || seed.reservation_units != base.previous_reservation_units
+            || seed.unit != base.previous_unit
+            || seed.clock_domain != base.previous_clock_domain
+            || seed.initial_millis < base.previous_last_checked_millis
+            || seed.deadline_millis > base.previous_deadline_millis
+            || base.previous_last_checked_millis < 0
+            || base.carried_turns >= seed.max_iterations
+            || base.carried_stages >= seed.max_stages
+            || base.carried_effects > base.carried_turns
+            || base.carried_attempts < base.carried_effects
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        carry
+            .monetary
+            .validate_destination(&pricing)
+            .map_err(|_| SourceJournalError::Binding)?;
+        let max_steps_per_stage = seed.max_steps_per_stage;
+        let max_total_steps = seed.max_total_steps;
+        let mut binding = Self::bind_priced_execution(seed, evaluator_profile, pricing)?;
+        if base
+            .carried_stage_fuel
+            .checked_add(base.evaluation_fuel()?)
+            .is_none_or(|total| total > max_total_steps as u64)
+        {
+            return Err(SourceJournalError::Capacity);
+        }
+        binding.invocation = digest(
+            PRICED_MIGRATED_ID_DOMAIN,
+            format!("{}\0{}", binding.invocation, carry.handoff_digest).as_bytes(),
+        );
+        let priced = binding
+            .priced_binding()
+            .ok_or(SourceJournalError::Binding)?
+            .rebound_to_invocation(binding.invocation.clone())?;
+        binding.profile = SourceProfile::PricedMigratedV4 {
+            evaluator: evaluator_profile.to_owned(),
+            max_steps_per_stage,
+            max_total_steps,
+            pricing: priced,
             carry,
         };
         Ok(binding)

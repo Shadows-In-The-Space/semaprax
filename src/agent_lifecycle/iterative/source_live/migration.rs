@@ -9,9 +9,8 @@ use crate::execution_revision::typed::migration::{
 use crate::hir::{DeclarationId, ResolvedType};
 use crate::interpreter::retained_call::{RetainedField, RetainedRecord};
 use crate::live_invocation::source_journal::{
-    recover_source_checkpoint, source_migration_state_digest, SourceJournalEntry,
-    SourceMigrationCarry, SourceMigrationFailure, MAX_SOURCE_CARRIER_BYTES,
-    SOURCE_EXECUTION_JOURNAL_SCHEMA, SOURCE_MIGRATED_JOURNAL_SCHEMA,
+    recover_source_checkpoint, source_migration_state_digest, PricedMigrationCarryV4,
+    SourceJournalEntry, SourceMigrationCarry, SourceMigrationFailure, MAX_SOURCE_CARRIER_BYTES,
 };
 use crate::project::ProjectRevision;
 use serde_json::Value;
@@ -208,21 +207,55 @@ fn selected_project_program(
 pub fn prepare_source_live_migration<'a>(
     request: SourceLiveMigrationRequest<'a>,
 ) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    prepare_source_live_migration_inner(request, None)
+}
+
+/// Preserves checked monetary history through the existing migration evaluator.
+pub fn prepare_source_live_priced_migration<'a>(
+    request: SourceLiveMigrationRequest<'a>,
+    previous_pricing: &SourceLivePricing,
+    destination_pricing: &SourceLivePricing,
+) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    prepare_source_live_migration_inner(request, Some((previous_pricing, destination_pricing)))
+}
+
+fn prepare_source_live_migration_inner<'a>(
+    request: SourceLiveMigrationRequest<'a>,
+    pricing: Option<(&SourceLivePricing, &SourceLivePricing)>,
+) -> Result<PreparedSourceLiveMigration<'a>, SourceLiveFailure> {
+    if request.previous_binding.priced_binding().is_some() != pricing.is_some() {
+        return Err(refused("migration.pricing_profile"));
+    }
     let (previous_root, _) = selected_project_program(&request.previous)?;
     let (destination_root, destination_definition) =
         selected_project_program(&request.destination)?;
     if previous_root == destination_root {
         return Err(refused("migration.unchanged_project"));
     }
-    let previous_expected = request
-        .previous
-        .policy
-        .binding(
+    let previous_expected = match pricing {
+        Some((previous_pricing, _)) => request.previous.policy.binding_priced(
             request.previous.lifecycle,
             request.task,
             request.previous.budget,
-        )
-        .map_err(|error| SourceLiveFailure::initial(error, None))?;
+            previous_pricing,
+        ),
+        None => request.previous.policy.binding(
+            request.previous.lifecycle,
+            request.task,
+            request.previous.budget,
+        ),
+    }
+    .map_err(|error| SourceLiveFailure::initial(error, None))?;
+    if request
+        .previous_binding
+        .priced_binding()
+        .map(|bound| bound.pricing())
+        != previous_expected
+            .priced_binding()
+            .map(|bound| bound.pricing())
+    {
+        return Err(refused("migration.previous_pricing"));
+    }
     if request.previous_binding.migration().is_none() {
         if request.previous_binding != &previous_expected {
             return Err(refused("migration.previous_binding"));
@@ -344,11 +377,7 @@ pub fn prepare_source_live_migration<'a>(
         }) => (*stages, *effects, *attempts),
         _ => unreachable!(),
     };
-    let predecessor_schema = if request.previous_binding.migration().is_some() {
-        SOURCE_MIGRATED_JOURNAL_SCHEMA
-    } else {
-        SOURCE_EXECUTION_JOURNAL_SCHEMA
-    };
+    let predecessor_schema = request.previous_binding.schema();
     let mut carry = SourceMigrationCarry {
         handoff_digest: String::new(),
         previous_schema: predecessor_schema.to_owned(),
@@ -388,26 +417,47 @@ pub fn prepare_source_live_migration<'a>(
         evaluation_steps: request.max_migration_steps,
     };
     carry.handoff_digest = carry.digest();
+    let seed = request
+        .destination
+        .policy
+        .seed(
+            request.destination.lifecycle,
+            request.task,
+            request.destination.budget,
+        )
+        .map_err(|error| SourceLiveFailure::initial(error, None))?;
+    let binding = match pricing {
+        Some((_, destination_pricing)) => {
+            let destination_pricing = destination_pricing
+                .validated(&request.destination.policy.unit)
+                .map_err(|error| SourceLiveFailure::initial(error, None))?;
+            let priced_carry = PricedMigrationCarryV4::from_predecessor(
+                carry.clone(),
+                request.previous_binding,
+                &previous,
+                destination_pricing.clone(),
+            )
+            .map_err(|error| SourceLiveFailure::initial(error, None))?;
+            SourceInvocationBinding::bind_priced_migrated_execution(
+                seed,
+                &SourceLivePolicy::evaluator_profile(),
+                priced_carry,
+                destination_pricing,
+            )
+        }
+        None => SourceInvocationBinding::bind_migrated_execution(
+            seed,
+            &SourceLivePolicy::evaluator_profile(),
+            carry.clone(),
+        ),
+    }
+    .map_err(|error| SourceLiveFailure::initial(error, None))?;
     if request
         .expected_handoff_digest
-        .is_some_and(|expected| expected != carry.handoff_digest)
+        .is_some_and(|expected| Some(expected) != binding.migration_handoff_digest())
     {
         return Err(refused("migration.handoff_mismatch"));
     }
-    let binding = SourceInvocationBinding::bind_migrated_execution(
-        request
-            .destination
-            .policy
-            .seed(
-                request.destination.lifecycle,
-                request.task,
-                request.destination.budget,
-            )
-            .map_err(|error| SourceLiveFailure::initial(error, None))?,
-        &SourceLivePolicy::evaluator_profile(),
-        carry.clone(),
-    )
-    .map_err(|error| SourceLiveFailure::initial(error, None))?;
     Ok(PreparedSourceLiveMigration {
         destination: request.destination,
         task: request.task,
@@ -428,7 +478,9 @@ impl<'a> PreparedSourceLiveMigration<'a> {
         &self.binding
     }
     pub fn handoff_digest(&self) -> &str {
-        &self.carry.handoff_digest
+        self.binding
+            .migration_handoff_digest()
+            .expect("prepared migration has a handoff")
     }
     /// Supplies the destination's latest trusted snapshot under exclusive
     /// writer ownership. The expected handoff stays bound by preparation.
@@ -494,7 +546,7 @@ impl<'a> PreparedSourceLiveMigration<'a> {
         };
         if sink.journal().entries().is_empty() {
             let entry = SourceJournalEntry::MigrationOpened {
-                handoff_digest: self.carry.handoff_digest.clone(),
+                handoff_digest: self.handoff_digest().to_owned(),
             };
             sink.append_at(entry, clock.now_millis())
                 .map_err(|error| sink_failure(error, &sink))?;

@@ -12,6 +12,22 @@ pub struct SourceLivePricing {
     pub money_ceiling_minor: i64,
 }
 
+impl SourceLivePricing {
+    pub(crate) fn validated(
+        &self,
+        work_unit: &str,
+    ) -> Result<ValidatedPricing, SourceJournalError> {
+        ValidatedPricing::new(
+            work_unit.to_owned(),
+            self.currency.clone(),
+            self.minor_unit_exponent,
+            self.price_per_work_unit_minor,
+            self.money_ceiling_minor,
+        )
+        .map_err(|_| SourceJournalError::Binding)
+    }
+}
+
 impl SourceLivePolicy {
     pub fn binding_priced(
         &self,
@@ -20,14 +36,7 @@ impl SourceLivePolicy {
         budget: IterativeBudget,
         pricing: &SourceLivePricing,
     ) -> Result<SourceInvocationBinding, SourceJournalError> {
-        let pricing = ValidatedPricing::new(
-            self.unit.clone(),
-            pricing.currency.clone(),
-            pricing.minor_unit_exponent,
-            pricing.price_per_work_unit_minor,
-            pricing.money_ceiling_minor,
-        )
-        .map_err(|_| SourceJournalError::Binding)?;
+        let pricing = pricing.validated(&self.unit)?;
         SourceInvocationBinding::bind_priced_execution(
             self.seed(compiled, task, budget)?,
             &Self::evaluator_profile(),

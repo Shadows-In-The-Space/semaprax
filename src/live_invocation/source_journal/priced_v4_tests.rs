@@ -172,7 +172,7 @@ fn journal_fold_replays_observed_overage_without_refund_or_float_inference() {
             },
         }),
     ];
-    let totals = fold(&binding, &entries).unwrap();
+    let totals = fold_unmigrated(&binding, &entries).unwrap();
     assert_eq!(totals.reserved_minor, 14);
     assert_eq!(totals.observed_charge_minor, 17);
     assert_eq!(totals.unknown_charge_reservation_minor, 0);
@@ -217,5 +217,8 @@ fn journal_fold_refuses_usage_that_relabels_an_older_money_ordinal() {
             charge: ProviderChargeObservation::Unknown,
         }),
     ];
-    assert_eq!(fold(&binding, &entries), Err(SourceJournalError::Order));
+    assert_eq!(
+        fold_unmigrated(&binding, &entries),
+        Err(SourceJournalError::Order)
+    );
 }

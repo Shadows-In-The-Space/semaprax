@@ -135,6 +135,19 @@ pub(crate) struct MonetaryCarry {
     reserved_minor: i64,
 }
 
+/// Validated cumulative v4 evidence carried across a priced migration.  It
+/// has no synthetic per-attempt provenance; `next_ordinal` preserves the
+/// global ordinal for the destination's real v4 entries.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PricedMonetaryCarry {
+    pricing: ValidatedPricing,
+    reserved_minor: i64,
+    observed_minor: i64,
+    unknown_reservation_minor: i64,
+    observed_over_reservation_minor: i64,
+    next_ordinal: u32,
+}
+
 impl MonetaryCarry {
     pub(crate) fn from_legacy_work(
         pricing: &ValidatedPricing,
@@ -180,6 +193,82 @@ impl MonetaryCarry {
             .ok_or_else(|| refusal(PRICING_PRODUCT_OVERFLOW))?;
         if self.reserved_minor != expected {
             return Err(refusal(PRICING_UNIT_MISMATCH));
+        }
+        Ok(())
+    }
+}
+
+impl PricedMonetaryCarry {
+    pub(crate) fn from_validated(
+        pricing: ValidatedPricing,
+        reserved_minor: i64,
+        observed_minor: i64,
+        unknown_reservation_minor: i64,
+        observed_over_reservation_minor: i64,
+        next_ordinal: u32,
+    ) -> Result<Self, BudgetRefusal> {
+        if reserved_minor < 0
+            || observed_minor < 0
+            || unknown_reservation_minor < 0
+            || observed_over_reservation_minor < 0
+            || unknown_reservation_minor > reserved_minor
+            || observed_over_reservation_minor > observed_minor
+            || reserved_minor
+                .checked_add(observed_over_reservation_minor)
+                .is_none()
+        {
+            return Err(refusal(PRICING_TOTAL_OVERFLOW));
+        }
+        Ok(Self {
+            pricing,
+            reserved_minor,
+            observed_minor,
+            unknown_reservation_minor,
+            observed_over_reservation_minor,
+            next_ordinal,
+        })
+    }
+
+    pub(crate) fn pricing(&self) -> &ValidatedPricing {
+        &self.pricing
+    }
+    pub(crate) const fn reserved_minor(&self) -> i64 {
+        self.reserved_minor
+    }
+    pub(crate) const fn observed_minor(&self) -> i64 {
+        self.observed_minor
+    }
+    pub(crate) const fn unknown_reservation_minor(&self) -> i64 {
+        self.unknown_reservation_minor
+    }
+    pub(crate) const fn observed_over_reservation_minor(&self) -> i64 {
+        self.observed_over_reservation_minor
+    }
+    pub(crate) const fn next_ordinal(&self) -> u32 {
+        self.next_ordinal
+    }
+
+    pub(crate) fn validate_destination(
+        &self,
+        destination: &ValidatedPricing,
+    ) -> Result<(), BudgetRefusal> {
+        if self.pricing.work_unit != destination.work_unit {
+            return Err(refusal(PRICING_UNIT_MISMATCH));
+        }
+        if self.pricing.currency != destination.currency {
+            return Err(refusal(PRICING_CURRENCY_MISMATCH));
+        }
+        if self.pricing.minor_unit_exponent != destination.minor_unit_exponent {
+            return Err(refusal(PRICING_SCALE_MISMATCH));
+        }
+        if self.pricing.price_per_work_unit_minor != destination.price_per_work_unit_minor {
+            return Err(refusal(PRICING_RATE_MISMATCH));
+        }
+        if destination.ceiling_minor > self.pricing.ceiling_minor {
+            return Err(refusal(PRICING_BUDGET_EXHAUSTED));
+        }
+        if self.reserved_minor > destination.ceiling_minor {
+            return Err(refusal(PRICING_BUDGET_EXHAUSTED));
         }
         Ok(())
     }
@@ -236,6 +325,7 @@ pub(crate) struct MonetaryAccounting {
     observed_minor: i64,
     unknown_reservation_minor: i64,
     observed_over_reservation_minor: i64,
+    next_ordinal: u32,
     failure: Option<&'static str>,
 }
 
@@ -248,6 +338,7 @@ impl MonetaryAccounting {
             observed_minor: 0,
             unknown_reservation_minor: 0,
             observed_over_reservation_minor: 0,
+            next_ordinal: 0,
             failure: None,
         }
     }
@@ -271,6 +362,7 @@ impl MonetaryAccounting {
             observed_minor: 0,
             unknown_reservation_minor: carry.reserved_minor,
             observed_over_reservation_minor: 0,
+            next_ordinal: 0,
             failure: None,
         })
     }
@@ -313,6 +405,38 @@ impl MonetaryAccounting {
         Ok(accounting)
     }
 
+    pub(crate) fn resume_with_priced_carry(
+        pricing: ValidatedPricing,
+        carry: PricedMonetaryCarry,
+        attempts: &[MonetaryAttempt],
+    ) -> Result<Self, BudgetRefusal> {
+        carry.validate_destination(&pricing)?;
+        let mut accounting = Self {
+            pricing,
+            attempts: Vec::new(),
+            reserved_minor: carry.reserved_minor,
+            observed_minor: carry.observed_minor,
+            unknown_reservation_minor: carry.unknown_reservation_minor,
+            observed_over_reservation_minor: carry.observed_over_reservation_minor,
+            next_ordinal: carry.next_ordinal,
+            failure: None,
+        };
+        for persisted in attempts {
+            if persisted.reservation.ordinal != accounting.next_ordinal {
+                return Err(refusal(PRICING_UNKNOWN_RESERVATION));
+            }
+            let reservation = MonetaryReservation::recover(
+                &accounting.pricing,
+                accounting.next_ordinal,
+                persisted.reservation.work_units,
+                persisted.reservation.reserved_minor,
+            )?;
+            accounting.reserve_replayed(reservation)?;
+            accounting.record_charge(reservation, persisted.charge.clone())?;
+        }
+        Ok(accounting)
+    }
+
     pub(crate) fn pricing(&self) -> &ValidatedPricing {
         &self.pricing
     }
@@ -341,8 +465,7 @@ impl MonetaryAccounting {
         if admission_exposure > self.pricing.ceiling_minor() {
             return Err(refusal(PRICING_BUDGET_EXHAUSTED));
         }
-        let ordinal =
-            u32::try_from(self.attempts.len()).map_err(|_| refusal(PRICING_TOTAL_OVERFLOW))?;
+        let ordinal = self.next_ordinal;
         let reservation = MonetaryReservation {
             ordinal,
             work_units,
@@ -361,8 +484,20 @@ impl MonetaryAccounting {
         charge: ProviderChargeObservation,
     ) -> Result<(), BudgetRefusal> {
         self.ensure_live()?;
-        let index = usize::try_from(reservation.ordinal)
-            .map_err(|_| refusal(PRICING_UNKNOWN_RESERVATION))?;
+        let ordinal_base = self
+            .next_ordinal
+            .checked_sub(
+                u32::try_from(self.attempts.len())
+                    .map_err(|_| refusal(PRICING_UNKNOWN_RESERVATION))?,
+            )
+            .ok_or_else(|| refusal(PRICING_UNKNOWN_RESERVATION))?;
+        let index = usize::try_from(
+            reservation
+                .ordinal
+                .checked_sub(ordinal_base)
+                .ok_or_else(|| refusal(PRICING_UNKNOWN_RESERVATION))?,
+        )
+        .map_err(|_| refusal(PRICING_UNKNOWN_RESERVATION))?;
         let attempt = self
             .attempts
             .get(index)
@@ -462,12 +597,17 @@ impl MonetaryAccounting {
             .unknown_reservation_minor
             .checked_add(reservation.reserved_minor)
             .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?;
+        let next_ordinal = self
+            .next_ordinal
+            .checked_add(1)
+            .ok_or_else(|| refusal(PRICING_TOTAL_OVERFLOW))?;
         self.reserved_minor = reserved_total;
         self.unknown_reservation_minor = unknown_total;
         self.attempts.push(MonetaryAttempt {
             reservation,
             charge: ProviderChargeObservation::Unknown,
         });
+        self.next_ordinal = next_ordinal;
         Ok(())
     }
 

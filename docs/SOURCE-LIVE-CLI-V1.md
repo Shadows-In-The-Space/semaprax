@@ -20,18 +20,24 @@ semaprax-full source-live migrate OLD_CONFIG OLD_CHECKPOINT NEW_CONFIG NEW_CHECK
 
 All operands are absolute except the stable migration function identity and
 positive checked-evaluator step limit. `run` requires a new, private checkpoint
-directory. `resume` requires its existing latest journal. `migrate` accepts
-only a committed v2 Suspend from the predecessor directory and a fresh or
-same-claim v3 destination directory. A v3 predecessor is explicitly refused
-by this CLI version; the checked embedding migration API has a separate
+directory. `resume` requires its existing latest journal. `migrate` accepts a
+committed unpriced v2 Suspend or a committed priced v4 Suspend from the
+predecessor directory, and writes a fresh or same-claim destination journal.
+The private CLI performs one predecessor-to-destination handoff; it does not
+offer a general migration-chain command. A v3 predecessor is explicitly
+refused by this CLI version; the checked embedding migration API has a separate
 A→B→C gate. The executable is the one explicitly chosen OpenCode binary, and
 every process attempt uses the fixed
 `opencode/muse-spark-1.3-contributor-free` profile without a paid fallback.
 Scratch must be a new empty absolute directory for each CLI invocation.
 
-Priced v2 migration is currently refused. It must not reinterpret an unpriced
-v2/v3 predecessor as zero-priced or silently shed unknown monetary exposure
-while the explicit priced handoff is incomplete.
+Priced migration requires both predecessor and destination config v2 pricing
+with exactly matching work unit, currency, minor-unit exponent and integer
+rate. The destination money ceiling may narrow but cannot fall below carried
+reservations. The migrated v4 journal retains unknown exposure, observed
+charges, overage and the global money ordinal; it never reconstructs them from
+the CLI receipt. Unpriced-to-priced and priced-to-unpriced conversion are
+refused rather than silently shedding exposure or treating it as zero-priced.
 
 A crash after fresh directory creation but before its first journal ACK can
 leave an empty directory. Both `run` (existing directory) and `resume` (no

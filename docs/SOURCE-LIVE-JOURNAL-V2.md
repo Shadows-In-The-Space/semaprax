@@ -80,6 +80,13 @@ turn/attempt scope, duplicate usage, malformed currency/scale, and overflow.
 Its returned priced totals distinguish reserved, observed, and unknown
 reservation minor units; none is settlement or payment authority.
 
+For a migrated v4 binding, pricing replay starts from the durable priced carry.
+The sink derives each new intent ordinal as the carried global ordinal plus the
+local v4 intent inventory; it never renumbers predecessor attempts. Recovery
+requires exact pricing identity and ordinal/scope sequence, retains unknown
+exposure and observed overage, and clamps remaining admission at zero. The
+returned totals remain an authority-free accounting view.
+
 ## Checkpoint-before-dispatch boundaries
 
 The route checks cancellation and the shared absolute deadline before stages
@@ -148,14 +155,16 @@ external dispatch. The binding also bounds attempts to four per turn,
 iterations to 4,096, stages to 12,289, per-stage fuel to 1,000,000, and total
 stage fuel to 1,000,000,000.
 
-This route has no migration or runtime CLI. It does not claim a durable
-filesystem, power-loss behavior, multi-writer coordination, remote-provider
-delivery proof, provider reconciliation, price lookup, exact billing, or hosted
-or live-provider evidence. Its correctness depends on a trusted latest-store
-load, exclusive writer control, and the host's restart-stable clock guarantee.
+The core source journal supplies no filesystem or runtime CLI. It does not
+claim durable filesystem or power-loss behavior, multi-writer coordination,
+remote-provider delivery proof, provider reconciliation, price lookup, exact
+billing, or hosted or live-provider evidence. Its correctness depends on a
+trusted latest-store load, exclusive writer control, and the host's
+restart-stable clock guarantee.
 The private CLI's v2 priced configuration selects the v4 route; direct resume
-of v1/v2/v3 under that configuration is refused. Priced migration remains
-explicitly unavailable pending its separate carry/handoff contract.
+of v1/v2/v3 under that configuration is refused. Its one-hop priced migration
+route derives the v4 carry only after binding and recovery validate the priced
+predecessor. Unsupported profile conversion remains refused.
 Local executable gates:
 
 - `cargo test --locked -p semaprax --lib agent_lifecycle::iterative::` exercises

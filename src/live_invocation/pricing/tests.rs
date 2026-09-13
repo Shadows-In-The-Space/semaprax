@@ -217,6 +217,57 @@ fn resume_preserves_terminal_overage_but_refuses_a_new_reservation() {
 }
 
 #[test]
+fn priced_carry_preserves_ordinal_and_overage_while_only_allowing_narrowing() {
+    let carry = PricedMonetaryCarry::from_validated(pricing(21), 7, 15, 0, 8, 3).unwrap();
+    let mut recovered =
+        MonetaryAccounting::resume_with_priced_carry(pricing(14), carry.clone(), &[]).unwrap();
+    assert_eq!(
+        recovered
+            .reserve("fixed_model_attempt_units.v1", 1)
+            .unwrap_err()
+            .0,
+        PRICING_BUDGET_EXHAUSTED
+    );
+    assert_eq!(
+        carry.validate_destination(&pricing(22)).unwrap_err().0,
+        PRICING_BUDGET_EXHAUSTED
+    );
+    assert!(carry.validate_destination(&pricing(7)).is_ok());
+    assert_eq!(
+        carry.validate_destination(&pricing(6)).unwrap_err().0,
+        PRICING_BUDGET_EXHAUSTED
+    );
+    let ordinary = PricedMonetaryCarry::from_validated(pricing(21), 7, 0, 7, 0, 3).unwrap();
+    let mut ordinary =
+        MonetaryAccounting::resume_with_priced_carry(pricing(21), ordinary, &[]).unwrap();
+    assert_eq!(
+        ordinary
+            .reserve("fixed_model_attempt_units.v1", 1)
+            .unwrap()
+            .ordinal(),
+        3
+    );
+}
+
+#[test]
+fn exhausted_global_ordinal_refuses_without_mutating_accounting() {
+    let carry = PricedMonetaryCarry::from_validated(pricing(14), 0, 0, 0, 0, u32::MAX).unwrap();
+    let mut accounting =
+        MonetaryAccounting::resume_with_priced_carry(pricing(14), carry, &[]).unwrap();
+    assert_eq!(
+        accounting
+            .reserve("fixed_model_attempt_units.v1", 1)
+            .unwrap_err()
+            .0,
+        PRICING_TOTAL_OVERFLOW
+    );
+    assert_eq!(accounting.reserved_minor(), 0);
+    assert_eq!(accounting.unknown_reservation_minor(), 0);
+    assert!(accounting.attempts().is_empty());
+    assert_eq!(accounting.failure(), None);
+}
+
+#[test]
 fn replay_restores_a_terminal_overage_but_rejects_a_later_forged_intent() {
     let contract = pricing(10);
     let first = MonetaryReservation::recover(&contract, 0, 1, 7).unwrap();

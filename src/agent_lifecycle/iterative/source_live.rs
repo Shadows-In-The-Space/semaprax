@@ -15,8 +15,8 @@ use crate::live_invocation::{
     CumulativeBudgetLedger, SourceInvocationClock,
 };
 pub use migration::{
-    prepare_source_live_migration, PreparedSourceLiveMigration, SourceLiveMigrationEndpoint,
-    SourceLiveMigrationRequest,
+    prepare_source_live_migration, prepare_source_live_priced_migration,
+    PreparedSourceLiveMigration, SourceLiveMigrationEndpoint, SourceLiveMigrationRequest,
 };
 pub(crate) use session::SourceExecutionSession;
 

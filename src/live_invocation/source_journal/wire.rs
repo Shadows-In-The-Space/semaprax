@@ -10,6 +10,7 @@ const CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v1\0";
 const EXECUTION_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v2\0";
 const MIGRATED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v3\0";
 const PRICED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v4\0";
+const PRICED_MIGRATED_CHAIN_DOMAIN: &[u8] = b"semaprax.live-invocation.source-chain.v4-migrated\0";
 
 fn kind(entry: &SourceJournalEntry) -> &'static str {
     match entry {
@@ -221,7 +222,9 @@ pub(super) fn encode_envelope(
     }
     let entries = encode_entries(journal.entries())?;
     let link = digest(
-        if journal.binding.is_priced_profile() {
+        if journal.binding.is_priced_migrated_profile() {
+            PRICED_MIGRATED_CHAIN_DOMAIN
+        } else if journal.binding.is_priced_profile() {
             PRICED_CHAIN_DOMAIN
         } else if journal.binding.migration().is_some() {
             MIGRATED_CHAIN_DOMAIN

@@ -3,9 +3,9 @@ use super::super::migration::durable;
 use super::*;
 use semaprax::agent_lifecycle::iterative::driver::{ProposalRequest, ProposalSource};
 use semaprax::agent_lifecycle::iterative::source_live::{
-    prepare_source_live_migration, SourceAttemptIdentity, SourceLiveMigrationEndpoint,
-    SourceLiveMigrationRequest, SourceLivePolicy, SourceLiveRequest, SourceProposalOutcome,
-    SourceProposalPolicy,
+    prepare_source_live_migration, prepare_source_live_priced_migration, SourceAttemptIdentity,
+    SourceLiveMigrationEndpoint, SourceLiveMigrationRequest, SourceLivePolicy, SourceLivePricing,
+    SourceLiveRequest, SourceProposalOutcome, SourceProposalPolicy,
 };
 use semaprax::agent_lifecycle::iterative::{
     compile_project_agent_lifecycle_v2, CompiledIterativeLifecycle,
@@ -24,6 +24,9 @@ use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
+
+#[path = "source_migration_priced.rs"]
+mod source_migration_priced;
 
 const DEPLOYMENT: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const DEADLINE: i64 = 100_000;
@@ -158,7 +161,6 @@ impl ProposalSource for Model {
             .cloned()
             .expect("unexpected physical model dispatch");
         let identity = self.checkpoint_attempt_identity(&request).unwrap();
-        let binding = sink.journal().binding();
         let invocation = ModelInvocationRequest {
             turn: request.turn as u32,
             task: request.task.objective.clone(),
@@ -178,23 +180,17 @@ impl ProposalSource for Model {
                 model_dispatches: 0,
             };
         }
-        let intent = SourceJournalEntry::AttemptIntent {
-            turn: request.turn as u32,
-            attempt: request.attempt as u32,
-            attempt_digest: binding.attempt_digest(
+        let intent = sink
+            .attempt_intent(
                 request.turn as u32,
                 request.attempt as u32,
-                &identity.request_digest,
-                &identity.prompt_digest,
+                identity.request_digest,
+                identity.prompt_digest,
                 identity.request_bytes,
-            ),
-            request_digest: identity.request_digest,
-            prompt_digest: identity.prompt_digest,
-            request_bytes: identity.request_bytes,
-            reserved_units: 1,
-            response_limit: 4096,
-        };
-        if sink.append_at(intent, clock.now_millis()).is_err() {
+            )
+            .and_then(|intent| sink.append_at(intent, clock.now_millis()).map(|_| ()))
+            .is_ok();
+        if !intent {
             return SourceProposalOutcome {
                 terminal_failure: None,
                 result: Err(vec![semaprax::diagnostic::Diagnostic::io(

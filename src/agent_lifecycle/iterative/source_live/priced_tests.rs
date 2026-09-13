@@ -13,6 +13,7 @@ fn priced_source_boundaries_and_terminal_recovery_keep_distinct_accounting() {
         (14, false, 1, 1),
         (15, false, 1, 1),
         (14, true, 1, 0),
+        (28, true, 2, 1),
     ] {
         let mut policy = policy(1000);
         policy.reservation_units = 2;
@@ -23,14 +24,11 @@ fn priced_source_boundaries_and_terminal_recovery_keep_distinct_accounting() {
             money_ceiling_minor: ceiling,
         };
         let mut source = Source {
-            responses: vec![
-                if malformed {
-                    b"not-json".to_vec()
-                } else {
-                    Source::valid_response(&compiled)
-                };
-                2
-            ],
+            responses: if malformed {
+                vec![b"not-json".to_vec(), Source::valid_response(&compiled)]
+            } else {
+                vec![Source::valid_response(&compiled); 2]
+            },
             calls: 0,
             deployment: DEPLOYMENT.into(),
             response_limit: 4096,

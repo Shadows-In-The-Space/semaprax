@@ -11,8 +11,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 - Add an explicit priced source-journal v4 route and private CLI config/receipt
   v2 (#113). Integer currency-bound reservations remain separate from work
   quotas and provider observations; replay retains unknown exposure and refuses
-  quote drift. Legacy source profiles remain unchanged. Priced migration is
-  explicitly refused pending its cumulative monetary carry implementation.
+  quote drift. Add the private CLI's one-hop priced-to-priced migration carry,
+  preserving cumulative reservations, observations, overage, and global money
+  ordinals under a non-widening compatible quote. Legacy source profiles remain
+  unchanged; unsupported profile conversion is refused.
 
 - Construct ordinary imported function stubs from signatures without cloning
   discarded bodies (#124). Preserve fitting graph receipts and add an uncached

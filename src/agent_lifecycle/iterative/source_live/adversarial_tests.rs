@@ -675,3 +675,61 @@ fn cancellation_after_settlement_keeps_charge_and_skips_effect() {
         SourceTerminalStatus::Cancelled
     );
 }
+
+#[test]
+fn priced_cancellation_before_dispatch_and_after_settlement_keep_distinct_charge() {
+    for before_dispatch in [true, false] {
+        let compiled = lifecycle();
+        let task = task();
+        let policy = policy(2);
+        let pricing = SourceLivePricing {
+            currency: "USD".into(),
+            minor_unit_exponent: 6,
+            price_per_work_unit_minor: 7,
+            money_ceiling_minor: 14,
+        };
+        let clock = Clock { now: 1 };
+        let cancellation = AgentCancellation::default();
+        if before_dispatch {
+            cancellation.cancel();
+        }
+        let mut source = scripted(&compiled, 1);
+        let mut read = Read { calls: 0 };
+        let mut store = CancellingStore {
+            document: String::new(),
+            cancellation: cancellation.clone(),
+        };
+        let result = compiled.run_live_durable_priced(
+            request(&task, &policy, &clock, &cancellation),
+            &pricing,
+            &mut source,
+            &mut read,
+            &mut store,
+        );
+        let checkpoint = if before_dispatch {
+            result
+                .expect("pre-cancelled run records its terminal status")
+                .checkpoint
+        } else {
+            let failure = result
+                .err()
+                .expect("post-settlement cancellation refuses the effect");
+            assert_eq!(failure.selected, Some(SourceTerminalStatus::Cancelled));
+            failure.checkpoint.unwrap()
+        };
+        let expected_calls = usize::from(!before_dispatch);
+        assert_eq!((source.calls, read.calls), (expected_calls, 0));
+        let totals = checkpoint.priced_totals().unwrap();
+        assert_eq!(checkpoint.committed_reserved_units(), expected_calls as i64);
+        assert_eq!(totals.reserved_minor, expected_calls as i64 * 7);
+        assert_eq!(
+            totals.unknown_charge_reservation_minor,
+            totals.reserved_minor
+        );
+        assert_eq!(totals.observed_charge_minor, 0);
+        assert_eq!(
+            checkpoint.terminal_snapshot().unwrap().status(),
+            SourceTerminalStatus::Cancelled
+        );
+    }
+}

@@ -367,8 +367,8 @@ pub(super) fn validate(
         }
     }
     let mut fold = validate_inner(binding, &projected)?;
-    if let Some(pricing) = priced {
-        fold.priced = Some(super::priced_v4::fold(pricing, entries)?);
+    if priced.is_some() {
+        fold.priced = Some(super::priced_v4::fold(binding, entries)?);
     }
     Ok(fold)
 }

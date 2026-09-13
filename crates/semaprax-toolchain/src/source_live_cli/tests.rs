@@ -685,3 +685,6 @@ fn suspended_retained_project_migrates_once_and_recovers_destination_without_dis
 
 #[path = "priced_tests.rs"]
 mod priced_tests;
+
+#[path = "priced_migration_tests.rs"]
+mod priced_migration_tests;

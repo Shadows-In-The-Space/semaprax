@@ -99,12 +99,35 @@ single-consumer handoff, hosted/provider execution, or nested State support.
 A failed or unacknowledged model/effect intent remains uncertain; recovery
 never treats an opaque receipt as physical exactly-once proof.
 
-## Priced successor boundary
+## Priced v4 successor boundary
 
-This v3 handoff carries work reservations only. The private priced source
-profile uses a distinct v4 journal and integer operator quote; it must carry
-legacy reservations as explicit unknown monetary exposure, bind the exact
-rate/currency/scale, and prevent ceiling widening before it can admit a priced
-successor. That handoff is not implemented here. The CLI therefore refuses a
-priced migration rather than treating prior attempts as free, observed, or
-zero-priced.
+The private priced source profile uses the distinct v4 journal and an integer
+operator quote. A priced predecessor may migrate only to a priced v4
+destination. The destination derives `PricedMigrationCarryV4` from the
+validated predecessor binding and recovered checkpoint, never from a receipt
+or caller-supplied totals. Its distinct v4 handoff digest binds the v3 base
+handoff plus pricing identity (work unit, currency, minor-unit exponent and
+integer rate), predecessor money ceiling, cumulative reserved, observed,
+unknown and observed-over-reservation minor units, and the next global money
+ordinal.
+
+The v3 base carry must match the recovered predecessor invocation, generation,
+chain, committed work and fuel, terminal turn/stage/effect/attempt counters,
+limits, unit, clock floor, deadline, and v4 schema. The predecessor must have
+a committed terminal snapshot. The destination retains the exact work unit,
+currency, exponent and rate; it may narrow its money ceiling but may not lower
+it below carried reservations. Historical observed overage can exhaust further
+admission, but is neither refunded nor erased.
+
+The `MigrationOpened` / checked pure-evaluation / `RunOpened` prefix remains
+the single destination prefix. Under v4 its `MigrationOpened` row names the
+priced handoff digest while the retained v3 digest binds ordinary migration
+facts. Destination priced attempts start at the carried global ordinal and
+continue it across recovery. Replayed totals retain previous `Unknown` and
+`Observed` evidence; receipts remain observational and grant no accounting
+authority.
+
+The private CLI admits one priced predecessor-to-destination handoff. It
+refuses unpriced-to-priced and priced-to-unpriced conversion rather than
+treating prior work as zero-priced, observed, or free. This does not claim
+provider billing, refunds, cross-store single consumption, or hosted execution.

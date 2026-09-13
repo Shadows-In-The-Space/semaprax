@@ -8,8 +8,9 @@ use crate::opencode_host::{
     ProcessOpenCodeRunner, OPENCODE_MODEL,
 };
 use semaprax::agent_lifecycle::iterative::source_live::{
-    prepare_source_live_migration, SourceLiveFailure, SourceLiveMigrationEndpoint,
-    SourceLiveMigrationRequest, SourceLiveOutcome, SourceLivePolicy, SourceLiveRequest,
+    prepare_source_live_migration, prepare_source_live_priced_migration, SourceLiveFailure,
+    SourceLiveMigrationEndpoint, SourceLiveMigrationRequest, SourceLiveOutcome, SourceLivePolicy,
+    SourceLiveRequest,
 };
 use semaprax::agent_lifecycle::iterative::{
     compile_project_agent_lifecycle_v2, CompiledIterativeLifecycle, IterativeBudget,
@@ -398,34 +399,29 @@ fn execute_migrate<R: OpenCodeRunner>(
 ) -> Result<String, CliError> {
     let previous = Endpoint::load(SessionConfig::load(&previous_config)?)?;
     let mut destination = Endpoint::load(SessionConfig::load(&destination_config)?)?;
-    if previous.config.pricing.is_some() || destination.config.pricing.is_some() {
-        return Err(CliError::refused(
-            "priced checkpoint migration is not yet admitted",
-        ));
+    if previous.config.pricing.is_some() != destination.config.pricing.is_some() {
+        return Err(CliError::refused("migration cannot change pricing profile"));
     }
     if previous.task.objective != destination.task.objective
         || previous.task.budget != destination.task.budget
     {
         return Err(CliError::refused("migration task changed"));
     }
-    let previous_binding = previous
-        .policy
-        .binding(&previous.compiled, &previous.task, previous.budget)
-        .map_err(|_| CliError::refused("predecessor binding refused"))?;
-    // A v3 predecessor cannot satisfy this v2 binding. This CLI version
-    // deliberately refuses multi-hop store topology instead of inferring a
-    // previous handoff authority from submitted checkpoint bytes.
+    let previous_binding = previous.binding()?;
+    // A migrated predecessor needs its independently retained handoff binding.
+    // This CLI accepts a fresh predecessor only; submitted checkpoint bytes
+    // cannot supply the previous handoff authority.
     let previous_store = CheckpointDir::existing(&previous_checkpoint, &previous.project_root)?;
     let previous_document = previous_store
         .latest()?
         .ok_or(CliError::refused("predecessor has no latest checkpoint"))?;
     let predecessor = recover_source_checkpoint(&previous_document, &previous_binding)
-        .map_err(|_| CliError::refused("predecessor v2 checkpoint refused"))?;
+        .map_err(|_| CliError::refused("predecessor checkpoint refused"))?;
     // The destination clock origin is carried from the authenticated latest
     // predecessor, not reset by the operator's destination CONFIG. Repeating
     // this handoff derives the same origin from the same held source journal.
     destination.policy.initial_millis = predecessor.last_checked_millis();
-    let prepared = prepare_source_live_migration(SourceLiveMigrationRequest {
+    let request = SourceLiveMigrationRequest {
         previous: previous.migration_endpoint(),
         previous_binding: &previous_binding,
         previous_checkpoint: &previous_document,
@@ -434,7 +430,14 @@ fn execute_migrate<R: OpenCodeRunner>(
         migration_function: function,
         max_migration_steps: steps,
         expected_handoff_digest: None,
-    })
+    };
+    let prepared = match (&previous.config.pricing, &destination.config.pricing) {
+        (Some(previous_price), Some(destination_price)) => {
+            prepare_source_live_priced_migration(request, previous_price, destination_price)
+        }
+        (None, None) => prepare_source_live_migration(request),
+        _ => unreachable!("pricing profiles checked before store access"),
+    }
     .map_err(source_error)?;
     let path_was_new = !destination_checkpoint.exists();
     let mut destination_store = if path_was_new {

@@ -19,7 +19,7 @@ mod wire;
 pub use crate::live_invocation::pricing::ProviderChargeObservation;
 pub(crate) use migration::{
     state_digest as source_migration_state_digest, task_digest as source_migration_task_digest,
-    SourceMigrationCarry,
+    PricedMigrationCarryV4, SourceMigrationCarry,
 };
 pub use priced_v4::{
     PricedAttemptIntentV4, PricedAttemptUsageV4, PricedTotalsV4, SourceUsageObservationV4,
@@ -56,6 +56,7 @@ const PROMPT_DOMAIN: &[u8] = b"semaprax.live-invocation.source-prompt.v1\0";
 const CONTEXT_DOMAIN: &[u8] = b"semaprax.live-invocation.source-context-binding.v1\0";
 const EXECUTION_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v2\0";
 const MIGRATED_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v3\0";
+const PRICED_MIGRATED_ID_DOMAIN: &[u8] = b"semaprax.live-invocation.source-id.v4-migrated\0";
 
 /// All caller-selected policy, program and task inputs to one source run.
 /// The resulting binding is opaque; a recovery caller must supply it again.
@@ -118,6 +119,13 @@ enum SourceProfile {
         max_steps_per_stage: usize,
         max_total_steps: usize,
         pricing: priced_v4::PricedSourceBindingV4,
+    },
+    PricedMigratedV4 {
+        evaluator: String,
+        max_steps_per_stage: usize,
+        max_total_steps: usize,
+        pricing: priced_v4::PricedSourceBindingV4,
+        carry: PricedMigrationCarryV4,
     },
 }
 
@@ -278,20 +286,39 @@ impl SourceInvocationBinding {
             SourceProfile::ExecutionV2 { .. }
                 | SourceProfile::MigratedV3 { .. }
                 | SourceProfile::PricedV4 { .. }
+                | SourceProfile::PricedMigratedV4 { .. }
         )
     }
     pub(crate) fn priced_binding(&self) -> Option<&priced_v4::PricedSourceBindingV4> {
         match &self.profile {
-            SourceProfile::PricedV4 { pricing, .. } => Some(pricing),
+            SourceProfile::PricedV4 { pricing, .. }
+            | SourceProfile::PricedMigratedV4 { pricing, .. } => Some(pricing),
             _ => None,
         }
     }
     pub(crate) fn is_priced_profile(&self) -> bool {
         self.priced_binding().is_some()
     }
+    pub(crate) fn is_priced_migrated_profile(&self) -> bool {
+        matches!(&self.profile, SourceProfile::PricedMigratedV4 { .. })
+    }
     pub(crate) fn migration(&self) -> Option<&SourceMigrationCarry> {
         match &self.profile {
             SourceProfile::MigratedV3 { carry, .. } => Some(carry),
+            SourceProfile::PricedMigratedV4 { carry, .. } => Some(&carry.base),
+            _ => None,
+        }
+    }
+    pub(crate) fn priced_migration_carry(&self) -> Option<&PricedMigrationCarryV4> {
+        match &self.profile {
+            SourceProfile::PricedMigratedV4 { carry, .. } => Some(carry),
+            _ => None,
+        }
+    }
+    pub(crate) fn migration_handoff_digest(&self) -> Option<&str> {
+        match &self.profile {
+            SourceProfile::MigratedV3 { carry, .. } => Some(&carry.handoff_digest),
+            SourceProfile::PricedMigratedV4 { carry, .. } => Some(&carry.handoff_digest),
             _ => None,
         }
     }
@@ -300,7 +327,8 @@ impl SourceInvocationBinding {
             SourceProfile::PrimitiveV1 => None,
             SourceProfile::ExecutionV2 { evaluator, .. }
             | SourceProfile::MigratedV3 { evaluator, .. }
-            | SourceProfile::PricedV4 { evaluator, .. } => Some(evaluator),
+            | SourceProfile::PricedV4 { evaluator, .. }
+            | SourceProfile::PricedMigratedV4 { evaluator, .. } => Some(evaluator),
         }
     }
     pub fn max_steps_per_stage(&self) -> Option<usize> {
@@ -317,6 +345,10 @@ impl SourceInvocationBinding {
             | SourceProfile::PricedV4 {
                 max_steps_per_stage,
                 ..
+            }
+            | SourceProfile::PricedMigratedV4 {
+                max_steps_per_stage,
+                ..
             } => Some(*max_steps_per_stage),
         }
     }
@@ -331,6 +363,9 @@ impl SourceInvocationBinding {
             }
             | SourceProfile::PricedV4 {
                 max_total_steps, ..
+            }
+            | SourceProfile::PricedMigratedV4 {
+                max_total_steps, ..
             } => Some(*max_total_steps),
         }
     }
@@ -340,12 +375,14 @@ impl SourceInvocationBinding {
     pub const fn max_stages(&self) -> u32 {
         self.max_stages
     }
-    fn schema(&self) -> &'static str {
+    pub(crate) fn schema(&self) -> &'static str {
         match &self.profile {
             SourceProfile::PrimitiveV1 => SOURCE_JOURNAL_SCHEMA,
             SourceProfile::ExecutionV2 { .. } => SOURCE_EXECUTION_JOURNAL_SCHEMA,
             SourceProfile::MigratedV3 { .. } => SOURCE_MIGRATED_JOURNAL_SCHEMA,
-            SourceProfile::PricedV4 { .. } => SOURCE_PRICED_JOURNAL_SCHEMA,
+            SourceProfile::PricedV4 { .. } | SourceProfile::PricedMigratedV4 { .. } => {
+                SOURCE_PRICED_JOURNAL_SCHEMA
+            }
         }
     }
 
@@ -829,13 +866,20 @@ impl SourceJournal {
         request_bytes: usize,
     ) -> Result<SourceJournalEntry, SourceJournalError> {
         if self.binding.is_priced_profile() {
-            let money_ordinal = u32::try_from(
+            let local_ordinal = u32::try_from(
                 self.entries
                     .iter()
                     .filter(|entry| matches!(entry, SourceJournalEntry::PricedAttemptIntent(_)))
                     .count(),
             )
             .map_err(|_| SourceJournalError::Capacity)?;
+            let carried_ordinal = self
+                .binding
+                .priced_migration_carry()
+                .map_or(0, |carry| carry.monetary.next_ordinal());
+            let money_ordinal = carried_ordinal
+                .checked_add(local_ordinal)
+                .ok_or(SourceJournalError::Capacity)?;
             self.binding.attempt_intent_at_ordinal(
                 turn,
                 attempt,

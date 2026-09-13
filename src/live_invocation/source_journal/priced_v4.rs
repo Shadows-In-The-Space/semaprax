@@ -61,6 +61,21 @@ impl PricedSourceBindingV4 {
         &self.invocation
     }
 
+    /// A checked migrated binding already has its final outer identity. Keep
+    /// this pricing commitment intact while using that identity for attempt
+    /// digests.
+    pub(super) fn rebound_to_invocation(
+        &self,
+        invocation: String,
+    ) -> Result<Self, SourceJournalError> {
+        if !looks_like_digest(&invocation) {
+            return Err(SourceJournalError::Binding);
+        }
+        let mut rebound = self.clone();
+        rebound.invocation = invocation;
+        Ok(rebound)
+    }
+
     pub(crate) fn pricing(&self) -> &ValidatedPricing {
         &self.pricing
     }
@@ -216,18 +231,43 @@ pub struct PricedTotalsV4 {
 }
 
 pub(crate) fn fold(
+    binding: &super::SourceInvocationBinding,
+    entries: &[super::SourceJournalEntry],
+) -> Result<PricedTotalsV4, SourceJournalError> {
+    let priced = binding
+        .priced_binding()
+        .ok_or(SourceJournalError::Binding)?;
+    fold_with(priced, binding.priced_migration_carry(), entries)
+}
+
+#[cfg(test)]
+fn fold_unmigrated(
     binding: &PricedSourceBindingV4,
     entries: &[super::SourceJournalEntry],
 ) -> Result<PricedTotalsV4, SourceJournalError> {
+    fold_with(binding, None, entries)
+}
+
+fn fold_with(
+    priced: &PricedSourceBindingV4,
+    carry: Option<&super::PricedMigrationCarryV4>,
+    entries: &[super::SourceJournalEntry],
+) -> Result<PricedTotalsV4, SourceJournalError> {
+    let ordinal_start = carry.map_or(0, |carry| carry.monetary.next_ordinal());
     let mut attempts = Vec::new();
     let mut closed = Vec::new();
     let mut scopes = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         match entry {
             super::SourceJournalEntry::PricedAttemptIntent(intent) => {
-                let reservation = intent.reservation(binding)?;
+                let reservation = intent.reservation(priced)?;
                 if reservation.ordinal()
-                    != u32::try_from(attempts.len()).map_err(|_| SourceJournalError::Capacity)?
+                    != ordinal_start
+                        .checked_add(
+                            u32::try_from(attempts.len())
+                                .map_err(|_| SourceJournalError::Capacity)?,
+                        )
+                        .ok_or(SourceJournalError::Capacity)?
                 {
                     return Err(SourceJournalError::Order);
                 }
@@ -247,8 +287,13 @@ pub(crate) fn fold(
                 {
                     return Err(SourceJournalError::Order);
                 }
-                let ordinal = usize::try_from(usage.money_ordinal)
-                    .map_err(|_| SourceJournalError::Capacity)?;
+                let ordinal = usize::try_from(
+                    usage
+                        .money_ordinal
+                        .checked_sub(ordinal_start)
+                        .ok_or(SourceJournalError::Order)?,
+                )
+                .map_err(|_| SourceJournalError::Capacity)?;
                 let stored = attempts.get_mut(ordinal).ok_or(SourceJournalError::Order)?;
                 if closed.get(ordinal) != Some(&false)
                     || stored.reservation.ordinal() != usage.money_ordinal
@@ -266,20 +311,27 @@ pub(crate) fn fold(
             _ => {}
         }
     }
-    let accounting = MonetaryAccounting::resume(binding.pricing().clone(), &attempts)
-        .map_err(|_| SourceJournalError::Capacity)?;
+    let accounting = match carry {
+        Some(carry) => MonetaryAccounting::resume_with_priced_carry(
+            priced.pricing().clone(),
+            carry.monetary.clone(),
+            &attempts,
+        ),
+        None => MonetaryAccounting::resume(priced.pricing().clone(), &attempts),
+    }
+    .map_err(|_| SourceJournalError::Capacity)?;
     let exposure = accounting
         .conservative_exposure_minor()
         .map_err(|_| SourceJournalError::Capacity)?;
-    let remaining_admission_minor = binding
+    let remaining_admission_minor = priced
         .pricing()
         .ceiling_minor()
         .checked_sub(exposure)
         .unwrap_or(0)
         .max(0);
     Ok(PricedTotalsV4 {
-        currency: binding.pricing().currency().to_owned(),
-        minor_unit_exponent: binding.pricing().minor_unit_exponent(),
+        currency: priced.pricing().currency().to_owned(),
+        minor_unit_exponent: priced.pricing().minor_unit_exponent(),
         reserved_minor: accounting.reserved_minor(),
         observed_charge_minor: accounting.observed_minor(),
         unknown_charge_reservation_minor: accounting.unknown_reservation_minor(),

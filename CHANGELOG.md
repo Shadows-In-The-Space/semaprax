@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a fifth held-out cross-language benchmark family for half-open booking
+  conflicts (#106). Rust, TypeScript and SEMAPRAX share candidates across
+  public and hidden runs; an inclusive-end mutation passes public cases and
+  fails hidden adjacency cases on each port. Actual coding-agent trials remain.
+
 - Migrate suspended source-mode agents through checked retained-Project A→B→C
   handoffs (#115), preserving schema provenance and cumulative charged work.
   Acknowledged migration results resume at Observe; initialization and completed

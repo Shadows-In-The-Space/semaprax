@@ -1,0 +1,7 @@
+module bench.booking.tests;
+
+@id("bench.booking.tests")
+fn main() -> i64
+{
+    0
+}

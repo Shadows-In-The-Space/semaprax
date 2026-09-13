@@ -25,6 +25,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const SUITE: &str = "benchmarks/cross-language-v1";
 static SERIAL: AtomicUsize = AtomicUsize::new(0);
 
+#[path = "cross_language_benchmark_suite/booking_window_conflict.rs"]
+mod booking_window_conflict;
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
 }

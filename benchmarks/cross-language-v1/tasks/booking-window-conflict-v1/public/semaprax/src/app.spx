@@ -1,0 +1,8 @@
+module bench.booking.app;
+use function @id("bench.booking.conflicts") from bench.booking.candidate as conflicts;
+
+@id("bench.booking.main")
+fn main() -> i64
+{
+    if conflicts(10i32, 20i32, 15i32, 25i32) == 1i32 { if conflicts(10i32, 30i32, 12i32, 18i32) == 1i32 { if conflicts(10i32, 20i32, 25i32, 30i32) == 0i32 { 0 } else { 1 } } else { 1 } } else { 1 }
+}

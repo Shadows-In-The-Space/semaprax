@@ -1,0 +1,7 @@
+module bench.booking.candidate;
+
+@id("bench.booking.conflicts")
+fn conflicts(a_start: i32, a_end: i32, b_start: i32, b_end: i32) -> i32
+{
+    if a_start < b_end && b_start < a_end { 1i32 } else { 0i32 }
+}

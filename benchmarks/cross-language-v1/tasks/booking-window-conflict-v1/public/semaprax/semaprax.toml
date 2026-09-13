@@ -1,0 +1,6 @@
+schema = "semaprax.project.v1"
+name = "booking-window-conflict"
+entry = "bench.booking.app"
+sources = ["src/app.spx", "src/candidate.spx", "src/tests.spx"]
+web_exports = ["bench.booking.conflicts"]
+tests = ["bench.booking.tests"]

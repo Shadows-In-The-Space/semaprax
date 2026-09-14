@@ -8,6 +8,8 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+## 0.5.0 — 2026-09-14
+
 - Bind effect-free retained source job handlers to persisted deployment
   descriptors before claim, using the existing durable job runtime and
   checked interpreter; refuse stale roots and handler substitutions (#192).

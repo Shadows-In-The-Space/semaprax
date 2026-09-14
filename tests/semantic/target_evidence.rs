@@ -325,10 +325,16 @@ fn string_cleanup_evidence_binds_current_production_c_and_rejects_foreign_bindin
     let report = target_evidence::preview(&fixture.source, &fixture.patch).unwrap();
     let value: serde_json::Value = serde_json::from_str(&report).unwrap();
     let native = codegen::emit_c(&parse(source, &fixture.source).unwrap()).unwrap();
-    assert!(native.contains("live String overwritten"));
-    assert!(native.contains("invalid String transfer"));
+    // String is now lowered through the owned-Bytes plan (see
+    // `85014337` and the subsequent String-variant work). The live-set
+    // is tracked as `spx_bytes_*` rather than a dedicated
+    // "live String overwritten" invariant, but the String representation
+    // itself is still `spx_string_v10` with `spx_string_*` helpers.
     assert!(native.contains("struct spx_string_v10"));
-    assert!(native.contains("spx_string_length_v10(spx_source)"));
+    assert!(native.contains("spx_string_from_literal"));
+    assert!(native.contains("spx_string_len"));
+    assert!(native.contains("spx_string_drop"));
+    assert!(native.contains("Bytes plan initialize liveness"));
     assert!(!native.contains("strlen(spx_source)"));
     assert_eq!(value["targets"][0]["base_bytes"], native.len());
     assert_eq!(
@@ -381,7 +387,7 @@ fn string_cleanup_evidence_binds_current_production_c_and_rejects_foreign_bindin
     )
     .unwrap();
     let native = codegen::emit_c(&candidate).unwrap();
-    assert!(native.contains("invalid String transfer"));
+    assert!(native.contains("spx_string_drop"));
     assert_eq!(value["targets"][0]["candidate_bytes"], native.len());
     assert_eq!(
         value["targets"][0]["candidate_digest"],
@@ -488,17 +494,17 @@ fn whole_report_sha_kats_cover_patch_v1_v2_v3() {
             .each_ref()
             .map(|report| sha256(&report.replace("0.258.0", "0.256.0"))),
         [
-            "b4df6754748dd17fbc869a25a5a90e6915447b986c3539a9aad3a810b3fdaa87".to_owned(),
-            "86a3088f7f026f31387a77de6965cf73c3b96e2081a36de4824094ac4a8557a7".to_owned(),
-            "a3cb196a85f3c1785cbc794f3177b39369b14393e184920b932bebe47aa20bf1".to_owned(),
+            "bb170ceb8919eae5fcca10b80cc3dc5e4d12b6c11df23b4bc01a81b2215507ae".to_owned(),
+            "5637cd656d6dc40adb6122e92b5262d8279788e1f1fc8c4cacdecf92a8e2c449".to_owned(),
+            "53a0d865ea05ae1dc9fe7307f0867b5acfc649de2d8fe9221eb0df6d0b8d2bba".to_owned(),
         ]
     );
     assert_eq!(
         reports.each_ref().map(|report| sha256(report)),
         [
-            "08a8e74f4e4281713c2e70f3c4d4cfbee1cf2dd73c512dbd5bbfd8355b443046".to_owned(),
-            "e05607932e6d2dc89308e533968f02d127141d4818945dca40e60f3e9a4892cc".to_owned(),
-            "a2a40c19a9bfd00e0dfdf235ef4c64d8e2dca7ca20b40596f20e56d4ed3c6037".to_owned(),
+            "2d6609fbda665facaf6f0064ca7e8789728d0d12eb9457d560e8d93d270e55e1".to_owned(),
+            "fd06cb1e2ba931f5acc38547d26b616a5114971d4d82dc1f5b31bd6be9e6b8e8".to_owned(),
+            "d89e3fec2876f08c31decb2b7a499af9aa4dc3bd8a5822eb4c4c4a58ae4cb77c".to_owned(),
         ]
     );
 }

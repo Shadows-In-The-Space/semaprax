@@ -90,8 +90,8 @@ pub use persistence::{
     RecoveryError, PERSISTED_JOURNAL_SCHEMA, PERSISTED_PRICED_IO_JOURNAL_SCHEMA,
     PERSISTED_PRICED_JOURNAL_SCHEMA,
 };
-pub use policy_kernel_v3::run_durable_byte_policy_invocation;
 pub use policy_kernel::{run_durable_policy_invocation, DurablePolicyRun, DurablePolicyRunError};
+pub use policy_kernel_v3::run_durable_byte_policy_invocation;
 pub use priced::{
     run_priced_live_invocation, GenericPricing, PricedInvocationState,
     PricedLiveInvocationHandlers, PricedLiveKernelRun, PricedMigrationError, PricedWorkBudgetHook,

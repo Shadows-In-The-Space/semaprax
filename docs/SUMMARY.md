@@ -326,6 +326,7 @@ Audience: all documentation readers.
 - [Public Scalar WIT Interface v1](PUBLIC-SCALAR-WIT-INTERFACE-V1.md)
 - [Public Generic WIT Type Projection v1](PUBLIC-GENERIC-WIT-TYPE-PROJECTION-V1.md)
 - [Wasm owned ABI](WASM-OWNED-ABI-V1.md)
+- [Feature-composition corpus v1](FEATURE-COMPOSITION-CORPUS-V1.md)
 
 ## Agent query and change protocols
 
@@ -339,6 +340,7 @@ Audience: all documentation readers.
 - [Source Live Journal v2](SOURCE-LIVE-JOURNAL-V2.md)
 - [Source live migration journal v3](SOURCE-LIVE-MIGRATION-V3.md)
 - [Private source live CLI v1](SOURCE-LIVE-CLI-V1.md)
+- [Private Host Offline Repair v1](PRIVATE-HOST-OFFLINE-REPAIR-V1.md)
 - [Live Invocation Persistence v1](LIVE-INVOCATION-PERSISTENCE-V1.md)
 - [Live Invocation Migration v1](LIVE-INVOCATION-MIGRATION-V1.md)
 - [Audit Capsule v1](AUDIT-CAPSULE-V1.md)

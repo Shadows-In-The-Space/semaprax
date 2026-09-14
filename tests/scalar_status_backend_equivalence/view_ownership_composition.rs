@@ -866,11 +866,8 @@ fn scalar_export_profile_refuses_ownership_transfer_with_spx_w115() {
         Path::new("view-ownership-composition-transfer.spx"),
     )
     .unwrap();
-    let error = wasm::emit_module_with_scalar_exports(
-        &program,
-        &["voc.case_transfer".to_owned()],
-    )
-    .unwrap_err();
+    let error = wasm::emit_module_with_scalar_exports(&program, &["voc.case_transfer".to_owned()])
+        .unwrap_err();
     assert_eq!(error.code, "SPX-W115");
 }
 

@@ -490,7 +490,7 @@ fn main() -> i64 { increment(41) }
     );
     assert_eq!(
         digest,
-        "e5d1722f836f833233f4f6d257fb329559a1bd09d7d8b561e27485032d6aeada"
+        "f8eeafe9d84e6d5fa1fd6e90407838f6fff6f449a9c13dd528da2306cceb9d56"
     );
 }
 

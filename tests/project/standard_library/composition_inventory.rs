@@ -47,7 +47,8 @@ struct CorpusRow {
 
 const SCALAR_DIFFERENTIAL_REGISTRATION: [Registration; 1] = [Registration {
     source: SCALAR_HARNESS,
-    declaration: "#[path = \"scalar_status_backend_equivalence/differential.rs\"]\nmod differential;",
+    declaration:
+        "#[path = \"scalar_status_backend_equivalence/differential.rs\"]\nmod differential;",
 }];
 const VIEW_OWNERSHIP_REGISTRATION: [Registration; 1] = [Registration {
     source: SCALAR_HARNESS,
@@ -114,7 +115,10 @@ const CORPUS_ROWS: [CorpusRow; 10] = [
         source: VIEW_CALL_BOUNDARY,
         owner: "borrowed_view_call_matrix_agrees_across_interpreter_native_and_core_wasm",
         registrations: &VIEW_CALL_REGISTRATION,
-        required_markers: &["CASES", "borrowed_view_return_is_rejected_with_stable_diagnostic"],
+        required_markers: &[
+            "CASES",
+            "borrowed_view_return_is_rejected_with_stable_diagnostic",
+        ],
     },
     CorpusRow {
         id: "scalar.lazy-checked-failure-v1",
@@ -139,7 +143,11 @@ const CORPUS_ROWS: [CorpusRow; 10] = [
         source: IMPORTED_VIEW,
         owner: "imported_std_bytes_view_composition_agrees_across_project_backends",
         registrations: &IMPORTED_VIEW_REGISTRATION,
-        required_markers: &["std.bytes.field_start", "byte_range", "assert_backend_value"],
+        required_markers: &[
+            "std.bytes.field_start",
+            "byte_range",
+            "assert_backend_value",
+        ],
     },
     CorpusRow {
         id: "project.owned-cursor-contract-v1",
@@ -162,7 +170,8 @@ const CORPUS_ROWS: [CorpusRow; 10] = [
     CorpusRow {
         id: "generic.boundary-input-v1",
         source: GENERIC_SETTLEMENT,
-        owner: "native_o0_and_o2_agree_with_interpreter_and_wasm_across_the_shared_settlement_corpus",
+        owner:
+            "native_o0_and_o2_agree_with_interpreter_and_wasm_across_the_shared_settlement_corpus",
         registrations: &GENERIC_SETTLEMENT_REGISTRATION,
         required_markers: &["fn corpus()", "compare_case("],
     },
@@ -175,7 +184,10 @@ enum InventoryError {
     MissingDocumentRow(&'static str),
     MissingModuleRegistration(&'static str),
     MissingOwner(&'static str),
-    MissingSemanticMarker { row: &'static str, marker: &'static str },
+    MissingSemanticMarker {
+        row: &'static str,
+        marker: &'static str,
+    },
 }
 
 fn documented_rows(document: &str) -> Vec<&str> {
@@ -230,7 +242,10 @@ fn validate_inventory(
 fn feature_composition_rows_are_registered_and_documented() {
     assert!(CORPUS_DOCUMENT.contains("semaprax.feature-composition-corpus.v1"));
     let expected = CORPUS_ROWS.map(|row| row.id);
-    assert_eq!(documented_rows(CORPUS_DOCUMENT).as_slice(), expected.as_slice());
+    assert_eq!(
+        documented_rows(CORPUS_DOCUMENT).as_slice(),
+        expected.as_slice()
+    );
     validate_inventory(&expected, &CORPUS_ROWS, CORPUS_DOCUMENT).unwrap();
 }
 

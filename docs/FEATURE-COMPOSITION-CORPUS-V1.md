@@ -1,5 +1,9 @@
 # Feature-composition corpus V1
 
+Status: bounded acceptance inventory for issue #103.
+
+Audience: compiler contributors and release reviewers.
+
 Schema: `semaprax.feature-composition-corpus.v1`.
 
 This is the bounded acceptance inventory for issue #103.  A row names a real

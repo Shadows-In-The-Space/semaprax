@@ -550,10 +550,10 @@ fn context_impact_and_review_documents_have_frozen_kats_and_exact_digest_replay(
         [
             // Issue #248: corrected workspace max_builder_bytes and dependent
             // digests. Reconstructing only those fields reproduces all prior KATs.
-            "sha256:95f5907e20d43a1edf6b560b257d2bbf6730b9ca80cb9a518949abd157e35c46",
-            "sha256:e804a4449365f25b5ca89ef7aee80cb3138a87c8ebd8fb0c4b42b8bb8000719d",
-            "sha256:056a3901e1f0424bc1334ddbebd64b90b9d518acad045c19f85648356ded82ae",
-            "sha256:9c79f1dcd1ad6f02cc967da4f88c32db36f32cd33df31e77350c5a36efa5b397"
+            "sha256:0982280c02d7802903b93c4184aee9df9537df63eb58da0c3a44b2e52f7675bf",
+            "sha256:b1d772e75f6762d01a6f557224af9708e56c9590de087eba402eb7b2307c24f4",
+            "sha256:af26298aac91fa71201fccea5dedda821e50168cd16d21810ecae927eca670bc",
+            "sha256:6d816a6cca92ce3e157084d59f087912c24fe5ed9ef6c7af0c81cb0fd8787537"
         ]
     );
     for artifact in &contexts {

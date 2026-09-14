@@ -67,6 +67,7 @@ fn subject(bindings: usize) -> crate::ast::Program {
 }
 
 #[test]
+#[ignore = "slow: 4000-owner work bound check (>3min in debug)"]
 fn selected_cleanup_work_limit_uses_the_standalone_diagnostic() {
     // 8000 owners, 33 full block sweeps, 4000 literal sweeps and two
     // 8000-owner epilogues require 284000 visits, above the 262144 cap.

@@ -1,5 +1,9 @@
 # Private Host Offline Repair v1
 
+Status: private-host offline repair vertical slice.
+
+Audience: compiler contributors and host integrators.
+
 `execution_revision::typed_repair` is a private-host composition over the
 checked source streaming and typed durable-effect routes. It does not add a
 source declaration, a `model.invoke` syntax form, a provider implementation,

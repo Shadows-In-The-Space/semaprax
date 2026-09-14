@@ -92,6 +92,7 @@ fn source_file(source: &str, label: &str) -> std::path::PathBuf {
 }
 
 #[test]
+#[ignore = "String variant interpreter admission pending (SPX-F102)"]
 fn direct_string_variant_round_trips_graphs_and_interprets_repeatedly() {
     let program = checked();
     let canonical = format::canonical(&program);

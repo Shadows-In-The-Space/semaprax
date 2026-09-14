@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use super::*;
 use crate::agent_interaction_schema::CompiledInteractionSchema;
@@ -111,7 +111,9 @@ struct MemoryCheckpointStore {
 }
 
 impl JobCheckpointStore for MemoryCheckpointStore {
-    fn load(&mut self) -> Result<Option<StoredJobCheckpoint>, crate::job_runtime::CheckpointStoreError> {
+    fn load(
+        &mut self,
+    ) -> Result<Option<StoredJobCheckpoint>, crate::job_runtime::CheckpointStoreError> {
         Ok(self.current.clone())
     }
 
@@ -238,7 +240,8 @@ fn recovered_job_refuses_a_same_schema_different_source_handler_before_claiming(
     .unwrap();
     assert_eq!(runtime.state(), JobState::Pending);
 
-    let mut recovered = JobRuntime::recover(&mut checkpoints, original.payload_schema(), 7).unwrap();
+    let mut recovered =
+        JobRuntime::recover(&mut checkpoints, original.payload_schema(), 7).unwrap();
     let changed = project.binding_for("job.handler.alternate");
     let changed_identity = changed.deployment_identity().to_owned();
 

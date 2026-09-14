@@ -123,7 +123,8 @@ impl SourceJobHandlerBinding {
         if crate::graph::revision(&checked) != source.source_revision() {
             return Err(SourceJobHandlerRefusal::SourceRevisionMismatch);
         }
-        let program = hir::resolve(&checked).map_err(|_| SourceJobHandlerRefusal::HandlerAdmission)?;
+        let program =
+            hir::resolve(&checked).map_err(|_| SourceJobHandlerRefusal::HandlerAdmission)?;
         hir::validate(&program).map_err(|_| SourceJobHandlerRefusal::HandlerAdmission)?;
         let payload_schema = compile_agent_interaction_schema_from_retained_source(
             source.source(),
@@ -371,7 +372,10 @@ fn digest(canonical: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(BINDING_DOMAIN);
     hasher.update(canonical.as_bytes());
-    format!("sha256:{:x}", crate::digest_hex::LowerHex(hasher.finalize()))
+    format!(
+        "sha256:{:x}",
+        crate::digest_hex::LowerHex(hasher.finalize())
+    )
 }
 
 #[cfg(test)]

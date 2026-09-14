@@ -35,8 +35,7 @@ use crate::job_fixture::{
 
 mod source_handler;
 pub use source_handler::{
-    drive_checked_source_job, SourceJobDriveError, SourceJobHandlerBinding,
-    SourceJobHandlerRefusal,
+    drive_checked_source_job, SourceJobDriveError, SourceJobHandlerBinding, SourceJobHandlerRefusal,
 };
 
 pub const JOB_RUNTIME_CHECKPOINT_SCHEMA: &str = "semaprax.job-runtime-checkpoint.v1";

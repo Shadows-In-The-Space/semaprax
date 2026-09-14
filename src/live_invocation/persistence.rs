@@ -85,10 +85,10 @@ use crate::diagnostic::quote_json;
 use super::identity::LiveInvocationId;
 use super::journal::{self, JournalEntry};
 
-mod priced;
-mod priced_io;
 pub(crate) mod policy;
 pub(crate) mod policy_v3;
+mod priced;
+mod priced_io;
 pub(crate) use priced::encode_priced_envelope_with_handoff;
 pub use priced::{
     recover_priced_journal, PricedCheckpointJournalSink, PricedRecoveryError,

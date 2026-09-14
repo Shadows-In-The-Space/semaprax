@@ -8,7 +8,8 @@
     clippy::large_enum_variant,
     clippy::drop_non_drop,
     clippy::needless_borrow,
-    clippy::items_after_test_module
+    clippy::items_after_test_module,
+    clippy::needless_return
 )]
 
 use std::path::Path;

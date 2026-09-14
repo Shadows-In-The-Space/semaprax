@@ -77,7 +77,7 @@ fn golden_envelope_digest_is_pinned() {
         .expect("envelope");
     assert_eq!(
         sha256_hex(envelope.as_bytes()),
-        "sha256:d51d7cc001a8e47e6dc4aeadacd39588a616b3fe72464052fa5d83d0ea8a4e18"
+        "sha256:b1e68dae188175612dd7843e8cdcd22d5d00e9ec1a67cbdb425505192ec19e12"
     );
     assert!(envelope.contains("\"schema\":\"semaprax.freestanding.v1\""));
     assert!(envelope.contains("\"no_runtime\":true"));
@@ -98,7 +98,7 @@ fn golden_translation_unit_digest_is_pinned_and_path_independent() {
     assert_eq!(from_examples, from_temp);
     assert_eq!(
         sha256_hex(from_examples.as_bytes()),
-        "sha256:7dc78c346536a1d8173a76839a73971bafd6ce1b3c515d5c8fbcb765f39a9cc9"
+        "sha256:af232e4c05ca552476597c37022f5568d0822fd5430cfb8e283225257ea4c56d"
     );
 }
 

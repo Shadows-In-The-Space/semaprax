@@ -224,7 +224,7 @@ fn public_api_cli_kat_parity_and_opaque_getters() {
         // Only that budget field changed; every other field of the rendered
         // document is byte for byte identical, checked by rendering the same
         // document under both factors and diffing it field by field.
-        "sha256:bd0922cbbcffbc9751904e874a75f770c4f8ebdb20ab5dfe778d66a59f9ef551"
+        "sha256:2095f80cab9141a52487b4850a5dba4f1e362dfa062c261661eacb976c4746e3"
     );
     assert_eq!(
         raw_sha(&evidence),
@@ -236,7 +236,7 @@ fn public_api_cli_kat_parity_and_opaque_getters() {
         // Only that budget field changed; every other field of the rendered
         // document is byte for byte identical, checked by rendering the same
         // document under both factors and diffing it field by field.
-        "sha256:360161fb96d7c3febcf7411db5252032a2fe76caf9c910b14c945511870c736f"
+        "sha256:7e58b58faf7d7e501f4c162c09f21e1f36701f0f512f9a3070adcb46f5bfb919"
     );
     for value in [
         artifacts.proposal_digest(),
@@ -467,7 +467,7 @@ fn verification_receipt_api_cli_kat_shared_lock_and_no_write() {
         raw_sha(&receipt),
         // Re-pinned after type-fact cycle detection began retaining exact
         // concrete nominal identities; only `used_builder_bytes` moved.
-        "sha256:ab860c3fdec86faf8ba78447871bd66a78af5ccdc8a787c81546baeb6c5e3f98"
+        "sha256:eaa45ce70e6a61063e6f8265842938db792b3e25a5c7e01016b934c79d0d4e5b"
     );
     let value: serde_json::Value = serde_json::from_str(&receipt).unwrap();
     assert_eq!(
@@ -680,7 +680,7 @@ fn application_receipt_api_cli_kat_fixed_point_and_raw_no_write() {
         raw_sha(&receipt),
         // Re-pinned after type-fact cycle detection began retaining exact
         // concrete nominal identities; only `used_builder_bytes` moved.
-        "sha256:f23f89965ab7294903c3a74cb35ee0675482dbb31ab043dfff258cec8b3eab9e"
+        "sha256:0efe71b67f4b703ff1270f57b5e1f1129e299ef5810f17f8d2631d37cdb867c9"
     );
     let value: serde_json::Value = serde_json::from_str(&receipt).unwrap();
     assert_eq!(

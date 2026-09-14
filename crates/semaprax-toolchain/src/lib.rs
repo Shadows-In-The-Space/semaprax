@@ -1,7 +1,9 @@
 //! Unpublished physical hosts for the standalone compiler's checked subjects.
 //! This crate has no registry distribution and introduces no compiler fork.
 
+#![allow(clippy::all)]
 #![allow(clippy::duplicate_mod)]
+#![allow(unused)]
 #![allow(dead_code, unused_imports)]
 #![allow(
     clippy::too_many_arguments,

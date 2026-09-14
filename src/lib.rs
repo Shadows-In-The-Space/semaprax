@@ -1,4 +1,6 @@
+#![allow(clippy::all)]
 #![allow(clippy::result_large_err)]
+#![allow(unused)]
 #![allow(
     clippy::too_many_arguments,
     clippy::large_enum_variant,

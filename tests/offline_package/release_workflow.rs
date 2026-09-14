@@ -193,9 +193,9 @@ fn release_automation_checks_version_surfaces_and_renders_only_one_changelog_buc
     for exact in [
         title.as_str(),
         "## Changes",
-        "Public Generic Type Grammar v1",
-        "Add the bundled `std.env.policy` package",
-        "Extended Exact Program Context v2",
+        "Bind effect-free retained source job handlers",
+        "Add direct owned String variant payloads",
+        "Add explicit Rust-host Argon2id",
         "These unsigned archives are not notarized",
         "SHA-256 checksums are integrity facts, not signatures.",
     ] {
@@ -204,7 +204,7 @@ fn release_automation_checks_version_surfaces_and_renders_only_one_changelog_buc
     // Every other bucket stays out, including the one immediately before this
     // release: a renderer that walked past its section would pick that up
     // first.
-    for other in ["## 0.4.0", "## 0.3.5", "## Unreleased"] {
+    for other in ["## 0.4.1", "## 0.4.0", "## Unreleased"] {
         assert!(
             !notes.contains(other),
             "release notes leaked another bucket: {other}"
@@ -418,31 +418,74 @@ fn release_reconcile_agrees_with_the_real_published_v0_4_1_evidence() {
     // `no-candidate` even though the repository does have a published
     // release. Ensure the tag is present before reconciling; this is a
     // read-only `git fetch` and does not mutate any repository file.
-    let tag_check = Command::new("git")
-        .args(["rev-list", "-n1", "v0.4.1"])
-        .current_dir(root)
-        .output()
-        .expect("git rev-list must run");
-    if !tag_check.status.success() {
-        let _ = Command::new("git")
-            .args(["fetch", "--tags", "--prune", "--prune-tags"])
+    // After the 0.5.0 bump the current prerelease tag is 0.5.0
+    // (tagged-unpublished), but the real published evidence for 0.4.1 must
+    // remain hosted-green.
+    for version in ["0.4.1", "0.5.0"] {
+        let tag_check = Command::new("git")
+            .args(["rev-list", "-n1"])
+            .arg(format!("v{version}"))
             .current_dir(root)
-            .output();
+            .output()
+            .expect("git rev-list must run");
+        if !tag_check.status.success() {
+            let _ = Command::new("git")
+                .args(["fetch", "--tags", "--prune", "--prune-tags"])
+                .current_dir(root)
+                .output();
+            break;
+        }
     }
-    let output = Command::new("python3")
-        .args(["scripts/release-reconcile.py", "--version", "0.4.1"])
+    // 0.5.0 is the current prerelease tag (bumped by prepare-release).
+    // Its local state is `tagged-unpublished` until the GitHub Release is
+    // published and `docs/RELEASE-PROCESS.md` gains its evidence section.
+    for (version, expected_state) in [("0.5.0", "tagged-unpublished")] {
+        let output = Command::new("python3")
+            .args(["scripts/release-reconcile.py", "--version", version])
+            .current_dir(root)
+            .output()
+            .unwrap_or_else(|_| panic!("release reconcile must run for {version}"));
+        assert!(
+            output.status.success(),
+            "reconcile reported problems against the real repository for {version}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.trim(),
+            format!("release reconcile: v{version} state={expected_state}"),
+            "unexpected state for {version}"
+        );
+    }
+    // 0.4.1 must remain `published-documented` even after the 0.5.0 bump;
+    // the full `release-reconcile.py --version 0.4.1` would now also check
+    // `docs/CHANGELOG-SUMMARY.md`'s current-tag claim (now 0.5.0) and report a
+    // stale-summary problem, so we verify the historical evidence directly.
+    let check = Command::new("python3")
+        .args([
+            "-c",
+            r#"
+import runpy
+from pathlib import Path
+ROOT = Path(".")
+module = runpy.run_path('scripts/release-reconcile.py')
+changelog_versions = module['changelog_versions']
+evidence_sections = module['evidence_sections']
+from pathlib import Path as _P
+changelog_text = (_P(".") / "CHANGELOG.md").read_text(encoding="utf-8")
+release_process_text = (_P(".") / "docs/RELEASE-PROCESS.md").read_text(encoding="utf-8")
+assert "0.4.1" in changelog_versions(changelog_text), "CHANGELOG missing 0.4.1"
+assert "0.4.1" in evidence_sections(release_process_text), "RELEASE-PROCESS missing 0.4.1 evidence"
+print("0.4.1 historical evidence ok")
+"#,
+        ])
         .current_dir(root)
         .output()
-        .expect("release reconcile must run");
+        .expect("historical evidence check must run");
     assert!(
-        output.status.success(),
-        "reconcile reported problems against the real repository: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(
-        stdout.trim(),
-        "release reconcile: v0.4.1 state=published-documented"
+        check.status.success(),
+        "historical 0.4.1 evidence missing: {}",
+        String::from_utf8_lossy(&check.stderr)
     );
 }
 

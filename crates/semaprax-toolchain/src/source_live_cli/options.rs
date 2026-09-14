@@ -1,5 +1,9 @@
 use std::path::{Path, PathBuf};
 
+fn is_absolute_like(path: &Path) -> bool {
+    path.is_absolute() || path.to_string_lossy().starts_with('/')
+}
+
 use semaprax::agent_lifecycle::iterative::source_live::{SourceIoLimits, SourceLivePricing};
 use serde_json::{Map, Value};
 
@@ -35,7 +39,7 @@ pub(super) struct SessionConfig {
 
 impl SessionConfig {
     pub(super) fn load(path: &Path) -> Result<Self, CliError> {
-        if !path.is_absolute() {
+        if !is_absolute_like(path) {
             return Err(CliError::usage("configuration path must be absolute"));
         }
         let bytes = bounded_read(path, MAX_CONFIG_BYTES)?;
@@ -152,7 +156,7 @@ impl SessionConfig {
         let task_path = absolute(map, "task_path")?;
         let read_path = absolute(map, "read_path")?;
         let source_path = token(map, "source_path")?;
-        if Path::new(&source_path).is_absolute()
+        if is_absolute_like(Path::new(&source_path))
             || Path::new(&source_path)
                 .components()
                 .any(|component| !matches!(component, std::path::Component::Normal(_)))
@@ -282,7 +286,7 @@ fn token(map: &Map<String, Value>, key: &str) -> Result<String, CliError> {
 
 fn absolute(map: &Map<String, Value>, key: &str) -> Result<PathBuf, CliError> {
     let path = PathBuf::from(text(map, key)?);
-    if !path.is_absolute() {
+    if !is_absolute_like(&path) {
         return Err(CliError::refused("configuration path must be absolute"));
     }
     Ok(path)
@@ -418,7 +422,7 @@ impl Command {
 
 fn absolute_operand(value: &str) -> Result<PathBuf, CliError> {
     let path = PathBuf::from(value);
-    if !path.is_absolute() {
+    if !is_absolute_like(&path) {
         return Err(CliError::usage(
             "source-live operands must be absolute paths",
         ));

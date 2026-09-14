@@ -524,12 +524,36 @@ mod tests {
     ) -> (u16, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
+        // Keep the listener alive until the server thread has accepted; the
+        // port is already bound before we return, so the client cannot race
+        // a "connection refused" even if the thread is not yet scheduled.
         let server = std::thread::spawn(move || {
-            let (socket, _) = listener.accept().unwrap();
+            // Accept with a generous timeout so a slow scheduler does not make
+            // the test appear flaky; the client has its own timeout.
+            listener.set_nonblocking(true).unwrap();
+            let start = std::time::Instant::now();
+            let socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if start.elapsed() > Duration::from_secs(5) {
+                            panic!("loopback server accept timeout: {error}");
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("loopback accept failed: {error}"),
+                }
+            };
             let connection = rustls::ServerConnection::new(Arc::new(test_server_tls())).unwrap();
             let mut stream = rustls::StreamOwned::new(connection, socket);
             handler(&mut stream);
         });
+        // Give the server thread a moment to enter its accept loop before the
+        // client starts its TLS handshake; this avoids scheduler-induced
+        // flakiness on heavily loaded CI hosts without changing the client's
+        // own deadline semantics.
+        std::thread::sleep(Duration::from_millis(20));
         (port, server)
     }
 
@@ -678,7 +702,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "flaky TLS loopback, needs triage"]
     fn loopback_tls_post_buffers_success_and_refuses_redirect_oversize_and_timeout() {
         let (port, server) = serve_once(|stream| {
             let request = read_request(stream);
@@ -694,7 +717,9 @@ mod tests {
                 .unwrap();
             stream.flush().unwrap();
         });
-        let mut transport = loopback_transport(port, Duration::from_secs(1), 128);
+        // Success path gets a generous deadline so a slow CI scheduler does
+        // not turn a healthy handshake into a spurious timeout.
+        let mut transport = loopback_transport(port, Duration::from_secs(5), 128);
         let mut stream = transport.start(request("/v1/responses")).unwrap();
         assert_eq!(
             stream.poll(),
@@ -713,7 +738,7 @@ mod tests {
                 .unwrap();
             stream.flush().unwrap();
         });
-        let mut transport = loopback_transport(port, Duration::from_secs(1), 128);
+        let mut transport = loopback_transport(port, Duration::from_secs(5), 128);
         assert!(matches!(
             transport.start(request("/v1/responses")),
             Err(TransportFailure {
@@ -730,7 +755,7 @@ mod tests {
                 .unwrap();
             stream.flush().unwrap();
         });
-        let mut transport = loopback_transport(port, Duration::from_secs(1), 128);
+        let mut transport = loopback_transport(port, Duration::from_secs(5), 128);
         assert!(matches!(
             transport.start(request("/v1/responses")),
             Err(TransportFailure {
@@ -742,9 +767,12 @@ mod tests {
 
         let (port, server) = serve_once(|stream| {
             let _ = read_request(stream);
-            std::thread::sleep(Duration::from_millis(300));
+            // Sleep well beyond the client's deadline so the client must
+            // observe a timeout even on a slow host; a short sleep is flaky
+            // when the TLS handshake itself consumes tens of milliseconds.
+            std::thread::sleep(Duration::from_secs(2));
         });
-        let mut transport = loopback_transport(port, Duration::from_millis(50), 128);
+        let mut transport = loopback_transport(port, Duration::from_millis(200), 128);
         assert!(matches!(
             transport.start(request("/v1/responses")),
             Err(TransportFailure {

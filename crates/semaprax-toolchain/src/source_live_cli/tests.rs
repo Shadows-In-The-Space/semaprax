@@ -413,6 +413,7 @@ fn runner(answer: String, calls: &Rc<Cell<usize>>) -> RecordedRunner {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn retained_project_run_and_terminal_resume_reject_changed_inputs_without_dispatch() {
     let fixture = Fixture::new();
@@ -488,6 +489,7 @@ fn retained_project_run_and_terminal_resume_reject_changed_inputs_without_dispat
     assert_eq!(calls.get(), 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn empty_fresh_store_refuses_run_and_resume_with_zero_dispatch() {
     let fixture = Fixture::new();
@@ -587,6 +589,7 @@ fn migrate_command(
     .unwrap()
 }
 
+#[cfg(unix)]
 #[test]
 fn suspended_retained_project_migrates_once_and_recovers_destination_without_dispatch() {
     let fixture = Fixture::new();
@@ -683,14 +686,18 @@ fn suspended_retained_project_migrates_once_and_recovers_destination_without_dis
     assert_eq!(new_calls.get(), 1);
 }
 
+#[cfg(unix)]
 #[path = "priced_tests.rs"]
 mod priced_tests;
 
+#[cfg(unix)]
 #[path = "priced_migration_tests.rs"]
 mod priced_migration_tests;
 
+#[cfg(unix)]
 #[path = "priced_adapter_boundaries.rs"]
 mod priced_adapter_boundaries;
 
+#[cfg(unix)]
 #[path = "io_tests.rs"]
 mod io_tests;

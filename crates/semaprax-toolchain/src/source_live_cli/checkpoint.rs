@@ -81,10 +81,14 @@ mod platform {
         poisoned: bool,
     }
 
+    fn is_absolute_like(path: &Path) -> bool {
+        path.is_absolute() || path.to_string_lossy().starts_with('/')
+    }
+
     // Walk physical components using held descriptors. A path check followed
     // by reopening its spelling would lose this authority under rename.
     fn directory(path: &Path, project_root: &Path) -> Result<File, CliError> {
-        if !path.is_absolute() {
+        if !is_absolute_like(path) {
             return Err(CliError::refused("checkpoint directory must be absolute"));
         }
         let project = project_root

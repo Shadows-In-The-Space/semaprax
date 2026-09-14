@@ -35,16 +35,25 @@ fn fixture_binary() -> &'static Path {
 }
 
 fn fresh_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "semaprax-doctor-confinement-{name}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::create_dir(&dir).unwrap();
-    dir
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    for _ in 0..32 {
+        let dir = std::env::temp_dir().join(format!(
+            "semaprax-doctor-confinement-{name}-{}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return dir,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("create temp dir {}: {error}", dir.display()),
+        }
+    }
+    panic!("create temp dir: too many collisions for {name}");
 }
 
 #[test]
@@ -197,7 +206,6 @@ fn confined_process_exceeding_deadline_settles_cancelled_not_completed_or_failed
 /// own exit, must be caught as `Uncertain`, never silently folded into
 /// `Completed`.
 #[test]
-#[ignore = "flaky Io on fresh_dir, needs triage"]
 fn a_descendant_left_behind_in_the_confined_group_settles_uncertain_not_completed() {
     let scratch = fresh_dir("leak-scratch");
     let confined =

@@ -116,17 +116,27 @@ impl ScratchProfile {
              (allow mach-lookup)\n\
              (allow file-write*\n  (subpath \"{escaped}\"))\n"
         );
-        let path = unique_temp_path("semaprax-doctor-confinement-profile", "sb")?;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|_| ConfinementError::Io)?;
-        file.write_all(profile.as_bytes())
-            .map_err(|_| ConfinementError::Io)?;
-        file.flush().map_err(|_| ConfinementError::Io)?;
-        Ok(Self { path })
+        // `create_new` guarantees we do not race with another test that
+        // allocated the same profile path. Retry on collision.
+        for _ in 0..32 {
+            let path = unique_temp_path("semaprax-doctor-confinement-profile", "sb")?;
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+            {
+                Ok(mut file) => {
+                    file.write_all(profile.as_bytes())
+                        .map_err(|_| ConfinementError::Io)?;
+                    file.flush().map_err(|_| ConfinementError::Io)?;
+                    return Ok(Self { path });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => return Err(ConfinementError::Io),
+            }
+        }
+        Err(ConfinementError::Io)
     }
 }
 
@@ -137,13 +147,20 @@ impl Drop for ScratchProfile {
 }
 
 fn unique_temp_path(prefix: &str, extension: &str) -> Result<PathBuf, ConfinementError> {
-    let nanos = std::time::SystemTime::now()
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let base_nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| ConfinementError::Io)?
         .as_nanos();
+    // Include a counter so concurrent callers cannot collide on the same
+    // pid+nanos when tests run in parallel; callers use `create_new` and
+    // must not allocate the same profile path twice.
     Ok(std::env::temp_dir().join(format!(
-        "{prefix}-{}-{nanos}.{extension}",
-        std::process::id()
+        "{prefix}-{}-{}-{}.{extension}",
+        std::process::id(),
+        base_nanos,
+        COUNTER.fetch_add(1, Ordering::Relaxed)
     )))
 }
 

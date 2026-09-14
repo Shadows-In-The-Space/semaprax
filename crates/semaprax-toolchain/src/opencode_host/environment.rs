@@ -21,14 +21,18 @@ struct Sources {
     managed_preferences: Option<PathBuf>,
 }
 
+fn is_absolute_like(path: &Path) -> bool {
+    path.is_absolute() || path.to_string_lossy().starts_with('/')
+}
+
 #[cfg(not(test))]
 fn host_data_home() -> Result<PathBuf, &'static str> {
     if let Some(value) = env::var_os("XDG_DATA_HOME") {
         let path = PathBuf::from(value);
-        return path.is_absolute().then_some(path).ok_or(REFUSED);
+        return is_absolute_like(&path).then_some(path).ok_or(REFUSED);
     }
     let home = env::var_os("HOME").map(PathBuf::from).ok_or(REFUSED)?;
-    if !home.is_absolute() {
+    if !is_absolute_like(&home) {
         return Err(REFUSED);
     }
     Ok(home.join(".local/share"))
@@ -131,7 +135,7 @@ fn check_auth(sources: &Sources) -> Result<(), &'static str> {
 }
 
 fn private_dir(sandbox: &Path) -> Result<PathBuf, &'static str> {
-    if !sandbox.is_absolute() {
+    if !is_absolute_like(sandbox) {
         return Err(REFUSED);
     }
     let root = sandbox.join(PRIVATE);

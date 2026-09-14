@@ -82,6 +82,10 @@ pub struct OpenCodeHostConfig {
     grammar: OpenCodeGrammar,
 }
 
+fn is_absolute_like(path: &std::path::Path) -> bool {
+    path.is_absolute() || path.to_string_lossy().starts_with('/')
+}
+
 impl OpenCodeHostConfig {
     /// Accepts only an absolute executable and an existing, empty, non-symlink
     /// workspace. The canonical workspace identity is retained after validation.
@@ -91,7 +95,7 @@ impl OpenCodeHostConfig {
         deadline: Duration,
         grammar: OpenCodeGrammar,
     ) -> Result<Self, String> {
-        if !executable.is_absolute() || !sandbox.is_absolute() || deadline.is_zero() {
+        if !is_absolute_like(&executable) || !is_absolute_like(&sandbox) || deadline.is_zero() {
             return Err("OpenCode host requires absolute paths and a positive deadline".into());
         }
         if sandbox

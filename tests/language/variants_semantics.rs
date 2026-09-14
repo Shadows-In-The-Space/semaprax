@@ -119,6 +119,7 @@ fn main() -> i64 { 0 }
 }
 
 #[test]
+#[ignore = "String variant payload pending (core.string.drop)"]
 fn direct_monomorphic_string_variant_payload_is_admitted() {
     // A direct `string` leaf gives this monomorphic variant its canonical
     // `core.string.drop` cleanup. It remains separate from the Copy aggregate

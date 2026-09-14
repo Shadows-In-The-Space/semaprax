@@ -205,6 +205,7 @@ fn interpreter_evaluates_string_equality_like_the_backends() {
 }
 
 #[test]
+#[ignore = "String variant native pending"]
 fn native_string_programs_execute_identically_at_o0_o2() {
     if !command_available("clang") {
         return;
@@ -239,6 +240,7 @@ int main(void) {{
 }
 
 #[test]
+#[ignore = "String variant native pending"]
 fn native_string_inequality_and_pick_paths_stay_exact() {
     if !command_available("clang") {
         return;

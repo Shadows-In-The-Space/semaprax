@@ -459,6 +459,15 @@ mod tests {
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| (*s).to_owned()).collect()
     }
+    fn banking_ledger_path() -> PathBuf {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let direct = manifest.join("examples/banking_ledger.spx");
+        if direct.exists() {
+            direct
+        } else {
+            manifest.join("../../examples/banking_ledger.spx")
+        }
+    }
     #[test]
     fn compact_cli_grammar_is_closed_and_profile_specific() {
         assert_eq!(
@@ -628,8 +637,7 @@ mod tests {
 
     #[test]
     fn task_context_cli_preserves_library_tokenizer_and_seed_diagnostics() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let path = root.join("examples/banking_ledger.spx");
+        let path = banking_ledger_path();
         let unknown_tokenizer = parse_inner(&args(&[
             "task-context",
             path.to_str().unwrap(),
@@ -664,8 +672,7 @@ mod tests {
 
     #[test]
     fn task_context_cli_emits_the_selected_lexical_accounting_metadata() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let path = root.join("examples/banking_ledger.spx");
+        let path = banking_ledger_path();
         let options = parse_inner(&args(&[
             "task-context",
             path.to_str().unwrap(),
@@ -694,8 +701,7 @@ mod tests {
 
     #[test]
     fn task_context_default_route_matches_the_legacy_byte_wire() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let path = root.join("examples/banking_ledger.spx");
+        let path = banking_ledger_path();
         let options =
             parse_inner(&args(&["task-context", path.to_str().unwrap(), "app.main"])).unwrap();
         let cli_wire = output(&options).unwrap();
@@ -720,8 +726,7 @@ mod tests {
 
     #[test]
     fn actual_graph_cli_output_is_independently_reconstructed() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let path = root.join("examples/banking_ledger.spx");
+        let path = banking_ledger_path();
         let options = parse_inner(&args(&["graph", path.to_str().unwrap()])).unwrap();
         let encoded = output(&options).unwrap();
         let decoded = compact::decode_text(std::str::from_utf8(&encoded).unwrap()).unwrap();

@@ -84,9 +84,23 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         named_cases, 8,
         "catalog-normalizer application case inventory drifted"
     );
+    #[cfg(windows)]
+    let scratch = std::env::temp_dir().join(format!(
+        "semaprax-catalog-normalizer-batch-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    #[cfg(not(windows))]
     let scratch = std::env::temp_dir().canonicalize().unwrap().join(format!(
-        "semaprax-catalog-normalizer-batch-{}",
-        std::process::id()
+        "semaprax-catalog-normalizer-batch-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     let _ = std::fs::remove_dir_all(&scratch);
     std::fs::create_dir_all(&scratch).unwrap();

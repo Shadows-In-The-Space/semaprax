@@ -439,7 +439,8 @@ fn release_reconcile_agrees_with_the_real_published_v0_4_1_evidence() {
     // 0.5.0 is the current prerelease tag (bumped by prepare-release).
     // Its local state is `tagged-unpublished` until the GitHub Release is
     // published and `docs/RELEASE-PROCESS.md` gains its evidence section.
-    for (version, expected_state) in [("0.5.0", "tagged-unpublished")] {
+    {
+        let (version, expected_state) = ("0.5.0", "tagged-unpublished");
         let output = Command::new("python3")
             .args(["scripts/release-reconcile.py", "--version", version])
             .current_dir(root)

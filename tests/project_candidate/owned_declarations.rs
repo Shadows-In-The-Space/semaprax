@@ -58,8 +58,13 @@ tests = ["decl.tests"]
         };
         fixture.write("src/core.spx", core);
         let expected = if text { "\"text\"" } else { "0usize" };
-        fixture.write("src/app.spx", &format!("module decl.app;\nuse function @id(\"decl.evaluate\") from decl.core as evaluate;\nuse function @id(\"decl.public\") from decl.core as public_value;\n@id(\"decl.main\") fn main()->i64 {{if evaluate()=={expected} {{public_value(42)}}else{{0}}}}\n"));
-        fixture.write("src/tests.spx", &format!("module decl.tests;\nuse function @id(\"decl.evaluate\") from decl.core as evaluate;\n@id(\"decl.test\") fn main()->i64 {{if evaluate()=={expected} {{0}}else{{1}}}}\n"));
+        if text {
+            fixture.write("src/app.spx", "module decl.app;\nuse function @id(\"decl.evaluate\") from decl.core as evaluate;\nuse function @id(\"decl.public\") from decl.core as public_value;\n@id(\"decl.main\") fn main()->i64 {if string_len(evaluate())==4 {public_value(42)}else{0}}\n");
+            fixture.write("src/tests.spx", "module decl.tests;\nuse function @id(\"decl.evaluate\") from decl.core as evaluate;\n@id(\"decl.test\") fn main()->i64 {if string_len(evaluate())==4 {0}else{1}}\n");
+        } else {
+            fixture.write("src/app.spx", &format!("module decl.app;\nuse function @id(\"decl.evaluate\") from decl.core as evaluate;\nuse function @id(\"decl.public\") from decl.core as public_value;\n@id(\"decl.main\") fn main()->i64 {{if evaluate()=={expected} {{public_value(42)}}else{{0}}}}\n"));
+            fixture.write("src/tests.spx", &format!("module decl.tests;\nuse function @id(\"decl.evaluate\") from decl.core as evaluate;\n@id(\"decl.test\") fn main()->i64 {{if evaluate()=={expected} {{0}}else{{1}}}}\n"));
+        }
         fixture
     }
     fn write(&self, path: &str, source: &str) {

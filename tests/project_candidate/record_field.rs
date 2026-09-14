@@ -432,9 +432,9 @@ fn private_copy_record_constructors_gain_fresh_string_and_bytes_owners() {
             .find(|row| row["id"] == "field.seed.consume")
             .unwrap();
         // A fresh `Bytes` owner is a cleanup-plan resource leaf. An owned
-        // `String` settles through the separate native String settlement lane
-        // and contributes no resource cleanup slot, so its inventory is
-        // unchanged and still empty.
+        // `String` now also materializes through the aggregate String lane
+        // and contributes a resource cleanup slot (previously it settled
+        // through a separate native lane with no slot).
         let slots = changed["candidate"]["cleanup_inventory"]["slots"]
             .as_array()
             .unwrap();
@@ -442,8 +442,8 @@ fn private_copy_record_constructors_gain_fresh_string_and_bytes_owners() {
             assert_eq!(changed["comparison"]["cleanup_inventory_equal"], false);
             assert!(!slots.is_empty());
         } else {
-            assert_eq!(changed["comparison"]["cleanup_inventory_equal"], true);
-            assert!(slots.is_empty());
+            assert_eq!(changed["comparison"]["cleanup_inventory_equal"], false);
+            assert!(!slots.is_empty());
         }
         let replay = ProjectCandidate::replay(
             Arc::clone(root.base_revision()),

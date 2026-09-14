@@ -1,4 +1,5 @@
 //! Checked atomic publication through the authenticated Project v19 route.
+#![allow(unused_imports, dead_code)]
 use super::{filesystem, project};
 use semaprax::filesystem_provider::{CheckedAtomicWriteFault, FixtureFileProvider};
 use semaprax::interpreter::CommandEvaluationOutcome;

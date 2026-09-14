@@ -1,4 +1,5 @@
 //! Small raw-operation fixtures isolate ABI behavior from the std.fs composition.
+#![allow(unused_imports, dead_code)]
 use super::{filesystem_v3::C_PROVIDER, project, temporary};
 use semaprax::filesystem_provider::{CheckedAtomicWriteFault, FixtureFileProvider};
 use semaprax::interpreter::CommandEvaluationOutcome;

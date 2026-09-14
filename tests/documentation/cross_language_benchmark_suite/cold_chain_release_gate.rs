@@ -76,6 +76,7 @@ fn run_all_ports(directory: &Path, tasks: &Path, id: &str) -> (std::process::Out
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn cold_chain_release_gate_v1_correct_candidates_pass_public_and_hidden_in_all_ports() {
     let directory = scratch("cold-chain-release-correct");
     copy_task(&directory);
@@ -97,6 +98,7 @@ fn cold_chain_release_gate_v1_correct_candidates_pass_public_and_hidden_in_all_p
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn disjunctive_cold_chain_candidate_passes_public_but_fails_hidden_in_all_ports() {
     let directory = scratch("cold-chain-release-disjunction");
     copy_task(&directory);

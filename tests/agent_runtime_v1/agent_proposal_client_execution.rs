@@ -452,7 +452,11 @@ fn generated_proposal_clients_compile_execute_and_round_trip() {
     // On plain `cargo test` lanes (e.g. Rust macos-latest/windows-latest) the
     // TypeScript toolchain is not provisioned; building the clients would
     // panic on `could not run tsc`. Skip gracefully when not provisioned.
-    let has_tsc = command_available("tsc")
+    let has_tsc = Command::new("tsc")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
         || std::env::var_os("SEMAPRAX_TEST_TSC_JS")
             .map(|path| Path::new(&path).is_file())
             .unwrap_or(false)

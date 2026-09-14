@@ -463,6 +463,7 @@ fn every_committed_task_declares_a_split_and_the_held_out_task_is_not_developmen
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn bounded_counter_repair_v1_passes_under_real_rust_and_typescript_toolchains_with_leak_check_ok() {
     // Uses the committed suite's real root, tasks, and adapters (no mocks):
     // this proves the actual committed held-out task builds and passes its
@@ -507,6 +508,7 @@ fn bounded_counter_repair_v1_passes_under_real_rust_and_typescript_toolchains_wi
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn a_naive_end_of_sequence_clamp_repair_passes_public_but_fails_the_held_out_hidden_vectors() {
     // The strongest available proof that this held-out task's hidden
     // vectors do their job: a classic, plausible *wrong* repair (clamp the
@@ -633,6 +635,7 @@ mod hidden_tests {
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn structured_input_hidden_oracle_rejects_version_first_candidate_and_visible_test_tampering() {
     // Mutate the committed public candidate only. The hidden overlay must keep
     // importing that copied candidate, rather than carrying a reference
@@ -708,6 +711,7 @@ pub fn validate(kind: i64, version: i64, payload_len: i64) -> i64 {
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn module_import_invoice_wrong_candidate_passes_public_but_fails_hidden_on_all_three_ports() {
     let directory = scratch("module-import-wrong-candidate");
     let source = root().join(SUITE).join("tasks/module-import-refactor-v1");

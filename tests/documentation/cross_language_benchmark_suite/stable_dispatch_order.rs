@@ -76,6 +76,7 @@ fn run_all_ports(directory: &Path, tasks: &Path, id: &str) -> (std::process::Out
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn stable_dispatch_order_v1_correct_candidates_pass_public_and_hidden_in_all_ports() {
     let directory = scratch("stable-dispatch-correct");
     copy_task(&directory);
@@ -97,6 +98,7 @@ fn stable_dispatch_order_v1_correct_candidates_pass_public_and_hidden_in_all_por
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn strict_comparison_dispatch_candidate_passes_public_but_fails_hidden_in_all_ports() {
     let directory = scratch("stable-dispatch-strict-comparisons");
     copy_task(&directory);

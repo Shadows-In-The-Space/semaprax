@@ -86,6 +86,7 @@ fn assert_ok(report: &Value, id: &str) {
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn owned_byte_sentinel_balance_correct_candidates_pass_public_and_hidden_in_all_ports() {
     let directory = scratch("owned-byte-sentinel-correct");
     copy_task(&directory);
@@ -100,6 +101,7 @@ fn owned_byte_sentinel_balance_correct_candidates_pass_public_and_hidden_in_all_
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn forgetting_zero_mapping_passes_public_but_fails_hidden_in_all_ports() {
     let directory = scratch("owned-byte-sentinel-wrong-candidate");
     copy_task(&directory);
@@ -147,6 +149,7 @@ fn forgetting_zero_mapping_passes_public_but_fails_hidden_in_all_ports() {
 }
 
 #[test]
+#[cfg_attr(target_os = "windows", ignore = "requires Unix toolchain")]
 fn deleting_visible_assertions_does_not_change_hidden_owned_byte_rejection() {
     let directory = scratch("owned-byte-sentinel-visible-tamper");
     copy_task(&directory);

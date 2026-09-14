@@ -449,27 +449,6 @@ fn generated_proposal_clients_compile_execute_and_round_trip() {
         eprintln!("generated Proposal client execution requires an explicit provisioned lane");
         return;
     }
-    // On plain `cargo test` lanes (e.g. Rust macos-latest/windows-latest) the
-    // TypeScript toolchain is not provisioned; building the clients would
-    // panic on `could not run tsc`. Skip gracefully when not provisioned.
-    let has_tsc = Command::new("tsc")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-        || std::env::var_os("SEMAPRAX_TEST_TSC_JS")
-            .map(|path| Path::new(&path).is_file())
-            .unwrap_or(false)
-        || Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("platform-tests/wasm-scalar-browser-v1/node_modules/typescript/bin/tsc")
-            .is_file()
-        || std::env::var_os("SEMAPRAX_TEST_TSC")
-            .map(|path| Path::new(&path).is_file())
-            .unwrap_or(false);
-    if !has_tsc {
-        eprintln!("generated Proposal client execution requires provisioned TypeScript (tsc)");
-        return;
-    }
 
     let definition = definition(&profile());
     let record = compile_agent_proposal_schema(RECORD_MODULE, MODULE_PATH, &definition).unwrap();

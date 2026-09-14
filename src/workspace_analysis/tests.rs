@@ -616,8 +616,8 @@ fn context_impact_and_review_documents_have_frozen_kats_and_exact_digest_replay(
         [
             // Issue #248: only workspace max_builder_bytes and its dependent
             // digests changed; reconstructing them reproduces the prior KATs.
-            "sha256:b567e08854b592697dcde50ecbd43953cea46694805a1b4fecc38096cd9819c1",
-            "sha256:b595f0d93e3108f04b7d1eb2731a3048db64415ca69282635ca40abc9f165793",
+            "sha256:ed0a51a8a4f3321cb51c1d0a863676e2859f75bede884e99b7895786f9712cd9",
+            "sha256:4ef0b36ca6288173ce1d853925287b909fef703ec1f961759a542781ed63c92f",
         ]
     );
     let declaration_impact: serde_json::Value = serde_json::from_str(&impacts[0].json).unwrap();

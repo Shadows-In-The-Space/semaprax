@@ -438,13 +438,8 @@ fn private_copy_record_constructors_gain_fresh_string_and_bytes_owners() {
         let slots = changed["candidate"]["cleanup_inventory"]["slots"]
             .as_array()
             .unwrap();
-        if field_type == "Bytes" {
-            assert_eq!(changed["comparison"]["cleanup_inventory_equal"], false);
-            assert!(!slots.is_empty());
-        } else {
-            assert_eq!(changed["comparison"]["cleanup_inventory_equal"], false);
-            assert!(!slots.is_empty());
-        }
+        assert_eq!(changed["comparison"]["cleanup_inventory_equal"], false);
+        assert!(!slots.is_empty());
         let replay = ProjectCandidate::replay(
             Arc::clone(root.base_revision()),
             root.base_revision().project_revision(),

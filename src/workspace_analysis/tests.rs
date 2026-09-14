@@ -758,7 +758,7 @@ fn context_impact_and_review_documents_have_frozen_kats_and_exact_digest_replay(
         document_sha(&review.json),
         // Issue #248: only workspace max_builder_bytes and its dependent
         // digests changed; reconstructing them reproduces the prior KATs.
-        "sha256:7b2e5047397e6167c6e2622c725d771b8047b83bab82046c4ed262ef11f32769"
+        "sha256:a2a1fd79eff6aac84e0e03bf895d2e2e0b7392a3bf2b6f94c282baae42c5e5e2"
     );
     let direct_context = analysis
         .render_context(

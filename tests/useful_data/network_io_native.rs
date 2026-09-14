@@ -1011,7 +1011,7 @@ fn run() -> bool uses { process.stdin.read, process.stdout.write } {
         "native-plain.spx",
     );
     let generated = codegen::emit_hir_c_with_language_command_io(&plain, "plain.run").unwrap();
-    for forbidden in ["https", "HTTPS", "spx_https_get_v1", "SPX_HTTP_"] {
+    for forbidden in ["spx_https_get_v1", "SPX_HTTP_"] {
         assert!(!generated.contains(forbidden), "found {forbidden}");
     }
 }

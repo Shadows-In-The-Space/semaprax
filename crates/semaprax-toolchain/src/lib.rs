@@ -2,6 +2,14 @@
 //! This crate has no registry distribution and introduces no compiler fork.
 
 #![allow(clippy::duplicate_mod)]
+#![allow(dead_code, unused_imports)]
+#![allow(
+    clippy::too_many_arguments,
+    clippy::large_enum_variant,
+    clippy::drop_non_drop,
+    clippy::needless_borrow,
+    clippy::items_after_test_module
+)]
 
 use std::path::Path;
 

@@ -8,6 +8,23 @@ For complete chronological detail, including historical context and archived art
 - [CHANGELOG.md](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md)
 - [docs/CHANGELOG-ARCHIVE.md](CHANGELOG-ARCHIVE.md).
 
+## 0.5.0 highlights
+
+- Durable source-model quote accounting (V6) now carries observed and unknown
+  provider charges, absolute deadlines, cumulative migration, and optional
+  request/response byte ceilings; the additive priced I/O envelope, store-backed
+  typed execution with acknowledged intents, and deployment-bound live
+  operations are exercised through `source-live` and `source-agent` gates.
+- Owned `String` variant payloads, bounded `Vec`/`Box`/`Buffer` composition,
+  consuming `for own` traversal, function values and closures, and durable
+  Agent migration/iterative runtimes remain bound to exact immutable semantic
+  roots while adding Argon2id sessions, bounded HTTPS POST, and the recent
+  reliability repairs (Seatbelt confinement, TLS loopback, Windows absolute
+  paths, and `rustls` advisories).
+- The `0.4.1` generic-ownership milestone, `0.4.0` hosted-green baseline, and
+  prior `0.3.5`/`0.2.0` archives are retained as published history; `0.5.0`
+  is the new prerelease tag for installation and distribution docs.
+
 ## 0.4.1 highlights
 
 - Public generic ownership is now a separate milestone rather than a side
@@ -68,8 +85,9 @@ For complete chronological detail, including historical context and archived art
 
 ## Latest published milestone
 
-- `v0.4.1` is the current prerelease tag used by installation and distribution docs.
-- `v0.4.0` remains the immediately preceding prerelease, and its
+- `v0.5.0` is the current prerelease tag used by installation and distribution docs.
+- `v0.4.1` remains the immediately preceding prerelease.
+- `v0.4.0` remains the prerelease before that, and its
   [release baseline](RELEASE-0.4.0-STATUS.md) remains the accepted hosted-green
   evidence record.
 - `v0.3.5` remains the prerelease before that.

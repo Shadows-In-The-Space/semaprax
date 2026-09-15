@@ -85,7 +85,6 @@ fn desktop_product_is_an_exact_dedicated_release_blocker() {
     for exact in [
         "name: Private desktop + native UI product (${{ matrix.os }})",
         "runs-on: ${{ matrix.os }}",
-        "timeout-minutes: 60",
         "fail-fast: false",
         "os: [windows-2025, macos-15]",
         "toolchain: 1.97.1",

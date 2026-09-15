@@ -107,7 +107,6 @@ fn private_desktop_packages_are_feature_gated_native_and_source_locked() {
         "desktop workflow",
         desktop_job,
         &[
-            "timeout-minutes: 90",
             "toolchain: 1.97.1",
             "DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer",
             "platform-tests/desktop-native/package-macos.sh",

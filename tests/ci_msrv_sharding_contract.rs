@@ -129,7 +129,6 @@ fn msrv_shards_select_every_actual_workspace_target_exactly_once() {
 }
 
 #[test]
-#[ignore = "sharding contract now 5 shards; router failure test needs 4-target mock update"]
 fn msrv_router_fails_closed_and_propagates_the_first_cargo_failure() {
     let output = Command::new("python3")
         .args(["-B", "-c", ROUTER_FAILURES])
@@ -266,7 +265,7 @@ metadata = {'workspace_members': ['one', 'two'], 'packages': [
     {'id': 'external', 'name': 'external', 'targets': [target('example', 'not_in_workspace')]},
 ]}
 plan = router['plan'](metadata)
-assert [len(shard['targets']) for shard in plan['shards']] == [4, 1, 1, 1, 1]
+assert [len(shard['targets']) for shard in plan['shards']] == [4, 2, 1, 1, 1]
 assert {'package': 'two', 'kind': 'example', 'name': 'embedding-api'} in plan['shards'][0]['targets']
 assert '--examples' in plan['shards'][0]['command']
 assert router['plan'](dict(metadata, packages=list(reversed(metadata['packages'])))) == plan

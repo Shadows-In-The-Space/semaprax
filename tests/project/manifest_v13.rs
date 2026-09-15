@@ -14,7 +14,10 @@ const MANIFEST: &str = include_str!("../../examples/https-project/semaprax.toml"
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 fn temp_https_project_root() -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
+    let base = std::env::temp_dir()
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let root = base.join(format!(
         "spx-https-project-{}-{:?}-{}-{}",
         std::process::id(),
         std::thread::current().id(),
@@ -165,17 +168,22 @@ fn project_v13_builds_a_replayable_fixture_only_npm_web_carrier() {
 fn project_v13_builds_the_libcurl_native_https_executable() {
     let root = temp_https_project_root();
     let suffix = std::env::consts::EXE_SUFFIX;
-    let output = NativeOutput(std::env::temp_dir().join(format!(
-        "semaprax-https-project-native-{}-{:?}-{}-{}{}",
-        std::process::id(),
-        std::thread::current().id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        SERIAL.fetch_add(1, Ordering::Relaxed),
-        suffix
-    )));
+    let output = NativeOutput(
+        std::env::temp_dir()
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join(format!(
+                "semaprax-https-project-native-{}-{:?}-{}-{}{}",
+                std::process::id(),
+                std::thread::current().id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                SERIAL.fetch_add(1, Ordering::Relaxed),
+                suffix
+            )),
+    );
     with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         snapshot.build_native(&output.0)
     })
@@ -188,16 +196,21 @@ fn project_v13_builds_the_libcurl_native_https_executable() {
 #[test]
 fn generated_https_web_package_runs_fixture_v3_under_node() {
     let root = temp_https_project_root();
-    let output = Output(std::env::temp_dir().join(format!(
-        "semaprax-https-project-npm-{}-{:?}-{}-{}",
-        std::process::id(),
-        std::thread::current().id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        SERIAL.fetch_add(1, Ordering::Relaxed)
-    )));
+    let output = Output(
+        std::env::temp_dir()
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join(format!(
+                "semaprax-https-project-npm-{}-{:?}-{}-{}",
+                std::process::id(),
+                std::thread::current().id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                SERIAL.fetch_add(1, Ordering::Relaxed)
+            )),
+    );
     with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         snapshot.build_npm(&output.0)
     })
@@ -228,16 +241,21 @@ fn generated_https_web_package_runs_fixture_v3_under_node() {
 #[test]
 fn generated_https_web_package_rejects_untrusted_fixture_and_provider_results() {
     let root = temp_https_project_root();
-    let output = Output(std::env::temp_dir().join(format!(
-        "semaprax-https-project-hostile-{}-{:?}-{}-{}",
-        std::process::id(),
-        std::thread::current().id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        SERIAL.fetch_add(1, Ordering::Relaxed)
-    )));
+    let output = Output(
+        std::env::temp_dir()
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join(format!(
+                "semaprax-https-project-hostile-{}-{:?}-{}-{}",
+                std::process::id(),
+                std::thread::current().id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                SERIAL.fetch_add(1, Ordering::Relaxed)
+            )),
+    );
     with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         snapshot.build_npm(&output.0)
     })
@@ -261,16 +279,21 @@ fn generated_https_web_package_rejects_untrusted_fixture_and_provider_results() 
 #[test]
 fn project_v13_npm_publication_fails_closed_without_windows_authority() {
     let root = temp_https_project_root();
-    let output = Output(std::env::temp_dir().join(format!(
-        "semaprax-https-project-npm-rejected-{}-{:?}-{}-{}",
-        std::process::id(),
-        std::thread::current().id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        SERIAL.fetch_add(1, Ordering::Relaxed)
-    )));
+    let output = Output(
+        std::env::temp_dir()
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::temp_dir())
+            .join(format!(
+                "semaprax-https-project-npm-rejected-{}-{:?}-{}-{}",
+                std::process::id(),
+                std::thread::current().id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                SERIAL.fetch_add(1, Ordering::Relaxed)
+            )),
+    );
     let errors = with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         snapshot.build_npm(&output.0)
     })

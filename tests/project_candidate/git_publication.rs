@@ -29,8 +29,13 @@ impl Fixture {
     }
     fn with_format(corrupt_base: bool, format: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
-            "spx-git-publication-{}-{}",
+            "spx-git-publication-{}-{:?}-{}-{}",
             std::process::id(),
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
             SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(root.join("src")).unwrap();

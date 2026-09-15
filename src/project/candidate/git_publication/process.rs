@@ -664,8 +664,13 @@ mod unix {
         impl Repository {
             fn new() -> Self {
                 let path = std::env::temp_dir().join(format!(
-                    "spx-git-lease-{}-{}",
+                    "spx-git-lease-{}-{:?}-{}-{}",
                     std::process::id(),
+                    std::thread::current().id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos(),
                     SERIAL.fetch_add(1, Ordering::Relaxed)
                 ));
                 std::fs::create_dir(&path).unwrap();

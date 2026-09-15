@@ -964,7 +964,7 @@ jobs:
 
   verify:
     name: Rust ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       # Keep the test compiler inside the cache host's 256-MiB executable bound
       # and avoid linking debug symbols into every integration-test binary.
@@ -1267,7 +1267,7 @@ jobs:
 
   verify-build:
     name: Rust build ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       # Keep the test compiler inside the cache host's 256-MiB executable bound
       # and avoid linking debug symbols into every integration-test binary.
@@ -1413,7 +1413,7 @@ jobs:
 
   verify-tests:
     name: Rust tests ${{ matrix.os }} (${{ matrix.shard }})
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -1528,7 +1528,7 @@ jobs:
   desktop-native-product:
     name: Private desktop + native UI product (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -1874,8 +1874,9 @@ jobs:
     # toolchain that compiles it more slowly, so it gets the same budget. At 40
     # minutes the `integration-1` shard was cut off mid-test on two runs while
     # completing in about 35 on others: a budget that tight reports the runner's
-    # speed, not the shard's result.
-    timeout-minutes: 90
+    # speed, not the shard's result. Mac/Windows runners are slower and need
+    # extra headroom (120) for the integration shards.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:

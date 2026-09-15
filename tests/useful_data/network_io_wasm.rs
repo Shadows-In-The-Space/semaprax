@@ -126,13 +126,17 @@ fn run_facade(
     fixture: Option<&str>,
     hostile: Option<&str>,
 ) -> (bool, Vec<String>) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
-        "spx-network-io-wasm-{}-{}",
+        "spx-network-io-wasm-{}-{:?}-{}-{}",
         std::process::id(),
+        std::thread::current().id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("app.wasm"), bytes).unwrap();

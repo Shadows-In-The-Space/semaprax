@@ -140,7 +140,7 @@ fn msrv_router_fails_closed_and_propagates_the_first_cargo_failure() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stdout, b"MSRV integration-0: 1 workspace targets\n");
+    assert_eq!(output.stdout, b"MSRV integration-0: 2 workspace targets\n");
 }
 
 #[test]

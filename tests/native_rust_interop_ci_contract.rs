@@ -1034,7 +1034,7 @@ fn hosted_workflow_names_all_private_interop_evidence_boundaries() {
         .nth(1)
         .and_then(|tail| tail.split("    strategy:\n").next())
         .expect("Rust matrix job header");
-    assert!(verify_header.contains("timeout-minutes: 60"));
+    assert!(verify_header.contains("timeout-minutes: 90"));
     for required in [
         "Require private Native Rust Interop language, HIR, Graph, and Wasm preservation evidence",
         "cargo test --locked -p semaprax --test native_rust_interop_v1 -- --nocapture",

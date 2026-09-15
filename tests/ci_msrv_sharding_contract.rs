@@ -154,7 +154,8 @@ fn msrv_matrix_preserves_checks_timeout_complete_results_and_release_dependency(
         // while finishing in about 35 on others, so the number reported the
         // runner's speed rather than the shard's result. The coverage
         // guarantees are the `forbidden` list below, not this budget.
-        "timeout-minutes: 90",
+        // Raised to 120 for macOS/Windows integration (verify-tests) headroom.
+        "timeout-minutes: 120",
         "fail-fast: false",
         "shard: [unit, integration-0, integration-1, integration-2]",
         "toolchain: \"1.88\"",
@@ -205,7 +206,7 @@ fn current_rust_matrix_reuses_the_exact_inventory_in_parallel_platform_shards() 
         .0;
     for required in [
         "name: Rust tests ${{ matrix.os }} (${{ matrix.shard }})",
-        "timeout-minutes: 90",
+        "timeout-minutes: 120",
         "fail-fast: false",
         "os: [ubuntu-latest, macos-latest, windows-latest]",
         "shard: [unit, integration-0, integration-1, integration-2]",

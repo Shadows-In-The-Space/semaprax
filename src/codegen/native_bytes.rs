@@ -666,18 +666,26 @@ impl NativeBytesPlan {
     ) -> Result<String, Diagnostic> {
         let source_storage = crate::cleanup_plan::StorageId::Temporary(arm_value_id.clone());
         let dest_storage = crate::cleanup_plan::StorageId::Temporary(match_id.clone());
-        let mut matches = self.transitions.get(match_id).into_iter().flatten().filter_map(
-            |transition| match transition {
-                CleanupTransition::Transfer { source, destination, .. }
-                | CleanupTransition::Renew { source, destination, .. }
-                    if source.storage == source_storage
-                        && destination.storage == dest_storage =>
-                {
+        let mut matches = self
+            .transitions
+            .get(match_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|transition| match transition {
+                CleanupTransition::Transfer {
+                    source,
+                    destination,
+                    ..
+                }
+                | CleanupTransition::Renew {
+                    source,
+                    destination,
+                    ..
+                } if source.storage == source_storage && destination.storage == dest_storage => {
                     Some((source, destination))
                 }
                 _ => None,
-            },
-        );
+            });
         let (source, destination) = matches.next().ok_or_else(|| {
             error(format!(
                 "scalar match arm `{arm_value_id}` has no canonical transfer to match `{match_id}`"

@@ -119,11 +119,11 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 let value = self.emit_expr(&arm.value)?;
                 self.require_type(&value.ty, &expr.ty, "match arm result")?;
                 if is_direct_plan_owned(self.program, &expr.ty) {
-                    let transitions = self
+                    let transfer = self
                         .bytes_plan
                         .expect("checked above")
-                        .apply_at(&arm.value.id)?;
-                    for line in transitions.lines() {
+                        .transfer_scalar_match_arm(&expr.id, &arm.value.id)?;
+                    for line in transfer.lines() {
                         self.line(line);
                     }
                 } else {
@@ -139,11 +139,11 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 let value = self.emit_expr(&arm.value)?;
                 self.require_type(&value.ty, &expr.ty, "match arm result")?;
                 if is_direct_plan_owned(self.program, &expr.ty) {
-                    let transitions = self
+                    let transfer = self
                         .bytes_plan
                         .expect("checked above")
-                        .apply_at(&arm.value.id)?;
-                    for line in transitions.lines() {
+                        .transfer_scalar_match_arm(&expr.id, &arm.value.id)?;
+                    for line in transfer.lines() {
                         self.line(line);
                     }
                 } else {

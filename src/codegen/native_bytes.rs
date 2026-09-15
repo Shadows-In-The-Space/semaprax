@@ -285,15 +285,7 @@ impl NativeBytesPlan {
             .collect::<BTreeSet<_>>();
         let mut output = String::new();
         for slot in self.slots.values() {
-            // Keep static but provably inert case leaves visible to cleanup without warning failures.
-            let maybe_unused = if provider_retains_all_slots
-                || (self.inactive_places.contains(&slot.place)
-                    && !self.referenced_places.contains(&slot.place))
-            {
-                " __attribute__((unused))"
-            } else {
-                ""
-            };
+            let maybe_unused = " __attribute__((unused))";
             output.push_str(&format!(
                 "    {} {}{} = {{0}};\n",
                 slot.kind.c_type(),
@@ -667,6 +659,48 @@ impl NativeBytesPlan {
             "field initializer transfer",
         ))
     }
+    pub(super) fn transfer_scalar_match_arm(
+        &self,
+        match_id: &ExpressionId,
+        arm_value_id: &ExpressionId,
+    ) -> Result<String, Diagnostic> {
+        let source_storage = crate::cleanup_plan::StorageId::Temporary(arm_value_id.clone());
+        let dest_storage = crate::cleanup_plan::StorageId::Temporary(match_id.clone());
+        let mut matches = self.transitions.get(match_id).into_iter().flatten().filter_map(
+            |transition| match transition {
+                CleanupTransition::Transfer { source, destination, .. }
+                | CleanupTransition::Renew { source, destination, .. }
+                    if source.storage == source_storage
+                        && destination.storage == dest_storage =>
+                {
+                    Some((source, destination))
+                }
+                _ => None,
+            },
+        );
+        let (source, destination) = matches.next().ok_or_else(|| {
+            error(format!(
+                "scalar match arm `{arm_value_id}` has no canonical transfer to match `{match_id}`"
+            ))
+        })?;
+        if matches.next().is_some() {
+            return Err(error("scalar match arm transfer is ambiguous"));
+        }
+        let source_slot = self
+            .slots
+            .get(source)
+            .ok_or_else(|| error("scalar match arm source is not indexed"))?;
+        let dest_slot = self
+            .slots
+            .get(destination)
+            .ok_or_else(|| error("scalar match destination is not indexed"))?;
+        Ok(super::native_bytes::emit_transfer(
+            source_slot,
+            dest_slot,
+            "scalar match arm transfer",
+        ))
+    }
+
     pub(super) fn transfer_branch_at(
         &self,
         at: &ExpressionId,

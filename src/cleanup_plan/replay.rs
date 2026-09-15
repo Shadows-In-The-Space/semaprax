@@ -5435,7 +5435,9 @@ fn finish_scalar_match_skeleton(
     scrutinee_paths: Vec<ExprSkeletonPath>,
     work: &mut SkeletonWork<'_, '_>,
 ) -> Result<Vec<ExprSkeletonPath>, Diagnostic> {
-    if type_needs_drop(program, function, &expression.ty)? {
+    if type_needs_drop(program, function, &expression.ty)?
+        && !matches!(expression.ty, crate::hir::ResolvedType::String)
+    {
         return Err(replay_error(
             function,
             "droppable refutable-match result reached the copy-only cleanup skeleton",

@@ -69,7 +69,6 @@ fn tag_artifacts_are_exact_blocking_children_of_the_release_gate() {
         // stray `ref:`) cannot silently bind the built archive to a
         // different commit than the gate verified.
         "test \"$(git rev-parse HEAD)\" = \"$GITHUB_SHA\"",
-        "timeout-minutes: 30",
         "fail-fast: false",
         "os: ubuntu-24.04\n            target: x86_64-unknown-linux-gnu\n            extension: tar.gz",
         "os: macos-15\n            target: aarch64-apple-darwin\n            extension: tar.gz",

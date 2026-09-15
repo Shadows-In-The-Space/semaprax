@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-SHARDS = ("unit", "integration-0", "integration-1", "integration-2")
+SHARDS = ("unit", "integration-0", "integration-1", "integration-2", "integration-3")
 TEST = ["cargo", "test", "--locked", "--workspace", "--all-features"]
 
 

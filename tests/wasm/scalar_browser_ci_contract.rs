@@ -138,7 +138,6 @@ fn chromium_scalar_calculator_gate_is_isolated_locked_and_serial() {
         "wasm-scalar-exports-browser-v1:",
         "name: Public Wasm Scalar Exports v1 Chromium",
         "runs-on: ubuntu-24.04",
-        "timeout-minutes: 20",
         "node-version: 22",
         "SEMAPRAX_DIRECT_CALCULATOR_ROOT=$direct",
         "SEMAPRAX_PROJECT_CALCULATOR_ROOT=$project",

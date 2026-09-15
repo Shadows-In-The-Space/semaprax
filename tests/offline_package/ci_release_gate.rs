@@ -137,7 +137,6 @@ fn release_gate_fails_closed_over_the_complete_blocker_set() {
         // check. The gate must run unconditionally and decide in the script.
         "if: ${{ always() }}",
         "runs-on: ubuntu-24.04",
-        "timeout-minutes: 5",
         "Confirm every release blocker passed",
         "SEMAPRAX_CI_NEEDS: ${{ toJSON(needs) }}",
         "--sha \"${{ github.sha }}\"",

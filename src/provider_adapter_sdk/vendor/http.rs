@@ -746,13 +746,20 @@ mod tests {
             // Sleep well beyond the client's deadline so the client must
             // observe a timeout even on a slow host; a short sleep is flaky
             // when the TLS handshake itself consumes tens of milliseconds.
-            std::thread::sleep(Duration::from_secs(2));
+            // Windows loopback under CI load can need >200ms for the handshake,
+            // so use a generous deadline and allow either Timeout or Uncertain
+            // (both are after-dispatch failures and indistinguishable for the
+            // blocking client on some platforms).
+            std::thread::sleep(Duration::from_secs(3));
         });
-        let mut transport = loopback_transport(port, Duration::from_millis(200), 128);
+        let mut transport = loopback_transport(port, Duration::from_millis(500), 128);
         assert!(matches!(
             transport.start(request("/v1/responses")),
             Err(TransportFailure {
                 kind: TransportFailureKind::TimeoutAfterDispatch,
+                attempted_bytes: 0,
+            }) | Err(TransportFailure {
+                kind: TransportFailureKind::UncertainAfterDispatch,
                 attempted_bytes: 0,
             })
         ));

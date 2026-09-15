@@ -13,11 +13,46 @@ use semaprax::project::{
 const MANIFEST: &str = include_str!("../../examples/https-project/semaprax.toml");
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
+fn temp_https_project_root() -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "spx-https-project-{}-{:?}-{}-{}",
+        std::process::id(),
+        std::thread::current().id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+        SERIAL.fetch_add(1, Ordering::Relaxed)
+    ));
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    // Copy the example project to the temp dir to avoid parallel tests
+    // racing on the same source directory (with_authenticated_project may
+    // write to the project or acquire locks).
+    std::fs::create_dir_all(&root).unwrap();
+    for entry in std::fs::read_dir(&src).unwrap() {
+        let entry = entry.unwrap();
+        let dest = root.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            // Recursively copy src directory if needed (for this project it's flat)
+            std::fs::create_dir_all(&dest).unwrap();
+            for sub in std::fs::read_dir(entry.path()).unwrap() {
+                let sub = sub.unwrap();
+                std::fs::copy(sub.path(), dest.join(sub.file_name())).unwrap();
+            }
+        } else {
+            std::fs::copy(entry.path(), dest).unwrap();
+        }
+    }
+    root
+}
+
 struct Output(PathBuf);
 
 impl Drop for Output {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        // Leak to avoid deleting a live held directory that another parallel
+        // Windows test may still be using via a held file descriptor.
+        std::mem::forget(self.0.clone());
     }
 }
 
@@ -84,13 +119,13 @@ fn exhaustive_linux_ci_provisions_the_native_https_development_interface() {
 
 #[test]
 fn project_v13_authenticates_and_admits_the_https_command_closure() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    let root = temp_https_project_root();
     with_authenticated_project(&root.join("semaprax.toml"), |snapshot| snapshot.check()).unwrap();
 }
 
 #[test]
 fn project_v13_execution_and_prepared_trace_envelopes_replay() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    let root = temp_https_project_root();
     with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         let execution = snapshot.execute_entry(&ProjectExecutionOptions::default())?;
         verify_execution_envelope(execution.envelope()).map_err(|error| vec![error])?;
@@ -113,7 +148,7 @@ fn project_v13_execution_and_prepared_trace_envelopes_replay() {
 
 #[test]
 fn project_v13_builds_a_replayable_fixture_only_npm_web_carrier() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    let root = temp_https_project_root();
     let build = with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         snapshot.build_npm_inline(semaprax::project::MAX_PROJECT_NPM_BUILD_BYTES)
     })
@@ -128,11 +163,16 @@ fn project_v13_builds_a_replayable_fixture_only_npm_web_carrier() {
 #[cfg(unix)]
 #[test]
 fn project_v13_builds_the_libcurl_native_https_executable() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    let root = temp_https_project_root();
     let suffix = std::env::consts::EXE_SUFFIX;
     let output = NativeOutput(std::env::temp_dir().join(format!(
-        "semaprax-https-project-native-{}-{}{}",
+        "semaprax-https-project-native-{}-{:?}-{}-{}{}",
         std::process::id(),
+        std::thread::current().id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
         SERIAL.fetch_add(1, Ordering::Relaxed),
         suffix
     )));
@@ -147,10 +187,15 @@ fn project_v13_builds_the_libcurl_native_https_executable() {
 #[cfg(not(windows))]
 #[test]
 fn generated_https_web_package_runs_fixture_v3_under_node() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    let root = temp_https_project_root();
     let output = Output(std::env::temp_dir().join(format!(
-        "semaprax-https-project-npm-{}-{}",
+        "semaprax-https-project-npm-{}-{:?}-{}-{}",
         std::process::id(),
+        std::thread::current().id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
         SERIAL.fetch_add(1, Ordering::Relaxed)
     )));
     with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
@@ -182,10 +227,15 @@ fn generated_https_web_package_runs_fixture_v3_under_node() {
 #[cfg(not(windows))]
 #[test]
 fn generated_https_web_package_rejects_untrusted_fixture_and_provider_results() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    let root = temp_https_project_root();
     let output = Output(std::env::temp_dir().join(format!(
-        "semaprax-https-project-hostile-{}-{}",
+        "semaprax-https-project-hostile-{}-{:?}-{}-{}",
         std::process::id(),
+        std::thread::current().id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
         SERIAL.fetch_add(1, Ordering::Relaxed)
     )));
     with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
@@ -210,10 +260,15 @@ fn generated_https_web_package_rejects_untrusted_fixture_and_provider_results() 
 #[cfg(windows)]
 #[test]
 fn project_v13_npm_publication_fails_closed_without_windows_authority() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    let root = temp_https_project_root();
     let output = Output(std::env::temp_dir().join(format!(
-        "semaprax-https-project-npm-rejected-{}-{}",
+        "semaprax-https-project-npm-rejected-{}-{:?}-{}-{}",
         std::process::id(),
+        std::thread::current().id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
         SERIAL.fetch_add(1, Ordering::Relaxed)
     )));
     let errors = with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
@@ -232,7 +287,7 @@ fn project_v13_npm_publication_fails_closed_without_windows_authority() {
 
 #[test]
 fn https_network_run_replays_fixture_v3_without_opening_a_socket() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/https-project");
+    let root = temp_https_project_root();
     let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
         .arg("network-run")
         .arg(&root)

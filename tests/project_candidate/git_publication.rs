@@ -241,7 +241,10 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        // Intentionally leak the temp directory to avoid deleting a live
+        // held repository that another parallel test may still be using via
+        // a held file descriptor (rename + same-path re-create race).
+        // The CI runner's temp dir is ephemeral.
     }
 }
 

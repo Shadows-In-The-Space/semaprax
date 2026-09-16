@@ -26,18 +26,12 @@
 //! actual point of comparing them rather than one being a restatement of
 //! the other.
 //!
-//! **Native C11 is out of scope here.** `crate::public_generic_abi::native`
-//! only renders a compilable C translation unit
-//! (`native::template::render_reference_provider`); it has no in-process
-//! Rust adapter analogous to `WasmProvider`/`InterpreterProvider` to run
-//! this same case table against without inventing a fourth artifact this
-//! issue's file lease does not own. Real compiled-and-executed native (at
-//! `-O0`/`-O2`) and generated-consumer execution against this corpus's
-//! shape is `tests/public_generic_native_adapter_v1/**`'s and
-//! `tests/public_generic_wasm_adapter_v1/**`'s own leased territory
-//! (`c_calling_consumer.rs`, `rust_calling_consumer.rs`, `probe.c`,
-//! `allocations.c`) — this module does not duplicate or re-verify that
-//! work, and does not claim it.
+//! **Shared data, distinct execution harnesses.** This library test and
+//! `tests/public_generic_native_adapter_v1/settlement_corpus.rs` include the
+//! same bounded loader for the committed versioned JSON manifest and the
+//! same descriptor fixture bytes. The integration harness additionally
+//! executes native C11 at O0/O2. Its physical evidence channel does not
+//! claim that the two in-process models are a compiled Wasm provider.
 //!
 //! **What "trace" means here.** Neither adapter reinvents the normalized
 //! trace vocabulary: `WasmProvider::test_last_trace` and
@@ -65,22 +59,21 @@ use crate::public_generic_abi::interpreter::{InterpreterPgStatus, InterpreterPro
 use crate::public_generic_abi::wasm::binding::WasmProviderBindingV1;
 use crate::public_generic_abi::wasm::provider::{WasmPgStatus, WasmProvider};
 
-const DESCRIPTOR_FIXTURE: &[u8] =
-    b"semaprax.public-generic-settlement-corpus.v1.descriptor-fixture";
+const DESCRIPTOR_FIXTURE: &[u8] = settlement_manifest::DESCRIPTOR_FIXTURE;
 
 fn interpreter_binding() -> CarrierBindingV1 {
     CarrierBindingV1::new(
-        "sha256:settlement-corpus-descriptor-identity",
+        "sha256:settlement-corpus-native-descriptor-identity",
         TargetProfile::Interpreter,
-        "sha256:settlement-corpus-runtime-identity",
+        "sha256:settlement-corpus-native-runtime-identity",
     )
 }
 
 fn wasm_binding() -> WasmProviderBindingV1 {
     let carrier_binding = CarrierBindingV1::new(
-        "sha256:settlement-corpus-descriptor-identity",
+        "sha256:settlement-corpus-native-descriptor-identity",
         TargetProfile::CoreWasm,
-        "sha256:settlement-corpus-runtime-identity",
+        "sha256:settlement-corpus-native-runtime-identity",
     );
     WasmProviderBindingV1::new(
         carrier_binding,
@@ -131,179 +124,37 @@ fn expected_result_bytes(leaves: &[Vec<u8>]) -> Vec<u8> {
 /// and rejection shapes, plus one case per non-terminal
 /// [`TraceLabel`] failure-injection ordinal — the full matrix both
 /// adapters' `test_inject_failure` supports.
+#[path = "../../../tests/support/public_generic_settlement_manifest.rs"]
+mod settlement_manifest;
+
 fn corpus() -> Vec<Case> {
-    let mut cases = vec![
-        Case {
-            case_id: "minimal_success".to_owned(),
-            input_leaves: vec![b"hello".to_vec()],
-            failure_injection_id: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "zero_length_owned_bytes".to_owned(),
-            input_leaves: vec![Vec::new()],
-            failure_injection_id: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "embedded_zero_bytes".to_owned(),
-            input_leaves: vec![vec![0u8, 1, 0, 2, 0, 3, 0]],
-            failure_injection_id: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "two_leaves_structural_order".to_owned(),
-            input_leaves: vec![b"AA".to_vec(), b"BBB".to_vec()],
-            failure_injection_id: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "max_bytes_per_leaf".to_owned(),
-            input_leaves: vec![vec![
-                0xABu8;
-                crate::public_generic_abi::boundary_profile::MAX_BYTES_PER_LEAF
-            ]],
-            failure_injection_id: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "first_over_max_bytes_per_leaf".to_owned(),
-            input_leaves: vec![vec![
-                0u8;
-                crate::public_generic_abi::boundary_profile::MAX_BYTES_PER_LEAF
-                    + 1
-            ]],
-            failure_injection_id: None,
-            compound_cleanup_injection: None,
-            expected_accepted: false,
-            expected_status: InterpreterPgStatus::CarrierCapacity as i32,
-        },
-        Case {
-            case_id: "first_over_max_leaf_count".to_owned(),
-            input_leaves: vec![
-                Vec::new();
-                crate::public_generic_abi::boundary_profile::MAX_OWNED_LEAVES_PER_INSTANCE
-                    + 1
-            ],
-            failure_injection_id: None,
-            compound_cleanup_injection: None,
-            expected_accepted: false,
-            expected_status: InterpreterPgStatus::CarrierCapacity as i32,
-        },
+    const LABELS: [TraceLabel; 14] = [
+        TraceLabel::FrameValidated,
+        TraceLabel::LeafAllocationStarted,
+        TraceLabel::LeafAllocationCommitted,
+        TraceLabel::LeafPayloadCopied,
+        TraceLabel::InputValuePrepared,
+        TraceLabel::InputTransferCommitted,
+        TraceLabel::ExecutionStarted,
+        TraceLabel::ExecutionFinished,
+        TraceLabel::ResultLeafAllocationStarted,
+        TraceLabel::ResultLeafAllocationCommitted,
+        TraceLabel::ResultValuePrepared,
+        TraceLabel::ResultCommit,
+        TraceLabel::LeafRelease,
+        TraceLabel::CarrierRelease,
     ];
-
-    // One case per non-terminal trace ordinal, each pinned to the status
-    // both adapters' documented `status_from_settlement`/direct-error
-    // mapping deterministically produces.
-    let injection_matrix: &[(TraceLabel, i32)] = &[
-        (
-            TraceLabel::FrameValidated,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::LeafAllocationStarted,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::LeafAllocationCommitted,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::LeafPayloadCopied,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::InputValuePrepared,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::InputTransferCommitted,
-            InterpreterPgStatus::IllegalTransition as i32,
-        ),
-        (
-            TraceLabel::ExecutionStarted,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::ExecutionFinished,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::ResultLeafAllocationStarted,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::ResultLeafAllocationCommitted,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::ResultValuePrepared,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::ResultCommit,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::LeafRelease,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::CarrierRelease,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-    ];
-    for (label, status) in injection_matrix {
-        cases.push(Case {
-            case_id: format!("failure_injection_{label:?}"),
-            input_leaves: vec![b"inject-me".to_vec(), b"second-leaf".to_vec()],
-            failure_injection_id: Some(*label),
-            compound_cleanup_injection: None,
-            expected_accepted: false,
-            expected_status: *status,
-        });
-    }
-
-    // Issue #162's required "cleanup failure after an input/runtime
-    // failure" case: `ExecutionStarted`'s own injected failure settles
-    // `ContractFailure` first and physically releases the input; a
-    // release-ordinal injection ALSO armed for this same call is then a
-    // genuinely later, distinct attempt (`Settlement::CleanupFailure`) the
-    // sticky rule must reject and count instead of apply — see
-    // `InterpreterProvider::call`/`WasmProvider::call`'s own new comment at
-    // the `ExecutionStarted` site. Distinct from the pre-existing
-    // `failure_injection_LeafRelease`/`CarrierRelease` cases above, which
-    // exercise "cleanup failure with NO prior failure": those never inject
-    // anything earlier, so the release-ordinal injection there legally
-    // becomes the terminal status instead of being discarded. The expected
-    // accept/reject and status are unchanged from the earlier-only case
-    // (`ExecutionStarted` alone): the compounding cleanup attempt is
-    // rejected, never applied, so it cannot change what the caller
-    // observes — only `test_settlement_overwrite_attempts` reveals it,
-    // which `sticky_failure_selection_matches_across_engines_when_cleanup_follows_an_earlier_failure`
-    // (below) already established interpreter/Wasm both increment
-    // identically for a single-injection call; this case proves the same
-    // sticky rule holds when the cleanup ordinal is real too, not merely
-    // absent.
-    cases.push(Case {
-        case_id: "execution_failure_with_compounding_cleanup_injection".to_owned(),
-        input_leaves: vec![b"payload".to_vec()],
-        failure_injection_id: Some(TraceLabel::ExecutionStarted),
-        compound_cleanup_injection: Some(TraceLabel::LeafRelease),
-        expected_accepted: false,
-        expected_status: InterpreterPgStatus::ContractFailure as i32,
-    });
-    cases
+    settlement_manifest::cases()
+        .into_iter()
+        .map(|case| Case {
+            case_id: case.case_id,
+            input_leaves: case.input_leaves,
+            failure_injection_id: case.injection.map(|index| LABELS[index]),
+            compound_cleanup_injection: case.cleanup_injection.map(|index| LABELS[index]),
+            expected_accepted: case.accepted,
+            expected_status: case.status,
+        })
+        .collect()
 }
 
 /// One engine's observed outcome for one case — the fields both engines'

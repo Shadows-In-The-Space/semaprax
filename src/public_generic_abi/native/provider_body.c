@@ -33,6 +33,30 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Optional, translation-unit-local observers used by the settlement probe.
+ * Ordinary providers define none of these and retain the same public ABI. */
+#ifndef SPX_PG_ALLOCATION_FAILURE
+#define SPX_PG_ALLOCATION_FAILURE() 0
+#endif
+#ifndef SPX_PG_OBSERVE_ALLOCATION
+#define SPX_PG_OBSERVE_ALLOCATION(allocations, bytes) ((void)0)
+#endif
+#ifndef SPX_PG_OBSERVE_HANDLE
+#define SPX_PG_OBSERVE_HANDLE(delta) ((void)0)
+#endif
+#ifndef SPX_PG_OBSERVE_ENDPOINT
+#define SPX_PG_OBSERVE_ENDPOINT() ((void)0)
+#endif
+#ifndef SPX_PG_OBSERVE_LEAF_RELEASE
+#define SPX_PG_OBSERVE_LEAF_RELEASE(direction, index) ((void)0)
+#endif
+#ifndef SPX_PG_OBSERVE_CLEANUP_FAILURE
+#define SPX_PG_OBSERVE_CLEANUP_FAILURE(selected, status) ((void)0)
+#endif
+#ifndef SPX_PG_OCCURRENCE_INJECTION
+#define SPX_PG_OCCURRENCE_INJECTION(label) 0
+#endif
+
 /* --- Bounds, reused verbatim from Public Generic Boundary Profile v1 (see
  * src/public_generic_abi/boundary_profile.rs) so this file never restates a
  * number independently; tests/public_generic_native_adapter_v1 pins these
@@ -122,12 +146,16 @@ static void *spx_pg_alloc(size_t size) {
         size > SPX_PG_MAX_PHYSICAL_LIVE_BYTES - g_spx_pg_live_bytes) {
         return NULL; /* SPX-PG903: bounded allocator exhausted */
     }
+    if (SPX_PG_ALLOCATION_FAILURE()) {
+        return NULL;
+    }
     void *pointer = malloc(size);
     if (pointer == NULL) {
         return NULL;
     }
     g_spx_pg_live_allocations += 1;
     g_spx_pg_live_bytes += size;
+    SPX_PG_OBSERVE_ALLOCATION(g_spx_pg_live_allocations, g_spx_pg_live_bytes);
     return pointer;
 }
 
@@ -166,6 +194,9 @@ static void spx_pg_trace_record(uint32_t label) {
 static uint32_t g_spx_pg_injected_ordinals[2] = {SPX_PG_TEST_NO_INJECTION, SPX_PG_TEST_NO_INJECTION};
 
 static int spx_pg_should_inject(uint32_t label) {
+    if (SPX_PG_OCCURRENCE_INJECTION(label)) {
+        return 1;
+    }
     for (size_t index = 0; index < 2; ++index) {
         if (g_spx_pg_injected_ordinals[index] == label) {
             g_spx_pg_injected_ordinals[index] = SPX_PG_TEST_NO_INJECTION;
@@ -253,6 +284,16 @@ static void spx_pg_reset_call_state(void) {
     g_spx_pg_settlement_status = SPX_PG_STATUS_OK;
 }
 
+/* Select a known failure BEFORE compensating cleanup starts. Cleanup can
+ * itself fail; selecting only on return would let that later failure win.
+ * This does not emit a terminal event or manufacture an overwrite attempt. */
+static void spx_pg_select_primary_failure(spx_pg_status_v1 status) {
+    if (!g_spx_pg_settlement_selected && status != SPX_PG_STATUS_OK) {
+        g_spx_pg_settlement_selected = 1;
+        g_spx_pg_settlement_status = status;
+    }
+}
+
 /* Select `status` as the terminal outcome for the call in progress. Sticky:
  * once selected, a different later status is rejected (counted, not
  * applied) and the ORIGINAL status is returned. */
@@ -284,6 +325,7 @@ static int spx_pg_registry_insert(void *pointer, uint32_t kind, void *owner, uin
             g_spx_pg_registry[index].kind = kind;
             g_spx_pg_registry[index].owner = owner;
             g_spx_pg_registry[index].generation = generation;
+            SPX_PG_OBSERVE_HANDLE(1);
             return 1;
         }
     }
@@ -302,6 +344,7 @@ static size_t spx_pg_registry_find(const void *pointer, uint32_t kind) {
 }
 
 static void spx_pg_registry_remove(size_t index) {
+    SPX_PG_OBSERVE_HANDLE(-1);
     g_spx_pg_registry[index].pointer = NULL;
     g_spx_pg_registry[index].kind = SPX_PG_KIND_NONE;
     g_spx_pg_registry[index].owner = NULL;
@@ -366,6 +409,14 @@ static spx_pg_status_v1 spx_pg_preflight_carrier(const uint8_t *bytes, size_t le
     return SPX_PG_STATUS_OK;
 }
 
+/* 0 = input, 1 = result; indices are structural, never pointer-derived. */
+static void spx_pg_release_payload(uint8_t **bytes, size_t *lengths,
+                                      uint32_t index, uint32_t direction) {
+    spx_pg_dealloc(bytes[index], lengths[index]);
+    SPX_PG_OBSERVE_LEAF_RELEASE(direction, index);
+    (void)direction;
+}
+
 /* Release `count` already-allocated leaves in exact reverse order, matching
  * "release order after a failed transfer is the exact reverse of the
  * canonical obligation order." Safe to call with a partially filled array:
@@ -377,11 +428,13 @@ static spx_pg_status_v1 spx_pg_preflight_carrier(const uint8_t *bytes, size_t le
  * (the success path exercises this); if a different outcome is already
  * selected, the attempt is rejected and counted, exactly matching "cleanup
  * cannot replace the selected status." */
-static void spx_pg_release_leaves(uint8_t **leaf_bytes, size_t *leaf_lens, uint32_t filled) {
+static void spx_pg_release_leaves(uint8_t **leaf_bytes, size_t *leaf_lens,
+                                     uint32_t filled, uint32_t direction) {
     for (uint32_t index = filled; index-- > 0;) {
-        spx_pg_dealloc(leaf_bytes[index], leaf_lens[index]);
+        spx_pg_release_payload(leaf_bytes, leaf_lens, index, direction);
         spx_pg_trace_record(SPX_PG_TRACE_LEAF_RELEASE);
         if (spx_pg_should_inject(SPX_PG_TRACE_LEAF_RELEASE)) {
+            SPX_PG_OBSERVE_CLEANUP_FAILURE(g_spx_pg_settlement_selected, SPX_PG_STATUS_CONTRACT_FAILURE);
             (void)spx_pg_settle(SPX_PG_STATUS_CONTRACT_FAILURE);
         }
     }
@@ -395,10 +448,12 @@ static void spx_pg_release_leaves(uint8_t **leaf_bytes, size_t *leaf_lens, uint3
      * release side. */
     spx_pg_trace_record(SPX_PG_TRACE_LEAF_RELEASE);
     if (spx_pg_should_inject(SPX_PG_TRACE_LEAF_RELEASE)) {
+        SPX_PG_OBSERVE_CLEANUP_FAILURE(g_spx_pg_settlement_selected, SPX_PG_STATUS_CONTRACT_FAILURE);
         (void)spx_pg_settle(SPX_PG_STATUS_CONTRACT_FAILURE);
     }
     spx_pg_trace_record(SPX_PG_TRACE_CARRIER_RELEASE);
     if (spx_pg_should_inject(SPX_PG_TRACE_CARRIER_RELEASE)) {
+        SPX_PG_OBSERVE_CLEANUP_FAILURE(g_spx_pg_settlement_selected, SPX_PG_STATUS_CONTRACT_FAILURE);
         (void)spx_pg_settle(SPX_PG_STATUS_CONTRACT_FAILURE);
     }
 }
@@ -433,21 +488,24 @@ static spx_pg_status_v1 spx_pg_fill_leaves(const uint8_t *bytes, size_t offset, 
     for (uint32_t leaf = 0; leaf < leaf_count; ++leaf) {
         spx_pg_trace_record(started_label);
         if (spx_pg_should_inject(started_label)) {
-            spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf);
+            spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
+            spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf, 0);
             return SPX_PG_STATUS_ALLOCATION_FAILURE;
         }
         uint64_t leaf_len = spx_pg_read_u64le(bytes + offset);
         size_t payload_offset = offset + 8;
         uint8_t *storage = (leaf_len == 0) ? NULL : (uint8_t *)spx_pg_alloc((size_t)leaf_len);
         if (leaf_len != 0 && storage == NULL) {
-            spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf);
+            spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
+            spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf, 0);
             return SPX_PG_STATUS_ALLOCATION_FAILURE;
         }
         leaf_bytes[leaf] = storage;
         leaf_lens[leaf] = (size_t)leaf_len;
         spx_pg_trace_record(committed_label);
         if (spx_pg_should_inject(committed_label)) {
-            spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf + 1);
+            spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
+            spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf + 1, 0);
             return SPX_PG_STATUS_ALLOCATION_FAILURE;
         }
         if (leaf_len != 0) {
@@ -456,7 +514,8 @@ static spx_pg_status_v1 spx_pg_fill_leaves(const uint8_t *bytes, size_t offset, 
         offset = payload_offset + (size_t)leaf_len;
         spx_pg_trace_record(payload_label);
         if (spx_pg_should_inject(payload_label)) {
-            spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf + 1);
+            spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
+            spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf + 1, 0);
             return SPX_PG_STATUS_ALLOCATION_FAILURE;
         }
     }
@@ -472,12 +531,13 @@ static spx_pg_status_v1 spx_pg_endpoint_reverse_bytes_v1(uint32_t leaf_count,
                                                           const size_t *input_leaf_lens,
                                                           uint8_t **out_leaf_bytes,
                                                           size_t *out_leaf_lens) {
+    SPX_PG_OBSERVE_ENDPOINT();
     for (uint32_t leaf = 0; leaf < leaf_count; ++leaf) {
         size_t length = input_leaf_lens[leaf];
         uint8_t *storage = (length == 0) ? NULL : (uint8_t *)spx_pg_alloc(length);
         if (length != 0 && storage == NULL) {
             for (uint32_t undo = leaf; undo-- > 0;) {
-                spx_pg_dealloc(out_leaf_bytes[undo], out_leaf_lens[undo]);
+                spx_pg_release_payload(out_leaf_bytes, out_leaf_lens, undo, 1);
             }
             return SPX_PG_STATUS_ALLOCATION_FAILURE;
         }
@@ -597,7 +657,8 @@ spx_pg_status_v1 spx_pg_input_prepare_v1(spx_pg_provider_v1 *provider, const uin
 
     spx_pg_value_v1 *value = (spx_pg_value_v1 *)spx_pg_alloc(sizeof(spx_pg_value_v1));
     if (value == NULL) {
-        spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf_count);
+        spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
+        spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf_count, 0);
         if (leaf_bytes != NULL) {
             spx_pg_dealloc(leaf_bytes, sizeof(uint8_t *) * leaf_count);
         }
@@ -614,7 +675,8 @@ spx_pg_status_v1 spx_pg_input_prepare_v1(spx_pg_provider_v1 *provider, const uin
     value->leaf_lens = leaf_lens;
 
     if (!spx_pg_registry_insert(value, SPX_PG_KIND_VALUE, provider, value->generation)) {
-        spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf_count);
+        spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
+        spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf_count, 0);
         if (leaf_bytes != NULL) {
             spx_pg_dealloc(leaf_bytes, sizeof(uint8_t *) * leaf_count);
         }
@@ -631,7 +693,8 @@ spx_pg_status_v1 spx_pg_input_prepare_v1(spx_pg_provider_v1 *provider, const uin
         if (slot != SPX_PG_REGISTRY_CAPACITY) {
             spx_pg_registry_remove(slot);
         }
-        spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf_count);
+        spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
+        spx_pg_release_leaves(leaf_bytes, leaf_lens, leaf_count, 0);
         if (leaf_bytes != NULL) {
             spx_pg_dealloc(leaf_bytes, sizeof(uint8_t *) * leaf_count);
         }
@@ -670,7 +733,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
     spx_pg_registry_remove(slot);
     spx_pg_trace_record(SPX_PG_TRACE_INPUT_TRANSFER_COMMITTED);
     if (spx_pg_should_inject(SPX_PG_TRACE_INPUT_TRANSFER_COMMITTED)) {
-        spx_pg_release_leaves(input->leaf_bytes, input->leaf_lens, input->leaf_count);
+        spx_pg_select_primary_failure(SPX_PG_STATUS_ILLEGAL_TRANSITION);
+        spx_pg_release_leaves(input->leaf_bytes, input->leaf_lens, input->leaf_count, 0);
         if (input->leaf_bytes != NULL) {
             spx_pg_dealloc(input->leaf_bytes, sizeof(uint8_t *) * input->leaf_count);
         }
@@ -683,7 +747,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
 
     spx_pg_trace_record(SPX_PG_TRACE_EXECUTION_STARTED);
     if (spx_pg_should_inject(SPX_PG_TRACE_EXECUTION_STARTED)) {
-        spx_pg_release_leaves(input->leaf_bytes, input->leaf_lens, input->leaf_count);
+        spx_pg_select_primary_failure(SPX_PG_STATUS_CONTRACT_FAILURE);
+        spx_pg_release_leaves(input->leaf_bytes, input->leaf_lens, input->leaf_count, 0);
         if (input->leaf_bytes != NULL) {
             spx_pg_dealloc(input->leaf_bytes, sizeof(uint8_t *) * input->leaf_count);
         }
@@ -728,11 +793,18 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
     spx_pg_trace_record(SPX_PG_TRACE_EXECUTION_FINISHED);
     int execution_finished_injected = spx_pg_should_inject(SPX_PG_TRACE_EXECUTION_FINISHED);
 
+    /* The endpoint failure happened before cleanup and outranks both a
+     * post-execution injection and a failure while releasing the input. */
+    if (execution_finished_injected && endpoint_status == SPX_PG_STATUS_OK) {
+        endpoint_status = SPX_PG_STATUS_CONTRACT_FAILURE;
+    }
+    spx_pg_select_primary_failure(endpoint_status);
+
     /* Non-result obligation: release the consumed input before the result is
      * ever published, matching "result publication follows postconditions
      * and non-result cleanup." Runs regardless of the ExecutionFinished
      * injection captured above. */
-    spx_pg_release_leaves(input->leaf_bytes, input->leaf_lens, input->leaf_count);
+    spx_pg_release_leaves(input->leaf_bytes, input->leaf_lens, input->leaf_count, 0);
     if (input->leaf_bytes != NULL) {
         spx_pg_dealloc(input->leaf_bytes, sizeof(uint8_t *) * input->leaf_count);
     }
@@ -741,10 +813,6 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
     }
     spx_pg_dealloc(input, sizeof(spx_pg_value_v1));
 
-    if (execution_finished_injected) {
-        endpoint_status = SPX_PG_STATUS_CONTRACT_FAILURE;
-    }
-
     if (endpoint_status != SPX_PG_STATUS_OK) {
         /* If the endpoint had already fully allocated and populated every
          * result leaf before this injected post-hoc rejection, those leaf
@@ -752,8 +820,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
          * — unlike a genuine endpoint failure (already self-cleaned above)
          * or an array-allocation failure (nothing was allocated yet). */
         if (endpoint_already_succeeded) {
-            for (uint32_t index = 0; index < leaf_count; ++index) {
-                spx_pg_dealloc(result_leaf_bytes[index], result_leaf_lens[index]);
+            for (uint32_t index = leaf_count; index-- > 0;) {
+                spx_pg_release_payload(result_leaf_bytes, result_leaf_lens, index, 1);
             }
         }
         if (result_leaf_bytes != NULL) {
@@ -768,8 +836,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
     spx_pg_result_v1 *result = (spx_pg_result_v1 *)spx_pg_alloc(sizeof(spx_pg_result_v1));
     if (result == NULL) {
         if (result_leaf_bytes != NULL) {
-            for (uint32_t index = 0; index < leaf_count; ++index) {
-                spx_pg_dealloc(result_leaf_bytes[index], result_leaf_lens[index]);
+            for (uint32_t index = leaf_count; index-- > 0;) {
+                spx_pg_release_payload(result_leaf_bytes, result_leaf_lens, index, 1);
             }
             spx_pg_dealloc(result_leaf_bytes, sizeof(uint8_t *) * leaf_count);
         }
@@ -812,8 +880,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
         }
     }
     if (result_leaf_trace_injected) {
-        for (uint32_t index = 0; index < leaf_count; ++index) {
-            spx_pg_dealloc(result->leaf_bytes[index], result->leaf_lens[index]);
+        for (uint32_t index = leaf_count; index-- > 0;) {
+            spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
         if (result->leaf_bytes != NULL) {
             spx_pg_dealloc(result->leaf_bytes, sizeof(uint8_t *) * leaf_count);
@@ -826,8 +894,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
     }
     spx_pg_trace_record(SPX_PG_TRACE_RESULT_VALUE_PREPARED);
     if (spx_pg_should_inject(SPX_PG_TRACE_RESULT_VALUE_PREPARED)) {
-        for (uint32_t index = 0; index < leaf_count; ++index) {
-            spx_pg_dealloc(result->leaf_bytes[index], result->leaf_lens[index]);
+        for (uint32_t index = leaf_count; index-- > 0;) {
+            spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
         if (result->leaf_bytes != NULL) {
             spx_pg_dealloc(result->leaf_bytes, sizeof(uint8_t *) * leaf_count);
@@ -841,8 +909,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
 
     spx_pg_trace_record(SPX_PG_TRACE_RESULT_COMMIT);
     if (spx_pg_should_inject(SPX_PG_TRACE_RESULT_COMMIT)) {
-        for (uint32_t index = 0; index < leaf_count; ++index) {
-            spx_pg_dealloc(result->leaf_bytes[index], result->leaf_lens[index]);
+        for (uint32_t index = leaf_count; index-- > 0;) {
+            spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
         if (result->leaf_bytes != NULL) {
             spx_pg_dealloc(result->leaf_bytes, sizeof(uint8_t *) * leaf_count);
@@ -855,8 +923,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
     }
 
     if (!spx_pg_registry_insert(result, SPX_PG_KIND_RESULT, provider, result->generation)) {
-        for (uint32_t index = 0; index < leaf_count; ++index) {
-            spx_pg_dealloc(result->leaf_bytes[index], result->leaf_lens[index]);
+        for (uint32_t index = leaf_count; index-- > 0;) {
+            spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
         if (result->leaf_bytes != NULL) {
             spx_pg_dealloc(result->leaf_bytes, sizeof(uint8_t *) * leaf_count);
@@ -901,8 +969,8 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
         if (result_slot != SPX_PG_REGISTRY_CAPACITY) {
             spx_pg_registry_remove(result_slot);
         }
-        for (uint32_t index = 0; index < leaf_count; ++index) {
-            spx_pg_dealloc(result->leaf_bytes[index], result->leaf_lens[index]);
+        for (uint32_t index = leaf_count; index-- > 0;) {
+            spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
         if (result->leaf_bytes != NULL) {
             spx_pg_dealloc(result->leaf_bytes, sizeof(uint8_t *) * leaf_count);
@@ -967,7 +1035,7 @@ spx_pg_status_v1 spx_pg_value_release_v1(spx_pg_value_v1 **value) {
     }
     spx_pg_value_v1 *owned = *value;
     spx_pg_registry_remove(slot);
-    spx_pg_release_leaves(owned->leaf_bytes, owned->leaf_lens, owned->leaf_count);
+    spx_pg_release_leaves(owned->leaf_bytes, owned->leaf_lens, owned->leaf_count, 0);
     if (owned->leaf_bytes != NULL) {
         spx_pg_dealloc(owned->leaf_bytes, sizeof(uint8_t *) * owned->leaf_count);
     }
@@ -1001,7 +1069,7 @@ spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result) {
      * value's, and the normalized trace is documented as recording every
      * such release, not only the ones reachable from `spx_pg_call_v1`'s own
      * internal input release. */
-    spx_pg_release_leaves(owned->leaf_bytes, owned->leaf_lens, owned->leaf_count);
+    spx_pg_release_leaves(owned->leaf_bytes, owned->leaf_lens, owned->leaf_count, 1);
     if (owned->leaf_bytes != NULL) {
         spx_pg_dealloc(owned->leaf_bytes, sizeof(uint8_t *) * owned->leaf_count);
     }

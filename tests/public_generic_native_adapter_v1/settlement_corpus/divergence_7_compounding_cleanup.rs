@@ -46,30 +46,8 @@
 //! Pinned here exactly, with a negative control proving the assertion is
 //! real and failable, rather than left as an unexamined gap.
 
-use semaprax::public_generic_abi::carrier::trace::TraceLabel;
-use semaprax::public_generic_abi::interpreter::InterpreterPgStatus;
 
 use super::{Case, EngineOutcome};
-
-/// The one case this whole module exists to prove: `ExecutionStarted`'s
-/// own injected failure is the primary; a release-ordinal injection ALSO
-/// armed for the same call is a later, distinct attempt the sticky rule
-/// must reject, not apply — matching
-/// `src/public_generic_abi/carrier/settlement_corpus.rs`'s own identical
-/// case exactly. `expected_accepted`/`expected_status` are unaffected by
-/// whether the compounding rejection genuinely happens; only
-/// [`assert_divergence_7`]'s `settlement_overwrite_attempts` comparison is
-/// sensitive to that.
-pub(super) fn compounding_case() -> Case {
-    Case {
-        case_id: "execution_failure_with_compounding_cleanup_injection",
-        input_leaves: vec![b"inject-me".to_vec(), b"second-leaf".to_vec()],
-        failure_injection: Some(TraceLabel::ExecutionStarted),
-        compound_cleanup_injection: Some(TraceLabel::LeafRelease),
-        expected_accepted: false,
-        expected_status: InterpreterPgStatus::ContractFailure as i32,
-    }
-}
 
 /// Called from [`super::compare_case`] for every case. A no-op unless
 /// `case` is the one compounding-cleanup-injection case this divergence

@@ -432,6 +432,14 @@ jobs:
           cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1
           cargo test --locked -p semaprax --test projections public_generic_descriptor_carrier_hostile_replay
 
+      - name: Native settlement sanitizer evidence and independent replay
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/public_generic_settlement_evidence.py --sanitizers --output target/pg-settlement
+          python3 scripts/public_generic_settlement_evidence.py --sanitizers --replay target/pg-settlement/evidence.json
+
   std-library-depth:
     name: STD-08 bundled library depth
     runs-on: ubuntu-latest

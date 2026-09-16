@@ -12,7 +12,7 @@ const CASE_ID: &str = "result_allocation_rejection_releases_inputs_in_reverse_or
 
 fn case() -> Case {
     Case {
-        case_id: CASE_ID,
+        case_id: CASE_ID.to_owned(),
         input_leaves: vec![b"first".to_vec(), b"second".to_vec()],
         failure_injection: Some(TraceLabel::ResultLeafAllocationCommitted),
         compound_cleanup_injection: None,

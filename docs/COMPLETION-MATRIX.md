@@ -108,9 +108,10 @@ target-neutral type grammar with template and ordered argument identities, the
 semantic compatibility rules, the candidate delta, and the cross-platform
 milestone job itself, alongside four-language metadata consumers that close the
 grammar half of two more. No public generic signature, descriptor, carrier,
-calling convention, or support claim follows from any of them, and the four open
-gates all wait on one artifact that does not exist: a versioned public generic
-descriptor and carrier.
+calling convention, or support claim follows from any of them, and no public support follows from the versioned descriptor/carrier code that
+now exists. The [runtime settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
+records the implemented native fixture subset and the remaining checked-endpoint,
+compiled-Wasm, consumer-matrix and all-engine evidence requirements.
 
 The largest remaining product gaps are general ownership and lifetime safety,
 stable public aggregate/resource/component ABIs, a supported package ecosystem,

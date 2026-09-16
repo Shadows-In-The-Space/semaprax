@@ -956,6 +956,15 @@ from a prior generation.
 
 ### Cross-engine settlement corpus (issue #162)
 
+The current persisted manifest, native primary-failure fixes, per-case physical
+observations and portable replay format are specified in
+[Settlement Corpus v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md). Both library and
+native harnesses now load the same committed cases and descriptor fixture. The
+historical engine-local analysis below remains useful, but its statements about
+native per-case peaks, physical release indices and absent portable evidence
+are superseded for the explicitly scoped native fixture route by that document.
+
+
 `src/public_generic_abi/carrier/settlement_corpus.rs` is
 `semaprax.public-generic-settlement-corpus.v1`: one shared case table (the
 base success/rejection shapes above, plus one case per non-terminal

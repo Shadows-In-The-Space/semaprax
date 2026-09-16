@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Share one bounded, digest-pinned public-generic settlement manifest across the
+  existing model/native harnesses; preserve primary failures before cleanup and
+  reverse every native result rollback. Add per-case native observations, real
+  allocation/compound-failure regressions, retained trace expectations, and
+  portable sanitizer/replay evidence. This advances the fixture subset of #162;
+  it does not close PG-7 or widen public ownership support.
+
 ## 0.5.0 — 2026-09-14
 
 - Bind effect-free retained source job handlers to persisted deployment

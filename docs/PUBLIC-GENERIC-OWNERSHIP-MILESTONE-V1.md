@@ -207,14 +207,16 @@ than by advancing the row.
   public_generic_abi::carrier::settlement_corpus` — 9 passed, 0 failed.
 
   This is not yet the full PG-7 the milestone asks for:
-  - **native C11 is not a party to the cross-engine corpus.** It has no
-    in-process Rust adapter analogous to `InterpreterProvider`/`WasmProvider`
-    — only a C-source renderer — so its real compiled `-O0`/`-O2` equivalence
-    against this exact case table is not established, only asserted
-    separately in its own harness (#162 tracks this as open);
-  - **peak allocation/handle counters are not compared**, only final
-    (post-terminal) counts, so the corpus is silent on the "peak" fields
-    issue #162 itself lists as required;
+  - native C11 O0/O2 now participates through the existing integration harness,
+    and all routes load one committed case manifest. The
+    [persisted settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md) adds
+    native per-case peaks, real allocation-failure regression coverage,
+    physical release indices, and portable replay. This remains a fixture
+    boundary, not a compiler-derived generic-program equivalence proof;
+  - peak allocation/handle observations are now compared for native O0/O2,
+    but not across all model heaps/registries. Existing logical trace
+    differences remain explicit, and the Wasm model is not an actual compiled
+    provider module;
   - **every adapter still binds a fixture endpoint**, not a function body
     codegenned from a real admitted public-generic export — the same gap
     named under PG-5/PG-6 above;
@@ -316,7 +318,7 @@ those three are ready to claim. PG-9 is undecided.
 | PG-3 | [compatibility rules](PUBLIC-GENERIC-COMPATIBILITY-V1.md) | nothing; hosted green on three hosts |
 | PG-4 | [candidate delta](PUBLIC-GENERIC-CANDIDATE-DELTA-V1.md) | nothing; hosted green on three hosts. It describes a genuine public-generic signature only when one is named explicitly via `public_generic_delta_with_boundary_subjects` (#139, #161); no manifest-profile route admits one on its own |
 | PG-5, PG-6 | [consumers](PUBLIC-GENERIC-CONSUMERS-V1.md), [descriptor](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md) | a hosted run; codegen wiring from a verified descriptor to a real callable function body on any backend (every provider still binds a fixture endpoint); a compiled `.wasm` implementing the full provider ABI (#229); #173's remaining descriptor-level hostile cases exercised through all four calling consumers, plus MSRV and the 16 MiB bound for foreign consumers (#226) |
-| PG-7 | [settlement obligations](PUBLIC-GENERIC-SETTLEMENT-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md); [cross-engine corpus](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | a hosted run; native C11 joining the cross-engine settlement corpus (#162); peak allocation/handle counters; the same fixture-endpoint and nested-record limitations as PG-5/PG-6 above |
+| PG-7 | [settlement obligations](PUBLIC-GENERIC-SETTLEMENT-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md); [cross-engine corpus](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | a hosted run; complete model/compiled-Wasm/consumer participation in the persisted settlement corpus; comparable all-engine peaks and logical traces; the same fixture-endpoint and nested-record limitations as PG-5/PG-6 above |
 | PG-8 | the `public-generic-ownership-milestone` CI job | a fresh run at the exact commit where PG-5/PG-6/PG-7 land, once `main`'s CI stops being cancelled before completion; the recorded green run predates all of PG-5/PG-6/PG-7's code |
 | PG-9 | this document | the decision itself, once the eight above are hosted green |
 

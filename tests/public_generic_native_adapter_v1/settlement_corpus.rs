@@ -200,31 +200,18 @@
 //! `result_release` call in a way interpreter/Wasm's per-call trace is not
 //! (a harness artifact, not an engine divergence).
 //!
-//! **Other nonclaims.** Native's normalized trace (`spx_pg_test_trace_label_v1`)
-//! records only the label ordinal per event, not a leaf index
-//! (`g_spx_pg_trace` is `uint32_t[]`, not a `(label, leaf)` pair) — unlike
-//! `semaprax::public_generic_abi::carrier::trace::TraceEvent`, which carries
-//! both — so this module cannot additionally pin native's *per-leaf*
-//! canonical release order the way
-//! `structural_leaf_order_is_left_to_right_staged_and_exact_reverse_released`
-//! does for interpreter vs. Wasm; extending native's test-only trace
-//! surface to carry a leaf index is native/provider_body.c work, outside
-//! this issue's lease. `spx_pg_test_settlement_overwrite_attempts_v1` and
-//! `spx_pg_test_live_allocations_v1`/`fixture_peak` are process-global, not
-//! per-provider (native has no per-instance accessor for either): this
-//! module computes the settlement-overwrite count as a running delta so
-//! per-case values are still comparable to interpreter/Wasm's per-provider
-//! counters, and treats `fixture_peak` (a cumulative high-water mark since
-//! the probe process started) only as an O0-vs-O2 self-consistency check —
-//! both binaries execute the identical scripted case sequence, so the
-//! cumulative peak at a given case index must match between them, which is
-//! a real "native optimization equivalence" proof for peak counters, not an
-//! isolated per-case expectation. #119's flat-owned-`Bytes`-leaves limit
-//! applies here exactly as it does to the in-process engines: no nested
-//! record case exists for native either. No compiled `.wasm` participates
-//! anywhere in this repository (`WasmProvider` is an in-process Rust model,
-//! matching `carrier::settlement_corpus`'s own nonclaim); this module does
-//! not change that.
+//! **Physical evidence and nonclaims.** The test-only observer channel now
+//! records per-case peaks, actual endpoint entry, structural leaf discharge
+//! indices and secondary cleanup statuses. The existing normalized trace
+//! remains label-only; the separate physical release log is not silently
+//! substituted for a target-neutral `TraceEvent`. Per-case observations are
+//! compared between native O0 and O2. The separate `fixture_peak` counter
+//! remains cumulative and is retained for its existing assertions.
+//!
+//! All engines still bind a flat-owned-Bytes fixture endpoint. `WasmProvider`
+//! is the in-process model, not a compiled provider module. The portable
+//! native evidence gate and remaining limitations are specified in
+//! `docs/PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md`; this does not complete PG-7.
 
 /// Issue #103's extension of issue #240 divergence 4 to three more
 /// preparation-phase ordinals. Factored into its own file purely to stay
@@ -241,6 +228,9 @@ mod ordinal_timing_extension;
 #[path = "settlement_corpus/divergence_7_compounding_cleanup.rs"]
 mod divergence_7_compounding_cleanup;
 
+#[path = "settlement_corpus/wire_evidence.rs"]
+mod wire_evidence;
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -248,9 +238,6 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-use semaprax::public_generic_abi::boundary_profile::{
-    MAX_BYTES_PER_LEAF, MAX_OWNED_LEAVES_PER_INSTANCE,
-};
 use semaprax::public_generic_abi::carrier::trace::TraceLabel;
 use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
 use semaprax::public_generic_abi::interpreter::{InterpreterPgStatus, InterpreterProvider};
@@ -261,8 +248,7 @@ use semaprax::public_generic_abi::wasm::provider::{WasmPgStatus, WasmProvider};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-const DESCRIPTOR_FIXTURE: &[u8] =
-    b"semaprax.public-generic-settlement-corpus.v1.native-cross-engine-fixture";
+const DESCRIPTOR_FIXTURE: &[u8] = settlement_manifest::DESCRIPTOR_FIXTURE;
 
 fn interpreter_binding() -> CarrierBindingV1 {
     CarrierBindingV1::new(
@@ -299,15 +285,12 @@ fn native_binding() -> NativeProviderBindingV1 {
     )
 }
 
-/// One shared settlement-corpus case, mirrored one-for-one from
-/// `carrier::settlement_corpus::corpus()` (7 base shapes + one case per
-/// non-terminal `TraceLabel` ordinal = 21), which this file cannot import
-/// directly: that module is `#[cfg(test)]`-gated inside the `semaprax` lib
-/// (only compiled for the crate's own unit-test build), invisible to an
-/// external integration-test crate regardless of visibility modifiers.
+/// One adapter's projection of the canonical committed fixture manifest.
+/// The library harness includes the same bounded loader, avoiding the former
+/// independently maintained tables and leaked, dynamically allocated case IDs.
 #[derive(Debug, Clone)]
 struct Case {
-    case_id: &'static str,
+    case_id: String,
     input_leaves: Vec<Vec<u8>>,
     failure_injection: Option<TraceLabel>,
     /// A second, independently armed injection ordinal, alongside
@@ -320,144 +303,37 @@ struct Case {
     expected_status: i32,
 }
 
+#[path = "../support/public_generic_settlement_manifest.rs"]
+mod settlement_manifest;
+
 fn corpus() -> Vec<Case> {
-    let mut cases = vec![
-        Case {
-            case_id: "minimal_success",
-            input_leaves: vec![b"hello".to_vec()],
-            failure_injection: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "zero_length_owned_bytes",
-            input_leaves: vec![Vec::new()],
-            failure_injection: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "embedded_zero_bytes",
-            input_leaves: vec![vec![0u8, 1, 0, 2, 0, 3, 0]],
-            failure_injection: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "two_leaves_structural_order",
-            input_leaves: vec![b"AA".to_vec(), b"BBB".to_vec()],
-            failure_injection: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "max_bytes_per_leaf",
-            input_leaves: vec![vec![0xABu8; MAX_BYTES_PER_LEAF]],
-            failure_injection: None,
-            compound_cleanup_injection: None,
-            expected_accepted: true,
-            expected_status: InterpreterPgStatus::Ok as i32,
-        },
-        Case {
-            case_id: "first_over_max_bytes_per_leaf",
-            input_leaves: vec![vec![0u8; MAX_BYTES_PER_LEAF + 1]],
-            failure_injection: None,
-            compound_cleanup_injection: None,
-            expected_accepted: false,
-            expected_status: InterpreterPgStatus::CarrierCapacity as i32,
-        },
-        Case {
-            case_id: "first_over_max_leaf_count",
-            input_leaves: vec![Vec::new(); MAX_OWNED_LEAVES_PER_INSTANCE + 1],
-            failure_injection: None,
-            compound_cleanup_injection: None,
-            expected_accepted: false,
-            expected_status: InterpreterPgStatus::CarrierCapacity as i32,
-        },
+    const LABELS: [TraceLabel; 14] = [
+        TraceLabel::FrameValidated,
+        TraceLabel::LeafAllocationStarted,
+        TraceLabel::LeafAllocationCommitted,
+        TraceLabel::LeafPayloadCopied,
+        TraceLabel::InputValuePrepared,
+        TraceLabel::InputTransferCommitted,
+        TraceLabel::ExecutionStarted,
+        TraceLabel::ExecutionFinished,
+        TraceLabel::ResultLeafAllocationStarted,
+        TraceLabel::ResultLeafAllocationCommitted,
+        TraceLabel::ResultValuePrepared,
+        TraceLabel::ResultCommit,
+        TraceLabel::LeafRelease,
+        TraceLabel::CarrierRelease,
     ];
-
-    // One case per non-terminal trace ordinal, matching
-    // `carrier::settlement_corpus::corpus`'s injection matrix exactly, so
-    // native is checked against the identical per-ordinal expected status
-    // the in-process engines already are.
-    let injection_matrix: &[(TraceLabel, i32)] = &[
-        (
-            TraceLabel::FrameValidated,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::LeafAllocationStarted,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::LeafAllocationCommitted,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::LeafPayloadCopied,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::InputValuePrepared,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::InputTransferCommitted,
-            InterpreterPgStatus::IllegalTransition as i32,
-        ),
-        (
-            TraceLabel::ExecutionStarted,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::ExecutionFinished,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::ResultLeafAllocationStarted,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::ResultLeafAllocationCommitted,
-            InterpreterPgStatus::AllocationFailure as i32,
-        ),
-        (
-            TraceLabel::ResultValuePrepared,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::ResultCommit,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::LeafRelease,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-        (
-            TraceLabel::CarrierRelease,
-            InterpreterPgStatus::ContractFailure as i32,
-        ),
-    ];
-    for (label, status) in injection_matrix {
-        cases.push(Case {
-            case_id: Box::leak(format!("failure_injection_{label:?}").into_boxed_str()),
-            input_leaves: vec![b"inject-me".to_vec(), b"second-leaf".to_vec()],
-            failure_injection: Some(*label),
-            compound_cleanup_injection: None,
-            expected_accepted: false,
-            expected_status: *status,
-        });
-    }
-
-    // Issue #162's compound cleanup-after-an-earlier-failure case; see
-    // `divergence_7_compounding_cleanup` for the case itself and the
-    // finding it exists to prove.
-    cases.push(divergence_7_compounding_cleanup::compounding_case());
-    cases
+    settlement_manifest::cases()
+        .into_iter()
+        .map(|case| Case {
+            case_id: case.case_id,
+            input_leaves: case.input_leaves,
+            failure_injection: case.injection.map(|index| LABELS[index]),
+            compound_cleanup_injection: case.cleanup_injection.map(|index| LABELS[index]),
+            expected_accepted: case.accepted,
+            expected_status: case.status,
+        })
+        .collect()
 }
 
 /// Length-prefix one field exactly like `public_generic_abi::frame`
@@ -605,7 +481,7 @@ fn run_interpreter_case(case: &Case) -> EngineOutcome {
     let live_allocations = provider.live_allocations() as u64;
     let live_handles = provider.live_handles() as u64;
     let settlement_overwrite_attempts = provider.test_settlement_overwrite_attempts() as u64;
-    let _ = provider.close();
+    assert_eq!(provider.close(), InterpreterPgStatus::Ok);
     EngineOutcome {
         engine_id: "interpreter",
         accepted,
@@ -654,7 +530,7 @@ fn run_wasm_case(case: &Case) -> EngineOutcome {
     let live_allocations = provider.live_allocations() as u64;
     let live_handles = provider.live_handles() as u64;
     let settlement_overwrite_attempts = provider.test_settlement_overwrite_attempts() as u64;
-    let _ = provider.close();
+    assert_eq!(provider.close(), WasmPgStatus::Ok);
     EngineOutcome {
         engine_id: "core-wasm",
         accepted,
@@ -709,113 +585,11 @@ fn render_settlement_corpus_probe(cases: &[Case]) -> String {
     source.push('\n');
     source.push_str(include_str!("allocations.c"));
     source.push('\n');
+    source.push_str(include_str!("settlement_corpus/observations.c"));
     source.push_str(&provider_source);
     source.push('\n');
-    source.push_str(
-        r#"/* --- settlement-corpus driver (issue #162): one function per case,
- * generated from the identical Rust `Case` table `run_interpreter_case`/
- * `run_wasm_case` consume. --- */
-static size_t g_prev_overwrite_total = 0;
-/* `g_spx_pg_trace`/`g_spx_pg_trace_len` (provider_body.c) are process-global
- * and append-only for the whole probe run, with no reset entry point
- * exposed -- exactly like the settlement-overwrite counter above, one
- * case's own trace is the slice recorded since the previous case, not the
- * cumulative total. */
-static size_t g_prev_trace_len = 0;
-
-/* Fixed scratch, deliberately never routed through `malloc`/`free`
- * (tracked by `allocations.c` above): this driver's OWN copy of the
- * exported result bytes must not appear in either counter this function
- * reports, or it would compare the provider's real settlement against a
- * count polluted by test-harness bookkeeping rather than the provider
- * itself. Sized for the corpus's own maximum case (one
- * `MAX_BYTES_PER_LEAF`-sized leaf plus the small fixed header). */
-static uint8_t g_result_scratch[1 << 18];
-
-static spx_pg_provider_v1 *open_trusted_provider(void) {
-    spx_pg_provider_v1 *provider = NULL;
-    spx_pg_status_v1 status =
-        spx_pg_provider_open_v1(SPX_PG_TRUSTED_DESCRIPTOR_BYTES, SPX_PG_TRUSTED_DESCRIPTOR_LEN,
-                                 SPX_PG_TRUSTED_BINDING_BYTES, SPX_PG_TRUSTED_BINDING_LEN, &provider);
-    REQUIRE(status == SPX_PG_STATUS_OK);
-    REQUIRE(provider != NULL);
-    return provider;
-}
-
-static void run_one_case(const char *case_id, const uint8_t *carrier, size_t carrier_len,
-                          int32_t injection_ordinal, int32_t injection_ordinal2) {
-    spx_pg_provider_v1 *provider = open_trusted_provider();
-    if (injection_ordinal >= 0) {
-        spx_pg_test_inject_failure_v1((uint32_t)injection_ordinal);
-    }
-    if (injection_ordinal2 >= 0) {
-        spx_pg_test_inject_failure_v1((uint32_t)injection_ordinal2);
-    }
-    spx_pg_value_v1 *input = NULL;
-    spx_pg_status_v1 status = spx_pg_input_prepare_v1(provider, carrier, carrier_len, &input);
-    spx_pg_result_v1 *result = NULL;
-    if (status == SPX_PG_STATUS_OK) {
-        if (injection_ordinal >= 0) {
-            spx_pg_test_inject_failure_v1((uint32_t)injection_ordinal);
-        }
-        if (injection_ordinal2 >= 0) {
-            spx_pg_test_inject_failure_v1((uint32_t)injection_ordinal2);
-        }
-        status = spx_pg_call_v1(provider, input, &result);
-    }
-    int has_result = 0;
-    size_t result_len = 0;
-    if (status == SPX_PG_STATUS_OK) {
-        REQUIRE(result != NULL);
-        size_t required = 0;
-        spx_pg_status_v1 sized = spx_pg_result_export_v1(result, NULL, 0, &required);
-        REQUIRE(sized == SPX_PG_STATUS_BUFFER_TOO_SMALL || sized == SPX_PG_STATUS_OK);
-        REQUIRE(required <= sizeof(g_result_scratch));
-        size_t reported = 0;
-        REQUIRE(spx_pg_result_export_v1(result, g_result_scratch, required, &reported) ==
-                SPX_PG_STATUS_OK);
-        result_len = reported;
-        has_result = 1;
-        REQUIRE(spx_pg_result_release_v1(&result) == SPX_PG_STATUS_OK);
-    } else {
-        REQUIRE(result == NULL);
-    }
-    /* Handle count is meaningful only while `provider` is still a live
-     * pointer; alloc/byte counters are read AFTER close instead, exactly
-     * like every existing `assert_fully_settled()` call in probe.c, so
-     * the provider's own control-block allocation (freed by close) does
-     * not read as a false "still live" resource. */
-    size_t live_handles = spx_pg_test_live_handles_v1(provider);
-    size_t trace_total = spx_pg_test_trace_len_v1();
-    size_t trace_start = g_prev_trace_len;
-    g_prev_trace_len = trace_total;
-    size_t overwrite_total = spx_pg_test_settlement_overwrite_attempts_v1();
-    size_t overwrite_delta = overwrite_total - g_prev_overwrite_total;
-    g_prev_overwrite_total = overwrite_total;
-    spx_pg_test_clear_failure_injection_v1();
-    REQUIRE(spx_pg_provider_close_v1(&provider) == SPX_PG_STATUS_OK);
-    size_t live_alloc = spx_pg_test_live_allocations_v1();
-
-    printf("CASE case_id=%s accepted=%d status=%d live_alloc=%zu live_handles=%zu "
-           "fixture_live=%zu fixture_peak=%zu overwrite=%zu trace=",
-           case_id, status == SPX_PG_STATUS_OK ? 1 : 0, (int)status, live_alloc, live_handles,
-           fixture_live, fixture_peak, overwrite_delta);
-    for (size_t index = trace_start; index < trace_total; ++index) {
-        printf("%u%s", spx_pg_test_trace_label_v1(index), (index + 1 < trace_total) ? "," : "");
-    }
-    printf(" result=");
-    if (has_result) {
-        for (size_t index = 0; index < result_len; ++index) {
-            printf("%02x", g_result_scratch[index]);
-        }
-    } else {
-        printf("-");
-    }
-    printf("\n");
-}
-
-"#,
-    );
+    source.push_str(include_str!("settlement_corpus/probe.c"));
+    source.push_str(include_str!("settlement_corpus/failure_regressions.c"));
 
     for (index, case) in cases.iter().enumerate() {
         let carrier = encode_input_carrier(&case.input_leaves);
@@ -835,10 +609,10 @@ static void run_one_case(const char *case_id, const uint8_t *carrier, size_t car
         source.push_str(&format!(
             "    run_one_case({}, CASE_{index}_CARRIER, sizeof(CASE_{index}_CARRIER), {ordinal}, \
              {ordinal2});\n",
-            c_string_literal(case.case_id)
+            c_string_literal(&case.case_id)
         ));
     }
-    source.push_str("    (void)puts(\"settlement-corpus-native-probe-done\");\n    return 0;\n}\n");
+    source.push_str("    check_failure_regressions();\n    (void)puts(\"settlement-corpus-native-probe-done\");\n    return 0;\n}\n");
     source
 }
 
@@ -846,6 +620,7 @@ static void run_one_case(const char *case_id, const uint8_t *carrier, size_t car
 struct NativeCaseOutcome {
     outcome: EngineOutcome,
     fixture_peak_so_far: u64,
+    measurements: wire_evidence::Measurements,
 }
 
 fn parse_native_line(line: &str, engine_id: &'static str) -> NativeCaseOutcome {
@@ -855,6 +630,30 @@ fn parse_native_line(line: &str, engine_id: &'static str) -> NativeCaseOutcome {
     let rest = line
         .strip_prefix("CASE ")
         .unwrap_or_else(|| panic!("unexpected native probe line: {line:?}"));
+    let expected = [
+        "case_id",
+        "accepted",
+        "status",
+        "live_alloc",
+        "live_handles",
+        "fixture_live",
+        "fixture_peak",
+        "overwrite",
+        "trace",
+        "result",
+        "live_bytes",
+        "peak_alloc",
+        "peak_bytes",
+        "peak_handles",
+        "endpoint_invoked",
+        "release_order",
+        "secondary_cleanup",
+    ];
+    let keys: Vec<_> = rest
+        .split(' ')
+        .map(|field| field.split_once('=').unwrap().0)
+        .collect();
+    assert_eq!(keys, expected, "native evidence field inventory/order mismatch");
     let mut case_id = None;
     let mut accepted = None;
     let mut status = None;
@@ -871,7 +670,10 @@ fn parse_native_line(line: &str, engine_id: &'static str) -> NativeCaseOutcome {
             .unwrap_or_else(|| panic!("malformed native probe field {field:?} in {line:?}"));
         match key {
             "case_id" => case_id = Some(value.to_owned()),
-            "accepted" => accepted = Some(value == "1"),
+            "accepted" => {
+                assert!(value == "0" || value == "1", "noncanonical accepted boolean");
+                accepted = Some(value == "1");
+            }
             "status" => status = Some(value.parse::<i32>().unwrap()),
             "live_alloc" => live_alloc = Some(value.parse::<u64>().unwrap()),
             "live_handles" => live_handles = Some(value.parse::<u64>().unwrap()),
@@ -889,6 +691,11 @@ fn parse_native_line(line: &str, engine_id: &'static str) -> NativeCaseOutcome {
                 })
             }
             "result" => result = Some(value.to_owned()),
+            "live_bytes" => assert_eq!(value, "0", "native byte leak"),
+            "peak_alloc" | "peak_bytes" | "peak_handles" | "endpoint_invoked"
+            | "release_order" | "secondary_cleanup" => {
+                // Parsed into typed measurements by wire_evidence::read below.
+            }
             other => panic!("unknown native probe field {other:?} in {line:?}"),
         }
     }
@@ -923,6 +730,7 @@ fn parse_native_line(line: &str, engine_id: &'static str) -> NativeCaseOutcome {
             settlement_overwrite_attempts: overwrite.expect("missing overwrite"),
         },
         fixture_peak_so_far: fixture_peak.expect("missing fixture_peak"),
+        measurements: wire_evidence::read(rest),
     }
 }
 
@@ -999,7 +807,14 @@ fn compile_and_run_native(cases: &[Case], optimization: &str) -> Vec<NativeCaseO
     };
     lines
         .into_iter()
-        .map(|line| parse_native_line(line, engine_id))
+        .zip(cases)
+        .map(|(line, case)| {
+            assert!(
+                line.starts_with(&format!("CASE case_id={} ", case.case_id)),
+                "native case ID/order mismatch"
+            );
+            parse_native_line(line, engine_id)
+        })
         .collect()
 }
 
@@ -1011,6 +826,13 @@ fn corpus_and_native_outcomes(
         let cases = corpus();
         let o0 = compile_and_run_native(&cases, "-O0");
         let o2 = compile_and_run_native(&cases, "-O2");
+        for (index, (left, right)) in o0.iter().zip(&o2).enumerate() {
+            assert_eq!(
+                left.measurements, right.measurements,
+                "native physical evidence differs at case {}",
+                cases[index].case_id
+            );
+        }
         (cases, o0, o2)
     })
 }

@@ -508,7 +508,7 @@ exactly one closed constant:
 | `SPX_PG_STATUS_MALFORMED_BINDING` (3) | `SPX-PG901` | malformed native provider binding bytes |
 | `SPX_PG_STATUS_BINDING_REPLAY_MISMATCH` (4) | `SPX-PG902` | binding bytes do not replay, or name a different descriptor/target/provider artifact/endpoint |
 | `SPX_PG_STATUS_MALFORMED_CARRIER` (5) | `SPX-PG801` | malformed input/result carrier bytes |
-| `SPX_PG_STATUS_CARRIER_CAPACITY` (6) | `SPX-PG802` | a carrier bound was reached (leaf count or byte total) |
+| `SPX_PG_STATUS_CARRIER_CAPACITY` (6) | `SPX-PG802` | a carrier/resource bound was reached (leaf count, byte total, live registry or identity capacity) |
 | `SPX_PG_STATUS_ILLEGAL_TRANSITION` (7) | `SPX-PG804` | an illegal handle-lifecycle operation |
 | `SPX_PG_STATUS_HANDLE_INVALID` (8) | `SPX-PG805` | the handle is not live in this provider's registry: foreign, stale, already consumed/released, or forged |
 | `SPX_PG_STATUS_STICKY_SETTLEMENT_VIOLATION` (9) | `SPX-PG806` | reserved; the adapter itself never issues a second, different outcome |
@@ -524,23 +524,53 @@ duplicate an existing SPX-PG reason.
 
 ### Handle safety
 
-Every opaque handle is a pointer minted by this adapter and tracked in one
-process-wide registry entry `{pointer, kind, owner, generation}` (native
-C11's physical spelling of the logical `Handle{id, generation}`: pointer
-identity is `id`, a per-provider monotonic counter is `generation`). Handle
-validation always scans the registry for the exact pointer **value** first
-and dereferences the pointee only once a live, correctly-kinded entry is
-found — the repository's existing FFI-handle safety pattern, reused rather
-than reinvented, so a forged or foreign pointer is rejected without ever
-being dereferenced. A released or transferred entry is zeroed immediately, so
-a later allocation reusing the same address is never mistaken for the old
-handle. This is why `spx_pg_result_export_v1`/`spx_pg_value_release_v1`/
-`spx_pg_result_release_v1` need no separate provider argument even though the
-registry backs every provider: cross-provider misuse is caught because a
-handle minted by one provider is tagged with that provider as `owner` and
-`spx_pg_call_v1`/`spx_pg_provider_close_v1` check it explicitly.
+Opaque handles are address-only identities, not heap addresses. The native
+reference provider uses one bounded pool of real C identity objects with static
+storage duration, shared by provider/input/result kinds. Each mint consumes the
+next pool entry permanently. No integer-to-pointer encoding or supplied-pointer
+dereference is used. Child registry rows bind `{identity, private_object, kind,
+owner, generation}`; a separate provider registry binds identity to its private
+heap object. Validation compares the supplied pointer **value** to a live entry
+before using the private object from that entry. Provider operations follow the
+same rule, including close. Unknown/stale provider identities return status 8;
+close nulls the rejected caller alias without freeing any foreign object.
+
+Removing a row invalidates the identity permanently. Heap storage is still
+freed immediately. Thus malloc reusing a private input/result/provider address
+cannot resurrect a released or transferred public handle. The former registry
+keyed by the heap pointer did **not** provide that property: merely zeroing a
+row did not stop a new allocation at the same address from reviving an alias.
+Retained tests exercise stale child aliases and provider recreation; they do
+not infer safety from malloc happening not to reuse an address under ASan.
+
+The reference artifact admits **256 live providers**, **256 live child handles**
+across those providers, and **65,536 total minted identities** across all kinds
+over one loaded artifact lifetime. The shared identity pool occupies 65,536
+one-byte union objects, with no per-carrier heap obligation. Its mint counter
+never resets on provider close, cleanup, failed invocation, or test reset. The
+bound is a conservative safety constraint of this experimental pointer ABI,
+not an unlimited-reuse claim. Exhaustion returns existing capacity status 6
+before a new allocation; failed allocation before minting consumes no identity.
+A minted identity discarded during later preparation still counts. Existing
+results remain exportable/releasable and providers remain closeable at capacity.
+Unloading/reloading an artifact while retaining its handles is not admitted.
+
+Carrier framing/bounds precede input resource-capacity checks. Invalid provider
+identity precedes carrier access. A null/stale/cross-provider call pairing
+leaves a live input untouched. After valid pairing, identity-capacity refusal
+settles the admitted input before endpoint entry, returns 6 and exposes no
+result, preserving the existing valid-call consuming contract for generated
+clients. No public function signature, carrier byte schema, native binding
+schema or public support/publication decision changes.
 
 ### Allocation, release, and sticky failure
+
+Each valid `spx_pg_call_v1` starts a fresh settlement selection after checking
+the input/provider pairing and before any new failure. A different prepared
+input's success, failure, or rejected preparation cannot select this call's
+status. Sticky precedence still holds within the call. The lifecycle gate
+pins all three sibling scenarios, including the former defect where a prior
+success caused a later execution failure to return success with a null result.
 
 [`provider_body.c`](../src/public_generic_abi/native/provider_body.c) routes
 every heap byte — provider/value/result structs, leaf pointer/length arrays,

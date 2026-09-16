@@ -8,6 +8,14 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Prevent stale native public-generic handles from reviving when heap addresses
+  are reused; validate provider identities before access/close and pin bounded,
+  non-recycled identities plus exact/+1 live-resource admission. Isolate
+  settlement between sibling prepared inputs so an earlier success cannot mask
+  a later failure as success-without-result. Extend #162 with lifecycle/recreation,
+  identity-exhaustion, 8,192-call stress and paired replay evidence; public ABI
+  signatures and unsupported/unpublished status remain unchanged.
+
 - Share one bounded, digest-pinned public-generic settlement manifest across the
   existing model/native harnesses; preserve primary failures before cleanup and
   reverse every native result rollback. Add per-case native observations, real

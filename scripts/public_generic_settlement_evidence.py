@@ -157,16 +157,19 @@ def render(cases: list[dict[str, Any]]) -> tuple[str, bytes, bytes]:
              c_array("SPX_PG_TRUSTED_BINDING_BYTES", binding, "SPX_PG_TRUSTED_BINDING_LEN"),
              (ROOT / "src/public_generic_abi/native/provider_body.c").read_text(),
              (NATIVE / "settlement_corpus/probe.c").read_text(),
-             (NATIVE / "settlement_corpus/failure_regressions.c").read_text()]
+             (NATIVE / "settlement_corpus/failure_regressions.c").read_text(),
+             (NATIVE / "settlement_corpus/lifecycle.c").read_text()]
     for i, case in enumerate(cases):
         parts.append(c_array(f"CASE_{i}_CARRIER", input_carrier(case)))
-    parts.append("int main(void) { REQUIRE(fixture_binary_stdout());\n")
+    parts.append("int main(int argc, char **argv) { REQUIRE(fixture_binary_stdout());\n"
+                 'if (argc == 2) return pg_lifecycle_run(argv[1], 1) ? 0 : 2;\n'
+                 'if (argc != 1) return 2;\n')
     for i, case in enumerate(cases):
         injections = [LABELS.index(case[field]) if case[field] is not None else -1
                       for field in ["failure_injection_id", "compound_cleanup_injection"]]
         parts.append(f'run_one_case("{case["case_id"]}", CASE_{i}_CARRIER, sizeof(CASE_{i}_CARRIER), '
                      f'{injections[0]}, {injections[1]});\n')
-    parts.append('check_failure_regressions(); puts("settlement-corpus-native-probe-done"); return 0; }\n')
+    parts.append('check_failure_regressions(); check_lifecycle_regressions(); puts("settlement-corpus-native-probe-done"); return 0; }\n')
     return "\n".join(parts), descriptor, binding
 
 
@@ -294,10 +297,115 @@ def check_negative_controls(trusted: bytes) -> int:
     return len(corruptions)
 
 
+
+LIFECYCLE = "semaprax.public-generic-native-lifecycle-evidence.v1"
+LIFECYCLE_FIELDS = ["case_id", "endpoints", "rejections", "identities", "peak_alloc",
+                    "peak_handles", "live_alloc", "live_handles", "live_bytes"]
+LIFECYCLE_CASES = ["reuse", "stale_children", "recreation", "hostile_providers",
+                   "sibling_settlement", "live_providers", "live_children",
+                   "identity_provider", "identity_input", "identity_result",
+                   "identity_result_over", "stress"]
+
+
+def lifecycle_manifest(stress: bool) -> tuple[list[dict[str, Any]], bytes]:
+    data = read_bounded(FIXTURE / "native-lifecycle-cases.json", 32 * 1024)
+    value = read_canonical(data, 32 * 1024)
+    require(type(value) is dict and set(value) == {"schema", "identity_capacity",
+            "live_provider_capacity", "live_child_capacity", "cases"}, "lifecycle-manifest-fields")
+    require(value["schema"] == "semaprax.public-generic-native-lifecycle-corpus.v1",
+            "lifecycle-manifest-schema")
+    for field, expected in [("identity_capacity", 65536), ("live_provider_capacity", 256),
+                            ("live_child_capacity", 256)]:
+        require(type(value[field]) is int and value[field] == expected, "lifecycle-manifest-bound")
+    cases = value["cases"]
+    require(type(cases) is list and len(cases) == len(LIFECYCLE_CASES), "lifecycle-case-count")
+    for case, case_id in zip(cases, LIFECYCLE_CASES):
+        require(type(case) is dict and set(case) == set(LIFECYCLE_FIELDS), "lifecycle-case-fields")
+        require(case["case_id"] == case_id, "lifecycle-case-order")
+        require(all(type(case[key]) is int and 0 <= case[key] <= 65536
+                    for key in LIFECYCLE_FIELDS[1:]), "lifecycle-counter-bound")
+        require(all(case[key] == 0 for key in ["live_alloc", "live_handles", "live_bytes"]),
+                "lifecycle-live-expectation")
+    return (cases if stress else cases[:-1]), data
+
+
+def parse_lifecycle(text: str, expected: dict[str, Any]) -> dict[str, Any]:
+    require(text.startswith("LIFECYCLE ") and text.endswith("\n")
+            and len(text.splitlines()) == 1, "lifecycle-framing")
+    fields = [field.split("=", 1) for field in text.removeprefix("LIFECYCLE ").removesuffix("\n").split(" ")]
+    require(all(len(field) == 2 for field in fields)
+            and [field[0] for field in fields] == LIFECYCLE_FIELDS, "lifecycle-fields")
+    result = {key: value if key == "case_id" else unsigned(value) for key, value in fields}
+    require(result == expected, "lifecycle-expectation: " + expected["case_id"])
+    return result
+
+
+def seal_lifecycle(body: dict[str, Any]) -> bytes:
+    return canonical(dict(body, summary_digest=digest(LIFECYCLE + "/summary", canonical(body))))
+
+
+def replay_lifecycle(submitted: bytes, trusted: bytes) -> None:
+    value = read_canonical(submitted, 256 * 1024)
+    require(type(value) is dict and set(value) == {"schema", "manifest_digest", "rows",
+            "settlement_evidence_digest", "summary_digest"} and value["schema"] == LIFECYCLE,
+            "lifecycle-evidence-schema")
+    require(type(value["rows"]) is list and 0 < len(value["rows"]) <= 36,
+            "lifecycle-row-bound")
+    body = {key: item for key, item in value.items() if key != "summary_digest"}
+    require(seal_lifecycle(body) == submitted, "lifecycle-summary-digest")
+    require(submitted == trusted, "lifecycle-trusted-replay-mismatch")
+
+
+def lifecycle_negative_controls(trusted: bytes, expected: dict[str, Any]) -> int:
+    original = json.loads(trusted)
+    bad_evidence = [trusted[:-1], trusted[:-25], b" " + trusted,
+                    trusted.replace(b'{', b'{"unknown":0,', 1)]
+    for field in original["rows"][0]:
+        changed = copy.deepcopy(original)
+        old = changed["rows"][0][field]
+        changed["rows"][0][field] = old + 1 if type(old) is int else "forged"
+        changed.pop("summary_digest")
+        bad_evidence.append(seal_lifecycle(changed))
+    for transform in [lambda v: v["rows"].reverse(), lambda v: v["rows"].pop(),
+                      lambda v: v["rows"][0].pop("endpoints"),
+                      lambda v: v["rows"][0].update(unknown=0),
+                      lambda v: v.update(settlement_evidence_digest="sha256:" + "f" * 64),
+                      lambda v: v.update(manifest_digest="sha256:" + "f" * 64)]:
+        changed = copy.deepcopy(original)
+        transform(changed)
+        changed.pop("summary_digest")
+        bad_evidence.append(seal_lifecycle(changed))
+    for bad in bad_evidence:
+        try:
+            replay_lifecycle(bad, trusted)
+        except (ValueError, TypeError, KeyError):
+            continue
+        raise ValueError("lifecycle-negative-control-accepted")
+    valid = "LIFECYCLE " + " ".join(f"{key}={expected[key]}" for key in LIFECYCLE_FIELDS) + "\n"
+    require(parse_lifecycle(valid, expected) == expected, "lifecycle-positive-control")
+    bad_wire = [valid.rstrip(), valid + valid, valid.replace("endpoints=", "unknown=", 1),
+                valid.replace(" endpoints=", " case_id=duplicate endpoints=", 1),
+                valid.replace(" live_bytes=0", " live_bytes=00"),
+                valid.replace(" live_bytes=0", " live_bytes=1"),
+                valid.replace(" endpoints=", " endpoints=0", 1),
+                valid.replace(" live_alloc=0 live_handles=0", " live_handles=0 live_alloc=0"),
+                valid[:-1] + " \n", valid[:-1] + "\r\n",
+                valid.replace(" live_bytes=0", " live_bytes=18446744073709551616"),
+                valid.replace(" live_bytes=0", "")]
+    for bad in bad_wire:
+        try:
+            parse_lifecycle(bad, expected)
+        except (ValueError, TypeError, KeyError):
+            continue
+        raise ValueError("lifecycle-wire-negative-control-accepted")
+    return len(bad_evidence) + len(bad_wire)
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, help="write payload-free canonical evidence here")
     parser.add_argument("--replay", type=Path, help="reconstruct and verify this evidence.json")
+    parser.add_argument("--replay-lifecycle", type=Path, help="verify companion native-lifecycle-evidence.json")
+    parser.add_argument("--stress", action="store_true", help="also require 8,192 same-provider calls per native engine")
     parser.add_argument("--sanitizers", action="store_true", help="also require ASan + UBSan at -O1")
     parser.add_argument("--cc", default=os.environ.get("CLANG", "clang"))
     args = parser.parse_args()
@@ -306,6 +414,11 @@ def main() -> int:
         submitted = read_bounded(args.replay, 1024 * 1024)
         # Canonical framing and integrity are checked before compilation.
         replay(submitted, submitted)
+    submitted_lifecycle = None
+    if args.replay_lifecycle:
+        submitted_lifecycle = read_bounded(args.replay_lifecycle, 256 * 1024)
+        replay_lifecycle(submitted_lifecycle, submitted_lifecycle)
+    lifecycle_cases, lifecycle_bytes = lifecycle_manifest(args.stress)
     compiler = shutil.which(args.cc)
     require(compiler is not None, "compiler-unavailable")
     manifest, manifest_bytes = load_manifest()
@@ -325,7 +438,7 @@ def main() -> int:
     engines = [("native-c11-O0", ["-O0"]), ("native-c11-O2", ["-O2"])]
     if args.sanitizers:
         engines.append(("native-c11-asan-ubsan", ["-O1", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"]))
-    rows, outcomes = [], []
+    rows, outcomes, lifecycle_rows = [], [], []
     with tempfile.TemporaryDirectory(prefix="spx-settlement-") as temp:
         work = Path(temp)
         (work / "settlement_corpus_probe.c").write_text(source, encoding="utf-8")
@@ -350,6 +463,14 @@ def main() -> int:
             artifact = digest(EVIDENCE + "/provider-artifact", binary.read_bytes())
             rows.extend(evidence_row(item, engine, artifact, descriptor, binding) for item in measured)
             print(f"PASS {engine}: {len(cases)} shared cases, compound/rollback regressions, zero resources")
+            for expected in lifecycle_cases:
+                check = subprocess.run([str(binary), expected["case_id"]], cwd=work,
+                    capture_output=True, text=True, env=env, timeout=120)
+                require(check.returncode == 0 and not check.stderr,
+                        "lifecycle-probe-failed: " + expected["case_id"] + ": " + check.stderr)
+                observed = parse_lifecycle(check.stdout, expected)
+                lifecycle_rows.append(dict(observed, engine_id=engine, provider_artifact_digest=artifact))
+            print(f"PASS {engine}: {len(lifecycle_cases)} lifecycle cases, exact/+1 bounds, zero resources")
     body = {"schema": EVIDENCE, "profile": manifest["profile"],
             "manifest_digest": digest(EVIDENCE + "/manifest", manifest_bytes),
             "provider_sources_digest": digest(EVIDENCE + "/sources", source.encode("utf-8")),
@@ -361,9 +482,20 @@ def main() -> int:
         require(submitted is not None, "missing-replay")
         replay(submitted, trusted)
         print("PASS independent replay against fresh trusted execution")
+    lifecycle_trusted = seal_lifecycle({"schema": LIFECYCLE,
+        "manifest_digest": digest(LIFECYCLE + "/manifest", lifecycle_bytes),
+        "settlement_evidence_digest": digest(LIFECYCLE + "/settlement", trusted), "rows": lifecycle_rows})
+    replay_lifecycle(lifecycle_trusted, lifecycle_trusted)
+    count = lifecycle_negative_controls(lifecycle_trusted, lifecycle_cases[0])
+    print(f"PASS lifecycle replay: {count} reminted/structural/wire negative controls")
+    if args.replay_lifecycle:
+        require(submitted_lifecycle is not None, "missing-lifecycle-replay")
+        replay_lifecycle(submitted_lifecycle, lifecycle_trusted)
+        print("PASS independent lifecycle replay against fresh trusted execution")
     if args.output:
         args.output.mkdir(parents=True, exist_ok=True)
         (args.output / "evidence.json").write_bytes(trusted)
+        (args.output / "native-lifecycle-evidence.json").write_bytes(lifecycle_trusted)
         print(f"Wrote {args.output / 'evidence.json'}")
     return 0
 

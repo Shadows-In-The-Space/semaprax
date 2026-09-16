@@ -110,7 +110,8 @@ milestone job itself, alongside four-language metadata consumers that close the
 grammar half of two more. No public generic signature, descriptor, carrier,
 calling convention, or support claim follows from any of them, and no public support follows from the versioned descriptor/carrier code that
 now exists. The [runtime settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
-records the implemented native fixture subset and the remaining checked-endpoint,
+records the implemented native fixture subset, including bounded non-recycled
+identity/recreation and sibling-settlement gates, and the remaining checked-endpoint,
 compiled-Wasm, consumer-matrix and all-engine evidence requirements.
 
 The largest remaining product gaps are general ownership and lifetime safety,

@@ -108,8 +108,9 @@ later failure simply because the numeric primary status is also 11.
 
 The shared probe checks exact and one-byte-short result export, unchanged output
 buffers after a capacity refusal, explicit release, null-release idempotence,
-and rejection of a copied result handle immediately after release. It does not
-claim to solve pointer-address reuse across later native allocations.
+and rejection of a copied result handle immediately after release. The native
+lifecycle continuation below additionally covers later allocation and provider
+recreation without reusing public handle identities.
 
 The native-only extension additionally executes 61 regression combinations:
 22 real allocation-failure combinations (each of eleven allocation points,
@@ -154,6 +155,78 @@ reports. The replay gate includes 25 structural and reminted semantic negative
 controls. A changed toolchain/provider may legitimately invalidate an older
 artifact; replay requires the same trusted subjects, not merely equal output.
 
+## Native lifecycle continuation
+
+Issue #162's continuation reuses the same rendered provider, shared C probe,
+allocator observers, compiler selection and replay gate. It does not add a
+second provider or a Wasm implementation. `settlement_corpus/lifecycle.c` adds
+seven ordinary lifecycle scenarios to the existing Cargo native probe. The
+portable gate additionally runs four identity-bound scenarios in **fresh
+processes**, never by resetting or fast-forwarding the identity counter.
+
+The committed `native-lifecycle-cases.json` uses
+`semaprax.public-generic-native-lifecycle-corpus.v1`. It is sorted-key compact
+ASCII JSON plus LF, limited to 32 KiB, with closed fields and case order. Eleven
+cases run by default: same-provider reuse, stale input/result aliases after
+allocation, provider recreation, hostile/wrong-kind/foreign providers, sibling
+settlement isolation, exact/+1 live provider and child capacity, and exact/+1
+identity capacity at provider/input/result creation and pre-execution result
+refusal. The twelfth case, `stress`, runs 8,192 independent calls on one live
+provider when `--stress` is selected. Default reuse runs 128 calls. Exact
+copy-in isolation, repeated non-consuming copy-out, embedded zeros, unchanged
+short-buffer poison, reverse physical release and no endpoint retry are checked
+inside the actual lifecycle operations, not inferred from the final counters.
+
+The native fix separates non-recycled public identity from recyclable heap
+storage and checks provider handles through a live registry before access or
+close. The [native handle contract](PUBLIC-GENERIC-CARRIER-V1.md#handle-safety)
+pins the new conservative bound: 65,536 total minted identities per loaded
+artifact, shared across provider/input/result kinds. There are 256 live-provider
+and 256 live-child slots. All private heap allocations still free normally;
+static identity metadata is not an outstanding payload/resource obligation.
+Exhausted identities cannot be reset by reopening a provider. A valid call
+refused for result identity capacity consumes/settles its input before endpoint
+entry; invalid provider/input pairing does not consume a different live input.
+
+A second correction resets settlement at each valid invocation, not merely at
+input preparation. With more than one prepared input, a sibling's result or a
+later failed preparation previously contaminated the next call. A prior
+success could mask a real failure as status 0 with a null result. The new gate
+pins prior-success/later-failure, prior-failure/later-success, and rejected-
+prepare/later-success separately. Chronological sticky failure within a single
+invocation is unchanged and remains covered by all earlier regression cases.
+
+### Companion evidence
+
+`native-lifecycle-evidence.json` uses the new, separate
+`semaprax.public-generic-native-lifecycle-evidence.v1`; it does not reinterpret
+the predecessor settlement-evidence schema. Each fixed-order C receipt has
+`case_id`, `endpoints`, `rejections`, `identities`, `peak_alloc`, `peak_handles`,
+`live_alloc`, `live_handles`, and `live_bytes`. The parser rejects unknown,
+duplicate, reordered, missing or noncanonical fields and compares every field
+to the committed case expectation. The C checks also inspect every private
+registry entry and require zero providers, child objects, heap allocations and
+bytes plus exact independent malloc/free balance at each scenario's end.
+
+The canonical evidence envelope contains `schema`, `manifest_digest`,
+`settlement_evidence_digest`, ordered `rows`, and `summary_digest`. Each row adds
+`engine_id` and the actual `provider_artifact_digest` to the measured receipt.
+It binds the **exact companion settlement evidence**, which already binds
+trusted provider source, descriptor/binding, carriers and runtime traces. All
+digests reuse the existing domain/NUL/u64-length framing; lifecycle-specific
+suffixes are `/manifest`, `/settlement` and `/summary`. Receipt fields describe
+multi-operation lifecycle scenarios, not a replacement `EngineOutcome` or an
+assertion that all engines now share full normalized lifecycle traces.
+
+Replay is bounded to 256 KiB and 36 rows (12 scenarios times three native
+builds). It rebuilds the trusted source, executes the cases and compares exact
+canonical bytes. Thirty-three negative controls cover reminted receipt/case/
+engine/provider/counter changes, a different companion artifact or manifest,
+missing/unknown fields, reordered/truncated rows, and hostile wire receipts.
+The original 25 settlement-evidence controls remain. No receipt contains
+payloads, pointers, wall-clock data or raw handles. Existing native trace and
+carrier expectation files are unchanged.
+
 ## Focused gates
 
 From the repository root:
@@ -162,11 +235,16 @@ From the repository root:
 cargo test --locked -p semaprax --lib public_generic_abi::carrier::settlement_corpus
 cargo test --locked -p semaprax --test public_generic_native_adapter_v1 settlement_corpus
 python3 scripts/public_generic_settlement_evidence.py --sanitizers --output target/pg-settlement
-python3 scripts/public_generic_settlement_evidence.py --sanitizers --replay target/pg-settlement/evidence.json
+python3 scripts/public_generic_settlement_evidence.py --sanitizers \
+  --replay target/pg-settlement/evidence.json \
+  --replay-lifecycle target/pg-settlement/native-lifecycle-evidence.json
 cargo fmt --all -- --check
 sh scripts/quality.sh full
 ```
 
+`--stress` additionally requires the 8,192-call scenario for every selected
+native build. Use identical `--stress`/`--sanitizers` options for generation and
+replay. The Linux workflow selects both options and replays both artifacts.
 `--cc` selects an explicit compiler; `CLANG` or `clang` is the default. A missing
 compiler, failed build, assertion, sanitizer error, malformed output or replay
 mismatch is a failing gate, never a skipped pass. The workflow selects the

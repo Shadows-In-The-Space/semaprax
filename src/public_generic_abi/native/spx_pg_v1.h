@@ -45,7 +45,8 @@ typedef struct spx_pg_result_v1 spx_pg_result_v1;
 #define SPX_PG_STATUS_BINDING_REPLAY_MISMATCH 4
 /* SPX-PG801: malformed input/result carrier bytes (framing, leaf count). */
 #define SPX_PG_STATUS_MALFORMED_CARRIER 5
-/* SPX-PG802: a carrier bound was reached (leaf count or byte total). */
+/* SPX-PG802: a carrier/resource admission bound was reached: leaf count,
+ * byte total, live registry capacity or lifetime identity capacity. */
 #define SPX_PG_STATUS_CARRIER_CAPACITY 6
 /* SPX-PG804: an illegal handle-lifecycle operation: release after transfer,
  * double release, close with a live handle, result read before commit, a
@@ -99,12 +100,13 @@ spx_pg_status_v1 spx_pg_input_prepare_v1(spx_pg_provider_v1 *provider,
                                           size_t carrier_len,
                                           spx_pg_value_v1 **out_input);
 
-/* Commits input transfer exactly once (invalidating `input` for the caller
- * even on failure — see "Transfer invalidates caller ownership exactly
- * once"), invokes the bound endpoint, and stages the whole result privately.
- * `*out_result` is null on any non-OK status. `input` must never be passed
- * to `spx_pg_value_release_v1` after this call, succeeding or not: ownership
- * already transferred. */
+/* Validates the provider/input pairing, then consumes input exactly once,
+ * invokes the bound endpoint, and stages the whole result privately.
+ * A null/stale/wrong-provider pairing is refused WITHOUT consuming a live
+ * input. Once pairing is accepted, every failure consumes/settles that input,
+ * including identity-capacity refusal before endpoint execution. Do not
+ * release it again. `*out_result` is null on any non-OK status.
+ * Settlement is invocation-local even with other prepared inputs/results. */
 spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider,
                                  spx_pg_value_v1 *input,
                                  spx_pg_result_v1 **out_result);
@@ -129,7 +131,18 @@ spx_pg_status_v1 spx_pg_value_release_v1(spx_pg_value_v1 **value);
 spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result);
 
 /* Closing a provider with a live input or result handle is refused
- * (SPX_PG_STATUS_ILLEGAL_TRANSITION); release every handle first. */
+ * (SPX_PG_STATUS_ILLEGAL_TRANSITION); release every handle first. A stale or
+ * foreign provider returns HANDLE_INVALID and nulls *provider, without
+ * dereferencing/freeing the supplied identity. Closing null is idempotent.
+ *
+ * Native reference-provider bounds: at most 256 live providers and 256 live
+ * child handles per loaded artifact. The artifact mints at most 65,536
+ * identities TOTAL across providers/inputs/results; identities are never
+ * recycled, even across provider close/reopen. Exhaustion returns
+ * CARRIER_CAPACITY, with no new allocation. Export/release/close still work.
+ * This bounded, address-only identity metadata has static storage duration;
+ * all private provider/carrier heap storage is freed normally. The contract
+ * does not admit carrying handles across artifact unload/reload. */
 spx_pg_status_v1 spx_pg_provider_close_v1(spx_pg_provider_v1 **provider);
 
 /* --- Test-only surface: not part of the production ABI, never emitted for

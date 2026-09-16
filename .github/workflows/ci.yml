@@ -437,8 +437,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/public_generic_settlement_evidence.py --sanitizers --output target/pg-settlement
-          python3 scripts/public_generic_settlement_evidence.py --sanitizers --replay target/pg-settlement/evidence.json
+          python3 scripts/public_generic_settlement_evidence.py --sanitizers --stress --output target/pg-settlement
+          python3 scripts/public_generic_settlement_evidence.py --sanitizers --stress \
+            --replay target/pg-settlement/evidence.json \
+            --replay-lifecycle target/pg-settlement/native-lifecycle-evidence.json
 
   std-library-depth:
     name: STD-08 bundled library depth

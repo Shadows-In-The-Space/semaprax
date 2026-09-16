@@ -285,7 +285,10 @@ static size_t build_payload_boundary_carrier(size_t final_leaf_len) {
     return carrier_len;
 }
 
-static void assert_boundary_input_copied(const spx_pg_value_v1 *input, size_t final_leaf_len) {
+static void assert_boundary_input_copied(const spx_pg_value_v1 *handle, size_t final_leaf_len) {
+    size_t slot = spx_pg_registry_find(handle, SPX_PG_KIND_VALUE);
+    REQUIRE(slot != SPX_PG_REGISTRY_CAPACITY);
+    const spx_pg_value_state *input = (const spx_pg_value_state *)g_spx_pg_registry[slot].object;
     REQUIRE(input->leaf_count == SPX_PG_MAX_OWNED_LEAVES);
     for (uint32_t leaf = 0; leaf < SPX_PG_MAX_OWNED_LEAVES; ++leaf) {
         size_t length = (leaf + 1 == SPX_PG_MAX_OWNED_LEAVES) ? final_leaf_len
@@ -354,8 +357,8 @@ static void test_physical_allowance_exhaustion_preserves_live_handles(void) {
     REQUIRE(SPX_PG_MAX_PHYSICAL_LIVE_BYTES ==
             (size_t)2 * SPX_PG_MAX_TOTAL_PAYLOAD_BYTES +
                 (size_t)2 * SPX_PG_MAX_OWNED_LEAVES * (sizeof(uint8_t *) + sizeof(size_t)) +
-                sizeof(spx_pg_provider_v1) + sizeof(spx_pg_value_v1) +
-                sizeof(spx_pg_result_v1));
+                sizeof(spx_pg_provider_state) + sizeof(spx_pg_value_state) +
+                sizeof(spx_pg_result_state));
     spx_pg_provider_v1 *provider = open_trusted_provider();
     size_t carrier_len = build_payload_boundary_carrier(SPX_PG_MAX_BYTES_PER_LEAF);
     spx_pg_value_v1 *first = NULL;

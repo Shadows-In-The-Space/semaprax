@@ -211,7 +211,9 @@ than by advancing the row.
     and all routes load one committed case manifest. The
     [persisted settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md) adds
     native per-case peaks, real allocation-failure regression coverage,
-    physical release indices, and portable replay. This remains a fixture
+    physical release indices, and portable replay. Its native continuation also
+    checks stale aliases/provider recreation, sibling settlement, exact/+1
+    identity/live-capacity limits and paired lifecycle replay. This remains a fixture
     boundary, not a compiler-derived generic-program equivalence proof;
   - peak allocation/handle observations are now compared for native O0/O2,
     but not across all model heaps/registries. Existing logical trace

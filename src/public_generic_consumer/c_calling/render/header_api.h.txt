@@ -1,0 +1,91 @@
+/* Verify the exact descriptor/provider pairing against this consumer's own
+ * embedded trusted bytes BEFORE any native allocation, then open the native
+ * provider. `*out_consumer` is non-null if and only if this returns
+ * SPX_PG_CONSUMER_OK. */
+spx_pg_consumer_status spx_pg_consumer_open(const uint8_t *descriptor_bytes,
+                                             size_t descriptor_len,
+                                             const uint8_t *provider_binding_bytes,
+                                             size_t provider_binding_len,
+                                             spx_pg_calling_consumer **out_consumer);
+
+/* Consumes `*input` by value: every leaf's `data` in `*input` is freed and
+ * the leaf zeroed before this call returns, success or failure alike -- the
+ * caller must not read or free `*input` again afterward. Every leaf byte is
+ * copied into an independent carrier buffer before any native transfer, so
+ * the native adapter never sees the caller's own buffer. `*out_output` is
+ * zeroed before this call does anything else and is populated only on
+ * SPX_PG_CONSUMER_OK; on any failure every field stays exactly {NULL,0} --
+ * a deterministic failure value, never a partially populated result. The
+ * native result handle this call opens internally is always released, by
+ * this call, before it returns, whichever way it returns -- the result this
+ * API hands back is a plain value, never a handle the caller must release.
+ * `out_native_status`, if non-null, receives the raw native
+ * `spx_pg_status_v1` the primary failure restates (0 on
+ * success or on a failure this consumer's own checks caught locally). */
+spx_pg_consumer_status spx_pg_consumer_transform(spx_pg_calling_consumer *consumer,
+                                                  spx_pg_input *input,
+                                                  spx_pg_output *out_output,
+                                                  int *out_native_status);
+
+/* One invocation's complete compositional outcome. release_status is the
+ * single native result-release operation's status, including a secondary
+ * failure after export/decode failed. No prose or stderr parsing is needed.
+ * A result is returned only if export, independent decode AND release pass. */
+typedef struct spx_pg_consumer_settlement_v1 {
+    spx_pg_consumer_status primary_status;
+    int native_status;
+    int release_status;
+} spx_pg_consumer_settlement_v1;
+
+/* Same consuming semantics as transform, with deterministic failure evidence.
+ * report may be NULL. All provided outputs are initialized on every path.
+ * Required non-null input leaves must be independent malloc-family owners;
+ * NULL/length mismatches and exact duplicate owners are refused before copy.
+ * Distinct input/output/report storage must not overlap. */
+spx_pg_consumer_status spx_pg_consumer_transform_with_settlement(
+    spx_pg_calling_consumer *consumer, spx_pg_input *input,
+    spx_pg_output *out_output, spx_pg_consumer_settlement_v1 *report);
+
+/* A checked alternative to legacy void close. Idempotent for a null pointee.
+ * On a native refusal that retains a live provider, retain *consumer for retry;
+ * never orphan that provider by dropping the only owner. */
+spx_pg_consumer_status spx_pg_consumer_close_checked(
+    spx_pg_calling_consumer **consumer, int *out_native_status);
+
+/* Releases exactly one owned leaf and zeroes it. A null pointee (`data ==
+ * NULL`) is a safe no-op, matching "release null" from the native ABI's own
+ * lifecycle tests. Safe to call on `bytes == NULL`. */
+void spx_pg_owned_bytes_free(spx_pg_owned_bytes *bytes);
+
+/* Frees every leaf of `*output` and zeroes it. Safe to call on an
+ * already-zeroed output, or on `output == NULL`. */
+void spx_pg_output_free(spx_pg_output *output);
+
+/* Closes the native provider exactly once. `*consumer` is NULL after this
+ * succeeds; a refused close retains a live owner. Prefer close_checked when
+ * the caller needs the status; this compatibility wrapper reports to stderr. */
+void spx_pg_consumer_close(spx_pg_calling_consumer **consumer);
+
+/* --- Test-only surface: restates the native provider's own test-only
+ * diagnostics. Never part of any production or publication claim -- exists
+ * so an execution harness can prove exact
+ * settlement from the consumer side, using the native provider's OWN
+ * counters. Single-threaded only, matching the native adapter itself. --- */
+
+/* Arms deterministic failure injection at native trace ordinal `ordinal`
+ * for the NEXT spx_pg_consumer_transform call only. */
+void spx_pg_consumer_test_inject_failure(uint32_t ordinal);
+void spx_pg_consumer_test_clear_failure_injection(void);
+/* The native provider's own live-allocation counter -- zero after every
+ * terminal case, success or failure, once every handle a caller minted has
+ * been released. */
+size_t spx_pg_consumer_test_live_allocations(void);
+/* The native provider's own live-handle counter for `consumer`'s provider.
+ * Returns 0 for a null `consumer`. */
+size_t spx_pg_consumer_test_live_handles(spx_pg_calling_consumer *consumer);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SPX_PG_CALLING_CONSUMER_H */

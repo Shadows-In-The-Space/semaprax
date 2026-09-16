@@ -94,6 +94,8 @@ impl RecordShape {
 /// allocates one.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ShapeError {
+    /// Executable flat-owned record profiles admit 1..=256 leaves.
+    LeafCountOutOfBounds { count: usize },
     /// `input.fields.len() != output.fields.len()`. The bound native
     /// provider's flat-leaf shape preserves leaf count end to end (see the
     /// module scope note), so a caller asking for different input/output
@@ -110,6 +112,9 @@ pub enum ShapeError {
 impl std::fmt::Display for ShapeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::LeafCountOutOfBounds { count } => {
+                write!(f, "record has {count} owned leaves; expected 1..=256")
+            }
             Self::LeafCountMismatch { input, output } => write!(
                 f,
                 "input has {input} owned leaves but output has {output}; the bound native provider preserves leaf count"
@@ -178,6 +183,12 @@ pub fn generate_rust_calling_consumer(
         return Err(ShapeError::LeafCountMismatch {
             input: input.fields.len(),
             output: output.fields.len(),
+        });
+    }
+
+    if !(1..=256).contains(&input.fields.len()) {
+        return Err(ShapeError::LeafCountOutOfBounds {
+            count: input.fields.len(),
         });
     }
 

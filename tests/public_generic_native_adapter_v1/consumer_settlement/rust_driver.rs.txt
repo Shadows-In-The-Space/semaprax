@@ -1,0 +1,81 @@
+//! Test-only external crate. The library still exposes no unsafe public API.
+#![allow(unsafe_code)]
+use spx_pg_rust_calling_consumer::{diagnostics, Error, Provider, Input, TRUSTED_DESCRIPTOR_BYTES, TRUSTED_BINDING_BYTES};
+extern "C" {
+    fn spx_pg_rs_case_v1(id: u32);
+    fn spx_pg_rs_live_v1() -> usize;
+    fn spx_pg_rs_endpoint_v1() -> usize;
+    fn spx_pg_rs_exports_v1() -> usize;
+    fn spx_pg_rs_assert_order_v1();
+}
+fn select(id: u32) {
+    // SAFETY: test-only scalar selector, called serially with no live children.
+    unsafe { spx_pg_rs_case_v1(id) }
+}
+fn input() -> Input { Input { @FIELD0@: vec![0,1,0], @FIELD1@: vec![2,0,3] } }
+fn open() -> Provider {
+    Provider::open(TRUSTED_DESCRIPTOR_BYTES, TRUSTED_BINDING_BYTES).unwrap()
+}
+fn settled(provider: &mut Provider) {
+    assert_eq!(diagnostics::live_handles(provider), 0);
+    // SAFETY: read-only test assertion over provider-owned trace metadata.
+    unsafe { spx_pg_rs_assert_order_v1() };
+    provider.close().unwrap();
+    provider.close().unwrap();
+    assert_eq!(diagnostics::live_allocations(), 0);
+    // SAFETY: independent C allocator counter takes no pointer or input.
+    assert_eq!(unsafe { spx_pg_rs_live_v1() }, 0);
+}
+#[test]
+fn explicit_release_export_decode_and_close_preserve_ownership_and_primary_error() {
+    for id in 1..=8 {
+        select(id);
+        let mut provider = open();
+        let result = provider.transform(input());
+        match id {
+            1 => assert!(matches!(result, Err(Error::ReleaseFailed(11)))),
+            2 | 8 => assert!(matches!(result, Err(Error::ExecutionFailed(11)))),
+            3 | 4 => assert!(matches!(result, Err(Error::ResultRejected(_)))),
+            5 => assert!(matches!(result, Err(Error::ExecutionFailed(10)))),
+            7 => assert!(matches!(result, Err(Error::ExecutionFailed(11)))),
+            6 => {
+                let output = result.unwrap();
+                assert_eq!(output.@FIELD0@, vec![0,1,0]);
+                assert_eq!(output.@FIELD1@, vec![3,0,2]);
+                assert!(matches!(provider.close(), Err(Error::ReleaseFailed(7))));
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(provider.last_release_status(), if matches!(id, 1..=4 | 8) { 11 } else { 0 });
+        // SAFETY: immutable scalar counters; successful export retry never
+        // causes another endpoint execution.
+        assert_eq!(unsafe { spx_pg_rs_endpoint_v1() }, 1);
+        if id == 3 { assert_eq!(unsafe { spx_pg_rs_exports_v1() }, 1); }
+        settled(&mut provider);
+    }
+    // A local bound refusal consumes its injection; the following independent
+    // invocation must succeed without the caller manually clearing it.
+    select(0);
+    let mut provider = open();
+    diagnostics::inject_failure(6);
+    let mut oversized = input();
+    oversized.@FIELD0@ = vec![0; 65537];
+    assert!(matches!(provider.transform(oversized), Err(Error::CapacityExceeded(_))));
+    assert_eq!(unsafe { spx_pg_rs_endpoint_v1() }, 0);
+    let output = provider.transform(input()).unwrap();
+    assert_eq!(output.@FIELD1@, vec![3,0,2]);
+    assert_eq!(provider.last_release_status(), 0);
+    settled(&mut provider);
+    assert!(provider.transform(input()).is_err());
+
+    // A release failure must not stick to a later successful call on the
+    // same live provider; last_release_status reports only that invocation.
+    select(1);
+    let mut provider = open();
+    assert!(matches!(provider.transform(input()), Err(Error::ReleaseFailed(11))));
+    assert_eq!(provider.last_release_status(), 11);
+    select(0);
+    assert_eq!(provider.transform(input()).unwrap().@FIELD1@, vec![3,0,2]);
+    assert_eq!(provider.last_release_status(), 0);
+    settled(&mut provider);
+}

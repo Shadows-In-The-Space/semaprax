@@ -1,0 +1,23 @@
+/* One move-only owner of the generated C output, never a native handle. */
+class Output final {
+public:
+    Output() noexcept : raw_{} {}
+    Output(Output &&other) noexcept : raw_(other.raw_) { other.raw_ = ::spx_pg_output{}; }
+    Output &operator=(Output &&other) noexcept {
+        if (this != &other) {
+            ::spx_pg_output_free(&raw_);
+            raw_ = other.raw_;
+            other.raw_ = ::spx_pg_output{};
+        }
+        return *this;
+    }
+    Output(const Output &) = delete;
+    Output &operator=(const Output &) = delete;
+    ~Output() noexcept { ::spx_pg_output_free(&raw_); }
+
+@ACCESSORS@
+private:
+    friend class Provider;
+    explicit Output(::spx_pg_output raw) noexcept : raw_(raw) {}
+    ::spx_pg_output raw_;
+};

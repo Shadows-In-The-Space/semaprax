@@ -215,7 +215,10 @@ than by advancing the row.
     checks stale aliases/provider recreation, sibling settlement, exact/+1
     identity/live-capacity limits and paired lifecycle replay. Physical phase evidence
     additionally covers actual result allocation/copy, nonconsuming export failure,
-    explicit release statuses and an exact 16 MiB fixture. This remains a fixture
+    explicit release statuses and an exact 16 MiB fixture. The consumer
+    continuation adds C/C++ error propagation, bounded codecs, independent
+    caller counters, replay and Rust explicit-settlement implementation/gates.
+    This remains a fixture
     boundary, not a compiler-derived generic-program equivalence proof;
   - peak allocation/handle observations are now compared for native O0/O2,
     but not across all model heaps/registries. Existing logical trace

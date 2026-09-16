@@ -128,6 +128,12 @@ pub fn generate_c_calling_consumer(
         });
     }
 
+    if !(1..=256).contains(&input.fields.len()) {
+        return Err(ShapeError::LeafCountOutOfBounds {
+            count: input.fields.len(),
+        });
+    }
+
     let binding_bytes = binding.encode();
     let files = vec![
         (HEADER_FILE_NAME.to_owned(), HEADER_V1.replace("\r\n", "\n")),

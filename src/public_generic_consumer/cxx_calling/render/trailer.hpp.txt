@@ -1,0 +1,4 @@
+
+} // namespace semaprax::public_generic::v1
+
+#endif // SEMAPRAX_PUBLIC_GENERIC_CONSUMER_V1_HPP

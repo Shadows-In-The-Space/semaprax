@@ -1,0 +1,98 @@
+pub(crate) const MAX_LEAF_BYTES: usize = 65_536;
+pub(crate) const MAX_TOTAL_BYTES: usize = 16_777_216;
+pub(crate) const MIN_FRAME_BYTES: usize = 8 + 8 * FIELD_COUNT;
+pub(crate) const MAX_FRAME_BYTES: usize = MIN_FRAME_BYTES + MAX_TOTAL_BYTES;
+
+pub(crate) fn encode_input(value: &Input) -> Result<Vec<u8>, Error> {
+    let leaves: [&[u8]; FIELD_COUNT] = input_leaves(value);
+    encode_leaves(&leaves)
+}
+
+fn encode_leaves(leaves: &[&[u8]]) -> Result<Vec<u8>, Error> {
+    let mut payload = 0usize;
+    for leaf in leaves {
+        if leaf.len() > MAX_LEAF_BYTES || leaf.len() > MAX_TOTAL_BYTES - payload {
+            return Err(Error::CapacityExceeded("input leaf or total payload exceeds the bound"));
+        }
+        payload += leaf.len();
+    }
+    let total = 8 + 8 * leaves.len() + payload;
+    let mut out = Vec::new();
+    out.try_reserve_exact(total).map_err(|_| Error::AllocationFailure)?;
+    out.extend_from_slice(&(leaves.len() as u64).to_le_bytes());
+    for leaf in leaves {
+        out.extend_from_slice(&(leaf.len() as u64).to_le_bytes());
+        out.extend_from_slice(leaf);
+    }
+    Ok(out)
+}
+
+fn read_width(bytes: &[u8], offset: &mut usize) -> Result<usize, Error> {
+    let end = offset.checked_add(8).ok_or(Error::ResultRejected("length overflow"))?;
+    let prefix = bytes.get(*offset..end).ok_or(Error::ResultRejected("truncated length"))?;
+    let mut width = [0u8; 8];
+    width.copy_from_slice(prefix);
+    *offset = end;
+    usize::try_from(u64::from_le_bytes(width)).map_err(|_| Error::ResultRejected("length does not fit usize"))
+}
+
+pub(crate) fn decode_output(bytes: &[u8]) -> Result<Output, Error> {
+    if bytes.len() > MAX_FRAME_BYTES {
+        return Err(Error::ResultRejected("result carrier exceeds the bound"));
+    }
+    let mut offset = 0usize;
+    if read_width(bytes, &mut offset)? != FIELD_COUNT {
+        return Err(Error::ResultRejected("result leaf count differs from the descriptor"));
+    }
+    // Full validation precedes allocation of any result leaf, even when the
+    // last field is hostile. Bounded arrays cannot be sized by hostile bytes.
+    let mut spans = [(0usize, 0usize); FIELD_COUNT];
+    let mut payload = 0usize;
+    for span in &mut spans {
+        let len = read_width(bytes, &mut offset)?;
+        if len > MAX_LEAF_BYTES || len > MAX_TOTAL_BYTES - payload || len > bytes.len() - offset {
+            return Err(Error::ResultRejected("result leaf length exceeds its bound or remaining bytes"));
+        }
+        *span = (offset, len);
+        offset += len;
+        payload += len;
+    }
+    if offset != bytes.len() {
+        return Err(Error::ResultRejected("trailing result bytes"));
+    }
+    let mut leaves: Vec<Vec<u8>> = Vec::new();
+    leaves.try_reserve_exact(FIELD_COUNT).map_err(|_| Error::AllocationFailure)?;
+    for (start, len) in spans {
+        let mut leaf = Vec::new();
+        if leaf.try_reserve_exact(len).is_err() {
+            // Explicit reverse discharge; Vec's implicit element-drop order
+            // is not a settlement ordering contract.
+            while leaves.pop().is_some() {}
+            return Err(Error::AllocationFailure);
+        }
+        leaf.extend_from_slice(&bytes[start..start + len]);
+        leaves.push(leaf);
+    }
+    output_from_leaves(leaves)
+}
+
+#[cfg(test)]
+mod bounded_codec_tests {
+    use super::*;
+
+    #[test]
+    fn input_first_over_bound_refuses_before_encoding() {
+        let too_big = vec![0u8; MAX_LEAF_BYTES + 1];
+        assert!(matches!(encode_leaves(&[&too_big]), Err(Error::CapacityExceeded(_))));
+    }
+
+    #[test]
+    fn hostile_u64_length_and_truncations_are_errors_not_panics() {
+        let mut valid = (FIELD_COUNT as u64).to_le_bytes().to_vec();
+        for _ in 0..FIELD_COUNT { valid.extend_from_slice(&0u64.to_le_bytes()); }
+        assert!(decode_output(&valid).is_ok());
+        for cut in 0..valid.len() { assert!(decode_output(&valid[..cut]).is_err()); }
+        valid[8..16].copy_from_slice(&u64::MAX.to_le_bytes());
+        assert!(matches!(decode_output(&valid), Err(Error::ResultRejected(_))));
+    }
+}

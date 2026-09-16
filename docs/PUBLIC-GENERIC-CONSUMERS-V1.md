@@ -278,10 +278,14 @@ point of an independently verified descriptor
 ([issue #152](PUBLIC-GENERIC-DESCRIPTOR-V1.md)). `Provider::transform`
 consumes `Input` by value (Rust's own move semantics make reuse through the
 safe API impossible), transfers it exactly once, and releases the native
-result handle in every case — success or an early `?` out of decode — via a
-`Drop`-based guard. A release/close failure observed only during `Drop` is
-printed as secondary evidence and never overwrites the primary `Err` already
-selected: sticky failure, restated for this consumer.
+result handle explicitly before returning any decoded output. `ResultGuard`
+retains a Drop fallback. `Error::ReleaseFailed` suppresses success when explicit
+release fails; `last_release_status()` preserves that status without replacing
+an earlier export/decode error. `close()` reports refusal and retains a live
+owner for retry. Destructor diagnostics are best-effort writes, not panic-prone
+printing. The [consumer settlement continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162)
+owns the new bounded-codec and execution gates; its Rust execution is a
+separate required check, not implied by the historical round-trip evidence.
 
 **Execution evidence.** `tests/public_generic_native_adapter_v1/rust_calling_consumer.rs`
 generates the crate, compiles the *same* rendered reference provider
@@ -392,9 +396,13 @@ failure — "output parameters have deterministic failure values." The native
 result handle this call opens internally is always released, by this call,
 before it returns, whichever way it returns — "result remains opaque/owning
 and is released explicitly," entirely inside the consumer, never exposed to
-its caller. A release/close failure observed only as secondary cleanup is
-printed to `stderr` and never changes the already-selected primary outcome:
-sticky failure, restated for this consumer.
+its caller. The additive `transform_with_settlement` reports primary, native
+and explicit-release status separately. A release failure suppresses a decoded
+success with status 9 (`RELEASE_FAILED`), while an earlier failure stays primary.
+`close_checked` preserves a live owner on a retriable refusal; legacy void close
+still delegates with a best-effort note. Length preflight, complete decode
+validation before allocation, reverse cleanup and exact source-pointer
+preconditions are specified in the [consumer continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162).
 
 **Failure injection across one opaque call.** The native ABI arms
 one-shot failure injection for the *next* native call only, and its trace
@@ -702,12 +710,10 @@ non-OK C11 status has an exact typed home; `Error` carries both the mapped
 parsed string. `Result<T>` is this generator's own closed, exception-free
 sum type (C++17 has no `std::expected`): a `std::variant<T, Error>` wrapped
 behind `has_value()`/`value()`/`error()`, never exposing the discriminant as
-anything else. `ReleaseFailed` is declared but currently unreachable: the
-exposed C11 surface's `spx_pg_consumer_close` returns `void` and only ever
-prints a secondary `stderr` note (`SPX_PG_CCC_SECONDARY_RELEASE_NOTE`) for a
-close failure, so there is no status this wrapper could observe and map to
-it without changing the C11 surface — a change outside this generator's own
-lease. No C++ exception crosses the C11 boundary in either direction: every
+anything else. `ReleaseFailed` is now reachable through the additive C
+settlement and checked-close APIs. `Error::release_status()` retains secondary
+explicit-release evidence; `Provider::close_checked()` returns a typed status.
+Move assignment retains both owners when closing the target is refused. No C++ exception crosses the C11 boundary in either direction: every
 wrapper method is `noexcept`, and every call into the C11 surface is a plain
 C function call.
 
@@ -748,11 +754,10 @@ untried, matching every other native-adapter harness in this document. The
 trusted descriptor bytes are a canonical encoded Descriptor-v1 test fixture,
 not derived from a real checked generic export. The type model covers
 flat owned-`Bytes` leaves only (see above); nested records and Copy scalars
-are not yet generated (#119), and no maximum-total-payload (16 MiB) case is
-exercised for this consumer (#226). `ReleaseFailed` is declared in the
-closed `ErrorKind` vocabulary but not currently reachable, since the
-exposed C11 surface offers no status a destructor-time release failure
-could be mapped from — see the error-model paragraph above. The provisioned
+are not yet generated (#119). The original round-trip harness did not cover
+16 MiB; the new [consumer continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162)
+adds that exact bound and explicit `ReleaseFailed`/checked-close propagation.
+The provisioned
 ASan/UBSan variant
 (`provisioned_cxx_calling_consumer_asan_ubsan`) is `#[ignore]`d by default
 and was not run in this round; only the plain `-O0`/`-O2` build and run is
@@ -1079,3 +1084,9 @@ This section documents execution evidence only. The obligations this corpus
 executes against are derived and specified in
 [Public Generic Settlement Obligations v1](PUBLIC-GENERIC-SETTLEMENT-V1.md),
 which remains that document's own lease.
+
+The [native calling-consumer continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162)
+adds 112 shared C/C++ fixture cases, independently replayed evidence, caller-side
+allocation/cleanup observations and Rust explicit-settlement implementation and
+regressions. Production-template execution, actual generator execution and Rust
+execution are labelled separately. This does not change PG-7 or PG-9 status.

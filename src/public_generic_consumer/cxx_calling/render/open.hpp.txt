@@ -1,0 +1,16 @@
+inline Result<Provider> Provider::open(const std::uint8_t *descriptor_bytes, std::size_t descriptor_len,
+                                        const std::uint8_t *provider_binding_bytes,
+                                        std::size_t provider_binding_len) noexcept {
+    ::spx_pg_calling_consumer *raw = nullptr;
+    ::spx_pg_consumer_status status = ::spx_pg_consumer_open(descriptor_bytes, descriptor_len,
+                                                              provider_binding_bytes, provider_binding_len, &raw);
+    if (status != SPX_PG_CONSUMER_OK) {
+        return Error(map_error_kind(status), 0);
+    }
+    return Provider(raw);
+}
+
+inline Result<Provider> Provider::open() noexcept {
+    return open(::spx_pg_trusted_descriptor_bytes, ::spx_pg_trusted_descriptor_len,
+                ::spx_pg_trusted_binding_bytes, ::spx_pg_trusted_binding_len);
+}

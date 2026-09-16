@@ -306,3 +306,39 @@ fn a_single_field_shape_generates_successfully() {
     assert!(round_trip.contains("zero_bytes_input"));
     assert!(round_trip.contains("first_leaf"));
 }
+
+#[test]
+fn executable_shape_bounds_are_exact_and_do_not_emit_empty_or_oversized_records() {
+    for count in [0usize, 257] {
+        let shape = RecordShape::new(
+            (0..count)
+                .map(|index| OwnedByteField::new(format!("bound.field{index}")))
+                .collect(),
+        );
+        assert_eq!(
+            generate_cxx_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).unwrap_err(),
+            ShapeError::LeafCountOutOfBounds { count }
+        );
+    }
+    let shape = RecordShape::new(
+        (0..256)
+            .map(|index| OwnedByteField::new(format!("bound.field{index}")))
+            .collect(),
+    );
+    assert!(generate_cxx_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).is_ok());
+}
+
+#[test]
+fn release_errors_and_retained_move_ownership_are_in_the_generated_wrapper() {
+    let consumer = generate();
+    let header = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == WRAPPER_HEADER_FILE_NAME)
+        .unwrap()
+        .1;
+    assert!(header.contains("report.release_status"));
+    assert!(header.contains("if (!close_checked()) return *this;"));
+    assert!(header.contains("~InjectionScope() noexcept"));
+    assert!(header.contains("16777216u - payload"));
+}

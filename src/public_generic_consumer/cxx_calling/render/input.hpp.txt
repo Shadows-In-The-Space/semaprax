@@ -1,0 +1,3 @@
+/* Concrete input values own independent byte vectors until transfer. */
+struct Input {
+@FIELDS@};

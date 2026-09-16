@@ -1,0 +1,30 @@
+/* Test-only allocation hook. Overrides must return malloc/free-compatible
+ * storage; this is not a published allocator ABI. */
+#ifndef SPX_PG_CXX_ALLOC
+#define SPX_PG_CXX_ALLOC(length) std::malloc(length)
+#endif
+namespace detail {
+
+/* Copies `value` into a freshly malloc'd spx_pg_owned_bytes leaf -- the
+ * generated C11 consumer takes ownership of exactly this allocation once
+ * handed to spx_pg_consumer_transform, and frees it internally regardless
+ * of outcome (see spx_pg_calling_consumer.h's own transform doc comment).
+ * Returns false, leaving `out` untouched, on allocation failure; the caller
+ * must not treat `out` as initialized in that case. */
+inline bool make_owned_bytes(const std::vector<std::uint8_t> &value, ::spx_pg_owned_bytes &out) noexcept {
+    if (value.empty()) {
+        out.data = nullptr;
+        out.len = 0;
+        return true;
+    }
+    auto *buffer = static_cast<std::uint8_t *>(SPX_PG_CXX_ALLOC(value.size()));
+    if (buffer == nullptr) {
+        return false;
+    }
+    std::memcpy(buffer, value.data(), value.size());
+    out.data = buffer;
+    out.len = value.size();
+    return true;
+}
+
+} // namespace detail

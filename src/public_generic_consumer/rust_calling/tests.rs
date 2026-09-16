@@ -318,3 +318,48 @@ fn field_count_and_field_lists_scale_with_the_shape() {
         assert!(types_source.contains(&field.field_name()));
     }
 }
+
+#[test]
+fn executable_shape_bounds_are_exact_and_do_not_emit_empty_or_oversized_records() {
+    for count in [0usize, 257] {
+        let shape = RecordShape::new(
+            (0..count)
+                .map(|index| OwnedByteField::new(format!("bound.field{index}")))
+                .collect(),
+        );
+        assert_eq!(
+            generate_rust_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).unwrap_err(),
+            ShapeError::LeafCountOutOfBounds { count }
+        );
+    }
+    let shape = RecordShape::new(
+        (0..256)
+            .map(|index| OwnedByteField::new(format!("bound.field{index}")))
+            .collect(),
+    );
+    assert!(generate_rust_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).is_ok());
+}
+
+#[test]
+fn result_is_settled_before_success_and_destructors_use_nonpanicking_writes() {
+    let consumer = generate();
+    let provider = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == "src/provider.rs")
+        .unwrap()
+        .1;
+    let carrier = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == "src/carrier.rs")
+        .unwrap()
+        .1;
+    assert!(provider.contains("self.last_release_status = guard.release()"));
+    assert!(provider.contains("Error::ReleaseFailed(self.last_release_status)"));
+    assert!(provider.contains("pub fn close(&mut self)"));
+    assert!(!provider.contains("eprintln!("));
+    assert!(carrier.contains("try_reserve_exact"));
+    assert!(carrier.contains("usize::try_from"));
+    assert!(carrier.contains("MIN_FRAME_BYTES"));
+}

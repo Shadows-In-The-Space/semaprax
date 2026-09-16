@@ -376,8 +376,139 @@ logical traces/peaks on every engine. Existing native/model trace differences
 are not silently normalized away by this extension. Cross-host and hosted
 promotion remain governed by the milestone and its separate gates.
 
-The physical-phase extension exercises the raw native provider, not generated
-consumer propagation. In particular, existing generated C/Rust wrappers still
-log some release failures rather than refusing a previously successful decode;
-that end-to-end consumer behavior requires its own follow-on change and execution
-coverage. The native return-status fix must not be presented as that closure.
+The physical-phase extension alone exercises the raw native provider. The
+consumer continuation below adds checked C/C++ propagation and implements the
+corresponding Rust path; neither is a substitute for the full all-engine gate.
+
+## Native calling-consumer continuation (issue #162)
+
+### Contracts and compatibility
+
+The owning generators remain `public_generic_consumer::{c_calling,cxx_calling,
+rust_calling}`. C11/C++17 fixed text now lives in their `render/*.txt` assets,
+not a second codec/runtime. Their thin field-list renderers and the test-only
+`public_generic_consumer_fixture.py` use the same assets. The latter does **not**
+produce or verify compiler descriptors: its evidence route is explicitly
+`production-template-fixture`. The Cargo `consumer_settlement` harness generates
+real consumers, requires byte-for-byte agreement through `--generated`, then
+runs the same native binaries under the `rust-generator-checked` route. Missing
+tools or byte drift fail, rather than skipping the check.
+
+The C/Rust executable shape generators now refuse 0 and 257 leaves and admit
+exactly 1 through 256; C++ inherits the C rule. Duplicate-identity and mismatched
+input/result-count refusal precedence is preserved. `ShapeError::LeafCountOutOfBounds`
+is an internal generator contract, not a newly allocated public diagnostic.
+All prior native ABI declarations, descriptor/carrier formats and metadata
+consumer versions stay unchanged. Generic ownership remains unsupported and
+unpublished. These calling clients still consume trusted **flat-owned-Bytes
+fixtures**, not compiler-derived nested generic records.
+
+The C client adds `SPX_PG_CONSUMER_RELEASE_FAILED = 9` without changing values
+0 through 8. `spx_pg_consumer_transform_with_settlement` returns an initialized
+report of `primary_status`, `native_status` and the **explicit result-release**
+`release_status`. Earlier encode/call/export/decode errors stay primary. If
+decode succeeded but release failed, the decoded output is discharged in
+reverse and suppressed. Provider-internal cleanup failures remain in the native
+trace; this small report is not a replacement for all provider evidence.
+The old transform delegates to that path. Checked close returns its status and
+retains the client owner when native close refuses without consuming it; the
+legacy void close delegates and reports a best-effort note.
+
+C and Rust validate per-leaf (65,536), total payload (16,777,216) and total
+framing bounds before encoding allocations. Reported export sizes are bounded
+before buffer allocation. Every result leaf's framing is validated, including
+the last leaf, before allocating any decoded result leaf. Staging and decoded
+leaf rollback run in reverse. C requires owning pointers to be valid allocations;
+exact duplicate input owners are refused and consumed once, while forged or
+interior pointers are outside this source-level C contract. Null/zero must be
+canonical. C++ uses bounded vectors, checks lengths before creating C staging
+copies, and rolls back only acquired copies in reverse.
+
+C++ `Error` retains an explicit `release_status()` alongside its existing kind
+and native status. `Provider::close_checked()` reports refusal and retains the
+owner. Move assignment does not overwrite either owner when closing the target
+fails. Owning wrappers remain noncopyable, noexcept-movable and self-move safe.
+One-shot test injections are cleared even when C++ returns before entering C.
+A destructor is a noexcept fallback, not an error-returning close operation.
+
+Rust implements `Error::AllocationFailure`, `Error::ReleaseFailed(i32)`,
+`Provider::last_release_status()` and checked, idempotent `Provider::close()`.
+`ResultGuard` explicitly releases before a successful value can escape. An
+export/decode error remains primary when release also fails. Result and input
+rollback use generated reverse field order; lengths use checked conversion and
+fallible reservations. Destructor diagnostics use best-effort `Write`, not
+`eprintln!` or an allocated diagnostic String. The external Rust regression
+harness is required by Cargo, but adding it is **not local Rust execution
+proof** when that toolchain has not been run.
+
+### Shared consumer cases and observations
+
+`tests/fixtures/public-generic-consumer-settlement-v1/cases.json` is the canonical
+manifest `semaprax.public-generic-consumer-settlement-corpus.v1`. It contains
+112 stable cases with explicit route applicability: 108 C11 and 105 C++17
+executions per build. Input digests bind the recipe's baseline carrier; `input_mutation` binds the
+source-level attack. A locally rejected null/alias/oversized source input never
+claims to have crossed an encoded carrier boundary. There are one-, two-, three-
+and 256-leaf shapes; exact
+zero/embedded-zero bytes, 64 KiB and 16 MiB bounds; first-over-bound and hostile
+source input; all 14 legacy logical ordinals; real result allocation/copy/commit
+and export injections; ten malformed export forms; caller allocation failure;
+reverse partial rollback; eight reused calls; close-refusal retry; failed move
+assignment; and local-refusal injection isolation. Three-leaf cases prove
+rollback order when two decoded or staged leaves were already acquired.
+
+Each executable links the actual native `provider_body.c` and the actual C
+consumer in separate translation units. C++ wraps that same C source. The
+provider observer and the caller allocator are separate: the gate asserts
+zero final resources on each side, exact result bytes and literal reverse
+input/result/staging order, not just engine agreement. Empty leaves allocate
+nothing. The caller table counts its C-owned buffers and C++-to-C copies; it
+does **not** count all C++ standard-library allocations or Rust's heap.
+ASan/UBSan instrument the complete C/C++ executable as an independent check.
+
+Cross-optimization equality compares the complete observation record, including
+caller peaks. Cross-language equality compares native results, statuses,
+invocation count, trace, physical release order, secondary statuses and native
+peaks. Different C/C++ source representations necessarily produce different
+caller-side peaks/release IDs; those fields remain present as target-local
+observations and must still end at zero. No physical event is relabelled as a
+missing interpreter/Wasm logical event.
+
+### Consumer evidence and replay
+
+`consumer-settlement.json` uses
+`semaprax.public-generic-consumer-settlement-evidence.v1`. It binds the manifest,
+exact trusted template/observer sources, descriptor/binding fixture bytes,
+compiled executable digests, route, case, status, trace/release/result digests,
+full payload-free observations and resource counters. Result hashes are taken
+from actual exported bytes after independent semantic comparison. Fixture
+payload bytes are not embedded in evidence. Executable hashes differ across
+optimization/toolchain builds; they are never used as semantic equality keys.
+
+Replay recompiles trusted checkout sources with the same selected compiler and
+configuration, reruns every applicable case and requires **canonical byte
+equality**, not Python's loose integer/boolean equality. Submitted binaries are
+never executed. Reordered/truncated/unknown fields, false-as-zero counters,
+reminted trace digests, another source/provider/artifact and missing evidence
+all fail. Replay is exact for that checkout/toolchain; it does not claim that
+unrelated platform binaries have identical artifact hashes. `--case` is a
+focused local probe and is not the complete gate.
+
+```sh
+cargo test --locked -p semaprax --test public_generic_native_adapter_v1 consumer_settlement
+python3 scripts/public_generic_consumer_settlement.py --sanitizers --output target/pg-consumers
+python3 scripts/public_generic_consumer_settlement.py --sanitizers --output target/pg-consumers-replay \
+  --replay target/pg-consumers/consumer-settlement.json
+python3 scripts/public_generic_consumer_mutations.py
+```
+
+The last command first runs a positive control, then compiles eleven deliberate
+consumer regressions and requires each to fail its intended runtime assertion.
+Compilation errors or an unrelated crash do not pass. Linux CI selects the
+sanitizer, independent replay and mutation gates. The Cargo-generated C/C++
+byte-comparison matrix and Rust native-shim regression are Unix selectors;
+Windows/MSVC and hosted-green for this increment are not inferred.
+
+Cancellation and concurrency remain outside the synchronous v1 profile. No
+hidden retry repeats an endpoint. Export retry and retriable close are distinct
+operations, not permissions to replay a transferred input.

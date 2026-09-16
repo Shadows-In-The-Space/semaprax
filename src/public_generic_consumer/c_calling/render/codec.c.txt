@@ -1,0 +1,254 @@
+/* Logical Carrier v1's wire framing, restated independently rather than
+ * trusted from any other translation unit: `[u64 leaf_count][per leaf: u64
+ * len][bytes]`, little-endian -- matching
+ * src/public_generic_abi/native/provider_body.c's own codec and
+ * semaprax::public_generic_consumer::rust_calling's carrier.rs. */
+static uint64_t spx_pg_ccc_read_u64le(const uint8_t *bytes) {
+    uint64_t value = 0;
+    for (int index = 7; index >= 0; --index) {
+        value = (value << 8) | (uint64_t)bytes[index];
+    }
+    return value;
+}
+
+static void spx_pg_ccc_write_u64le(uint8_t *out, uint64_t value) {
+    for (int index = 0; index < 8; ++index) {
+        out[index] = (uint8_t)(value & 0xffu);
+        value >>= 8;
+    }
+}
+
+static int spx_pg_ccc_bytes_equal(const uint8_t *a, size_t a_len, const uint8_t *b, size_t b_len) {
+    if (a_len != b_len) {
+        return 0;
+    }
+    return a_len == 0 || memcmp(a, b, a_len) == 0;
+}
+
+static const char SPX_PG_CCC_SECONDARY_RELEASE_NOTE[] =
+    "spx-pg-c-calling-consumer: secondary release/close failure observed "
+    "after the primary outcome was already settled; the primary outcome is "
+    "unaffected\n";
+
+/* The opaque handle: a native provider pointer, never exposed to a caller
+ * of spx_pg_calling_consumer.h. */
+struct spx_pg_calling_consumer {
+    spx_pg_provider_v1 *provider;
+};
+
+static int spx_pg_ccc_utf8(const uint8_t *bytes, size_t length) {
+    size_t index = 0;
+    while (index < length) {
+        const uint8_t lead = bytes[index];
+        if (lead <= 0x7fu) { index += 1u; continue; }
+        size_t width = 0;
+        if (lead >= 0xc2u && lead <= 0xdfu) width = 2u;
+        else if (lead >= 0xe0u && lead <= 0xefu) width = 3u;
+        else if (lead >= 0xf0u && lead <= 0xf4u) width = 4u;
+        else return 0;
+        if (width > length - index) return 0;
+        const uint8_t second = bytes[index + 1u];
+        if (second < 0x80u || second > 0xbfu) return 0;
+        if (lead == 0xe0u && second < 0xa0u) return 0;
+        if (lead == 0xedu && second > 0x9fu) return 0;
+        if (lead == 0xf0u && second < 0x90u) return 0;
+        if (lead == 0xf4u && second > 0x8fu) return 0;
+        for (size_t tail = 2u; tail < width; tail += 1u) {
+            if (bytes[index + tail] < 0x80u || bytes[index + tail] > 0xbfu) return 0;
+        }
+        index += width;
+    }
+    return 1;
+}
+
+static int spx_pg_ccc_descriptor_v1(const uint8_t *bytes, size_t length) {
+    if (length > 131072u) return 0;
+    size_t offset = 0;
+    for (size_t field = 0; field < 12u; field += 1u) {
+        if (offset > length || length - offset < 8u) return 0;
+        const uint64_t width = spx_pg_ccc_read_u64le(bytes + offset);
+        if (width > 65536u) return 0;
+        offset += 8u;
+        if (width > length - offset) return 0;
+        const size_t field_length = (size_t)width;
+        const uint8_t *content = bytes + offset;
+        if (!spx_pg_ccc_utf8(content, field_length)) return 0;
+        static const char descriptor_schema[] = "semaprax.public-generic-descriptor.v1";
+        static const char boundary_schema[] = "semaprax.public-generic-boundary-profile.v1";
+        static const char grammar_schema[] = "semaprax.public-generic-type-grammar.v1";
+        const char *version = NULL;
+        size_t version_length = 0u;
+        if (field == 0u) { version = descriptor_schema; version_length = sizeof(descriptor_schema) - 1u; }
+        if (field == 1u) { version = boundary_schema; version_length = sizeof(boundary_schema) - 1u; }
+        if (field == 2u) { version = grammar_schema; version_length = sizeof(grammar_schema) - 1u; }
+        if (version != NULL &&
+            (field_length != version_length || memcmp(content, version, version_length) != 0)) return 0;
+        offset += field_length;
+    }
+    return offset == length;
+}
+
+static spx_pg_consumer_status spx_pg_ccc_verify_pairing(const uint8_t *descriptor_bytes,
+                                                         size_t descriptor_len,
+                                                         const uint8_t *binding_bytes,
+                                                         size_t binding_len) {
+    if (!spx_pg_ccc_descriptor_v1(descriptor_bytes, descriptor_len)) {
+        return SPX_PG_CONSUMER_DESCRIPTOR_REJECTED;
+    }
+    if (!spx_pg_ccc_bytes_equal(descriptor_bytes, descriptor_len, spx_pg_trusted_descriptor_bytes,
+                                 spx_pg_trusted_descriptor_len)) {
+        return SPX_PG_CONSUMER_DESCRIPTOR_REJECTED;
+    }
+    if (!spx_pg_ccc_bytes_equal(binding_bytes, binding_len, spx_pg_trusted_binding_bytes,
+                                 spx_pg_trusted_binding_len)) {
+        return SPX_PG_CONSUMER_PROVIDER_MISMATCH;
+    }
+    return SPX_PG_CONSUMER_OK;
+}
+
+static spx_pg_consumer_status spx_pg_ccc_map_open_failure(spx_pg_status_v1 status) {
+    switch (status) {
+    case SPX_PG_STATUS_MALFORMED_DESCRIPTOR:
+    case SPX_PG_STATUS_DESCRIPTOR_REPLAY_MISMATCH:
+        return SPX_PG_CONSUMER_DESCRIPTOR_REJECTED;
+    case SPX_PG_STATUS_MALFORMED_BINDING:
+    case SPX_PG_STATUS_BINDING_REPLAY_MISMATCH:
+        return SPX_PG_CONSUMER_PROVIDER_MISMATCH;
+    default:
+        return SPX_PG_CONSUMER_EXECUTION_FAILED;
+    }
+}
+
+static spx_pg_consumer_status spx_pg_ccc_map_prepare_failure(spx_pg_status_v1 status) {
+    switch (status) {
+    case SPX_PG_STATUS_MALFORMED_CARRIER:
+        return SPX_PG_CONSUMER_CARRIER_REJECTED;
+    case SPX_PG_STATUS_CARRIER_CAPACITY:
+        return SPX_PG_CONSUMER_CAPACITY_EXCEEDED;
+    default:
+        return SPX_PG_CONSUMER_EXECUTION_FAILED;
+    }
+}
+
+static spx_pg_consumer_status spx_pg_ccc_map_call_failure(spx_pg_status_v1 status) {
+    switch (status) {
+    case SPX_PG_STATUS_HANDLE_INVALID:
+    case SPX_PG_STATUS_ILLEGAL_TRANSITION:
+        return SPX_PG_CONSUMER_CARRIER_REJECTED;
+    default:
+        return SPX_PG_CONSUMER_EXECUTION_FAILED;
+    }
+}
+
+static spx_pg_consumer_status spx_pg_ccc_map_export_failure(spx_pg_status_v1 status) {
+    switch (status) {
+    case SPX_PG_STATUS_HANDLE_INVALID:
+        return SPX_PG_CONSUMER_CARRIER_REJECTED;
+    default:
+        return SPX_PG_CONSUMER_EXECUTION_FAILED;
+    }
+}
+
+/* Same bounded flat-leaf profile as the native adapter. Bounds are checked
+ * before copying/allocating, including output sizes reported by a provider. */
+#define SPX_PG_CCC_MAX_LEAF_BYTES 65536u
+#define SPX_PG_CCC_MAX_TOTAL_BYTES 16777216u
+#define SPX_PG_CCC_MAX_FRAME_BYTES (8u + 8u * FIELD_COUNT + SPX_PG_CCC_MAX_TOTAL_BYTES)
+
+static spx_pg_consumer_status spx_pg_ccc_encode_leaves(
+    const spx_pg_owned_bytes *const *leaves, uint8_t **out_bytes, size_t *out_len) {
+    *out_bytes = NULL;
+    *out_len = 0;
+    size_t payload = 0;
+    for (size_t i = 0; i < FIELD_COUNT; ++i) {
+        const size_t len = leaves[i]->len;
+        if (len > SPX_PG_CCC_MAX_LEAF_BYTES || len > SPX_PG_CCC_MAX_TOTAL_BYTES - payload) {
+            return SPX_PG_CONSUMER_CAPACITY_EXCEEDED;
+        }
+        payload += len;
+    }
+    for (size_t i = 0; i < FIELD_COUNT; ++i) {
+        if ((leaves[i]->data == NULL) != (leaves[i]->len == 0)) {
+            return SPX_PG_CONSUMER_CARRIER_REJECTED;
+        }
+        for (size_t j = 0; j < i; ++j) {
+            if (leaves[i]->data != NULL && leaves[i]->data == leaves[j]->data) {
+                return SPX_PG_CONSUMER_CARRIER_REJECTED;
+            }
+        }
+    }
+    const size_t total = 8u + 8u * FIELD_COUNT + payload;
+    uint8_t *buffer = (uint8_t *)malloc(total);
+    if (buffer == NULL) return SPX_PG_CONSUMER_ALLOCATION_FAILURE;
+    spx_pg_ccc_write_u64le(buffer, (uint64_t)FIELD_COUNT);
+    size_t offset = 8;
+    for (size_t i = 0; i < FIELD_COUNT; ++i) {
+        spx_pg_ccc_write_u64le(buffer + offset, (uint64_t)leaves[i]->len);
+        offset += 8;
+        if (leaves[i]->len != 0) memcpy(buffer + offset, leaves[i]->data, leaves[i]->len);
+        offset += leaves[i]->len;
+    }
+    *out_bytes = buffer;
+    *out_len = total;
+    return SPX_PG_CONSUMER_OK;
+}
+
+static void spx_pg_ccc_consume_input(spx_pg_owned_bytes **leaves) {
+    /* A rejected exact-alias input is still consumed without double free.
+     * As for any C owning API, non-null pointers must be valid allocations;
+     * interior/forged pointers are not an admitted source-level value. */
+    for (size_t i = FIELD_COUNT; i-- > 0;) {
+        uint8_t *pointer = leaves[i]->data;
+        for (size_t j = 0; j < i; ++j) {
+            if (pointer != NULL && leaves[j]->data == pointer) {
+                leaves[j]->data = NULL;
+                leaves[j]->len = 0;
+            }
+        }
+        free(pointer);
+        leaves[i]->data = NULL;
+        leaves[i]->len = 0;
+    }
+}
+
+static void spx_pg_ccc_free_leaves(spx_pg_owned_bytes *leaves, size_t count) {
+    while (count != 0) {
+        --count;
+        free(leaves[count].data);
+        leaves[count].data = NULL;
+        leaves[count].len = 0;
+    }
+}
+
+static spx_pg_consumer_status spx_pg_ccc_decode_leaves(
+    const uint8_t *bytes, size_t len, spx_pg_owned_bytes *leaves) {
+    if (len > SPX_PG_CCC_MAX_FRAME_BYTES || len < 8) return SPX_PG_CONSUMER_RESULT_REJECTED;
+    if (spx_pg_ccc_read_u64le(bytes) != (uint64_t)FIELD_COUNT) return SPX_PG_CONSUMER_RESULT_REJECTED;
+    size_t offsets[FIELD_COUNT], lengths[FIELD_COUNT];
+    size_t offset = 8, payload = 0;
+    /* Validate the ENTIRE layout before creating any owned result leaf. */
+    for (size_t i = 0; i < FIELD_COUNT; ++i) {
+        if (len - offset < 8) return SPX_PG_CONSUMER_RESULT_REJECTED;
+        const uint64_t width = spx_pg_ccc_read_u64le(bytes + offset);
+        offset += 8;
+        if (width > SPX_PG_CCC_MAX_LEAF_BYTES || width > len - offset ||
+            width > SPX_PG_CCC_MAX_TOTAL_BYTES - payload) return SPX_PG_CONSUMER_RESULT_REJECTED;
+        lengths[i] = (size_t)width;
+        offsets[i] = offset;
+        offset += lengths[i];
+        payload += lengths[i];
+    }
+    if (offset != len) return SPX_PG_CONSUMER_RESULT_REJECTED;
+    for (size_t i = 0; i < FIELD_COUNT; ++i) {
+        if (lengths[i] != 0) {
+            leaves[i].data = (uint8_t *)malloc(lengths[i]);
+            if (leaves[i].data == NULL) {
+                spx_pg_ccc_free_leaves(leaves, i);
+                return SPX_PG_CONSUMER_ALLOCATION_FAILURE;
+            }
+            memcpy(leaves[i].data, bytes + offsets[i], lengths[i]);
+        }
+        leaves[i].len = lengths[i];
+    }
+    return SPX_PG_CONSUMER_OK;
+}

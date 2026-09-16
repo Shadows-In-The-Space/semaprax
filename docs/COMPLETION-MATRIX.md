@@ -112,7 +112,8 @@ calling convention, or support claim follows from any of them, and no public sup
 now exists. The [runtime settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
 records the implemented native fixture subset, including bounded non-recycled
 identity/recreation, sibling settlement, explicit release-status propagation and
-real result-phase/export-failure gates, and the remaining checked-endpoint,
+real result-phase/export-failure gates, the C/C++ consumer propagation matrix
+and Rust explicit-settlement implementation/gates, and the remaining checked-endpoint,
 compiled-Wasm, consumer-matrix and all-engine evidence requirements.
 
 The largest remaining product gaps are general ownership and lifetime safety,

@@ -261,3 +261,47 @@ fn empty_trusted_bytes_render_a_valid_c_array_literal() {
     assert!(source.contains("const uint8_t spx_pg_trusted_descriptor_bytes[] = {0};"));
     assert!(!source.contains("uint8_t spx_pg_trusted_descriptor_bytes[] = {};"));
 }
+
+#[test]
+fn executable_shape_bounds_are_exact_and_do_not_emit_empty_or_oversized_records() {
+    for count in [0usize, 257] {
+        let shape = RecordShape::new(
+            (0..count)
+                .map(|index| OwnedByteField::new(format!("bound.field{index}")))
+                .collect(),
+        );
+        assert_eq!(
+            generate_c_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).unwrap_err(),
+            ShapeError::LeafCountOutOfBounds { count }
+        );
+    }
+    let shape = RecordShape::new(
+        (0..256)
+            .map(|index| OwnedByteField::new(format!("bound.field{index}")))
+            .collect(),
+    );
+    assert!(generate_c_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).is_ok());
+}
+
+#[test]
+fn explicit_settlement_api_preserves_status_numbers_and_hides_native_handles() {
+    let consumer = generate();
+    let header = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == CONSUMER_HEADER_FILE_NAME)
+        .unwrap()
+        .1;
+    let source = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == CONSUMER_SOURCE_FILE_NAME)
+        .unwrap()
+        .1;
+    assert!(header.contains("SPX_PG_CONSUMER_NULL_ARGUMENT = 8"));
+    assert!(header.contains("SPX_PG_CONSUMER_RELEASE_FAILED = 9"));
+    assert!(header.contains("spx_pg_consumer_transform_with_settlement"));
+    assert!(header.contains("spx_pg_consumer_close_checked"));
+    assert!(source.contains("outcome.primary_status == SPX_PG_CONSUMER_OK"));
+    assert!(source.contains("required > SPX_PG_CCC_MAX_FRAME_BYTES"));
+}

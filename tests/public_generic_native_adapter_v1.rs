@@ -35,3 +35,8 @@ mod settlement_corpus;
 /// (`tests/support/public_generic_hostile_corpus.rs`).
 #[path = "public_generic_native_adapter_v1/shared_hostile_corpus.rs"]
 mod shared_hostile_corpus;
+
+/// Unix-only external caller matrix; no Windows/MSVC coverage is inferred.
+#[cfg(unix)]
+#[path = "public_generic_native_adapter_v1/consumer_settlement.rs"]
+mod consumer_settlement;

@@ -1,0 +1,76 @@
+/* Move-only RAII owner of one opened spx_pg_calling_consumer handle.
+ * Provider::open independently invokes the generated C11 client's exact
+ * pairing checks -- this wrapper offers no constructor that skips them, and
+ * no public constructor accepts an arbitrary raw handle. */
+class Provider final {
+public:
+    Provider() noexcept = default;
+    Provider(Provider &&other) noexcept : raw_(other.raw_) { other.raw_ = nullptr; }
+    Provider &operator=(Provider &&other) noexcept {
+        if (this != &other) {
+            if (!close_checked()) return *this;
+            raw_ = other.raw_;
+            other.raw_ = nullptr;
+        }
+        return *this;
+    }
+    Provider(const Provider &) = delete;
+    Provider &operator=(const Provider &) = delete;
+    ~Provider() noexcept { reset(); }
+
+    /* Verifies descriptor_bytes/provider_binding_bytes against this
+     * package's own embedded trusted values via the generated C11 client's
+     * spx_pg_consumer_open -- the same independent pairing check the C11
+     * harness itself exercises, never a C++-side shortcut around it. */
+    static Result<Provider> open(const std::uint8_t *descriptor_bytes, std::size_t descriptor_len,
+                                  const std::uint8_t *provider_binding_bytes,
+                                  std::size_t provider_binding_len) noexcept;
+    /* Convenience overload: opens against this package's own embedded
+     * trusted descriptor/binding bytes. */
+    static Result<Provider> open() noexcept;
+
+    /* Consumes `input` by value. A default-constructed or moved-from
+     * Provider safely returns ErrorKind::NullArgument without touching
+     * `input`'s vectors at all (they are destroyed normally when `input`
+     * goes out of scope) -- this call never hands a native call a consumer
+     * it knows is not open. */
+    Result<Output> transform(Input input) noexcept;
+
+    bool valid() const noexcept { return raw_ != nullptr; }
+
+    /* Explicit checked close retains the owning guard on a retriable native
+     * refusal. Destruction is still noexcept; use this path to observe errors. */
+    Result<bool> close_checked() noexcept {
+        int native_status = 0;
+        const auto status = ::spx_pg_consumer_close_checked(&raw_, &native_status);
+        if (status != SPX_PG_CONSUMER_OK) return Error(map_error_kind(status), native_status, native_status);
+        return true;
+    }
+    /* Compatibility convenience. A refusal is reported by the C layer and
+     * does not change an already selected transform outcome. */
+    void close() noexcept { reset(); }
+
+private:
+    explicit Provider(::spx_pg_calling_consumer *raw) noexcept : raw_(raw) {}
+
+    /* Idempotent: a null raw_ is always a safe no-op, matching
+     * spx_pg_consumer_close's own "closing an already-null provider is a
+     * no-op success." */
+    void reset() noexcept {
+        if (raw_ != nullptr) {
+            ::spx_pg_consumer_close(&raw_);
+        }
+    }
+
+    ::spx_pg_calling_consumer *raw_ = nullptr;
+};
+
+static_assert(!std::is_copy_constructible_v<Provider>);
+static_assert(!std::is_copy_assignable_v<Provider>);
+static_assert(std::is_nothrow_move_constructible_v<Provider>);
+static_assert(std::is_nothrow_move_assignable_v<Provider>);
+
+static_assert(!std::is_copy_constructible_v<Output>);
+static_assert(!std::is_copy_assignable_v<Output>);
+static_assert(std::is_nothrow_move_constructible_v<Output>);
+static_assert(std::is_nothrow_move_assignable_v<Output>);

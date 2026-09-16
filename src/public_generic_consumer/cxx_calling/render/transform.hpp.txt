@@ -1,0 +1,21 @@
+inline Result<Output> Provider::transform(Input input) noexcept {
+    // Clear one-shot test injections on local refusal as well as native calls.
+    struct InjectionScope {
+        ~InjectionScope() noexcept { ::spx_pg_consumer_test_clear_failure_injection(); }
+    } injection_scope;
+    if (raw_ == nullptr) return Error(ErrorKind::NullArgument, 0);
+    std::size_t payload = 0;
+@PREFLIGHT@    ::spx_pg_input c_input{};
+    bool prepared = true;
+@STAGE@    if (!prepared) {
+@ROLLBACK@        return Error(ErrorKind::AllocationFailure, 0);
+    }
+    ::spx_pg_output c_output{};
+    ::spx_pg_consumer_settlement_v1 report{};
+    const auto status = ::spx_pg_consumer_transform_with_settlement(raw_, &c_input, &c_output, &report);
+    if (status != SPX_PG_CONSUMER_OK) {
+        ::spx_pg_output_free(&c_output);
+        return Error(map_error_kind(status), report.native_status, report.release_status);
+    }
+    return Output(c_output);
+}

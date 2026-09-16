@@ -8,6 +8,16 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Propagate explicit native release failures through C11/C++17 calling consumers
+  without exposing a decoded success or overwriting earlier failures. Add
+  checked close with retained ownership, reverse caller rollback, bounded
+  encoding/export/decode, and per-invocation injection isolation. Implement
+  corresponding Rust settlement and fallible codecs, with separate Cargo
+  regressions. Extend #162 by 112 shared consumer cases, independent caller
+  counters, replay evidence and eleven compiled semantic negative controls;
+  actual generator/Rust execution remains a distinct gate, and full PG-7,
+  compiled Wasm and hosted promotion are not claimed.
+
 - Return real native input/result release failures without overwriting an earlier
   call's settlement. Extend #162 with actual per-leaf result allocation/copy and
   export preflight failures, pre-rollback byte checks, exact 16 MiB success,

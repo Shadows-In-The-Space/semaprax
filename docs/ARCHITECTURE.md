@@ -2712,3 +2712,14 @@ overhead with a path tie-break, using a fixed-size stack index. Its forecast use
 the identical schedule, and retained modules return to canonical path order
 before cross-module validation and publication. Earlier profiles keep their
 existing resolution order.
+
+### Public-generic calling-consumer settlement ownership
+
+`public_generic_consumer::{c_calling,cxx_calling,rust_calling}` continue to own
+codecs and caller settlement. Their `render/` text assets are consumed by the
+existing deterministic generators, with reverse field-order cleanup emitted by
+thin shape renderers. `tests/public_generic_native_adapter_v1/consumer_settlement`
+and the corresponding Python scripts own test-only allocation/hostility
+observations, not a second provider. The Cargo bridge byte-compares actual
+generator output with fixture assembly before executing it. The authoritative
+contracts and nonclaims live in [Settlement Corpus v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162).

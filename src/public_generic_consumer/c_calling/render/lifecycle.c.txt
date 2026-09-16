@@ -1,0 +1,153 @@
+/* Injection is consumed by one public transform, including locally rejected
+ * inputs. Each invocation has a separate primary and release outcome. */
+static uint32_t spx_pg_ccc_pending_injection = SPX_PG_TEST_NO_INJECTION;
+void spx_pg_consumer_test_inject_failure(uint32_t ordinal) {
+    spx_pg_ccc_pending_injection = ordinal;
+    spx_pg_test_inject_failure_v1(ordinal);
+}
+void spx_pg_consumer_test_clear_failure_injection(void) {
+    spx_pg_ccc_pending_injection = SPX_PG_TEST_NO_INJECTION;
+    spx_pg_test_clear_failure_injection_v1();
+}
+size_t spx_pg_consumer_test_live_allocations(void) { return spx_pg_test_live_allocations_v1(); }
+size_t spx_pg_consumer_test_live_handles(spx_pg_calling_consumer *consumer) {
+    return consumer == NULL ? 0 : spx_pg_test_live_handles_v1(consumer->provider);
+}
+
+spx_pg_consumer_status spx_pg_consumer_open(const uint8_t *descriptor_bytes, size_t descriptor_len,
+    const uint8_t *provider_binding_bytes, size_t provider_binding_len,
+    spx_pg_calling_consumer **out_consumer) {
+    if (out_consumer == NULL) return SPX_PG_CONSUMER_NULL_ARGUMENT;
+    *out_consumer = NULL;
+    if (descriptor_bytes == NULL || provider_binding_bytes == NULL) return SPX_PG_CONSUMER_NULL_ARGUMENT;
+    const spx_pg_consumer_status verified = spx_pg_ccc_verify_pairing(
+        descriptor_bytes, descriptor_len, provider_binding_bytes, provider_binding_len);
+    if (verified != SPX_PG_CONSUMER_OK) return verified;
+    /* Allocate the client guard first: there is no native owner to orphan if
+     * this caller-side allocation fails. */
+    spx_pg_calling_consumer *consumer = (spx_pg_calling_consumer *)malloc(sizeof(*consumer));
+    if (consumer == NULL) return SPX_PG_CONSUMER_ALLOCATION_FAILURE;
+    consumer->provider = NULL;
+    const spx_pg_status_v1 status = spx_pg_provider_open_v1(descriptor_bytes, descriptor_len,
+        provider_binding_bytes, provider_binding_len, &consumer->provider);
+    if (status != SPX_PG_STATUS_OK) {
+        free(consumer);
+        return spx_pg_ccc_map_open_failure(status);
+    }
+    *out_consumer = consumer;
+    return SPX_PG_CONSUMER_OK;
+}
+
+spx_pg_consumer_status spx_pg_consumer_transform_with_settlement(
+    spx_pg_calling_consumer *consumer, spx_pg_input *input,
+    spx_pg_output *out_output, spx_pg_consumer_settlement_v1 *report) {
+    spx_pg_consumer_settlement_v1 outcome = {SPX_PG_CONSUMER_OK, 0, 0};
+    uint8_t *carrier = NULL, *buffer = NULL;
+    size_t carrier_len = 0, required = 0, reported = 0;
+    spx_pg_value_v1 *input_handle = NULL;
+    spx_pg_result_v1 *result_handle = NULL;
+    spx_pg_status_v1 status = SPX_PG_STATUS_OK;
+    const uint32_t injection = spx_pg_ccc_pending_injection;
+    spx_pg_ccc_pending_injection = SPX_PG_TEST_NO_INJECTION;
+    if (report != NULL) *report = outcome;
+    if (out_output != NULL) memset(out_output, 0, sizeof(*out_output));
+    if (consumer == NULL || input == NULL || out_output == NULL) {
+        outcome.primary_status = SPX_PG_CONSUMER_NULL_ARGUMENT;
+        if (input != NULL) spx_pg_ccc_free_input_leaves(input);
+        goto settle;
+    }
+    outcome.primary_status = spx_pg_ccc_encode_input(input, &carrier, &carrier_len);
+    spx_pg_ccc_free_input_leaves(input);
+    if (outcome.primary_status != SPX_PG_CONSUMER_OK) goto settle;
+    if (injection != SPX_PG_TEST_NO_INJECTION) spx_pg_test_inject_failure_v1(injection);
+    status = spx_pg_input_prepare_v1(consumer->provider, carrier, carrier_len, &input_handle);
+    free(carrier);
+    carrier = NULL;
+    if (status != SPX_PG_STATUS_OK) {
+        outcome.primary_status = spx_pg_ccc_map_prepare_failure(status);
+        outcome.native_status = (int)status;
+        goto settle;
+    }
+    if (injection != SPX_PG_TEST_NO_INJECTION) spx_pg_test_inject_failure_v1(injection);
+    /* These handles were minted together by this provider. Validated pairing
+     * consumes input even on failure; the consumer never repeats execution. */
+    status = spx_pg_call_v1(consumer->provider, input_handle, &result_handle);
+    input_handle = NULL;
+    if (status != SPX_PG_STATUS_OK) {
+        outcome.primary_status = spx_pg_ccc_map_call_failure(status);
+        outcome.native_status = (int)status;
+        goto settle;
+    }
+    status = spx_pg_result_export_v1(result_handle, NULL, 0, &required);
+    if (status != SPX_PG_STATUS_OK && status != SPX_PG_STATUS_BUFFER_TOO_SMALL) {
+        outcome.primary_status = spx_pg_ccc_map_export_failure(status);
+        outcome.native_status = (int)status;
+        goto settle;
+    }
+    if (required < 8u + 8u * FIELD_COUNT || required > SPX_PG_CCC_MAX_FRAME_BYTES) {
+        outcome.primary_status = SPX_PG_CONSUMER_RESULT_REJECTED;
+        goto settle;
+    }
+    buffer = (uint8_t *)malloc(required);
+    if (buffer == NULL) {
+        outcome.primary_status = SPX_PG_CONSUMER_ALLOCATION_FAILURE;
+        goto settle;
+    }
+    status = spx_pg_result_export_v1(result_handle, buffer, required, &reported);
+    if (status != SPX_PG_STATUS_OK) {
+        outcome.primary_status = spx_pg_ccc_map_export_failure(status);
+        outcome.native_status = (int)status;
+        goto settle;
+    }
+    if (reported != required) {
+        outcome.primary_status = SPX_PG_CONSUMER_RESULT_REJECTED;
+        goto settle;
+    }
+    outcome.primary_status = spx_pg_ccc_decode_output(buffer, reported, out_output);
+settle:
+    /* One auditable exit. Release cannot mask export/decode/allocation errors;
+     * without a prior failure it becomes primary and suppresses the output. */
+    free(carrier);
+    free(buffer);
+    if (result_handle != NULL) {
+        outcome.release_status = (int)spx_pg_result_release_v1(&result_handle);
+        if (outcome.release_status != SPX_PG_STATUS_OK && outcome.primary_status == SPX_PG_CONSUMER_OK) {
+            outcome.primary_status = SPX_PG_CONSUMER_RELEASE_FAILED;
+            outcome.native_status = outcome.release_status;
+        }
+    }
+    if (outcome.primary_status != SPX_PG_CONSUMER_OK && out_output != NULL) spx_pg_output_free(out_output);
+    spx_pg_consumer_test_clear_failure_injection();
+    if (report != NULL) *report = outcome;
+    return outcome.primary_status;
+}
+
+spx_pg_consumer_status spx_pg_consumer_transform(spx_pg_calling_consumer *consumer,
+    spx_pg_input *input, spx_pg_output *out_output, int *out_native_status) {
+    spx_pg_consumer_settlement_v1 report;
+    const spx_pg_consumer_status status = spx_pg_consumer_transform_with_settlement(consumer, input, out_output, &report);
+    if (out_native_status != NULL) *out_native_status = report.native_status;
+    return status;
+}
+
+spx_pg_consumer_status spx_pg_consumer_close_checked(spx_pg_calling_consumer **consumer, int *out_native_status) {
+    if (out_native_status != NULL) *out_native_status = 0;
+    if (consumer == NULL) return SPX_PG_CONSUMER_NULL_ARGUMENT;
+    if (*consumer == NULL) return SPX_PG_CONSUMER_OK;
+    const spx_pg_status_v1 status = spx_pg_provider_close_v1(&(*consumer)->provider);
+    if (out_native_status != NULL) *out_native_status = (int)status;
+    /* Native close leaves a valid, busy provider intact. Preserve its guard.
+     * A terminal refusal nulls the native handle and permits guard cleanup. */
+    if ((*consumer)->provider == NULL) {
+        free(*consumer);
+        *consumer = NULL;
+    }
+    return status == SPX_PG_STATUS_OK ? SPX_PG_CONSUMER_OK : SPX_PG_CONSUMER_RELEASE_FAILED;
+}
+
+void spx_pg_consumer_close(spx_pg_calling_consumer **consumer) {
+    if (consumer == NULL) return;
+    if (spx_pg_consumer_close_checked(consumer, NULL) != SPX_PG_CONSUMER_OK) {
+        fprintf(stderr, "%s", SPX_PG_CCC_SECONDARY_RELEASE_NOTE);
+    }
+}

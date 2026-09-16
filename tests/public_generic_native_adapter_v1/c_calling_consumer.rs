@@ -34,11 +34,11 @@ use semaprax::public_generic_consumer::rust_calling::{OwnedByteField, RecordShap
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-fn fixture_descriptor_bytes() -> Vec<u8> {
+pub(super) fn fixture_descriptor_bytes() -> Vec<u8> {
     DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
 }
 
-fn fixture_binding() -> NativeProviderBindingV1 {
+pub(super) fn fixture_binding() -> NativeProviderBindingV1 {
     NativeProviderBindingV1::new(
         CarrierBindingV1::new(
             "sha256:9999999999999999999999999999999999999999999999999999999999999999",

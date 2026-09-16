@@ -119,13 +119,26 @@ def main(argv=None):
     test_arguments = []
     if args.nocapture:
         test_arguments.append("--nocapture")
-    if os.name == "nt" and args.label == "Rust Windows" and args.shard == "integration-0":
-        # Keep this stabilization scoped to the explicit current-Rust Windows
-        # CI path so the generic/MSRV router contract remains byte-for-byte stable.
+    if os.name == "nt" and args.label == "Rust Windows" and args.shard.startswith("integration-"):
+        # C ABI fixtures allocate a 1 MiB aligned context on the stack, which
+        # leaves no headroom under the Windows linker's 1 MiB default stack
+        # reserve. LINK is inherited by link.exe even when tests invoke it via
+        # clang. Apply to every integration shard so the fix does not break
+        # when the `project` harness moves between shards via --exclude-package.
         cargo_env["LINK"] = "/STACK:8388608"
-        # Project/npm fixtures in this shard share process/filesystem resources;
-        # serial execution prevents cross-test contention from stalling the job.
-        test_arguments.append("--test-threads=1")
+    if os.name == "nt" and args.label == "Rust Windows" and any(
+        target["name"] == "project" for target in shard["targets"]
+    ):
+        # Project/npm fixtures share process/filesystem resources; serial
+        # execution prevents cross-test contention from stalling the job.
+        if "--test-threads=1" not in test_arguments:
+            test_arguments.append("--test-threads=1")
+    if os.name == "nt" and args.label == "Rust Windows" and args.shard == "integration-0":
+        # Keep the historical integration-0 serialization for the current-Rust
+        # Windows CI path so the generic/MSRV router contract remains stable.
+        # The LINK assignment above already covers the stack reserve.
+        if "--test-threads=1" not in test_arguments:
+            test_arguments.append("--test-threads=1")
     if (
         sys.platform == "darwin"
         and args.label == "Rust macOS"

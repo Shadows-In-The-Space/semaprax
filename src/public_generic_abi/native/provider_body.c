@@ -57,6 +57,26 @@
 #define SPX_PG_OCCURRENCE_INJECTION(label) 0
 #endif
 
+/* Physical result/cleanup boundaries, separate from the legacy label-only
+ * logical trace. Optional test instrumentation only: ordinary builds neither
+ * export nor accept an injection API here. Indices are structural; UINT32_MAX
+ * denotes a whole-value event. Hooks may report failure, never skip cleanup.
+ * The pinned vocabulary belongs to PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md. */
+#define SPX_PG_PHASE_RESULT_ALLOCATION_STARTED 0u
+#define SPX_PG_PHASE_RESULT_ALLOCATION_COMMITTED 1u
+#define SPX_PG_PHASE_RESULT_PAYLOAD_COPIED 2u
+#define SPX_PG_PHASE_RESULT_VALUE_PREPARED 3u
+#define SPX_PG_PHASE_RESULT_COMMIT_PENDING 4u
+#define SPX_PG_PHASE_EXPORT_PENDING 5u
+#define SPX_PG_PHASE_EXPORT_LEAF_PENDING 6u
+#define SPX_PG_PHASE_LEAF_RELEASED 7u
+#ifndef SPX_PG_OBSERVE_RESULT_PAYLOAD
+#define SPX_PG_OBSERVE_RESULT_PAYLOAD(leaf, bytes, length) ((void)0)
+#endif
+#ifndef SPX_PG_PHYSICAL_PHASE
+#define SPX_PG_PHYSICAL_PHASE(phase, direction, leaf, allocations, bytes) 0
+#endif
+
 /* --- Bounds, reused verbatim from Public Generic Boundary Profile v1 (see
  * src/public_generic_abi/boundary_profile.rs) so this file never restates a
  * number independently; tests/public_generic_native_adapter_v1 pins these
@@ -350,6 +370,18 @@ spx_pg_status_v1 spx_pg_test_force_settlement_conflict_v1(spx_pg_status_v1 statu
     return spx_pg_settle(status);
 }
 
+/* This instrumentation does not reinterpret the v1 logical trace: in this
+ * fixture the endpoint itself allocates its return value, earlier than the
+ * historical post-hoc result-staging labels. Physical evidence says exactly
+ * when those allocations/copies actually happen. */
+static int spx_pg_physical_phase(uint32_t phase, uint32_t direction, uint32_t leaf) {
+    (void)phase;
+    (void)direction;
+    (void)leaf;
+    return SPX_PG_PHYSICAL_PHASE(phase, direction, leaf,
+                                 g_spx_pg_live_allocations, g_spx_pg_live_bytes);
+}
+
 /* --- Registry operations. --- */
 
 static int spx_pg_registry_insert(void *pointer, void *object, uint32_t kind, void *owner, uint32_t generation) {
@@ -450,7 +482,10 @@ static void spx_pg_release_payload(uint8_t **bytes, size_t *lengths,
                                       uint32_t index, uint32_t direction) {
     spx_pg_dealloc(bytes[index], lengths[index]);
     SPX_PG_OBSERVE_LEAF_RELEASE(direction, index);
-    (void)direction;
+    if (spx_pg_physical_phase(SPX_PG_PHASE_LEAF_RELEASED, direction, index)) {
+        SPX_PG_OBSERVE_CLEANUP_FAILURE(g_spx_pg_settlement_selected, SPX_PG_STATUS_CONTRACT_FAILURE);
+        (void)spx_pg_settle(SPX_PG_STATUS_CONTRACT_FAILURE);
+    }
 }
 
 /* Release `count` already-allocated leaves in exact reverse order, matching
@@ -568,20 +603,46 @@ static spx_pg_status_v1 spx_pg_endpoint_reverse_bytes_v1(uint32_t leaf_count,
                                                           uint8_t **out_leaf_bytes,
                                                           size_t *out_leaf_lens) {
     SPX_PG_OBSERVE_ENDPOINT();
+    uint32_t completed = 0;
+    spx_pg_status_v1 status = SPX_PG_STATUS_OK;
     for (uint32_t leaf = 0; leaf < leaf_count; ++leaf) {
         size_t length = input_leaf_lens[leaf];
+        if (spx_pg_physical_phase(SPX_PG_PHASE_RESULT_ALLOCATION_STARTED, 1, leaf)) {
+            status = SPX_PG_STATUS_ALLOCATION_FAILURE;
+            break;
+        }
         uint8_t *storage = (length == 0) ? NULL : (uint8_t *)spx_pg_alloc(length);
         if (length != 0 && storage == NULL) {
-            for (uint32_t undo = leaf; undo-- > 0;) {
-                spx_pg_release_payload(out_leaf_bytes, out_leaf_lens, undo, 1);
-            }
-            return SPX_PG_STATUS_ALLOCATION_FAILURE;
+            status = SPX_PG_STATUS_ALLOCATION_FAILURE;
+            break;
+        }
+        /* Install ownership immediately after allocation, BEFORE a fallible
+         * observation or payload write. Empty leaves are completed obligations
+         * but create no phantom malloc/free obligation. */
+        out_leaf_bytes[leaf] = storage;
+        out_leaf_lens[leaf] = length;
+        completed = leaf + 1;
+        if (spx_pg_physical_phase(SPX_PG_PHASE_RESULT_ALLOCATION_COMMITTED, 1, leaf)) {
+            status = SPX_PG_STATUS_ALLOCATION_FAILURE;
+            break;
         }
         for (size_t index = 0; index < length; ++index) {
             storage[index] = input_leaf_bytes[leaf][length - 1 - index];
         }
-        out_leaf_bytes[leaf] = storage;
-        out_leaf_lens[leaf] = length;
+        SPX_PG_OBSERVE_RESULT_PAYLOAD(leaf, storage, length);
+        if (spx_pg_physical_phase(SPX_PG_PHASE_RESULT_PAYLOAD_COPIED, 1, leaf)) {
+            status = SPX_PG_STATUS_CONTRACT_FAILURE;
+            break;
+        }
+    }
+    if (status != SPX_PG_STATUS_OK) {
+        /* Select the real failure before rollback: a later cleanup error
+         * must not turn an allocation failure into contract failure. */
+        spx_pg_select_primary_failure(status);
+        for (uint32_t undo = completed; undo-- > 0;) {
+            spx_pg_release_payload(out_leaf_bytes, out_leaf_lens, undo, 1);
+        }
+        return status;
     }
     return SPX_PG_STATUS_OK;
 }
@@ -911,6 +972,7 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
 
     spx_pg_result_state *result = (spx_pg_result_state *)spx_pg_alloc(sizeof(spx_pg_result_state));
     if (result == NULL) {
+        spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
         if (result_leaf_bytes != NULL) {
             for (uint32_t index = leaf_count; index-- > 0;) {
                 spx_pg_release_payload(result_leaf_bytes, result_leaf_lens, index, 1);
@@ -956,6 +1018,7 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
         }
     }
     if (result_leaf_trace_injected) {
+        spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
         for (uint32_t index = leaf_count; index-- > 0;) {
             spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
@@ -969,7 +1032,9 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
         return spx_pg_settle(SPX_PG_STATUS_ALLOCATION_FAILURE);
     }
     spx_pg_trace_record(SPX_PG_TRACE_RESULT_VALUE_PREPARED);
-    if (spx_pg_should_inject(SPX_PG_TRACE_RESULT_VALUE_PREPARED)) {
+    if (spx_pg_should_inject(SPX_PG_TRACE_RESULT_VALUE_PREPARED) ||
+        spx_pg_physical_phase(SPX_PG_PHASE_RESULT_VALUE_PREPARED, 1, UINT32_MAX)) {
+        spx_pg_select_primary_failure(SPX_PG_STATUS_CONTRACT_FAILURE);
         for (uint32_t index = leaf_count; index-- > 0;) {
             spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
@@ -984,7 +1049,9 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
     }
 
     spx_pg_trace_record(SPX_PG_TRACE_RESULT_COMMIT);
-    if (spx_pg_should_inject(SPX_PG_TRACE_RESULT_COMMIT)) {
+    if (spx_pg_should_inject(SPX_PG_TRACE_RESULT_COMMIT) ||
+        spx_pg_physical_phase(SPX_PG_PHASE_RESULT_COMMIT_PENDING, 1, UINT32_MAX)) {
+        spx_pg_select_primary_failure(SPX_PG_STATUS_CONTRACT_FAILURE);
         for (uint32_t index = leaf_count; index-- > 0;) {
             spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
@@ -1000,6 +1067,7 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
 
     spx_pg_result_v1 *identity = &g_spx_pg_identities[g_spx_pg_identities_used++].result;
     if (!spx_pg_registry_insert(identity, result, SPX_PG_KIND_RESULT, provider, result->generation)) {
+        spx_pg_select_primary_failure(SPX_PG_STATUS_ALLOCATION_FAILURE);
         for (uint32_t index = leaf_count; index-- > 0;) {
             spx_pg_release_payload(result->leaf_bytes, result->leaf_lens, index, 1);
         }
@@ -1083,6 +1151,17 @@ spx_pg_status_v1 spx_pg_result_export_v1(spx_pg_result_v1 *result_handle, uint8_
     if (out_bytes == NULL || out_capacity < required) {
         return SPX_PG_STATUS_BUFFER_TOO_SMALL;
     }
+    /* Check every fallible export boundary before the first caller-visible
+     * write. Refusal is non-consuming, reports the exact required capacity,
+     * leaves the buffer untouched and never re-executes the endpoint. */
+    if (spx_pg_physical_phase(SPX_PG_PHASE_EXPORT_PENDING, 1, UINT32_MAX)) {
+        return SPX_PG_STATUS_CONTRACT_FAILURE;
+    }
+    for (uint32_t index = 0; index < result->leaf_count; ++index) {
+        if (spx_pg_physical_phase(SPX_PG_PHASE_EXPORT_LEAF_PENDING, 1, index)) {
+            return SPX_PG_STATUS_CONTRACT_FAILURE;
+        }
+    }
     size_t offset = 0;
     spx_pg_write_u64le(out_bytes + offset, result->leaf_count);
     offset += 8;
@@ -1112,6 +1191,9 @@ spx_pg_status_v1 spx_pg_value_release_v1(spx_pg_value_v1 **value) {
                                                        : SPX_PG_STATUS_ILLEGAL_TRANSITION;
     }
     spx_pg_value_state *owned = (spx_pg_value_state *)g_spx_pg_registry[slot].object;
+    int previous_selected = g_spx_pg_settlement_selected;
+    spx_pg_status_v1 previous_status = g_spx_pg_settlement_status;
+    spx_pg_reset_call_state();
     spx_pg_registry_remove(slot);
     spx_pg_release_leaves(owned->leaf_bytes, owned->leaf_lens, owned->leaf_count, 0);
     if (owned->leaf_bytes != NULL) {
@@ -1122,7 +1204,11 @@ spx_pg_status_v1 spx_pg_value_release_v1(spx_pg_value_v1 **value) {
     }
     spx_pg_dealloc(owned, sizeof(spx_pg_value_state));
     *value = NULL;
-    return SPX_PG_STATUS_OK;
+    spx_pg_status_v1 release_status = g_spx_pg_settlement_selected
+        ? g_spx_pg_settlement_status : SPX_PG_STATUS_OK;
+    g_spx_pg_settlement_selected = previous_selected;
+    g_spx_pg_settlement_status = previous_status;
+    return release_status;
 }
 
 spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result) {
@@ -1140,6 +1226,9 @@ spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result) {
                                                        : SPX_PG_STATUS_ILLEGAL_TRANSITION;
     }
     spx_pg_result_state *owned = (spx_pg_result_state *)g_spx_pg_registry[slot].object;
+    int previous_selected = g_spx_pg_settlement_selected;
+    spx_pg_status_v1 previous_status = g_spx_pg_settlement_status;
+    spx_pg_reset_call_state();
     spx_pg_registry_remove(slot);
     /* Route through the same traced/injectable helper `spx_pg_value_release_v1`
      * uses, rather than a second, untraced per-leaf loop: releasing a
@@ -1156,5 +1245,9 @@ spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result) {
     }
     spx_pg_dealloc(owned, sizeof(spx_pg_result_state));
     *result = NULL;
-    return SPX_PG_STATUS_OK;
+    spx_pg_status_v1 release_status = g_spx_pg_settlement_selected
+        ? g_spx_pg_settlement_status : SPX_PG_STATUS_OK;
+    g_spx_pg_settlement_selected = previous_selected;
+    g_spx_pg_settlement_status = previous_status;
+    return release_status;
 }

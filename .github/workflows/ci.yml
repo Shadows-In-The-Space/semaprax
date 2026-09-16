@@ -440,7 +440,8 @@ jobs:
           python3 scripts/public_generic_settlement_evidence.py --sanitizers --stress --output target/pg-settlement
           python3 scripts/public_generic_settlement_evidence.py --sanitizers --stress \
             --replay target/pg-settlement/evidence.json \
-            --replay-lifecycle target/pg-settlement/native-lifecycle-evidence.json
+            --replay-lifecycle target/pg-settlement/native-lifecycle-evidence.json \
+            --replay-result-phases target/pg-settlement/native-result-phase-evidence.json
 
   std-library-depth:
     name: STD-08 bundled library depth

@@ -158,10 +158,12 @@ def render(cases: list[dict[str, Any]]) -> tuple[str, bytes, bytes]:
              (ROOT / "src/public_generic_abi/native/provider_body.c").read_text(),
              (NATIVE / "settlement_corpus/probe.c").read_text(),
              (NATIVE / "settlement_corpus/failure_regressions.c").read_text(),
-             (NATIVE / "settlement_corpus/lifecycle.c").read_text()]
+             (NATIVE / "settlement_corpus/lifecycle.c").read_text(),
+             (NATIVE / "settlement_corpus/result_phases.c").read_text()]
     for i, case in enumerate(cases):
         parts.append(c_array(f"CASE_{i}_CARRIER", input_carrier(case)))
     parts.append("int main(int argc, char **argv) { REQUIRE(fixture_binary_stdout());\n"
+                 'if (argc == 2 && strcmp(argv[1], "result-phases") == 0) { check_result_phase_regressions(1); return 0; }\n'
                  'if (argc == 2) return pg_lifecycle_run(argv[1], 1) ? 0 : 2;\n'
                  'if (argc != 1) return 2;\n')
     for i, case in enumerate(cases):
@@ -169,7 +171,7 @@ def render(cases: list[dict[str, Any]]) -> tuple[str, bytes, bytes]:
                       for field in ["failure_injection_id", "compound_cleanup_injection"]]
         parts.append(f'run_one_case("{case["case_id"]}", CASE_{i}_CARRIER, sizeof(CASE_{i}_CARRIER), '
                      f'{injections[0]}, {injections[1]});\n')
-    parts.append('check_failure_regressions(); check_lifecycle_regressions(); puts("settlement-corpus-native-probe-done"); return 0; }\n')
+    parts.append('check_failure_regressions(); check_lifecycle_regressions(); check_result_phase_regressions(0); puts("settlement-corpus-native-probe-done"); return 0; }\n')
     return "\n".join(parts), descriptor, binding
 
 
@@ -401,10 +403,13 @@ def lifecycle_negative_controls(trusted: bytes, expected: dict[str, Any]) -> int
     return len(bad_evidence) + len(bad_wire)
 
 def main() -> int:
+    import public_generic_settlement_phases as phases
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, help="write payload-free canonical evidence here")
     parser.add_argument("--replay", type=Path, help="reconstruct and verify this evidence.json")
     parser.add_argument("--replay-lifecycle", type=Path, help="verify companion native-lifecycle-evidence.json")
+    parser.add_argument("--replay-result-phases", type=Path, help="verify companion native-result-phase-evidence.json")
     parser.add_argument("--stress", action="store_true", help="also require 8,192 same-provider calls per native engine")
     parser.add_argument("--sanitizers", action="store_true", help="also require ASan + UBSan at -O1")
     parser.add_argument("--cc", default=os.environ.get("CLANG", "clang"))
@@ -418,6 +423,12 @@ def main() -> int:
     if args.replay_lifecycle:
         submitted_lifecycle = read_bounded(args.replay_lifecycle, 256 * 1024)
         replay_lifecycle(submitted_lifecycle, submitted_lifecycle)
+    submitted_phases = None
+    if args.replay_result_phases:
+        submitted_phases = read_bounded(args.replay_result_phases, phases.BYTE_LIMIT)
+        phases.replay(submitted_phases, submitted_phases)
+    phase_bytes = read_bounded(FIXTURE / "native-result-phase-cases.json", phases.BYTE_LIMIT)
+    phase_manifest = phases.load_manifest(phase_bytes)
     lifecycle_cases, lifecycle_bytes = lifecycle_manifest(args.stress)
     compiler = shutil.which(args.cc)
     require(compiler is not None, "compiler-unavailable")
@@ -439,6 +450,7 @@ def main() -> int:
     if args.sanitizers:
         engines.append(("native-c11-asan-ubsan", ["-O1", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"]))
     rows, outcomes, lifecycle_rows = [], [], []
+    phase_rows, phase_outcomes, phase_receipt = [], [], ""
     with tempfile.TemporaryDirectory(prefix="spx-settlement-") as temp:
         work = Path(temp)
         (work / "settlement_corpus_probe.c").write_text(source, encoding="utf-8")
@@ -471,6 +483,16 @@ def main() -> int:
                 observed = parse_lifecycle(check.stdout, expected)
                 lifecycle_rows.append(dict(observed, engine_id=engine, provider_artifact_digest=artifact))
             print(f"PASS {engine}: {len(lifecycle_cases)} lifecycle cases, exact/+1 bounds, zero resources")
+            phase_run = subprocess.run([str(binary), "result-phases"], cwd=work,
+                capture_output=True, text=True, env=env, timeout=120)
+            require(phase_run.returncode == 0 and not phase_run.stderr, "phase-probe-failed: " + phase_run.stderr)
+            measured_phases = phases.verify_receipts(phase_run.stdout, phase_manifest)
+            if phase_outcomes:
+                require(measured_phases == phase_outcomes[0], "phase-native-optimization-disagreement")
+            phase_outcomes.append(measured_phases)
+            phase_receipt = phase_run.stdout
+            phase_rows.extend(phases.evidence_rows(measured_phases, engine, artifact, descriptor, binding))
+            print(f"PASS {engine}: {len(measured_phases)} real result-phase/export/release cases, zero resources")
     body = {"schema": EVIDENCE, "profile": manifest["profile"],
             "manifest_digest": digest(EVIDENCE + "/manifest", manifest_bytes),
             "provider_sources_digest": digest(EVIDENCE + "/sources", source.encode("utf-8")),
@@ -492,10 +514,21 @@ def main() -> int:
         require(submitted_lifecycle is not None, "missing-lifecycle-replay")
         replay_lifecycle(submitted_lifecycle, lifecycle_trusted)
         print("PASS independent lifecycle replay against fresh trusted execution")
+    phase_trusted = phases.seal({"schema": phases.EVIDENCE,
+        "manifest_digest": digest(phases.EVIDENCE + "/manifest", phase_bytes),
+        "settlement_evidence_digest": digest(phases.EVIDENCE + "/settlement", trusted), "rows": phase_rows})
+    phases.replay(phase_trusted, phase_trusted)
+    phase_controls = phases.negative_controls(phase_trusted, phase_receipt, phase_manifest)
+    print(f"PASS result-phase replay: {phase_controls} reminted/structural/wire negative controls")
+    if args.replay_result_phases:
+        require(submitted_phases is not None, "missing-result-phase-replay")
+        phases.replay(submitted_phases, phase_trusted)
+        print("PASS independent result-phase replay against fresh trusted execution")
     if args.output:
         args.output.mkdir(parents=True, exist_ok=True)
         (args.output / "evidence.json").write_bytes(trusted)
         (args.output / "native-lifecycle-evidence.json").write_bytes(lifecycle_trusted)
+        (args.output / "native-result-phase-evidence.json").write_bytes(phase_trusted)
         print(f"Wrote {args.output / 'evidence.json'}")
     return 0
 

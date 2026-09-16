@@ -117,9 +117,10 @@ The native-only extension additionally executes 61 regression combinations:
 alone and with cleanup injection), 35 input/execution plus cleanup-position
 combinations, and four post-hoc result-staging rollback cases. These run in the
 existing Cargo-generated native probe too, not solely in a separate script.
-Native result-staging label injections remain post-hoc: the endpoint already
-allocated the result. That is not an exhaustive target-neutral logical
-result-allocation failure matrix.
+Legacy native result-staging label injections remain post-hoc: the endpoint
+already allocated the result. The physical result-phase continuation below
+adds genuine allocation/copy failure points without reinterpreting that frozen
+label stream. It is still not an exhaustive target-neutral logical matrix.
 
 ## Portable evidence and replay
 
@@ -227,6 +228,117 @@ The original 25 settlement-evidence controls remain. No receipt contains
 payloads, pointers, wall-clock data or raw handles. Existing native trace and
 carrier expectation files are unchanged.
 
+## Physical result-phase continuation
+
+`settlement_corpus/result_phases.c` adds 72 native cases to the same Cargo-built
+probe. The Python gate executes the same code and compares its complete physical
+receipts against committed `native-result-phase-cases.json`, never regenerating
+expectations per compiler or optimization. Independent C assertions also pin
+status, leaf acquisition prefixes, exact copied contents, reverse release order,
+empty-leaf allocation counts, consumed injection slots and zero resources. The
+retained vectors supplement these assertions; engine agreement alone is not the
+oracle.
+
+This is `semaprax.public-generic-native-result-phase-corpus.v1`, a companion to
+the unchanged shared corpus, with `flat-owned-bytes-reference-fixture.v1` scope.
+It is canonical sorted-key ASCII JSON plus LF, bounded to 1 MiB, and bound to the
+original shared manifest. The expectation file has exactly 72 ordered cases;
+unknown/missing fields, duplicate IDs, invalid types, altered physical vectors
+or a different emitted case order fail closed. It excludes target-local byte
+peaks from pinned equality; O0/O2/sanitizer runs on one host must agree on those
+peaks separately. Existing native expectations and both existing corpus schemas
+are unchanged.
+
+### Actual event contract
+
+The optional `SPX_PG_PHYSICAL_PHASE` callback uses the following closed IDs.
+Direction 0 is input and 1 is result; a whole-value index is `UINT32_MAX`.
+Ordinary builds use a no-op default, expose no new symbols and accept no new
+runtime authority. The byte-content observer is also test-only: it validates
+actual result bytes before they can be rolled back but never retains or emits
+payload bytes.
+
+| ID | Event | Actual boundary and refusal |
+| --- | --- | --- |
+| 0 | Result allocation started | Before allocating this leaf; failure is status 10 and the leaf is not completed. |
+| 1 | Result allocation committed | After storage is installed in the private ownership inventory, before payload writes; failure is status 10 and this leaf is included in rollback. |
+| 2 | Result payload copied | After every byte is reversed/copied and independently inspected; failure is status 11. |
+| 3 | Result value prepared | After the complete private result/control object exists; failure is status 11 and no result handle is published. |
+| 4 | Result commit pending | Before registry publication/caller exposure; failure is status 11 and no result handle is published. |
+| 5 | Export pending | A live result and sufficient output capacity have been verified, before any caller-buffer write; failure is status 11. |
+| 6 | Export leaf pending | Per-leaf export preflight, all before the first output write; failure is status 11. |
+| 7 | Leaf released | After the actual free (or completed empty-leaf discharge), before proceeding to later safe cleanup; failure is status 11 and never prevents subsequent frees. |
+
+Phases 0..2 happen in the fixture endpoint, where it really allocates and
+computes its owned return value. This fact is not relabelled as post-execution
+logical staging. The historical logical result labels still occur later. The
+new trace contains phase, direction, structural index, live allocation/child
+handle counts, and whether the event injected failure. It is not claimed equal
+to interpreter/Wasm traces or a replacement for `TraceEvent`.
+
+A per-case recorder holds at most 4,096 events and at most 512 physical release
+pairs. Overflow aborts the probe rather than accepting truncated evidence.
+Native child handles remain invisible during failed private result construction.
+Only the prefix of completed result obligations is released, in reverse order,
+followed by provider-owned input when failure occurs inside the endpoint.
+When input cleanup already happened before a later failure, the trace preserves
+that chronology rather than sorting releases afterward.
+
+### Cases and failure precedence
+
+The 72 cases comprise three exact-success shapes, 31 nonempty staging/compound
+cases, eight empty-leaf staging cases, nine export/release combinations,
+fourteen explicit-release cases, and seven real-allocator/legacy-label rollback
+combinations. The successes include both empty and embedded-zero leaves and
+exactly **256 x 65,536 bytes = 16 MiB**, with 518 peak tracked native allocations.
+The empty two-leaf shape peaks at eight allocations rather than ten: an empty
+payload does not acquire a phantom allocation obligation.
+
+New result-allocation/copy hooks run at the physical boundary, so a failed
+second allocation cannot masquerade as a fully prepared result. The test checks
+copied contents before a failing call frees them, not just on successful export.
+Allocation/commit failures are selected before rollback; cleanup failures are
+secondary and never overwrite the original failure. Existing real allocation
+failures are additionally combined with failure while releasing the staged
+result, including failure allocating its final control block.
+
+Explicit `value_release` and `result_release` previously always returned 0 even
+when their cleanup recorded a failure. They now return that operation's first
+failure and continue cleanup to zero resources. Tests exercise both physical
+leaf positions, both failures together, every logical leaf/root position and
+carrier release, including result release after a successful call. The prior
+call's state is restored unchanged. Releasing an invalidated/null result is
+still handled according to the existing lifecycle contract.
+
+Export failures after commit leave the output buffer unchanged and the exact
+required length available. Size queries and short buffers do not consume an
+injection intended for a full export. Retrying only the nonconsuming export
+returns the exact result without another endpoint invocation; explicit release
+works whether it succeeds or itself reports a cleanup failure. The receipt
+records export status and release-operation status independently, not by
+replacing an earlier failure with the last return code.
+
+### Physical companion evidence
+
+`native-result-phase-evidence.json` uses
+`semaprax.public-generic-native-result-phase-evidence.v1`. It binds the exact
+phase manifest, existing settlement-evidence digest and each compiled artifact.
+Rows retain descriptor/provider binding, route/case IDs, primary and explicit
+release statuses, secondary cleanup statuses, endpoint invocation, export retry
+count, exact leaf-copy check count, phase/release digests and all peak/final
+resource counters. `verified_result_carrier_digest` hashes the canonical value
+that the C probe first proves byte-identical to its actual exported result.
+No payload is embedded in evidence. This companion is not a reduced substitute
+for the existing complete native observation rows.
+
+Replay bounds and validates the canonical envelope and closed row vocabulary,
+then recompiles trusted sources and requires exact reconstruction. Reminted
+changes to statuses, cases, routes, digests, counters or rows fail; missing,
+unknown, reordered, duplicate and truncated evidence fails too. Input/row/event/
+release/counter first-over-bound and malformed-coordinate controls are included.
+The same three-artifact replay is selected in Linux CI. Local execution does
+not establish hosted-green, MSVC, macOS or a Rust integration-test result.
+
 ## Focused gates
 
 From the repository root:
@@ -237,14 +349,15 @@ cargo test --locked -p semaprax --test public_generic_native_adapter_v1 settleme
 python3 scripts/public_generic_settlement_evidence.py --sanitizers --output target/pg-settlement
 python3 scripts/public_generic_settlement_evidence.py --sanitizers \
   --replay target/pg-settlement/evidence.json \
-  --replay-lifecycle target/pg-settlement/native-lifecycle-evidence.json
+  --replay-lifecycle target/pg-settlement/native-lifecycle-evidence.json \
+  --replay-result-phases target/pg-settlement/native-result-phase-evidence.json
 cargo fmt --all -- --check
 sh scripts/quality.sh full
 ```
 
 `--stress` additionally requires the 8,192-call scenario for every selected
 native build. Use identical `--stress`/`--sanitizers` options for generation and
-replay. The Linux workflow selects both options and replays both artifacts.
+replay. The Linux workflow selects both options and replays all three artifacts.
 `--cc` selects an explicit compiler; `CLANG` or `clang` is the default. A missing
 compiler, failed build, assertion, sanitizer error, malformed output or replay
 mismatch is a failing gate, never a skipped pass. The workflow selects the
@@ -262,3 +375,9 @@ target-neutral per-leaf failure/commit/release matrix, and comparable complete
 logical traces/peaks on every engine. Existing native/model trace differences
 are not silently normalized away by this extension. Cross-host and hosted
 promotion remain governed by the milestone and its separate gates.
+
+The physical-phase extension exercises the raw native provider, not generated
+consumer propagation. In particular, existing generated C/Rust wrappers still
+log some release failures rather than refusing a previously successful decode;
+that end-to-end consumer behavior requires its own follow-on change and execution
+coverage. The native return-status fix must not be presented as that closure.

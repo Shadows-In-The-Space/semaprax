@@ -565,6 +565,25 @@ schema or public support/publication decision changes.
 
 ### Allocation, release, and sticky failure
 
+Explicit input/result release is an independent native operation. After a valid
+handle is selected, the release uses a fresh failure selection, performs all
+safe reverse cleanup and invalidates the handle. It returns its first cleanup
+failure rather than unconditional success. The earlier call's selection is
+saved/restored; a successful call cannot mask release failure, and release
+cannot overwrite an unrelated call's status. A composing caller keeps an
+already-returned call/export failure as primary and records the release status
+separately. Null release remains an idempotent success and no signatures or
+status numbers change.
+
+The optional physical-phase observers documented in
+[Settlement Corpus v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#physical-result-phase-continuation)
+exercise real result allocation, payload copying, pre-commit refusal, export
+preflight and physical release. They are translation-unit-local test hooks,
+not new production exports and not a redefinition of the legacy logical trace.
+Export failures are nonconsuming and all fallible export checks precede the
+first output write, with required length retained and no endpoint re-execution.
+
+
 Each valid `spx_pg_call_v1` starts a fresh settlement selection after checking
 the input/provider pairing and before any new failure. A different prepared
 input's success, failure, or rejected preparation cannot select this call's
@@ -784,6 +803,25 @@ direction; native's adapter never needs an equivalent split because its
 value and result objects already have distinct pointer identities.
 
 ### Allocation, release, and sticky failure
+
+Explicit input/result release is an independent native operation. After a valid
+handle is selected, the release uses a fresh failure selection, performs all
+safe reverse cleanup and invalidates the handle. It returns its first cleanup
+failure rather than unconditional success. The earlier call's selection is
+saved/restored; a successful call cannot mask release failure, and release
+cannot overwrite an unrelated call's status. A composing caller keeps an
+already-returned call/export failure as primary and records the release status
+separately. Null release remains an idempotent success and no signatures or
+status numbers change.
+
+The optional physical-phase observers documented in
+[Settlement Corpus v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#physical-result-phase-continuation)
+exercise real result allocation, payload copying, pre-commit refusal, export
+preflight and physical release. They are translation-unit-local test hooks,
+not new production exports and not a redefinition of the legacy logical trace.
+Export failures are nonconsuming and all fallible export checks precede the
+first output write, with required length retained and no endpoint re-execution.
+
 
 Every byte this adapter ever allocates — the always-zero-length root
 marker and every leaf's payload alike — routes through

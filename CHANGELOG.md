@@ -8,6 +8,14 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Return real native input/result release failures without overwriting an earlier
+  call's settlement. Extend #162 with actual per-leaf result allocation/copy and
+  export preflight failures, pre-rollback byte checks, exact 16 MiB success,
+  compound reverse cleanup, and 72 pinned physical-phase cases with a third
+  independently replayed evidence artifact. Legacy logical trace bytes and
+  public ABI declarations remain unchanged; full PG-7 and generated-consumer
+  failure propagation are not claimed.
+
 - Prevent stale native public-generic handles from reviving when heap addresses
   are reused; validate provider identities before access/close and pin bounded,
   non-recycled identities plus exact/+1 live-resource admission. Isolate

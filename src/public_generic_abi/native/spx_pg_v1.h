@@ -115,8 +115,10 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider,
  * `out_capacity == 0`) to learn `*out_required`; the result is not consumed
  * and no byte is written. Call again with a buffer of at least
  * `*out_required` bytes to receive canonical result carrier bytes,
- * byte-identical on every repeated call. Release remains mandatory and
- * separate. */
+ * byte-identical on every repeated call. A test-injected export failure is
+ * checked before any output write, reports the exact required capacity and
+ * retains the result for an explicit export retry or release. It never retries
+ * endpoint execution. Release remains mandatory and separate. */
 spx_pg_status_v1 spx_pg_result_export_v1(spx_pg_result_v1 *result,
                                           uint8_t *out_bytes,
                                           size_t out_capacity,
@@ -126,7 +128,12 @@ spx_pg_status_v1 spx_pg_result_export_v1(spx_pg_result_v1 *result,
  * successful release, or after a rejected double/foreign/stale release, so
  * caller-side reuse is observable either way. Null-pointee is accepted and a
  * no-op success, matching "release null" from the required lifecycle
- * tests. */
+ * tests. A valid release is a separate operation: its first cleanup failure
+ * is returned, even after a successful call; later safe cleanup still runs and
+ * the handle is invalidated. An earlier call's selected status is preserved,
+ * not overwritten or allowed to mask this release's own failure. Callers must
+ * retain an earlier operation failure as primary and record release failures
+ * separately when composing operations. */
 spx_pg_status_v1 spx_pg_value_release_v1(spx_pg_value_v1 **value);
 spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result);
 

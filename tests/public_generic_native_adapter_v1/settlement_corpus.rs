@@ -591,6 +591,7 @@ fn render_settlement_corpus_probe(cases: &[Case]) -> String {
     source.push_str(include_str!("settlement_corpus/probe.c"));
     source.push_str(include_str!("settlement_corpus/failure_regressions.c"));
     source.push_str(include_str!("settlement_corpus/lifecycle.c"));
+    source.push_str(include_str!("settlement_corpus/result_phases.c"));
 
     for (index, case) in cases.iter().enumerate() {
         let carrier = encode_input_carrier(&case.input_leaves);
@@ -598,6 +599,7 @@ fn render_settlement_corpus_probe(cases: &[Case]) -> String {
     }
 
     source.push_str("int main(int argc, char **argv) {\n    REQUIRE(fixture_binary_stdout());\n");
+    source.push_str("    if (argc == 2 && strcmp(argv[1], \"result-phases\") == 0) { check_result_phase_regressions(1); return 0; }\n");
     source.push_str("    if (argc == 2) return pg_lifecycle_run(argv[1], 1) ? 0 : 2;\n    if (argc != 1) return 2;\n");
     for (index, case) in cases.iter().enumerate() {
         let ordinal = match case.failure_injection {
@@ -614,7 +616,7 @@ fn render_settlement_corpus_probe(cases: &[Case]) -> String {
             c_string_literal(&case.case_id)
         ));
     }
-    source.push_str("    check_failure_regressions();\n    check_lifecycle_regressions();\n    (void)puts(\"settlement-corpus-native-probe-done\");\n    return 0;\n}\n");
+    source.push_str("    check_failure_regressions();\n    check_lifecycle_regressions();\n    check_result_phase_regressions(0);\n    (void)puts(\"settlement-corpus-native-probe-done\");\n    return 0;\n}\n");
     source
 }
 

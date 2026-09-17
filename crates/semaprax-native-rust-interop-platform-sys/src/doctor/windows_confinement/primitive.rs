@@ -1,0 +1,664 @@
+//! `#[cfg(windows)]` Windows confinement primitive for
+//! [`DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1`][doc].
+//!
+//! # This code has never been compiled or executed
+//!
+//! The authoring host for this module is macOS arm64 with no `rustup`, no
+//! installed `*-pc-windows-*` target, and no Windows toolchain of any kind,
+//! so `cfg(windows)` code is never even parsed here -- `cargo check` on this
+//! host does not select this module. Every function signature, struct
+//! layout, and constant used below was cross-checked against the exact
+//! vendored `windows-sys = "=0.61.2"` source
+//! (`~/.cargo/registry/src/.../windows-sys-0.61.2`) already pinned by this
+//! crate's `Cargo.toml`, using only features already enabled there
+//! (`Win32_Foundation`, `Win32_Security`, `Win32_Storage_FileSystem`,
+//! `Win32_System_JobObjects`, `Win32_System_Threading`) -- no `Cargo.toml`
+//! change accompanies this file. That cross-check raises confidence that the
+//! code compiles; it is not a substitute for real Windows execution and must
+//! never be described as one. Treat every claim this file's doc comments
+//! make about its own behavior as a design intent, not evidence, until a
+//! Windows-capable session builds and runs it (see the proposed gate in
+//! `DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1.md`).
+//!
+//! # Scope
+//!
+//! This is a standalone confinement primitive, analogous to
+//! `doctor::darwin_confinement` and tested only in isolation: it is not the
+//! ordinary `--version` probe in `doctor::windows`, and it is not wired into
+//! any ordinary CLI route or into `provisioned_doctor_*`. It reuses the
+//! existing `doctor::windows` job-object plumbing's *shape* (suspended
+//! leader, non-breakaway job assigned before resume, settlement observed via
+//! `JobObjectBasicAccountingInformation`) without importing its private
+//! types, exactly as `darwin_confinement` does not import
+//! `doctor::unix::launch::darwin`'s private types.
+//!
+//! Three deliberate simplifications versus a full production primitive,
+//! recorded here rather than left implicit:
+//!
+//! 1. **Output capture is file-based, not pipe-based.** The confined leader's
+//!    stdout/stderr are redirected to two fixed-name log files inside the
+//!    per-invocation scratch root (created with the same restrictive ACL as
+//!    the root itself) rather than inherited pipe handles drained through a
+//!    `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`. This avoids duplicating
+//!    `doctor::windows::launch`'s attribute-list machinery in code nobody
+//!    here can compile-check, at the cost of not sharing that exact
+//!    handle-inheritance precision. Unifying the two is left as follow-up
+//!    work for a Windows-capable session.
+//! 2. **The restricted token disables maximum privilege only**
+//!    (`CreateRestrictedToken` with `DISABLE_MAX_PRIVILEGE` and empty
+//!    disable/delete/restrict lists), not the fuller "disable the caller's
+//!    own logon SID" refinement `DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1.md`
+//!    proposes. That refinement requires walking the calling token's
+//!    `TokenGroups` to find the `SE_GROUP_LOGON_ID` entry, a variable-length,
+//!    harder-to-verify-blind structure; this file keeps the FFI surface
+//!    reviewable and defers that specific tightening.
+//! 3. **Filesystem confinement is a restricted-ACL scratch root**, the
+//!    design the owning spec identifies as needing no `Cargo.toml` feature
+//!    change, not an AppContainer profile (which needs
+//!    `Win32_Security_Isolation`, not enabled today and outside this
+//!    session's file lease).
+//!
+//! [doc]: https://github.com/wavect/semaprax/blob/main/docs/DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1.md
+use super::capsule::{parse_capsule_body, CapsuleBody};
+use super::refusal::{admit, Refusal};
+use super::settlement::{FailureReason, Settlement, StickySettlement, UncertainReason};
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GetCurrentProcess, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
+use windows_sys::Win32::Security::{
+    AddAccessAllowedAceEx, CreateRestrictedToken, GetTokenInformation, InitializeAcl,
+    InitializeSecurityDescriptor, SetSecurityDescriptorDacl, TokenUser, ACL, ACL_REVISION,
+    DISABLE_MAX_PRIVILEGE, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, TOKEN_ASSIGN_PRIMARY,
+    TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER,
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateDirectoryW, CreateFileW, CREATE_NEW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ,
+    FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
+use windows_sys::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
+    JobObjectBasicUIRestrictions, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+    SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+    JOBOBJECT_BASIC_UI_RESTRICTIONS, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_UILIMIT_DESKTOP,
+    JOB_OBJECT_UILIMIT_DISPLAYSETTINGS, JOB_OBJECT_UILIMIT_EXITWINDOWS,
+    JOB_OBJECT_UILIMIT_GLOBALATOMS, JOB_OBJECT_UILIMIT_HANDLES, JOB_OBJECT_UILIMIT_READCLIPBOARD,
+    JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
+};
+use windows_sys::Win32::System::Threading::{
+    CreateProcessAsUserW, GetExitCodeProcess, OpenProcessToken, ResumeThread, TerminateProcess,
+    WaitForSingleObject, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, PROCESS_INFORMATION,
+    STARTF_USESTDHANDLES, STARTUPINFOW,
+};
+
+const MAX_WIDE: usize = 32767;
+/// Denies every UI-affecting capability a confined batch tool has no
+/// legitimate use for, per this contract's job-limit tightening.
+const DENIED_UI_LIMITS: u32 = JOB_OBJECT_UILIMIT_HANDLES
+    | JOB_OBJECT_UILIMIT_READCLIPBOARD
+    | JOB_OBJECT_UILIMIT_WRITECLIPBOARD
+    | JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS
+    | JOB_OBJECT_UILIMIT_DESKTOP
+    | JOB_OBJECT_UILIMIT_DISPLAYSETTINGS
+    | JOB_OBJECT_UILIMIT_GLOBALATOMS
+    | JOB_OBJECT_UILIMIT_EXITWINDOWS;
+
+struct Handle(Option<HANDLE>);
+
+impl Handle {
+    fn new(raw: HANDLE) -> Self {
+        Self(Some(raw))
+    }
+
+    fn raw(&self) -> HANDLE {
+        self.0.expect("primitive handle is owned")
+    }
+}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        if let Some(raw) = self.0.take() {
+            // SAFETY: sole remaining owner of this handle.
+            unsafe { CloseHandle(raw) };
+        }
+    }
+}
+
+fn wide(value: &OsStr) -> Result<Vec<u16>, ()> {
+    let length = value.encode_wide().count();
+    if length == 0 || length >= MAX_WIDE || value.encode_wide().any(|unit| unit == 0) {
+        return Err(());
+    }
+    Ok(value.encode_wide().chain(Some(0)).collect())
+}
+
+/// A per-invocation restricted-ACL scratch root. Only the two log files this
+/// primitive itself creates are ever removed on drop: a closed inventory,
+/// never an arbitrary directory walk.
+struct ScratchRoot {
+    dir: PathBuf,
+    stdout_log: PathBuf,
+    stderr_log: PathBuf,
+}
+
+impl Drop for ScratchRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.stdout_log);
+        let _ = std::fs::remove_file(&self.stderr_log);
+        let _ = std::fs::remove_dir(&self.dir);
+    }
+}
+
+/// Build a restricted token with `DISABLE_MAX_PRIVILEGE` from the calling
+/// process's own token. See the module documentation for why this does not
+/// also disable the caller's logon SID.
+fn restricted_token() -> Result<Handle, ()> {
+    let mut process_token = std::ptr::null_mut();
+    // SAFETY: `GetCurrentProcess` returns a pseudo-handle that need not be
+    // closed; `process_token` is a live, exclusively-owned output pointer.
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY,
+            &mut process_token,
+        )
+    } == 0
+    {
+        return Err(());
+    }
+    let process_token = Handle::new(process_token);
+    let mut restricted = std::ptr::null_mut();
+    // SAFETY: `process_token` is live and has `TOKEN_DUPLICATE`; every
+    // disable/delete/restrict list is empty (count 0, pointer null), which
+    // `CreateRestrictedToken` documents as valid; `restricted` is a live,
+    // exclusively-owned output pointer.
+    if unsafe {
+        CreateRestrictedToken(
+            process_token.raw(),
+            DISABLE_MAX_PRIVILEGE,
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            &mut restricted,
+        )
+    } == 0
+    {
+        return Err(());
+    }
+    Ok(Handle::new(restricted))
+}
+
+/// Read the restricted token's own user SID via `GetTokenInformation` into
+/// `buffer` in place. `GetTokenInformation(TokenUser)` returns a `TOKEN_USER`
+/// whose `Sid` field is a pointer *into this same buffer* (the SID bytes are
+/// appended after the struct), not a separately allocated region -- so the
+/// buffer must never move between this call and any later dereference of
+/// that pointer. Taking `buffer` by mutable reference rather than returning
+/// an owned array is deliberate: an owned return would let the caller move
+/// it, which would relocate the bytes without updating the pointer embedded
+/// inside them.
+fn read_token_user_sid(token: &Handle, buffer: &mut [u8; 256]) -> Result<(), ()> {
+    let mut returned = 0u32;
+    // SAFETY: `token` is live; `buffer` is a live, exclusively-owned output
+    // region of the declared length; `returned` is a live output pointer.
+    let ok = unsafe {
+        GetTokenInformation(
+            token.raw(),
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            buffer.len() as u32,
+            &mut returned,
+        )
+    } != 0;
+    if !ok
+        || (returned as usize) > buffer.len()
+        || (returned as usize) < std::mem::size_of::<TOKEN_USER>()
+    {
+        return Err(());
+    }
+    Ok(())
+}
+
+/// Create a fresh scratch subdirectory of `scratch_root` whose DACL grants
+/// only `sid_buffer`'s `TOKEN_USER.User.Sid` read/write/delete access. No
+/// other principal is listed, which is an implicit deny under Windows DACL
+/// evaluation. This session did not verify whether an inheritable ACE from
+/// `scratch_root`'s own parent can still additively grant access alongside
+/// this explicit DACL; a Windows-capable reviewer should confirm that, and
+/// add `SE_DACL_PROTECTED` to this security descriptor's control bits if so.
+fn confined_scratch_root(scratch_root: &Path, sid_buffer: &[u8; 256]) -> Result<ScratchRoot, ()> {
+    // SAFETY: `sid_buffer` was populated by `GetTokenInformation(TokenUser)`
+    // and is large enough for a `TOKEN_USER`; the resulting `Sid` pointer
+    // stays valid for `sid_buffer`'s lifetime, which outlives this call.
+    let sid = unsafe { (*sid_buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+
+    let mut acl_buffer = [0u8; 512];
+    let acl_ptr = acl_buffer.as_mut_ptr().cast::<ACL>();
+    // SAFETY: `acl_ptr` points at a live, exclusively-owned 512-byte buffer;
+    // `ACL_REVISION` is the fixed revision this crate targets.
+    if unsafe { InitializeAcl(acl_ptr, 512, ACL_REVISION) } == 0 {
+        return Err(());
+    }
+    // SAFETY: `acl_ptr` was just initialized above and has spare capacity
+    // for one ACE with a real-world SID; `sid` is a live pointer into
+    // `sid_buffer`, which outlives this call.
+    if unsafe {
+        AddAccessAllowedAceEx(
+            acl_ptr,
+            ACL_REVISION,
+            0,
+            FILE_GENERIC_READ | FILE_GENERIC_WRITE | DELETE,
+            sid,
+        )
+    } == 0
+    {
+        return Err(());
+    }
+
+    let mut descriptor: SECURITY_DESCRIPTOR = unsafe { std::mem::zeroed() };
+    let descriptor_ptr = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
+    // `SECURITY_DESCRIPTOR_REVISION` (documented Win32 value `1`) lives in
+    // `Win32_System_SystemServices`, a feature this crate does not enable
+    // (`Cargo.toml`, outside this session's lease); the literal is Microsoft's
+    // own fixed, never-changed ABI constant, not a value this file invents.
+    const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
+    // SAFETY: `descriptor_ptr` points at a live, exclusively-owned
+    // `SECURITY_DESCRIPTOR`.
+    if unsafe { InitializeSecurityDescriptor(descriptor_ptr, SECURITY_DESCRIPTOR_REVISION) } == 0 {
+        return Err(());
+    }
+    // SAFETY: `descriptor_ptr` was just initialized; `acl_ptr` outlives this
+    // call and this descriptor's use in `CreateDirectoryW` below.
+    if unsafe { SetSecurityDescriptorDacl(descriptor_ptr, 1, acl_ptr, 0) } == 0 {
+        return Err(());
+    }
+
+    let dir = fresh_child_dir(scratch_root)?;
+    let dir_wide = wide(dir.as_os_str())?;
+    let security = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor_ptr,
+        bInheritHandle: 0,
+    };
+    // SAFETY: `dir_wide` is a live NUL-terminated wide string; `security`'s
+    // descriptor outlives this call.
+    if unsafe { CreateDirectoryW(dir_wide.as_ptr(), &security) } == 0 {
+        return Err(());
+    }
+    Ok(ScratchRoot {
+        stdout_log: dir.join("stdout.log"),
+        stderr_log: dir.join("stderr.log"),
+        dir,
+    })
+}
+
+fn fresh_child_dir(scratch_root: &Path) -> Result<PathBuf, ()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| ())?
+        .as_nanos();
+    Ok(scratch_root.join(format!(
+        "semaprax-doctor-confinement-{}-{}-{}",
+        std::process::id(),
+        nanos,
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )))
+}
+
+fn create_inheritable_log(path: &Path) -> Result<Handle, ()> {
+    let security = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: std::ptr::null_mut(),
+        bInheritHandle: 1,
+    };
+    let path_wide = wide(path.as_os_str())?;
+    // SAFETY: `path_wide` is a live NUL-terminated wide string; `security`
+    // is a live, stack-owned value for the duration of this call.
+    let raw = unsafe {
+        CreateFileW(
+            path_wide.as_ptr(),
+            FILE_GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            &security,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(());
+    }
+    Ok(Handle::new(raw))
+}
+
+fn open_inheritable_null() -> Result<Handle, ()> {
+    let security = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: std::ptr::null_mut(),
+        bInheritHandle: 1,
+    };
+    let null = [u16::from(b'N'), u16::from(b'U'), u16::from(b'L'), 0];
+    // SAFETY: `null` is a live NUL-terminated wide string naming the fixed
+    // device path `NUL`; `security` is a live, stack-owned value.
+    let raw = unsafe {
+        CreateFileW(
+            null.as_ptr(),
+            FILE_GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            &security,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            std::ptr::null_mut(),
+        )
+    };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(());
+    }
+    Ok(Handle::new(raw))
+}
+
+/// Create a job object and tighten its limits per this contract's
+/// "job-object limits, tightened" section: `KILL_ON_JOB_CLOSE` (already the
+/// ordinary probe's behavior), `ACTIVE_PROCESS` capped at one, and
+/// `DIE_ON_UNHANDLED_EXCEPTION`, plus a `JOBOBJECT_BASIC_UI_RESTRICTIONS`
+/// call denying every listed UI capability.
+fn tightened_job() -> Result<Handle, ()> {
+    // SAFETY: both name arguments are null, requesting an unnamed job.
+    let raw_job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+    if raw_job.is_null() {
+        return Err(());
+    }
+    let job = Handle::new(raw_job);
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+        | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+    limits.BasicLimitInformation.ActiveProcessLimit = 1;
+    // SAFETY: `job` is live; `limits` is a live, exclusively-owned local of
+    // the exact size passed.
+    if unsafe {
+        SetInformationJobObject(
+            job.raw(),
+            JobObjectExtendedLimitInformation,
+            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            std::mem::size_of_val(&limits) as u32,
+        )
+    } == 0
+    {
+        return Err(());
+    }
+    let restrictions = JOBOBJECT_BASIC_UI_RESTRICTIONS {
+        UIRestrictionsClass: DENIED_UI_LIMITS,
+    };
+    // SAFETY: `job` is live; `restrictions` is a live, exclusively-owned
+    // local of the exact size passed.
+    if unsafe {
+        SetInformationJobObject(
+            job.raw(),
+            JobObjectBasicUIRestrictions,
+            (&restrictions as *const JOBOBJECT_BASIC_UI_RESTRICTIONS).cast(),
+            std::mem::size_of_val(&restrictions) as u32,
+        )
+    } == 0
+    {
+        return Err(());
+    }
+    Ok(job)
+}
+
+/// A minimal, forced-only environment block: `TEMP` and `TMP` are pinned to
+/// the confined scratch directory, and nothing else is inherited. Windows
+/// requires case-insensitive sorted names and a trailing empty row; `TEMP` <
+/// `TMP` case-insensitively, so this fixed pair is already sorted.
+fn forced_environment(scratch_dir: &Path) -> Result<Vec<u16>, ()> {
+    let value = wide(scratch_dir.as_os_str())?;
+    let mut output = Vec::new();
+    for name in ["TEMP", "TMP"] {
+        output.extend(name.encode_utf16());
+        output.push(u16::from(b'='));
+        output.extend_from_slice(&value[..value.len() - 1]);
+        output.push(0);
+    }
+    output.push(0);
+    Ok(output)
+}
+
+pub struct ConfinedProcess {
+    process: Handle,
+    thread: Handle,
+    job: Handle,
+    _token: Handle,
+    _scratch: ScratchRoot,
+    _stdin: Handle,
+    _stdout: Handle,
+    _stderr: Handle,
+    settled: bool,
+}
+
+impl Drop for ConfinedProcess {
+    fn drop(&mut self) {
+        if !self.settled {
+            // A caller that drops a `ConfinedProcess` without calling
+            // `settle` gets a short, fixed grace period rather than the
+            // caller's own deadline (which is not available here); this
+            // mirrors `doctor::windows::Child::drop` treating an unsettled
+            // drop as an urgent cleanup, not an ordinary wait.
+            let _ = settle_confined(self, Instant::now() + Duration::from_secs(5));
+            self.settled = true;
+        }
+    }
+}
+
+/// Structurally validate a sealed capsule, then spawn `exe` suspended under
+/// a restricted token, inside a fresh ACL-confined scratch root, assigned to
+/// a tightened job object, before any target code runs. Mirrors
+/// `doctor::windows`'s "assign before resume" ordering.
+pub fn confined_spawn(
+    exe: &Path,
+    args: &[&OsStr],
+    scratch_root: &Path,
+    capsule_bytes: &[u8],
+) -> Result<ConfinedProcess, Refusal> {
+    let (_host, capsule, token, job, scratch): (_, CapsuleBody, _, _, _) = admit(
+        || {
+            if cfg!(all(
+                windows,
+                target_pointer_width = "64",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            )) {
+                Ok(())
+            } else {
+                Err(())
+            }
+        },
+        || parse_capsule_body(capsule_bytes),
+        restricted_token,
+        tightened_job,
+        || {
+            let token = restricted_token()?;
+            let mut sid_buffer = [0u8; 256];
+            read_token_user_sid(&token, &mut sid_buffer)?;
+            confined_scratch_root(scratch_root, &sid_buffer)
+        },
+    )?;
+    let _ = capsule; // Structural validation only; see `super::capsule` docs.
+    let stdin = open_inheritable_null().map_err(|()| Refusal::FilesystemConfinement)?;
+    let stdout =
+        create_inheritable_log(&scratch.stdout_log).map_err(|()| Refusal::FilesystemConfinement)?;
+    let stderr =
+        create_inheritable_log(&scratch.stderr_log).map_err(|()| Refusal::FilesystemConfinement)?;
+
+    let application = wide(exe.as_os_str()).map_err(|()| Refusal::Invalid)?;
+    let mut command: Vec<u16> = Vec::new();
+    command.push(u16::from(b'"'));
+    command.extend_from_slice(&application[..application.len() - 1]);
+    command.push(u16::from(b'"'));
+    for arg in args {
+        command.push(u16::from(b' '));
+        command.extend(arg.encode_wide());
+    }
+    command.push(0);
+    let cwd = wide(scratch.dir.as_os_str()).map_err(|()| Refusal::Invalid)?;
+    let environment = forced_environment(&scratch.dir).map_err(|()| Refusal::Invalid)?;
+
+    let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = stdin.raw();
+    startup.hStdOutput = stdout.raw();
+    startup.hStdError = stderr.raw();
+    let mut process_information = PROCESS_INFORMATION::default();
+    // SAFETY: `token` is a live restricted token with the rights
+    // `CreateProcessAsUserW` requires; `application`/`cwd`/`environment` are
+    // live NUL-terminated (or double-NUL-terminated) wide buffers; `command`
+    // is a live, exclusively-owned mutable buffer as this API requires;
+    // `startup`'s three handles are live and inheritable; `bInheritHandles`
+    // is `1` and no attribute list restricts which handles are inherited, so
+    // this process also inherits any other inheritable handle this process
+    // holds -- the deliberate simplification the module documentation
+    // records.
+    if unsafe {
+        CreateProcessAsUserW(
+            token.raw(),
+            application.as_ptr(),
+            command.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+            CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+            environment.as_ptr().cast(),
+            cwd.as_ptr(),
+            &startup,
+            &mut process_information,
+        )
+    } == 0
+    {
+        return Err(Refusal::Spawn);
+    }
+    let process = Handle::new(process_information.hProcess);
+    let thread = Handle::new(process_information.hThread);
+    // SAFETY: the leader remains suspended; both handles are exclusively
+    // held by this function.
+    if unsafe { AssignProcessToJobObject(job.raw(), process.raw()) } == 0 {
+        // SAFETY: the leader is still suspended; terminating it now cannot
+        // race with any code the leader would otherwise run.
+        unsafe { TerminateProcess(process.raw(), 1) };
+        return Err(Refusal::Spawn);
+    }
+    // SAFETY: this is the primary thread `CreateProcessAsUserW` returned
+    // suspended.
+    if unsafe { ResumeThread(thread.raw()) } == u32::MAX {
+        return Err(Refusal::Spawn);
+    }
+
+    Ok(ConfinedProcess {
+        process,
+        thread,
+        job,
+        _token: token,
+        _scratch: scratch,
+        _stdin: stdin,
+        _stdout: stdout,
+        _stderr: stderr,
+        settled: false,
+    })
+}
+
+pub struct Settled {
+    pub status: Settlement,
+}
+
+pub fn settle(mut confined: ConfinedProcess, deadline: Duration) -> Settled {
+    let deadline = Instant::now()
+        .checked_add(deadline)
+        .unwrap_or_else(Instant::now);
+    let status = settle_confined(&mut confined, deadline);
+    confined.settled = true;
+    Settled { status }
+}
+
+fn settle_confined(confined: &mut ConfinedProcess, deadline: Instant) -> Settlement {
+    let mut state = StickySettlement::default();
+    let mut timed_out = false;
+    let mut exit_code = None;
+    loop {
+        // SAFETY: `confined.process` is a live, held process handle.
+        match unsafe { WaitForSingleObject(confined.process.raw(), 0) } {
+            WAIT_OBJECT_0 => {
+                let mut code = u32::MAX;
+                // SAFETY: `confined.process` is live and signaled.
+                if unsafe { GetExitCodeProcess(confined.process.raw(), &mut code) } == 0 {
+                    state.select(Settlement::Uncertain(UncertainReason::WaitFailed));
+                } else {
+                    exit_code = Some(code);
+                }
+                break;
+            }
+            WAIT_TIMEOUT => {
+                if Instant::now() >= deadline {
+                    timed_out = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            _ => {
+                state.select(Settlement::Uncertain(UncertainReason::WaitFailed));
+                break;
+            }
+        }
+    }
+
+    if timed_out {
+        // SAFETY: `confined.job` is live and owns exclusive termination
+        // authority over this confined process tree.
+        let killed = unsafe { TerminateJobObject(confined.job.raw(), 126) } != 0;
+        if !killed {
+            state.select(Settlement::Uncertain(UncertainReason::KillAmbiguous));
+        } else {
+            state.select(Settlement::Cancelled);
+        }
+    } else if let Some(code) = exit_code {
+        if code == 0 {
+            state.select(Settlement::Completed);
+        } else {
+            state.select(Settlement::Failed(FailureReason::ExitCode(code)));
+        }
+    }
+
+    let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+    // SAFETY: `confined.job` is live; `accounting` is a live,
+    // exclusively-owned local of the exact size passed.
+    let queried = unsafe {
+        QueryInformationJobObject(
+            confined.job.raw(),
+            JobObjectBasicAccountingInformation,
+            (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+            std::mem::size_of_val(&accounting) as u32,
+            std::ptr::null_mut(),
+        )
+    } != 0;
+    if !queried {
+        state.select(Settlement::Uncertain(UncertainReason::QueryFailed));
+    } else if accounting.ActiveProcesses != 0 {
+        state.select(Settlement::Uncertain(
+            UncertainReason::ActiveProcessesNonZero,
+        ));
+    }
+
+    state
+        .resolve()
+        .unwrap_or(Settlement::Uncertain(UncertainReason::WaitFailed))
+}
+
+#[cfg(test)]
+mod tests;

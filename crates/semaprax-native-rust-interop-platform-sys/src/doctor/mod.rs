@@ -10,6 +10,7 @@ mod offline_collector;
 mod offline_input;
 mod offline_launcher;
 mod offline_provisioner;
+pub mod windows_confinement;
 pub use offline_collector::{
     collect_provisioned_doctor_worker, finish_provisioned_doctor_report, DoctorOfflineTarget,
     SettledDoctorObservation, SettledDoctorTool,

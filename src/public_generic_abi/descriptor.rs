@@ -269,3 +269,7 @@ pub mod verify;
 
 #[cfg(test)]
 mod tests;
+
+/// Bounded, deterministic property/fuzz coverage (issue #173).
+#[cfg(test)]
+mod fuzz;

@@ -34,6 +34,12 @@ pub mod native;
 pub mod wasm;
 pub mod wit_projection;
 
+/// Deterministic bounded mutation engine shared by the descriptor and
+/// carrier reference codecs' own property/fuzz coverage (issue #173). Not
+/// part of the public ABI itself; see the module's own doc comment.
+#[cfg(test)]
+pub(crate) mod fuzz_support;
+
 /// Length-prefix one field: an 8-byte little-endian length, then the bytes.
 /// Shared framing convention with `public_generic_type` and
 /// `public_generic_settlement`.

@@ -501,6 +501,11 @@ pub fn replay_binding(
 #[cfg(test)]
 mod tests;
 
+/// Bounded, deterministic property/fuzz coverage of `CarrierBindingV1`
+/// (issue #173).
+#[cfg(test)]
+mod fuzz;
+
 /// The shared cross-engine settlement corpus (issue #162): one case table,
 /// the interpreter and Core Wasm physical adapters each run against every
 /// case, and one checker that diffs both against an independently pinned

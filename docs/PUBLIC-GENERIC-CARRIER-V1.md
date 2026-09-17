@@ -1323,7 +1323,16 @@ submodule, and in the `machine` and `trace` submodules:
   logical module;
 - golden byte-determinism for `CarrierBindingV1::encode`, a hostile decode
   corpus (truncation, trailing bytes, unknown target profile, oversized
-  length claim), and a cross-paired `replay` failure for each bound field.
+  length claim), and a cross-paired `replay` failure for each bound field;
+- its `fuzz` submodule (issue #173) adds bounded, deterministic property/fuzz
+  coverage: the same fixed-seed mutation engine `descriptor::fuzz` uses
+  (`public_generic_abi::fuzz_support`) runs 500 reproducible bounded
+  mutations of a canonical `CarrierBindingV1` through `decode_binding` and
+  `replay_binding`, asserting neither ever panics and `replay_binding` never
+  accepts a candidate unless it is byte-identical to the trusted encoding —
+  `CarrierBindingV1` carries no presentation-only field, so this property is
+  strictly byte-exact, unlike the descriptor's identity-preserving exception.
+  A violation is reported as a pasteable byte-literal minimized reproduction.
 
 The `frame` submodule covers [Canonical carrier bytes](#canonical-carrier-bytes),
 issue #153's Section B, at the wire-byte level:

@@ -139,14 +139,58 @@ than by advancing the row.
     (`tests/public_generic_wasm_adapter_v1/reference_wasm_module.rs`), not a
     build of `src/public_generic_abi/wasm/**` (#229, human-blocked on a
     scope decision);
-  - #173's remaining PG-6 scope — extra/reordered/duplicate descriptor
-    fields, unknown schema/version, and stale Project/ProgramRoot/artifact
-    associations exercised through all four *calling* consumers, plus
-    persisted property/fuzz-minimized reproductions — is deliberately not
-    covered by #160's shared corpus, which compares only the opaque
-    authenticated byte-string equality check each calling consumer can
-    express identically today; that structured hostility exists only at the
-    Rust reference `descriptor.rs`/`carrier/frame.rs` layer.
+  - `5ac1331d` closed the gap this note used to record: all four generated
+    calling consumers (Rust/C11/C++17 via the C11 layer, TypeScript/Wasm)
+    now independently parse the bounded Descriptor-v1 frame envelope —
+    exact frame count, per-field UTF-8, the three frozen schema/version
+    literals — *before* the byte-exact trusted-descriptor pairing check, so
+    extra frames, missing frames, truncation, invalid UTF-8, and an unknown
+    schema/version are rejected as malformed framing rather than merely as
+    a byte mismatch. Reordered and duplicated content fields are still
+    caught only by the byte-exact pairing check (reordering or duplicating
+    content necessarily changes the bytes), which reports the identical
+    closed `DescriptorRejected` reason, so the observable refusal class
+    matches either way. `tests/support/public_generic_hostile_corpus.rs`'s
+    `structured_descriptor_cases()` — unknown schema, invalid UTF-8, stale
+    program root, reordered context, duplicate context, truncated final
+    frame, extra frame, overlong length claim, presentation-only rename —
+    is now driven through real generated-and-executed Rust, C11, and C++17
+    drivers (`tests/public_generic_native_adapter_v1/shared_hostile_corpus.rs`)
+    and a real generated-and-executed TypeScript/Wasm driver
+    (`tests/public_generic_wasm_adapter_v1/shared_hostile_corpus.rs`), each
+    pinned against the same SHA-256 mutation bytes and the same Rust
+    reference-decoder outcome. Cross-runtime replay
+    (`binding_wrong_target_profile`) and cross-artifact replay
+    (`binding_valid_for_different_artifact`) are covered the same way.
+    Stale Project/ProgramRoot/source/export/public-surface associations are
+    exercised at the reference-decoder layer
+    (`descriptor/tests.rs::replay_rejects_a_cross_paired_descriptor_on_every_bound_field`)
+    and, for `program_root`, through the shared corpus above; nothing about
+    this layer's calling-consumer parity was untested before `5ac1331d`
+    beyond those two content-reordering cases, which were already provably
+    equivalent by construction (any content mutation changes the trusted
+    pairing bytes).
+  - Bounded, deterministic property/fuzz coverage now exists for both wire
+    codecs: `descriptor::fuzz` and `carrier::fuzz`
+    (`src/public_generic_abi/descriptor/fuzz.rs`,
+    `src/public_generic_abi/carrier/fuzz.rs`) apply a fixed-seed, hand-rolled
+    `xorshift64*` mutation engine (`fuzz_support.rs`; no `proptest`/
+    `quickcheck` dependency, since adding one edits `Cargo.toml`, off this
+    round's file lease) over 500 reproducible trials per codec, each
+    bounded to at most 4 point mutations and a 16-byte length delta, and
+    assert `decode`/`replay`/`decode_binding`/`replay_binding` never panic
+    and never return a diagnostic code outside the small closed set each
+    already documents. Any violation renders the exact offending bytes as a
+    pasteable Rust literal in the assertion failure — the "persist minimized
+    reproductions for any discovered distinct invariant" outcome #173 asks
+    for — rather than a bare pass/fail. This is bounded generation over a
+    hand-built fixture, not derived from a real checked generic export, and
+    it runs only the reference codecs in-process; it does not drive the
+    same mutated bytes through the four generated calling consumers (that
+    remains the deterministic, individually-pinned `structured_descriptor_cases`
+    corpus above, not a randomized one — running an unbounded random corpus
+    through four spawned toolchains per trial was judged out of proportion
+    to this round's scope and is not attempted here).
 
   Both gates therefore move from `Open` to `Implemented, local evidence`, not
   `Hosted green`.

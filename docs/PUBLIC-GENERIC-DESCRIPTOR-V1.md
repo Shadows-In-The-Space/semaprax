@@ -215,9 +215,16 @@ byte-identical across calls and independent of construction order), a
 display-rename case that changes wire bytes but not the identity digest, and
 hostile decode/replay cases covering truncation, trailing bytes, reordered
 framing, an unknown schema literal, an oversized length claim, and a
-cross-paired trusted value for every one of the seven bound fields. No hosted
-run is recorded for this document; see the accompanying worktree report for
-the exact local commands run.
+cross-paired trusted value for every one of the seven bound fields. Its `fuzz`
+submodule (issue #173) adds bounded, deterministic property/fuzz coverage: a
+fixed-seed hand-rolled mutation engine (`fuzz_support`, shared with `carrier`'s
+own `fuzz` submodule) runs 500 reproducible bounded mutations of a canonical
+descriptor through `decode` and `replay`, asserting neither ever panics and
+`replay` never accepts a mutation unless it left the identity digest
+unchanged — any violation is reported as a pasteable byte-literal minimized
+reproduction rather than a bare failure. No hosted run is recorded for this
+document; see the accompanying worktree report for the exact local commands
+run.
 
 ## Derivation from checked facts (the producer)
 

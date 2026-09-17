@@ -458,6 +458,14 @@ pub(crate) fn is_admitted_owned_string_variant(
                 && cases.iter().flat_map(|case| &case.fields).all(|field| {
                     field.ty == ResolvedType::String
                         || nested_record_copy_scalar_is_admitted(&field.ty)
+                        // The HIR twin of the same widening applied to
+                        // `TypeTable::is_flat_owned_string_variant`. A Copy
+                        // Aggregate Variant Payload v1 sibling needs no drop, so
+                        // the variant's cleanup is still just the string leaf.
+                        // Without this, `resolver_admits_owned_variant` refused
+                        // `match own` on a variant the source verifier admits,
+                        // with SPX-O117.
+                        || is_admitted_copy_aggregate_variant_field(declarations, &field.ty)
                 })
         })
 }

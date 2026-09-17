@@ -342,3 +342,88 @@ process.stdout.write(`${process.argv[3]}=${instance.exports.semaprax_main().toSt
         "interpreter diverges from both backends on the Copy record profile"
     );
 }
+
+/// Copy Aggregate Variant Payload v1 alongside an owned `string` case field,
+/// in one variant, used as an `own` function parameter.
+///
+/// `SPX-T215` and `SPX-T268` admit this declaration, but until the widening
+/// that landed with this fixture, five independent classifiers each kept their
+/// own list of admitted variant profiles and only the first had learned the
+/// Copy-aggregate payload. The shape failed at a different layer depending on
+/// how far it got: `SPX-O002`/`SPX-O104` refused the signature, `SPX-O117`
+/// refused `match own`, `SPX-H006` called the resolved variant "not direct and
+/// monomorphic", and — worst — once those were widened the program passed
+/// `check` and then died constructing the nested payload at run time on the
+/// `SPX-F105` "impossible post-verify state" guard, because
+/// `Interpreter::value_has_type` accepted a record value only when it was an
+/// owned-`Bytes` record. A verified program that cannot execute is exactly
+/// what the backend-equivalence invariant forbids, so both arms are executed
+/// here rather than merely type-checked.
+const MIXED_VARIANT_PAYLOAD_FIXTURE: &str = r#"
+module test.interpreter_mixed_variant_payload;
+
+@id("mixed.inner")
+record Inner {
+    @id("mixed.inner.x") x: i64,
+    @id("mixed.inner.flag") flag: bool,
+}
+
+@id("mixed.payload")
+variant Payload {
+    @id("mixed.payload.text")
+    Text {
+        @id("mixed.payload.text.text") text: string,
+    },
+    @id("mixed.payload.wrapped")
+    Wrapped {
+        @id("mixed.payload.wrapped.value") value: Inner,
+    },
+}
+
+@id("mixed.relay")
+fn relay(payload: own Payload) -> i64 {
+    match own payload {
+        Payload::Text { text } => 1,
+        Payload::Wrapped { value } => 2,
+    }
+}
+
+@id("case.mixed.text")
+fn case_mixed_text() -> i64 {
+    relay(Payload::Text { text: "hello" })
+}
+
+@id("case.mixed.wrapped")
+fn case_mixed_wrapped() -> i64 {
+    relay(Payload::Wrapped { value: Inner { x: 7, flag: true } })
+}
+
+@id("app.main")
+fn main() -> i64 {
+    case_mixed_text() + case_mixed_wrapped()
+}
+"#;
+
+#[test]
+fn a_string_and_a_copy_aggregate_payload_share_one_variant_and_both_arms_execute() {
+    let path = write_temp(MIXED_VARIANT_PAYLOAD_FIXTURE);
+    let transcript = ["case.mixed.text", "case.mixed.wrapped"]
+        .iter()
+        .map(|id| {
+            let envelope = interpret_case(&path, id, &[])
+                .unwrap_or_else(|errors| panic!("`{id}` must be admitted: {errors:?}"));
+            let payload: serde_json::Value =
+                serde_json::from_str(&envelope).expect("envelope JSON");
+            let outcome = &payload["payload"]["outcome"];
+            // `returned`, not a guard or a refusal: the shape really ran.
+            assert_eq!(outcome["kind"], "returned", "{id}: {envelope}");
+            assert_eq!(outcome["type"], "i64", "{id}: {envelope}");
+            format!("{id}={}\n", outcome["value"].as_str().expect("value text"))
+        })
+        .collect::<String>();
+    cleanup(&path);
+    assert_eq!(
+        transcript, "case.mixed.text=1\ncase.mixed.wrapped=2\n",
+        "the string arm and the nested-record arm must each execute and settle"
+    );
+}

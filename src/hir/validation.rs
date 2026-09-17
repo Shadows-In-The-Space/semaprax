@@ -594,6 +594,16 @@ impl<'a> HirValidator<'a> {
                                 && !super::type_reachability::nested_record_copy_scalar_is_admitted(
                                     &field.ty,
                                 )
+                                // Copy Aggregate Variant Payload v1 sibling: no
+                                // drop, so the variant stays a direct owned-string
+                                // variant. Fourth site that had to learn this
+                                // profile; see the commit widening SPX-T268,
+                                // `is_flat_owned_string_variant` and the HIR
+                                // `is_admitted_owned_string_variant` twin.
+                                && !super::type_reachability::is_admitted_copy_aggregate_variant_field(
+                                    &self.program.declarations,
+                                    &field.ty,
+                                )
                             }))
                     {
                         return Err(hir_error(

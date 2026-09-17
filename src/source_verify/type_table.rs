@@ -726,7 +726,18 @@ impl<'a> TypeTable<'a> {
                 .flat_map(|case| &case.fields)
                 .any(|field| field.ty == Type::String)
             && cases.iter().flat_map(|case| &case.fields).all(|field| {
-                field.ty == Type::String || owned_byte_record_copy_field_is_admitted(&field.ty)
+                field.ty == Type::String
+                    || owned_byte_record_copy_field_is_admitted(&field.ty)
+                    // A Copy Aggregate Variant Payload v1 sibling needs no drop
+                    // at all, so the variant's cleanup is still just the string
+                    // leaf and its ownership mode is unchanged. Omitting this
+                    // made a variant that SPX-T215 and SPX-T268 both admit as a
+                    // declaration unusable as a function parameter or result:
+                    // own/borrow mode refused with SPX-O002 and Value mode with
+                    // SPX-O104, on the same type. "Flat" in this name predates
+                    // that payload profile and now means "needs no cleanup
+                    // beyond the string leaf", not "has no nested record".
+                    || self.is_admitted_copy_aggregate_variant_field(&field.ty)
             })
     }
 

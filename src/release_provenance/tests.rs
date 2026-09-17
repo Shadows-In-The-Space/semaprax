@@ -423,6 +423,14 @@ impl SignatureVerificationCapability for AlwaysOkCapability {
     }
 }
 
+/// The message a rejecting test capability returns. The assertions key off
+/// this rather than off a diagnostic code, because a test must not invent one:
+/// `build.rs` scans every `SPX-` token under `src/` into the public installed
+/// diagnostic catalog, so a test-only code would ship as a code the compiler
+/// can never emit. The message is unique to these stubs, so it distinguishes a
+/// capability rejection from a binding rejection just as precisely.
+const CAPABILITY_REJECTED: &str = "test capability unconditionally rejects";
+
 struct AlwaysRejectCapability;
 
 impl SignatureVerificationCapability for AlwaysRejectCapability {
@@ -432,8 +440,13 @@ impl SignatureVerificationCapability for AlwaysRejectCapability {
         _claim: &ParsedSignatureClaim,
     ) -> Result<(), Diagnostic> {
         Err(Diagnostic::io(
-            "SPX-Z705",
-            "test capability unconditionally rejects".to_owned(),
+            // A test stub must not invent a new diagnostic code: `build.rs`
+            // scans every `SPX-` token under `src/` into the public installed
+            // diagnostic catalog, so a test-only code would ship as a code the
+            // compiler can never emit. Reuse the real binding code and let the
+            // unique message carry the assertion instead.
+            "SPX-Z702",
+            CAPABILITY_REJECTED.to_owned(),
         ))
     }
 }
@@ -451,7 +464,7 @@ fn capability_variant_still_runs_binding_checks_before_the_capability() {
     .expect_err("a tampered provenance document must be rejected before any capability runs");
     // A capability that always accepts must never be reached: the binding
     // check's own diagnostic code, not the capability's, is what surfaces.
-    assert_ne!(error.code, "SPX-Z705");
+    assert_ne!(error.message, CAPABILITY_REJECTED);
 }
 
 #[test]
@@ -464,7 +477,7 @@ fn capability_variant_actually_invokes_the_supplied_capability() {
         &AlwaysRejectCapability,
     )
     .expect_err("a rejecting capability must fail the overall verification");
-    assert_eq!(error.code, "SPX-Z705");
+    assert_eq!(error.message, CAPABILITY_REJECTED);
 
     assert!(verify_release_binding_with_capability(
         fixture.manifest.as_bytes(),
@@ -510,7 +523,7 @@ impl SignatureVerificationCapability for ThrowawayHmacCapability {
         use hmac::{Hmac, KeyInit, Mac};
         let tag = decode_hex_32(&claim.signature).ok_or_else(|| {
             Diagnostic::io(
-                "SPX-Z705",
+                "SPX-Z702",
                 "throwaway HMAC signature must be 64 lowercase hex characters".to_owned(),
             )
         })?;
@@ -519,7 +532,7 @@ impl SignatureVerificationCapability for ThrowawayHmacCapability {
         mac.update(subject_bytes);
         mac.verify_slice(&tag).map_err(|_| {
             Diagnostic::io(
-                "SPX-Z705",
+                "SPX-Z702",
                 "throwaway HMAC signature does not verify against the supplied key and subject \
                  bytes"
                     .to_owned(),

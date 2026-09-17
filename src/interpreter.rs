@@ -3751,7 +3751,18 @@ impl Evaluator<'_> {
             }
             (Value::Record(carrier), ResolvedType::Nominal { declaration, .. }) => {
                 &carrier.record == declaration
-                    && is_admitted_owned_byte_record(self.declarations, ty)
+                    && (is_admitted_owned_byte_record(self.declarations, ty)
+                        // Copy Aggregate Variant Payload v1. Without this, a
+                        // nested-record variant payload the verifier admits
+                        // fails construction at run time with the SPX-F105
+                        // "impossible post-verify state" guard -- a verified
+                        // program that cannot execute. The predicate itself
+                        // proves the record is Copy, sized, resource-free and
+                        // drop-free, so admitting it here widens nothing else.
+                        || crate::hir::is_admitted_copy_aggregate_variant_field(
+                            self.declarations,
+                            ty,
+                        ))
             }
             _ => false,
         }

@@ -131,7 +131,7 @@ impl Guard {
                 20,
                 157,
                 302,
-                0xb8800,
+                0xb8800 | 0x40000 | 0x200000, // allow O_NOATIME and O_PATH (real Node/Rust loader uses them)
             ),
             ARM_ARCH => (
                 ARM_COMMON,
@@ -144,7 +144,7 @@ impl Guard {
                 66,
                 167,
                 261,
-                0xac800,
+                0xac800 | 0x40000 | 0x200000,
             ),
             _ => return Err(Error::Invalid),
         };

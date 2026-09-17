@@ -336,6 +336,17 @@ real function body from an admitted public-generic export (every physical
 adapter still calls a fixture endpoint), no compiled Wasm artifact implements
 the provider ABI, and no hosted run has ever exercised any of it.
 
+### TypeScript host-owned settlement continuation
+
+The [TypeScript continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#typescript-host-owned-caller-continuation-issue-162)
+adds immutable module authentication, explicit single-call ownership, bounded
+framing, whole-result validation, primary/secondary cleanup evidence and
+independently replayed host-caller observations. The seven shared semantic
+cases now have fresh native C/C++ comparisons. These checks exercise the
+hand-assembled reversal endpoint under two V8 tiers, not a compiled generic
+provider ABI. Actual Rust-generator equality remains a separate required gate;
+no new PG-7 completion or hosted-green claim follows from local template runs.
+
 ## Standing support and publication decision
 
 As of 2026-09-11: **public generic ownership is not supported and not

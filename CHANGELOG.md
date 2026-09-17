@@ -8,6 +8,17 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Harden the host-owned TypeScript/Wasm reference caller: authenticate immutable
+  module-byte snapshots, reject unverifiable precompiled modules, isolate private
+  descriptor/binding authority, enforce one in-flight owner and exact framed
+  payload bounds, preflight complete result frames, and propagate primary plus
+  secondary cleanup failures. Extend #162 with 108 settlement cases, 32 host
+  regression groups, 13 authenticated module subjects, two V8 Wasm execution
+  tiers, fresh C/C++ semantic comparison, strict replay and twelve type-checked
+  behavioral mutants. Add actual-generator byte-equality gates without claiming
+  those Rust gates have run, compiled-provider support, PG-7 completion or hosted
+  promotion. No existing native ABI or public rejection profile is widened.
+
 - Propagate explicit native release failures through C11/C++17 calling consumers
   without exposing a decoded success or overwriting earlier failures. Add
   checked close with retained ownership, reverse caller rollback, bounded

@@ -2723,3 +2723,12 @@ and the corresponding Python scripts own test-only allocation/hostility
 observations, not a second provider. The Cargo bridge byte-compares actual
 generator output with fixture assembly before executing it. The authoritative
 contracts and nonclaims live in [Settlement Corpus v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162).
+
+The TypeScript caller follows the same ownership split:
+`public_generic_consumer/typescript_calling/render.rs` emits shape-dependent
+fragments, while every fixed runtime/test fragment is a normalized `render/`
+text asset. `tests/public_generic_wasm_adapter_v1/settlement` and the TypeScript
+settlement scripts own the host-only corpus, independent oracle, byte-fixture
+assembly, hostile module/handle checks and replay. The actual-generator Cargo
+bridge is separate from template-only execution. No new compiler Wasm target,
+provider ABI, allocator authority or generic export admission is introduced.

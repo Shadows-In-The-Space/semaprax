@@ -313,6 +313,16 @@ that all of that functionality already exists.
 | Sandboxed builds and dependencies | Partial; exact held Project subjects, generated Cargo inputs, semantic locks and bounded linked builds have hosted-green release evidence. Held source authority and absence of implicit tool execution are not a hermetic OS sandbox. | [Project Dependencies](PROJECT-DEPENDENCIES-V1.md), [Capability Manifest](CAPABILITY-MANIFEST-V1.md), [Offline Lock](OFFLINE-PACKAGE-LOCK-V1.md), [Resolver](OFFLINE-PACKAGE-RESOLVER-V1.md), [Source Capsule](OFFLINE-MULTI-PACKAGE-SOURCE-CAPSULE-V1.md), [Pure Wasm Build](OFFLINE-PURE-WASM-PACKAGE-BUILD-V1.md), [Linked Wasm Build](OFFLINE-LINKED-SCALAR-WASM-PACKAGE-BUILD-V2.md) | Verify reproducible acquired inputs, generic package signatures, supported publication and actual least-authority OS sandbox/dependency enforcement. |
 | Debugger, profiler, diagnostics, and operations | Partial; bounded installed static diagnostic inventory and exact identity/provenance explanation have hosted-green evidence. Static presence is not complete runtime reachability, wording, repair knowledge or backend coverage. | [Architecture](ARCHITECTURE.md), [Human Diagnostics](HUMAN-DIAGNOSTICS-V1.md), [Installed Diagnostics](INSTALLED-DIAGNOSTICS-V1.md) | Source-level debugging/profiling, crash and trace mapping, complete runtime diagnostic semantics and repair guidance, observability and deployment diagnostics cover every backend. |
 
+### Public-generic TypeScript settlement increment
+
+Status remains **partial**. The [owning settlement specification](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#typescript-host-owned-caller-continuation-issue-162)
+records immutable module-byte admission, bounded single-call host settlement,
+full result preflight, sticky release evidence, replay and a bounded native
+semantic comparison. This is the flat-owned-Bytes host reference caller, not
+a compiler-derived generic provider, complete four-language proof, browser
+matrix or hosted promotion. Required Rust-generator and full quality gates
+must be executed separately before advancing their evidence class.
+
 ## Final validation product
 
 Completion requires one maintained offline-first product built from a shared

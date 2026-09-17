@@ -1,0 +1,102 @@
+
+// Public byte arrays are informational copies, never mutable replay authority.
+const EXPECTED_DESCRIPTOR_BYTES = TRUSTED_DESCRIPTOR_BYTES.slice();
+const EXPECTED_BINDING_BYTES = TRUSTED_BINDING_BYTES.slice();
+export const MAX_MODULE_BYTES = 16777216;
+
+export function trustedDescriptorAndBinding(): readonly [Uint8Array, Uint8Array] {
+  return [EXPECTED_DESCRIPTOR_BYTES.slice(), EXPECTED_BINDING_BYTES.slice()];
+}
+
+function canonicalDescriptorV1(bytes: Uint8Array): boolean {
+  if (bytes.length > 131_072) return false;
+  // ignoreBOM=true retains a leading U+FEFF. The reference UTF-8 decoder
+  // preserves it too, so a BOM-prefixed schema must never become valid here.
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  let offset = 0;
+  for (let field = 0; field < 12; field += 1) {
+    if (offset > bytes.length || bytes.length - offset < 8) return false;
+    let width = 0n;
+    for (let index = 0; index < 8; index += 1) {
+      width |= BigInt(bytes[offset + index] as number) << BigInt(index * 8);
+    }
+    if (width > 65_536n) return false;
+    offset += 8;
+    const length = Number(width);
+    if (length > bytes.length - offset) return false;
+    let text: string;
+    try {
+      text = decoder.decode(bytes.subarray(offset, offset + length));
+    } catch {
+      return false;
+    }
+    const version = [
+      "semaprax.public-generic-descriptor.v1",
+      "semaprax.public-generic-boundary-profile.v1",
+      "semaprax.public-generic-type-grammar.v1",
+    ][field];
+    if (version !== undefined && text !== version) return false;
+    offset += length;
+  }
+  return offset === bytes.length;
+}
+
+export function verifyDescriptorAndBinding(
+  descriptorBytes: Uint8Array,
+  bindingBytes: Uint8Array,
+): void {
+  let descriptor: Uint8Array;
+  let binding: Uint8Array;
+  try { descriptor = byteView(descriptorBytes); }
+  catch { throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-framing" }); }
+  if (descriptor.length > 131072) throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-bound" });
+  if (!canonicalDescriptorV1(descriptor)) throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-framing" });
+  if (!bytesEqual(descriptor, EXPECTED_DESCRIPTOR_BYTES)) throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-replay" });
+  try { binding = byteView(bindingBytes); }
+  catch { throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "binding-replay" }); }
+  if (binding.length > 262144) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "binding-bound" });
+  if (!bytesEqual(binding, EXPECTED_BINDING_BYTES)) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "binding-replay" });
+}
+
+/**
+ * This generator's OWN module-artifact-identity convention: domain-separated
+ * SHA-256 over `len(bytes) as u64 little-endian || bytes`, rendered as
+ * `sha256:<hex>`. Async: the platform Web Crypto API's `digest` is
+ * Promise-based.
+ */
+export async function computeModuleArtifactDigest(
+  wasmBytes: Uint8Array,
+): Promise<string> {
+  wasmBytes = byteView(wasmBytes);
+  if (wasmBytes.length > MAX_MODULE_BYTES) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "module-bound" });
+  const preimage = new Uint8Array(
+    MODULE_ARTIFACT_DIGEST_DOMAIN.length + 8 + wasmBytes.length,
+  );
+  preimage.set(MODULE_ARTIFACT_DIGEST_DOMAIN, 0);
+  new DataView(preimage.buffer).setBigUint64(
+    MODULE_ARTIFACT_DIGEST_DOMAIN.length,
+    BigInt(wasmBytes.length),
+    true,
+  );
+  preimage.set(wasmBytes, MODULE_ARTIFACT_DIGEST_DOMAIN.length + 8);
+  const digestBytes = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", preimage),
+  );
+  let hex = "";
+  for (const byte of digestBytes) {
+    hex += byte.toString(16).padStart(2, "0");
+  }
+  return `sha256:${hex}`;
+}
+
+export async function verifyModuleArtifactDigest(
+  wasmBytes: Uint8Array,
+): Promise<void> {
+  const computed = await computeModuleArtifactDigest(wasmBytes);
+  if (computed !== TRUSTED_PROVIDER_ARTIFACT_DIGEST) {
+    throw new SemapraxPublicGenericException({
+      kind: "provider-mismatch",
+      reason: "module-digest",
+    });
+  }
+}

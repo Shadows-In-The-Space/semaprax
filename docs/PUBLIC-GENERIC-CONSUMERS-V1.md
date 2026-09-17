@@ -512,12 +512,12 @@ bytes and a `RecordShape` to source text:
 package.json          -- fixed template; one devDependency, typescript 5.8.3 (repo-pinned)
 package-lock.json     -- fixed template; the same pinned integrity hash this repo already uses
 tsconfig.json         -- fixed template; strict mode, ES2023+DOM lib (for WebAssembly/Web Crypto types)
-src/errors.ts         -- fixed template; closed discriminated error union, sticky-failure secondary note
+src/errors.ts         -- fixed template; closed discriminated error union and retained secondary cleanup statuses
 src/descriptor.ts     -- embeds TRUSTED_DESCRIPTOR_BYTES/TRUSTED_BINDING_BYTES/endpoint name/artifact digest; independent byte-exact verify() and Web-Crypto module-artifact-digest verification
 src/types.ts          -- Input/Output interfaces, one readonly Uint8Array field per leaf, field order preserved
 src/carrier.ts         -- Logical Carrier v1 codec for exactly FIELD_COUNT leaves, BigInt-exact leaf-count/length handling
 src/wasm-provider.ts   -- fixed template; the host-owned allocator/registry/lifecycle wrapper and the safe Provider API
-src/index.ts           -- fixed template; re-exports Provider, Input/Output, and the error model only
+src/index.ts           -- fixed template; re-exports Provider, Input/Output, errors and settlement report types
 test/round-trip.mjs    -- sampleInput/assertReversed/per-leaf-bound/failure-matrix tests, generated per shape
 ```
 
@@ -543,23 +543,50 @@ so this is the exact-integer discipline the current wire format has to
 prove; range-checking those scalar domains is future generator work once
 #119 unblocks them, not a gap invented here.
 
-**Ownership and settlement.** `Provider.open` independently replays
-submitted descriptor/binding bytes against the embedded trusted values
-(byte-exact equality), and independently recomputes a domain-separated
-SHA-256 digest of the supplied `.wasm` module bytes against the embedded
-trusted `provider_artifact_digest` (via `globalThis.crypto.subtle`, no
-`node:crypto`/`@types/node` dependency) — both *before* any Wasm memory
-allocation. This digest check is a real, content-based module-identity
-check, not merely export-name or successful-instantiation trust: a
-byte-mutated (but still export-name-identical) module is rejected. Raw
-numeric handles are never exported: `OpaqueHandle` has a private
-constructor and a private `#tag` field, so a cast through `unknown` cannot
-forge or reuse one (`instanceof` still requires a real instance of the
-class). `Provider.transform` stages input, calls, exports, and releases in
-one method with `try`/`finally` cleanup; a `Provider.diagnostics` test-only
-static surface exposes the same private steps to `test/round-trip.mjs` for
-stale/foreign-handle and failure-injection exercises, without a second,
-parallel implementation.
+**Ownership and settlement (issue #162 continuation).** `Provider.open`
+requires module bytes: a precompiled `WebAssembly.Module` receives the closed
+`module-bytes-required` refusal, since its original bytes cannot be recovered
+for digest verification. The exact supplied BufferSource range is copied before
+the first `await`, then hashed, compiled, checked for the exact two-export/no-import
+surface, and instantiated. Shared, resizable and detached ingress buffers are
+refused. Exported descriptor/binding byte arrays are informational copies;
+private captured bytes remain the replay authority even if those public arrays
+are mutated. Module bytes are bounded to 16 MiB, including custom sections.
+
+The reference shape admits 1–256 owned byte leaves. A leaf is at most 65,536
+bytes, total payload at most 16,777,216 bytes, and the complete carrier at most
+16,779,272 bytes. The host arena therefore allows **257 pages**, not 256: the
+extra page is necessary for count/length framing at the exact payload maximum.
+The original `reference_wasm_module::build()` bytes remain unchanged at 256
+pages; the settlement fixture explicitly selects `build_with_max_pages(257)`.
+Module maximum-memory refusal is tested separately with a one-page fixture.
+
+Exactly one call may be in flight per provider. A competing prepare/transform
+is refused before allocation and cannot release the existing owner's frame.
+Handles use intrinsic private-field branding, a private provider identity,
+input/result kind and a monotonic generation. Generation `0xffffffff` is the
+last admitted value; reuse/exhaustion refuses without resurrecting an old handle.
+Close with a live input/result refuses while preserving its owner for explicit
+settlement and retry. No cancellation, concurrent calls, or endpoint retry is
+introduced. Non-consuming result export may be retried without re-execution.
+
+Input records require exact own data fields; getters are not invoked. Byte
+views are validated through typed-array intrinsics rather than user-overridden
+methods or properties. All result framing, including the last leaf, is checked
+before copying any decoded payload. The entire result remains private until
+commit. `transform` explicitly releases the result before returning success:
+a release-only error is primary, while a prior execution/export/decode error
+remains primary and retains release errors in `secondaryCleanupStatuses` and
+`Provider.settlement()`. Injected release failure is reported only **after**
+physical zeroing and invalidation, so it cannot create a deliberate leak.
+
+Reports include observed endpoint calls, live/peak frame bytes and allocations,
+active input/result handles, zeroed bytes, retained memory pages, host event
+sequence and frame release order. These are **host-owned frame observations**,
+not a fabricated compiler leaf cleanup trace. JavaScript heap reclamation and
+provider object GC are not measured; zero live spans does not claim zero retained
+Wasm pages. At most 4,096 trace rows are admitted, with two reserved for cleanup;
+ordinary operations refuse at 4,094 rather than silently truncating evidence.
 
 **Execution evidence.**
 `tests/public_generic_wasm_adapter_v1/typescript_calling_consumer.rs`
@@ -593,9 +620,11 @@ devDependency.
 **Known limitations, stated once.** Local evidence only: no hosted CI run is
 recorded for this section, and no browser/Chromium fixture is exercised —
 "at minimum exercise the current Node/Wasm route" is met; the browser route
-is deferred, not claimed. This harness is gated on `node` and a
-repository-pinned (5.8.3) `tsc` being present on `PATH` or at a known pnpm
-install location; it skips (never fails) on a host without either. The
+is deferred, not claimed. The older package harness skips when its toolchains are missing. The new
+[settlement gate](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#typescript-host-owned-caller-continuation-issue-162)
+requires Node 22 and the pinned TypeScript 5.8.3 compiler and fails on absence;
+its Unix Cargo bridge compares all ten files from the actual Rust generator
+before executing them. That bridge must be run before claiming generator proof. The
 trusted descriptor bytes are a canonical encoded Descriptor-v1 test fixture,
 not derived from a real checked generic export. Most importantly: this proves the generated consumer's own
 real execution, exact-copy-out, exact-integer carrier decoding, and exact

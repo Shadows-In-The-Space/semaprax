@@ -22,3 +22,8 @@ mod reference_wasm_module;
 mod shared_hostile_corpus;
 #[path = "public_generic_wasm_adapter_v1/typescript_calling_consumer.rs"]
 mod typescript_calling_consumer;
+
+/// #162: actual generated source equality, host-owned settlement and bounded
+/// module/handle hostility. Does not substitute for the compiled provider ABI.
+#[path = "public_generic_wasm_adapter_v1/typescript_settlement.rs"]
+mod typescript_settlement;

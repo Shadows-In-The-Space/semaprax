@@ -512,3 +512,117 @@ Windows/MSVC and hosted-green for this increment are not inferred.
 Cancellation and concurrency remain outside the synchronous v1 profile. No
 hidden retry repeats an endpoint. Export retry and retriable close are distinct
 operations, not permissions to replay a transferred input.
+
+## TypeScript host-owned caller continuation (issue #162)
+
+This increment executes the production TypeScript templates against the existing
+**hand-assembled endpoint-only Wasm fixture**. Host TypeScript still owns the
+allocator, handles and settlement protocol. It does not compile a Semaprax
+provider ABI, admit a generic export, prove compiler-derived descriptor facts,
+or substitute a C/Rust-to-Wasm shim for the missing compiler target profile.
+#119 and #229 remain prerequisites; PG-7 and hosted promotion remain incomplete.
+
+### Shared cases and exact observations
+
+`tests/fixtures/public-generic-typescript-settlement-v1/cases.json` uses the new
+`semaprax.public-generic-typescript-settlement-corpus.v1` schema. It binds the
+existing C/C++ consumer manifest digest and reuses that owner's canonical input
+and result recipes. It does not replace or reinterpret the previous manifests.
+There are 108 cases: seven shared semantic/boundary cases, all eight unchanged
+legacy host ordinals, named host-event failures over three byte shapes, compound
+cleanup failures, and six malformed exported-frame forms with/without cleanup
+failure. The oracle pins the complete expected report independently of runtime
+output, including statuses, every trace row, frame release order, endpoint calls,
+resource peaks, retained pages and actual zeroing obligations. Result digests
+are checked against actual decoded/exported bytes, not expected bytes substituted
+for an unobserved runtime result.
+
+The 19 injectable host event names are closed in `SettlementEvent` and
+`INJECTABLE` in the generated wrapper. Each named point carries an exact leaf
+index only for per-leaf endpoint/copy operations; other points require null.
+Input transfer and private result commit are distinct observed boundaries.
+`result-committed` is observed but not injected: post-commit failure belongs to
+export or result release. At most two injection points are armed. Legacy IDs
+0–7 retain their prior meanings and statuses, including legacy failure status
+zero, which is not reinterpreted as acceptance.
+
+A further 32 host regression groups exercise immutable module snapshots,
+private descriptor/binding authority, exact module/input/codec bounds, closed
+input fields and intrinsic byte brands, input copying, stale/forged/wrong-kind
+handles, one in-flight owner, reentrancy, close refusal/retry, export retry,
+explicit release failure, sticky cleanup evidence, frozen reports, the exact
+last generation, trace capacity and repeated calls. The default repetition
+count is 64; `--repeats 8192` is an explicitly selected stress gate.
+
+Thirteen authenticated byte fixtures pin module admission branches: malformed
+binary, unexpected import, extra/missing/wrong-kind exports, shared/zero/oversized
+initial memory, start-function trap, endpoint trap, memory.grow(0), a one-page
+maximum that causes real growth refusal, and an exact 16 MiB module. An expected
+module rejection reports **no provider was created**; it does not invent
+post-instantiation resource counters for a nonexistent provider. The growth
+fixture checks real RangeError translation before committing a frame allocation,
+then proves a smaller call still succeeds. Endpoint growth tests that borrowed
+memory views are not retained across possible detachment.
+
+The same 153 cases run under Node 22 with explicit V8 `--liftoff-only` and
+`--no-liftoff` modes (both with `--no-wasm-lazy-compilation`). All reports must
+match exactly between these two execution configurations. These are two tiers
+of the **same endpoint-only reference module**, not independent full provider
+implementations or a claim about other Wasm runtimes/browsers.
+
+`--native` freshly compiles the existing C11/C++17 consumer fixtures at O0/O2
+for the seven common semantic cases. It compares canonical input/result bytes,
+acceptance, endpoint-invoked flags and the capacity category: 56 comparisons
+across the four native routes and two TypeScript modes. Host per-leaf endpoint
+counts, frame traces/release order and peaks are explicitly not equated with
+native whole-call/leaf observations. Every route's own counters are checked.
+The native gate's internal exact-case selection is additive; its default full
+matrix and prior evidence schema are unchanged.
+
+### Reproducibility, source authority and replay
+
+The new `semaprax.public-generic-typescript-settlement-evidence.v1` artifact
+`typescript-settlement.json` records the corpus, source-file digests, all generated
+package and compiled JavaScript digests, exact module digests, Node/TypeScript
+versions, selected V8 flags, every payload-free report and the optional freshly
+executed native comparison. Tool paths, temporary paths, timing and payload
+bytes are excluded. Replay is bounded to 8 MiB, recompiles/reruns trusted local
+sources and requires canonical byte equality. It never executes a submitted
+module or treats a reminted hash as authority. Missing/unknown/reordered fields,
+changed case/engine/status/result/trace/release/resources, false-as-zero, another
+provider/package/source and self-reminted digests fail independent replay.
+
+`public_generic_typescript_fixture.py` assembles the production templates for
+an explicitly labelled flat test subject. The separate Unix Cargo test
+`actual_generated_typescript_matches_all_assets_and_executes_settlement` writes
+all ten actual Rust-generated files into an empty directory, compares every
+file to the assembler, then executes those checked files through `--generated`.
+The hand-assembled module bytes are also compared to the original Rust fixture
+builder for the base/page-bound subjects. Until that Cargo test has actually run,
+local Python/Node execution is **production-template-fixture evidence**, not
+Rust-generator execution. Rust formatting, integration and clippy gates remain
+required; absence of a Rust toolchain does not turn them green.
+
+```sh
+cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1 typescript_settlement
+python3 scripts/public_generic_typescript_settlement.py --native --output target/pg-typescript
+python3 scripts/public_generic_typescript_settlement.py --native --output target/pg-typescript-replay \
+  --replay target/pg-typescript/typescript-settlement.json
+python3 scripts/public_generic_typescript_mutations.py
+```
+
+The mutation gate strictly type-checks twelve deliberately broken clients, then
+requires each selected named runtime assertion to reject the behavioral defect.
+Compilation failure, timeout or an unrelated runtime exception does not count.
+Linux CI selects the shared native comparison, independent replay and mutation
+gates with its already-pinned Node/TypeScript toolchains. Windows, browser and
+hosted-green evidence are not inferred from adding selectors.
+
+JavaScript source buffers and decoded results are GC-owned copies. Resource
+counts describe the explicit host-managed Wasm frame ledger, not every JS heap
+allocation. Retained linear-memory pages are reported, never silently called
+zero. A fatal process/engine OOM cannot be guaranteed recoverable; the gates
+exercise recoverable bounded allocation/growth and explicit injected failures.
+No cancellation, parallel execution, finalizer dependency or hidden call retry
+is added. No frozen carrier/descriptor schema, native ABI or public generic
+admission rule changes.

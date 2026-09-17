@@ -221,6 +221,15 @@ pub const ENDPOINT_EXPORT_NAME: &str = "spx_pg_wasm_endpoint_reverse_bytes_v1";
 /// Assemble the complete `.wasm` binary. Deterministic: always the same
 /// bytes.
 pub fn build() -> Vec<u8> {
+    build_with_max_pages(256)
+}
+
+/// Preserve the legacy fixture bytes at 256 pages. Settlement tests select
+/// 257 pages so the exact 16 MiB payload also has room for carrier framing;
+/// a one-page fixture exercises a real memory.grow refusal. Still hand-built
+/// endpoint bytecode, never a Semaprax provider ABI or compiler admission.
+pub fn build_with_max_pages(max_pages: u32) -> Vec<u8> {
+    assert!((1..=257).contains(&max_pages));
     let mut module = Vec::new();
     module.extend_from_slice(b"\0asm");
     module.extend_from_slice(&1u32.to_le_bytes());
@@ -237,11 +246,11 @@ pub fn build() -> Vec<u8> {
     // Function section: one function using type index 0.
     module.extend(section(3, vector(vec![uleb128(0)])));
 
-    // Memory section: one memory, min=1 page, max=256 pages (16 MiB).
+    // Memory section: one memory, min=1 page, explicitly bounded maximum.
     let memory_limits = {
         let mut out = vec![0x01u8]; // flags: has-max
         out.extend(uleb128(1));
-        out.extend(uleb128(256));
+        out.extend(uleb128(u64::from(max_pages)));
         out
     };
     module.extend(section(5, vector(vec![memory_limits])));

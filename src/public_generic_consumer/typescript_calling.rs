@@ -137,6 +137,12 @@ pub fn generate_typescript_calling_consumer(
         });
     }
 
+    if input.fields.is_empty() || input.fields.len() > 256 {
+        return Err(ShapeError::LeafCountOutOfBounds {
+            count: input.fields.len(),
+        });
+    }
+
     let binding_bytes = binding.encode();
     let files = vec![
         ("package.json".to_owned(), render::package_json()),

@@ -1,0 +1,141 @@
+/** Generated flat-owned-Bytes reference codec; not the full compiler carrier.
+ * All widths are exact u64 little-endian. Full validation precedes payload
+ * allocation. Input records use own data fields, never getters or iteration.
+ */
+import { SemapraxPublicGenericException } from "./errors.js";
+import type { CapacityReason, CarrierReason } from "./errors.js";
+import type { Input, Output } from "./types.js";
+
+export const MAX_OWNED_LEAVES = 256;
+export const MAX_BYTES_PER_LEAF = 65536;
+export const MAX_TOTAL_PAYLOAD_BYTES = 16777216;
+export const MAX_CARRIER_BYTES = 8 + 8 * MAX_OWNED_LEAVES + MAX_TOTAL_PAYLOAD_BYTES;
+const typedArrayPrototype: object = Object.getPrototypeOf(Uint8Array.prototype) as object;
+const typedTag = Object.getOwnPropertyDescriptor(typedArrayPrototype, Symbol.toStringTag)!.get!;
+const typedLength = Object.getOwnPropertyDescriptor(typedArrayPrototype, "length")!.get!;
+const typedBuffer = Object.getOwnPropertyDescriptor(typedArrayPrototype, "buffer")!.get!;
+const typedOffset = Object.getOwnPropertyDescriptor(typedArrayPrototype, "byteOffset")!.get!;
+const arrayBufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength")!.get!;
+const arrayBufferResizable = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "resizable")?.get;
+
+function capacityExceeded(reason: CapacityReason): SemapraxPublicGenericException {
+  return new SemapraxPublicGenericException({ kind: "capacity-exceeded", reason });
+}
+function resultRejected(reason: CarrierReason): SemapraxPublicGenericException {
+  return new SemapraxPublicGenericException({ kind: "result-rejected", reason });
+}
+function inputRejected(reason: CarrierReason): SemapraxPublicGenericException {
+  return new SemapraxPublicGenericException({ kind: "carrier-rejected", reason });
+}
+
+/** Intrinsic brand checks ignore forged .length/.buffer and Symbol.toStringTag.
+ * Shared, resizable and detached buffers are outside this synchronous profile.
+ * A genuine Uint8Array view is returned; user slice/iterator methods never run.
+ */
+export function byteView(value: unknown): Uint8Array {
+  try {
+    if (Reflect.apply(typedTag, value, []) !== "Uint8Array") throw inputRejected("input-bytes");
+    const buffer: unknown = Reflect.apply(typedBuffer, value, []);
+    Reflect.apply(arrayBufferLength, buffer, []); // Reject SharedArrayBuffer.
+    if (arrayBufferResizable && Reflect.apply(arrayBufferResizable, buffer, [])) throw inputRejected("input-bytes");
+    const offset: number = Reflect.apply(typedOffset, value, []);
+    const length: number = Reflect.apply(typedLength, value, []);
+    return new Uint8Array(buffer as ArrayBuffer, offset, length);
+  } catch {
+    throw inputRejected("input-bytes");
+  }
+}
+
+function validCount(count: number): void {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_OWNED_LEAVES) throw capacityExceeded("leaf-count");
+}
+
+function readInputFields(value: unknown, names: readonly string[]): readonly Uint8Array[] {
+  if (value === null || typeof value !== "object") throw inputRejected("input-shape");
+  let proto: unknown;
+  let keys: readonly PropertyKey[];
+  // Host proxy traps are not entitled to forge a semantic exception. Catch
+  // only reflective operations here; our own closed refusals happen outside.
+  try { proto = Object.getPrototypeOf(value); keys = Reflect.ownKeys(value); }
+  catch { throw inputRejected("input-shape"); }
+  if (proto !== null && proto !== Object.prototype) throw inputRejected("input-shape");
+  if (keys.length !== names.length || keys.some(key => typeof key !== "string" || !names.includes(key))) {
+    throw inputRejected("input-field");
+  }
+  const leaves: Uint8Array[] = [];
+  for (const name of names) {
+    let property: PropertyDescriptor | undefined;
+    try { property = Object.getOwnPropertyDescriptor(value, name); }
+    catch { throw inputRejected("input-shape"); }
+    if (!property || !("value" in property)) throw inputRejected("input-field");
+    leaves.push(byteView(property.value));
+  }
+  return leaves;
+}
+
+export interface LeafSpan { readonly offset: number; readonly length: number; }
+
+export function encodeLeaves(leaves: readonly Uint8Array[]): Uint8Array {
+  if (!Array.isArray(leaves)) throw inputRejected("input-shape");
+  validCount(leaves.length);
+  let payload = 0;
+  const views: Uint8Array[] = [];
+  for (let i = 0; i < leaves.length; i += 1) {
+    const property = Object.getOwnPropertyDescriptor(leaves, String(i));
+    if (!property || !("value" in property)) throw inputRejected("input-field");
+    const view = byteView(property.value);
+    if (view.length > MAX_BYTES_PER_LEAF) throw capacityExceeded("leaf-bytes");
+    if (view.length > MAX_TOTAL_PAYLOAD_BYTES - payload) throw capacityExceeded("total-payload");
+    payload += view.length;
+    views.push(view);
+  }
+  let out: Uint8Array;
+  try { out = new Uint8Array(8 + 8 * views.length + payload); }
+  catch { throw capacityExceeded("host-allocation"); }
+  const wire = new DataView(out.buffer);
+  wire.setBigUint64(0, BigInt(views.length), true);
+  let offset = 8;
+  for (const view of views) {
+    wire.setBigUint64(offset, BigInt(view.length), true);
+    offset += 8;
+    out.set(view, offset);
+    offset += view.length;
+  }
+  return out;
+}
+
+/** Returns spans only: even a hostile last leaf is checked before copying the
+ * first payload. Copy code must not allocate result leaves during this pass. */
+export function locateLeaves(bytes: Uint8Array, expectedCount: number): LeafSpan[] {
+  validCount(expectedCount);
+  let checked: Uint8Array;
+  try { checked = byteView(bytes); } catch { throw resultRejected("carrier-framing"); }
+  if (checked.length > MAX_CARRIER_BYTES) throw capacityExceeded("carrier-bytes");
+  if (checked.length < 8) throw resultRejected("carrier-framing");
+  const wire = new DataView(checked.buffer, checked.byteOffset, checked.byteLength);
+  if (wire.getBigUint64(0, true) !== BigInt(expectedCount)) throw resultRejected("carrier-count");
+  let offset = 8;
+  let payload = 0;
+  const spans: LeafSpan[] = [];
+  for (let index = 0; index < expectedCount; index += 1) {
+    if (checked.length - offset < 8) throw resultRejected("carrier-framing");
+    const length = wire.getBigUint64(offset, true);
+    offset += 8;
+    if (length > BigInt(MAX_BYTES_PER_LEAF)) throw capacityExceeded("leaf-bytes");
+    const exact = Number(length);
+    if (exact > MAX_TOTAL_PAYLOAD_BYTES - payload) throw capacityExceeded("total-payload");
+    if (exact > checked.length - offset) throw resultRejected("carrier-framing");
+    payload += exact;
+    spans.push({ offset, length: exact });
+    offset += exact;
+  }
+  if (offset !== checked.length) throw resultRejected("carrier-trailing");
+  return spans;
+}
+
+export function decodeLeaves(bytes: Uint8Array, expectedCount: number): Uint8Array[] {
+  const checked = byteView(bytes);
+  const spans = locateLeaves(checked, expectedCount);
+  try { return spans.map(span => checked.slice(span.offset, span.offset + span.length)); }
+  catch { throw capacityExceeded("host-allocation"); }
+}

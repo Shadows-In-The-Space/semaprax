@@ -244,3 +244,82 @@ fn generated_package_declares_no_runtime_dependency() {
         "the generated package must declare no runtime dependency beyond the platform"
     );
 }
+
+#[test]
+fn reference_shape_has_exact_zero_max_and_first_over_leaf_bounds() {
+    for count in [0, 257] {
+        let shape = RecordShape::new(
+            (0..count)
+                .map(|index| OwnedByteField::new(format!("bound.field{index}")))
+                .collect(),
+        );
+        assert_eq!(
+            generate_typescript_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape)
+                .unwrap_err(),
+            ShapeError::LeafCountOutOfBounds { count }
+        );
+    }
+    let shape = RecordShape::new(
+        (0..256)
+            .map(|index| OwnedByteField::new(format!("bound.field{index}")))
+            .collect(),
+    );
+    assert!(
+        generate_typescript_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).is_ok()
+    );
+}
+
+#[test]
+fn generated_reference_runtime_preserves_its_no_ambient_authority_contract() {
+    let consumer = generate();
+    for (name, contents) in consumer.files() {
+        if !name.starts_with("src/") {
+            continue;
+        }
+        for forbidden in [
+            "from \"node:",
+            "from 'node:",
+            "import(\"node:",
+            "import('node:",
+            "fetch(",
+            "XMLHttpRequest",
+            "WebSocket",
+            "child_process",
+            "FinalizationRegistry",
+            "setTimeout(",
+            "AbortController",
+        ] {
+            assert!(!contents.contains(forbidden), "{name}: {forbidden}");
+        }
+    }
+}
+
+#[test]
+fn authentication_and_cleanup_guards_are_emitted_from_fixed_assets() {
+    let consumer = generate();
+    let source = |name: &str| {
+        consumer
+            .files()
+            .iter()
+            .find(|(path, _)| path == name)
+            .unwrap()
+            .1
+            .as_str()
+    };
+    let provider = source("src/wasm-provider.ts");
+    assert!(provider.contains("throw mismatch(\"module-bytes-required\")"));
+    assert!(
+        provider
+            .find("const bytes = snapshotModuleBytes(moduleOrBytes);")
+            .unwrap()
+            < provider.find("await verifyModuleArtifactDigest(bytes)").unwrap()
+    );
+    assert!(source("src/descriptor.ts")
+        .contains("EXPECTED_DESCRIPTOR_BYTES = TRUSTED_DESCRIPTOR_BYTES.slice()"));
+    assert!(source("src/descriptor.ts")
+        .contains("EXPECTED_BINDING_BYTES = TRUSTED_BINDING_BYTES.slice()"));
+    assert!(provider.contains("this.#releaseIfOwned(result, \"result\")"));
+    assert!(provider.contains("throw carrier(\"provider-busy\")"));
+    assert!(source("src/errors.ts").contains("secondaryCleanupStatuses"));
+    assert!(source("src/carrier.ts").contains("const spans = locateLeaves(checked, expectedCount)"));
+}

@@ -141,12 +141,16 @@ def build(work: Path, cc: str, cxx: str, flags: list[str]) -> dict[str, Path]:
     return binaries
 
 
-def execute(args: argparse.Namespace) -> dict:
+def execute(args: argparse.Namespace, *, case_ids: list[str] | None = None) -> dict:
     trusted = manifest()
     pinned = ROOT/'tests/fixtures/public-generic-consumer-settlement-v1/cases.json'
     require(read_bounded(pinned, 512*1024) == canonical(trusted), 'stale-consumer-manifest')
     rows = trusted['cases']
     selected = rows if args.case is None else [c for c in rows if c['case_id'] == args.case]
+    if case_ids is not None:
+        require(args.case is None and len(case_ids) == len(set(case_ids)), 'invalid-case-selection')
+        require(set(case_ids).issubset({c['case_id'] for c in rows}), 'unknown-case-selection')
+        selected = [c for c in rows if c['case_id'] in case_ids]
     require(selected, 'unknown-case')
     configurations = [('O0',['-O0']),('O2',['-O2'])]
     if args.sanitizers: configurations += [('ASanUBSan',['-O1','-g0','-fsanitize=address,undefined','-fno-omit-frame-pointer'])]

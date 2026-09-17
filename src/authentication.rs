@@ -52,3 +52,43 @@ impl AuthEntropy for OsAuthEntropy {
         getrandom::fill(out).map_err(|_| AuthError::Entropy)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A marker unlikely to appear in any redacted rendering by accident,
+    /// used to prove the negative (content absent) rather than merely the
+    /// positive (some fixed literal string present).
+    const MARKER: &[u8] = b"UNREDACTED-SECRET-MARKER-7f3a";
+
+    #[test]
+    fn secret_bytes_debug_never_prints_its_content() {
+        let secret = SecretBytes::try_from_bytes(MARKER).expect("bounded secret");
+        // Non-vacuity control: the marker really is inside the owned bytes,
+        // so a debug leak is a real possible failure this test would catch.
+        assert_eq!(secret.as_bytes(), MARKER);
+        let rendered = format!("{secret:?}");
+        assert_eq!(rendered, "SecretBytes([REDACTED])");
+        assert!(!rendered
+            .as_bytes()
+            .windows(MARKER.len())
+            .any(|window| window == MARKER));
+    }
+
+    #[test]
+    fn secret_bytes_rejects_empty_and_oversized_input() {
+        assert_eq!(
+            SecretBytes::try_from_bytes(&[]).err(),
+            Some(AuthError::InvalidInput)
+        );
+        let oversized = vec![1_u8; 4097];
+        assert_eq!(
+            SecretBytes::try_from_bytes(&oversized).err(),
+            Some(AuthError::InvalidInput)
+        );
+        // The exact bound is admitted.
+        let boundary = vec![1_u8; 4096];
+        assert!(SecretBytes::try_from_bytes(&boundary).is_ok());
+    }
+}

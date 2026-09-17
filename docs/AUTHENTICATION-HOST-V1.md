@@ -12,6 +12,11 @@ The host explicitly supplies entropy, signing key, clock ticks and storage.
 `SecretBytes` has redacted debug output, no serialization or clone traits,
 and zeroizes owned storage on drop. This does not erase caller-owned copies.
 Errors are closed tags and carry no credential or bearer-token contents.
+`authentication::tests::secret_bytes_debug_never_prints_its_content` pairs a
+non-vacuity control (the marker bytes are really present in the owned
+storage) with the redaction assertion (the marker is absent from every byte
+window of the rendered `Debug` output), rather than checking only a fixed
+positive string.
 
 Reference in-memory stores provide bounded process-local storage; they do
 not claim database durability, distributed transactions, HTTP middleware,
@@ -74,6 +79,21 @@ are checked. Its debug representation is redacted; storage adapters receive a
 record only through `expose_for_storage`. Incorrect passwords and malformed
 stored credentials are returned as closed `AuthError` tags. This host API does
 not add a source-language secret type, password operation, or authority.
+
+`PasswordHasherHost::with_approved_migrations` lets a deployment verify a
+record hashed under a previously current policy while every new hash uses the
+active policy: `authentication::password::tests::
+approved_migration_verifies_old_hash_but_new_hashes_always_use_current_policy`
+hashes under an old policy, shows an unapproved-migration hasher refuses it,
+then shows an approving hasher verifies the legacy record, still rejects a
+wrong password against it, and rehashes under the current policy rather than
+the migration policy. The migration set itself is bounded (`InvalidPolicy` at
+five entries or when it names the active policy).
+`authentication::password::tests::
+policy_bounds_reject_out_of_range_iterations_and_parallelism` asserts the
+floor and ceiling on iterations and refuses any parallelism other than one,
+each individually, as a closed-form resource-exhaustion bound rather than a
+silent clamp.
 
 
 ## Account and session composition

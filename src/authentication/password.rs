@@ -334,4 +334,84 @@ mod tests {
             Err(AuthError::Capacity)
         ));
     }
+
+    #[test]
+    fn policy_bounds_reject_out_of_range_iterations_and_parallelism() {
+        // Floor and ceiling on iterations, each individually out of bounds.
+        assert_eq!(
+            PasswordPolicy::new(MIN_MEMORY_KIB, MIN_ITERATIONS - 1, PARALLELISM),
+            Err(AuthError::InvalidPolicy)
+        );
+        assert_eq!(
+            PasswordPolicy::new(MIN_MEMORY_KIB, MAX_ITERATIONS + 1, PARALLELISM),
+            Err(AuthError::InvalidPolicy)
+        );
+        // Only parallelism == 1 is admitted; a resource-exhaustion attempt via
+        // a larger parallelism is refused, not silently clamped.
+        assert_eq!(
+            PasswordPolicy::new(MIN_MEMORY_KIB, MIN_ITERATIONS, PARALLELISM + 1),
+            Err(AuthError::InvalidPolicy)
+        );
+        assert_eq!(
+            PasswordPolicy::new(MIN_MEMORY_KIB, MIN_ITERATIONS, 0),
+            Err(AuthError::InvalidPolicy)
+        );
+        // The exact bounds are admitted (paired positive control).
+        assert!(PasswordPolicy::new(MIN_MEMORY_KIB, MIN_ITERATIONS, PARALLELISM).is_ok());
+        assert!(PasswordPolicy::new(MAX_MEMORY_KIB, MAX_ITERATIONS, PARALLELISM).is_ok());
+    }
+
+    #[test]
+    fn approved_migration_verifies_old_hash_but_new_hashes_always_use_current_policy() {
+        let old_policy = PasswordPolicy::new(MIN_MEMORY_KIB, MIN_ITERATIONS, PARALLELISM).unwrap();
+        let current_policy =
+            PasswordPolicy::new(MIN_MEMORY_KIB, MAX_ITERATIONS, PARALLELISM).unwrap();
+        assert_ne!(old_policy, current_policy);
+
+        // A record hashed under the old policy while it was current.
+        let old_hasher = PasswordHasherHost::new(old_policy).unwrap();
+        let mut entropy = FixedEntropy(3);
+        let legacy = old_hasher
+            .hash(&secret(b"legacy password"), &mut entropy)
+            .unwrap();
+
+        // Without an explicit migration, a hasher on the new policy refuses
+        // to verify a record produced under a different, unapproved policy.
+        let strict_hasher = PasswordHasherHost::new(current_policy).unwrap();
+        assert_eq!(
+            strict_hasher.verify(&secret(b"legacy password"), &legacy),
+            Err(AuthError::InvalidPolicy)
+        );
+
+        // With the old policy explicitly approved as a migration, the legacy
+        // record verifies, a wrong password against it still fails, and a
+        // freshly issued hash uses the current policy rather than the
+        // migration policy.
+        let migrating_hasher =
+            PasswordHasherHost::with_approved_migrations(current_policy, &[old_policy]).unwrap();
+        migrating_hasher
+            .verify(&secret(b"legacy password"), &legacy)
+            .unwrap();
+        assert_eq!(
+            migrating_hasher.verify(&secret(b"wrong password"), &legacy),
+            Err(AuthError::InvalidCredential)
+        );
+        let rehashed = migrating_hasher
+            .hash(&secret(b"legacy password"), &mut entropy)
+            .unwrap();
+        assert!(rehashed.expose_for_storage().contains("m=19456,t=4,p=1"));
+        assert_eq!(migrating_hasher.policy(), current_policy);
+
+        // A migration set cannot include the active policy itself, and is
+        // bounded at four entries.
+        assert_eq!(
+            PasswordHasherHost::with_approved_migrations(current_policy, &[current_policy]).err(),
+            Some(AuthError::InvalidPolicy)
+        );
+        let five = [old_policy; 5];
+        assert_eq!(
+            PasswordHasherHost::with_approved_migrations(current_policy, &five).err(),
+            Some(AuthError::InvalidPolicy)
+        );
+    }
 }

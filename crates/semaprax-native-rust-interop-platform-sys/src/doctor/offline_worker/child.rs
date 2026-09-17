@@ -12,38 +12,50 @@ pub(super) unsafe fn enter(
     supervisor: i32,
 ) -> ! {
     if unsafe { libc::getpid() } != 1 {
-        fail_stop();
+        fail_stop_with(10);
     }
     // Arm immediately, then repeat after capability/credential preparation.
     if !parent_alive(supervisor) {
-        fail_stop();
+        fail_stop_with(11);
     }
     for (destination, source) in streams.into_iter().enumerate() {
         if unsafe { libc::dup2(source, destination as i32) } != destination as i32 {
-            fail_stop();
+            fail_stop_with(12);
         }
     }
     let root = match unsafe { offline_root::linux::materialize(plan) } {
         Ok(root) => root,
-        Err(_) => fail_stop(),
+        Err(_) => fail_stop_with(13),
     };
-    if unsafe { libc::fchdir(root.as_raw_fd()) } != 0
-        || unsafe { libc::chroot(c".".as_ptr()) } != 0
-        || unsafe { libc::chdir(c"/".as_ptr()) } != 0
-    {
-        fail_stop();
+    if unsafe { libc::fchdir(root.as_raw_fd()) } != 0 {
+        fail_stop_with(14);
+    }
+    if unsafe { libc::chroot(c".".as_ptr()) } != 0 {
+        fail_stop_with(15);
+    }
+    if unsafe { libc::chdir(c"/".as_ptr()) } != 0 {
+        fail_stop_with(16);
     }
     unsafe { root.close() };
-    if !limits() || !remove_capabilities() || !parent_alive(supervisor) {
-        fail_stop();
+    if !limits() {
+        fail_stop_with(17);
+    }
+    if !remove_capabilities() {
+        fail_stop_with(18);
+    }
+    if !parent_alive(supervisor) {
+        fail_stop_with(19);
     }
     // Exact inherited inventory is a provisioner precondition. All remaining
     // descriptors are this worker's pipes/pidfds, not foreign filesystem files.
     if unsafe { libc::syscall(libc::SYS_close_range, 3_u32, u32::MAX, 0_u32) } != 0 {
-        fail_stop();
+        fail_stop_with(20);
     }
-    if !signals() || !unsafe { guard.install() } {
-        fail_stop();
+    if !signals() {
+        fail_stop_with(21);
+    }
+    if !unsafe { guard.install() } {
+        fail_stop_with(22);
     }
     let argv = [path.as_ptr(), c"--version".as_ptr(), std::ptr::null()];
     let environment = [
@@ -53,7 +65,17 @@ pub(super) unsafe fn enter(
         std::ptr::null(),
     ];
     unsafe { libc::execve(path.as_ptr(), argv.as_ptr(), environment.as_ptr()) };
-    fail_stop()
+    fail_stop_with(23)
+}
+
+fn fail_stop_with(code: i32) -> ! {
+    // Distinct codes let the provisioned gate name the failing step without
+    // changing the wire format; the worker's capture turns any non-zero into
+    // ProbeError::Exit but the numeric status is preserved via waitpid.
+    // Keep codes inside 1..127 so WEXITSTATUS is distinct; 126 remains the
+    // generic fail-stop for unknown paths.
+    let code = if (1..=127).contains(&code) { code } else { 126 };
+    unsafe { libc::_exit(code) }
 }
 
 fn parent_alive(supervisor: i32) -> bool {
@@ -102,6 +124,16 @@ fn signals() -> bool {
             continue;
         }
         if unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) } != 0 {
+            // On musl, some RT signals may be reserved or the kernel may
+            // return EINVAL for signals that are not supported on this
+            // architecture. The original code treated any failure as a
+            // hard error, which breaks on ubuntu-24.04 where the child's
+            // PID 1 context or musl's sigaction wrapper rejects a specific
+            // signal. Treat EINVAL as "not applicable" and continue.
+            let err = super::errno();
+            if err == libc::EINVAL {
+                continue;
+            }
             return false;
         }
     }

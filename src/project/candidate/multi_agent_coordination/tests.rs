@@ -686,6 +686,42 @@ fn scheduling_comparison_computes_bounded_ratios_and_rejects_out_of_bounds_metri
 }
 
 #[test]
+fn scheduling_comparison_reports_an_unfavorable_parallel_run_honestly() {
+    // The favorable case above could pass even from a function that always
+    // reports parallel as cheaper and faster. This is the control: a
+    // parallel run that is genuinely *worse* on every named metric --
+    // slower, costlier, more retries, more review burden -- must be
+    // reported as such, not clamped or hidden. "Parallel work can amplify
+    // model/tool cost without benefit" (the issue's own failure case) is
+    // exactly what this proves the function does not paper over.
+    let sequential = SchedulingObservation {
+        agent_count: 1,
+        wall_clock_units: 50,
+        retries: 1,
+        cost_units: 20,
+        review_items_opened: 2,
+    };
+    let unfavorable_parallel = SchedulingObservation {
+        agent_count: 6,
+        wall_clock_units: 80,
+        retries: 9,
+        cost_units: 140,
+        review_items_opened: 11,
+    };
+    let comparison = record_scheduling_comparison(sequential, unfavorable_parallel).unwrap();
+    let comparison: Value = serde_json::from_str(&comparison).unwrap();
+    // Slower: speedup below 1.
+    assert!(comparison["wall_clock_speedup"].as_f64().unwrap() < 1.0);
+    // Costlier: parallel cost is a multiple of sequential cost.
+    assert_eq!(comparison["cost_ratio"], json!(7.0));
+    // Strictly more retries and more review burden, not merely "changed".
+    assert_eq!(comparison["retries_delta"], json!(8));
+    assert_eq!(comparison["review_burden_delta"], json!(9));
+    assert_eq!(comparison["execution_authority"], json!(false));
+    assert_eq!(comparison["publication_authority"], json!(false));
+}
+
+#[test]
 fn target_overlap_is_the_only_variable_between_a_parallelizable_pair_and_a_refused_pair() {
     // A direct control for "two genuinely disjoint transactions may
     // proceed in parallel, and the scheduler would have refused them had

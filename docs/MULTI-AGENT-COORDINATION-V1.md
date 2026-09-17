@@ -227,6 +227,12 @@ the codes above.
 - **Parallel work can amplify cost without benefit.** `record_scheduling_comparison`
   is the bounded evidence surface for a caller to record and compare that,
   without this module ever running the comparison itself.
+  `scheduling_comparison_reports_an_unfavorable_parallel_run_honestly` proves
+  the function does not assume parallel is always better: given a parallel
+  observation that is slower, costlier, and has more retries and review
+  burden than the sequential one, every metric is reported in the
+  unfavorable direction (`wall_clock_speedup < 1.0`, `cost_ratio > 1.0`,
+  positive `retries_delta`/`review_burden_delta`), not clamped or hidden.
 - **No agent/coordinator path publishes without a separate authorized
   session.** Every record this module renders carries
   `publication_authority: false`; the module calls no publication, rebase,

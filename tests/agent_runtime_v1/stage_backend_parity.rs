@@ -52,6 +52,22 @@
 //! nothing about whether they computed the same thing or took the same
 //! branch.
 //!
+//! It also covers the `Step` variant `reduce` result named in #182's scope
+//! ("Initialize, observe, authorize, reduce, and Step variant execution"),
+//! previously unexercised here. `StepShape::bind`
+//! (`src/agent_lifecycle/iterative/step.rs`) requires a closed four-case
+//! `Continue`/`Complete`/`Suspend`/`Fail` variant where `Continue`/`Suspend`
+//! fields exactly match the bound `State` record's fields and `Complete`
+//! fields exactly match the bound result record's fields, with `Fail`
+//! holding exactly one `i64`. `reduce_step`/`Step` below reproduce that
+//! exact closed shape (matching `State`/`Report` field lists in order and
+//! type) and four distinct `case.reduce_step_*` wrappers drive one input
+//! down each of the four branches, projected to `i64` the same way the
+//! `Decision` variant already is. This is the same non-claim as the rest of
+//! this module: it proves the `Step`-shaped compute substrate is
+//! cross-engine consistent, not that any backend runs the iterative
+//! driver's actual `Step` dispatch.
+//!
 //! This is necessary evidence for any future stage-executor seam (the
 //! compute substrate the four stage bodies need is already
 //! backend-consistent) but it is NOT that seam: no authorization is minted,
@@ -121,6 +137,28 @@ record Report {
     @id("parity.type.report.status") status: i64,
 }
 
+@id("parity.type.step")
+variant Step {
+    @id("parity.type.step.continue") Continue {
+        @id("parity.type.step.continue.objective") objective: Bytes,
+        @id("parity.type.step.continue.budget") budget: i64,
+        @id("parity.type.step.continue.epoch") epoch: i64,
+    },
+    @id("parity.type.step.complete") Complete {
+        @id("parity.type.step.complete.summary") summary: Bytes,
+        @id("parity.type.step.complete.budget") budget: i64,
+        @id("parity.type.step.complete.status") status: i64,
+    },
+    @id("parity.type.step.suspend") Suspend {
+        @id("parity.type.step.suspend.objective") objective: Bytes,
+        @id("parity.type.step.suspend.budget") budget: i64,
+        @id("parity.type.step.suspend.epoch") epoch: i64,
+    },
+    @id("parity.type.step.fail") Fail {
+        @id("parity.type.step.fail.code") code: i64,
+    },
+}
+
 @id("parity.fn.initialize")
 fn initialize(task: own Task) -> State
 {
@@ -153,6 +191,24 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
         summary: bytes_copy(array_as_slice(stamp)),
         budget: state.budget - budget,
         status: outcome.status + state.epoch,
+    }
+}
+
+@id("parity.fn.reduce_step")
+fn reduce_step(state: own State, budget: i64, urgent: bool, sequence: usize, outcome: own Outcome) -> Step
+{
+    if outcome.status < 0 {
+        Step::Fail { code: outcome.status }
+    } else {
+        if outcome.status == 0 {
+            Step::Complete { summary: outcome.value, budget: state.budget - budget, status: state.epoch }
+        } else {
+            if urgent {
+                Step::Suspend { objective: state.objective, budget: state.budget, epoch: state.epoch + 1 }
+            } else {
+                Step::Continue { objective: state.objective, budget: state.budget - budget, epoch: state.epoch + outcome.status }
+            }
+        }
     }
 }
 
@@ -208,6 +264,66 @@ fn case_reduce() -> i64
     report.budget * 1000 + report.status
 }
 
+@id("case.reduce_step_continue")
+fn case_reduce_step_continue() -> i64
+{
+    let seed = [1u8, 1u8];
+    let state = State { objective: bytes_copy(array_as_slice(seed)), budget: 10, epoch: 2 };
+    let outcome = Outcome { value: bytes_copy(array_as_slice(seed)), status: 3 };
+    let step = reduce_step(state, 4, false, 1usize, outcome);
+    match own step {
+        Step::Continue { objective: o, budget: b, epoch: e } => 100000 + b * 1000 + e,
+        Step::Complete { summary: s, budget: b, status: st } => 200000 + b * 1000 + st,
+        Step::Suspend { objective: o, budget: b, epoch: e } => 300000 + b * 1000 + e,
+        Step::Fail { code: c } => 400000 + c,
+    }
+}
+
+@id("case.reduce_step_complete")
+fn case_reduce_step_complete() -> i64
+{
+    let seed = [1u8, 1u8];
+    let state = State { objective: bytes_copy(array_as_slice(seed)), budget: 10, epoch: 2 };
+    let outcome = Outcome { value: bytes_copy(array_as_slice(seed)), status: 0 };
+    let step = reduce_step(state, 4, false, 1usize, outcome);
+    match own step {
+        Step::Continue { objective: o, budget: b, epoch: e } => 100000 + b * 1000 + e,
+        Step::Complete { summary: s, budget: b, status: st } => 200000 + b * 1000 + st,
+        Step::Suspend { objective: o, budget: b, epoch: e } => 300000 + b * 1000 + e,
+        Step::Fail { code: c } => 400000 + c,
+    }
+}
+
+@id("case.reduce_step_suspend")
+fn case_reduce_step_suspend() -> i64
+{
+    let seed = [1u8, 1u8];
+    let state = State { objective: bytes_copy(array_as_slice(seed)), budget: 10, epoch: 2 };
+    let outcome = Outcome { value: bytes_copy(array_as_slice(seed)), status: 3 };
+    let step = reduce_step(state, 4, true, 1usize, outcome);
+    match own step {
+        Step::Continue { objective: o, budget: b, epoch: e } => 100000 + b * 1000 + e,
+        Step::Complete { summary: s, budget: b, status: st } => 200000 + b * 1000 + st,
+        Step::Suspend { objective: o, budget: b, epoch: e } => 300000 + b * 1000 + e,
+        Step::Fail { code: c } => 400000 + c,
+    }
+}
+
+@id("case.reduce_step_fail")
+fn case_reduce_step_fail() -> i64
+{
+    let seed = [1u8, 1u8];
+    let state = State { objective: bytes_copy(array_as_slice(seed)), budget: 10, epoch: 2 };
+    let outcome = Outcome { value: bytes_copy(array_as_slice(seed)), status: 0 - 7 };
+    let step = reduce_step(state, 4, false, 1usize, outcome);
+    match own step {
+        Step::Continue { objective: o, budget: b, epoch: e } => 100000 + b * 1000 + e,
+        Step::Complete { summary: s, budget: b, status: st } => 200000 + b * 1000 + st,
+        Step::Suspend { objective: o, budget: b, epoch: e } => 300000 + b * 1000 + e,
+        Step::Fail { code: c } => 400000 + c,
+    }
+}
+
 @id("app.main")
 fn main() -> i64 { 0 }
 "#;
@@ -219,6 +335,10 @@ const CASES: &[&str] = &[
     "case.authorize_granted",
     "case.authorize_refused",
     "case.reduce",
+    "case.reduce_step_continue",
+    "case.reduce_step_complete",
+    "case.reduce_step_suspend",
+    "case.reduce_step_fail",
 ];
 
 /// Hand-computed expected values, one per `CASES` entry, from the fixture
@@ -231,7 +351,15 @@ const CASES: &[&str] = &[
 ///   (urgent=false) } -> 0-1 = -1
 /// - `reduce`: report.budget = 10-3 = 7, report.status = 5+2 = 7 ->
 ///   7*1000+7 = 7007
-const EXPECTED: &[i64] = &[10001, 20003, 1005, -1, 7007];
+/// - `reduce_step` continue (status=3>0, not urgent): Continue { budget:
+///   10-4=6, epoch: 2+3=5 } -> 100000+6*1000+5 = 106005
+/// - `reduce_step` complete (status=0): Complete { budget: 10-4=6, status:
+///   state.epoch=2 } -> 200000+6*1000+2 = 206002
+/// - `reduce_step` suspend (status=3>0, urgent): Suspend { budget:
+///   state.budget=10, epoch: 2+1=3 } -> 300000+10*1000+3 = 310003
+/// - `reduce_step` fail (status=-7<0): Fail { code: -7 } ->
+///   400000+(-7) = 399993
+const EXPECTED: &[i64] = &[10001, 20003, 1005, -1, 7007, 106005, 206002, 310003, 399993];
 
 fn tool_available(name: &str) -> bool {
     Command::new(name)

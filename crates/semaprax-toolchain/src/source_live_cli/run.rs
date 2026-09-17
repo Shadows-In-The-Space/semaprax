@@ -14,7 +14,7 @@ use semaprax::agent_lifecycle::iterative::source_live::{
     SourceLiveRequest,
 };
 use semaprax::agent_lifecycle::iterative::{
-    compile_project_agent_lifecycle_v2, CompiledIterativeLifecycle, IterativeBudget,
+    compile_project_agent_lifecycle_v2, CompiledIterativeLifecycle, IterativeBudget, IterativeRun,
 };
 use semaprax::agent_lifecycle::{AgentReadOperation, AuthorizedRequest, LifecycleTask};
 use semaprax::agent_runtime::AgentCancellation;
@@ -25,6 +25,7 @@ use semaprax::live_invocation::source_journal::{
 };
 use semaprax::live_invocation::{InvocationClock, ModelInvokeCapability, SourceInvocationClock};
 use semaprax::project::{with_authenticated_project, ProjectRevision};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::checkpoint::{bounded_read, CheckpointDir};
@@ -231,7 +232,20 @@ fn source_error(failure: SourceLiveFailure) -> CliError {
     ))
 }
 
+/// The compiled reducer already renders a self-contained, revision-bound
+/// evidence document (stage rows, authorization bindings, terminal value
+/// digest) into `IterativeRun::evidence`. A fresh or resumed attempt that
+/// dispatched this call carries it; a pure checkpoint replay (`checked_run`
+/// is `None`) has none to add. Parsing is defensive only: the string is
+/// compiler-produced canonical JSON and is expected to always parse.
+fn iterative_evidence_value(checked_run: Option<&IterativeRun>) -> Value {
+    checked_run.map_or(Value::Null, |run| {
+        serde_json::from_str(run.evidence()).unwrap_or(Value::Null)
+    })
+}
+
 fn receipt(outcome: SourceLiveOutcome) -> Result<String, CliError> {
+    let iterative_evidence = iterative_evidence_value(outcome.checked_run.as_ref());
     let terminal = outcome
         .checkpoint
         .terminal_snapshot()
@@ -266,6 +280,7 @@ fn receipt(outcome: SourceLiveOutcome) -> Result<String, CliError> {
                 "observed_response_bytes": io.observed_response_bytes,
                 "unknown_response_reservation_bytes": io.unknown_response_reservation_bytes,
             },
+            "iterative_evidence": iterative_evidence,
         });
         return Ok(format!("{receipt}\n"));
     }
@@ -289,20 +304,23 @@ fn receipt(outcome: SourceLiveOutcome) -> Result<String, CliError> {
                 "observed_over_reservation_minor": money.observed_over_reservation_minor,
                 "remaining_admission_minor": money.remaining_admission_minor,
             },
+            "iterative_evidence": iterative_evidence,
         });
         return Ok(format!("{receipt}\n"));
     }
-    Ok(format!(
-        "{{\"schema\":\"semaprax.source-live-cli.receipt.v1\",\"status\":{},\"invocation\":{},\"generation\":{},\"chain\":{},\"committed_model_units\":{},\"committed_stage_fuel\":{},\"model_dispatches\":{},\"effect_dispatches\":{}}}\n",
-        serde_json::to_string(terminal.status().as_str()).expect("static status"),
-        serde_json::to_string(outcome.checkpoint.invocation()).expect("bound invocation"),
-        outcome.checkpoint.generation(),
-        serde_json::to_string(outcome.checkpoint.chain()).expect("bound chain"),
-        outcome.checkpoint.committed_reserved_units(),
-        outcome.checkpoint.committed_stage_fuel(),
-        outcome.model_dispatches,
-        outcome.effect_dispatches,
-    ))
+    let receipt = serde_json::json!({
+        "schema": "semaprax.source-live-cli.receipt.v1",
+        "status": terminal.status().as_str(),
+        "invocation": outcome.checkpoint.invocation(),
+        "generation": outcome.checkpoint.generation(),
+        "chain": outcome.checkpoint.chain(),
+        "committed_model_units": outcome.checkpoint.committed_reserved_units(),
+        "committed_stage_fuel": outcome.checkpoint.committed_stage_fuel(),
+        "model_dispatches": outcome.model_dispatches,
+        "effect_dispatches": outcome.effect_dispatches,
+        "iterative_evidence": iterative_evidence,
+    });
+    Ok(format!("{receipt}\n"))
 }
 
 fn provider<R: OpenCodeRunner>(

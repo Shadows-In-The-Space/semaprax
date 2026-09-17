@@ -437,6 +437,18 @@ fn retained_project_run_and_terminal_resume_reject_changed_inputs_without_dispat
     assert_eq!(receipt["model_dispatches"], 1);
     assert_eq!(receipt["effect_dispatches"], 1);
     assert_eq!(calls.get(), 1);
+    // A dispatching attempt carries the compiled reducer's own revision-bound
+    // evidence document (stage rows, authorization bindings, terminal value
+    // digest), not just the checkpoint's bookkeeping counters.
+    assert_eq!(
+        receipt["iterative_evidence"]["schema"],
+        "semaprax.agent-iterative-evidence.v2"
+    );
+    assert_eq!(receipt["iterative_evidence"]["status"], "Complete");
+    assert_eq!(receipt["iterative_evidence"]["effects"], 1);
+    assert!(receipt["iterative_evidence"]["stages"]
+        .as_array()
+        .is_some_and(|stages| !stages.is_empty()));
     assert_eq!(
         fs::read(manifest.parent().unwrap().join("src/app.spx")).unwrap(),
         source_before
@@ -454,6 +466,9 @@ fn retained_project_run_and_terminal_resume_reject_changed_inputs_without_dispat
     assert_eq!(replay["effect_dispatches"], 0);
     assert_eq!(replay["committed_model_units"], 1);
     assert_eq!(calls.get(), 1);
+    // A pure terminal-checkpoint replay redispatches nothing, so it has no
+    // fresh reducer evidence to carry; it must not fabricate one.
+    assert_eq!(replay["iterative_evidence"], serde_json::Value::Null);
     assert_eq!(
         fs::read(checkpoint.join("checkpoint.json")).unwrap(),
         journal_before

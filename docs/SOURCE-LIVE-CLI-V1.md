@@ -156,14 +156,24 @@ State is schema-checked before first Observe. No Initialize is repeated.
 
 A completed unpriced run returns the v1 bounded JSON receipt with terminal status,
 invocation, generation, chain, acknowledged model units and stage fuel, and
-this traversal's model/effect dispatch counts. It does not include raw model
-text, credentials, provider stderr, or a publication grant. A failure reports
-its selected status and last acknowledged counters; the journal remains the
-reviewable causal artifact. The CLI never rewrites authoritative `.spx`
-source or Git state. Real failed-check observation, semantic candidate
-preview, repair feedback, and approval-bound publication remain issue #116's
-separate vertical-slice work. No live provider, hosted CI, durable power-loss,
-or exactly-once physical delivery claim follows from local injected tests.
+this traversal's model/effect dispatch counts. Every receipt version also
+carries `iterative_evidence`: the compiled reducer's own
+`semaprax.agent-iterative-evidence.v2` document (policy, invocation digest,
+status, iteration/effect counts, per-stage role/function/outcome/step rows,
+authorization bindings, and a terminal-value digest) when this traversal
+dispatched fresh work, or `null` on a pure terminal-checkpoint replay that
+redispatched nothing. It does not include raw model text, credentials,
+provider stderr, or a publication grant. A failure reports its selected
+status and last acknowledged counters; the journal remains the reviewable
+causal artifact. The CLI never rewrites authoritative `.spx` source or Git
+state. Real failed-check observation, semantic candidate preview (source
+diff, semantic impact, blind spots), repair feedback, and approval-bound
+publication remain issue #116's separate vertical-slice work; the general
+`run`/`resume`/`migrate` route is a domain-agnostic Agent-lifecycle host
+adapter; it is not itself wired to the candidate-preview machinery that
+`offline-repair` demonstrates for its one fixed project. No live provider,
+hosted CI, durable power-loss, or exactly-once physical delivery claim
+follows from local injected tests.
 
 A completed priced run returns
 `semaprax.source-live-cli.receipt.v2` with the same top-level status,

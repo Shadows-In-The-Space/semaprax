@@ -36,7 +36,26 @@
       "Bash(graft:*)",
       "Bash(npx graft:*)",
       "Bash(graft-dev:*)",
-      "Bash(node dist/cli.js:*)"
+      "Bash(node dist/cli.js:*)",
+      "Bash(./target/private/debug/semaprax check:*)",
+      "Bash(./target/debug/semaprax check:*)",
+      "Bash(target/private/debug/semaprax check:*)",
+      "Bash(target/debug/semaprax check:*)",
+      "Bash(./target/private/debug/semaprax test:*)",
+      "Bash(./target/debug/semaprax test:*)",
+      "Bash(scripts/check-invariants.sh:*)",
+      "Bash(./scripts/check-invariants.sh:*)",
+      "Bash(bash scripts/check-invariants.sh:*)",
+      "Bash(sh scripts/check-invariants.sh:*)",
+      "Bash(scripts/check-boot.sh:*)",
+      "Bash(./scripts/check-boot.sh:*)",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__claude-in-chrome__read_page",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__claude-in-chrome__find",
+      "mcp__claude-in-chrome__read_network_requests",
+      "mcp__claude-in-chrome__list_connected_browsers",
+      "mcp__lean-ctx__ctx_read"
     ],
     "deny": [
       "Bash(git stash:*)"
@@ -63,7 +82,7 @@
         ]
       },
       {
-        "matcher": "Bash|mcp__graft__",
+        "matcher": "Bash|mcp__graft__|Read|Grep|Glob",
         "hooks": [
           {
             "type": "command",

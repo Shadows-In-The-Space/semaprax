@@ -276,6 +276,48 @@ certificate's recorded counterexample does not independently replay, or
 `artifact.target` names a target outside the closed vocabulary — see the
 bug-class section above.
 
+## The `ExternalKernelCapability` seam (issue #186)
+
+`verify_certificate_with_solver` hard-wires "the external kernel is Z3"
+into its own body: it re-runs the certificate's exact embedded script
+through a caller-supplied `Provisioning` and requires the fresh result to
+also be `unsat`. `ExternalKernelCapability`
+(`../src/assurance_manifest/proof_certificate/verify.rs`) and
+`verify_certificate_with_capability` pull that final consultation out
+behind an explicit trait, mirroring
+[`SignatureVerificationCapability`](../src/release_provenance.rs) and
+`verify_release_binding_with_capability`'s shape exactly: every binding
+check (`verify_certificate_against_source`, itself unchanged) still runs
+first and still fails closed on its own, and the capability is consulted
+only afterward, only for a `proved` verdict, never for a `refuted` one
+(already independently validated by checked-arithmetic replay). A
+capability that always confirms can therefore never widen what the binding
+layer already refuses — `verify_certificate_with_capability_runs_binding_checks_before_the_capability`
+confirms this with an always-accepting mock capability over a
+source-drifted certificate, and
+`verify_certificate_with_capability_actually_invokes_the_supplied_capability`
+confirms the reverse: the capability is genuinely consulted, not silently
+skipped. `verify_certificate_with_solver` is now this generic function
+applied to `Z3SolverCapability`, the one instance that genuinely wraps a
+real kernel (the same Z3 subprocess it already spawned) — extracting the
+seam changed no observable behavior of that function.
+
+This is the reusable surface issue #186's still-open "select one backend
+such as Lean, Dafny, Verus, or Coq" requirement is written against: a
+future translator exporting selected obligations to a real proof-assistant
+kernel can implement `ExternalKernelCapability` for that kernel's own
+transport and accept/reject format, and reuse this module's
+binding-then-capability ordering rather than reimplementing it. **No such
+implementation exists in this repository.** `lean`, `lean4`, `dafny`,
+`verus`, `coqc`, and `coq_makefile` are all absent from every host this
+tranche has run on; only `z3` is installed. Writing a translator for a
+kernel that cannot be run end to end here would produce exactly what issue
+#186's own out-of-scope list warns against — an opaque script that cannot
+be independently checked on this host, and an unverifiable claim. The trait
+and its ordering guarantee are genuine, tested infrastructure; a
+proof-assistant backend implementing it is `HUMAN_BLOCKED` on provisioning
+one of those toolchains.
+
 ## Scope and honest limitations
 
 - Only postcondition (`ensures`) discharge is certified; precondition
@@ -293,6 +335,11 @@ bug-class section above.
 - `verify_certificate_against_source`'s script re-derivation depends on
   this exact compiler's deterministic translator; it is the strongest check
   available without a solver, not a substitute for one.
+- `ExternalKernelCapability` is a genuine, tested seam, not a shipped
+  proof-assistant backend: `Z3SolverCapability` is its only implementation,
+  and it wraps the same Z3 this schema already targets. Selecting and
+  implementing a Lean/Dafny/Verus/Coq backend for issue #186 remains
+  unimplemented and `HUMAN_BLOCKED` on provisioning one of those toolchains.
 - Evidence for this tranche is local, developer-machine: unit and
   integration tests exercise rendering, structural replay, drift, and the
   mutation ladder without a solver process; a second, `#[ignore]`d tranche

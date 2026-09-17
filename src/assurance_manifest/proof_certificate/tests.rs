@@ -21,7 +21,8 @@ use std::time::Duration;
 use super::render::{render, CertificateBody, RenderInput};
 use super::{
     export_postcondition_certificate, verify_certificate, verify_certificate_against_artifact,
-    verify_certificate_against_source, verify_certificate_with_solver,
+    verify_certificate_against_source, verify_certificate_with_capability,
+    verify_certificate_with_solver, ExternalKernelCapability,
 };
 
 use crate::assurance_manifest::smt_discharge::{
@@ -30,6 +31,7 @@ use crate::assurance_manifest::smt_discharge::{
     ENV_Z3_PATH,
 };
 use crate::diagnostic::quote_json;
+use crate::diagnostic::Diagnostic;
 
 fn short_limits() -> RunLimits {
     RunLimits {
@@ -958,6 +960,116 @@ fn export_rejects_an_unknown_declaration_id() {
     std::fs::remove_file(&path).ok();
     let diagnostics = result.expect_err("declaration does not exist");
     assert_eq!(diagnostics[0].code, "SPX-Z105");
+}
+
+// ---------------------------------------------------------------------
+// `ExternalKernelCapability` plumbing (issue #186). Offline: no solver
+// process is spawned by anything below.
+//
+// No real Lean/Dafny/Verus/Coq (or any other non-Z3) kernel implementation
+// of `ExternalKernelCapability` exists anywhere in this repository — see
+// the module doc. The tests below establish the two things that matter
+// about the seam itself without pretending either mock is a real kernel:
+//
+// 1. `verify_certificate_with_capability` still runs every binding check
+//    first and still fails closed on its own: an always-confirming
+//    capability can never rescue a certificate whose binding to source has
+//    already drifted.
+// 2. The supplied capability is genuinely consulted for a `proved`
+//    verdict — not silently skipped — and genuinely skipped for a
+//    `refuted` one, exactly like `verify_certificate_with_solver` already
+//    behaves (which this generic function now backs).
+// ---------------------------------------------------------------------
+
+struct AlwaysOkKernelCapability;
+
+impl ExternalKernelCapability for AlwaysOkKernelCapability {
+    fn confirm(&self, _script: &str) -> Result<(), Diagnostic> {
+        Ok(())
+    }
+}
+
+/// The message a rejecting test capability returns. Assertions key off this
+/// message, not off a fabricated diagnostic code: `build.rs` scans every
+/// `SPX-` token under `src/` into the public installed diagnostic catalog,
+/// so a test-only code would ship as one the compiler can never emit. The
+/// existing consistency code (`SPX-Z106`, already used for
+/// `verify_certificate_with_solver`'s own rejection) is reused instead, and
+/// this message distinguishes a capability rejection from any binding
+/// rejection just as precisely.
+const KERNEL_CAPABILITY_REJECTED: &str = "test kernel capability unconditionally rejects";
+
+struct AlwaysRejectKernelCapability;
+
+impl ExternalKernelCapability for AlwaysRejectKernelCapability {
+    fn confirm(&self, _script: &str) -> Result<(), Diagnostic> {
+        Err(Diagnostic::io(
+            "SPX-Z106",
+            KERNEL_CAPABILITY_REJECTED.to_owned(),
+        ))
+    }
+}
+
+#[test]
+fn verify_certificate_with_capability_runs_binding_checks_before_the_capability() {
+    let path = write_temp(&true_postcondition_source(), "capability-binding-first");
+    let source_text = std::fs::read_to_string(&path).unwrap();
+    let certificate = proved_certificate(&path, &source_text, "app.t.f");
+
+    // Drift the source on disk after the certificate was produced, exactly
+    // like `verify_certificate_against_source_rejects_after_source_drift`.
+    std::fs::write(
+        &path,
+        source_text.replace("requires a >= 0", "requires a >= 1"),
+    )
+    .unwrap();
+
+    let result = verify_certificate_with_capability(&certificate, &path, &AlwaysOkKernelCapability);
+    std::fs::remove_file(&path).ok();
+    let error = result.expect_err(
+        "a source-drifted certificate must be rejected before an always-confirming capability \
+         is ever reached",
+    );
+    // The binding layer's own drift code surfaces, not a capability
+    // rejection: an always-`Ok` capability never even ran.
+    assert_eq!(error.code, "SPX-Z107");
+    assert_ne!(error.message, KERNEL_CAPABILITY_REJECTED);
+}
+
+#[test]
+fn verify_certificate_with_capability_actually_invokes_the_supplied_capability() {
+    let path = write_temp(&true_postcondition_source(), "capability-invoked");
+    let source_text = std::fs::read_to_string(&path).unwrap();
+    let certificate = proved_certificate(&path, &source_text, "app.t.f");
+
+    let error =
+        verify_certificate_with_capability(&certificate, &path, &AlwaysRejectKernelCapability)
+            .expect_err(
+                "a rejecting capability must fail overall verification for a `proved` verdict",
+            );
+    assert_eq!(error.code, "SPX-Z106");
+    assert_eq!(error.message, KERNEL_CAPABILITY_REJECTED);
+
+    let result = verify_certificate_with_capability(&certificate, &path, &AlwaysOkKernelCapability);
+    std::fs::remove_file(&path).ok();
+    result.expect("a confirming capability over an otherwise-genuine certificate must accept");
+}
+
+#[test]
+fn verify_certificate_with_capability_never_consults_the_capability_for_a_refuted_verdict() {
+    let path = write_temp(&false_postcondition_source(), "capability-refuted-skipped");
+    let source_text = std::fs::read_to_string(&path).unwrap();
+    let mut model = Model::new();
+    model.insert("a".to_owned(), ModelValue::Int(0));
+    let certificate = refuted_certificate(&path, &source_text, "app.t.f", model);
+
+    // Even an unconditionally rejecting capability must not be reached: a
+    // `refuted` verdict's counterexample is already independently
+    // validated above, so no kernel is consulted for it at all.
+    let result =
+        verify_certificate_with_capability(&certificate, &path, &AlwaysRejectKernelCapability);
+    std::fs::remove_file(&path).ok();
+    result.expect("a refuted certificate's capability step must be a no-op, never a rejection");
 }
 
 // ---------------------------------------------------------------------

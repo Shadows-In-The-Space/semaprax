@@ -97,6 +97,26 @@
 //!   third-party-only check of a `proved` verdict still requires handing the
 //!   embedded script text to an independent solver, which this module makes
 //!   possible but does not itself require.
+//!
+//! # The `ExternalKernelCapability` seam (issue #186)
+//!
+//! [`verify_certificate_with_solver`] hard-wires "the external kernel is
+//! Z3" into its own body. [`ExternalKernelCapability`] and
+//! [`verify_certificate_with_capability`] pull that consultation out behind
+//! an explicit trait — mirroring
+//! [`crate::release_provenance::SignatureVerificationCapability`] and
+//! `verify_release_binding_with_capability`'s "binding checks first, then
+//! an explicitly supplied capability" shape exactly — so a future
+//! obligation-export translator targeting a real proof-assistant kernel
+//! (Lean, Dafny, Verus, or Coq, per issue #186's still-open "select one
+//! backend") can implement the trait and reuse this module's binding
+//! ordering guarantee instead of reimplementing it. No implementation of
+//! that kind ships here: none of those four toolchains is installed on this
+//! host, and installing one is out of scope for this tranche. The only
+//! implementation that exists, [`verify_certificate_with_solver`]'s
+//! internal `Z3SolverCapability`, wraps the real (already-shipped) Z3
+//! subprocess — it is not, and must never be described as, the
+//! proof-assistant backend this issue still asks for.
 
 mod render;
 mod verify;
@@ -107,7 +127,7 @@ mod tests;
 pub use render::SCHEMA;
 pub use verify::{
     verify_certificate, verify_certificate_against_artifact, verify_certificate_against_source,
-    verify_certificate_with_solver,
+    verify_certificate_with_capability, verify_certificate_with_solver, ExternalKernelCapability,
 };
 
 use std::path::Path;

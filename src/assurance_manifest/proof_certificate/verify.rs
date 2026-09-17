@@ -607,35 +607,118 @@ pub fn verify_certificate_against_source(
     }
 }
 
-/// Everything [`verify_certificate_against_source`] checks, plus — only for
-/// a `proved` verdict, and only because the caller explicitly supplied a
-/// solver — re-running the certificate's exact embedded script through
-/// `provisioning` and requiring the fresh result to also be `unsat`.
+/// Explicit capability to independently confirm, through a real external
+/// proof kernel, that a certificate's exact embedded, already
+/// source-rebound obligation-export script (`checked.script` — for this
+/// schema, the `QF_LIA` SMT-LIB2 text) is genuinely accepted — as opposed to
+/// the binding checks in [`verify_certificate_against_source`], which never
+/// run any external kernel at all. Per `AGENTS.md`'s capability invariant
+/// ("Capabilities are explicit... [generated code and this repository's
+/// tooling gain] no ambient... process... authority"), nothing in this
+/// module discovers or spawns a kernel binary on its own: a caller
+/// constructs a capability from whatever kernel they have provisioned and
+/// passes it in explicitly to [`verify_certificate_with_capability`].
 ///
-/// This never spawns a process for a `refuted` certificate: its
-/// counterexample is already independently validated by checked-arithmetic
-/// replay above, which is strictly stronger evidence than a second `sat`
-/// from any solver. Spawns a process only when this function is called with
-/// an explicit `provisioning`; never consults the environment itself.
-pub fn verify_certificate_with_solver(
-    certificate: &str,
-    source_path: &Path,
-    provisioning: &Provisioning,
-    limits: &RunLimits,
-) -> Result<(), Diagnostic> {
-    verify_certificate_against_source(certificate, source_path)?;
-    let checked = check_certificate(certificate)?;
-    if let CheckedBody::Proved = checked.body {
-        match run(provisioning, &checked.script, limits) {
+/// This is the reusable seam issue #186's still-open "select one backend
+/// such as Lean, Dafny, Verus, or Coq" requirement is written against: a
+/// future translator that exports selected obligations to one of those
+/// proof assistants can implement this trait to plug its own kernel's
+/// accept/reject verdict into exactly the same binding-then-capability
+/// ordering [`verify_certificate_with_solver`] already uses for Z3 — without
+/// this module needing to know anything about that kernel's transport or
+/// output format. No such implementation ships here: `lean`, `dafny`,
+/// `verus`, and `coqc` are not installed on this host and installing one is
+/// out of this session's scope (see `docs/SMT-PROOF-CERTIFICATE-V1.md`
+/// "Scope and honest limitations"). [`Z3SolverCapability`] below is the one
+/// implementation that genuinely exists today, wrapping the real Z3
+/// subprocess this crate already spawns for #184 — it is not a stand-in for
+/// the still-missing proof-assistant backend.
+pub trait ExternalKernelCapability {
+    /// Return `Ok(())` only if a real external kernel accepts `script`
+    /// exactly as given. `script` is always the certificate's own verbatim
+    /// embedded obligation-export text, already confirmed byte-identical to
+    /// what re-deriving from the certificate's exact bound source produces
+    /// — this trait is never asked to re-check binding, only to consult a
+    /// real kernel about already-bound content. Implementations must treat
+    /// `script` as opaque input to whatever kernel they wrap; they must not
+    /// themselves grant ambient filesystem, process, or network authority
+    /// beyond what constructing the capability already required.
+    fn confirm(&self, script: &str) -> Result<(), Diagnostic>;
+}
+
+/// The one genuine (non-mock) [`ExternalKernelCapability`] implementation in
+/// this crate: re-runs `script` through an explicitly provisioned Z3 binary
+/// via [`run`] and requires the fresh verdict to be [`Verdict::Unsat`]. This
+/// is exactly what [`verify_certificate_with_solver`] used to do inline
+/// before this seam existed; extracting it here means that function and any
+/// future backend-specific capability now share one ordering guarantee
+/// ([`verify_certificate_with_capability`]) instead of each reimplementing
+/// it.
+struct Z3SolverCapability<'a> {
+    provisioning: &'a Provisioning,
+    limits: &'a RunLimits,
+}
+
+impl ExternalKernelCapability for Z3SolverCapability<'_> {
+    fn confirm(&self, script: &str) -> Result<(), Diagnostic> {
+        match run(self.provisioning, script, self.limits) {
             Verdict::Unsat => Ok(()),
             other => Err(consistency_error(format!(
                 "re-running the certificate's exact embedded script through the provisioned \
                  solver did not reproduce `unsat`: {other:?}"
             ))),
         }
+    }
+}
+
+/// Everything [`verify_certificate_against_source`] checks, plus — only for
+/// a `proved` verdict — consulting an explicitly supplied
+/// [`ExternalKernelCapability`]. The binding checks still run first and
+/// still fail closed on their own: a source-drifted, version-drifted, or
+/// tampered-script certificate is rejected before the capability is ever
+/// invoked, exactly mirroring
+/// [`crate::release_provenance::verify_release_binding_with_capability`]'s
+/// "binding checks first, capability second" shape — a capability that
+/// always confirms can never widen what the binding layer already refuses.
+///
+/// This never consults `capability` for a `refuted` certificate: its
+/// counterexample is already independently validated by checked-arithmetic
+/// replay in [`verify_certificate_against_source`], which is strictly
+/// stronger evidence than any kernel's second opinion on a script that was
+/// never claimed to be unsatisfiable in the first place.
+pub fn verify_certificate_with_capability(
+    certificate: &str,
+    source_path: &Path,
+    capability: &dyn ExternalKernelCapability,
+) -> Result<(), Diagnostic> {
+    verify_certificate_against_source(certificate, source_path)?;
+    let checked = check_certificate(certificate)?;
+    if let CheckedBody::Proved = checked.body {
+        capability.confirm(&checked.script)
     } else {
         Ok(())
     }
+}
+
+/// [`verify_certificate_with_capability`] using [`Z3SolverCapability`], the
+/// concrete Z3 instance of that general seam: re-runs the certificate's
+/// exact embedded script through `provisioning` and requires the fresh
+/// result to also be `unsat`, only for a `proved` verdict.
+///
+/// This never spawns a process for a `refuted` certificate (see above), and
+/// spawns a process only when this function is called with an explicit
+/// `provisioning`; it never consults the environment itself.
+pub fn verify_certificate_with_solver(
+    certificate: &str,
+    source_path: &Path,
+    provisioning: &Provisioning,
+    limits: &RunLimits,
+) -> Result<(), Diagnostic> {
+    let capability = Z3SolverCapability {
+        provisioning,
+        limits,
+    };
+    verify_certificate_with_capability(certificate, source_path, &capability)
 }
 
 /// Bind one certificate to an actual compiled artifact a caller already has

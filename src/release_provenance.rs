@@ -703,6 +703,64 @@ pub fn verify_release_binding(
     Ok(())
 }
 
+/// Explicit capability to perform *cryptographic* signature verification --
+/// as opposed to the binding checks above, which never decode `signature`/
+/// `certificate` (see the module doc's "What this module deliberately does
+/// not do"). This module defines no implementation of this trait for any
+/// real algorithm: no cryptography dependency is available here, and no
+/// signing key or keyless-signing (Sigstore) identity exists in this
+/// repository or is created by it (`AGENTS.md`: "Capabilities are
+/// explicit... [generated code and this repository's tooling gain] no
+/// ambient... signing... authority"). A caller that holds a real verifier --
+/// a `cosign`/Sigstore bundle check, or an Ed25519 implementation --
+/// supplies it explicitly through this trait; this module never reaches for
+/// one on its own, and never invokes one unless the caller passes one in.
+///
+/// This is the reusable surface #195 (signed package registry) and #209
+/// (signed audit capsule) can implement against without redefining what
+/// "verify a signature claim" means: both name a `subject_digest`/identity
+/// shape compatible with `ParsedSignatureClaim`, so a single
+/// implementation of this trait (once a real one exists) can serve all
+/// three call sites.
+pub trait SignatureVerificationCapability {
+    /// Return `Ok(())` only if `claim`'s `signature`/`certificate` are a
+    /// valid cryptographic signature over `subject_bytes` under the
+    /// identity and algorithm `claim` itself declares. `subject_bytes` is
+    /// always the exact bytes `claim.subject_digest` was computed over
+    /// (typically a provenance document) -- this trait is never asked to
+    /// verify a digest, only a signature over already-digest-bound bytes.
+    /// Implementations must be pure computation over their arguments and
+    /// whatever key/identity material they were constructed with: no
+    /// filesystem, network, or process access, and no ambient state.
+    fn verify_signature(
+        &self,
+        subject_bytes: &[u8],
+        claim: &ParsedSignatureClaim,
+    ) -> Result<(), Diagnostic>;
+}
+
+/// Like [`verify_release_binding`], but also invokes an explicitly supplied
+/// [`SignatureVerificationCapability`] after every binding check has
+/// already passed. The binding checks still run first and still fail
+/// closed on their own: a structurally mismatched, tampered, or replayed
+/// claim is rejected before the capability is ever invoked, so a real
+/// verifier only ever sees a claim that already names the right subject
+/// digest and the pinned trusted identity. [`verify_release_binding`]
+/// itself is unchanged and remains the entry point for binding-only
+/// verification when no cryptographic capability is available -- exactly
+/// today's situation for every real SEMAPRAX release (see
+/// `docs/RELEASE-SIGNING-POLICY-V1.md`).
+pub fn verify_release_binding_with_capability(
+    manifest_bytes: &[u8],
+    provenance_bytes: &[u8],
+    claim_bytes: &[u8],
+    capability: &dyn SignatureVerificationCapability,
+) -> Result<(), Diagnostic> {
+    verify_release_binding(manifest_bytes, provenance_bytes, claim_bytes)?;
+    let claim = parse_signature_claim(claim_bytes)?;
+    capability.verify_signature(provenance_bytes, &claim)
+}
+
 /// Re-hash every artifact a manifest names, from a caller-supplied
 /// directory's actual bytes, and fail closed on any digest/size mismatch or
 /// missing file. This is an independent replay of what

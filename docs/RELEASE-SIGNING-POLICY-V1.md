@@ -170,6 +170,21 @@ by `tests/offline_package/release_provenance.rs`) provides:
   provenance document's own recorded builder identity.
 - `verify_release_binding`: the two binding checks composed, for a single
   entry point over a manifest/provenance/claim triple.
+- `SignatureVerificationCapability` / `verify_release_binding_with_capability`:
+  an explicit extension point for a *cryptographic* verifier. This module
+  still implements no real algorithm and still creates no key or identity
+  material -- the trait exists so a caller that does hold a real verifier
+  (a `cosign`/Sigstore bundle check, once one is wired up per the checklist
+  below) can supply it explicitly, and so it composes with the binding
+  checks (which still run first and still fail closed on their own) rather
+  than duplicating them. This is the reusable surface #195 (signed package
+  registry) and #209 (signed audit capsule) can implement the trait against
+  without redefining what "verify a signature claim" means. Its only tests
+  today use a throwaway HMAC-SHA256 key generated inside the test module
+  (`src/release_provenance/tests.rs`) to prove the interface actually gates
+  on cryptographic verification and is not a no-op -- HMAC is a symmetric
+  stand-in for wiring only, never a claim about the real algorithm, which
+  stays Sigstore/cosign per this document.
 
 ### What verification does and does not prove
 

@@ -391,3 +391,186 @@ fn verification_touches_no_network_and_executes_no_artifact() {
     )
     .is_ok());
 }
+
+// -- `SignatureVerificationCapability` plumbing and a throwaway-key demo --
+//
+// No real signature-verification implementation exists anywhere in this
+// repository (see the module doc): there is no cryptography dependency and
+// no signing key or keyless identity. The tests below establish two
+// separate things without pretending either is production signing:
+//
+// 1. `verify_release_binding_with_capability` actually calls the supplied
+//    capability -- it is not a decoration that gets silently skipped -- and
+//    still fails closed on the binding checks before ever reaching it.
+// 2. A capability implementation can perform genuine cryptographic
+//    verification (HMAC-SHA256, already a pinned dependency via
+//    `semantic_cache_store`'s use of the same crate) against a key
+//    generated fresh inside this test function and used nowhere else. This
+//    is a throwaway test key demonstrating the interface, never a released
+//    artifact's signature and never a claim about HMAC being the release
+//    signing algorithm -- `docs/RELEASE-SIGNING-POLICY-V1.md` names
+//    Sigstore/cosign as the real target.
+
+struct AlwaysOkCapability;
+
+impl SignatureVerificationCapability for AlwaysOkCapability {
+    fn verify_signature(
+        &self,
+        _subject_bytes: &[u8],
+        _claim: &ParsedSignatureClaim,
+    ) -> Result<(), Diagnostic> {
+        Ok(())
+    }
+}
+
+struct AlwaysRejectCapability;
+
+impl SignatureVerificationCapability for AlwaysRejectCapability {
+    fn verify_signature(
+        &self,
+        _subject_bytes: &[u8],
+        _claim: &ParsedSignatureClaim,
+    ) -> Result<(), Diagnostic> {
+        Err(Diagnostic::io(
+            "SPX-Z705",
+            "test capability unconditionally rejects".to_owned(),
+        ))
+    }
+}
+
+#[test]
+fn capability_variant_still_runs_binding_checks_before_the_capability() {
+    let fixture = valid_fixture();
+    let tampered_provenance = fixture.provenance.replacen('9', "8", 1);
+    let error = verify_release_binding_with_capability(
+        fixture.manifest.as_bytes(),
+        tampered_provenance.as_bytes(),
+        fixture.claim.as_bytes(),
+        &AlwaysOkCapability,
+    )
+    .expect_err("a tampered provenance document must be rejected before any capability runs");
+    // A capability that always accepts must never be reached: the binding
+    // check's own diagnostic code, not the capability's, is what surfaces.
+    assert_ne!(error.code, "SPX-Z705");
+}
+
+#[test]
+fn capability_variant_actually_invokes_the_supplied_capability() {
+    let fixture = valid_fixture();
+    let error = verify_release_binding_with_capability(
+        fixture.manifest.as_bytes(),
+        fixture.provenance.as_bytes(),
+        fixture.claim.as_bytes(),
+        &AlwaysRejectCapability,
+    )
+    .expect_err("a rejecting capability must fail the overall verification");
+    assert_eq!(error.code, "SPX-Z705");
+
+    assert!(verify_release_binding_with_capability(
+        fixture.manifest.as_bytes(),
+        fixture.provenance.as_bytes(),
+        fixture.claim.as_bytes(),
+        &AlwaysOkCapability,
+    )
+    .is_ok());
+}
+
+/// A throwaway-key HMAC-SHA256 stand-in for a real signature verifier,
+/// existing only in this test module to demonstrate that
+/// `SignatureVerificationCapability` can be implemented with genuine
+/// cryptographic verification -- not merely structural string checks --
+/// once a real algorithm and key/identity material exist. HMAC is a
+/// symmetric MAC, not the asymmetric/keyless scheme
+/// `docs/RELEASE-SIGNING-POLICY-V1.md` specifies for real releases; this
+/// struct must never be read as a recommendation to use it for that.
+struct ThrowawayHmacCapability {
+    key: [u8; 32],
+}
+
+fn decode_hex_32(hex: &str) -> Option<[u8; 32]> {
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    let bytes = hex.as_bytes();
+    for (index, slot) in out.iter_mut().enumerate() {
+        let high = (bytes[index * 2] as char).to_digit(16)?;
+        let low = (bytes[index * 2 + 1] as char).to_digit(16)?;
+        *slot = ((high << 4) | low) as u8;
+    }
+    Some(out)
+}
+
+impl SignatureVerificationCapability for ThrowawayHmacCapability {
+    fn verify_signature(
+        &self,
+        subject_bytes: &[u8],
+        claim: &ParsedSignatureClaim,
+    ) -> Result<(), Diagnostic> {
+        use hmac::{Hmac, KeyInit, Mac};
+        let tag = decode_hex_32(&claim.signature).ok_or_else(|| {
+            Diagnostic::io(
+                "SPX-Z705",
+                "throwaway HMAC signature must be 64 lowercase hex characters".to_owned(),
+            )
+        })?;
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key)
+            .expect("HMAC-SHA256 accepts a 32-byte key of any value");
+        mac.update(subject_bytes);
+        mac.verify_slice(&tag).map_err(|_| {
+            Diagnostic::io(
+                "SPX-Z705",
+                "throwaway HMAC signature does not verify against the supplied key and subject \
+                 bytes"
+                    .to_owned(),
+            )
+        })
+    }
+}
+
+fn hmac_tag_hex(key: &[u8; 32], subject_bytes: &[u8]) -> String {
+    use hmac::{Hmac, KeyInit, Mac};
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("32-byte key is always accepted");
+    mac.update(subject_bytes);
+    format!(
+        "{:x}",
+        crate::digest_hex::LowerHex(mac.finalize().into_bytes())
+    )
+}
+
+#[test]
+fn throwaway_hmac_capability_verifies_a_correct_signature_and_rejects_tampering() {
+    let key: [u8; 32] = *b"throwaway-test-key-not-a-secret1";
+    let subject_bytes = b"exact provenance bytes under test";
+    let claim = ParsedSignatureClaim {
+        subject_digest: sha256_digest(subject_bytes),
+        algorithm: "test-only-hmac-sha256".to_owned(),
+        identity_issuer: TRUSTED_ISSUER.to_owned(),
+        identity_subject: "repo:wavect/semaprax:ref:refs/tags/v9.9.9".to_owned(),
+        identity_workflow_ref: format!(
+            "{TRUSTED_REPOSITORY}/{TRUSTED_WORKFLOW_PATH}@refs/tags/v9.9.9"
+        ),
+        signature: hmac_tag_hex(&key, subject_bytes),
+        certificate: "throwaway-test-only".to_owned(),
+    };
+    let capability = ThrowawayHmacCapability { key };
+
+    assert!(capability.verify_signature(subject_bytes, &claim).is_ok());
+
+    let wrong_key: [u8; 32] = *b"a-different-throwaway-key-value1";
+    let wrong_key_capability = ThrowawayHmacCapability { key: wrong_key };
+    assert!(wrong_key_capability
+        .verify_signature(subject_bytes, &claim)
+        .is_err());
+
+    let tampered_subject: &[u8] = b"exact provenance bytes under tesT";
+    assert!(capability
+        .verify_signature(tampered_subject, &claim)
+        .is_err());
+
+    let mut tampered_claim = claim.clone();
+    tampered_claim.signature = hmac_tag_hex(&key, b"a completely different payload");
+    assert!(capability
+        .verify_signature(subject_bytes, &tampered_claim)
+        .is_err());
+}

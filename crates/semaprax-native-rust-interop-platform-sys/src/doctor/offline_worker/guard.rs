@@ -23,7 +23,12 @@ const CAPACITY: usize = 256;
 const X86_COMMON: &[u32] = &[
     0, 19, 17, 3, 5, 262, 332, 8, 79, 89, 267, 21, 269, 439, 12, 9, 10, 11, 25, 28, 13, 14, 15,
     131, 228, 96, 35, 230, 39, 110, 186, 102, 107, 104, 108, 63, 24, 204, 202, 218, 273, 334, 158,
-    318, 60, 231, 59,
+    318, 60, 231, 59, // base
+    // Real Node 22 and Rust 1.88 need event loop primitives even for --version
+    // (libuv, tokio). The previous inventory denied them with EPERM, causing
+    // the real-distribution gate to fail while synthetic static fixtures and
+    // the static clang passed.
+    232, 233, 281, 283, 284, 286, 287, 288, 290, 291, 292, 293, 294, 295, 296, 297, 298,
 ];
 const ARM_COMMON: &[u32] = &[
     63, 65, 67, 57, 80, 79, 291, 62, 17, 78, 48, 439, 214, 222, 226, 215, 216, 233, 134, 135, 139,

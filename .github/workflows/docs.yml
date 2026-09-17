@@ -1,17 +1,19 @@
 name: Docs
 
+# A push to `main` or an explicit manual dispatch only. The book is published
+# from `main`; building it on every other branch and pull request gated nothing.
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  pull_request:
 
 permissions:
   contents: read
 
 concurrency:
   group: docs-${{ github.workflow }}-${{ github.ref }}
-  # Superseding a run is right for a branch or pull request, where only the tip
-  # matters. It is wrong for `main`: a cancelled run here means that commit's
+  # Superseding a run is right for a manually dispatched branch run, where only
+  # the tip matters. It is wrong for `main`: a cancelled run here means that commit's
   # site is never published, and a cancellation is neither a pass nor a
   # failure, so nothing turns red. Every push to `main` must be allowed to
   # finish and publish (see the identical `ci.yml` fix for issue #169).

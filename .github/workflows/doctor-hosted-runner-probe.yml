@@ -13,11 +13,11 @@
 # gate or its provisioning wrapper already states, observed rather than assumed.
 name: Doctor hosted-runner probe
 
+# Dispatch-only. The `agent/doctor-hosted-probe-20260906` push trigger is gone:
+# that investigation branch is superseded, and this repository now runs CI only
+# on `main` pushes and manual dispatch.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/doctor-hosted-probe-20260906
 
 permissions:
   contents: read

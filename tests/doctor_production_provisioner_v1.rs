@@ -362,15 +362,14 @@ fn production_provisioner_source_layout_tripwires_are_present() {
 /// inputs and walks the checked-in source tree for `#[ignore]`d lifecycle
 /// tests the gate's fixed selection has drifted from (see
 /// `docs/DOCTOR-PROVISIONED-LINUX-GATE-V1.md`'s "Test selection" section).
-/// Nothing before this test ran it anywhere except two workflows that are
-/// never selected on an ordinary push or pull request
-/// (`.github/workflows/doctor-provisioned-linux.yml` is `workflow_dispatch`
-/// only, and `.github/workflows/doctor-hosted-runner-probe.yml` triggers only
-/// on a since-superseded investigation branch): a genuine drift between the
-/// gate's selection and the tree could go unnoticed for as long as nobody
-/// happens to dispatch either workflow by hand. Running it here, in an
-/// ordinary workspace test target, makes every push and pull request prove it
-/// instead.
+/// Nothing before this test ran it anywhere except two workflows that an
+/// ordinary run never selects (both
+/// `.github/workflows/doctor-provisioned-linux.yml` and
+/// `.github/workflows/doctor-hosted-runner-probe.yml` are `workflow_dispatch`
+/// only): a genuine drift between the gate's selection and the tree could go
+/// unnoticed for as long as nobody happens to dispatch either workflow by
+/// hand. Running it here, in an ordinary workspace test target, makes every
+/// `main` push and every manually dispatched CI run prove it instead.
 #[test]
 fn provisioned_linux_gate_self_test_passes_and_stays_nonvacuous() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));

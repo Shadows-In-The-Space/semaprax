@@ -1,19 +1,28 @@
 name: CI
 
+# Triggers are deliberately narrow: a push to `main`, or an explicit manual
+# dispatch. CI does not run on other branches and does not run on
+# `pull_request`. This repository takes direct pushes to `main` from many
+# worktrees and agent sessions; running the full matrix on every intermediate
+# branch push spent runner capacity on refs nothing gates on. Branch protection
+# is not applied here (see docs/CI-REQUIRED-CHECKS-V1.md), so no required check
+# depended on the `pull_request` trigger. Use `workflow_dispatch` to check a
+# branch before merging it.
 on:
+  workflow_dispatch:
   push:
-  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  # Superseding a run is right for a branch or pull request, where only the tip
-  # matters. It is wrong for `main`: this repository takes direct pushes from
-  # many worktrees, and a fast cadence cancelled 98 of 100 consecutive `main`
-  # runs, leaving the required gates with no verdict of either colour for about
-  # twenty hours. Every push to `main` must be allowed to finish.
+  # Superseding a run is right for a manually dispatched branch run, where only
+  # the tip matters. It is wrong for `main`: this repository takes direct pushes
+  # from many worktrees, and a fast cadence cancelled 98 of 100 consecutive
+  # `main` runs, leaving the required gates with no verdict of either colour for
+  # about twenty hours. Every push to `main` must be allowed to finish.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:

@@ -155,12 +155,13 @@ pub(super) fn check_byte_data_declarations<'p>(
                         && !has_direct_bytes
                         && field.ty != Type::String
                         && !owned_byte_record_copy_field_is_admitted(&field.ty)
+                        && !types.is_admitted_copy_aggregate_variant_field(&field.ty)
                     {
                         diagnostics.push(error(
                             program,
                             "SPX-T268",
                             format!(
-                                "owned-string variant field `{}.{}` must be direct `string` or a direct Copy scalar",
+                                "owned-string variant field `{}.{}` must be direct `string`, a direct Copy scalar, or a drop-free Copy aggregate record",
                                 declaration.name, field.name
                             ),
                             field.span,
@@ -586,3 +587,6 @@ pub(super) fn check_record_layouts<'p>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -73,7 +73,31 @@
 //!   `Continue/Complete/Suspend/Fail` `Step` grammar
 //!   [`super::iterative::compile_agent_lifecycle_v2`] compiles, and admits
 //!   only a single-scalar-field State (see [`RichProposalStages`]'s
-//!   `state_field` documentation).
+//!   `state_field` documentation). Source-level Copy Aggregate Variant
+//!   Payload v1 (`SPX-T215`, issue #216) now admits a drop-free nested
+//!   record directly as a variant case field, so `Continue` carrying the
+//!   real State record is no longer refused by the *declaration* check —
+//!   but the interpreter's retained-call admission for a variant
+//!   result/argument (`is_admitted_owned_variant` in
+//!   `interpreter::variant_admission`, composed from
+//!   `is_admitted_owned_byte_variant` and `hir::is_admitted_owned_string_variant`
+//!   only) has not been widened to recognize that profile, so this binder
+//!   still cannot pass such a value through the real seam: confirmed
+//!   empirically (not merely inferred) by pointing `reduce` at a
+//!   `Transition` whose only non-scalar case field is a Copy-closed nested
+//!   State record — `bind_rich_proposal_stages` fails at
+//!   `prepare_retained_call` with `SPX-F102`, `"interpreter admission
+//!   failed (unsupported_result_type): ... outside the retained call
+//!   vocabulary"`. The same interpreter vocabulary gap (`harvest` in
+//!   `interpreter::retained_call` has no `ResolvedType::String` arm, and
+//!   `retained_leaf_is_admitted` used for Proposal-shaped parameters omits
+//!   `String` too) blocks a direct `string` case field from crossing this
+//!   seam either, on both the Decision/Transition result side and the
+//!   Proposal parameter side. Both gaps are outside this module's file
+//!   lease (`interpreter::retained_call` and
+//!   `interpreter::variant_admission` are outside `src/agent_lifecycle/**`)
+//!   and are the concrete remaining scope of issue #216 as it touches this
+//!   binder.
 //! - No wiring into [`super::iterative::CompiledIterativeLifecycle`]'s
 //!   existing multi-turn driver loop; [`run_rich_turn`] runs one turn,
 //!   standalone. Widening to the full Step grammar and multi-turn driving
@@ -186,12 +210,15 @@ fn require_param(
 /// persistent HIR facts: a display rename of the variant, either case, or
 /// either field changes nothing this function reads.
 ///
-/// Source-level "Copy Variants v1" (`SPX-T215`) admits only a direct Copy
-/// scalar (or `Bytes`) as a variant case field, never a nested nominal
-/// record — so neither case field here can itself be the State record; a
-/// State-shaped positive field is one Copy scalar leaf that
-/// [`RichTurnOutcome`]'s caller-visible reconstruction wraps back into a
-/// real State record (see `run_rich_turn`'s single-field State handling).
+/// Source-level Copy Variants v1 (`SPX-T215`) has, since Copy Aggregate
+/// Variant Payload v1 (issue #216), admitted a drop-free nested record as a
+/// variant case field — but neither case field here can yet actually *be*
+/// the State record in a live turn, because the interpreter's retained-call
+/// admission for the containing variant has not been widened to match (see
+/// the module's top-level "Known limitations", confirmed empirically with
+/// `SPX-F102`). So a State-shaped positive field stays one Copy scalar leaf
+/// that [`RichTurnOutcome`]'s caller-visible reconstruction wraps back into
+/// a real State record (see `run_rich_turn`'s single-field State handling).
 struct TwoCaseShape {
     variant: DeclarationId,
     positive_case: DeclarationId,
@@ -309,10 +336,14 @@ pub struct RichProposalStages {
     state_type: DeclarationId,
     /// State's sole scalar field. This binder admits only a single-field
     /// State record (see the module's "Known limitation"): `reduce`'s
-    /// `continue` case carries that one Copy scalar leaf directly (Copy
-    /// Variants v1 forbids a nested State record inside a case), and
+    /// `continue` case carries that one Copy scalar leaf directly, and
     /// [`run_rich_turn`] wraps it back into a real State record keyed by
-    /// this exact persistent field identity.
+    /// this exact persistent field identity. Source-level Copy Aggregate
+    /// Variant Payload v1 (`SPX-T215`, issue #216) would let `continue`
+    /// carry the real State record directly instead, but the interpreter's
+    /// retained-call admission for the containing variant does not yet
+    /// recognize that profile (`SPX-F102`, confirmed empirically) — see the
+    /// module's "Known limitations".
     state_field: DeclarationId,
     authorize: PreparedRetainedCall,
     decision: TwoCaseShape,
@@ -594,10 +625,13 @@ pub fn run_rich_turn(
         .find(|item| item.field == stages.transition.positive_field)
         .map(|item| item.value.clone())
         .ok_or_else(|| refused("reduce.transition.next_state"))?;
-    // Copy Variants v1 (`SPX-T215`) forbade `Continue` from carrying a
-    // nested State record directly, so it carries State's one scalar leaf
-    // instead; this is the reconstruction back into a real, correctly
-    // identified State record the module documentation describes.
+    // `Continue` carries State's one scalar leaf, not the real State record
+    // directly, because the interpreter's retained-call admission for the
+    // containing variant does not yet recognize a Copy Aggregate Variant
+    // Payload v1 nested-record case field (source-level `SPX-T215` admits
+    // the declaration; the module's "Known limitations" has the confirming
+    // `SPX-F102` evidence) — this is the reconstruction back into a real,
+    // correctly identified State record the module documentation describes.
     let next_state = RetainedValue::Record(RetainedRecord {
         record: stages.state_type.clone(),
         fields: vec![RetainedField {

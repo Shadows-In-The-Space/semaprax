@@ -37,8 +37,15 @@ pub(super) fn read(closed_row: &str) -> Measurements {
                 let (direction, index) = entry.split_once(':').expect("invalid release pair");
                 let direction = direction.parse::<u32>().expect("invalid release direction");
                 let index = index.parse::<u32>().expect("invalid release index");
-                assert!(direction <= 1 && index < 256, "release identity out of bounds");
-                assert_eq!(entry, format!("{direction}:{index}"), "noncanonical release pair");
+                assert!(
+                    direction <= 1 && index < 256,
+                    "release identity out of bounds"
+                );
+                assert_eq!(
+                    entry,
+                    format!("{direction}:{index}"),
+                    "noncanonical release pair"
+                );
                 (direction, index)
             })
             .collect()

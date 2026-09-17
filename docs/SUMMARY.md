@@ -308,6 +308,7 @@ Audience: all documentation readers.
 - [Public Generic Compatibility v1](PUBLIC-GENERIC-COMPATIBILITY-V1.md)
 - [Public Generic Metadata Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md)
 - [Public Generic Settlement Obligations v1](PUBLIC-GENERIC-SETTLEMENT-V1.md)
+- [Public Generic Settlement Corpus v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
 - [Public Generic Candidate Delta v1](PUBLIC-GENERIC-CANDIDATE-DELTA-V1.md)
 - [Owned npm invocation failure state v1](OWNED-NPM-INVOCATION-V1.md)
 - [Useful Text Consumer v1](USEFUL-TEXT-CONSUMER-V1.md)

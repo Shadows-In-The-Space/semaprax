@@ -56,7 +56,11 @@ const HEADER_PRELUDE: &str = include_str!("render/header.hpp.txt");
 fn input_struct(input: &RecordShape) -> String {
     let mut fields = String::new();
     for field in &input.fields {
-        let _ = writeln!(fields, "    std::vector<std::uint8_t> {};", field_name(field));
+        let _ = writeln!(
+            fields,
+            "    std::vector<std::uint8_t> {};",
+            field_name(field)
+        );
     }
     include_str!("render/input.hpp.txt").replace("@FIELDS@", &fields)
 }
@@ -92,10 +96,17 @@ fn provider_transform_definition(input: &RecordShape) -> String {
         let name = field_name(field);
         let _ = writeln!(preflight, "    if (input.{name}.size() > 65536u || input.{name}.size() > 16777216u - payload) return Error(ErrorKind::CapacityExceeded, 0);");
         let _ = writeln!(preflight, "    payload += input.{name}.size();");
-        let _ = writeln!(stage, "    prepared = prepared && detail::make_owned_bytes(input.{name}, c_input.{name});");
+        let _ = writeln!(
+            stage,
+            "    prepared = prepared && detail::make_owned_bytes(input.{name}, c_input.{name});"
+        );
     }
     for field in input.fields.iter().rev() {
-        let _ = writeln!(rollback, "        ::spx_pg_owned_bytes_free(&c_input.{});", field_name(field));
+        let _ = writeln!(
+            rollback,
+            "        ::spx_pg_owned_bytes_free(&c_input.{});",
+            field_name(field)
+        );
     }
     include_str!("render/transform.hpp.txt")
         .replace("@PREFLIGHT@", &preflight)

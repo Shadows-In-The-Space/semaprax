@@ -657,7 +657,10 @@ fn parse_native_line(line: &str, engine_id: &'static str) -> NativeCaseOutcome {
         .split(' ')
         .map(|field| field.split_once('=').unwrap().0)
         .collect();
-    assert_eq!(keys, expected, "native evidence field inventory/order mismatch");
+    assert_eq!(
+        keys, expected,
+        "native evidence field inventory/order mismatch"
+    );
     let mut case_id = None;
     let mut accepted = None;
     let mut status = None;
@@ -675,7 +678,10 @@ fn parse_native_line(line: &str, engine_id: &'static str) -> NativeCaseOutcome {
         match key {
             "case_id" => case_id = Some(value.to_owned()),
             "accepted" => {
-                assert!(value == "0" || value == "1", "noncanonical accepted boolean");
+                assert!(
+                    value == "0" || value == "1",
+                    "noncanonical accepted boolean"
+                );
                 accepted = Some(value == "1");
             }
             "status" => status = Some(value.parse::<i32>().unwrap()),
@@ -696,8 +702,8 @@ fn parse_native_line(line: &str, engine_id: &'static str) -> NativeCaseOutcome {
             }
             "result" => result = Some(value.to_owned()),
             "live_bytes" => assert_eq!(value, "0", "native byte leak"),
-            "peak_alloc" | "peak_bytes" | "peak_handles" | "endpoint_invoked"
-            | "release_order" | "secondary_cleanup" => {
+            "peak_alloc" | "peak_bytes" | "peak_handles" | "endpoint_invoked" | "release_order"
+            | "secondary_cleanup" => {
                 // Parsed into typed measurements by wire_evidence::read below.
             }
             other => panic!("unknown native probe field {other:?} in {line:?}"),

@@ -328,7 +328,8 @@ fn executable_shape_bounds_are_exact_and_do_not_emit_empty_or_oversized_records(
                 .collect(),
         );
         assert_eq!(
-            generate_rust_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).unwrap_err(),
+            generate_rust_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape)
+                .unwrap_err(),
             ShapeError::LeafCountOutOfBounds { count }
         );
     }
@@ -337,7 +338,9 @@ fn executable_shape_bounds_are_exact_and_do_not_emit_empty_or_oversized_records(
             .map(|index| OwnedByteField::new(format!("bound.field{index}")))
             .collect(),
     );
-    assert!(generate_rust_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).is_ok());
+    assert!(
+        generate_rust_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).is_ok()
+    );
 }
 
 #[test]

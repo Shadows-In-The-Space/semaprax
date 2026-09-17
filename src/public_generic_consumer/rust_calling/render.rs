@@ -202,8 +202,17 @@ pub(super) fn carrier_rs(input: &RecordShape, output: &RecordShape) -> String {
     out.push_str(CARRIER_HEADER);
     let _ = writeln!(out, "const FIELD_COUNT: usize = {count};");
     out.push('\n');
-    out.push_str(&CARRIER_BODY.replace("\r\n", "\n"));
-    out.push('\n');
+    let body = CARRIER_BODY.replace("\r\n", "\n");
+    // Keep clippy's `items_after_test_module` satisfied: the test module must
+    // remain the final item in the file. `CARRIER_BODY` itself ends with
+    // `mod bounded_codec_tests { ... }`; encoding helpers emitted after it
+    // would trigger the lint. Splitting here preserves the exact same
+    // bytes, only reordered to be lint-clean.
+    let (before_tests, tests) = body
+        .split_once("#[cfg(test)]")
+        .map(|(head, tail)| (head, format!("#[cfg(test)]{tail}")))
+        .unwrap_or((body.as_str(), String::new()));
+    out.push_str(before_tests);
     out.push_str(&input_leaves_fn(input));
     out.push('\n');
     out.push_str(&output_from_leaves_fn(output));
@@ -213,6 +222,14 @@ pub(super) fn carrier_rs(input: &RecordShape, output: &RecordShape) -> String {
             let _ = writeln!(out, "    drop(value.{});", field.field_name());
         }
         out.push_str("}\n");
+    }
+    if !tests.is_empty() {
+        out.push('\n');
+        out.push_str(&tests);
+        // Ensure file ends with a trailing newline, as all generated files do.
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
     }
     out.replace("\r\n", "\n")
 }

@@ -18,10 +18,8 @@ impl Drop for Workspace {
 #[test]
 #[ignore = "requires provisioned clang wasm32, wasm-ld and Node; Linux CI selects explicitly"]
 fn actual_native_renderer_executes_in_core_wasm() {
-    let directory = std::env::temp_dir().join(format!(
-        "spx-compiled-reference-{}",
-        std::process::id()
-    ));
+    let directory =
+        std::env::temp_dir().join(format!("spx-compiled-reference-{}", std::process::id()));
     fs::create_dir(&directory).expect("create private compiled-reference fixture");
     let workspace = Workspace(directory);
     let binding = NativeProviderBindingV1::new(

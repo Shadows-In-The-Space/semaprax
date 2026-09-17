@@ -362,8 +362,8 @@ fn generated_rust_calling_consumer_executes_against_the_real_native_provider() {
     assert_eq!(summary.failed, 0, "stdout:\n{stdout}");
     assert_eq!(summary.ignored, 0, "stdout:\n{stdout}");
     assert_eq!(
-        summary.passed, 7,
-        "expected exactly 7 selected tests in the generated crate; stdout:\n{stdout}"
+        summary.passed, 9,
+        "expected exactly 9 selected tests in the generated crate; stdout:\n{stdout}"
     );
 }
 
@@ -540,7 +540,7 @@ fn generated_rust_calling_consumer_builds_and_runs_on_the_declared_msrv_toolchai
     assert_eq!(summary.failed, 0, "stdout:\n{stdout}");
     assert_eq!(summary.ignored, 0, "stdout:\n{stdout}");
     assert_eq!(
-        summary.passed, 7,
-        "expected exactly 7 selected tests in the generated crate; stdout:\n{stdout}"
+        summary.passed, 9,
+        "expected exactly 9 selected tests in the generated crate; stdout:\n{stdout}"
     );
 }

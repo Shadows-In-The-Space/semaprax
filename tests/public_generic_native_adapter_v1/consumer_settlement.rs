@@ -66,18 +66,21 @@ fn generated_c_and_cpp_match_fixture_bytes_and_execute_the_settlement_matrix() {
     let binding = fixture_binding();
     for count in [1, 2, 3, 256] {
         let shape = shape(count);
-        let generated = generate_cxx_calling_consumer(&descriptor, &binding, &shape, &shape).unwrap();
+        let generated =
+            generate_cxx_calling_consumer(&descriptor, &binding, &shape, &shape).unwrap();
         write_files(&workspace.0.join(count.to_string()), generated.files());
     }
     // --generated compares every executed C/C++ asset byte-for-byte against
     // actual generator output before any compiler sees it. It fails on drift.
-    run(Command::new(env::var_os("PYTHON").unwrap_or_else(|| "python3".into()))
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .arg("scripts/public_generic_consumer_settlement.py")
-        .arg("--generated")
-        .arg(&workspace.0)
-        .arg("--output")
-        .arg(workspace.0.join("evidence")));
+    run(
+        Command::new(env::var_os("PYTHON").unwrap_or_else(|| "python3".into()))
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .arg("scripts/public_generic_consumer_settlement.py")
+            .arg("--generated")
+            .arg(&workspace.0)
+            .arg("--output")
+            .arg(workspace.0.join("evidence")),
+    );
 }
 
 #[test]
@@ -105,41 +108,49 @@ fn generated_rust_explicit_settlement_executes_against_the_physical_provider() {
         include_str!("consumer_settlement/rust_shim.c")
     );
     fs::write(workspace.0.join("provider.c"), source).unwrap();
-    run(Command::new(env::var_os("CLANG").unwrap_or_else(|| "clang".into()))
-        .current_dir(&workspace.0)
-        .args([
-            "-std=c11",
-            "-O2",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-c",
-            "provider.c",
-            "-o",
-            "provider.o",
-        ]));
-    run(Command::new(env::var_os("AR").unwrap_or_else(|| "ar".into()))
-        .current_dir(&workspace.0)
-        .args(["rcs", "libspx_pg_reference_provider.a", "provider.o"]));
+    run(
+        Command::new(env::var_os("CLANG").unwrap_or_else(|| "clang".into()))
+            .current_dir(&workspace.0)
+            .args([
+                "-std=c11",
+                "-O2",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-c",
+                "provider.c",
+                "-o",
+                "provider.o",
+            ]),
+    );
+    run(
+        Command::new(env::var_os("AR").unwrap_or_else(|| "ar".into()))
+            .current_dir(&workspace.0)
+            .args(["rcs", "libspx_pg_reference_provider.a", "provider.o"]),
+    );
     // The external generator has no dependencies and does not emit a lockfile.
     // Materialize that lock offline before enforcing --locked execution.
-    run(Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
-        .current_dir(&workspace.0)
-        .args(["generate-lockfile", "--offline"]));
-    run(Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
-        .current_dir(&workspace.0)
-        .env("SPX_PG_PROVIDER_LIB_DIR", &workspace.0)
-        .env("SPX_PG_PROVIDER_LIB_NAME", "spx_pg_reference_provider")
-        .env("CARGO_TARGET_DIR", workspace.0.join("target"))
-        .env_remove("RUSTC_WRAPPER")
-        .args([
-            "test",
-            "--locked",
-            "--offline",
-            "--lib",
-            "--test",
-            "settlement",
-            "--",
-            "--test-threads=1",
-        ]));
+    run(
+        Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .current_dir(&workspace.0)
+            .args(["generate-lockfile", "--offline"]),
+    );
+    run(
+        Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .current_dir(&workspace.0)
+            .env("SPX_PG_PROVIDER_LIB_DIR", &workspace.0)
+            .env("SPX_PG_PROVIDER_LIB_NAME", "spx_pg_reference_provider")
+            .env("CARGO_TARGET_DIR", workspace.0.join("target"))
+            .env_remove("RUSTC_WRAPPER")
+            .args([
+                "test",
+                "--locked",
+                "--offline",
+                "--lib",
+                "--test",
+                "settlement",
+                "--",
+                "--test-threads=1",
+            ]),
+    );
 }

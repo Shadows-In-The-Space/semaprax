@@ -65,7 +65,10 @@ fn actual_generated_typescript_matches_all_assets_and_executes_settlement() {
     let workspace = Workspace::new();
     let subjects = workspace.0.join("subjects");
     let generated = workspace.0.join("generated");
-    run(python().arg("--write-subjects").arg("--output").arg(&subjects));
+    run(python()
+        .arg("--write-subjects")
+        .arg("--output")
+        .arg(&subjects));
     let inventory: serde_json::Value =
         serde_json::from_slice(&fs::read(subjects.join("subjects.json")).unwrap()).unwrap();
     let rows = inventory.as_array().unwrap();
@@ -74,7 +77,9 @@ fn actual_generated_typescript_matches_all_assets_and_executes_settlement() {
     for row in rows {
         assert_eq!(row.as_object().unwrap().len(), 2);
         let label = row["label"].as_str().unwrap();
-        assert!(label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
+        assert!(label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-'));
         let count = usize::try_from(row["fields"].as_u64().unwrap()).unwrap();
         assert!([1, 2, 256].contains(&count));
         let module = fs::read(subjects.join(label).join("reference.wasm")).unwrap();

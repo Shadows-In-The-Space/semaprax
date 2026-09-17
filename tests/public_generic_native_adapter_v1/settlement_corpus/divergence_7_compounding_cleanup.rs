@@ -46,7 +46,6 @@
 //! Pinned here exactly, with a negative control proving the assertion is
 //! real and failable, rather than left as an unexamined gap.
 
-
 use super::{Case, EngineOutcome};
 
 /// Called from [`super::compare_case`] for every case. A no-op unless

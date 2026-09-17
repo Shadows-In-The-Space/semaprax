@@ -3,6 +3,8 @@
 Status: implemented fixture/native evidence subset of issue #162. This is not
 full PG-7 completion, a hosted-green declaration, or a publication decision.
 
+Audience: native and Core Wasm settlement reviewers, and public-generic-milestone maintainers.
+
 ## Scope and owning code
 
 `tests/fixtures/public-generic-settlement-v1/cases.json` is the shared,

@@ -271,7 +271,8 @@ fn executable_shape_bounds_are_exact_and_do_not_emit_empty_or_oversized_records(
                 .collect(),
         );
         assert_eq!(
-            generate_c_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).unwrap_err(),
+            generate_c_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape)
+                .unwrap_err(),
             ShapeError::LeafCountOutOfBounds { count }
         );
     }

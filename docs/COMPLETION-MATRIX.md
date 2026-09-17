@@ -323,6 +323,17 @@ a compiler-derived generic provider, complete four-language proof, browser
 matrix or hosted promotion. Required Rust-generator and full quality gates
 must be executed separately before advancing their evidence class.
 
+### Public-generic compiled-reference settlement increment
+
+Status remains **partial**. A [compiled C11 reference route](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#compiled-c11-reference-provider-inside-core-wasm-issue-162)
+now executes in-module allocation, handles, copying and failure settlement
+under Core Wasm and compares them with the same native corpus. Its raw host
+calls are not the generated TypeScript public ABI. Clang-compiling the reference
+fixture is not evidence that Semaprax compiled an admitted generic endpoint.
+Compiler-derived descriptors/subjects, nested records/all Copy scalars, full
+consumer/model participation, Rust bridge execution and hosted closure retain
+their separate requirements.
+
 ## Final validation product
 
 Completion requires one maintained offline-first product built from a shared

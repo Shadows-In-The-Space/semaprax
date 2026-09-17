@@ -756,3 +756,206 @@ caller-owned C/C++ object races, signals, asynchronous cancellation, and recover
 from an owner exiting with live resources remain unsupported. No existing
 logical-carrier/binding schema, diagnostic allocation, public projection or
 support/publication state changes.
+
+## Compiled C11 reference provider inside Core Wasm (issue #162)
+
+### Evidence class and owning implementation
+
+This continuation is **compiled-and-executed private reference evidence**, not
+an added public profile. `scripts/public_generic_compiled_wasm.py` reuses
+`native::template::render_reference_provider`'s exact C composition (through the
+existing `public_generic_settlement_threads` helper), the unchanged
+`native/provider_body.c`, trusted reference fixture constants, the existing
+C allocation observer, and the original shared/failure/lifecycle/result-phase
+probes. The production header and provider body are not edited. No descriptor
+or endpoint is invented separately for an engine.
+
+Clang/wasm-ld compile those same C bodies with a small freestanding test runtime
+into a real Core Wasm module. Its allocator, registry, ownership transitions,
+copy-in, endpoint reversal, private result staging, export and release all run
+inside that module. A direct Node host invokes a test-only multi-call transport;
+there is no JavaScript provider, handle table or allocator standing in for it.
+The exact module export inventory and **zero imports** are checked. WASI,
+network loading, finalizers, callbacks and automatic execution retries are not
+used. The test's Node process still reads explicitly supplied local fixtures.
+
+The reference descriptor and native-binding preimages remain fixture facts.
+They are **not** presented as a verified compiler-produced generic descriptor,
+a Wasm target binding, or source-program admission. The evidence binds the
+compiled artifact, source composition, original reference binding and exact
+case inventory under a new explicit reference scope. The existing generated
+TypeScript caller is not migrated to this private transport. The public Wasm
+profile, SPX-W115 refusal, native ABI, logical-carrier versions, Project schemas,
+and unsupported/unpublished decision remain unchanged. In particular this
+continuation does not close #229 or all of #162.
+
+### Bounds and test-only transport
+
+The runtime is `tests/public_generic_wasm_adapter_v1/compiled_provider/runtime.c`.
+It supplies only the C routines the unchanged provider/probes require. Its
+private heap is exactly 40 MiB, with 4,096 live metadata entries and 16-byte
+alignment. Metadata is separate from payload. Address-ordered live entries
+support bounded first-fit allocation, arbitrary-order release and gap reuse;
+allocation and free use bounded linear metadata walks. Free scrubs the payload
+and alignment padding before removing its live entry. Unknown, double or
+interior frees trap as broken private test invariants, not public refusals.
+No general allocator ABI is introduced.
+
+The independent runtime self-test exercises zero/SIZE_MAX/40 MiB+1 refusal,
+exactly 40 MiB followed by the first failed byte allocation, all 4,096 live
+entries and entry 4,097 refusal, alternating frees, nonoverlapping first-fit
+reuse, zeroed reused bytes, reverse cleanup and final zero resources. It runs
+before the shared in-module probe. The mutation gate also compiles these exact
+runtime bodies with renamed symbols under native ASan/UBSan, without overriding
+the sanitizer's or host libc's allocator.
+
+The module starts with 128 MiB of linear memory, has a 192 MiB maximum and a
+1 MiB stack. These include static registries, observer arrays, logs, allocator
+storage and scratch space; they are not per-value allocation peaks. A bounded
+4 MiB log holds the C assertion receipts. Exhaustion fails the test rather than
+truncating evidence. Released allocations and handles must be zero; allocated
+linear-memory pages and immortal identity slots are not claimed to disappear.
+
+`transport.c` exposes only these private operations:
+
+- `pg_open`, `pg_prepare`, `pg_call`, `pg_export`, `pg_input_release`,
+  `pg_result_release`, `pg_close` execute the existing provider lifecycle.
+- `pg_scratch_pointer` and `pg_scratch_capacity` identify the sole permitted
+  host write window; `memory` is the module's own exported linear memory.
+- `pg_inject`, `pg_phase_inject`, `pg_reset_observations`, `pg_observe`,
+  `pg_trace`, `pg_release_observation`, `pg_cleanup_observation` are bounded
+  **test-only** fault/observation hooks. Reset refuses any live provider or
+  allocation and never resets minted identities.
+- `pg_run` selects the unchanged C assertion probes; `pg_log_pointer`,
+  `pg_log_length`, `pg_heap_live`, `pg_heap_bytes` report bounded test receipts
+  and independent allocator counts.
+
+The four value-returning lifecycle calls pack unsigned status in the low
+32 bits of an i64 and handle/required length in the high 32 bits. JavaScript
+decodes the unsigned bit pattern, not signed numeric ordering. Release, close
+and option setters return i32 statuses. Public native statuses 0–13 retain their
+meanings. Private transport refusals are 256 (range), 257 (closed option), and
+258 (observation/selector reset would hide existing state). These are not new
+SPX diagnostics and are not published through any production export.
+
+Pointer/length lanes are checked before reads and writes. Total-input bounds
+precede range arithmetic; subtraction against the scratch base/capacity avoids
+addition overflow. Descriptor and binding inputs are at most 65,536 bytes each.
+A carrier is at most 16,777,216 + 2,056 bytes (256 framed leaves); the scratch
+window has one additional byte for the first-over-bound test. Empty null slices
+retain the underlying provider's specified refusal or query behavior.
+Handles are nonrecycled one-based indices into the existing private identity
+inventory. No submitted handle is dereferenced as an address; the provider's
+own kind, generation, lifecycle and pairing checks remain authoritative.
+Invalid and failed calls never manufacture an output handle.
+
+Exported memory is not a confidentiality boundary against a malicious embedder
+that writes arbitrary private addresses. The host contract permits writes only
+inside scratch; guards reject supplied ranges outside it. Tests do not claim
+that ordinary WebAssembly prevents a host with the memory export from directly
+corrupting private bytes. Instances are synchronous, unshared and do not admit
+cancellation or concurrent use. Cross-instance raw integer aliases do not form
+an authenticated capability system.
+
+### Corpus, equality, canonical evidence and replay
+
+New identifiers:
+
+```text
+semaprax.public-generic-compiled-reference-corpus.v1
+semaprax.public-generic-compiled-reference-evidence.v1
+compiled-c11-reference-in-core-wasm-not-compiler-generic-v1
+```
+
+The retained new manifest pins 34 hostile/raw-transport subjects independently
+of execution. Existing manifests still own the 22 shared cases, 61 extra native
+failure regressions, 72 physical result-phase cases and 11 default/12 stressed
+lifecycle cases. No original manifest or expected carrier is rewritten.
+`pg_run(0)` executes the original shared/failure assertions; result phases and
+each lifecycle selector run separately in fresh instances, exactly like fresh
+native processes for intentionally terminal identity exhaustion. Stress adds
+8,192 calls through one provider. The host also drives all 22 canonical shared
+carriers through the separate open/prepare/call/export/release operations.
+
+Hostility cases cover pointer overflow, private/out-of-memory ranges, exact
+and first-over bounds, truncation/trailing input, stale/wrong-kind/wrong-provider
+handles, consumed-input replay, provider recreation, close with live children,
+post-ingress mutation, independent copy-out, memory growth/view reacquisition,
+non-writing short/failed exports, explicit release failure, private result
+staging failure and sticky failure with secondary cleanup. Exact result bytes,
+endpoint invocation count, release order and final resource counts are asserted;
+a no-op export or no-crash-only implementation does not pass.
+
+Native C11 O0/O2 and optional required ASan/UBSan establish the same independently
+pinned baseline. The same source is compiled into Wasm at O0/O2, and each module
+is separately compiled twice with byte-identical artifact output required.
+Each Wasm build executes under both V8 Liftoff-only and TurboFan-only settings,
+without tier-up. All measured Wasm observations must agree exactly across all
+four configurations. Compared with native, **only `peak_bytes` is target-local**:
+32-bit pointer/size_t bookkeeping requires fewer bytes than 64-bit native.
+That peak remains present, bounded and hashed in every applicable row. Logical
+allocation/handle peaks, status, exact result, trace, release order, overwrite
+attempts and final zero resources are not excluded from comparison. In-process
+Rust model evidence is not silently relabelled as participating here.
+
+With `--stress --sanitizers`, 966 evidence rows are required: 318 native and
+648 Wasm rows. The 61 additional assertion regressions execute per engine but
+are not counted as independent persisted rows. The new allocator's 4,096-entry
+self-test likewise is not added to this row count.
+
+Evidence is sorted-key compact ASCII JSON with one LF, bounded to 8 MiB. Closed
+root fields are `schema`, `profile`, `source_digest`, `manifest_digest`,
+`descriptor_digest`, `reference_binding_digest`, `configuration`, `rows`, and
+`summary_digest`. Configuration fixes stress/sanitizer booleans, O0/O2 and the
+two V8 tiers. Each row has `case_id`, `engine_id`, `route`, `artifact_digest`,
+`observations`, `result_digest`, and `observation_digest`. Route-specific fields,
+integer domains (never bool-as-zero), complete case/engine order, traces, release
+arrays, zero-resource fields and all digests are checked. All hashes reuse the
+existing domain + NUL + u64le length + bytes SHA-256 framing. Evidence contains
+no payloads, pointers, opaque handles or timing; assertion logs may intentionally
+contain this repository's nonsecret fixture bytes.
+
+Replay parses bounded canonical evidence first, then recompiles trusted local
+sources, regenerates canonical carriers and executes every selected subject.
+It requires byte identity with fresh evidence, including artifact/source and
+binding digests. A self-consistent public digest remint does not authenticate
+changed observations. Submitted executables are never loaded. Exact artifact
+replay requires the same compiler and configuration, not cross-host binary
+identity. Changed case/engine IDs, missing/reordered/unknown fields, wrong
+provider/source/binding/result facts, changed traces/releases, leaks, truncated
+framing and first-over-bound artifacts fail. The negative controls are included
+in the gate and cannot report success after accepting any submitted mutation.
+
+### Required selectors and remaining work
+
+```sh
+python3 scripts/public_generic_compiled_wasm.py --sanitizers --stress --output target/pg-compiled-reference
+python3 scripts/public_generic_compiled_wasm.py --sanitizers --stress \
+  --replay target/pg-compiled-reference/compiled-reference-evidence.json
+python3 scripts/public_generic_compiled_wasm_mutations.py
+cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1 \
+  compiled_provider::actual_native_renderer_executes_in_core_wasm -- --ignored --exact
+```
+
+The dedicated Linux CI step explicitly provisions the Wasm linker and runs
+these commands. Missing tools, missing cases, compile failures, traps or failed
+assertions fail rather than skip. The Cargo bridge is explicitly selected after
+provisioning; its default ignore annotation prevents unrelated platform runs
+from silently depending on an unprovisioned cross-compiler. The bridge invokes
+the actual native Rust renderer and demands exact provider bytes before the
+external gate runs. A standalone Python gate is not a claim that this bridge,
+Rust formatting/integration/clippy, or the full repository quality gate passed.
+
+The separate mutation selector first passes an unchanged control, then compiles
+each changed provider and requires the named runtime assertion to fail. It
+covers no-op reversal, masked release, lost sticky primary, partial failed
+export, admitted private ranges, wrong bound precedence, leaked provider,
+falsely successful live reset and forged partial-result handles. A compiler
+error or unrelated Wasm trap is not counted as a detected semantic mutant.
+
+PG-7 remains partial. Compiler-derived generic descriptors and endpoints,
+nested records, every admitted Copy scalar, the admitted compiled Wasm provider
+ABI, generated Rust/TypeScript/C/C++ execution through that actual boundary,
+complete model/caller/engine parity and hosted release evidence retain their
+own requirements. No support/publication decision or gate status is advanced
+by this private reference route.

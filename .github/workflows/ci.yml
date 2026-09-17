@@ -459,6 +459,27 @@ jobs:
             --replay target/pg-typescript/typescript-settlement.json
           python3 scripts/public_generic_typescript_mutations.py
 
+      - name: Compiled C11-reference provider inside Core Wasm (not public generic admission)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A freestanding module with no WASI or allocator imports. The native
+          # reference renderer remains the owner; no public profile is widened.
+          sudo apt-get update
+          sudo apt-get install -y lld
+          command -v wasm-ld
+          wasm-ld --version
+          "${CLANG:-clang}" --version
+          python3 scripts/public_generic_compiled_wasm.py --sanitizers --stress --output target/pg-compiled-reference
+          python3 scripts/public_generic_compiled_wasm.py --sanitizers --stress \
+            --replay target/pg-compiled-reference/compiled-reference-evidence.json
+          python3 scripts/public_generic_compiled_wasm_mutations.py
+          # Not implied by executing locally assembled template bytes: invoke
+          # the real Rust renderer and require exact bytes before compiling.
+          cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1 \
+            compiled_provider::actual_native_renderer_executes_in_core_wasm -- --ignored --exact
+
   std-library-depth:
     name: STD-08 bundled library depth
     runs-on: ubuntu-latest

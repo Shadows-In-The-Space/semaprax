@@ -8,6 +8,15 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Execute the unchanged native reference provider inside freestanding Core Wasm
+  at O0/O2 under both V8 tiers, with in-module allocation, ownership registries,
+  multi-call copy-in/export/release and no host imports. Add a bounded private
+  transport, exact native/corpus comparison, allocator self-tests, hostile-range
+  and lifecycle tests, deterministic artifacts, canonical replay, and compiled
+  semantic mutation controls for #162. This is a C11-reference fixture, not a
+  Semaprax-generated generic endpoint, public Wasm ABI, PG-7 completion or hosted
+  promotion. Actual Rust-renderer equality remains a separately selected gate.
+
 - Enforce single-owner, non-reentrant native reference-provider admission with
   one atomic owner/entry word; retain ownership until the last provider closes,
   and isolate failure injection, traces and sticky diagnostics per caller thread.

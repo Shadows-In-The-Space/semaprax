@@ -334,7 +334,10 @@ descriptor and carrier" — one now exists, with local evidence for all three
 of PG-5, PG-6, and PG-7. What is left is: no code path anywhere compiles a
 real function body from an admitted public-generic export (every physical
 adapter still calls a fixture endpoint), no compiled Wasm artifact implements
-the provider ABI, and no hosted run has ever exercised any of it.
+the admitted public-generic provider ABI, and hosted closure remains unrecorded.
+The private compiled C11 reference route below now exercises an in-module
+multi-call fixture; it does not change either compiler admission or public ABI
+status.
 
 ### TypeScript host-owned settlement continuation
 
@@ -388,5 +391,20 @@ non-recycled thread identities. It exercises real C11 allocation/call/export/
 release under pthread test contention, with zero-resource assertions and fresh
 replay. This is enforcement of the synchronous non-concurrency policy, not
 admission of concurrency or cancellation. PG-7 remains partial: compiler-derived
-generic subjects, compiled Wasm-provider ownership, complete four-language
+generic subjects, the admitted compiled Wasm provider ABI, complete four-language
 participation and all-engine settlement equality are still separate requirements.
+
+### Compiled reference continuation
+
+The [compiled C11 reference continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#compiled-c11-reference-provider-inside-core-wasm-issue-162)
+now places the existing reference provider's allocator, handle registry,
+copy-in, endpoint, staging, export and release inside a real Core Wasm module.
+It executes the same shared C assertions and canonical carriers as native
+O0/O2, plus a separately checked raw multi-call transport. No host import
+performs ownership work. Exact results, logical traces, releases, statuses and
+logical resource counts agree; pointer-width-dependent byte peaks remain
+reported separately. This supersedes a blanket assertion that no compiled
+reference provider lifecycle is exercised. It does **not** supersede #229's
+compiler-derived public-generic ABI requirement, migrate the generated
+TypeScript caller, or constitute checked nested/Copy-scalar generic semantics.
+The PG-7 row and unsupported/unpublished decision are not advanced.

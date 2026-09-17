@@ -27,3 +27,8 @@ mod typescript_calling_consumer;
 /// module/handle hostility. Does not substitute for the compiled provider ABI.
 #[path = "public_generic_wasm_adapter_v1/typescript_settlement.rs"]
 mod typescript_settlement;
+
+/// #162: actual native C renderer, compiled into a private Core Wasm reference
+/// transport. No Semaprax generic export or generated TypeScript ABI claim.
+#[path = "public_generic_wasm_adapter_v1/compiled_provider.rs"]
+mod compiled_provider;

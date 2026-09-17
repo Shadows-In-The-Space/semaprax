@@ -563,6 +563,60 @@ result, preserving the existing valid-call consuming contract for generated
 clients. No public function signature, carrier byte schema, native binding
 schema or public support/publication decision changes.
 
+### Native single-owner admission and thread-local diagnostics
+
+The synchronous v1 native reference provider admits **one owner thread per
+loaded artifact**, across all of its live providers. A successful entry takes
+one atomic word containing the non-recycled thread identity and active-entry
+bit, before reading any registry, allocator account, caller buffer or output
+slot. Reentrant entry and entry from another thread return existing
+`SPX_PG_STATUS_ILLEGAL_TRANSITION` (7). A refused caller never clears a flag or
+unlocks the active owner. The successful entrant alone exits the gate on every
+return path, including malformed input, allocation failure and refused close.
+
+Ownership remains with that thread between calls while any provider is live.
+Closing one of several providers does not transfer authority. Closing the last
+provider releases the owner epoch; a subsequent thread can open a **new** provider.
+Acquire/release synchronization publishes the settled registry and allocator
+state across that handoff. This does not make a live provider transferable,
+make client objects thread-safe, or admit simultaneous endpoint execution.
+The provider creates no threads and uses no OS thread API, wait or timeout.
+Admission uses one attempt, not a hidden execution retry.
+
+On **admission refusal**, every caller output slot, buffer and release/close
+alias stays untouched. This rule precedes null/framing/pairing checks and is an
+explicit exception to the admitted-operation rules that initialize outputs or
+invalidate stale aliases. In particular, a rejected foreign release cannot
+null somebody else's still-live owning handle. The caller continues to own its
+buffers and must synchronize its own C/C++ client objects and storage. The
+provider guard does not validate arbitrary pointers or prevent unrelated caller
+memory races. Signal-handler access and owner-thread exit with live resources
+are not admitted; there is no automatic thread-death recovery or cancellation.
+
+Thread identities are monotonically minted integers, not reusable OS identifiers
+or TLS addresses. The exact lifetime bound is `2^62 - 1`. The first new thread
+above it receives existing capacity status 6, with no output/storage access;
+existing identified owners can still settle and close. The bound is tested by
+positioning the private test counter at its boundary, not by claiming to create
+that many physical threads. Administrative token-mint contention also refuses
+with 7. No minted identity is reset on provider close.
+
+Failure-injection slots, normalized trace, sticky selection and overwrite
+counters are now thread-local. Foreign test calls can only arm/clear that
+thread's own plan. Active callbacks cannot mutate the executing owner's plan:
+void test setters are no-ops, and forced settlement returns 7. Trace getters
+return only the caller thread's retained diagnostics. The two shared-resource
+getters acquire the same admission gate and return **`SIZE_MAX` on refusal**,
+not zero; unavailable observation is never proof of zero live resources.
+
+The implementation uses C11 atomics/TLS on the POSIX toolchains and an aligned
+interlocked/TLS implementation on MSVC, without requiring MSVC's experimental
+C11-atomics switch. The supplied executable gate covers POSIX pthread hosts;
+adding the MSVC branch is not a claim of Windows execution evidence. Public
+signatures, status numbers, carrier/binding schemas and unsupported/unpublished
+status remain unchanged. The exact tests and replay contract are in the
+[admission continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-single-owner-admission-continuation-issue-162).
+
 ### Allocation, release, and sticky failure
 
 Explicit input/result release is an independent native operation. After a valid

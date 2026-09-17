@@ -446,6 +446,11 @@ jobs:
           python3 scripts/public_generic_consumer_settlement.py --sanitizers --output target/pg-consumers-replay \
             --replay target/pg-consumers/consumer-settlement.json
           python3 scripts/public_generic_consumer_mutations.py
+          # Refusal of unsafe thread/reentrant use, not concurrent runtime support.
+          python3 scripts/public_generic_settlement_threads.py --sanitizers --output target/pg-thread-admission
+          python3 scripts/public_generic_settlement_threads.py --sanitizers \
+            --replay target/pg-thread-admission/native-thread-admission-evidence.json
+          python3 scripts/public_generic_settlement_thread_mutations.py
           # Host-owned TypeScript reference caller; NOT the missing compiled
           # Wasm provider ABI. The preceding Cargo test compares actual generated
           # assets before execution; this step adds fresh native semantic equality.

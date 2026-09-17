@@ -337,12 +337,11 @@ fn generated_rust_calling_consumer_executes_against_the_real_native_provider() {
         }
     }
 
-    // Single-threaded: the linked native provider is explicitly documented
-    // as "single translation unit, single-threaded: no concurrency claim is
-    // made anywhere in this file" (spx_pg_v1.h). Its allocator, handle
-    // registry, and failure-injection state are process-global, so running
-    // this crate's tests concurrently would corrupt shared native state
-    // rather than exercise it.
+    // Single-owner: the native allocator/registry are shared per artifact.
+    // Foreign-thread/reentrant use now refuses before accessing them, while
+    // failure injection and diagnostics are thread-local. Parallel tests could
+    // receive intentional admission refusals, not independent provider lanes;
+    // retain one test thread for this generated crate's semantic cases.
     let tests = run(
         cargo_command(&crate_root, &target_dir, &lib_dir).args([
             "test",

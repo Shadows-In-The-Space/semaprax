@@ -626,3 +626,133 @@ exercise recoverable bounded allocation/growth and explicit injected failures.
 No cancellation, parallel execution, finalizer dependency or hidden call retry
 is added. No frozen carrier/descriptor schema, native ABI or public generic
 admission rule changes.
+
+
+## Native single-owner admission continuation (issue #162)
+
+This continuation enforces the existing synchronous, single-owner native
+reference profile. It does **not** add concurrent endpoint execution,
+cancellation, live-provider transfer, a new provider ABI, or PG-7 completion.
+The native carrier specification owns admission and refusal precedence; this
+section owns executable evidence for that contract.
+
+### Corpus and measured outcomes
+
+The canonical retained manifest is
+`tests/fixtures/public-generic-settlement-v1/native-thread-admission-cases.json`,
+with schema `semaprax.public-generic-native-thread-admission-corpus.v1` and
+profile `native-reference-single-owner-no-cancellation`. It contains 26 cases
+in a closed, fixed order. Each case runs in a fresh process and pins its exact
+expected check count, refused API calls, endpoint invocations, contention
+winners/losers, peak physical allocations, terminal allocations/bytes, independent
+allocator live count, and released owner epoch. No expectation is regenerated
+from the engine under test.
+
+The cases cover foreign access with live input/result; foreign fault arming and
+clearing; callback re-entry during all seven provider operations; cleanup
+re-entry after an existing failure; owner pauses during allocation, copying,
+export and release; 1,024 full foreign-refusal sweeps; eight-thread first-open
+contention over one and 64 epochs; handoff after thread exit; overlapping owner
+lifetimes; retention until the last provider closes; failed-open rollback; and
+exact/first-over thread-identity bounds. Each refusal sweep checks all seven
+operations with valid caller storage, again with null/hostile framing arguments,
+and the forced-settlement operation. It separately verifies both resource
+getters return `SIZE_MAX`, rather than misreporting zero.
+
+The 128-call overlapping-owner case deliberately uses only a relaxed atomic
+scheduling flag between two live threads. It cannot use a test mutex or a
+per-call thread join to hide a missing provider publication barrier. Physical
+counter checks occur while a provider still pins ownership; the final zero
+checks occur after both threads have joined. A relaxed scheduling flag is not
+permission to read shared counters after handing ownership away. The only
+administrative open retry is explicit and bounded in this test, before input
+creation; the provider itself never spins or retries execution.
+
+The thread-identity capacity case positions the **private test-only** mint
+counter at `2^62 - 2`, admits the last identity, then proves a fresh thread is
+refused without wrapping. Previously identified owners still call, settle and
+close. This does not claim physical creation of `2^62` threads. Static identity
+slots and TLS bookkeeping are not live semantic allocations; the independent
+allocator observes every actual provider heap allocation/free.
+
+The existing identity-result-exhaustion case remains in the preceding native
+lifecycle gate. Its internal rollback must call the private release
+implementation inside the admitted operation, not reenter the public shell.
+This preserves its original status, release order and zero-resource assertion.
+
+### Evidence bytes and independent replay
+
+`scripts/public_generic_settlement_threads.py` reuses the settlement fixture,
+canonical JSON, domain-separated digest framing, bounded parser and native
+allocator observer. It renders the same production header/body and trusted
+fixture constants, not a second provider implementation. The optional
+`--generated-provider` requires exact bytes from the actual Rust renderer before
+execution. The Unix Cargo test
+`actual_native_renderer_enforces_single_owner_and_reentrant_refusal` exercises
+that route; running the Python gate alone does not establish the Rust generator
+bridge passed.
+
+Evidence schema:
+`semaprax.public-generic-native-thread-admission-evidence.v1`.
+The closed top-level fields are `schema`, `profile`, `manifest_digest`,
+`sources_digest`, `descriptor_digest`, `binding_digest`, `rows`, and
+`evidence_digest`. Rows add `case_id`, `engine_id`, and
+`provider_artifact_digest` to every measured field listed above. The provider
+artifact digest binds the compiled provider **and its instrumented test driver**;
+it is not a standalone production-library signature. Fixture descriptor/binding
+hashes are scoped to this test evidence and are not relabelled as compiler
+admission proof.
+
+All JSON is sorted-key compact UTF-8 with exactly one trailing LF. Artifacts are
+bounded to 256 KiB; all row counters are exact non-boolean integers in
+`0..=20000`. At most four complete 26-case engine blocks are admitted, with no
+missing, duplicate, reordered or unknown case/engine/field. Engines are native
+C11 O0, O2, ASan/UBSan and explicitly selected TSan. Compiler artifact hashes may
+differ; the measured semantic fields must meet the same pinned expectations.
+Evidence contains no payload bytes, handles, addresses, thread IDs, timings or
+schedule-dependent winner identities. The driver checks actual reversed bytes,
+endpoint counts and unchanged refused outputs before emitting its receipt.
+
+`--replay` first bounds and validates the submitted artifact, then recompiles
+trusted checkout sources, reruns every selected case and requires byte equality.
+It never executes submitted binaries or uses submitted outcomes as expected
+results. Sixty-one negative controls cover changed/reminted case, engine,
+source/provider/descriptor/binding identity and outcome fields; omitted,
+unknown, duplicate, reordered and truncated fields; noncanonical integers,
+booleans, lengths and line framing; and the first byte beyond the evidence
+bound. A successful public digest remint is not trusted provenance.
+
+### Selectors and nonclaims
+
+```sh
+python3 scripts/public_generic_settlement_threads.py --sanitizers --output target/pg-thread-admission
+python3 scripts/public_generic_settlement_threads.py --sanitizers \
+  --replay target/pg-thread-admission/native-thread-admission-evidence.json
+python3 scripts/public_generic_settlement_thread_mutations.py
+# Explicitly selected provisioned GCC/TSan route; unavailable runtimes fail.
+python3 scripts/public_generic_settlement_threads.py --cc gcc --thread-sanitizer
+python3 scripts/public_generic_settlement_thread_mutations.py --cc gcc --thread-sanitizer
+cargo test --locked --test public_generic_native_adapter_v1 -- actual_native_renderer_enforces_single_owner_and_reentrant_refusal
+```
+
+The mutation selector first compiles and passes the unchanged positive control,
+then compiles each deliberately broken provider and requires its intended
+runtime assertion. Eleven mutants cover shared fault/trace/status state, owner
+stealing/unlocking, leaked admission, false-zero counters, output mutation before
+admission, reentrant plan changes, premature handoff and thread-counter wrap.
+With `--thread-sanitizer`, a twelfth mutant removes the provider's acquire/release
+ordering: the overlapping-owner positive control must be TSan-clean, and the
+compiled mutant must produce an actual TSan data-race report. Compile errors,
+timeouts, unavailable instrumentation or unrelated assertion failures never
+count as successful mutation detection.
+
+The existing Linux native CI selector runs O0/O2 and ASan/UBSan, fresh replay,
+and the eleven behavioral mutants. TSan is separately selectable and is never
+silently substituted for a passing ordinary build. POSIX misuse tests use
+pthread synchronization; the provider itself does not depend on pthreads. The
+MSVC interlocked/TLS implementation remains subject to its normal Windows
+physical gate, not a local Windows claim. Arbitrary caller pointer validity,
+caller-owned C/C++ object races, signals, asynchronous cancellation, and recovery
+from an owner exiting with live resources remain unsupported. No existing
+logical-carrier/binding schema, diagnostic allocation, public projection or
+support/publication state changes.

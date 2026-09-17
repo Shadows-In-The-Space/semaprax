@@ -8,6 +8,15 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Enforce single-owner, non-reentrant native reference-provider admission with
+  one atomic owner/entry word; retain ownership until the last provider closes,
+  and isolate failure injection, traces and sticky diagnostics per caller thread.
+  Reject misuse without touching caller output/owning aliases or reporting false
+  zero-resource counters. Extend #162 with deterministic pthread misuse/handoff,
+  exact/+1 thread-identity admission, sanitizer, replay and mutation gates. This
+  enforces the existing synchronous restriction, not concurrent execution,
+  compiled generic-provider support, PG-7 completion or hosted promotion.
+
 - Harden the host-owned TypeScript/Wasm reference caller: authenticate immutable
   module-byte snapshots, reject unverifiable precompiled modules, isolate private
   descriptor/binding authority, enforce one in-flight owner and exact framed

@@ -12,8 +12,9 @@
  * generated with and enforcing the handle-lifecycle rules that
  * docs/PUBLIC-GENERIC-CARRIER-V1.md already fixes as LOGICAL fact — every
  * rule enforced below cites the exact table row it restates. Single
- * translation unit, single-threaded: no concurrency claim is made anywhere
- * in this file.
+ * translation unit, single owner thread: foreign-thread and reentrant entry
+ * are refused before accessing shared state. This is admission enforcement,
+ * not support for concurrent endpoint execution or cancellation.
  *
  * The bound endpoint is a fixture: it reverses each owned leaf's bytes.
  * Deriving a real checked-program endpoint from validated generic HIR still
@@ -32,6 +33,85 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+
+
+/* One owner epoch spans all live providers in this loaded artifact. Owner
+ * identity and the active-entry bit occupy ONE atomic word: a foreign/refused
+ * caller never clears a separate flag belonging to an active owner. Only a
+ * successful entrant may release the word, after all registry/allocator work.
+ * Acquire/release ordering also publishes quiescent state to the next owner.
+ * Production code does not spawn, block, wait for, or retry an endpoint.
+ *
+ * Thread identities are monotonic integers, not OS IDs or TLS addresses that
+ * may be recycled after thread exit. Exhaustion refuses new thread identities;
+ * already identified threads can still settle their live resources. The
+ * caller must settle and close before its owner thread exits. No recovery or
+ * implicit ownership transfer is promised for an abandoned provider.
+ *
+ * MSVC's C11 atomics require an experimental switch on some admitted compiler
+ * versions. Use its interlocked intrinsics without that switch; other C11
+ * hosts use standard atomics. All MSVC values fit signed 64-bit, and the words
+ * have the required 8-byte alignment. No OS thread API or pthread dependency
+ * is introduced into the provider itself. */
+#if defined(_MSC_VER)
+#include <intrin.h>
+#define SPX_PG_THREAD_LOCAL __declspec(thread)
+typedef __declspec(align(8)) struct { volatile __int64 value; } spx_pg_atomic_word;
+static uint64_t spx_pg_atomic_load(spx_pg_atomic_word *word) {
+    return (uint64_t)_InterlockedCompareExchange64(&word->value, 0, 0);
+}
+static int spx_pg_atomic_cas(spx_pg_atomic_word *word, uint64_t expected, uint64_t desired) {
+    return (uint64_t)_InterlockedCompareExchange64(&word->value,
+        (__int64)desired, (__int64)expected) == expected;
+}
+static void spx_pg_atomic_store(spx_pg_atomic_word *word, uint64_t value) {
+    (void)_InterlockedExchange64(&word->value, (__int64)value);
+}
+#else
+#include <stdatomic.h>
+#define SPX_PG_THREAD_LOCAL _Thread_local
+typedef struct { _Atomic uint64_t value; } spx_pg_atomic_word;
+static uint64_t spx_pg_atomic_load(spx_pg_atomic_word *word) {
+    return atomic_load_explicit(&word->value, memory_order_acquire);
+}
+static int spx_pg_atomic_cas(spx_pg_atomic_word *word, uint64_t expected, uint64_t desired) {
+    return atomic_compare_exchange_strong_explicit(&word->value, &expected, desired,
+        memory_order_acq_rel, memory_order_acquire);
+}
+static void spx_pg_atomic_store(spx_pg_atomic_word *word, uint64_t value) {
+    atomic_store_explicit(&word->value, value, memory_order_release);
+}
+#endif
+#define SPX_PG_THREAD_ID_LIMIT ((UINT64_C(1) << 62) - 1)
+static spx_pg_atomic_word g_spx_pg_thread_ids = {0};
+static spx_pg_atomic_word g_spx_pg_entry_state = {0};
+static SPX_PG_THREAD_LOCAL uint64_t g_spx_pg_thread_id;
+static SPX_PG_THREAD_LOCAL int g_spx_pg_entry_active;
+
+static spx_pg_status_v1 spx_pg_enter(void) {
+    if (g_spx_pg_entry_active) return SPX_PG_STATUS_ILLEGAL_TRANSITION;
+    if (g_spx_pg_thread_id == 0) {
+        uint64_t previous = spx_pg_atomic_load(&g_spx_pg_thread_ids);
+        if (previous == SPX_PG_THREAD_ID_LIMIT) return SPX_PG_STATUS_CARRIER_CAPACITY;
+        /* One attempt, not a spin/wait loop. Administrative contention is a
+         * refusal, never permission to enter or retry transferred work. */
+        if (!spx_pg_atomic_cas(&g_spx_pg_thread_ids, previous, previous + 1))
+            return SPX_PG_STATUS_ILLEGAL_TRANSITION;
+        g_spx_pg_thread_id = previous + 1;
+    }
+    uint64_t owner = g_spx_pg_thread_id << 1;
+    uint64_t observed = spx_pg_atomic_load(&g_spx_pg_entry_state);
+    if (observed != 0 && observed != owner) return SPX_PG_STATUS_ILLEGAL_TRANSITION;
+    if (!spx_pg_atomic_cas(&g_spx_pg_entry_state, observed, owner | UINT64_C(1)))
+        return SPX_PG_STATUS_ILLEGAL_TRANSITION;
+    g_spx_pg_entry_active = 1;
+    return SPX_PG_STATUS_OK;
+}
+/* Defined after the provider registry; called only by a successful entrant. */
+static void spx_pg_leave(void);
+/* Internal rollback runs inside an already-admitted call; it must not reenter
+ * the public shell. Keep the same release/settlement implementation. */
+static spx_pg_status_v1 spx_pg_value_release_v1_impl(spx_pg_value_v1 **value);
 
 /* Optional, translation-unit-local observers used by the settlement probe.
  * Ordinary providers define none of these and retain the same public ABI. */
@@ -169,6 +249,19 @@ typedef struct {
 } spx_pg_provider_entry;
 static spx_pg_provider_entry g_spx_pg_providers[SPX_PG_REGISTRY_CAPACITY];
 
+static void spx_pg_leave(void) {
+    uint64_t next = 0;
+    for (size_t slot = 0; slot < SPX_PG_REGISTRY_CAPACITY; ++slot) {
+        if (g_spx_pg_providers[slot].identity != NULL) {
+            next = g_spx_pg_thread_id << 1;
+            break;
+        }
+    }
+    g_spx_pg_entry_active = 0;
+    spx_pg_atomic_store(&g_spx_pg_entry_state, next);
+}
+
+
 static size_t spx_pg_provider_find(const spx_pg_provider_v1 *identity) {
     if (identity != NULL) {
         for (size_t slot = 0; slot < SPX_PG_REGISTRY_CAPACITY; ++slot) {
@@ -226,8 +319,8 @@ static void spx_pg_dealloc(void *pointer, size_t size) {
  * vocabulary. Carries only the SPX_PG_TRACE_* label — no payload byte, no
  * pointer, no timestamp — matching carrier::trace::TraceEvent's own shape. */
 #define SPX_PG_TRACE_CAPACITY 4096
-static uint32_t g_spx_pg_trace[SPX_PG_TRACE_CAPACITY];
-static size_t g_spx_pg_trace_len = 0;
+static SPX_PG_THREAD_LOCAL uint32_t g_spx_pg_trace[SPX_PG_TRACE_CAPACITY];
+static SPX_PG_THREAD_LOCAL size_t g_spx_pg_trace_len = 0;
 
 static void spx_pg_trace_record(uint32_t label) {
     if (g_spx_pg_trace_len < SPX_PG_TRACE_CAPACITY) {
@@ -245,7 +338,7 @@ static void spx_pg_trace_record(uint32_t label) {
  * sticky rule (`spx_pg_settle`) has something genuine to discard. Two slots
  * are as many as any corpus case arms at once; a third simultaneous
  * injection is not a case this repository's corpus needs. */
-static uint32_t g_spx_pg_injected_ordinals[2] = {SPX_PG_TEST_NO_INJECTION, SPX_PG_TEST_NO_INJECTION};
+static SPX_PG_THREAD_LOCAL uint32_t g_spx_pg_injected_ordinals[2] = {SPX_PG_TEST_NO_INJECTION, SPX_PG_TEST_NO_INJECTION};
 
 static int spx_pg_should_inject(uint32_t label) {
     if (SPX_PG_OCCURRENCE_INJECTION(label)) {
@@ -274,6 +367,9 @@ static int spx_pg_should_inject(uint32_t label) {
  * overwrite-with-the-same-value was, rather than silently occupying the
  * second slot with a duplicate of the first. */
 void spx_pg_test_inject_failure_v1(uint32_t ordinal) {
+    /* Test plans are caller-thread-local. An observer cannot reenter to alter
+     * the active invocation's plan; a foreign thread may only alter its own. */
+    if (g_spx_pg_entry_active) return;
     for (size_t index = 0; index < 2; ++index) {
         if (g_spx_pg_injected_ordinals[index] == ordinal) {
             return;
@@ -288,11 +384,12 @@ void spx_pg_test_inject_failure_v1(uint32_t ordinal) {
 }
 
 void spx_pg_test_clear_failure_injection_v1(void) {
+    if (g_spx_pg_entry_active) return;
     g_spx_pg_injected_ordinals[0] = SPX_PG_TEST_NO_INJECTION;
     g_spx_pg_injected_ordinals[1] = SPX_PG_TEST_NO_INJECTION;
 }
 
-size_t spx_pg_test_live_allocations_v1(void) {
+static size_t spx_pg_test_live_allocations_v1_impl(void) {
     return g_spx_pg_live_allocations;
 }
 
@@ -310,7 +407,7 @@ static size_t spx_pg_count_live_handles(const spx_pg_provider_v1 *provider) {
     return live;
 }
 
-size_t spx_pg_test_live_handles_v1(spx_pg_provider_v1 *provider) {
+static size_t spx_pg_test_live_handles_v1_impl(spx_pg_provider_v1 *provider) {
     return spx_pg_count_live_handles(provider);
 }
 
@@ -329,9 +426,9 @@ uint32_t spx_pg_test_trace_label_v1(size_t index) {
  * attempt is counted here and discarded, exactly matching SPX-PG806's rule
  * as CallLedger::settle enforces it, restated in the physical layer instead
  * of reimplemented independently. */
-static size_t g_spx_pg_settlement_overwrites = 0;
-static int g_spx_pg_settlement_selected = 0;
-static spx_pg_status_v1 g_spx_pg_settlement_status = SPX_PG_STATUS_OK;
+static SPX_PG_THREAD_LOCAL size_t g_spx_pg_settlement_overwrites = 0;
+static SPX_PG_THREAD_LOCAL int g_spx_pg_settlement_selected = 0;
+static SPX_PG_THREAD_LOCAL spx_pg_status_v1 g_spx_pg_settlement_status = SPX_PG_STATUS_OK;
 
 static void spx_pg_reset_call_state(void) {
     g_spx_pg_settlement_selected = 0;
@@ -366,7 +463,7 @@ size_t spx_pg_test_settlement_overwrite_attempts_v1(void) {
     return g_spx_pg_settlement_overwrites;
 }
 
-spx_pg_status_v1 spx_pg_test_force_settlement_conflict_v1(spx_pg_status_v1 status) {
+static spx_pg_status_v1 spx_pg_test_force_settlement_conflict_v1_impl(spx_pg_status_v1 status) {
     return spx_pg_settle(status);
 }
 
@@ -654,7 +751,7 @@ static int spx_pg_bytes_equal(const uint8_t *left, size_t left_len, const uint8_
     return left_len == right_len && (left_len == 0 || memcmp(left, right, left_len) == 0);
 }
 
-spx_pg_status_v1 spx_pg_provider_open_v1(const uint8_t *descriptor_bytes, size_t descriptor_len,
+static spx_pg_status_v1 spx_pg_provider_open_v1_impl(const uint8_t *descriptor_bytes, size_t descriptor_len,
                                           const uint8_t *provider_binding_bytes,
                                           size_t provider_binding_len,
                                           spx_pg_provider_v1 **out_provider) {
@@ -693,7 +790,7 @@ spx_pg_status_v1 spx_pg_provider_open_v1(const uint8_t *descriptor_bytes, size_t
     return SPX_PG_STATUS_OK;
 }
 
-spx_pg_status_v1 spx_pg_provider_close_v1(spx_pg_provider_v1 **provider) {
+static spx_pg_status_v1 spx_pg_provider_close_v1_impl(spx_pg_provider_v1 **provider) {
     if (provider == NULL) {
         return SPX_PG_STATUS_NULL_OR_WRONG_KIND;
     }
@@ -717,7 +814,7 @@ spx_pg_status_v1 spx_pg_provider_close_v1(spx_pg_provider_v1 **provider) {
 
 /* --- Input preparation. --- */
 
-spx_pg_status_v1 spx_pg_input_prepare_v1(spx_pg_provider_v1 *provider, const uint8_t *carrier_bytes,
+static spx_pg_status_v1 spx_pg_input_prepare_v1_impl(spx_pg_provider_v1 *provider, const uint8_t *carrier_bytes,
                                           size_t carrier_len, spx_pg_value_v1 **out_input) {
     if (out_input == NULL) {
         return SPX_PG_STATUS_NULL_OR_WRONG_KIND;
@@ -832,7 +929,7 @@ spx_pg_status_v1 spx_pg_input_prepare_v1(spx_pg_provider_v1 *provider, const uin
  * result. `input` is invalidated (removed from the registry) exactly once
  * here, success or failure. --- */
 
-spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *input_handle,
+static spx_pg_status_v1 spx_pg_call_v1_impl(spx_pg_provider_v1 *provider, spx_pg_value_v1 *input_handle,
                                  spx_pg_result_v1 **out_result) {
     if (out_result == NULL) {
         return SPX_PG_STATUS_NULL_OR_WRONG_KIND;
@@ -859,7 +956,7 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
      * valid call failure; generated clients need not guess transfer state. */
     if (g_spx_pg_identities_used == SPX_PG_IDENTITY_CAPACITY) {
         spx_pg_select_primary_failure(SPX_PG_STATUS_CARRIER_CAPACITY);
-        (void)spx_pg_value_release_v1(&input_handle);
+        (void)spx_pg_value_release_v1_impl(&input_handle);
         return spx_pg_settle(SPX_PG_STATUS_CARRIER_CAPACITY);
     }
 
@@ -1132,7 +1229,7 @@ spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *i
 
 /* --- Result export/release. --- */
 
-spx_pg_status_v1 spx_pg_result_export_v1(spx_pg_result_v1 *result_handle, uint8_t *out_bytes,
+static spx_pg_status_v1 spx_pg_result_export_v1_impl(spx_pg_result_v1 *result_handle, uint8_t *out_bytes,
                                           size_t out_capacity, size_t *out_required) {
     if (out_required == NULL) {
         return SPX_PG_STATUS_NULL_OR_WRONG_KIND;
@@ -1176,7 +1273,7 @@ spx_pg_status_v1 spx_pg_result_export_v1(spx_pg_result_v1 *result_handle, uint8_
     return SPX_PG_STATUS_OK;
 }
 
-spx_pg_status_v1 spx_pg_value_release_v1(spx_pg_value_v1 **value) {
+static spx_pg_status_v1 spx_pg_value_release_v1_impl(spx_pg_value_v1 **value) {
     if (value == NULL) {
         return SPX_PG_STATUS_NULL_OR_WRONG_KIND;
     }
@@ -1211,7 +1308,7 @@ spx_pg_status_v1 spx_pg_value_release_v1(spx_pg_value_v1 **value) {
     return release_status;
 }
 
-spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result) {
+static spx_pg_status_v1 spx_pg_result_release_v1_impl(spx_pg_result_v1 **result) {
     if (result == NULL) {
         return SPX_PG_STATUS_NULL_OR_WRONG_KIND;
     }
@@ -1250,4 +1347,95 @@ spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result) {
     g_spx_pg_settlement_selected = previous_selected;
     g_spx_pg_settlement_status = previous_status;
     return release_status;
+}
+
+/* Public entry shells. Admission precedes ANY caller-pointer dereference or
+ * shared-state access. On admission refusal all out-parameters are untouched,
+ * including release/close aliases. Ordinary admitted-operation failure values
+ * are unchanged. Counter refusal returns SIZE_MAX, never a false zero-resource
+ * witness. TLS trace/diagnostic reads require no registry access. */
+spx_pg_status_v1 spx_pg_provider_open_v1(const uint8_t *descriptor_bytes, size_t descriptor_len,
+                                          const uint8_t *provider_binding_bytes,
+                                          size_t provider_binding_len,
+                                          spx_pg_provider_v1 **out_provider) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return admission;
+    spx_pg_status_v1 outcome = spx_pg_provider_open_v1_impl(descriptor_bytes, descriptor_len, provider_binding_bytes, provider_binding_len, out_provider);
+    spx_pg_leave();
+    return outcome;
+}
+
+spx_pg_status_v1 spx_pg_provider_close_v1(spx_pg_provider_v1 **provider) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return admission;
+    spx_pg_status_v1 outcome = spx_pg_provider_close_v1_impl(provider);
+    spx_pg_leave();
+    return outcome;
+}
+
+spx_pg_status_v1 spx_pg_input_prepare_v1(spx_pg_provider_v1 *provider, const uint8_t *carrier_bytes,
+                                          size_t carrier_len, spx_pg_value_v1 **out_input) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return admission;
+    spx_pg_status_v1 outcome = spx_pg_input_prepare_v1_impl(provider, carrier_bytes, carrier_len, out_input);
+    spx_pg_leave();
+    return outcome;
+}
+
+spx_pg_status_v1 spx_pg_call_v1(spx_pg_provider_v1 *provider, spx_pg_value_v1 *input_handle,
+                                 spx_pg_result_v1 **out_result) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return admission;
+    spx_pg_status_v1 outcome = spx_pg_call_v1_impl(provider, input_handle, out_result);
+    spx_pg_leave();
+    return outcome;
+}
+
+spx_pg_status_v1 spx_pg_result_export_v1(spx_pg_result_v1 *result_handle, uint8_t *out_bytes,
+                                          size_t out_capacity, size_t *out_required) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return admission;
+    spx_pg_status_v1 outcome = spx_pg_result_export_v1_impl(result_handle, out_bytes, out_capacity, out_required);
+    spx_pg_leave();
+    return outcome;
+}
+
+spx_pg_status_v1 spx_pg_value_release_v1(spx_pg_value_v1 **value) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return admission;
+    spx_pg_status_v1 outcome = spx_pg_value_release_v1_impl(value);
+    spx_pg_leave();
+    return outcome;
+}
+
+spx_pg_status_v1 spx_pg_result_release_v1(spx_pg_result_v1 **result) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return admission;
+    spx_pg_status_v1 outcome = spx_pg_result_release_v1_impl(result);
+    spx_pg_leave();
+    return outcome;
+}
+
+spx_pg_status_v1 spx_pg_test_force_settlement_conflict_v1(spx_pg_status_v1 status) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return admission;
+    spx_pg_status_v1 outcome = spx_pg_test_force_settlement_conflict_v1_impl(status);
+    spx_pg_leave();
+    return outcome;
+}
+
+size_t spx_pg_test_live_allocations_v1(void) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return SIZE_MAX;
+    size_t outcome = spx_pg_test_live_allocations_v1_impl();
+    spx_pg_leave();
+    return outcome;
+}
+
+size_t spx_pg_test_live_handles_v1(spx_pg_provider_v1 *provider) {
+    spx_pg_status_v1 admission = spx_pg_enter();
+    if (admission != SPX_PG_STATUS_OK) return SIZE_MAX;
+    size_t outcome = spx_pg_test_live_handles_v1_impl(provider);
+    spx_pg_leave();
+    return outcome;
 }

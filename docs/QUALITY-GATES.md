@@ -27,6 +27,13 @@ A change is ready only when:
 A local green test can support a local claim. It cannot be promoted to hosted,
 public, cross-platform, or production evidence without the corresponding gate.
 
+Native public-generic single-owner/admission changes additionally run the
+[admission continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-single-owner-admission-continuation-issue-162):
+actual-renderer comparison, O0/O2 execution, ASan/UBSan, fresh evidence replay and
+compiled negative controls. The optional ThreadSanitizer selector requires a
+working provisioned runtime and must fail rather than silently skip on startup
+failure. Thread misuse/refusal evidence does not claim concurrent execution.
+
 Dependency changes additionally run the complete
 `tests/project.rs::package_manifest_v1` module and the Native Rust builder's
 library and `project_sdk_cli` tests. Effectful Rust-crate coverage requires the

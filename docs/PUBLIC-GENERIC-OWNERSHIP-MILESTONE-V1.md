@@ -378,3 +378,15 @@ authority. It does not promote, deprecate, or reinterpret any existing profile,
 and it is not evidence that any gate has passed. The
 [completion matrix](COMPLETION-MATRIX.md) owns product status; the
 [quality gates](QUALITY-GATES.md) own required verification.
+
+### Native admission continuation
+
+The [single-owner continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-single-owner-admission-continuation-issue-162)
+adds an executable refusal boundary for foreign-thread and reentrant misuse,
+thread-local fault/diagnostic isolation, last-provider owner handoff and bounded
+non-recycled thread identities. It exercises real C11 allocation/call/export/
+release under pthread test contention, with zero-resource assertions and fresh
+replay. This is enforcement of the synchronous non-concurrency policy, not
+admission of concurrency or cancellation. PG-7 remains partial: compiler-derived
+generic subjects, compiled Wasm-provider ownership, complete four-language
+participation and all-engine settlement equality are still separate requirements.

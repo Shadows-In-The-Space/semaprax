@@ -76,6 +76,24 @@ typedef struct spx_pg_result_v1 spx_pg_result_v1;
  * independent of the handle's own lifecycle state. */
 #define SPX_PG_STATUS_NULL_OR_WRONG_KIND 13
 
+/* Native v1 is synchronous, single-owner and non-reentrant. The first admitted
+ * operation claims the loaded artifact for its current thread while ANY provider
+ * remains live. After the last provider closes, a different thread may open a
+ * new provider. Foreign-thread/reentrant entry returns ILLEGAL_TRANSITION before
+ * reading caller storage or shared state: ALL out-parameters/buffers/owning
+ * aliases are UNCHANGED on this admission refusal (an exception to the ordinary
+ * admitted-operation output rules below). Do not release/retry a transferred
+ * call to recover from a refusal. Cancellation, concurrent endpoint execution,
+ * thread exit with live providers, and signal-handler use are not admitted.
+ * Caller-owned buffers/client objects still require caller synchronization.
+ *
+ * Thread identities are non-recycled, bounded to (2^62 - 1) per loaded artifact.
+ * A thread without a prior identity gets CARRIER_CAPACITY at that bound, with
+ * the same unchanged-output rule. Already identified owner threads can still
+ * release and close. Neither admission contention nor exhaustion waits, repairs
+ * ownership or silently retries execution. No public function signature changes.
+ */
+
 /* Provider open binds one exact provider artifact to one verified descriptor
  * and provider-binding record; see NativeProviderBindingV1 in
  * ../binding.rs. `descriptor_bytes`/`provider_binding_bytes` must
@@ -155,8 +173,13 @@ spx_pg_status_v1 spx_pg_provider_close_v1(spx_pg_provider_v1 **provider);
 /* --- Test-only surface: not part of the production ABI, never emitted for
  * a support/publication claim. Deterministic failure injection mapped to
  * the logical trace ordinals below, plus live allocation/handle counters
- * for exact-settlement assertions. Single-threaded only: no concurrency
- * claim is made anywhere in this adapter. */
+ * for exact-settlement assertions. Fault plans, trace and sticky diagnostics
+ * are caller-thread-local; another thread cannot clear/arm the owner's plan.
+ * Mutating test calls from an active callback are refused (void setters do
+ * nothing; force-settlement returns ILLEGAL_TRANSITION). Trace getters read only
+ * the caller thread's own retained diagnostics. Shared resource counters need
+ * admission and return SIZE_MAX when unavailable, NEVER a false zero-resource
+ * observation. These hooks do not grant concurrent execution authority. */
 
 /* The closed, normalized trace vocabulary, in the exact order
  * docs/PUBLIC-GENERIC-CARRIER-V1.md#the-normalized-trace lists it and the
@@ -205,7 +228,7 @@ void spx_pg_test_clear_failure_injection_v1(void);
 size_t spx_pg_test_live_allocations_v1(void);
 size_t spx_pg_test_live_handles_v1(spx_pg_provider_v1 *provider);
 
-/* The append-only normalized trace recorded since the provider opened.
+/* The append-only normalized trace retained by the current caller thread.
  * `spx_pg_test_trace_len_v1` is the event count; `spx_pg_test_trace_label_v1`
  * returns the ordinal-th event's label as one of the SPX_PG_TRACE_*
  * constants, matching carrier::trace::TraceLabel's own vocabulary exactly. */

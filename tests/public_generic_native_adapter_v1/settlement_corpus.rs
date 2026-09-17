@@ -1370,3 +1370,8 @@ fn compare_case_rejects_a_native_trace_that_no_longer_contains_input_value_prepa
         .retain(|&label| label != input_value_prepared);
     compare_case(case, &interpreter, &wasm, &corrupted_o0, &corrupted_o2);
 }
+
+/// Single-owner admission enforcement, not support for concurrent execution.
+#[cfg(unix)]
+#[path = "thread_admission/renderer.rs"]
+mod thread_admission;

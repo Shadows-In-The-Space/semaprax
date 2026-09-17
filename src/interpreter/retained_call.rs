@@ -20,16 +20,19 @@
 //!
 //! Arguments and results are the monomorphic scalar record/variant subset of
 //! Agent Proposal Schema v1 that the interpreter can actually execute:
-//! `bool`, `i32`, `i64`, `u8`, `usize`, owned `Bytes`, and bounded acyclic
-//! records, classes, and owned-byte variants over exactly those leaves.
+//! `bool`, `i32`, `i64`, `u8`, `usize`, owned `Bytes`, direct owned `string`,
+//! and bounded acyclic records, classes, and variants over exactly those
+//! leaves (owned-byte, owned-string, and drop-free Copy Aggregate Variant
+//! Payload v1 profiles alike; see `retained_leaf_is_admitted` and
+//! `variant_leaves_are_admitted`). A `string` leaf's raw UTF-8 bytes travel
+//! through the same `RetainedValue::Bytes` carrier as an owned `Bytes` leaf —
+//! the declared field type, never the carrier shape, says which one it is —
+//! so this seam adds no new `RetainedValue` variant and every exhaustive
+//! match already written against it outside this module stays exhaustive.
 //!
 //! Deliberate exclusions, each an explicit located `SPX-F102` admission
 //! diagnostic rather than a panic or a silent widening:
 //!
-//! - `String`/`str`. Local interpreter String values and the owned String
-//!   variant profile do not add a retained-call transport representation.
-//!   This seam remains closed until its carrier and transport contract are
-//!   extended together. Owned UTF-8 stays on its own profile.
 //! - `char`, `f32`, `f64`. Excluded by the proposal schema's exact-transport
 //!   rule, so this seam does not transport them either.
 //! - `Slice<u8>`, fixed byte arrays, and every generic or type-parameter
@@ -63,9 +66,10 @@ use crate::diagnostic::Diagnostic;
 use crate::hir::{self, DeclarationId, ResolvedFunction, ResolvedType};
 
 use super::prepared::{index_closure, index_matches_program, PreparedFunctionIndex};
+use super::variant_admission::is_admitted_copy_aggregate_variant;
 use super::{
     admitted_resolved_functions, argument_error, guard_error, is_admitted_owned_byte_record,
-    is_admitted_owned_byte_variant, option_error, record_construction_is_admitted, scan_closure,
+    is_admitted_owned_variant, option_error, record_construction_is_admitted, scan_closure,
     selection_error, settle_interpreted_bytes, ContractFailureDetail, Evaluator, Flow,
     FunctionLookup, OwnedBytesValue, OwnedDataCleanupEvent, OwnedRecordValue, OwnedVariantValue,
     PreparedCancellation, Value, EVALUATION_STACK_BYTES, MAX_STEPS_LIMIT,
@@ -439,7 +443,11 @@ pub fn evaluate_retained_call(
     })
 }
 
-/// The closed direct leaf vocabulary of this seam.
+/// The closed direct leaf vocabulary of this seam. `String` is a direct leaf
+/// here, not a nested carrier: its raw UTF-8 bytes stage and harvest through
+/// the same `RetainedValue::Bytes` transport as an owned `Bytes` leaf (see
+/// `stage` and `harvest`), so admitting it here needs no new `RetainedValue`
+/// variant.
 fn retained_leaf_is_admitted(ty: &ResolvedType) -> bool {
     matches!(
         ty,
@@ -448,6 +456,7 @@ fn retained_leaf_is_admitted(ty: &ResolvedType) -> bool {
             | ResolvedType::I64
             | ResolvedType::U8
             | ResolvedType::Usize
+            | ResolvedType::String
     )
 }
 
@@ -472,7 +481,7 @@ fn retained_shape_is_admitted(declarations: &hir::DeclarationIndex, ty: &Resolve
                 && record_leaves_are_admitted(declarations, ty)
         }
         hir::DeclarationKind::Variant => {
-            is_admitted_owned_byte_variant(declarations, ty)
+            is_admitted_owned_variant(declarations, ty)
                 && variant_leaves_are_admitted(declarations, ty)
         }
         _ => false,
@@ -512,8 +521,13 @@ fn record_leaves_are_admitted(declarations: &hir::DeclarationIndex, root: &Resol
     true
 }
 
-/// Owned-byte variant case payloads are flat by construction, so each case
-/// field must be `Bytes` or an admitted direct scalar.
+/// Owned-byte and owned-string variant case payloads are flat by
+/// construction, so each such case field need only be `Bytes` or an admitted
+/// direct scalar. Copy Aggregate Variant Payload v1 case fields are not flat:
+/// a case field may itself be a further bounded, drop-free nested record, so
+/// that shape is walked the same way an ordinary record field is, through
+/// `record_leaves_are_admitted` (which is a no-op continue for a leaf that is
+/// already admitted directly).
 fn variant_leaves_are_admitted(declarations: &hir::DeclarationIndex, ty: &ResolvedType) -> bool {
     let ResolvedType::Nominal {
         declaration,
@@ -527,8 +541,11 @@ fn variant_leaves_are_admitted(declarations: &hir::DeclarationIndex, ty: &Resolv
     };
     cases.iter().all(|case| {
         case.fields.iter().all(|field| {
-            hir::substitute_type(&field.ty, declaration, arguments)
-                .is_ok_and(|ty| ty == ResolvedType::Bytes || retained_leaf_is_admitted(&ty))
+            hir::substitute_type(&field.ty, declaration, arguments).is_ok_and(|ty| {
+                ty == ResolvedType::Bytes
+                    || retained_leaf_is_admitted(&ty)
+                    || record_leaves_are_admitted(declarations, &ty)
+            })
         })
     })
 }
@@ -624,6 +641,19 @@ fn stage(
         (ResolvedType::U8, RetainedValue::U8(value)) => Ok(Value::Uint8(*value)),
         (ResolvedType::Usize, RetainedValue::Usize(value)) => Ok(Value::Usize(*value)),
         (ResolvedType::Bytes, RetainedValue::Bytes(bytes)) => staging.allocate(bytes),
+        (ResolvedType::String, RetainedValue::Bytes(bytes)) => {
+            let length = u64::try_from(bytes.len())
+                .map_err(|_| "owned String payload length does not fit u64".to_owned())?;
+            if length > crate::byte_ops::MAX_EXTERNAL_ROOT_BYTES {
+                return Err(format!(
+                    "owned String payload exceeds the {} byte external root limit",
+                    crate::byte_ops::MAX_EXTERNAL_ROOT_BYTES
+                ));
+            }
+            let text = String::from_utf8(bytes.clone())
+                .map_err(|_| "owned String payload is not valid UTF-8".to_owned())?;
+            Ok(Value::String(text))
+        }
         (ResolvedType::Nominal { .. }, RetainedValue::Record(record)) => {
             let (declaration, arguments) = nominal(expected)?;
             if record.record != *declaration {
@@ -725,6 +755,18 @@ fn harvest(
             settle_interpreted_bytes(value, cleanup_events)
                 .map(RetainedValue::Bytes)
                 .map_err(str::to_owned)
+        }
+        (ResolvedType::String, Value::String(value)) => {
+            // A local interpreter `String` is a uniquely owned Rust
+            // allocation, never an `Arc`-shared carrier, so it needs no
+            // uniqueness check and produces no boundary cleanup event: it is
+            // moved out whole, the same way it would be dropped by ordinary
+            // Rust scope exit if it were not returned here.
+            let length = u64::try_from(value.len()).unwrap_or(u64::MAX);
+            if length > crate::byte_ops::MAX_EXTERNAL_ROOT_BYTES {
+                return Err("owned String result exceeds the public output bound".to_owned());
+            }
+            Ok(RetainedValue::Bytes(value.into_bytes()))
         }
         (ResolvedType::Nominal { .. }, Value::Record(record)) => {
             harvest_record(declarations, expected, record, cleanup_events)

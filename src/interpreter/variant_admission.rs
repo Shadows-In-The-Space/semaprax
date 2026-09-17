@@ -51,13 +51,53 @@ pub(super) fn is_admitted_owned_byte_variant(
 
 /// Shared direct owned-variant classifier for execution paths which can move
 /// the selected case payload. Generic and prelude ownership remain Bytes-only;
-/// the string branch is the separate direct monomorphic profile.
+/// the string branch is the separate direct monomorphic profile. The third
+/// arm admits Copy Aggregate Variant Payload v1, whose every case field is
+/// drop-free by construction, so the retained-call seam and other execution
+/// paths gated on this classifier can transport it too.
 pub(super) fn is_admitted_owned_variant(
     declarations: &hir::DeclarationIndex,
     ty: &ResolvedType,
 ) -> bool {
     is_admitted_owned_byte_variant(declarations, ty)
         || hir::is_admitted_owned_string_variant(declarations, ty)
+        || is_admitted_copy_aggregate_variant(declarations, ty)
+}
+
+/// Copy Aggregate Variant Payload v1: every case field of a monomorphic
+/// variant is a direct admitted Copy scalar or a further drop-free
+/// Copy-closed nested record (`hir::is_admitted_copy_aggregate_variant_field`).
+/// Such a variant owns no cleanup-plan leaf anywhere in its closure, so it is
+/// re-derived here purely from the declaration index, mirroring the sibling
+/// classifiers above rather than reusing cached source-level `TypeFacts`.
+pub(super) fn is_admitted_copy_aggregate_variant(
+    declarations: &hir::DeclarationIndex,
+    ty: &ResolvedType,
+) -> bool {
+    let ResolvedType::Nominal {
+        declaration,
+        arguments,
+    } = ty
+    else {
+        return false;
+    };
+    if !arguments.is_empty() {
+        return false;
+    }
+    let Some(item) = declarations.declaration(declaration) else {
+        return false;
+    };
+    if item.kind != hir::DeclarationKind::Variant {
+        return false;
+    }
+    declarations
+        .variant_cases(declaration)
+        .is_some_and(|cases| {
+            !cases.is_empty()
+                && cases.iter().flat_map(|case| &case.fields).all(|field| {
+                    hir::is_admitted_copy_aggregate_variant_field(declarations, &field.ty)
+                })
+        })
 }
 
 /// A monomorphic fieldless variant carries only a Copy case tag. Keep this

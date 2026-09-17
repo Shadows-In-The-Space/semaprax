@@ -38,7 +38,50 @@ pub(super) fn admitted_functions(
             })
             .map(|function| (function.id.as_str(), function)),
     );
+    functions.extend(
+        program
+            .functions
+            .iter()
+            .filter(|function| retained_only_signature_is_admitted(program, function))
+            .map(|function| (function.id.as_str(), function)),
+    );
     functions
+}
+
+/// Retained-stage-only extension, issue #216: a function whose every
+/// parameter and result is either a direct closed-vocabulary leaf (including
+/// `string`, whose raw UTF-8 bytes stage and harvest through the same
+/// `RetainedValue::Bytes` carrier as owned `Bytes`) or a monomorphic Copy
+/// Aggregate Variant Payload v1 value. This does not itself gate ownership
+/// mode: `resolved_data_parameter_is_admitted`/`resolved_data_result_is_admitted`
+/// already admit `Bytes`/owned-byte- and owned-string-variant transfer
+/// through explicit `own`/`borrow`, but neither admits a bare `string` leaf
+/// (implicitly `own` at the resolver, with no explicit keyword in source) or
+/// a plain Value-mode Copy tagged union, so this extension only ever widens
+/// admission for exactly those two additional shapes. The function body
+/// itself still passes the ordinary closure scan unmodified, so a body that
+/// actually needs interpreter support this extension does not add (for
+/// example matching or constructing the Copy Aggregate variant) is rejected
+/// there, not admitted here.
+fn retained_only_signature_is_admitted(
+    program: &hir::ResolvedProgram,
+    function: &ResolvedFunction,
+) -> bool {
+    fn leaf_or_copy_aggregate(program: &hir::ResolvedProgram, ty: &ResolvedType) -> bool {
+        retained_leaf_is_admitted(ty)
+            || is_admitted_copy_aggregate_variant(&program.declarations, ty)
+    }
+
+    function.effects.is_empty()
+        && program
+            .declarations
+            .declaration(&function.id)
+            .is_some_and(|item| item.identity_origin == hir::IdentityOrigin::Explicit)
+        && function
+            .params
+            .iter()
+            .all(|parameter| leaf_or_copy_aggregate(program, &parameter.ty))
+        && leaf_or_copy_aggregate(program, &function.return_type)
 }
 
 fn flat_copy_record(program: &hir::ResolvedProgram, ty: &ResolvedType) -> bool {

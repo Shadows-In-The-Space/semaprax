@@ -52,6 +52,37 @@ variant Outcome {
     },
 }
 
+/// Owned String Variant v1 (`85014337`): a direct `string` case field,
+/// sibling to a Copy scalar case.
+@id("stage.signal")
+variant Signal {
+    @id("stage.signal.message") Message {
+        @id("stage.signal.message.text") text: string,
+    },
+    @id("stage.signal.code") Code {
+        @id("stage.signal.code.value") value: i64,
+    },
+}
+
+/// Copy Aggregate Variant Payload v1 (`77879d76`): a case field naming a
+/// further drop-free, Copy-closed nested record. `Proposal` stays a plain
+/// Copy tagged union end to end, so it is a bare (non-`own`) parameter.
+@id("stage.inner")
+record Inner {
+    @id("stage.inner.x") x: i64,
+    @id("stage.inner.flag") flag: bool,
+}
+
+@id("stage.proposal")
+variant Proposal {
+    @id("stage.proposal.wrapped") Wrapped {
+        @id("stage.proposal.wrapped.value") value: Inner,
+    },
+    @id("stage.proposal.plain") Plain {
+        @id("stage.proposal.plain.value") value: i64,
+    },
+}
+
 @id("stage.authorize")
 fn authorize(reading: i64, limit: i64, armed: bool) -> bool {
     armed && reading <= limit
@@ -76,6 +107,15 @@ fn relay(packet: own Packet) -> Packet { packet }
 @id("stage.classify")
 fn classify(outcome: own Outcome) -> Outcome { outcome }
 
+@id("stage.relay_signal")
+fn relay_signal(signal: own Signal) -> Signal { signal }
+
+@id("stage.reduce")
+fn reduce(proposal: Proposal) -> Proposal { proposal }
+
+@id("stage.label")
+fn label(value: string) -> string { value }
+
 @id("stage.checked")
 fn checked(value: i64) -> i64 requires value > 0 { value + 1 }
 
@@ -84,13 +124,14 @@ fn main() -> i64 { 42 }
 "#;
 
 /// Signatures the interpreter itself executes but that carry values outside
-/// the retained seam's exact-transport vocabulary.
+/// the retained seam's exact-transport vocabulary. Direct `string` used to be
+/// here (`closed.label`) but is now admitted: see `stage.label` and the
+/// direct-string-argument test below.
 const CLOSED_TRANSPORT_FIXTURE: &str = r#"
 module test.interpreter_retained_closed_transport;
 
 @id("closed.ratio") fn ratio(value: f64) -> f64 { value }
 @id("closed.letter") fn letter(value: char) -> char { value }
-@id("closed.label") fn label(value: string) -> string { value }
 @id("closed.result") fn width(value: i64) -> f32 { 0.5f32 }
 
 @id("app.main")
@@ -313,6 +354,146 @@ fn retained_call_round_trips_owned_variant_arguments_and_results() {
     assert!(evaluation.cleanup_events.is_empty());
 }
 
+/// Issue #216: a direct owned `string` argument and result. `string`'s raw
+/// UTF-8 bytes travel through the `RetainedValue::Bytes` carrier -- the
+/// declared parameter type, not the carrier shape, says it is text.
+#[test]
+fn retained_call_stages_and_returns_a_direct_string_argument() {
+    let program = fixture();
+    let prepared = prepare_retained_call(&program, "stage.label").expect("admitted");
+    let evaluation = evaluate_retained_call(
+        &program,
+        &prepared,
+        &[RetainedValue::Bytes(b"agent proposal".to_vec())],
+        10_000,
+    )
+    .expect("the direct string argument is staged");
+    assert_eq!(
+        returned(evaluation.outcome),
+        RetainedValue::Bytes(b"agent proposal".to_vec())
+    );
+    // A local interpreter String is a uniquely owned Rust allocation, not an
+    // `Arc`-shared carrier, so it settles through no boundary cleanup event.
+    assert!(evaluation.cleanup_events.is_empty());
+}
+
+/// Issue #216: Owned String Variant v1 (`85014337`) round-trips through the
+/// retained-call seam -- both the owned `string` case and its Copy sibling.
+#[test]
+fn retained_call_round_trips_an_owned_string_variant_arguments_and_results() {
+    let program = fixture();
+    let prepared = prepare_retained_call(&program, "stage.relay_signal").expect("admitted");
+
+    let message = RetainedValue::Variant(RetainedVariant {
+        variant: DeclarationId::new("stage.signal"),
+        case: DeclarationId::new("stage.signal.message"),
+        fields: vec![field(
+            "stage.signal.message.text",
+            RetainedValue::Bytes(b"authorize".to_vec()),
+        )],
+    });
+    let evaluation =
+        evaluate_retained_call(&program, &prepared, std::slice::from_ref(&message), 10_000)
+            .expect("the owned string variant round-trips");
+    assert_eq!(returned(evaluation.outcome), message);
+    // No `OwnedDataCleanupEvent` exists for a String leaf: it settles by
+    // ordinary Rust ownership, not a boundary finalizer call.
+    assert!(evaluation.cleanup_events.is_empty());
+
+    let code = RetainedValue::Variant(RetainedVariant {
+        variant: DeclarationId::new("stage.signal"),
+        case: DeclarationId::new("stage.signal.code"),
+        fields: vec![field("stage.signal.code.value", RetainedValue::I64(9))],
+    });
+    let evaluation =
+        evaluate_retained_call(&program, &prepared, std::slice::from_ref(&code), 10_000)
+            .expect("the Copy case round-trips");
+    assert_eq!(returned(evaluation.outcome), code);
+    assert!(evaluation.cleanup_events.is_empty());
+}
+
+/// Issue #216: Copy Aggregate Variant Payload v1 (`77879d76`) round-trips
+/// through the retained-call seam. `Proposal` stays a plain Copy tagged union
+/// end to end -- a bare (non-`own`) parameter and result, no cleanup events,
+/// and a nested record case field (`Wrapped { value: Inner }`) rather than a
+/// flat scalar.
+#[test]
+fn retained_call_round_trips_a_copy_aggregate_nested_record_variant() {
+    let program = fixture();
+    let prepared = prepare_retained_call(&program, "stage.reduce").expect("admitted");
+
+    let wrapped = RetainedValue::Variant(RetainedVariant {
+        variant: DeclarationId::new("stage.proposal"),
+        case: DeclarationId::new("stage.proposal.wrapped"),
+        fields: vec![field(
+            "stage.proposal.wrapped.value",
+            RetainedValue::Record(RetainedRecord {
+                record: DeclarationId::new("stage.inner"),
+                fields: vec![
+                    field("stage.inner.x", RetainedValue::I64(7)),
+                    field("stage.inner.flag", RetainedValue::Bool(true)),
+                ],
+            }),
+        )],
+    });
+    let evaluation =
+        evaluate_retained_call(&program, &prepared, std::slice::from_ref(&wrapped), 10_000)
+            .expect("the Copy aggregate nested-record variant round-trips");
+    assert_eq!(returned(evaluation.outcome), wrapped);
+    // A plain Copy tagged union owns no cleanup leaf anywhere in its closure.
+    assert!(evaluation.cleanup_events.is_empty());
+
+    let plain = RetainedValue::Variant(RetainedVariant {
+        variant: DeclarationId::new("stage.proposal"),
+        case: DeclarationId::new("stage.proposal.plain"),
+        fields: vec![field("stage.proposal.plain.value", RetainedValue::I64(11))],
+    });
+    let evaluation =
+        evaluate_retained_call(&program, &prepared, std::slice::from_ref(&plain), 10_000)
+            .expect("the flat scalar case round-trips");
+    assert_eq!(returned(evaluation.outcome), plain);
+    assert!(evaluation.cleanup_events.is_empty());
+}
+
+/// Widening the vocabulary to admit `string` and Copy Aggregate Variant
+/// Payload v1 case fields must not weaken the identity-keyed safety checks:
+/// a foreign variant identity and an unauthenticated case still fail closed
+/// with `SPX-F103`, exactly as they do for the pre-existing owned-byte
+/// variant profile.
+#[test]
+fn retained_call_still_rejects_foreign_identities_for_the_widened_variant_shapes() {
+    let program = fixture();
+
+    let prepared = prepare_retained_call(&program, "stage.relay_signal").expect("admitted");
+    let foreign_variant = RetainedValue::Variant(RetainedVariant {
+        variant: DeclarationId::new("stage.outcome"),
+        case: DeclarationId::new("stage.signal.message"),
+        fields: vec![field(
+            "stage.signal.message.text",
+            RetainedValue::Bytes(b"x".to_vec()),
+        )],
+    });
+    let errors = evaluate_retained_call(&program, &prepared, &[foreign_variant], 10_000)
+        .expect_err("a foreign variant identity fails closed");
+    assert!(
+        errors.iter().any(|item| item.code == "SPX-F103"),
+        "{errors:?}"
+    );
+
+    let prepared = prepare_retained_call(&program, "stage.reduce").expect("admitted");
+    let unknown_case = RetainedValue::Variant(RetainedVariant {
+        variant: DeclarationId::new("stage.proposal"),
+        case: DeclarationId::new("stage.outcome.rejected"),
+        fields: vec![field("stage.proposal.plain.value", RetainedValue::I64(1))],
+    });
+    let errors = evaluate_retained_call(&program, &prepared, &[unknown_case], 10_000)
+        .expect_err("an unauthenticated case identity fails closed");
+    assert!(
+        errors.iter().any(|item| item.code == "SPX-F103"),
+        "{errors:?}"
+    );
+}
+
 #[test]
 fn retained_call_reports_contract_failure_and_fuel_exhaustion() {
     let program = fixture();
@@ -368,7 +549,6 @@ fn retained_call_rejects_argument_and_result_types_outside_its_vocabulary() {
     for (id, reason) in [
         ("closed.ratio", "unsupported_parameter_type"),
         ("closed.letter", "unsupported_parameter_type"),
-        ("closed.label", "unsupported_parameter_type"),
         ("closed.result", "unsupported_result_type"),
     ] {
         let errors = match prepare_retained_call(&program, id) {

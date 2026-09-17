@@ -17,6 +17,13 @@ import time
 from pathlib import Path
 
 from opencode_agent_task_pilot.artifacts import archive_candidate, collect_source_bytes
+from opencode_agent_task_pilot.eligibility import (
+    INTERVENTION_KINDS,
+    append_intervention,
+    compute_eligibility,
+    initialize_intervention_ledger,
+    record_blinded_review,
+)
 from opencode_agent_task_pilot.evidence import gateway_diagnostics, mcp_tool_metrics, provider_usage
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -97,10 +104,6 @@ def policy(lane="semaprax-source-first", mcp=None):
     if mcp is not None:
         config["mcp"] = mcp
     return config
-
-
-def ineligibility_reason(lane):
-    return "blinded review and complete ledger metric mapping are not observed"
 
 
 def bounded(argv, cwd, timeout, env=None, check=True):
@@ -348,6 +351,20 @@ def install_gateway(compiler, state, candidate, lane, drift=None):
     compiler = Path(compiler).resolve(strict=True)
     state = Path(state).resolve(strict=True)
     candidate = Path(candidate).resolve(strict=True)
+    # This function is destructive: it RENAMES `compiler` to `semaprax-real`
+    # and writes the wrapper over that exact path. Handed a path outside the
+    # disposable state directory it will happily eat a real system binary --
+    # passing `sys.executable` renamed this machine's Python 3.14 to
+    # `semaprax-real` twice (2026-09-13 and 2026-09-17), leaving every
+    # `#!/usr/bin/env python3` shebang recursing until E2BIG. `provision_semaprax`
+    # already copies the compiler to `<state>/bin/semaprax`, so every legitimate
+    # caller is inside `state`; refuse anything else before touching the disk.
+    if not compiler.is_relative_to(state):
+        raise PilotFailure(
+            f"install_gateway refuses to rename {compiler}: the compiler must live "
+            f"inside the disposable state directory {state}. Pass the copy returned "
+            f"by provision_semaprax(), never a real interpreter or installed binary."
+        )
     real = compiler.with_name("semaprax-real")
     compiler.replace(real)
     log = state / "gateway.jsonl"
@@ -621,6 +638,7 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
     prompt = json.loads((ROOT / binding["path"]).read_text(encoding="utf-8"))["prompt"]
     original = original_repository_root()
     evidence.mkdir()
+    initialize_intervention_ledger(evidence)
     sandbox = None
     candidate = None
     before = None
@@ -759,20 +777,6 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
                 raise
             finally:
                 validation_wall_ns = time.monotonic_ns() - validation_started
-            result = {
-                "schema": "semaprax.opencode-agent-task-pilot.v1",
-                "status": "ineligible",
-                "reason": ineligibility_reason(lane),
-                "task": task, "lane": lane, "trial": trial, "model": MODEL,
-                "semaprax_sha256": compiler_digest, "session_id": session,
-                "wall_ns": elapsed, "before": before, "after": after,
-                "stdout_sha256": sha(out), "session_sha256": sha(exported),
-                "drift_applications": drift_applications,
-                "acceptance": acceptance_rows,
-                "provider_usage": model_counters,
-                "gateway_diagnostics": gateway_diagnostic,
-                "mcp_tool_metrics": mcp_metrics,
-            }
     except Exception as error:
         failure = str(error)
         raise
@@ -805,10 +809,18 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
                 mcp_metrics = {"status": "unavailable", "reason": str(error)}
         if review_package is not None:
             (evidence / "review-package.json").write_text(json.dumps(review_package, sort_keys=True) + "\n")
+        eligibility = compute_eligibility(
+            prompt=prompt,
+            mcp_metrics=mcp_metrics,
+            gateway_log_bytes=gateway_log,
+            drift_declared=binding["drift_patch"] is not None,
+            evidence_dir=evidence,
+        )
         record = {
             "schema": "semaprax.opencode-agent-task-pilot.v1",
-            "status": "ineligible",
-            "reason": ineligibility_reason(lane),
+            "status": "eligible" if eligibility["eligible"] else "ineligible",
+            "reason": None if eligibility["eligible"] else "; ".join(eligibility["reasons"]),
+            "eligibility": eligibility,
             "task": task, "lane": lane, "trial": trial, "model": MODEL,
             "semaprax_sha256": compiler_digest, "session_id": session,
             "wall_ns": elapsed, "before": before, "after": after,
@@ -838,32 +850,59 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
 
 def main():
     a = argparse.ArgumentParser()
-    a.add_argument("--task", required=True)
-    a.add_argument("--lane", required=True)
-    a.add_argument("--trial", type=int, required=True)
-    a.add_argument("--opencode", default="/opt/homebrew/bin/opencode")
-    a.add_argument(
+    sub = a.add_subparsers(dest="command", required=True)
+
+    run = sub.add_parser("run", help="run one isolated tuple and archive its evidence")
+    run.add_argument("--task", required=True)
+    run.add_argument("--lane", required=True)
+    run.add_argument("--trial", type=int, required=True)
+    run.add_argument("--opencode", default="/opt/homebrew/bin/opencode")
+    run.add_argument(
         "--semaprax",
         required=True,
         help="absolute compiler executable to copy into private host state",
     )
-    a.add_argument("--evidence-dir", required=True)
-    a.add_argument("--timeout", type=int, default=600)
-    n = a.parse_args()
-    print(
-        json.dumps(
-            run_tuple(
-                n.task,
-                n.lane,
-                n.trial,
-                n.opencode,
-                n.semaprax,
-                Path(n.evidence_dir),
-                n.timeout,
-            ),
-            indent=2,
-        )
+    run.add_argument("--evidence-dir", required=True)
+    run.add_argument("--timeout", type=int, default=600)
+
+    intervene = sub.add_parser(
+        "intervene",
+        help="append one entry to an already-created trial's operator intervention ledger",
     )
+    intervene.add_argument("--evidence-dir", required=True)
+    intervene.add_argument("--kind", required=True, choices=sorted(INTERVENTION_KINDS))
+    intervene.add_argument("--target", required=True)
+    intervene.add_argument("--note", default=None)
+
+    review = sub.add_parser(
+        "record-review",
+        help="record one blinded reviewer's active review interval for a trial's candidate diff",
+    )
+    review.add_argument("--evidence-dir", required=True)
+    review.add_argument("--reviewer-id", required=True)
+    review.add_argument("--started-monotonic-ns", type=int, required=True)
+    review.add_argument("--stopped-monotonic-ns", type=int, required=True)
+    review.add_argument("--active-ms", type=int, required=True)
+    review.add_argument(
+        "--blinded",
+        action="store_true",
+        required=True,
+        help="required attestation that the reviewer did not know which lane/model produced the diff",
+    )
+
+    n = a.parse_args()
+    if n.command == "run":
+        output = run_tuple(
+            n.task, n.lane, n.trial, n.opencode, n.semaprax, Path(n.evidence_dir), n.timeout,
+        )
+    elif n.command == "intervene":
+        output = append_intervention(Path(n.evidence_dir), n.kind, n.target, n.note)
+    else:
+        output = record_blinded_review(
+            Path(n.evidence_dir), n.reviewer_id, n.started_monotonic_ns,
+            n.stopped_monotonic_ns, n.active_ms, n.blinded,
+        )
+    print(json.dumps(output, indent=2))
 
 
 if __name__ == "__main__":

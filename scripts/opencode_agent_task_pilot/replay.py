@@ -1,7 +1,14 @@
 """Offline acceptance replay from bounded, authenticated pilot source archives.
 
-This reuses the frozen task oracle. It supplies neither a blinded review nor
-missing tool/context measurements, and never changes the original run record.
+This reuses the frozen task oracle. It never changes the original run record.
+It also recomputes real eligibility from whatever transport evidence already
+sits in `evidence_dir` (`gateway.jsonl`, `mcp-wire.jsonl`, an operator-supplied
+`review.json`, and `interventions.jsonl`) via the same fail-closed predicate the
+live runner uses (`opencode_agent_task_pilot.eligibility.compute_eligibility`).
+A frozen trial captured before that predicate existed - such as the whole
+2026-09-13 cohort - never recorded a blinded review or an intervention ledger,
+so this recomputation still reports it ineligible; it does not fabricate either
+measurement to change that.
 """
 import base64
 import hashlib
@@ -11,8 +18,21 @@ from pathlib import Path, PurePosixPath
 import tempfile
 import time
 
+from opencode_agent_task_pilot.eligibility import compute_eligibility
+from opencode_agent_task_pilot.evidence import mcp_tool_metrics
+
 ROOT = Path(__file__).resolve().parents[2]
 CAP = 8 * 1024 * 1024
+
+
+def _optional_bytes(path, cap):
+    """Read an optional archived evidence file; absence is simply empty bytes."""
+    try:
+        if not path.is_file() or path.is_symlink() or path.stat().st_nlink != 1 or path.stat().st_size > cap:
+            return b""
+        return path.read_bytes()
+    except OSError:
+        return b""
 
 
 def load_json(path, cap):
@@ -75,6 +95,25 @@ def replay_candidate(evidence_dir, compiler):
     spec.loader.exec_module(runner)
     _, _, tasks = runner.atc.load_manifest('benchmarks/agent-task-comparison-v1/manifest.json')
     binding = next(task for task in tasks if task['id'] == record['task'])
+    try:
+        prompt = json.loads((ROOT / binding['path']).read_text(encoding='utf-8'))['prompt']
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError):
+        prompt = None
+    gateway_log = _optional_bytes(evidence / 'gateway.jsonl', 32 * CAP)
+    mcp_wire = _optional_bytes(evidence / 'mcp-wire.jsonl', 32 * CAP)
+    try:
+        mcp_metrics = mcp_tool_metrics(mcp_wire) if mcp_wire else {
+            'status': 'unavailable', 'reason': 'MCP wire evidence is absent',
+        }
+    except ValueError as error:
+        mcp_metrics = {'status': 'unavailable', 'reason': str(error)}
+    try:
+        eligibility = compute_eligibility(
+            prompt=prompt, mcp_metrics=mcp_metrics, gateway_log_bytes=gateway_log,
+            drift_declared=binding['drift_patch'] is not None, evidence_dir=evidence,
+        )
+    except Exception as error:  # noqa: BLE001 - fail closed, never propagate
+        eligibility = {'eligible': False, 'reasons': [f'eligibility computation failed: {error}']}
     started = time.monotonic_ns()
     with tempfile.TemporaryDirectory(prefix='spx-pilot-replay-') as directory:
         candidate = Path(directory)
@@ -102,10 +141,17 @@ def replay_candidate(evidence_dir, compiler):
         'review_package': review,
         'validation_wall_ns': elapsed, 'validation_wall_ms': elapsed // 1_000_000,
         'non_source_files_not_reconstructed': missing,
-        'limitations': ['Existing task oracle results; review criterion is not blinded reviewer time.',
-                       'Authority is unavailable: this does not replay OS confinement or the original repository after-state.',
-                       'Stale detection criterion uses recorded drift count, not an inferred recovery metric.'],
-        'eligible_observation': False,
+        'limitations': [
+            'Existing task oracle results; review criterion is not blinded reviewer time.',
+            'Authority is unavailable: this does not replay OS confinement or the original repository after-state.',
+            'Presentation bytes and typed stale/recovery metrics are recomputed from whichever archived '
+            'gateway.jsonl/mcp-wire.jsonl transport bytes already sit in evidence_dir; absent transport '
+            'evidence leaves them unavailable rather than estimated.',
+            'Blinded active review time and the intervention ledger are never inferred here: each requires '
+            'the operator-supplied review.json / interventions.jsonl already present in evidence_dir.',
+        ],
+        'eligibility': eligibility,
+        'eligible_observation': eligibility['eligible'],
     }
     with output.open('x', encoding='utf-8') as destination:
         destination.write(json.dumps(derived, sort_keys=True) + '\n')

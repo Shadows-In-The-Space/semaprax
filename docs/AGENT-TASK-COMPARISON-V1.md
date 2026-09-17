@@ -167,6 +167,50 @@ separate diagnostics; only archived external MCP frames supply tool traffic
 measurements. The transport uses OpenCode's documented
 [local MCP configuration](https://opencode.ai/docs/mcp-servers/).
 
+### Instrumented eligibility: the four previously missing measurements
+
+Every one of the 18 real-model tuples in the
+[13 September private pilot](AGENT-TASK-PILOT-2026-09-13.md) is ineligible for
+exactly four missing measurements. `opencode_agent_task_pilot.eligibility`
+(`scripts/opencode_agent_task_pilot/eligibility.py`) gives each a precise
+definition, a deterministic serialization in the per-trial `record.json`, and a
+fail-closed reader that reports the measurement `unavailable` with a named
+reason rather than a fabricated value:
+
+| Metric | Definition |
+| --- | --- |
+| Presentation bytes | The frozen task prompt's exact UTF-8 byte length (presented once, at session start) plus every MCP `tools/call` response byte returned to the model as tool context, summed with repeats across the trial. Both terms are read off a transport the pilot itself owns — the literal `opencode run` argv and the archived `mcp-wire.jsonl` frames — never estimated from a token count. |
+| Blinded active review time | A recorded input slot, never a computed or fabricated number. An operator runs `opencode-agent-task-pilot.py record-review --evidence-dir <dir> --reviewer-id <id> --started-monotonic-ns <ns> --stopped-monotonic-ns <ns> --active-ms <ms> --blinded`, attesting they did not know which lane or model produced the trial's `candidate.diff` before reviewing it. The record binds the diff's exact SHA-256, and `active_ms` must be positive and no larger than the elapsed wall interval it was measured inside. It is written once (`review.json`, exclusive create); missing it is `unavailable`, never zero. |
+| Typed stale/recovery metrics | A closed enum classification of the manifest's synthetic drift trigger and the agent's response to it, read off the gateway's real recorded argv/return-code sequence (`gateway.jsonl`). Trigger kinds: `drift_on_source_read`, `drift_on_identifying_command`. Recovery outcomes: `recovered_conditional_write`, `rejected_stale_write`, `no_recovery_attempt`. A task with no declared drift scenario must show zero triggers; a task with one must show exactly one; anything else is internally inconsistent and reported `unavailable`. |
+| Intervention ledger | An append-only, ordered JSONL record of every operator intervention (`interventions.jsonl`), each entry carrying a strictly increasing `sequence`, a non-decreasing `timestamp_ns`, a closed `kind` (`timeout_extension`, `manual_process_kill`, `manual_source_edit`, `manual_harness_restart`, `manual_config_override`, `other_operator_action`), and a `target`. The runner creates the (possibly empty) ledger file at trial start, before any run activity, so even a zero-intervention trial has an auditable basis; an operator appends to it mid- or post-trial with `opencode-agent-task-pilot.py intervene --evidence-dir <dir> --kind <kind> --target <target> [--note <text>]`. An absent ledger file is `unavailable`, never a fabricated zero. |
+
+**Eligibility predicate.** `compute_eligibility` is the single fail-closed
+gate: a trial is `eligible` only when all four measurements above are present
+and internally consistent. It never raises — any defect in one measurement
+(missing file, malformed JSON, an inconsistent count, an out-of-range
+interval) makes that one measurement `unavailable`, which makes the whole
+trial ineligible and names the exact missing measurement by string in
+`record.json`'s `reason` field (and per-metric detail in `eligibility`). This
+replaces the previous hardcoded `ineligibility_reason` string and the
+hardcoded `eligible_observation: False` in
+`scripts/opencode_agent_task_pilot/replay.py`, which never measured any of the
+four at all. `replay.py`'s offline acceptance replay now recomputes this same
+predicate from whatever `gateway.jsonl` / `mcp-wire.jsonl` / `review.json` /
+`interventions.jsonl` bytes already exist in a trial's evidence directory.
+
+**The 2026-09-13 cohort remains ineligible.** None of its 18 archived evidence
+directories ever recorded a `review.json` or an `interventions.jsonl` (those
+artifacts did not exist before this instrumentation), so recomputing
+eligibility against that frozen cohort still reports it ineligible for at
+least blinded active review time and the intervention ledger, regardless of
+what its already-archived transport bytes can retroactively establish for
+presentation bytes or typed stale/recovery metrics. This is by design: missing
+measurements are never backfilled, inferred, or defaulted to zero for already-
+captured evidence. Making the 2026-09-13 tuples — or any future tuple —
+eligible requires one more, separately authorized cohort run, executed with
+this instrumentation in place from the start (so the blinded reviewer and
+intervention ledger exist as first-class run artifacts, not retrofits).
+
 ## Typed event-ledger derivation
 
 An external harness can derive the observation metrics from a canonical typed

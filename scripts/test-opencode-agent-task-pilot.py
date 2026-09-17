@@ -12,6 +12,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest import mock
+from opencode_agent_task_pilot import eligibility as elig
 from opencode_agent_task_pilot.evidence import stream_provider_usage
 from opencode_agent_task_pilot.replay import decode_sources
 
@@ -144,9 +145,14 @@ class SubprocessBoundaryTests(unittest.TestCase):
             candidate = state / "candidate"
             (candidate / "src").mkdir(parents=True)
             (candidate / "src/core.spx").write_text("module sample;\n")
+            # install_gateway renames its `compiler` argument in place and
+            # overwrites that exact path with the wrapper text. Passing the
+            # live sys.executable directly here would rename and overwrite the
+            # real interpreter running this test suite; provision_semaprax
+            # first copies it into disposable private state instead.
             gateway, _, _, configuration = pilot.install_gateway(
-                Path(sys.executable).resolve(strict=True), state, candidate,
-                "semaprax-graph-operational",
+                pilot.provision_semaprax(Path(sys.executable).resolve(strict=True), state)[0],
+                state, candidate, "semaprax-graph-operational",
             )
             environment = dict(os.environ, SEMAPRAX_PILOT_GATEWAY=configuration)
             completed = subprocess.run(
@@ -391,6 +397,376 @@ class TupleTransportTests(unittest.TestCase):
                 self.assertEqual(lane_record["status"], "ineligible")
                 self.assertTrue((lane_evidence / "candidate-source.json").is_file())
                 self.assertTrue((lane_evidence / "mcp-wire.jsonl").is_file())
+
+
+def _gateway_event(argv, code=0, out=b"{}", err=b""):
+    return json.dumps({
+        "argv_b64": base64.b64encode("\0".join(argv).encode()).decode(),
+        "stdout_b64": base64.b64encode(out).decode(),
+        "stderr_b64": base64.b64encode(err).decode(),
+        "returncode": code,
+    })
+
+
+def _gateway_log(*events):
+    return ("\n".join(events) + "\n").encode() if events else b""
+
+
+def _mcp_frame(response_bytes=100):
+    request = json.dumps({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "command", "arguments": {"argv": ["--version"]}},
+    }).encode()
+    response = json.dumps({
+        "jsonrpc": "2.0", "id": 1,
+        "result": {"content": [{"type": "text", "text": "x" * max(0, response_bytes - 60)}], "isError": False},
+    }).encode()
+    return json.dumps({
+        "request_b64": base64.b64encode(request).decode(),
+        "response_b64": base64.b64encode(response).decode(),
+    })
+
+
+class PresentedContextBytesTests(unittest.TestCase):
+    def test_sums_prompt_and_mcp_tool_response_bytes(self):
+        prompt = "do the migration"
+        metrics = {"status": "observed", "tool_response_bytes": 250}
+        result = elig.presented_context_bytes(prompt, metrics)
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(result["prompt_bytes"], len(prompt.encode("utf-8")))
+        self.assertEqual(result["presented_context_bytes"], len(prompt.encode("utf-8")) + 250)
+
+    def test_unavailable_when_mcp_metrics_are_not_observed(self):
+        result = elig.presented_context_bytes("prompt", {"status": "unavailable", "reason": "no wire"})
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("MCP tool response wire", result["reason"])
+
+    def test_unavailable_when_prompt_is_missing(self):
+        result = elig.presented_context_bytes(None, {"status": "observed", "tool_response_bytes": 1})
+        self.assertEqual(result["status"], "unavailable")
+
+    def test_unavailable_when_tool_response_bytes_is_malformed(self):
+        result = elig.presented_context_bytes("p", {"status": "observed", "tool_response_bytes": -1})
+        self.assertEqual(result["status"], "unavailable")
+        result = elig.presented_context_bytes("p", {"status": "observed", "tool_response_bytes": True})
+        self.assertEqual(result["status"], "unavailable")
+
+
+class StaleRecoveryEventsTests(unittest.TestCase):
+    def test_task_without_drift_scenario_shows_zero_triggers(self):
+        result = elig.stale_recovery_events(b"", False)
+        self.assertEqual(result, {"status": "observed", "stale_failures": 0, "stale_recovery_actions": 0, "events": []})
+
+    def test_conditional_write_after_trigger_is_recovered(self):
+        body = _gateway_log(
+            _gateway_event(["pilot-read", "src/core.spx"]),
+            _gateway_event(["pilot-drift", "pilot-read"]),
+            _gateway_event(["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"], code=0),
+        )
+        result = elig.stale_recovery_events(body, True)
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(result["stale_failures"], 1)
+        self.assertEqual(result["stale_recovery_actions"], 1)
+        self.assertEqual(result["events"][0]["trigger"], "drift_on_source_read")
+        self.assertEqual(result["events"][0]["recovery_outcome"], "recovered_conditional_write")
+
+    def test_rejected_stale_write_after_identifying_trigger(self):
+        body = _gateway_log(
+            _gateway_event(["pilot-drift", "graph"]),
+            _gateway_event(["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"], code=126),
+        )
+        result = elig.stale_recovery_events(body, True)
+        self.assertEqual(result["events"][0]["trigger"], "drift_on_identifying_command")
+        self.assertEqual(result["events"][0]["recovery_outcome"], "rejected_stale_write")
+        self.assertEqual(result["stale_recovery_actions"], 0)
+
+    def test_no_recovery_attempt_when_file_never_touched_again(self):
+        body = _gateway_log(_gateway_event(["pilot-drift", "graph"]))
+        result = elig.stale_recovery_events(body, True)
+        self.assertEqual(result["events"][0]["recovery_outcome"], "no_recovery_attempt")
+
+    def test_inconsistent_declared_but_no_trigger_is_unavailable(self):
+        result = elig.stale_recovery_events(b"", True)
+        self.assertEqual(result["status"], "unavailable")
+
+    def test_inconsistent_trigger_but_not_declared_is_unavailable(self):
+        body = _gateway_log(_gateway_event(["pilot-drift", "graph"]))
+        result = elig.stale_recovery_events(body, False)
+        self.assertEqual(result["status"], "unavailable")
+
+    def test_malformed_gateway_log_raises_value_error_not_silently_zero(self):
+        with self.assertRaises(ValueError):
+            elig.stale_recovery_events(b"not json\n", False)
+
+
+class BlindedReviewTests(unittest.TestCase):
+    def _evidence_with_diff(self, temp):
+        evidence = Path(temp)
+        (evidence / "candidate.diff").write_text("--- before\n+++ after\n")
+        return evidence
+
+    def test_missing_review_record_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            result = elig.blinded_review_slot(evidence)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertIn("no blinded review record", result["reason"])
+
+    def test_recorded_review_round_trips_and_is_observed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            record = elig.record_blinded_review(evidence, "reviewer-1", 1000, 2_000_000_000, 500, True)
+            self.assertEqual(record["schema"], elig.REVIEW_SCHEMA)
+            result = elig.blinded_review_slot(evidence)
+            self.assertEqual(result["status"], "observed")
+            self.assertEqual(result["review_wall_ms"], 500)
+            self.assertEqual(result["reviewer_id"], "reviewer-1")
+
+    def test_second_review_record_is_refused_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            elig.record_blinded_review(evidence, "reviewer-1", 0, 2_000_000_000, 500, True)
+            with self.assertRaises(FileExistsError):
+                elig.record_blinded_review(evidence, "reviewer-2", 0, 2_000_000_000, 500, True)
+
+    def test_unblinded_review_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            with self.assertRaisesRegex(ValueError, "blinded=True"):
+                elig.record_blinded_review(evidence, "reviewer-1", 0, 2_000_000_000, 500, False)
+
+    def test_active_time_exceeding_elapsed_interval_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            with self.assertRaises(ValueError):
+                elig.record_blinded_review(evidence, "reviewer-1", 0, 1_000_000, 999_999_999, True)
+
+    def test_review_bound_to_a_different_diff_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            elig.record_blinded_review(evidence, "reviewer-1", 0, 2_000_000_000, 500, True)
+            (evidence / "candidate.diff").write_text("--- changed\n")
+            result = elig.blinded_review_slot(evidence)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertIn("different candidate diff", result["reason"])
+
+    def test_tampered_attestation_is_unavailable_not_crash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            elig.record_blinded_review(evidence, "reviewer-1", 0, 2_000_000_000, 500, True)
+            value = json.loads((evidence / "review.json").read_text())
+            value["blinded"] = False
+            (evidence / "review.json").write_text(json.dumps(value))
+            result = elig.blinded_review_slot(evidence)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertIn("blinded", result["reason"])
+
+
+class InterventionLedgerTests(unittest.TestCase):
+    def test_absent_ledger_is_unavailable_not_zero(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = elig.intervention_ledger(temp)
+            self.assertEqual(result["status"], "unavailable")
+
+    def test_initialized_empty_ledger_is_observed_zero(self):
+        with tempfile.TemporaryDirectory() as temp:
+            elig.initialize_intervention_ledger(temp)
+            result = elig.intervention_ledger(temp)
+            self.assertEqual(result, {
+                "status": "observed", "human_interventions": 0, "events": [],
+                "sha256": hashlib.sha256(b"").hexdigest(),
+            })
+
+    def test_append_is_ordered_and_readable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            elig.initialize_intervention_ledger(temp)
+            first = elig.append_intervention(temp, "manual_process_kill", "pid-123", note="hung", timestamp_ns=10)
+            second = elig.append_intervention(temp, "timeout_extension", "trial-timeout", timestamp_ns=20)
+            self.assertEqual((first["sequence"], second["sequence"]), (1, 2))
+            result = elig.intervention_ledger(temp)
+            self.assertEqual(result["status"], "observed")
+            self.assertEqual(result["human_interventions"], 2)
+            self.assertEqual([event["kind"] for event in result["events"]],
+                              ["manual_process_kill", "timeout_extension"])
+
+    def test_unknown_kind_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            elig.initialize_intervention_ledger(temp)
+            with self.assertRaises(ValueError):
+                elig.append_intervention(temp, "not_a_real_kind", "target")
+
+    def test_out_of_order_timestamp_is_refused_on_append(self):
+        with tempfile.TemporaryDirectory() as temp:
+            elig.initialize_intervention_ledger(temp)
+            elig.append_intervention(temp, "manual_process_kill", "pid-1", timestamp_ns=100)
+            with self.assertRaises(ValueError):
+                elig.append_intervention(temp, "manual_process_kill", "pid-2", timestamp_ns=50)
+
+    def test_tampered_sequence_is_unavailable_not_crash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            elig.initialize_intervention_ledger(temp)
+            elig.append_intervention(temp, "manual_process_kill", "pid-1", timestamp_ns=1)
+            path = Path(temp) / "interventions.jsonl"
+            entries = [json.loads(line) for line in path.read_text().splitlines()]
+            entries[0]["sequence"] = 7
+            path.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n")
+            result = elig.intervention_ledger(temp)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertIn("append-only", result["reason"])
+
+    def test_unknown_kind_written_directly_is_unavailable_not_crash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            elig.initialize_intervention_ledger(temp)
+            path = Path(temp) / "interventions.jsonl"
+            entry = {"schema": elig.INTERVENTION_SCHEMA, "sequence": 1, "kind": "not_closed",
+                      "target": "x", "timestamp_ns": 1, "note": None}
+            path.write_text(json.dumps(entry) + "\n")
+            result = elig.intervention_ledger(temp)
+            self.assertEqual(result["status"], "unavailable")
+
+    def test_truncated_garbage_ledger_is_unavailable_not_crash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            (Path(temp) / "interventions.jsonl").write_text("{not json\n")
+            result = elig.intervention_ledger(temp)
+            self.assertEqual(result["status"], "unavailable")
+
+
+class ComputeEligibilityTests(unittest.TestCase):
+    def _complete_evidence(self, temp):
+        evidence = Path(temp)
+        (evidence / "candidate.diff").write_text("--- before\n+++ after\n")
+        elig.initialize_intervention_ledger(evidence)
+        elig.record_blinded_review(evidence, "reviewer-1", 0, 600_000_000_000, 400_000, True)
+        return evidence
+
+    def _complete_kwargs(self, evidence, drift_declared=False, gateway_log_bytes=b""):
+        return dict(
+            prompt="migrate the signature",
+            mcp_metrics={"status": "observed", "tool_response_bytes": 42},
+            gateway_log_bytes=gateway_log_bytes,
+            drift_declared=drift_declared,
+            evidence_dir=evidence,
+        )
+
+    def test_complete_record_is_eligible(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._complete_evidence(temp)
+            result = elig.compute_eligibility(**self._complete_kwargs(evidence))
+            self.assertTrue(result["eligible"], result["reasons"])
+            self.assertEqual(result["reasons"], [])
+            for key in ("presentation_bytes", "stale_recovery", "blinded_review", "intervention_ledger"):
+                self.assertEqual(result[key]["status"], "observed")
+
+    def test_each_missing_metric_is_named_and_others_stay_fine(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._complete_evidence(temp)
+            # Remove only the review record.
+            (evidence / "review.json").unlink()
+            result = elig.compute_eligibility(**self._complete_kwargs(evidence))
+            self.assertFalse(result["eligible"])
+            self.assertEqual(len(result["reasons"]), 1)
+            self.assertIn("blinded active review time", result["reasons"][0])
+            self.assertEqual(result["presentation_bytes"]["status"], "observed")
+            self.assertEqual(result["intervention_ledger"]["status"], "observed")
+
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._complete_evidence(temp)
+            (evidence / "interventions.jsonl").unlink()
+            result = elig.compute_eligibility(**self._complete_kwargs(evidence))
+            self.assertFalse(result["eligible"])
+            self.assertIn("intervention ledger", result["reasons"][0])
+
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._complete_evidence(temp)
+            kwargs = self._complete_kwargs(evidence)
+            kwargs["mcp_metrics"] = {"status": "unavailable", "reason": "no wire"}
+            result = elig.compute_eligibility(**kwargs)
+            self.assertFalse(result["eligible"])
+            self.assertIn("presentation bytes", result["reasons"][0])
+
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._complete_evidence(temp)
+            kwargs = self._complete_kwargs(evidence, drift_declared=True)
+            result = elig.compute_eligibility(**kwargs)
+            self.assertFalse(result["eligible"])
+            self.assertIn("typed stale/recovery metrics", result["reasons"][0])
+
+    def test_malformed_gateway_log_is_ineligible_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._complete_evidence(temp)
+            kwargs = self._complete_kwargs(evidence, gateway_log_bytes=b"{garbage")
+            result = elig.compute_eligibility(**kwargs)
+            self.assertFalse(result["eligible"])
+            self.assertEqual(result["stale_recovery"]["status"], "unavailable")
+
+    def test_malformed_intervention_ledger_is_ineligible_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._complete_evidence(temp)
+            (evidence / "interventions.jsonl").write_text("not json\n")
+            result = elig.compute_eligibility(**self._complete_kwargs(evidence))
+            self.assertFalse(result["eligible"])
+            self.assertEqual(result["intervention_ledger"]["status"], "unavailable")
+
+    def test_exception_raising_evidence_dir_never_propagates(self):
+        # A path type that raises on nearly every operation must still yield a
+        # clean ineligible result rather than an unhandled exception.
+        class Explosive:
+            def __truediv__(self, other):
+                raise RuntimeError("boom")
+
+            def __fspath__(self):
+                raise RuntimeError("boom")
+
+        result = elig.compute_eligibility(
+            prompt="p", mcp_metrics={"status": "observed", "tool_response_bytes": 1},
+            gateway_log_bytes=b"", drift_declared=False, evidence_dir=Explosive(),
+        )
+        self.assertFalse(result["eligible"])
+        self.assertTrue(result["reasons"])
+
+
+class RunTupleEligibilityCliTests(unittest.TestCase):
+    def test_intervene_and_record_review_cli_subcommands(self):
+        with tempfile.TemporaryDirectory(prefix="spx-cli-eligibility-") as temp:
+            evidence = Path(temp)
+            elig.initialize_intervention_ledger(evidence)
+            (evidence / "candidate.diff").write_text("--- a\n+++ b\n")
+            intervene = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/opencode-agent-task-pilot.py"),
+                 "intervene", "--evidence-dir", str(evidence),
+                 "--kind", "manual_process_kill", "--target", "pid-42", "--note", "hung agent"],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(intervene.returncode, 0, intervene.stderr)
+            self.assertEqual(json.loads(intervene.stdout)["sequence"], 1)
+
+            review = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/opencode-agent-task-pilot.py"),
+                 "record-review", "--evidence-dir", str(evidence), "--reviewer-id", "r1",
+                 "--started-monotonic-ns", "0", "--stopped-monotonic-ns", "600000000000",
+                 "--active-ms", "400000", "--blinded"],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(review.returncode, 0, review.stderr)
+            self.assertEqual(json.loads(review.stdout)["reviewer_id"], "r1")
+
+            ledger = elig.intervention_ledger(evidence)
+            self.assertEqual(ledger["human_interventions"], 1)
+            self.assertEqual(elig.blinded_review_slot(evidence)["status"], "observed")
+
+    def test_record_review_without_blinded_flag_is_rejected_by_cli(self):
+        with tempfile.TemporaryDirectory(prefix="spx-cli-eligibility-") as temp:
+            evidence = Path(temp)
+            (evidence / "candidate.diff").write_text("--- a\n+++ b\n")
+            review = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/opencode-agent-task-pilot.py"),
+                 "record-review", "--evidence-dir", str(evidence), "--reviewer-id", "r1",
+                 "--started-monotonic-ns", "0", "--stopped-monotonic-ns", "1000000000",
+                 "--active-ms", "400000"],
+                capture_output=True, check=False,
+            )
+            self.assertNotEqual(review.returncode, 0)
+            self.assertIn(b"--blinded", review.stderr)
 
 
 if __name__ == "__main__":

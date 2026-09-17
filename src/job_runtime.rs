@@ -219,7 +219,35 @@ pub struct JobSubmission {
 /// hands the same bytes to this explicit host seam. This trait alone does not
 /// prove its implementation invokes a compiler-checked SEMAPRAX callable.
 pub trait HostJobHandler {
-    fn execute(&mut self, admitted_payload: &[u8]) -> HostJobOutcome;
+    fn execute(
+        &mut self,
+        admitted_payload: &[u8],
+        heartbeat: &mut dyn JobHeartbeat,
+    ) -> HostJobOutcome;
+}
+
+/// A live handle available only for the single [`JobRuntime::drive_once`]
+/// call currently executing a handler. It grants no capability beyond the
+/// lease that call already holds: a handler can read how much of its granted
+/// window remains, or ask the runtime to extend that exact lease before the
+/// deadline passes. Extension is not automatic renewal; a runner that never
+/// calls `extend_lease` keeps the deadline it claimed.
+///
+/// This exists because `drive_once` is one atomic host call: nothing else in
+/// this process can observe or renew the lease while a handler is running, so
+/// a handler whose own work may run long must ask for more time from inside
+/// its own `execute`. A successful extension is checkpointed immediately, so
+/// a crash right after a confirmed heartbeat recovers with the extended
+/// window honored rather than the shorter, originally claimed one.
+pub trait JobHeartbeat {
+    /// The exact tick at which the currently held lease stops being valid.
+    fn current_deadline(&self) -> u64;
+
+    /// Extends the current lease to `now_tick + extend_ticks`, where
+    /// `now_tick` is the same tick `drive_once` was called with. Refused on
+    /// tick overflow, a stale worker/lease, or an already-poisoned runtime;
+    /// never silently retried.
+    fn extend_lease(&mut self, extend_ticks: u64) -> Result<u64, JobRuntimeError>;
 }
 
 /// The closed outcome reported by a host adapter. `Uncertain` is reserved for
@@ -527,7 +555,21 @@ impl<'schema> JobRuntime<'schema> {
         // The schema check is repeated at the execution boundary. A source
         // revision/schema change cannot turn retained bytes into handler input.
         validate_submission(self.schema, &self.submission)?;
-        let outcome = handler.execute(&self.submission.payload).job_outcome();
+        let payload = self.submission.payload.clone();
+        // `deadline` cannot overflow: the top-of-function guard already
+        // proved `now_tick.checked_add(lease_ticks)` is `Some`.
+        let deadline = now_tick + lease_ticks;
+        let outcome = {
+            let mut heartbeat = ExecutionHeartbeat {
+                runtime: &mut *self,
+                checkpoints: &mut *checkpoints,
+                worker_id,
+                lease_generation,
+                now_tick,
+                deadline,
+            };
+            handler.execute(&payload, &mut heartbeat).job_outcome()
+        };
         if self.store.leased_worker_id(self.job_id) != Some(worker_id) {
             return Err(JobRuntimeError::StaleLease);
         }
@@ -624,6 +666,48 @@ impl<'schema> JobRuntime<'schema> {
         self.replay_facts.push(ReplayFact::default());
         self.persist(checkpoints)?;
         Ok(state)
+    }
+
+    /// The mutation behind [`JobHeartbeat::extend_lease`]. Only reachable
+    /// while `drive_once` holds an active lease for `worker_id`/
+    /// `lease_generation`; it extends that exact lease through the canonical
+    /// `JobStore::heartbeat` reducer, then updates this runtime's own replay
+    /// bookkeeping so a later `recover()` replays the extended window rather
+    /// than the shorter one originally claimed. It appends no evidence entry:
+    /// a heartbeat is a liveness renewal of the already-recorded claim, not a
+    /// new lifecycle fact, so it does not change what state a replay proves.
+    fn heartbeat_locked(
+        &mut self,
+        checkpoints: &mut impl JobCheckpointStore,
+        worker_id: u32,
+        lease_generation: u64,
+        now_tick: u64,
+        extend_ticks: u64,
+    ) -> Result<u64, JobRuntimeError> {
+        if self.poisoned {
+            return Err(JobRuntimeError::Poisoned);
+        }
+        if extend_ticks == 0 || now_tick.checked_add(extend_ticks).is_none() {
+            return Err(JobRuntimeError::InvalidSubmission);
+        }
+        if self.store.leased_worker_id(self.job_id) != Some(worker_id) {
+            return Err(JobRuntimeError::StaleLease);
+        }
+        let new_deadline = self
+            .store
+            .heartbeat(self.job_id, lease_generation, now_tick, extend_ticks)
+            .map_err(JobRuntimeError::Store)?;
+        let claim = self
+            .replay_facts
+            .iter_mut()
+            .rev()
+            .find(|fact| fact.lease_ticks != 0)
+            .ok_or(JobRuntimeError::Evidence)?;
+        claim.lease_ticks = new_deadline
+            .checked_sub(claim.tick)
+            .ok_or(JobRuntimeError::Evidence)?;
+        self.persist(checkpoints)?;
+        Ok(new_deadline)
     }
 
     fn persist(
@@ -835,6 +919,36 @@ impl<'schema> JobRuntime<'schema> {
             checkpoint_generation,
             poisoned: false,
         })
+    }
+}
+
+/// The concrete [`JobHeartbeat`] handed to a [`HostJobHandler`] for exactly
+/// one [`JobRuntime::drive_once`] call. It borrows the runtime and checkpoint
+/// store it was built from and cannot outlive that call.
+struct ExecutionHeartbeat<'a, 'schema, C: JobCheckpointStore> {
+    runtime: &'a mut JobRuntime<'schema>,
+    checkpoints: &'a mut C,
+    worker_id: u32,
+    lease_generation: u64,
+    now_tick: u64,
+    deadline: u64,
+}
+
+impl<C: JobCheckpointStore> JobHeartbeat for ExecutionHeartbeat<'_, '_, C> {
+    fn current_deadline(&self) -> u64 {
+        self.deadline
+    }
+
+    fn extend_lease(&mut self, extend_ticks: u64) -> Result<u64, JobRuntimeError> {
+        let new_deadline = self.runtime.heartbeat_locked(
+            self.checkpoints,
+            self.worker_id,
+            self.lease_generation,
+            self.now_tick,
+            extend_ticks,
+        )?;
+        self.deadline = new_deadline;
+        Ok(new_deadline)
     }
 }
 

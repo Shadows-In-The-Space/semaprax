@@ -193,7 +193,11 @@ impl ScriptedHandler {
 }
 
 impl HostJobHandler for ScriptedHandler {
-    fn execute(&mut self, _admitted_payload: &[u8]) -> HostJobOutcome {
+    fn execute(
+        &mut self,
+        _admitted_payload: &[u8],
+        _heartbeat: &mut dyn JobHeartbeat,
+    ) -> HostJobOutcome {
         if self.outcomes.is_empty() {
             HostJobOutcome::Uncertain
         } else {
@@ -392,4 +396,101 @@ fn enqueue_and_drive_refuse_revision_zero_and_tick_overflow() {
         runtime.drive_once(&mut checkpoints, &mut handler, 1, u64::MAX, 1),
         Err(JobRuntimeError::InvalidSubmission)
     );
+}
+
+/// A handler that inspects and extends its own lease through the
+/// [`JobHeartbeat`] handle before returning `outcome`, recording what it
+/// observed for the test to assert on afterward.
+struct HeartbeatingHandler {
+    extend_ticks: u64,
+    outcome: HostJobOutcome,
+    initial_deadline: Option<u64>,
+    extend_result: Option<Result<u64, JobRuntimeError>>,
+    deadline_after_extend: Option<u64>,
+}
+
+impl HostJobHandler for HeartbeatingHandler {
+    fn execute(
+        &mut self,
+        _admitted_payload: &[u8],
+        heartbeat: &mut dyn JobHeartbeat,
+    ) -> HostJobOutcome {
+        self.initial_deadline = Some(heartbeat.current_deadline());
+        self.extend_result = Some(heartbeat.extend_lease(self.extend_ticks));
+        self.deadline_after_extend = Some(heartbeat.current_deadline());
+        self.outcome
+    }
+}
+
+#[test]
+fn a_handler_can_extend_its_own_lease_mid_execution_and_the_extra_checkpoint_is_written() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut runtime = JobRuntime::enqueue(
+        &mut checkpoints,
+        &schema,
+        1,
+        submission(&schema, b"heartbeat-extends"),
+    )
+    .unwrap();
+    let mut handler = HeartbeatingHandler {
+        extend_ticks: 50,
+        outcome: HostJobOutcome::Succeeded,
+        initial_deadline: None,
+        extend_result: None,
+        deadline_after_extend: None,
+    };
+    let calls_before = checkpoints.calls;
+    assert_eq!(
+        runtime.drive_once(&mut checkpoints, &mut handler, 3, 100, 10),
+        Ok(DriveOutcome::Completed(JobState::Succeeded))
+    );
+    // Claimed at tick 100 with a 10-tick lease: the handle reports the
+    // originally granted deadline before any extension. Extension is
+    // relative to `now_tick` (the tick `drive_once` was called with), not the
+    // current deadline, exactly like `JobStore::heartbeat` it delegates to.
+    assert_eq!(handler.initial_deadline, Some(110));
+    assert_eq!(handler.extend_result, Some(Ok(150)));
+    assert_eq!(handler.deadline_after_extend, Some(150));
+    // Claim, begin-execution, the mid-execution heartbeat, and the final
+    // completion each persist a checkpoint: one more than a plain drive.
+    assert_eq!(checkpoints.calls - calls_before, 4);
+    // A confirmed heartbeat is not a new lifecycle fact: it adds no evidence
+    // entry, so the recorded history is exactly Enqueued/Claimed/
+    // BegunExecution/DurableCompleted, same as a drive without a heartbeat.
+    assert_eq!(runtime.evidence().entries().len(), 4);
+    let recovered = JobRuntime::recover(&mut checkpoints, &schema, 1).unwrap();
+    assert_eq!(recovered.state(), JobState::Succeeded);
+}
+
+#[test]
+fn heartbeat_refuses_tick_overflow_without_poisoning_or_blocking_completion() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut runtime = JobRuntime::enqueue(
+        &mut checkpoints,
+        &schema,
+        1,
+        submission(&schema, b"heartbeat-overflow"),
+    )
+    .unwrap();
+    let mut handler = HeartbeatingHandler {
+        extend_ticks: u64::MAX,
+        outcome: HostJobOutcome::Succeeded,
+        initial_deadline: None,
+        extend_result: None,
+        deadline_after_extend: None,
+    };
+    assert_eq!(
+        runtime.drive_once(&mut checkpoints, &mut handler, 4, 100, 10),
+        Ok(DriveOutcome::Completed(JobState::Succeeded))
+    );
+    assert_eq!(
+        handler.extend_result,
+        Some(Err(JobRuntimeError::InvalidSubmission))
+    );
+    // A refused heartbeat leaves the deadline exactly as originally claimed
+    // and never poisons the runtime or blocks the job from completing.
+    assert_eq!(handler.deadline_after_extend, Some(110));
+    assert_eq!(runtime.state(), JobState::Succeeded);
 }

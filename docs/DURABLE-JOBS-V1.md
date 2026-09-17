@@ -320,8 +320,30 @@ Checkpoint failure poisons that runtime instance: further mutation refuses
 until the caller recovers from storage. Evidence grants no authority; recovery
 requires explicit storage and the current schema. The revision byte follows
 the fixture's known-revision range, not a cryptographic handler identity.
-This runtime currently drives one job; heartbeat/current-lease APIs and
-physical database integration remain follow-on work.
+This runtime currently drives one job; physical database integration
+remains follow-on work.
+
+**Heartbeat and current-lease query.** `drive_once` is one atomic host call:
+nothing else in this process can observe or renew the lease while a handler
+is running, so a handler whose own work may run long asks for more time from
+inside its own `execute` instead. `HostJobHandler::execute` now also receives
+a [`JobHeartbeat`] handle scoped to exactly that call: `current_deadline`
+reports the tick the held lease currently expires at, and `extend_lease`
+re-arms the same lease through the existing `JobStore::heartbeat` reducer to
+`now_tick + extend_ticks` (relative to the tick `drive_once` was called with,
+not the current deadline) and checkpoints the extension immediately. A
+refused extension (tick overflow, a stale worker/lease, or an
+already-poisoned runtime) does not block the handler's own outcome from
+completing normally. A confirmed heartbeat adds no evidence entry — it is a
+liveness renewal of the already-recorded claim, not a new lifecycle fact — but
+it does update this runtime's own crash-recovery replay bookkeeping, so a
+process that crashes right after a confirmed heartbeat and then recovers
+replays the extended window rather than the shorter one originally claimed.
+Because `FileJobCheckpointStore` writes through a real file, a heartbeat's
+extended deadline is genuinely visible to any other process reading that same
+checkpoint at that moment; no test here exercises that concurrently from a
+second process, matching the disclosed single-threaded-simulation limits of
+the concurrent-claim tests elsewhere in this document.
 
 ### Retained source-handler binding v1
 

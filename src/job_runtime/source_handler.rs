@@ -25,7 +25,8 @@ use crate::interpreter::MAX_STEPS_LIMIT;
 use crate::project::ProjectRevision;
 
 use super::{
-    DriveOutcome, HostJobHandler, HostJobOutcome, JobCheckpointStore, JobRuntime, JobRuntimeError,
+    DriveOutcome, HostJobHandler, HostJobOutcome, JobCheckpointStore, JobHeartbeat, JobRuntime,
+    JobRuntimeError,
 };
 
 /// Versioned identity domain for a retained checked source job handler.
@@ -271,7 +272,15 @@ struct BoundSourceJobHandler<'a> {
 }
 
 impl HostJobHandler for BoundSourceJobHandler<'_> {
-    fn execute(&mut self, admitted_payload: &[u8]) -> HostJobOutcome {
+    fn execute(
+        &mut self,
+        admitted_payload: &[u8],
+        _heartbeat: &mut dyn JobHeartbeat,
+    ) -> HostJobOutcome {
+        // The checked retained-call route is effect-free and bounded by
+        // interpreter fuel rather than wall/tick time, so it never needs to
+        // extend its own lease; it ignores the heartbeat handle rather than
+        // manufacturing a use for it.
         self.binding.execute(admitted_payload)
     }
 }

@@ -189,7 +189,98 @@ fn stream_ended(chunk: borrow Slice<u8>) -> bool
 
 ## `std.auth`
 
-Package `std/auth`, tier `portable`, status partial. Required project profile: `useful-data.v1`. Dependency: `std.auth = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
+Package `std/auth`, tier `portable`, status partial. Required project profile: `owned-data-api.v1`. Dependency: `std.auth = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
+
+### `std.auth.secret`
+
+---------------------------------------------------------------------
+Secret<T>: an opaque, non-leaking scalar handle (issue #191)
+---------------------------------------------------------------------
+This is the `.spx`-visible nominal wrapper the issue asks for. It is
+deliberately narrow, and the narrowness is load-bearing, not an
+oversight — every claim below was checked against the compiler, not
+assumed:
+
+1. Whole-value equality is already refused for every nominal type.
+   `left == right` on two `Secret<T>` values (or any other `record`/
+   `variant`) fails to compile with `SPX-T207` ("aggregate equality is
+   outside the executable comparison profile"), raised by
+   `reject_aggregate_equality` in `src/source_verify/diagnostics.rs` for
+   every `Type::Named`. This is an existing, general compiler invariant
+   `Secret<T>` inherits for free — it is not a new check this package
+   adds, and it cannot be bypassed by this or any other package. Proven
+   directly against the compiler in
+   `src/authentication/secret_source_tests.rs`.
+2. The language has no `Debug`/`Display`/string-interpolation/reflection
+   facility at all: the lexer (`src/lexer.rs`) recognizes ordinary string
+   literals and their escapes and nothing else, so there is no construct
+   in `.spx` that turns an arbitrary value — `Secret<T>` included — into
+   text. "Cannot be printed" is therefore a fact about the whole
+   language, not a property this package had to implement.
+3. The compiler's generic-copy-type admission for a user-declared record
+   (`SPX-T223`, "generic copy type `Secret` accepts only direct `i64` or
+   `bool` arguments") allows a use-site instantiation of `Secret<T>` for
+   exactly `T = i64` or `T = bool`; `Secret<usize>` — the type this
+   package's own session/state code uses everywhere else — fails to
+   compile with exactly that diagnostic, checked directly and not
+   asserted (`src/authentication/secret_source_tests.rs`). A fully
+   generic `fn f<T>(...) -> Secret<T>` fails separately with
+   `SPX-T224`/`SPX-T226` ("must return/use the direct-scalar profile"),
+   so no single generic `wrap`/`expose` function can cover both
+   instantiations even where one is admitted at all (see point 5).
+   `Secret<Bytes>` (with an `own Bytes` parameter) was also checked and,
+   perhaps surprisingly, statically admitted — but is unexplored beyond
+   that static check, since interpreter execution of it is unverified
+   (see point 4), so this package does not build a byte-carrying
+   `Secret<T>` on that basis alone. `Secret<T>` therefore ships as an
+   opaque numeric handle or opaque decided-flag wrapper here; real secret
+   bytes (a password, a signing key, a session token) remain the
+   existing `borrow Slice<u8>` idiom this package's token/CSRF/OAuth
+   functions already use and never retain past one call, and the real
+   byte-shaped secret material itself lives only in the Rust host layer
+   under `src/authentication/**`, which has its own independent
+   non-leak proof (no `Clone`, redacted `Debug`, zeroize-on-drop).
+   `Secret<T>` here is the source-language half of the same discipline,
+   applied to the opaque scalars a deployment hands this pure decision
+   layer (a numeric session/key handle, or an already-decided boolean
+   like the kind `token_verification_admits`'s `has_valid_signature`
+   takes).
+4. CAPACITY CEILING, checked directly and not worked around: calling any
+   function whose parameter or return type mentions a user generic
+   record fails on the interpreter backend with `SPX-F102`
+   ("interpreter admission failed (unsupported_callee)"), even though
+   `semaprax check` admits the declarations and the calls statically.
+   Isolated by direct bisection with throwaway `secret_wrap_i64`/
+   `secret_expose_i64` functions (since removed — see point 5): a bare
+   record literal (`Secret<i64> { value: 42 }`) followed by direct field
+   access (`.value`) executes cleanly on the interpreter; substituting
+   either step for a call to a function typed over `Secret<i64>`
+   reproduces `SPX-F102` at that exact call. This is a real
+   interpreter-backend admission gap for user generic records used
+   across a function boundary, not specific to secrets or to this
+   package — `semaprax run`/`semaprax test` hit it identically. Closing
+   it is `src/interpreter.rs` work outside this change's lease and
+   outside a single-package change's scope; reported here rather than
+   silently narrowed around.
+5. A second, independent reason no wrap/expose/match function over
+   `Secret<T>` ships: this package's own conformance-completeness gate
+   (`tests/project/standard_library.rs`'s
+   `every_public_declaration_has_a_std_identity_contracts_examples_and_conformance`)
+   requires `std.auth.tests` to `use function` import every `@id`'d
+   declaration in this module, and `use function` cannot import a
+   function whose signature mentions a record at all (`SPX-G172`,
+   "function signature leaves the admitted scalar/Copy workspace
+   domain") — checked directly by adding such functions and watching
+   both gates in turn, not assumed. Point 4 and point 5 independently
+   rule out the same shape, so `Secret<T>` values stay call-local here:
+   constructed and read with a literal and `.value`, exactly like
+   `secret_self_check` below.
+
+```semaprax
+record Secret<T> {
+    value: T,
+}
+```
 
 ### `std.auth.security.ct_bytes_equal`
 
@@ -633,6 +724,29 @@ composition idiom `token_claims_are_valid` uses for its own attack classes.
 
 ```semaprax
 fn oauth_callback_is_valid(state: borrow Slice<u8>, expected_state: borrow Slice<u8>, redirect_uri: borrow Slice<u8>, expected_redirect_uri: borrow Slice<u8>, pkce_method_id: u8, code_verifier: borrow Slice<u8>, code_challenge: borrow Slice<u8>, has_valid_s256_hash: bool, code_seen_before: bool) -> bool
+```
+
+### `std.auth.secret.self_check`
+
+No `secret_wrap_i64`/`secret_expose_i64`/`*_handles_match` function ships
+here, even though each one individually compiles: the package's own
+conformance-completeness gate
+(`tests/project/standard_library.rs`'s
+`every_public_declaration_has_a_std_identity_contracts_examples_and_conformance`)
+requires `std.auth.tests` to `use function` import every `@id`'d
+declaration in this module — checked directly, not assumed, by adding
+exactly these functions and watching that gate fail with "conformance
+module does not import `std.auth.secret.wrap_i64`" before removing them
+again. `use function` cannot import a function whose signature mentions a
+record (`SPX-G172`, "function signature leaves the admitted scalar/Copy
+workspace domain" — see point 4 above), so no wrap/expose/match function
+over `Secret<T>` can satisfy both gates at once today. `Secret<T>` values
+therefore stay call-local, constructed and read with a literal and `.value`
+exactly like `secret_self_check` below — the only shape this tranche can
+both ship and prove complete.
+
+```semaprax
+fn secret_self_check() -> bool
 ```
 
 ## `std.bytes`
@@ -1966,6 +2080,149 @@ fn limits_within_bounds(rows: usize, max_rows: usize, bytes: usize, max_bytes: u
 
 ```semaprax
 fn limits_should_stop(consumed_rows: usize, max_rows: usize) -> bool
+```
+
+## `std.email`
+
+Package `std/email`, tier `portable`, status partial. Required project profile: `useful-data.v2`. Dependency: `std.email = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
+
+### `std.email.byte_is_header_separator`
+
+Issue #193's outbound-email slice: the pure, effect-free decision layer an
+email adapter consults BEFORE it opens a connection, assembles a message,
+or hands anything to a transport. It performs no I/O, declares no
+`permit`, calls no `uses`-gated operation, and never accepts, retains, or
+returns a credential. This is the shape `std.log.redact` and `std.auth`
+already established here: policy as data, transport left to the caller.
+
+What this package is NOT: it does not send email, resolve MX records,
+speak SMTP, authenticate to a provider, or render a MIME body. Those need
+network and secret capability and remain future work. Nothing here is
+evidence that outbound delivery exists.
+
+Every function is scalar-in/scalar-out or `borrow Slice<u8>`-in/
+scalar-out, so a message's bytes are never copied into or out of this
+package.
+---------------------------------------------------------------------
+Header injection
+---------------------------------------------------------------------
+The one property here that is a security boundary rather than a
+convenience. SMTP separates headers by CRLF, so a caller-controlled value
+(a display name, a subject, a Reply-To taken from user input) carrying CR
+or LF can append arbitrary headers or terminate the header block and
+inject a body. NUL is refused alongside them because it truncates in a C
+transport regardless of the length the adapter believes it has.
+
+This is deliberately a refusal, not a sanitizer: a value that fails is
+rejected, never silently stripped, so a caller cannot ship a message whose
+content quietly differs from what it assembled.
+
+```semaprax
+fn byte_is_header_separator(candidate: u8) -> bool
+```
+
+### `std.email.value_is_header_safe`
+
+```semaprax
+fn value_is_header_safe(field: borrow Slice<u8>) -> bool
+```
+
+### `std.email.local_part_len_admitted`
+
+---------------------------------------------------------------------
+RFC 5321 size limits
+---------------------------------------------------------------------
+Three separate predicates rather than one, because an adapter reporting
+"address too long" without saying which half was over is exactly the
+diagnostic failure this repository keeps finding elsewhere. A local part is
+at most 64 octets, a domain at most 255, and the whole forward path at most
+254. Each half must also be non-empty: `@example.com` and `user@` are
+refusals, not zero-length successes.
+
+```semaprax
+fn local_part_len_admitted(length: usize) -> bool
+```
+
+### `std.email.domain_len_admitted`
+
+```semaprax
+fn domain_len_admitted(length: usize) -> bool
+```
+
+### `std.email.address_len_admitted`
+
+```semaprax
+fn address_len_admitted(length: usize) -> bool
+```
+
+### `std.email.at_sign_count`
+
+---------------------------------------------------------------------
+Address shape
+---------------------------------------------------------------------
+Exactly one `@`. Counting rather than finding-the-first is deliberate:
+`a@b@c` has a plausible first `@` and is not an address, and an adapter
+that split on the first separator would send it somewhere.
+
+```semaprax
+fn at_sign_count(address: borrow Slice<u8>) -> usize
+```
+
+### `std.email.at_sign_index`
+
+The index of the single `@`, defined only where there is exactly one, so a
+caller cannot ask this about `a@b@c` and receive a usable answer.
+
+```semaprax
+fn at_sign_index(address: borrow Slice<u8>) -> usize
+    requires at_sign_count(address) == 1usize
+```
+
+### `std.email.domain_shape_admitted`
+
+A domain must carry at least one dot and may not begin or end with one.
+`user@localhost` is a valid address in some deployments and is refused here
+on purpose: an outbound adapter that accepts it will queue mail for a name
+no public resolver can answer.
+
+```semaprax
+fn domain_shape_admitted(address: borrow Slice<u8>, start: usize) -> bool
+    requires start <= byte_len(address)
+```
+
+### `std.email.address_admitted`
+
+The composed judgement an adapter actually calls. Every clause is one of
+the predicates above, so a refusal can always be attributed to a named rule
+rather than to this function as a whole.
+
+```semaprax
+fn address_admitted(address: borrow Slice<u8>) -> bool
+```
+
+### `std.email.recipient_count_admitted`
+
+---------------------------------------------------------------------
+Envelope budgets and completeness
+---------------------------------------------------------------------
+One deployment-independent recipient ceiling. An adapter that accepts an
+unbounded recipient list turns one caller-controlled field into a fan-out
+amplifier; 64 is deliberately small, and an adapter profile is free to
+lower it, never to leave it unstated.
+
+```semaprax
+fn recipient_count_admitted(count: usize) -> bool
+```
+
+### `std.email.envelope_is_complete`
+
+A message with no sender, no recipient, or no subject is not a message an
+adapter should attempt; each is a distinct flag so a caller learns which
+one it failed to assemble. An empty body is admitted - it is a legitimate
+message - while an absent sender is not.
+
+```semaprax
+fn envelope_is_complete(has_sender: bool, has_recipient: bool, has_subject: bool) -> bool
 ```
 
 ## `std.encoding`
@@ -4523,4 +4780,127 @@ fn is_percent_triplet(marker: u8, high: u8, low: u8) -> bool
 ```semaprax
 fn decode_percent_triplet(marker: u8, high: u8, low: u8) -> i64
     ensures result >= -1 && result <= 255
+```
+
+## `std.webhook`
+
+Package `std/webhook`, tier `portable`, status partial. Required project profile: `useful-data.v2`. Dependency: `std.webhook = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
+
+### `std.webhook.replay_window_seconds`
+
+Issue #193's webhook slice: the pure, effect-free decision layer an
+inbound-webhook receiver consults BEFORE it parses a payload or acts on
+one, and an outbound sender consults before it attempts a delivery. It
+performs no I/O, declares no `permit`, calls no `uses`-gated operation,
+and never accepts, retains, or returns a signing secret.
+
+What this package is NOT: it does not compute or verify an HMAC, open a
+connection, or retry a delivery. Constant-time MAC comparison needs a
+primitive this language does not yet admit, and getting it wrong is worse
+than not shipping it, so signature *verification* is deliberately absent
+while signature *envelope* policy is present. Nothing here is evidence
+that webhook delivery or verification exists.
+
+Every function is scalar-in/scalar-out or `borrow Slice<u8>`-in/
+scalar-out, so neither a payload nor a secret is copied into or out of
+this package.
+---------------------------------------------------------------------
+Replay window
+---------------------------------------------------------------------
+The property that actually stops a captured-and-replayed delivery. A
+receiver that verifies a signature but ignores the timestamp accepts a
+valid signed request forever; the signature stays valid because the bytes
+never change. Both directions are bounded on purpose: a timestamp far in
+the future is as much a forgery signal as one far in the past, and a
+receiver that clamps only the past accepts a clock-skewed forgery
+indefinitely.
+
+```semaprax
+fn replay_window_seconds() -> i64
+```
+
+### `std.webhook.timestamp_within_window`
+
+```semaprax
+fn timestamp_within_window(signed_at: i64, now: i64) -> bool
+```
+
+### `std.webhook.signature_hex_len`
+
+---------------------------------------------------------------------
+Signature envelope shape
+---------------------------------------------------------------------
+A receiver must decide what a signature header may look like before it
+compares anything. A hex-encoded SHA-256 MAC is 64 lowercase hex digits:
+exactly that, nothing shorter, nothing uppercase, nothing with separators.
+Refusing early means a malformed header never reaches a comparison
+routine at all.
+
+```semaprax
+fn signature_hex_len() -> usize
+```
+
+### `std.webhook.byte_is_lower_hex`
+
+```semaprax
+fn byte_is_lower_hex(candidate: u8) -> bool
+```
+
+### `std.webhook.signature_shape_admitted`
+
+```semaprax
+fn signature_shape_admitted(signature: borrow Slice<u8>) -> bool
+```
+
+### `std.webhook.payload_len_admitted`
+
+---------------------------------------------------------------------
+Payload budget
+---------------------------------------------------------------------
+One deployment-independent ceiling on an inbound body. A receiver that
+buffers an unbounded payload before deciding anything about it has handed
+an attacker a memory cost with no authentication in front of it. 65536 is
+deliberately small; a profile may lower it, never leave it unstated.
+
+```semaprax
+fn payload_len_admitted(length: usize) -> bool
+```
+
+### `std.webhook.attempt_admitted`
+
+---------------------------------------------------------------------
+Delivery attempt budget
+---------------------------------------------------------------------
+A sender retrying without a ceiling turns one failing endpoint into an
+outbound amplifier. Attempts are counted from 1, so 0 is not a legitimate
+attempt number and is refused rather than treated as "before the first".
+
+```semaprax
+fn attempt_admitted(attempt: i64) -> bool
+```
+
+### `std.webhook.backoff_seconds`
+
+Exponential backoff with a fixed base and a hard ceiling, defined for
+exactly the admitted attempt numbers so a caller cannot ask about attempt
+9 and receive a plausible delay.
+
+```semaprax
+fn backoff_seconds(attempt: i64) -> i64
+    requires attempt_admitted(attempt)
+    ensures result >= 1
+    ensures result <= 60
+```
+
+### `std.webhook.delivery_admitted`
+
+---------------------------------------------------------------------
+Composed receiver admission
+---------------------------------------------------------------------
+The judgement an inbound receiver makes before it parses anything. Every
+clause is one of the predicates above, so a refusal is always attributable
+to a named rule.
+
+```semaprax
+fn delivery_admitted(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64) -> bool
 ```

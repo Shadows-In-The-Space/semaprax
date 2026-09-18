@@ -1,0 +1,44 @@
+module std.email.examples;
+use function @id("std.email.address_admitted") from std.email as address_admitted;
+use function @id("std.email.value_is_header_safe") from std.email as value_is_header_safe;
+use function @id("std.email.recipient_count_admitted") from std.email as recipient_count_admitted;
+use function @id("std.email.envelope_is_complete") from std.email as envelope_is_complete;
+
+// A synthetic assembly walk: the checks an outbound adapter would run, in
+// the order it would run them, before any transport exists. Nothing here
+// performs I/O.
+@id("std.email.examples.main")
+fn main() -> i64
+{
+    // `user@example.com`
+    let mut sender = bytes_zeroed(16usize);
+    sender = bytes_set(sender, 0usize, 117u8);
+    sender = bytes_set(sender, 1usize, 115u8);
+    sender = bytes_set(sender, 2usize, 101u8);
+    sender = bytes_set(sender, 3usize, 114u8);
+    sender = bytes_set(sender, 4usize, 64u8);
+    sender = bytes_set(sender, 5usize, 101u8);
+    sender = bytes_set(sender, 6usize, 120u8);
+    sender = bytes_set(sender, 7usize, 97u8);
+    sender = bytes_set(sender, 8usize, 109u8);
+    sender = bytes_set(sender, 9usize, 112u8);
+    sender = bytes_set(sender, 10usize, 108u8);
+    sender = bytes_set(sender, 11usize, 101u8);
+    sender = bytes_set(sender, 12usize, 46u8);
+    sender = bytes_set(sender, 13usize, 99u8);
+    sender = bytes_set(sender, 14usize, 111u8);
+    sender = bytes_set(sender, 15usize, 109u8);
+    let sender_ok = address_admitted(bytes_as_slice(sender));
+    // The same subject line with a CR spliced in: an adapter that trusted it
+    // would let the caller append its own headers.
+    let mut subject = bytes_zeroed(3usize);
+    subject = bytes_set(subject, 0usize, 72u8);
+    subject = bytes_set(subject, 1usize, 13u8);
+    subject = bytes_set(subject, 2usize, 105u8);
+    let injected_subject_refused = !value_is_header_safe(bytes_as_slice(subject));
+    let fanout_refused = !recipient_count_admitted(65usize);
+    let one_recipient_ok = recipient_count_admitted(1usize);
+    let assembled = envelope_is_complete(true, true, true);
+    let missing_sender_refused = !envelope_is_complete(false, true, true);
+    if sender_ok && injected_subject_refused && fanout_refused && one_recipient_ok && assembled && missing_sender_refused { 0 } else { 1 }
+}

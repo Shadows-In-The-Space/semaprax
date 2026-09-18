@@ -1,0 +1,172 @@
+module std.email;
+
+// Issue #193's outbound-email slice: the pure, effect-free decision layer an
+// email adapter consults BEFORE it opens a connection, assembles a message,
+// or hands anything to a transport. It performs no I/O, declares no
+// `permit`, calls no `uses`-gated operation, and never accepts, retains, or
+// returns a credential. This is the shape `std.log.redact` and `std.auth`
+// already established here: policy as data, transport left to the caller.
+//
+// What this package is NOT: it does not send email, resolve MX records,
+// speak SMTP, authenticate to a provider, or render a MIME body. Those need
+// network and secret capability and remain future work. Nothing here is
+// evidence that outbound delivery exists.
+//
+// Every function is scalar-in/scalar-out or `borrow Slice<u8>`-in/
+// scalar-out, so a message's bytes are never copied into or out of this
+// package.
+// ---------------------------------------------------------------------
+// Header injection
+// ---------------------------------------------------------------------
+// The one property here that is a security boundary rather than a
+// convenience. SMTP separates headers by CRLF, so a caller-controlled value
+// (a display name, a subject, a Reply-To taken from user input) carrying CR
+// or LF can append arbitrary headers or terminate the header block and
+// inject a body. NUL is refused alongside them because it truncates in a C
+// transport regardless of the length the adapter believes it has.
+//
+// This is deliberately a refusal, not a sanitizer: a value that fails is
+// rejected, never silently stripped, so a caller cannot ship a message whose
+// content quietly differs from what it assembled.
+@id("std.email.byte_is_header_separator")
+fn byte_is_header_separator(candidate: u8) -> bool
+{
+    candidate == 13u8 || candidate == 10u8 || candidate == 0u8
+}
+
+@id("std.email.value_is_header_safe")
+fn value_is_header_safe(field: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(field);
+    let mut index = 0usize;
+    let mut safe = true;
+    while index < length && safe {
+        safe = match byte_get(field, index) { Option::Some { value } => !byte_is_header_separator(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && safe
+    }
+    safe
+}
+
+// ---------------------------------------------------------------------
+// RFC 5321 size limits
+// ---------------------------------------------------------------------
+// Three separate predicates rather than one, because an adapter reporting
+// "address too long" without saying which half was over is exactly the
+// diagnostic failure this repository keeps finding elsewhere. A local part is
+// at most 64 octets, a domain at most 255, and the whole forward path at most
+// 254. Each half must also be non-empty: `@example.com` and `user@` are
+// refusals, not zero-length successes.
+@id("std.email.local_part_len_admitted")
+fn local_part_len_admitted(length: usize) -> bool
+{
+    length >= 1usize && length <= 64usize
+}
+
+@id("std.email.domain_len_admitted")
+fn domain_len_admitted(length: usize) -> bool
+{
+    length >= 1usize && length <= 255usize
+}
+
+@id("std.email.address_len_admitted")
+fn address_len_admitted(length: usize) -> bool
+{
+    length >= 3usize && length <= 254usize
+}
+
+// ---------------------------------------------------------------------
+// Address shape
+// ---------------------------------------------------------------------
+// Exactly one `@`. Counting rather than finding-the-first is deliberate:
+// `a@b@c` has a plausible first `@` and is not an address, and an adapter
+// that split on the first separator would send it somewhere.
+@id("std.email.at_sign_count")
+fn at_sign_count(address: borrow Slice<u8>) -> usize
+{
+    let length = byte_len(address);
+    let mut index = 0usize;
+    let mut seen = 0usize;
+    while index < length {
+        seen = match byte_get(address, index) { Option::Some { value } => if value == 64u8 { seen + 1usize } else { seen }, Option::None {} => seen, };
+        index = index + 1usize;
+        index < length
+    }
+    seen
+}
+
+// The index of the single `@`, defined only where there is exactly one, so a
+// caller cannot ask this about `a@b@c` and receive a usable answer.
+@id("std.email.at_sign_index")
+fn at_sign_index(address: borrow Slice<u8>) -> usize
+    requires at_sign_count(address) == 1usize
+{
+    let length = byte_len(address);
+    let mut index = 0usize;
+    let mut found = length;
+    while index < length {
+        found = match byte_get(address, index) { Option::Some { value } => if value == 64u8 { index } else { found }, Option::None {} => found, };
+        index = index + 1usize;
+        index < length
+    }
+    found
+}
+
+// A domain must carry at least one dot and may not begin or end with one.
+// `user@localhost` is a valid address in some deployments and is refused here
+// on purpose: an outbound adapter that accepts it will queue mail for a name
+// no public resolver can answer.
+@id("std.email.domain_shape_admitted")
+fn domain_shape_admitted(address: borrow Slice<u8>, start: usize) -> bool
+    requires start <= byte_len(address)
+{
+    let length = byte_len(address);
+    let mut index = start;
+    let mut dots = 0usize;
+    let mut first_is_dot = false;
+    let mut last_is_dot = false;
+    while index < length {
+        first_is_dot = match byte_get(address, index) { Option::Some { value } => if index == start { value == 46u8 } else { first_is_dot }, Option::None {} => first_is_dot, };
+        last_is_dot = match byte_get(address, index) { Option::Some { value } => value == 46u8, Option::None {} => last_is_dot, };
+        dots = match byte_get(address, index) { Option::Some { value } => if value == 46u8 { dots + 1usize } else { dots }, Option::None {} => dots, };
+        index = index + 1usize;
+        index < length
+    }
+    dots >= 1usize && !first_is_dot && !last_is_dot
+}
+
+// The composed judgement an adapter actually calls. Every clause is one of
+// the predicates above, so a refusal can always be attributed to a named rule
+// rather than to this function as a whole.
+@id("std.email.address_admitted")
+fn address_admitted(address: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(address);
+    let single_at = at_sign_count(address) == 1usize;
+    let header_safe = value_is_header_safe(address);
+    let sized = address_len_admitted(length);
+    if single_at && header_safe && sized { let at = at_sign_index(address); let domain_start = at + 1usize; let halves_sized = local_part_len_admitted(at) && domain_len_admitted(length - domain_start); halves_sized && domain_shape_admitted(address, domain_start) } else { false }
+}
+
+// ---------------------------------------------------------------------
+// Envelope budgets and completeness
+// ---------------------------------------------------------------------
+// One deployment-independent recipient ceiling. An adapter that accepts an
+// unbounded recipient list turns one caller-controlled field into a fan-out
+// amplifier; 64 is deliberately small, and an adapter profile is free to
+// lower it, never to leave it unstated.
+@id("std.email.recipient_count_admitted")
+fn recipient_count_admitted(count: usize) -> bool
+{
+    count >= 1usize && count <= 64usize
+}
+
+// A message with no sender, no recipient, or no subject is not a message an
+// adapter should attempt; each is a distinct flag so a caller learns which
+// one it failed to assemble. An empty body is admitted - it is a legitimate
+// message - while an absent sender is not.
+@id("std.email.envelope_is_complete")
+fn envelope_is_complete(has_sender: bool, has_recipient: bool, has_subject: bool) -> bool
+{
+    has_sender && has_recipient && has_subject
+}

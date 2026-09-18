@@ -51,6 +51,7 @@ fn declared_owners() -> Vec<(&'static str, Owner)> {
         ("std.data.json.write", Test("json_cursors::json_cursors_write_execute_on_all_three_backends")),
         ("std.data.toml", Test("toml_cursors::toml_cursors_execute_on_all_three_backends")),
         ("std.db", Test("db_jobs_backend_audit::db_and_jobs_execute_on_all_three_backends")),
+        ("std.email", Test("email_backend_audit::email_executes_on_all_three_backends")),
         ("std.encoding", Test("data_encoding_backend_audit::data_encoding_url_path_execute_on_all_three_backends")),
         ("std.encoding.base64", Test("base64::base64_encoding_executes_on_all_three_backends")),
         ("std.env", Test("environment::environment_package_executes_all_functions_with_injected_snapshot")),
@@ -78,6 +79,7 @@ fn declared_owners() -> Vec<(&'static str, Owner)> {
         ("std.text", Test("collections_mem_text_backend_audit::collections_mem_text_execute_on_all_three_backends")),
         ("std.time", Test("core_num_backend_audit::core_num_random_time_test_execute_on_all_three_backends")),
         ("std.url", Test("data_encoding_backend_audit::data_encoding_url_path_execute_on_all_three_backends")),
+        ("std.webhook", Test("webhook_backend_audit::webhook_executes_on_all_three_backends")),
     ]
 }
 

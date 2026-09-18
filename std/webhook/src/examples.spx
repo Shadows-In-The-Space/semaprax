@@ -1,0 +1,29 @@
+module std.webhook.examples;
+use function @id("std.webhook.delivery_admitted") from std.webhook as delivery_admitted;
+use function @id("std.webhook.backoff_seconds") from std.webhook as backoff_seconds;
+use function @id("std.webhook.attempt_admitted") from std.webhook as attempt_admitted;
+
+// A synthetic receive-then-retry walk: the checks a receiver and a sender
+// would run, in the order they would run them, before any transport exists.
+// Nothing here performs I/O.
+@id("std.webhook.examples.main")
+fn main() -> i64
+{
+    // A well-formed 64-digit lowercase hex signature.
+    let mut signature = bytes_zeroed(64usize);
+    let mut index = 0usize;
+    while index < 64usize {
+        signature = bytes_set(signature, index, 97u8);
+        index = index + 1usize;
+        index < 64usize
+    }
+    let fresh_delivery = delivery_admitted(bytes_as_slice(signature), 1024usize, 1000, 1100);
+    // The same delivery captured and replayed an hour later.
+    let replayed_delivery = delivery_admitted(bytes_as_slice(signature), 1024usize, 1000, 4600);
+    // An oversized body is refused before anything parses it.
+    let oversized_delivery = delivery_admitted(bytes_as_slice(signature), 65537usize, 1000, 1100);
+    let first_backoff = backoff_seconds(1);
+    let last_backoff = backoff_seconds(8);
+    let ninth_attempt_refused = !attempt_admitted(9);
+    if fresh_delivery && !replayed_delivery && !oversized_delivery && first_backoff == 1 && last_backoff == 60 && ninth_attempt_refused { 0 } else { 1 }
+}

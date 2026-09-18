@@ -1,0 +1,207 @@
+module std.email.tests;
+use function @id("std.email.address_admitted") from std.email as address_admitted;
+use function @id("std.email.value_is_header_safe") from std.email as value_is_header_safe;
+use function @id("std.email.at_sign_count") from std.email as at_sign_count;
+use function @id("std.email.local_part_len_admitted") from std.email as local_part_len_admitted;
+use function @id("std.email.domain_len_admitted") from std.email as domain_len_admitted;
+use function @id("std.email.address_len_admitted") from std.email as address_len_admitted;
+use function @id("std.email.recipient_count_admitted") from std.email as recipient_count_admitted;
+use function @id("std.email.envelope_is_complete") from std.email as envelope_is_complete;
+use function @id("std.email.byte_is_header_separator") from std.email as byte_is_header_separator;
+use function @id("std.email.at_sign_index") from std.email as at_sign_index;
+use function @id("std.email.domain_shape_admitted") from std.email as domain_shape_admitted;
+
+// Each header-separator byte is asserted individually, never combined, so a
+// regression that stops checking any one of the three fails here rather than
+// hiding behind the other two.
+@id("std.email.tests.header_separators_refused_individually")
+fn header_separators_refused_individually() -> bool
+{
+    let mut probe = bytes_zeroed(2usize);
+    probe = bytes_set(probe, 0usize, 65u8);
+    probe = bytes_set(probe, 1usize, 13u8);
+    let carriage_return_refused = !value_is_header_safe(bytes_as_slice(probe));
+    probe = bytes_set(probe, 1usize, 10u8);
+    let line_feed_refused = !value_is_header_safe(bytes_as_slice(probe));
+    probe = bytes_set(probe, 1usize, 0u8);
+    let nul_refused = !value_is_header_safe(bytes_as_slice(probe));
+    probe = bytes_set(probe, 1usize, 66u8);
+    let ordinary_value_admitted = value_is_header_safe(bytes_as_slice(probe));
+    carriage_return_refused && line_feed_refused && nul_refused && ordinary_value_admitted
+}
+
+// A separator in the LAST position is still caught. A scan that stops one
+// byte early passes every other case in this file.
+@id("std.email.tests.trailing_separator_refused")
+fn trailing_separator_refused() -> bool
+{
+    let mut probe = bytes_zeroed(3usize);
+    probe = bytes_set(probe, 0usize, 65u8);
+    probe = bytes_set(probe, 1usize, 66u8);
+    probe = bytes_set(probe, 2usize, 10u8);
+    !value_is_header_safe(bytes_as_slice(probe))
+}
+
+// `a@b@c` has a plausible first `@`. Counting, rather than splitting on the
+// first one, is what refuses it.
+@id("std.email.tests.two_at_signs_refused")
+fn two_at_signs_refused() -> bool
+{
+    let mut probe = bytes_zeroed(5usize);
+    probe = bytes_set(probe, 0usize, 97u8);
+    probe = bytes_set(probe, 1usize, 64u8);
+    probe = bytes_set(probe, 2usize, 98u8);
+    probe = bytes_set(probe, 3usize, 64u8);
+    probe = bytes_set(probe, 4usize, 99u8);
+    at_sign_count(bytes_as_slice(probe)) == 2usize && !address_admitted(bytes_as_slice(probe))
+}
+
+// An address with no `@` at all, and one that is only an `@`.
+@id("std.email.tests.address_without_separator_refused")
+fn address_without_separator_refused() -> bool
+{
+    let mut bare = bytes_zeroed(3usize);
+    bare = bytes_set(bare, 0usize, 97u8);
+    bare = bytes_set(bare, 1usize, 98u8);
+    bare = bytes_set(bare, 2usize, 99u8);
+    !address_admitted(bytes_as_slice(bare))
+}
+
+// Split from the case above rather than sharing its body: this package's
+// conformance module is declared arena-bounded, so at most one `Bytes` value
+// may be live at a time and two probes cannot coexist in one function.
+@id("std.email.tests.address_with_empty_local_part_refused")
+fn address_with_empty_local_part_refused() -> bool
+{
+    let mut lone = bytes_zeroed(3usize);
+    lone = bytes_set(lone, 0usize, 64u8);
+    lone = bytes_set(lone, 1usize, 46u8);
+    lone = bytes_set(lone, 2usize, 46u8);
+    !address_admitted(bytes_as_slice(lone))
+}
+
+// `user@example.com` is admitted, and the same bytes with a line feed
+// appended are not: header safety is checked on the address itself, not only
+// on free-text headers.
+@id("std.email.tests.wellformed_address_admitted")
+fn wellformed_address_admitted() -> bool
+{
+    let mut address = bytes_zeroed(16usize);
+    address = bytes_set(address, 0usize, 117u8);
+    address = bytes_set(address, 1usize, 115u8);
+    address = bytes_set(address, 2usize, 101u8);
+    address = bytes_set(address, 3usize, 114u8);
+    address = bytes_set(address, 4usize, 64u8);
+    address = bytes_set(address, 5usize, 101u8);
+    address = bytes_set(address, 6usize, 120u8);
+    address = bytes_set(address, 7usize, 97u8);
+    address = bytes_set(address, 8usize, 109u8);
+    address = bytes_set(address, 9usize, 112u8);
+    address = bytes_set(address, 10usize, 108u8);
+    address = bytes_set(address, 11usize, 101u8);
+    address = bytes_set(address, 12usize, 46u8);
+    address = bytes_set(address, 13usize, 99u8);
+    address = bytes_set(address, 14usize, 111u8);
+    address = bytes_set(address, 15usize, 109u8);
+    let admitted = address_admitted(bytes_as_slice(address));
+    address = bytes_set(address, 15usize, 10u8);
+    let injected_refused = !address_admitted(bytes_as_slice(address));
+    admitted && injected_refused
+}
+
+// A dotless domain (`user@localhost`) and a trailing-dot domain are both
+// refused; the boundaries of each size rule are asserted inclusively and at
+// +1 rather than trusted.
+@id("std.email.tests.size_and_domain_boundaries")
+fn size_and_domain_boundaries() -> bool
+{
+    let local_min = local_part_len_admitted(1usize) && !local_part_len_admitted(0usize);
+    let local_max = local_part_len_admitted(64usize) && !local_part_len_admitted(65usize);
+    let domain_max = domain_len_admitted(255usize) && !domain_len_admitted(256usize);
+    let address_max = address_len_admitted(254usize) && !address_len_admitted(255usize);
+    local_min && local_max && domain_max && address_max
+}
+
+// The recipient ceiling is inclusive at 64 and refuses 65 and 0.
+@id("std.email.tests.recipient_budget_boundaries")
+fn recipient_budget_boundaries() -> bool
+{
+    recipient_count_admitted(1usize) && recipient_count_admitted(64usize) && !recipient_count_admitted(65usize) && !recipient_count_admitted(0usize)
+}
+
+// Each missing envelope part is asserted individually.
+@id("std.email.tests.envelope_completeness")
+fn envelope_completeness() -> bool
+{
+    let complete = envelope_is_complete(true, true, true);
+    let no_sender = !envelope_is_complete(false, true, true);
+    let no_recipient = !envelope_is_complete(true, false, true);
+    let no_subject = !envelope_is_complete(true, true, false);
+    complete && no_sender && no_recipient && no_subject
+}
+
+// The three separator bytes, and one ordinary byte, asserted at the single
+// predicate the scanner is built from rather than only through it.
+@id("std.email.tests.separator_predicate")
+fn separator_predicate() -> bool
+{
+    byte_is_header_separator(13u8) && byte_is_header_separator(10u8) && byte_is_header_separator(0u8) && !byte_is_header_separator(65u8)
+}
+
+// The `@` index is reported at both ends of an address, not only in the
+// middle: a scan that stopped one byte early would still pass a mid-string
+// case.
+@id("std.email.tests.at_sign_index_positions")
+fn at_sign_index_positions() -> bool
+{
+    let mut probe = bytes_zeroed(3usize);
+    probe = bytes_set(probe, 0usize, 64u8);
+    probe = bytes_set(probe, 1usize, 97u8);
+    probe = bytes_set(probe, 2usize, 98u8);
+    let leading = at_sign_index(bytes_as_slice(probe)) == 0usize;
+    probe = bytes_set(probe, 0usize, 97u8);
+    probe = bytes_set(probe, 2usize, 64u8);
+    let trailing = at_sign_index(bytes_as_slice(probe)) == 2usize;
+    leading && trailing
+}
+
+// A dotless domain, a leading-dot domain and a trailing-dot domain are each
+// refused individually; `a.b` is admitted.
+@id("std.email.tests.domain_shape_cases")
+fn domain_shape_cases() -> bool
+{
+    let mut probe = bytes_zeroed(3usize);
+    probe = bytes_set(probe, 0usize, 97u8);
+    probe = bytes_set(probe, 1usize, 46u8);
+    probe = bytes_set(probe, 2usize, 98u8);
+    let dotted_admitted = domain_shape_admitted(bytes_as_slice(probe), 0usize);
+    probe = bytes_set(probe, 1usize, 98u8);
+    let dotless_refused = !domain_shape_admitted(bytes_as_slice(probe), 0usize);
+    probe = bytes_set(probe, 0usize, 46u8);
+    probe = bytes_set(probe, 1usize, 46u8);
+    let leading_dot_refused = !domain_shape_admitted(bytes_as_slice(probe), 0usize);
+    probe = bytes_set(probe, 0usize, 97u8);
+    probe = bytes_set(probe, 1usize, 46u8);
+    probe = bytes_set(probe, 2usize, 46u8);
+    let trailing_dot_refused = !domain_shape_admitted(bytes_as_slice(probe), 0usize);
+    dotted_admitted && dotless_refused && leading_dot_refused && trailing_dot_refused
+}
+
+@id("std.email.tests.main")
+fn main() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if header_separators_refused_individually() { 0 } else { 1 };
+    failed = failed + if trailing_separator_refused() { 0 } else { 2 };
+    failed = failed + if two_at_signs_refused() { 0 } else { 4 };
+    failed = failed + if address_without_separator_refused() { 0 } else { 8 };
+    failed = failed + if address_with_empty_local_part_refused() { 0 } else { 2048 };
+    failed = failed + if wellformed_address_admitted() { 0 } else { 16 };
+    failed = failed + if size_and_domain_boundaries() { 0 } else { 32 };
+    failed = failed + if recipient_budget_boundaries() { 0 } else { 64 };
+    failed = failed + if envelope_completeness() { 0 } else { 128 };
+    failed = failed + if separator_predicate() { 0 } else { 256 };
+    failed = failed + if at_sign_index_positions() { 0 } else { 512 };
+    failed = failed + if domain_shape_cases() { 0 } else { 1024 };
+    failed
+}

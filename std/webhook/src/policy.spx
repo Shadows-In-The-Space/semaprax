@@ -1,0 +1,130 @@
+module std.webhook;
+
+// Issue #193's webhook slice: the pure, effect-free decision layer an
+// inbound-webhook receiver consults BEFORE it parses a payload or acts on
+// one, and an outbound sender consults before it attempts a delivery. It
+// performs no I/O, declares no `permit`, calls no `uses`-gated operation,
+// and never accepts, retains, or returns a signing secret.
+//
+// What this package is NOT: it does not compute or verify an HMAC, open a
+// connection, or retry a delivery. Constant-time MAC comparison needs a
+// primitive this language does not yet admit, and getting it wrong is worse
+// than not shipping it, so signature *verification* is deliberately absent
+// while signature *envelope* policy is present. Nothing here is evidence
+// that webhook delivery or verification exists.
+//
+// Every function is scalar-in/scalar-out or `borrow Slice<u8>`-in/
+// scalar-out, so neither a payload nor a secret is copied into or out of
+// this package.
+// ---------------------------------------------------------------------
+// Replay window
+// ---------------------------------------------------------------------
+// The property that actually stops a captured-and-replayed delivery. A
+// receiver that verifies a signature but ignores the timestamp accepts a
+// valid signed request forever; the signature stays valid because the bytes
+// never change. Both directions are bounded on purpose: a timestamp far in
+// the future is as much a forgery signal as one far in the past, and a
+// receiver that clamps only the past accepts a clock-skewed forgery
+// indefinitely.
+@id("std.webhook.replay_window_seconds")
+fn replay_window_seconds() -> i64
+{
+    300
+}
+
+@id("std.webhook.timestamp_within_window")
+fn timestamp_within_window(signed_at: i64, now: i64) -> bool
+{
+    let skew = if now >= signed_at { now - signed_at } else { signed_at - now };
+    skew <= replay_window_seconds()
+}
+
+// ---------------------------------------------------------------------
+// Signature envelope shape
+// ---------------------------------------------------------------------
+// A receiver must decide what a signature header may look like before it
+// compares anything. A hex-encoded SHA-256 MAC is 64 lowercase hex digits:
+// exactly that, nothing shorter, nothing uppercase, nothing with separators.
+// Refusing early means a malformed header never reaches a comparison
+// routine at all.
+@id("std.webhook.signature_hex_len")
+fn signature_hex_len() -> usize
+{
+    64usize
+}
+
+@id("std.webhook.byte_is_lower_hex")
+fn byte_is_lower_hex(candidate: u8) -> bool
+{
+    candidate >= 48u8 && candidate <= 57u8 || candidate >= 97u8 && candidate <= 102u8
+}
+
+@id("std.webhook.signature_shape_admitted")
+fn signature_shape_admitted(signature: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(signature);
+    let mut index = 0usize;
+    let mut admitted = length == signature_hex_len();
+    while index < length && admitted {
+        admitted = match byte_get(signature, index) { Option::Some { value } => byte_is_lower_hex(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// ---------------------------------------------------------------------
+// Payload budget
+// ---------------------------------------------------------------------
+// One deployment-independent ceiling on an inbound body. A receiver that
+// buffers an unbounded payload before deciding anything about it has handed
+// an attacker a memory cost with no authentication in front of it. 65536 is
+// deliberately small; a profile may lower it, never leave it unstated.
+@id("std.webhook.payload_len_admitted")
+fn payload_len_admitted(length: usize) -> bool
+{
+    length <= 65536usize
+}
+
+// ---------------------------------------------------------------------
+// Delivery attempt budget
+// ---------------------------------------------------------------------
+// A sender retrying without a ceiling turns one failing endpoint into an
+// outbound amplifier. Attempts are counted from 1, so 0 is not a legitimate
+// attempt number and is refused rather than treated as "before the first".
+@id("std.webhook.attempt_admitted")
+fn attempt_admitted(attempt: i64) -> bool
+{
+    attempt >= 1 && attempt <= 8
+}
+
+// Exponential backoff with a fixed base and a hard ceiling, defined for
+// exactly the admitted attempt numbers so a caller cannot ask about attempt
+// 9 and receive a plausible delay.
+@id("std.webhook.backoff_seconds")
+fn backoff_seconds(attempt: i64) -> i64
+    requires attempt_admitted(attempt)
+    ensures result >= 1
+    ensures result <= 60
+{
+    let mut delay = 1;
+    let mut step = 1;
+    while step < attempt {
+        delay = if delay >= 60 { 60 } else { delay + delay };
+        step = step + 1;
+        step < attempt
+    }
+    if delay >= 60 { 60 } else { delay }
+}
+
+// ---------------------------------------------------------------------
+// Composed receiver admission
+// ---------------------------------------------------------------------
+// The judgement an inbound receiver makes before it parses anything. Every
+// clause is one of the predicates above, so a refusal is always attributable
+// to a named rule.
+@id("std.webhook.delivery_admitted")
+fn delivery_admitted(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64) -> bool
+{
+    signature_shape_admitted(signature) && payload_len_admitted(payload_len) && timestamp_within_window(signed_at, now)
+}

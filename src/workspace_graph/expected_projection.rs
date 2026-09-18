@@ -324,6 +324,8 @@ pub(super) fn retention_prebound_mode(
     dependency_scoped: bool,
     layout_mode: u8,
 ) -> Result<(usize, usize), Vec<Diagnostic>> {
+    let _precharge = super::diagnostics::precharge_scope();
+    super::diagnostics::begin_precharge_pass();
     let mut resolve = 0usize;
     let mut runtime = 0usize;
     // build_resolved_core calls synthetic_program once per source, in order.
@@ -333,6 +335,7 @@ pub(super) fn retention_prebound_mode(
     // one full imported body is transiently live across the whole loop.
     let mut transient_peak = 0usize;
     for program in programs {
+        super::diagnostics::begin_precharge_module(&program.path);
         let maximum = if dependency_scoped {
             Some(dependency_identity_max(program, authored, programs)?)
         } else {
@@ -343,16 +346,13 @@ pub(super) fn retention_prebound_mode(
         } else {
             synthetic_builder_bytes(program, authored, programs)?
         };
-        resolve = checked_usage(
-            resolve,
-            if layout_mode >= 3 {
-                costs.retained_clone_and_hir
-            } else {
-                costs.raw_clone_and_hir
-            },
-            "builder_bytes",
-            active_builder_limit(),
-        )?;
+        let charged = if layout_mode >= 3 {
+            costs.retained_clone_and_hir
+        } else {
+            costs.raw_clone_and_hir
+        };
+        super::diagnostics::record_precharge_module(&program.path, charged);
+        resolve = checked_usage(resolve, charged, "builder_bytes", active_builder_limit())?;
         transient_peak = transient_peak.max(costs.transient_import_clone);
         runtime = checked_usage(
             runtime,

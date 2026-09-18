@@ -448,3 +448,55 @@ fn catalog_normalizer_compact_core_fits_production_builder_cap() {
     assert!(built.hir.module_paths.contains_key("std.io"));
     assert!(built.usage.builder_bytes <= MAX_BUILDER_BYTES);
 }
+
+/// Issue #241. Both `builder_bytes` bounds refuse with the same code, the same
+/// message, and the same budget, so the message alone cannot tell an author
+/// whether the static admission pre-charge or live graph construction ran out.
+/// A workspace whose forecast alone exceeds the budget meets the pre-charge
+/// and never reaches the builder; a workspace whose forecast fits reaches the
+/// builder and can still exhaust the budget there. The message stays
+/// byte-identical, because nested workspace routes remap a `builder_bytes`
+/// refusal by comparing it exactly, so the attribution rides on `help`.
+#[test]
+fn builder_budget_refusal_names_the_bound_that_fired_and_its_dominant_module() {
+    let precharge =
+        build_owned_with_builder_limit(identity_scale_workspace(0, 64, 128), MAX_BUILDER_BYTES)
+            .err()
+            .expect("an oversized workspace must be refused");
+    assert_exact_builder_limit_error(&precharge, MAX_BUILDER_BYTES);
+    let help = precharge[0]
+        .help
+        .as_deref()
+        .expect("a builder budget refusal names the bound that fired");
+    assert!(
+        help.starts_with("the static admission pre-charge refused before the graph builder ran"),
+        "{help}"
+    );
+    assert!(
+        help.contains("while forecasting module `scale/library.spx` on its own"),
+        "{help}"
+    );
+    assert!(
+        help.contains(&format!("does not fit the {MAX_BUILDER_BYTES}-byte budget")),
+        "{help}"
+    );
+
+    let live = build_owned_with_builder_limit(core_retry_fixture(), MAX_BUILDER_BYTES - 1)
+        .err()
+        .expect("the retry fixture cannot fit one byte below the production cap");
+    assert_exact_builder_limit_error(&live, MAX_BUILDER_BYTES - 1);
+    let help = live[0]
+        .help
+        .as_deref()
+        .expect("a builder budget refusal names the bound that fired");
+    assert!(
+        help.starts_with(
+            "live graph construction, not the static admission pre-charge, exceeded the budget"
+        ),
+        "{help}"
+    );
+    assert!(
+        help.contains(&format!("and fit within {}", MAX_BUILDER_BYTES - 1)),
+        "{help}"
+    );
+}

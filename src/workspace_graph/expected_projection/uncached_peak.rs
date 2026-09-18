@@ -24,6 +24,7 @@ pub(in crate::workspace_graph) fn uncached_output_layout(
     programs: &[Program],
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
 ) -> Result<UncachedOutputLayout, Vec<Diagnostic>> {
+    let _precharge = super::super::diagnostics::precharge_scope();
     let mut order = [0; super::super::MAX_FILES];
     let mut full_costs = [0usize; super::super::MAX_FILES];
     let mut retained_costs = [0usize; super::super::MAX_FILES];
@@ -99,6 +100,7 @@ pub(in crate::workspace_graph) fn initial_core_prebound(
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     frontend_is_absent: bool,
 ) -> Result<(usize, usize, bool, u8), Vec<Diagnostic>> {
+    let _precharge = super::super::diagnostics::precharge_scope();
     let (receipt, initial_mode) =
         match checked_retention_prebound_with_uncached_peak(programs, authored, frontend_is_absent)
         {
@@ -121,11 +123,15 @@ pub(super) fn uncached_peak_prebound(
     programs: &[Program],
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
 ) -> Result<(usize, usize), Vec<Diagnostic>> {
+    let _precharge = super::super::diagnostics::precharge_scope();
+    super::super::diagnostics::begin_precharge_pass();
     let mut retained_hir = 0usize;
     let mut synthetic_ast_peak = 0usize;
     for program in programs {
+        super::super::diagnostics::begin_precharge_module(&program.path);
         let maximum = Some(dependency_identity_max(program, authored, programs)?);
         let costs = synthetic_builder_bytes_scoped(program, authored, programs, maximum, 4, true)?;
+        super::super::diagnostics::record_precharge_module(&program.path, costs.retained_hir);
         retained_hir = checked_usage(
             retained_hir,
             costs.retained_hir,

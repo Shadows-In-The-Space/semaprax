@@ -1,5 +1,7 @@
 //! Shared bounded workspace-graph diagnostic constructors.
 
+use std::cell::{Cell, RefCell};
+
 use crate::ast::{ModuleUse, Program, Span};
 use crate::diagnostic::Diagnostic;
 
@@ -49,10 +51,114 @@ pub(super) fn project_function_error(
 }
 
 pub(super) fn limit_error(field: &'static str, maximum: usize) -> Diagnostic {
-    graph_error(
+    let error = graph_error(
         "SPX-G171",
         crate::bounded_output::budgeted_format(format_args!(
             "Workspace Semantic Graph `{field}` exceeds {maximum}"
         )),
-    )
+    );
+    if field != "builder_bytes" {
+        return error;
+    }
+    let help = builder_bytes_help(maximum);
+    if help.is_empty() {
+        return error;
+    }
+    error.with_help(help)
+}
+
+/// Which of the two `builder_bytes` bounds refused.
+///
+/// The static admission pre-charge forecasts the whole build before the graph
+/// builder allocates anything; live accumulation charges the structures the
+/// builder really allocates. Both refuse with `SPX-G171` and the same budget,
+/// so without this the diagnostic cannot tell an author whether factoring the
+/// source differently could possibly help.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BuilderPhase {
+    Precharge,
+    Live,
+}
+
+thread_local! {
+    static BUILDER_PHASE: Cell<BuilderPhase> = const { Cell::new(BuilderPhase::Live) };
+    static PRECHARGE_MODULES: Cell<usize> = const { Cell::new(0) };
+    static PRECHARGE_BYTES: Cell<usize> = const { Cell::new(0) };
+    static PRECHARGE_DOMINANT: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
+    static PRECHARGE_PENDING: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Restores the previous phase on drop, so a pre-charge nested inside another
+/// one cannot leave live accumulation mislabelled.
+pub(super) struct PrechargeScope(BuilderPhase);
+
+impl Drop for PrechargeScope {
+    fn drop(&mut self) {
+        BUILDER_PHASE.with(|phase| phase.set(self.0));
+    }
+}
+
+pub(super) fn precharge_scope() -> PrechargeScope {
+    PrechargeScope(BUILDER_PHASE.with(|phase| phase.replace(BuilderPhase::Precharge)))
+}
+
+/// Start one forecast pass. Every fallback receipt re-costs each module, so
+/// attribution keeps only the pass that is currently running.
+pub(super) fn begin_precharge_pass() {
+    PRECHARGE_MODULES.with(|modules| modules.set(0));
+    PRECHARGE_BYTES.with(|bytes| bytes.set(0));
+    PRECHARGE_DOMINANT.with(|dominant| *dominant.borrow_mut() = None);
+    PRECHARGE_PENDING.with(|pending| *pending.borrow_mut() = None);
+}
+
+/// Name the module whose own forecast is being computed. One module's
+/// forecast can exceed the budget on its own, which is a different author
+/// remedy from a sum over modules that each fit.
+pub(super) fn begin_precharge_module(path: &str) {
+    PRECHARGE_PENDING.with(|pending| *pending.borrow_mut() = Some(path.to_owned()));
+}
+
+/// Record one module's forecast. Modules are costed in canonical path order
+/// and only a strictly larger forecast replaces the dominant module, so the
+/// retained attribution is deterministic.
+pub(super) fn record_precharge_module(path: &str, bytes: usize) {
+    PRECHARGE_PENDING.with(|pending| *pending.borrow_mut() = None);
+    PRECHARGE_MODULES.with(|modules| modules.set(modules.get().saturating_add(1)));
+    PRECHARGE_BYTES.with(|total| total.set(total.get().saturating_add(bytes)));
+    PRECHARGE_DOMINANT.with(|dominant| {
+        let mut dominant = dominant.borrow_mut();
+        if dominant.as_ref().is_none_or(|(_, seen)| bytes > *seen) {
+            *dominant = Some((path.to_owned(), bytes));
+        }
+    });
+}
+
+/// Name the bound that refused and the module that drove it. The message
+/// itself stays byte-identical, because nested workspace routes remap a
+/// `builder_bytes` refusal by comparing it exactly.
+fn builder_bytes_help(maximum: usize) -> String {
+    let precharge = BUILDER_PHASE.with(Cell::get) == BuilderPhase::Precharge;
+    let modules = PRECHARGE_MODULES.with(Cell::get);
+    let forecast = PRECHARGE_BYTES.with(Cell::get);
+    let dominant = PRECHARGE_DOMINANT.with(|dominant| dominant.borrow().clone());
+    let pending = PRECHARGE_PENDING.with(|pending| pending.borrow().clone());
+    if let (true, Some(path)) = (precharge, pending) {
+        return crate::bounded_output::budgeted_format(format_args!(
+            "the static admission pre-charge refused before the graph builder ran, while forecasting module `{path}` on its own: that one module does not fit the {maximum}-byte budget, which already carries {forecast} bytes for {modules} earlier module(s). Splitting `{path}` into several modules cannot reduce the forecast, because the pre-charge sums every reachable module; reducing its admitted source can."
+        ));
+    }
+    match (precharge, dominant) {
+        (true, Some((path, bytes))) => crate::bounded_output::budgeted_format(format_args!(
+            "the static admission pre-charge refused before the graph builder ran: forecasting {modules} reachable module(s) already reaches {forecast} bytes of the {maximum}-byte budget, and `{path}` alone forecasts {bytes} bytes of retained resolver state. The pre-charge sums every reachable module, so splitting one module into several cannot reduce it; removing a dependency or reducing total reachable source can."
+        )),
+        (true, None) => crate::bounded_output::budgeted_format(format_args!(
+            "the static admission pre-charge refused before the graph builder ran, and before any single module was fully costed against the {maximum}-byte budget."
+        )),
+        (false, Some((path, bytes))) => crate::bounded_output::budgeted_format(format_args!(
+            "live graph construction, not the static admission pre-charge, exceeded the budget: the pre-charge forecast {forecast} bytes for {modules} module(s) and fit within {maximum}, with `{path}` the largest at {bytes} bytes. Reducing reachable source is the only lever; the forecast itself was not the refusing bound."
+        )),
+        (false, None) => crate::bounded_output::budgeted_format(format_args!(
+            "live graph construction, not the static admission pre-charge, exceeded the {maximum}-byte budget while allocating workspace graph structure."
+        )),
+    }
 }

@@ -167,3 +167,20 @@ while IFS="$tab" read -r kind gate _rest; do
         *) echo "validated quality gate changed during dispatch: $gate" >&2; exit 2 ;;
     esac
 done <"$plan_file"
+
+# Not part of the validated semaprax.quality-route.v2 plan above (that
+# schema is produced by the Rust `quality-plan` command and this script only
+# dispatches its exact gate list): the Kernel-0 Lean proof gate re-checks
+# `proofs/kernel0-lean/Kernel0.lean`, the hole-free progress/preservation
+# mechanization that issue #188 found nothing in the repository re-verified.
+# It runs source-level checks (headline-theorem presence, pinned-signature, and
+# a comment-aware sorry/admit/axiom token scan) unconditionally, and adds a
+# full `lake build` plus `#print axioms` audit when a Lean toolchain happens
+# to be on PATH -- explicitly skipping, never silently passing, otherwise.
+# See docs/QUALITY-GATES.md's "Kernel-0 Lean proof gate" section and
+# scripts/kernel0-lean-gate.py's own module doc comment for the exact
+# failure modes each half catches.
+if [ "$effective" = full ]; then
+    printf '==> kernel0-lean-proof\n' >&2
+    python3 scripts/kernel0-lean-gate.py
+fi

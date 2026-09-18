@@ -620,6 +620,34 @@ jobs:
           # where README cited v0.4.0's commit for a v0.4.1 claim.
           python3 scripts/release-reconcile.py
 
+  kernel0-lean-proof-gate:
+    name: Kernel-0 Lean proof gate (issue #188)
+    # NOT-YET-HOSTED, deliberately: this job is not in `release-gate`'s
+    # `needs:` list below. GitHub-hosted runners ship no Lean toolchain, and
+    # AGENTS.md forbids introducing build-time network access to fetch one
+    # (elan's own installer needs a one-time network fetch, which is exactly
+    # that). Every run here therefore takes the explicit-skip half of
+    # scripts/kernel0-lean-gate.py's build check -- it still re-checks
+    # headline-theorem presence, pinned signatures, and a comment-aware
+    # sorry/admit/axiom scan against `proofs/kernel0-lean/Kernel0.lean`
+    # unconditionally (no toolchain needed for those), but it does not
+    # rebuild the proof or re-audit `#print axioms` here. Wiring this into
+    # `release-gate` is future work, once a hermetic, pre-baked or cached
+    # Lean toolchain is available without a build-time fetch; see
+    # docs/QUALITY-GATES.md's "Kernel-0 Lean proof gate" section, which owns
+    # the exact catch/skip inventory this comment summarizes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          fetch-tags: false
+          lfs: false
+      - name: Re-check the Kernel-0 Lean proof (source-level always; build and axiom audit only if a Lean toolchain happens to be present)
+        run: python3 scripts/kernel0-lean-gate.py
+
   supply-chain:
     name: Dependency policy
     runs-on: ubuntu-latest

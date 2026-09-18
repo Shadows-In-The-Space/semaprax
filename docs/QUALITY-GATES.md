@@ -99,7 +99,7 @@ plan on standard output.
 | --- | --- | --- |
 | `quick` | Early local feedback | diff check, Rust formatting, workspace check, advisory documentation/examples/context tests |
 | `changed` | Bounded reviewed changes | `quick` plus package Clippy, agent-context integration, and package rustdoc; plus `test-cli` for CLI surface paths and `test-editor` for editor paths |
-| `full` | Semantic changes and release candidates | workspace Clippy/tests/doctests/rustdoc, release build, package check, and canonical example checks |
+| `full` | Semantic changes and release candidates | workspace Clippy/tests/doctests/rustdoc, release build, package check, canonical example checks, and the Kernel-0 Lean proof gate |
 
 Capability-aware command help additionally requires the exact catalog/dispatcher
 inventory, global-byte preservation, standalone/full capability separation,
@@ -147,6 +147,65 @@ disabled so every shard reports its result after a peer failure. Shared integrat
 unknown target kinds fail closed instead of silently losing coverage. The
 release gate requires the complete matrix. This changes scheduling only, not
 the local `full` profile or any test, admission limit, or release requirement.
+
+## Kernel-0 Lean proof gate
+
+`proofs/kernel0-lean/Kernel0.lean` is a hole-free Lean 4 mechanization of a
+Progress trichotomy (the scalar-and-`if` fragment) and Preservation (the
+whole language, `Let` and non-recursive `Call` included) for Kernel-0 --
+see [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md) for the
+design record and [Semantic Kernel v1](SEMANTIC-KERNEL-V1.md) for what
+Kernel-0 is. Before issue #188, nothing in the repository re-checked that
+file: no CI job ran `lake build`, it was not in `scripts/quality.sh`, and
+nothing would fail if the proof were reverted, weakened, or silently made to
+stop building.
+
+`scripts/kernel0-lean-gate.py` is that executable gate, and its own module
+doc comment is the source of truth for its exact behavior. Summary:
+
+- **Always runs, no Lean toolchain required**: re-locates each of the seven
+  headline theorems (`progress_scalarIf`, `progress_scalarIf_closed`,
+  `preservation`, `subst_preserves_type`, `subst_preserves_type_args`,
+  `hastype_weaken_right`, `hastype_weaken_right_args`) by name in the source
+  and fails if any is missing (deleted or renamed); compares each theorem's
+  exact statement text against a frozen, byte-exact pin in the script and
+  fails on any change (a weakened conclusion or hypothesis, kept name and
+  all, fails here even though the file may still build); and scans the
+  source for a real `sorry`, `admit`, or new `axiom` token outside comments
+  and string literals, using a nesting-aware Lean comment/string stripper
+  (Lean 4 block comments nest) rather than a raw grep -- a raw
+  `grep -n sorry` on this exact file returns six hits, all inside doc
+  comments discussing this very gate, none a real tactic invocation; see
+  [the mechanization doc's "A concrete pitfall"](KERNEL-PROOF-MECHANIZATION-V1.md#a-concrete-pitfall-the-textual-half-of-the-gate-must-avoid).
+- **Runs only when `lake` is on `PATH`**: a cold `lake build` of
+  `proofs/kernel0-lean/`, failing on a non-zero exit, on `sorryAx` appearing
+  anywhere in the combined output, on any headline theorem's `#print axioms`
+  line naming an axiom outside `propext`/`Classical.choice`/`Quot.sound`, or
+  on a headline theorem producing no `#print axioms` line at all. When
+  `lake` is absent, the script prints an explicit, unambiguous `SKIP` line
+  naming exactly what was not checked and exits 0 for that half only -- it
+  never reports a build it did not run as a pass.
+- **Invoked from `scripts/quality.sh full`** (after the validated
+  `semaprax.quality-route.v2` gate list, not part of its schema) and from
+  the standalone `kernel0-lean-proof-gate` CI job in `.github/workflows/ci.yml`.
+  The CI job is **not** wired into `release-gate`'s blocker set: GitHub-hosted
+  runners ship no Lean toolchain, and AGENTS.md forbids introducing
+  build-time network access to fetch one, so every hosted run of that job
+  today takes the source-level-only path above. This is a known,
+  intentional, and documented gap, not a silent pass -- promote it to a
+  release-gate blocker only once a hermetic, pre-baked or cached Lean
+  toolchain is available in that job without a build-time fetch.
+- **Local evidence** (this repository's own dev host has a working Lean
+  4.34.0 toolchain via `elan`, not on `PATH` by default -- run
+  `export PATH="$HOME/.elan/bin:$PATH"` first): a cold `lake build` run
+  against the committed proof completes in about a second and reports
+  `PASS (source checks + lake build + axiom audit)`. Deliberate mutations
+  verified this session to be caught by name (never as a generic build
+  failure alone): renaming `preservation` away, weakening `preservation`'s
+  conclusion to `True` while keeping its name, and appending a real
+  `theorem ... := by sorry` -- each reported by the specific failing check
+  before any of the others, and a `sorry` mentioned only inside a doc
+  comment was confirmed **not** to trip the token scan.
 
 ## Manual baseline
 
@@ -326,6 +385,7 @@ Select every row touched by the change; these categories are cumulative.
 | Unix npm publication | Real-carrier parent/ancestor substitution, exact retained artifact and foreign-byte preservation, healthy alias binding, unchanged no-clobber behavior and thread-local fixture isolation; [Project Manifest v2](PROJECT-MANIFEST-V2.md) owns the shared boundary and maintained regression modules |
 | Shared full-toolchain test launcher | Exact Cargo artifact selection, stale guessed-path rejection, unique manifest-bound binary and successful build completion; [development](DEVELOPMENT.md#verification) owns the helper boundary and maintained regression entry point |
 | Unpacked release product | Explicit native archive admission, exact inventory and manifest/version agreement, outside-checkout calculator and read-only daemon execution, stable source/package bytes, and real generated Node/Rust consumers; [release process](RELEASE-PROCESS.md) separates artifact labels, local execution and release provenance. No implicit archive build, extraction, installation or hosted promotion. |
+| Kernel-0 Lean proof (`proofs/kernel0-lean/`) | Headline-theorem presence and byte-exact pinned signatures (deletion, renaming, and statement-weakening all fail closed, no Lean toolchain needed), a comment/string-aware `sorry`/`admit`/`axiom` token scan, and, where `lake` is on PATH, a cold `lake build` plus a `#print axioms` audit requiring every headline theorem's axiom set to be a subset of `propext`/`Classical.choice`/`Quot.sound`. See "Kernel-0 Lean proof gate" below for the exact catch/skip inventory; a missing toolchain is an explicit, visible skip of the build half only, never a silent pass. |
 
 The owning specification lists exact focused tests. If it does not, add the
 missing evidence section there instead of growing this document into a second

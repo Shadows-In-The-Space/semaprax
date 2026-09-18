@@ -11,7 +11,7 @@ Build runtime agents whose proposals must pass checked code before they can act.
 
 [![CI](https://github.com/wavect/semaprax/actions/workflows/ci.yml/badge.svg)](https://github.com/wavect/semaprax/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.5.0-7c3aed.svg)](Cargo.toml)
-[![Status](https://img.shields.io/badge/status-pre--alpha-f59e0b.svg)](#project-status)
+[![Status](https://img.shields.io/badge/status-alpha-f59e0b.svg)](#project-status)
 [![License](https://img.shields.io/badge/license-Apache--2.0-2563eb.svg)](LICENSE)
 
 [Get started](#get-started) · [Why Semaprax?](#why-semaprax) ·

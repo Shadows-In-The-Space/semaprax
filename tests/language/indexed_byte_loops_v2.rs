@@ -180,6 +180,68 @@ fn malformed_general_or_effectful_loop_matches_are_exact_t252() {
 }
 
 #[test]
+fn a_near_miss_indexed_match_says_which_detail_is_wrong() {
+    // `Option::Some { byte }` is the shorthand form with a field name the
+    // variant does not have - the variant's field is `value`. Outside a
+    // while body the compiler says exactly that (`SPX-M104: unknown or
+    // duplicate pattern field`). Inside one it used to answer "match
+    // expressions are not yet admitted in while bodies", which is false: the
+    // shape IS admitted, and the author was told to restructure a loop when
+    // they needed to rename a field.
+    let near_miss = VALID.replace(
+        "Option::Some { value: byte } =>",
+        "Option::Some { byte } =>",
+    );
+    assert_ne!(near_miss, VALID, "the near-miss substitution must apply");
+    let program = parse(&near_miss, "indexed-byte-loop-near-miss.spx").unwrap();
+
+    let source_messages: Vec<String> = verify::verify(&program)
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == "SPX-T252")
+        .map(|diagnostic| diagnostic.message)
+        .collect();
+    let resolved_messages: Vec<String> = hir::resolve(&program)
+        .unwrap_err()
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == "SPX-T252")
+        .map(|diagnostic| diagnostic.message)
+        .collect();
+
+    // Both the source verifier and the resolver must say it, and say the
+    // same thing: they are differential twins, and a message that improves
+    // on one path only reintroduces the divergence this repository keeps
+    // paying for.
+    for (lane, messages) in [
+        ("source verifier", &source_messages),
+        ("resolver", &resolved_messages),
+    ] {
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("rename the field to `value`")),
+            "{lane} did not name the wrong field: {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message == "match expressions are not yet admitted in while bodies"),
+            "{lane} still answers a near miss with the generic refusal: {messages:?}"
+        );
+    }
+
+    // A match that is genuinely not the admitted shape still gets the
+    // generic message - the near-miss wording must not leak onto it.
+    let unrelated = VALID.replace("match byte_get(bytes, index)", "match Option<u8>::None {}");
+    let unrelated = parse(&unrelated, "indexed-byte-loop-unrelated.spx").unwrap();
+    assert!(hir::resolve(&unrelated)
+        .unwrap_err()
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == "SPX-T252")
+        .any(|diagnostic| diagnostic.message
+            == "match expressions are not yet admitted in while bodies"));
+}
+
+#[test]
 fn hostile_hir_cannot_forge_indexed_match_identity_inventory_or_types() {
     let program = parse(VALID, "indexed-byte-loop-hostile.spx").unwrap();
     let baseline = hir::resolve(&program).unwrap();

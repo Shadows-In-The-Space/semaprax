@@ -334,7 +334,7 @@ pub(super) fn reject_while_disallowed_oracle(
             diagnostics.push(error(
                 program,
                 "SPX-T252",
-                "match expressions are not yet admitted in while bodies",
+                &crate::byte_ops::while_body_match_refusal(expression),
                 expression.span,
             ));
             Err(())

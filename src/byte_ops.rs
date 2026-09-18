@@ -360,6 +360,85 @@ pub(crate) fn is_indexed_byte_option_match_source(expression: &Expr) -> bool {
     some_seen && none_seen
 }
 
+/// The refusal message for a `match` a `while` body does not admit.
+///
+/// A while body admits exactly one match shape: a two-arm
+/// `Option::Some { value }` / `Option::None {}` over a `byte_get` call, with
+/// no guard. A match whose scrutinee is already a `byte_get` call is
+/// therefore a *near miss* - the author wrote the admitted shape and got one
+/// detail wrong, most often by naming the binding something other than
+/// `value`. Answering that with "match expressions are not yet admitted in
+/// while bodies" sends them to restructure a loop when they need to rename a
+/// field, so a near miss says which detail is wrong instead.
+pub(crate) fn while_body_match_refusal(expression: &Expr) -> String {
+    const GENERIC: &str = "match expressions are not yet admitted in while bodies";
+    let ExprKind::Match {
+        scrutinee, arms, ..
+    } = &expression.kind
+    else {
+        return GENERIC.to_owned();
+    };
+    let ExprKind::Call {
+        name,
+        type_arguments,
+        args,
+    } = &scrutinee.kind
+    else {
+        return GENERIC.to_owned();
+    };
+    if by_name(name) != Some(ByteOp::Get)
+        || !type_arguments.is_empty()
+        || args.len() != ByteOp::Get.arity()
+    {
+        return GENERIC.to_owned();
+    }
+    let admitted = "a `byte_get` match in a while body must be exactly two unguarded arms, \
+                    `Option::Some { value }` and `Option::None {}`";
+    if arms.len() != 2 {
+        return format!("{admitted}; this one has {} arm(s)", arms.len());
+    }
+    for arm in arms {
+        if arm.guard.is_some() {
+            return format!("{admitted}; this one guards an arm");
+        }
+        let MatchPattern::Variant {
+            type_name,
+            case_name,
+            fields,
+            ..
+        } = &arm.pattern
+        else {
+            return format!("{admitted}; this one matches a non-variant pattern");
+        };
+        if type_name != "Option" {
+            return format!("{admitted}; this one matches `{type_name}`");
+        }
+        match case_name.as_str() {
+            "Some" if fields.len() == 1 && fields[0].name != "value" => {
+                return format!(
+                    "{admitted}; this one binds `Option::Some {{ {} }}` - rename the field to `value`",
+                    fields[0].name
+                );
+            }
+            "Some" if fields.len() != 1 => {
+                return format!(
+                    "{admitted}; this one binds {} field(s) in `Option::Some`",
+                    fields.len()
+                );
+            }
+            "None" if !fields.is_empty() => {
+                return format!(
+                    "{admitted}; this one binds {} field(s) in `Option::None`",
+                    fields.len()
+                );
+            }
+            "Some" | "None" => {}
+            other => return format!("{admitted}; this one matches `Option::{other}`"),
+        }
+    }
+    GENERIC.to_owned()
+}
+
 pub(crate) fn resolved_params(op: ByteOp) -> Vec<ResolvedParam> {
     op.param_types()
         .iter()

@@ -1,5 +1,8 @@
 # Windows doctor confinement and settlement contract v1
 
+Audience: release engineers, platform maintainers, and security reviewers
+with access to a real Windows host or a Windows CI runner.
+
 Status: **code lands with this revision, and it is unexecuted and
 untypechecked on every host that authored it.** Every execution claim in this
 document is `HUMAN_BLOCKED: needs a Windows host` -- both authoring sessions
@@ -11,9 +14,6 @@ host-independent sealed-capsule, admission-ordering, and settlement logic
 (compiled and tested on every host this crate builds on, this one included).
 See [Current state](#current-state-unchanged-by-the-first-revision) for
 exactly what changed and what a Windows-capable session must still verify.
-
-Audience: release engineers, platform maintainers, and security reviewers
-with access to a real Windows host or a Windows CI runner.
 
 The macOS half of this split is
 [DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1](DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1.md),

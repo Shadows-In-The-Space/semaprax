@@ -1,5 +1,8 @@
 # Semantic Kernel v1: trusted computing base, a proved kernel language, and the self-hosting gate ladder
 
+- Audience: compiler contributors, language designers, and any agent asked to
+  extend, self-host, or formally verify part of SEMAPRAX.
+
 - Status: proposed; trust-reduction programme opened, TCB inventoried, Kernel-0
   defined with a paper (not mechanized) type-safety sketch, three capacity
   ceilings measured with exact regression fixtures (one since fixed,
@@ -22,8 +25,6 @@
   typing table omits an operator combination (`bool == bool`/`bool !=
   bool`) the real language and the reification predicate both admit — both
   are recorded below rather than silently patched.
-- Audience: compiler contributors, language designers, and any agent asked to
-  extend, self-host, or formally verify part of SEMAPRAX.
 
 ## Why this document exists
 

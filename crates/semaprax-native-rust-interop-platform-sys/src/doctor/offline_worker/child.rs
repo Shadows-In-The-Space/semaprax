@@ -1,5 +1,5 @@
 //! Async-signal-safe, allocation-free child setup; every rejection exits.
-use super::{fail_stop, guard::Guard, offline_root};
+use super::{guard::Guard, offline_root};
 use std::ffi::CStr;
 
 /// The clone has a private address space and descriptor table. Provisioned

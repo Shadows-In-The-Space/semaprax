@@ -181,6 +181,78 @@ fn a_target_with_the_wrong_signature_is_rejected() {
 }
 
 #[test]
+fn a_body_that_is_not_a_call_at_all_is_rejected() {
+    // `check_construction`'s first shape arm (`ExprKind::Call` match failure)
+    // is distinct from the "call with the wrong arity/type-arguments" arm
+    // `a_target_with_the_wrong_signature_is_rejected` actually drives (that
+    // body IS a call, just not one whose one argument is a direct lexical
+    // capture). This body is not a call at all.
+    let body = r#"
+    let payload = bytes_zeroed(4usize);
+    let clo = own fn() -> i64 { 1 };
+    checksum(payload) + clo()
+"#;
+    let codes = error_codes(body);
+    assert!(
+        codes.contains(&"SPX-T292"),
+        "a body that is not a call at all must be rejected, got {codes:?}"
+    );
+}
+
+#[test]
+fn a_call_with_the_wrong_argument_count_is_rejected() {
+    // The second shape arm: the body is a call, but not with exactly one
+    // argument -- distinct from both the "not a call" arm above and the
+    // "argument is not a direct lexical capture" arm
+    // `a_target_with_the_wrong_signature_is_rejected` drives.
+    let body = r#"
+    let payload = bytes_zeroed(4usize);
+    let clo = own fn() -> i64 { checksum(payload, payload) };
+    clo()
+"#;
+    let codes = error_codes(body);
+    assert!(
+        codes.contains(&"SPX-T292"),
+        "a call with the wrong argument count must be rejected, got {codes:?}"
+    );
+}
+
+#[test]
+fn an_undeclared_owning_closure_target_is_rejected() {
+    // `SPX-T293`'s "target is not declared" arm, distinct from
+    // `a_declared_target_with_a_mismatched_arity_is_rejected`'s "declared but
+    // wrong signature" arm just below.
+    let body = r#"
+    let payload = bytes_zeroed(4usize);
+    let clo = own fn() -> i64 { does_not_exist(payload) };
+    clo()
+"#;
+    let codes = error_codes(body);
+    assert!(
+        codes.contains(&"SPX-T293"),
+        "an undeclared owning-closure target must be rejected, got {codes:?}"
+    );
+}
+
+#[test]
+fn capturing_an_unknown_value_is_rejected() {
+    // `SPX-T202`, the ordinary "unknown value" diagnostic reused here for an
+    // owning closure whose one argument is a `Var` naming no local binding at
+    // all (as opposed to `capturing_a_non_bytes_value_is_rejected`'s known
+    // binding of the wrong type).
+    let body = r#"
+    let payload = bytes_zeroed(4usize);
+    let clo = own fn() -> i64 { checksum(nonexistent_local) };
+    checksum(payload) + clo()
+"#;
+    let codes = error_codes(body);
+    assert!(
+        codes.contains(&"SPX-T202"),
+        "capturing an unknown local must be rejected, got {codes:?}"
+    );
+}
+
+#[test]
 fn a_declared_target_with_a_mismatched_arity_is_rejected() {
     let source_text = r#"module test.owning_closures_bad_target;
 @id("owning.two_params") fn two_params(payload: own Bytes, extra: i64) -> i64 {
@@ -217,6 +289,40 @@ fn capturing_a_non_bytes_value_is_rejected() {
     assert!(
         codes.contains(&"SPX-T294"),
         "capturing a non-`Bytes` value must be rejected before an owning closure ever admits it, got {codes:?}"
+    );
+}
+
+#[test]
+fn capturing_a_borrowed_bytes_view_is_rejected() {
+    // Distinct from `capturing_a_non_bytes_value_is_rejected`: this exercises
+    // `check_construction`'s `binding.mode != ParamMode::Own` arm specifically
+    // -- a genuine `Bytes`-typed local that is borrowed, not owned -- rather
+    // than the `binding.ty != Type::Bytes` arm the existing test drives. Both
+    // conditions share the same diagnostic code (`SPX-T294`), so this is the
+    // Required Tests checklist's "escaping borrowed captures ... remain
+    // rejected" case named directly, not merely a re-run of the type-mismatch
+    // case under a different name.
+    let source_text = r#"module test.owning_closures_borrowed_capture;
+@id("owning.checksum") fn checksum(payload: own Bytes) -> i64 {
+    42
+}
+@id("owning.holder") fn holder(view: borrow Bytes) -> i64 {
+    let clo = own fn() -> i64 { checksum(view) };
+    clo()
+}
+@id("owning.main") fn main() -> i64 { holder(bytes_zeroed(4usize)) }
+"#;
+    let codes = match semaprax::check(source_text, "owning-closures-borrowed-capture.spx") {
+        Ok(_) => Vec::new(),
+        Err(diagnostics) => diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity.is_error())
+            .map(|diagnostic| diagnostic.code)
+            .collect::<Vec<_>>(),
+    };
+    assert!(
+        codes.contains(&"SPX-T294"),
+        "capturing a borrowed `Bytes` view (rather than an owned one) must be rejected, got {codes:?}"
     );
 }
 

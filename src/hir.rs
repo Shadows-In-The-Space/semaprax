@@ -205,8 +205,8 @@ pub(crate) use inspection::{
 };
 
 pub(crate) use type_reachability::{
-    is_admitted_nested_owned_byte_record, is_flat_owned_byte_record, reachable_authored_types,
-    reachable_authored_types_with_roots,
+    authored_nominal_declarations, is_admitted_nested_owned_byte_record, is_flat_owned_byte_record,
+    reachable_authored_types, reachable_authored_types_with_roots,
 };
 pub(crate) use validation::resolved_type_contains_owned_bytes;
 pub(crate) use validation::validate_core;

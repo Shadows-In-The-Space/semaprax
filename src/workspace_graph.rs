@@ -1268,6 +1268,11 @@ impl WorkspaceGraphBuild {
                 types.extend(module.types.iter().cloned());
             }
             for function in &module.functions {
+                // A dependency member leaves the established v1 inventory when
+                // its signature leaves the profile, and equally when its body
+                // names an authored type. The linker below retains no authored
+                // type declaration at all, so a body-only mention would
+                // otherwise be linked against a type that is no longer there.
                 if dependency_fallback
                     && (!hir::useful_data_workspace_return_admitted(&function.return_type)
                         || function.params.iter().any(|parameter| {
@@ -1275,7 +1280,8 @@ impl WorkspaceGraphBuild {
                                 &parameter.ty,
                                 parameter.ownership,
                             )
-                        }))
+                        })
+                        || !hir::authored_nominal_declarations(function).is_empty())
                 {
                     incompatible_dependency_functions.insert(function.id.clone());
                 }

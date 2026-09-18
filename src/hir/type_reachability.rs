@@ -93,6 +93,22 @@ pub(crate) fn reachable_authored_types_with_roots(
         .collect()
 }
 
+/// Every authored nominal type declaration one resolved function mentions in
+/// its signature, contracts, or body.
+///
+/// A linker profile that retains no authored type declaration must refuse such
+/// a function by name rather than link it against a declaration set that no
+/// longer contains the type. Compiler-owned prelude identities are excluded:
+/// those carry their own retention.
+pub(crate) fn authored_nominal_declarations(
+    function: &ResolvedFunction,
+) -> BTreeSet<DeclarationId> {
+    let mut declarations = BTreeSet::new();
+    collect_function(function, &mut declarations);
+    declarations.retain(|id| !crate::prelude::is_compiler_owned_id(id.as_str()));
+    declarations
+}
+
 fn collect_function(function: &ResolvedFunction, declarations: &mut BTreeSet<DeclarationId>) {
     for parameter in &function.params {
         collect_type(&parameter.ty, declarations);

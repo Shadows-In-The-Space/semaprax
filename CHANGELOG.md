@@ -8,6 +8,16 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Refuse a bundled dependency member that names an authored type at the Useful
+  Data workspace linker boundary, by name, rather than admitting it into a
+  declaration set that deliberately holds no authored type and letting it
+  surface much later as `inline-array slot references an unknown type` inside
+  inline-array capacity analysis. Drop such a member from the retained
+  dependency inventory when nothing reaches it, so a bundled package may still
+  declare a generic record. This restores `semaprax new --template service`,
+  which the `record Secret<T>` added to the bundled `std.auth` had broken for
+  every scaffolded project (#268).
+
 - Execute the unchanged native reference provider inside freestanding Core Wasm
   at O0/O2 under both V8 tiers, with in-module allocation, ownership registries,
   multi-call copy-in/export/release and no host imports. Add a bounded private

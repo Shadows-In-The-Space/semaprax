@@ -1096,9 +1096,9 @@ only final (post-terminal) counts, since neither adapter tracks a peak.
 
 **Execution evidence.** Verified directly for this update:
 `cargo test --locked -p semaprax --lib
-public_generic_abi::carrier::settlement_corpus` — 9 passed, 0 failed (5
-cross-engine cases plus 4 `should_panic` negative controls on the checker
-itself).
+public_generic_abi::carrier::settlement_corpus` — 13 passed, 0 failed (6
+cross-engine agreement cases, 5 `should_panic` negative controls on the checker
+itself, and 2 settlement-manifest cases).
 
 **Not yet recorded as hosted evidence.** The
 `public-generic-ownership-milestone` job now continues beyond the grammar-only

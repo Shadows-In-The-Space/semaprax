@@ -248,7 +248,9 @@ than by advancing the row.
   (Wasm input path, native result path; fixed and each pinned by a
   concrete-trace-contents regression test, not a bare success assertion).
   Re-run directly for this update: `cargo test --locked -p semaprax --lib
-  public_generic_abi::carrier::settlement_corpus` — 9 passed, 0 failed.
+  public_generic_abi::carrier::settlement_corpus` — 13 passed, 0 failed (6
+  cross-engine agreement cases, 5 `should_panic` negative controls on the
+  comparison checker itself, and 2 settlement-manifest cases).
 
   This is not yet the full PG-7 the milestone asks for:
   - native C11 O0/O2 now participates through the existing integration harness,

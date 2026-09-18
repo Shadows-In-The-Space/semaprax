@@ -26,8 +26,8 @@
 //! layout, not a single `mod`-list harness) where the natural CI unit is
 //! the WHOLE binary, matching how `tests/public_generic_native_adapter_v1/run_all_four_callers.sh`
 //! already invokes each (`cargo test --locked --test "$native_bin"`/
-//! `"$wasm_bin"` with no per-test filter). It instead requires the three
-//! literal invocation strings below -- each already a distinctive,
+//! `"$wasm_bin"` with no per-test filter). It instead requires the literal
+//! invocation strings below -- each already a distinctive,
 //! never-otherwise-occurring substring of `.github/workflows/ci.yml`
 //! (confirmed empirically: zero hits for any of the three harness/module
 //! names anywhere in the pinned workflow before this issue) -- and, as a
@@ -56,6 +56,16 @@
 //! and exports the `clang`/`clang++`/`node` toolchains this corpus needs
 //! in its own "Resolve the consumer toolchains this host really has" step,
 //! so no new toolchain provisioning is required.
+//!
+//! Issue #163 extends this guard with a fourth row. The library module
+//! `public_generic_abi` -- which owns the descriptor carrier, the
+//! cross-engine settlement corpus and its pinned settlement manifest, and
+//! the WIT projection -- was selected by no workflow file on any host:
+//! `--lib public_generic_settlement`, already in the job's grammar step, is
+//! a different module, and the three `--test` rows above drive the adapters
+//! rather than this one. Its 307 cases were green only on contributors'
+//! own machines, which is the same "real, green, local suite with no CI
+//! selector" defect this file was created to close.
 
 use std::fs;
 use std::path::Path;
@@ -112,6 +122,16 @@ const ROWS: &[Row] = &[
             "tests/public_generic_wasm_adapter_v1/typescript_calling_consumer.rs",
         ],
         required_ci_invocation: "cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1",
+    },
+    Row {
+        description: "public generic ABI library module (descriptor carrier, cross-engine \
+                       settlement corpus and its pinned settlement manifest, WIT projection) \
+                       -- issue #163",
+        test_files: &[
+            "src/public_generic_abi/carrier/settlement_corpus.rs",
+            "src/public_generic_abi/wit_projection/tests.rs",
+        ],
+        required_ci_invocation: "cargo test --locked -p semaprax --lib public_generic_abi",
     },
     Row {
         description: "independent malformed descriptor/carrier/binding replay (issue #173)",

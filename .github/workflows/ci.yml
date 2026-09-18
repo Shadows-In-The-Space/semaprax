@@ -445,6 +445,19 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p semaprax --test projections public_generic_consumers -- --nocapture
+      - name: Public generic ABI carrier, settlement corpus and WIT projection
+        shell: bash
+        run: |
+          # `public_generic_abi` is the library module that owns the descriptor
+          # carrier, the cross-engine settlement corpus and its pinned
+          # settlement manifest, and the WIT projection. Until now no workflow
+          # file selected it on any host: `--lib public_generic_settlement`
+          # above is a different module, and the `--test` harnesses below drive
+          # the adapters rather than this one. Every one of these cases passed
+          # only on a contributor's own machine, which is exactly the "local
+          # evidence described as hosted" gap issue #163 exists to close.
+          set -euo pipefail
+          cargo test --locked -p semaprax --lib public_generic_abi
       - name: Callable-boundary corpus, generated consumers, settlement and hostile replay
         shell: bash
         run: |

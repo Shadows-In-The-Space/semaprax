@@ -234,6 +234,22 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
     const PROJECT_ASSURANCE_MANIFEST_LINE: &str = "semaprax project-assurance-manifest <manifest> [--max-bytes N] [--max-obligations N] [--forbid-reaches <claim-id> <from-id> <to-id>]...\n";
     assert_eq!(current.matches(PROJECT_ASSURANCE_MANIFEST_LINE).count(), 1);
     current = current.replacen(PROJECT_ASSURANCE_MANIFEST_LINE, "", 1);
+    // `semaprax release verify` was added by #197 (commit 732970db) and the two
+    // persistent-semantic-cache open verbs by #130 (commit d3be06ec), all after
+    // these witnesses were pinned. Normalize them away here, exactly as every
+    // other intentional usage addition above is, so the historical byte and
+    // digest pins below keep describing the surface they were taken from.
+    const RELEASE_VERIFY_LINE: &str = "semaprax release verify <release-dir>\n";
+    assert_eq!(current.matches(RELEASE_VERIFY_LINE).count(), 1);
+    current = current.replacen(RELEASE_VERIFY_LINE, "", 1);
+    const CACHE_OPEN_LINES: [&str; 2] = [
+        "semaprax semantic-cache-cold-open <manifest>\n",
+        "semaprax semantic-cache-warm-open <manifest> <store-root> <entry-digest>\n",
+    ];
+    for line in CACHE_OPEN_LINES {
+        assert_eq!(current.matches(line).count(), 1);
+        current = current.replacen(line, "", 1);
+    }
     const GIT_PUBLISH_LINE: &str = "semaprax project-candidate-git-publish <manifest> <capsule.json> <approved-candidate-digest> <host-policy.json>\n";
     const WORKSPACE_LINE: &str = "semaprax serve-workspace <manifest> <host-policy.json>\n";
     const PROFILE_DOCTOR_LINE: &str =

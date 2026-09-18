@@ -792,3 +792,181 @@ fn evidence_flows_reject_graph_v16_fail_closed() {
     assert_eq!(refusal.code, "SPX-G410");
     assert!(graph::reject_evidence_schema("semaprax.graph.v10").is_ok());
 }
+
+/// Refutable Match v1 over a `usize` scrutinee.
+///
+/// `usize` selects Graph v17 (portable indexed byte data), which sits above
+/// the v16 lattice `CORPUS` pins, so this scrutinee needs its own corpus:
+/// folding it into `CORPUS` would silently retire that v16 selection proof.
+const USIZE_CORPUS: &str = r#"
+module test.refutable_match_usize;
+
+@id("rmu.route")
+fn route(index: usize) -> i64 {
+    match index {
+        0usize => -1,
+        1usize | 2usize => 2,
+        k if k > 100usize => 3,
+        _ => 4,
+    }
+}
+
+@id("rmu.width")
+fn width(index: usize) -> usize {
+    match index {
+        0usize => 7usize,
+        other => other,
+    }
+}
+
+@id("main")
+fn main() -> i64 {
+    route(0usize) + route(2usize) + route(101usize) + route(5usize)
+        + if width(0usize) == 7usize { 1 } else { 0 }
+        + if width(9usize) == 9usize { 1 } else { 0 }
+}
+"#;
+
+#[test]
+fn usize_refutable_matches_agree_across_interpreter_native_and_wasm() {
+    // Regression for a `usize` scrutinee reaching every lowering path. The
+    // Refutable Match v1 scalar set was duplicated across the cleanup
+    // builder, its recursive reference, independent replay, the Wasm local
+    // layout, the core Wasm lane and the native emitter; `usize` reached
+    // three of them, so this program was refused by `check` with a message
+    // about wildcard arm order. Only a cross-backend execution can show that
+    // the admitted program now means the same thing everywhere.
+    //
+    // main() = -1 + 2 + 3 + 4 + 1 + 1 = 10.
+    const EXPECTED: i64 = 10;
+
+    let path = write_corpus(USIZE_CORPUS, "usize");
+    let source = std::fs::read_to_string(&path).expect("corpus source");
+    let program = parse(&source, &path).expect("usize refutable corpus parses");
+    let resolved = hir::resolve(&program).expect("usize refutable corpus resolves");
+    assert!(
+        resolved
+            .functions
+            .iter()
+            .any(|function| function.id.as_str() == "rmu.route"),
+        "the scalar route survives resolution"
+    );
+
+    for (token, arguments, expected) in [
+        ("rmu.route", vec!["0usize"], "-1"),
+        ("rmu.route", vec!["2usize"], "2"),
+        ("rmu.route", vec!["101usize"], "3"),
+        ("rmu.route", vec!["5usize"], "4"),
+        ("rmu.width", vec!["0usize"], "7usize"),
+        ("rmu.width", vec!["9usize"], "9usize"),
+    ] {
+        let owned: Vec<String> = arguments
+            .iter()
+            .map(|argument| argument.to_string())
+            .collect();
+        let options = InterpreterOptions::new(65536, DEFAULT_MAX_STEPS).unwrap();
+        let envelope = interpreter::interpret(&path, token, &owned, &options)
+            .expect("interpretation")
+            .envelope;
+        let parsed: serde_json::Value = serde_json::from_str(&envelope).unwrap();
+        let outcome = &parsed["payload"]["outcome"];
+        assert_eq!(outcome["kind"], "returned", "{token}: {envelope}");
+        assert_eq!(
+            outcome["value"], expected,
+            "{token} agrees with both backends: {envelope}"
+        );
+    }
+
+    if command_available("clang") {
+        let generated = codegen::emit_c(&program).unwrap();
+        assert_eq!(generated, codegen::emit_c(&program).unwrap());
+        let symbol = |id: &str| format!("spx_decl_{}", hex_identity(id));
+        let probe = format!(
+            r#"
+int main(void) {{
+    struct spx_status_entry entries[UINT32_C(32)];
+    struct spx_context context = {{0}};
+    if (!spx_context_init(&context, UINT64_C(96), entries, UINT32_C(32), NULL, NULL, NULL)) return 10;
+    int64_t out = 0;
+    uint64_t wide = 0;
+    if ({route}(&context, UINT64_C(0), &out) != SPX_STATUS_SUCCESS || out != -INT64_C(1)) return 11;
+    if ({route}(&context, UINT64_C(2), &out) != SPX_STATUS_SUCCESS || out != INT64_C(2)) return 12;
+    if ({route}(&context, UINT64_C(101), &out) != SPX_STATUS_SUCCESS || out != INT64_C(3)) return 13;
+    if ({route}(&context, UINT64_C(5), &out) != SPX_STATUS_SUCCESS || out != INT64_C(4)) return 14;
+    if ({width}(&context, UINT64_C(0), &wide) != SPX_STATUS_SUCCESS || wide != UINT64_C(7)) return 15;
+    if ({width}(&context, UINT64_C(9), &wide) != SPX_STATUS_SUCCESS || wide != UINT64_C(9)) return 16;
+    if ({main_fn}(&context, &out) != SPX_STATUS_SUCCESS || out != INT64_C({expected})) return 17;
+    return 0;
+}}
+"#,
+            route = symbol("rmu.route"),
+            width = symbol("rmu.width"),
+            main_fn = symbol("main"),
+            expected = EXPECTED,
+        );
+
+        for optimization in ["-O0", "-O2"] {
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let stem = format!("semaprax-refutable-usize-{}-{id}", std::process::id());
+            let csource = std::env::temp_dir().join(format!("{stem}.c"));
+            let executable =
+                std::env::temp_dir().join(format!("{stem}{}", std::env::consts::EXE_SUFFIX));
+            std::fs::write(&csource, format!("{generated}\n{probe}")).unwrap();
+            let compiled = Command::new("clang")
+                .args([
+                    "-std=c11",
+                    optimization,
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-DSPX_NO_ENTRY_WRAPPER",
+                ])
+                .arg(&csource)
+                .arg("-o")
+                .arg(&executable)
+                .output()
+                .unwrap();
+            assert!(
+                compiled.status.success(),
+                "native C failed at {optimization}: {}\n{probe}",
+                String::from_utf8_lossy(&compiled.stderr)
+            );
+            let executed = Command::new(&executable).output().unwrap();
+            let code = executed.status.code();
+            let _ = std::fs::remove_file(&csource);
+            let _ = std::fs::remove_file(&executable);
+            assert!(
+                executed.status.success(),
+                "native usize refutable match failed at {optimization}: {code:?}"
+            );
+        }
+    }
+
+    if command_available("node") {
+        let bytes = semaprax::wasm::emit_module(&program).unwrap();
+        assert_eq!(bytes, semaprax::wasm::emit_module(&program).unwrap());
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let stem = format!("semaprax-refutable-usize-wasm-{}-{id}", std::process::id());
+        let wasm_path = std::env::temp_dir().join(format!("{stem}.wasm"));
+        let script_path = std::env::temp_dir().join(format!("{stem}.mjs"));
+        std::fs::write(&wasm_path, bytes).unwrap();
+        std::fs::write(&script_path, NODE_RUNNER).unwrap();
+        let output = Command::new("node")
+            .arg(&script_path)
+            .arg(&wasm_path)
+            .arg(EXPECTED.to_string())
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_file(&script_path);
+        let _ = std::fs::remove_file(&wasm_path);
+        assert!(
+            output.status.success(),
+            "Node usize refutable leg failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "refutable-wasm-ok"
+        );
+    }
+}

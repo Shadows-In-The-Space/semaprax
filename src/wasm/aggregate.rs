@@ -4766,15 +4766,7 @@ impl Emitter<'_> {
                 // Refutable Match v1: Copy-scalar scrutinees lower to the
                 // literal/guard decision chain even on the aggregate lane;
                 // aggregate storage keeps the pre-feature lowering below.
-                if matches!(
-                    value_type(&scrutinee),
-                    ResolvedType::I64
-                        | ResolvedType::I32
-                        | ResolvedType::U8
-                        | ResolvedType::Usize
-                        | ResolvedType::Char
-                        | ResolvedType::Bool
-                ) {
+                if crate::hir::is_refutable_match_scalar(value_type(&scrutinee)) {
                     return self.emit_scalar_refutable_match(expr, &scrutinee, arms);
                 }
                 let Value::Aggregate { pointer, ty } = &scrutinee else {

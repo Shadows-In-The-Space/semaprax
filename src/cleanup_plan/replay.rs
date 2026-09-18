@@ -4574,14 +4574,7 @@ fn expression_skeleton(
                     continue;
                 }
                 // Scalar decisions authenticate each selected arm and guard.
-                if matches!(
-                    scrutinee.ty,
-                    ResolvedType::I64
-                        | ResolvedType::I32
-                        | ResolvedType::U8
-                        | ResolvedType::Char
-                        | ResolvedType::Bool
-                ) {
+                if crate::hir::is_refutable_match_scalar(&scrutinee.ty) {
                     produced = Some(finish_scalar_match_skeleton(
                         program,
                         function,

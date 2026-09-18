@@ -336,8 +336,8 @@ pub(crate) fn bounded_owned_record_template_for_function<'a>(
     matched
 }
 pub(crate) use nodes::{
-    admitted_owned_byte_prelude_instance, is_scalar_resolved_type, LinkedDeclarationFact,
-    LinkedOwnedDataParts, LinkedScalarFunction,
+    admitted_owned_byte_prelude_instance, is_refutable_match_scalar, is_scalar_resolved_type,
+    LinkedDeclarationFact, LinkedOwnedDataParts, LinkedScalarFunction,
 };
 pub use nodes::{
     ByteSliceExtent, ByteSliceProvenance, ByteSliceRangeStep, ByteSliceRootKind, Declaration,

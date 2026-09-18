@@ -4180,14 +4180,7 @@ fn emit_expr(
             // Refutable Match v1: Copy-scalar scrutinees lower to the
             // literal/guard decision chain on the core lane; aggregates keep
             // the aggregate-lane rejection below.
-            if matches!(
-                scrutinee.ty,
-                ResolvedType::I64
-                    | ResolvedType::I32
-                    | ResolvedType::U8
-                    | ResolvedType::Char
-                    | ResolvedType::Bool
-            ) {
+            if crate::hir::is_refutable_match_scalar(&scrutinee.ty) {
                 return emit_scalar_refutable_match(
                     output,
                     expr,
@@ -4379,6 +4372,13 @@ fn emit_alternative_tests(
                 output.push(0x41);
                 write_i64(output, i64::from(*inner));
                 output.push(0x46);
+            }
+            (ResolvedType::Usize, crate::hir::PatternValue::Usize(inner)) => {
+                // `usize` rides the i64 valtype, matching the literal
+                // expression encoding and the aggregate lane's own test.
+                output.push(0x42); // i64.const
+                write_i64(output, *inner as i64);
+                output.push(0x51); // i64.eq -> i32
             }
             (ResolvedType::Char, crate::hir::PatternValue::Char(inner)) => {
                 output.push(0x41);

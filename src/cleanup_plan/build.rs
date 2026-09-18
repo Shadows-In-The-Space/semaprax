@@ -3880,14 +3880,7 @@ impl<'a> PlanBuilder<'a> {
                             "droppable match scrutinee reached the copy-only cleanup slice",
                         ));
                     }
-                    if matches!(
-                        scrutinee.ty,
-                        ResolvedType::I64
-                            | ResolvedType::I32
-                            | ResolvedType::U8
-                            | ResolvedType::Char
-                            | ResolvedType::Bool
-                    ) {
+                    if crate::hir::is_refutable_match_scalar(&scrutinee.ty) {
                         let destination = self.expression_slot(expression, active_region)?;
                         frames.push(Frame::ScalarMatchNext {
                             expression,
@@ -6071,15 +6064,7 @@ impl<'a> PlanBuilder<'a> {
         }
         // Refutable Match v1: recursive-reference twin of the scalar
         // decision chain.
-        if matches!(
-            scrutinee.ty,
-            ResolvedType::I64
-                | ResolvedType::I32
-                | ResolvedType::U8
-                | ResolvedType::Usize
-                | ResolvedType::Char
-                | ResolvedType::Bool
-        ) {
+        if crate::hir::is_refutable_match_scalar(&scrutinee.ty) {
             let destination = self.expression_slot(expression, region)?;
             return self.lower_scalar_match(
                 expression,
@@ -6515,6 +6500,31 @@ fn window_len(value: borrow Slice<u8>, start: usize, end: usize) -> usize {
     }
 
     #[test]
+    fn usize_scalar_match_lowers_through_the_iterative_scalar_chain() {
+        // Regression: the iterative lowering's scalar-match dispatch omitted
+        // `Usize` while the recursive reference admitted it, so a `usize`
+        // literal match fell through to variant-arm lowering and refused with
+        // "wildcard match arm must be the final exhaustive arm" — a message
+        // about arm order, for a program whose wildcard already was final.
+        let source = r#"
+module test.cleanup_usize_match;
+@id("pick") fn pick(index: usize) -> i64 {
+  match index { 0usize => 10, 1usize => 20, _ => 30, }
+}
+@id("main") fn main() -> i64 { 0 }
+"#;
+        let program =
+            hir::resolve(&parse(source, Path::new("cleanup-usize-match.spx")).expect("parses"))
+                .expect("a usize literal match resolves and lowers");
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.id.as_str() == "pick")
+            .expect("scalar match function is retained");
+        assert_expression_lowering_oracle(&program, function, &function.body);
+    }
+
+    #[test]
     fn iterative_lowering_matches_recursive_reference_for_every_resolved_body() {
         let source = r#"
 module test.cleanup_lowering_oracle;
@@ -6544,6 +6554,22 @@ interface HostEcho permits { host.echo } {
 @id("result_use") fn result_use(value: Result<i64, bool>) -> Result<bool, bool> {
   let checked = value?;
   Result<bool, bool>::Ok { value: checked > 0 }
+}
+@id("scalar_usize") fn scalar_usize(index: usize) -> i64 {
+  match index {
+    0usize => 10,
+    1usize | 2usize => 20,
+    _ => 30,
+  }
+}
+@id("scalar_usize_binding") fn scalar_usize_binding(index: usize) -> usize {
+  match index {
+    0usize => 7usize,
+    other => other,
+  }
+}
+@id("scalar_u8") fn scalar_u8(byte: u8) -> i64 {
+  match byte { 0u8 => 1, _ => 2, }
 }
 @id("exercise") fn exercise(flag: bool, choice: Choice, pair: Pair) -> i64
   uses { host.echo }

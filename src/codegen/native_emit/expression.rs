@@ -1744,14 +1744,7 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 // Refutable Match v1: Copy-scalar scrutinees lower to the
                 // literal/guard decision chain; aggregates keep the exact
                 // pre-feature lowering below.
-                if matches!(
-                    scrutinee.ty,
-                    ResolvedType::I64
-                        | ResolvedType::I32
-                        | ResolvedType::U8
-                        | ResolvedType::Char
-                        | ResolvedType::Bool
-                ) {
+                if crate::hir::is_refutable_match_scalar(&scrutinee.ty) {
                     return self.emit_scalar_match(expr, &scalar_scrutinee, &scrutinee, arms);
                 }
                 if let Some(record) = record_declaration_id(self.program, &scrutinee.ty)?.cloned() {

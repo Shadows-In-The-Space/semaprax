@@ -123,14 +123,7 @@ pub(super) fn collect_locals(
             scrutinee, arms, ..
         } => {
             collect_locals(scrutinee, parameter_count, layout)?;
-            if matches!(
-                scrutinee.ty,
-                ResolvedType::I64
-                    | ResolvedType::I32
-                    | ResolvedType::U8
-                    | ResolvedType::Char
-                    | ResolvedType::Bool
-            ) {
+            if crate::hir::is_refutable_match_scalar(&scrutinee.ty) {
                 // Refutable Match v1: stage the scrutinee once in its own
                 // dedicated local so every arm test re-reads exactly one
                 // evaluation.

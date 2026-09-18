@@ -694,6 +694,20 @@ pub struct ResolvedBinding {
     pub span: Span,
 }
 
+/// Refutable Match v1 admits every checked Copy scalar except the floats,
+/// which are never compared by exact pattern equality.
+///
+/// Every match-lowering path must agree on this set. While the iterative
+/// cleanup builder, its recursive reference, independent replay, the core
+/// Wasm lane, the Wasm aggregate lanes and the native C11 emitter each kept a
+/// private copy, `Usize` reached three of them and was missed by the other
+/// four: a `usize` literal match was admitted by the reference and refused by
+/// the production path with a message about arm order. Derive it here so the
+/// set cannot drift again.
+pub(crate) fn is_refutable_match_scalar(ty: &ResolvedType) -> bool {
+    is_scalar_resolved_type(ty) && !matches!(ty, ResolvedType::F32 | ResolvedType::F64)
+}
+
 /// Explicit Mutation v1 admits exactly the checked Copy scalar value types.
 pub(crate) fn is_scalar_resolved_type(ty: &ResolvedType) -> bool {
     matches!(

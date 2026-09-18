@@ -26,16 +26,7 @@ impl Emitter<'_> {
                 mode: crate::hir::ResolvedMatchMode::Value,
                 scrutinee,
                 arms,
-            } if matches!(
-                scrutinee.ty,
-                ResolvedType::I64
-                    | ResolvedType::I32
-                    | ResolvedType::U8
-                    | ResolvedType::Usize
-                    | ResolvedType::Char
-                    | ResolvedType::Bool
-            ) =>
-            {
+            } if crate::hir::is_refutable_match_scalar(&scrutinee.ty) => {
                 if is_aggregate(self.program, &expr.ty)? {
                     return Err(error("copy match result must be i64 or bool"));
                 }

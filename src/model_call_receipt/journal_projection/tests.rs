@@ -79,6 +79,10 @@ fn actual_kernel_calls_project_replay_and_bind_audit_objects() {
             associations: vec![],
             signatures: vec![],
             transparency: None,
+            nonclaims: crate::audit_capsule::nonclaims::ALWAYS_REQUIRED_NONCLAIMS
+                .iter()
+                .map(|entry| (*entry).to_owned())
+                .collect(),
         };
         let bytes = BTreeMap::from([(object.id.clone(), receipt.render().into_bytes())]);
         crate::audit_capsule::check_subject_bindings(&capsule).unwrap();

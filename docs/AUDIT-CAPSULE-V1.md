@@ -1,10 +1,10 @@
 # Audit Capsule v1
 
-Status: versioned manifest schema, object-type/relation/role/algorithm
-registries, a canonical builder, an independent structural verifier, and a
-structural diff. Cryptographic signing and real transparency-log
-submission/verification are `HUMAN_BLOCKED` -- neither exists in this
-repository, and this document must not be read as claiming otherwise.
+Status: versioned manifest schema and registries, a canonical builder, a
+structural verifier, a structural diff, machine-readable `nonclaims`, and
+independent replay of a `change` capsule against source. Cryptographic
+signing and real transparency-log submission are `HUMAN_BLOCKED` -- neither
+exists here, and this document must not be read as claiming otherwise.
 
 Audience: implementers wiring a capsule producer, reviewers auditing a
 capsule, and anyone extending `src/audit_capsule.rs`.
@@ -277,3 +277,122 @@ claims, never collapsed into one green summary:
   `src/audit_capsule.rs` executes, publishes, or spawns anything, and
   possessing (or fully verifying) a capsule is not the same fact as a human
   or policy having granted permission for whatever the capsule describes.
+
+
+## Machine-readable `nonclaims` (required)
+
+Every `semaprax.audit-capsule.v1` manifest carries a required, non-empty,
+canonically ordered `nonclaims` array drawn from the closed vocabulary
+`src/audit_capsule/nonclaims.rs` defines in `KNOWN_NONCLAIMS`. It states, in
+a form a downstream tool can act on, exactly what the capsule does **not**
+establish.
+
+The field exists because a capsule travels. Its whole purpose is that
+someone who was not present can verify it later, elsewhere, with no access
+to this repository -- and a disclaimer recorded only in this document does
+not travel with the bytes. Without the field, a downstream reader who never
+reads this page would see a fully green `verify_capsule` report and
+reasonably, and wrongly, conclude the capsule's signatures had been
+cryptographically checked.
+
+`ALWAYS_REQUIRED_NONCLAIMS` applies to every capsule regardless of profile
+or contents:
+
+| Nonclaim | What it denies |
+| --- | --- |
+| `signatures-not-cryptographically-verified` | No signature was decoded or verified. No signing key, keyless-signing identity, or verification dependency exists in this repository (issue #168 remains open). A forged signature naming an approved identity is not detected. |
+| `transparency-inclusion-not-independently-confirmed` | No transparency log was contacted. Only a caller-supplied entry's internal consistency was checked. |
+| `evidence-is-not-authorization` | Verification authorizes nothing: not publication, execution, signing, tagging, or deployment. |
+| `local-evidence-only` | Everything referenced was produced on a private developer machine. This is not evidence of a hosted CI run, a physical-device run, or a production deployment. |
+
+One further nonclaim is derived from the capsule's own structure: a capsule
+with any redacted object must also declare
+`redacted-objects-withhold-facts`.
+
+### Why a reader cannot lose them
+
+`check_nonclaims` does not trust the declared list. It re-derives, from the
+capsule's own structural facts and sharing no data with the declared array,
+the set this exact capsule is obliged to carry, and fails closed with
+`SPX-Z908` when any is missing. Deleting
+`signatures-not-cryptographically-verified` to make a capsule look stronger
+does not yield a weaker-but-valid capsule; it yields one that no longer
+verifies at all. A capsule may declare *more* nonclaims than required --
+being more modest is always admitted -- but never fewer, and never one
+outside the closed vocabulary. `CapsuleVerificationReport::nonclaims`
+carries them back out of verification as data, so a caller rendering a
+report cannot present a green result without them.
+
+Unsorted, duplicated, empty, and invented `nonclaims` are all rejected at
+parse time (`SPX-Z908`); the list is never silently repaired, because two
+orderings of one set would otherwise give one capsule two digests.
+
+## Independent replay against source (`change` profile)
+
+Every other check in this module is *structural*: it proves a capsule is
+internally consistent and that its retained objects still hash to the
+digests it records. That is necessary and insufficient. A producer can
+hand-write a flawless capsule whose subject names a `source_digest`,
+`root_digest`, and `revision` that no source tree ever produced, and every
+structural check passes -- because every structural check only ever compares
+the capsule against itself.
+
+`src/audit_capsule/change_replay.rs` closes that gap for the `change`
+profile:
+
+- `derive_change_identities` recomputes every identity from source text
+  alone, via `crate::parse`, `crate::verify::verify`,
+  `crate::format::canonical`, `crate::graph::revision`, and
+  `crate::graph::to_json`. It refuses source that does not parse or no
+  longer passes verification.
+- `emit_change_capsule` builds a capsule whose subject was re-derived rather
+  than asserted. The caller supplies only the evidence objects the change
+  itself owns (its semantic transaction, its assurance manifest); the
+  emitter derives the canonical source projection and the semantic graph
+  document, their digests, and the `derived_from` edge between them. Object
+  ids `derived-a-source-projection` and `derived-b-program-root` are
+  reserved, so a supplied object cannot shadow a derived one.
+- `verify_change_capsule_against_source` runs `verify_capsule` first, then
+  recomputes every identity from the source under test and refuses on any
+  disagreement with `SPX-Z909`. Toolchain drift is checked before the
+  identities, since a different compiler can legitimately derive a different
+  revision, and reporting that as source drift would mislead.
+
+This mirrors `verify_certificate_against_source` in
+`src/assurance_manifest/proof_certificate/verify.rs`, for the same reason: a
+document's self-reported fields are the claim under test, never the evidence
+for it.
+
+`change` is the only profile with such a replay, and deliberately so. Its
+subject is the only one whose every identity is a pure, deterministic
+function of bytes already in hand. An `agent-run` subject names a
+`session_id` only a live invocation can attest; a `release` subject names a
+`release_tag` and `commit` whose authority lives in Git and in a signing
+identity this repository does not have. Replaying those would mean inventing
+evidence.
+
+### Still no authority, and no new reach
+
+A successful replay proves the capsule's identities match that exact source.
+It is not permission to publish, tag, deploy, or sign anything, and nothing
+in this module performs such an action. `current_source` arrives as a string
+the caller already read: replay takes no `Path`, opens no file, spawns no
+process, and reaches no socket, so it cannot become a route to reading
+something the caller was never authorized to read. A test asserts this
+against the module's own source text rather than claiming it by inspection.
+
+### Subject key change
+
+`SUBJECT_KEYS_CHANGE` binds `compiler_version` alongside `source_digest`,
+`root_digest`, and `revision`. Both the root digest and the revision are
+deterministic functions of the source *and* the toolchain, so a capsule that
+recorded them without naming the compiler could not be replayed without
+silently assuming one.
+
+## What is still not implemented
+
+Unchanged by this work, and repeated here so a reader of this section alone
+is not misled: there is no cryptographic signing, no transparency-log
+submission or verification, no `semaprax audit verify|inspect|diff` CLI
+surface, no profile composition, and no replay for the `agent-run` or
+`release` profiles.

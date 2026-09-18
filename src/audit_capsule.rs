@@ -81,6 +81,9 @@ use sha2::{Digest as _, Sha256};
 
 use crate::diagnostic::Diagnostic;
 
+pub mod change_replay;
+pub mod nonclaims;
+
 pub const CAPSULE_SCHEMA: &str = "semaprax.audit-capsule.v1";
 
 /// A capsule's manifest bytes may not exceed this many bytes. Guards against
@@ -164,7 +167,16 @@ pub const REQUIRED_OBJECT_TYPES_RELEASE: &[&str] = &[
     "package-manifest",
 ];
 
-pub const SUBJECT_KEYS_CHANGE: &[&str] = &["source_digest", "root_digest", "revision"];
+/// The change profile binds the compiler that derived `root_digest` and
+/// `revision` alongside them: both are deterministic functions of the source
+/// *and* the toolchain, so a capsule that recorded them without naming the
+/// compiler could not be replayed without silently assuming one.
+pub const SUBJECT_KEYS_CHANGE: &[&str] = &[
+    "source_digest",
+    "root_digest",
+    "revision",
+    "compiler_version",
+];
 pub const SUBJECT_KEYS_AGENT_RUN: &[&str] = &["session_id", "deployment_digest", "target_digest"];
 pub const SUBJECT_KEYS_RELEASE: &[&str] = &["release_tag", "commit", "artifact_digest"];
 
@@ -459,6 +471,11 @@ pub struct ParsedCapsule {
     pub associations: Vec<AssociationEdge>,
     pub signatures: Vec<SignatureEntry>,
     pub transparency: Option<TransparencyEntry>,
+    /// What this capsule explicitly does **not** establish. Required,
+    /// non-empty, and canonically ordered; `nonclaims::check_nonclaims`
+    /// independently re-derives the entries a capsule of this exact shape
+    /// must carry and refuses one that omits any of them.
+    pub nonclaims: Vec<String>,
 }
 
 fn parse_object(value: &Value, profile: Profile) -> Result<ObjectRef, Diagnostic> {
@@ -673,6 +690,7 @@ pub fn parse_capsule(bytes: &[u8]) -> Result<ParsedCapsule, Diagnostic> {
             "associations",
             "signatures",
             "transparency",
+            "nonclaims",
         ],
         "audit capsule",
     )?;
@@ -757,6 +775,8 @@ pub fn parse_capsule(bytes: &[u8]) -> Result<ParsedCapsule, Diagnostic> {
         other => Some(parse_transparency(other)?),
     };
 
+    let nonclaims = nonclaims::parse_nonclaims(&value["nonclaims"])?;
+
     Ok(ParsedCapsule {
         profile,
         subject,
@@ -764,6 +784,7 @@ pub fn parse_capsule(bytes: &[u8]) -> Result<ParsedCapsule, Diagnostic> {
         associations,
         signatures,
         transparency,
+        nonclaims,
     })
 }
 
@@ -1053,6 +1074,10 @@ pub struct CapsuleVerificationReport {
     /// #209's redaction requirement, rather than a green summary that
     /// silently omits them.
     pub unavailable_claims: Vec<(String, String, String)>,
+    /// Exactly what this capsule does **not** establish, carried out of
+    /// verification as data so a downstream reader that renders a report
+    /// cannot present a green result without them.
+    pub nonclaims: Vec<String>,
 }
 
 /// Verifies one capsule end to end: structural/vocabulary validity, the
@@ -1073,6 +1098,7 @@ pub fn verify_capsule(
     check_required_object_types(&capsule)?;
     check_associations(&capsule)?;
     check_subject_bindings(&capsule)?;
+    nonclaims::check_nonclaims(&capsule)?;
     let verified_object_ids = check_object_bytes(&capsule, object_bytes)?;
     check_signature_policy(&capsule, signature_ctx)?;
     check_transparency(&capsule, manifest_bytes, transparency_ctx)?;
@@ -1095,6 +1121,7 @@ pub fn verify_capsule(
         profile: capsule.profile,
         verified_object_ids,
         unavailable_claims,
+        nonclaims: capsule.nonclaims.clone(),
     })
 }
 
@@ -1132,6 +1159,7 @@ pub fn render_capsule(
     associations: &[AssociationEdge],
     signatures: &[SignatureEntry],
     transparency: Option<&TransparencyEntry>,
+    nonclaims: &[String],
 ) -> Result<Vec<u8>, Diagnostic> {
     let subject_keys: BTreeSet<&str> = subject.keys().map(String::as_str).collect();
     let expected_keys: BTreeSet<&str> = profile.subject_keys().iter().copied().collect();
@@ -1210,6 +1238,11 @@ pub fn render_capsule(
         }),
     };
 
+    let nonclaims_json: Vec<Value> = nonclaims::canonical_nonclaims(nonclaims)
+        .into_iter()
+        .map(Value::String)
+        .collect();
+
     let manifest = serde_json::json!({
         "schema": CAPSULE_SCHEMA,
         "profile": profile.as_str(),
@@ -1218,6 +1251,7 @@ pub fn render_capsule(
         "associations": associations_json,
         "signatures": signatures_json,
         "transparency": transparency_json,
+        "nonclaims": nonclaims_json,
     });
 
     let mut bytes = serde_json::to_vec(&manifest)

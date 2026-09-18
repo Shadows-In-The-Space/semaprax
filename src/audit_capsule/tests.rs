@@ -28,14 +28,22 @@ fn change_fixture(revision: &str) -> (String, BTreeMap<String, Vec<u8>>) {
     let digest_b = sha256_digest(OBJECT_B_BYTES);
     let digest_c = sha256_digest(OBJECT_C_BYTES);
     let digest_d = sha256_digest(OBJECT_D_BYTES);
+    let compiler = env!("CARGO_PKG_VERSION");
     let manifest = format!(
         r#"{{
   "schema": "semaprax.audit-capsule.v1",
+  "nonclaims": [
+    "evidence-is-not-authorization",
+    "local-evidence-only",
+    "signatures-not-cryptographically-verified",
+    "transparency-inclusion-not-independently-confirmed"
+  ],
   "profile": "change",
   "subject": {{
     "source_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "root_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-    "revision": "{revision}"
+    "revision": "{revision}",
+    "compiler_version": "{compiler}"
   }},
   "objects": [
     {{"id": "obj-a-program-root", "object_type": "program-root", "schema": "semaprax.program-root.v3", "digest": "{digest_a}", "redacted": false, "redaction_reason": null, "binds": {{"revision": "{revision}"}}}},
@@ -319,14 +327,23 @@ fn supplying_retained_bytes_for_a_redacted_object_is_rejected_as_a_leak() {
     let digest_b = sha256_digest(OBJECT_B_BYTES);
     let digest_c = sha256_digest(OBJECT_C_BYTES);
     let digest_d = sha256_digest(OBJECT_D_BYTES);
+    let compiler = env!("CARGO_PKG_VERSION");
     let manifest = format!(
         r#"{{
   "schema": "semaprax.audit-capsule.v1",
+  "nonclaims": [
+    "evidence-is-not-authorization",
+    "local-evidence-only",
+    "redacted-objects-withhold-facts",
+    "signatures-not-cryptographically-verified",
+    "transparency-inclusion-not-independently-confirmed"
+  ],
   "profile": "change",
   "subject": {{
     "source_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "root_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-    "revision": "r1"
+    "revision": "r1",
+    "compiler_version": "{compiler}"
   }},
   "objects": [
     {{"id": "obj-a-program-root", "object_type": "program-root", "schema": "semaprax.program-root.v3", "digest": "{digest_a}", "redacted": true, "redaction_reason": "withheld for the fixture", "binds": {{"revision": "r1"}}}},
@@ -373,14 +390,23 @@ fn a_redacted_object_verifies_without_its_bytes_and_is_reported_as_unavailable()
     let digest_b = sha256_digest(OBJECT_B_BYTES);
     let digest_c = sha256_digest(OBJECT_C_BYTES);
     let digest_d = sha256_digest(OBJECT_D_BYTES);
+    let compiler = env!("CARGO_PKG_VERSION");
     let manifest = format!(
         r#"{{
   "schema": "semaprax.audit-capsule.v1",
+  "nonclaims": [
+    "evidence-is-not-authorization",
+    "local-evidence-only",
+    "redacted-objects-withhold-facts",
+    "signatures-not-cryptographically-verified",
+    "transparency-inclusion-not-independently-confirmed"
+  ],
   "profile": "change",
   "subject": {{
     "source_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "root_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-    "revision": "r1"
+    "revision": "r1",
+    "compiler_version": "{compiler}"
   }},
   "objects": [
     {{"id": "obj-a-program-root", "object_type": "program-root", "schema": "semaprax.program-root.v3", "digest": "{digest_a}", "redacted": true, "redaction_reason": "contains private paths", "binds": {{"revision": "r1"}}}},
@@ -711,7 +737,10 @@ fn an_agent_run_profile_capsule_with_the_wrong_required_types_is_rejected() {
     let agent_run_manifest = manifest
         .replacen("\"profile\": \"change\"", "\"profile\": \"agent-run\"", 1)
         .replacen(
-            "\"source_digest\": \"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\n    \"root_digest\": \"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\n    \"revision\": \"r1\"",
+            &format!(
+                "\"source_digest\": \"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\n    \"root_digest\": \"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\n    \"revision\": \"r1\",\n    \"compiler_version\": \"{}\"",
+                env!("CARGO_PKG_VERSION")
+            ),
             "\"session_id\": \"session-1\",\n    \"deployment_digest\": \"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\n    \"target_digest\": \"sha256:2222222222222222222222222222222222222222222222222222222222222222\"",
             1,
         )
@@ -738,6 +767,12 @@ fn a_release_profile_capsule_with_its_own_required_types_present_verifies() {
     let manifest = format!(
         r#"{{
   "schema": "semaprax.audit-capsule.v1",
+  "nonclaims": [
+    "evidence-is-not-authorization",
+    "local-evidence-only",
+    "signatures-not-cryptographically-verified",
+    "transparency-inclusion-not-independently-confirmed"
+  ],
   "profile": "release",
   "subject": {{
     "release_tag": "v1.2.3",
@@ -829,6 +864,26 @@ fn an_object_claiming_to_be_an_audit_capsule_itself_is_rejected() {
 // and `verify_capsule` exactly like a hand-written fixture.
 // ---------------------------------------------------------------------
 
+/// The always-required nonclaims every capsule must declare, in the order
+/// `parse_nonclaims` requires.
+fn base_nonclaims() -> Vec<String> {
+    nonclaims::ALWAYS_REQUIRED_NONCLAIMS
+        .iter()
+        .map(|entry| (*entry).to_owned())
+        .collect()
+}
+
+/// The nonclaims a capsule carrying at least one redacted object must
+/// declare -- `check_nonclaims` derives the extra entry independently, so
+/// omitting it here would make the fixture invalid rather than merely
+/// less informative.
+fn redacted_nonclaims() -> Vec<String> {
+    let mut entries = base_nonclaims();
+    entries.push("redacted-objects-withhold-facts".to_owned());
+    entries.sort();
+    entries
+}
+
 fn revision_binds(revision: &str) -> BTreeMap<String, String> {
     let mut binds = BTreeMap::new();
     binds.insert("revision".to_owned(), revision.to_owned());
@@ -855,6 +910,10 @@ fn change_subject(revision: &str) -> BTreeMap<String, String> {
         "sha256:2222222222222222222222222222222222222222222222222222222222222222".to_owned(),
     );
     subject.insert("revision".to_owned(), revision.to_owned());
+    subject.insert(
+        "compiler_version".to_owned(),
+        env!("CARGO_PKG_VERSION").to_owned(),
+    );
     subject
 }
 
@@ -924,6 +983,7 @@ fn render_capsule_builds_bytes_that_verify_identically_to_a_hand_written_manifes
         &associations,
         &[],
         None,
+        &base_nonclaims(),
     )
     .expect("well-formed pieces render into a well-formed manifest");
     let report = verify_capsule(
@@ -957,7 +1017,16 @@ fn render_capsule_rejects_a_subject_missing_a_required_key_for_its_profile() {
         "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
     );
     // "root_digest" and "revision" are missing.
-    let error = render_capsule(Profile::Change, &subject, &[], &[], &[], None).unwrap_err();
+    let error = render_capsule(
+        Profile::Change,
+        &subject,
+        &[],
+        &[],
+        &[],
+        None,
+        &base_nonclaims(),
+    )
+    .unwrap_err();
     assert_eq!(error.code, "SPX-Z901");
     assert!(
         error.message.contains("subject keys must be exactly"),
@@ -1020,9 +1089,16 @@ fn a_disclosed_object_verifies_against_the_exact_commitment_a_prior_redacted_cap
     };
     let mut redacted_objects = vec![redacted_object];
     redacted_objects.extend(other_objects.iter().cloned());
-    let redacted_manifest =
-        render_capsule(Profile::Change, &subject, &redacted_objects, &[], &[], None)
-            .expect("redacted capsule renders");
+    let redacted_manifest = render_capsule(
+        Profile::Change,
+        &subject,
+        &redacted_objects,
+        &[],
+        &[],
+        None,
+        &redacted_nonclaims(),
+    )
+    .expect("redacted capsule renders");
 
     let mut object_bytes_without_secret = BTreeMap::new();
     object_bytes_without_secret.insert(
@@ -1068,6 +1144,7 @@ fn a_disclosed_object_verifies_against_the_exact_commitment_a_prior_redacted_cap
         &[],
         &[],
         None,
+        &base_nonclaims(),
     )
     .expect("disclosed capsule renders");
     let mut object_bytes_with_secret = object_bytes_without_secret;

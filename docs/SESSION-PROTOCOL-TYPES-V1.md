@@ -180,6 +180,46 @@ specific `DualityError::CapabilityDivergence` variant, never the generic
 `MissingCounterpart`/`KindNotComplementary` a naive structural-only check
 would conflate it with.
 
+### Bounded model-checking
+
+`model_check::check_bounded` is a separate, whole-graph BFS over a declared
+`ProtocolSpec` (issue #206 step 6, "optionally model-check bounded
+traces"), independent of any live `SessionTable`/`Endpoint`. It catches two
+defects `ProtocolSpec::validate`'s per-transition checks cannot see, because
+each is a property of the graph as a whole rather than of one transition in
+isolation:
+
+1. A declared state no transition, anywhere in the spec, ever names as a
+   `Next` target -- an orphan `initial` can never actually reach, even
+   though the orphan's own outgoing transitions (including its own required
+   escape) are individually well-formed
+   (`an_orphan_state_no_transition_ever_reaches_is_flagged_by_bounded_model_check_but_not_by_static_validate`).
+2. A nonterminal state whose only paths loop forever among other
+   nonterminal states without ever reaching a declared terminal state.
+   `SpecError::MissingEscape` only requires a state to have *some*
+   `Cancel`/`Timeout`/`Fail`-kind outgoing transition; nothing in that
+   single-transition check stops the escape's own `next` from pointing at
+   another nonterminal state whose own escape points right back, so every
+   state on such a cycle can individually satisfy `MissingEscape` while the
+   cycle as a whole never lets an endpoint finish
+   (`an_escape_cycle_that_never_reaches_terminal_is_flagged_by_bounded_model_check`).
+
+Both applied protocols are asserted to model-check cleanly
+(`both_applied_protocols_model_check_cleanly`) with `bound = states.len()`
+-- large enough that an ordinary BFS, which never needs to revisit a state,
+answers "reachable at all," not merely "reachable within an arbitrarily
+small search."
+
+### Determinism
+
+`the_same_message_sequence_produces_byte_identical_results_on_independent_runs`
+drives an identical message/payload/capability sequence -- including one
+deliberately illegal message mid-sequence -- against two wholly independent
+`SessionTable`s and asserts the rendered states, the illegal-message error,
+and the final terminal cleanup inventory are byte-identical once the one
+caller-chosen difference (the session id, which `SessionTable::open`
+requires to be unique) is normalized out of both traces.
+
 ## What this reference module implements
 
 - `spec.rs`: `Kind`, `OwnershipMove`, `Next`, `Transition`, `ProtocolSpec`,
@@ -192,13 +232,18 @@ would conflate it with.
   `SessionTable` (`open`, `advance`, `checkpoint`).
 - `duality.rs`: `DualityError` (4 variants), `check_duality_one_way`,
   `check_duality`.
+- `model_check.rs`: `ModelCheckError` (2 variants), `check_bounded` -- a
+  whole-graph bounded BFS, distinct from `ProtocolSpec::validate`'s
+  per-transition checks (see [Bounded model-checking](#bounded-model-checking)).
 - `protocols.rs`: `model_stream_protocol` (a model/tool streaming session:
   `Send`/`Receive`/`Branch`/`Cancel`/`Timeout`/`Fail`) and
   `resource_transaction_protocol` (a bounded database transaction:
   `Call`/`Return` with pending tracking, and `ConsumesResource` ownership on
   `commit`) -- the two applied subsystems issue #206 requires, at this
   module's Rust reference-kernel layer (see [Scope boundary](#scope-boundary)).
-- `tests.rs`: every category below.
+- `tests.rs` and `tests/model_check_and_determinism.rs`: every category
+  below (split across two files to stay under this repository's
+  1500-line-per-file budget).
 
 ## What matters, and how it is tested
 
@@ -262,12 +307,16 @@ would conflate it with.
   earlier-catching half: presenting the same live `Endpoint` binding to a
   second operation does not compile at all.
 - **Static declaration defects are each specific.** `spec_validation::*`
-  (10 tests) exercises every `SpecError` variant, including two pairs of
+  (9 tests) exercises every `SpecError` variant, including two pairs of
   tests that specifically prove two rules are *not* conflated
   (`DeadEnd` vs. `MissingEscape`) and confirm both applied example
   protocols themselves validate cleanly
   (`both_applied_protocols_validate`) -- a direct regression against
   shipping a broken example.
+- **Bounded model-checking catches whole-graph defects static validation
+  cannot see, and both applied protocols pass it.** See
+  [Bounded model-checking](#bounded-model-checking) above.
+- **Determinism.** See [Determinism](#determinism) above.
 
 ## Failure and security cases
 
@@ -322,6 +371,14 @@ Explicitly **not** done in this slice, and why:
 - **No native/Wasm lowering, no migration of an existing subsystem (Agent
   lifecycle, network streams, publication workflows) onto this
   mechanism.** Both are downstream of the syntax/HIR tranche above.
+- **`model_check::check_bounded` explores the declared graph only, not a
+  live `SessionTable`'s runtime behavior.** It is a design-time property
+  check over `ProtocolSpec` (are all states reachable, can every reachable
+  nonterminal state reach a terminal one within the bound), not a
+  bounded-trace *runtime* fuzzer that also exercises `advance`'s
+  payload/capability/ownership checks together with the graph shape; the
+  runtime layer's own defects are covered by the `ProtocolError` tests
+  above instead.
 
 ## Acceptance criteria: met here versus open
 
@@ -332,10 +389,11 @@ Explicitly **not** done in this slice, and why:
 | Ownership and authority are coupled to protocol state | **Met at the reference-kernel level**: `required_capability` and `OwnershipMove` are per-transition fields the engine checks alongside state/order, and are proven independently failing from state/order correctness (`missing_authority_is_refused_even_in_correct_order`). |
 | Failure/cancellation/uncertainty remain explicit | **Met**: `Cancel`/`Timeout`/`Fail` are ordinary declared transitions with their own cleanup; `Timeout` is routed to a distinct `Uncertain` terminal in both applied protocols. |
 | Protocol facts appear in context, graph, architecture, and assurance outputs | **Open.** No projection into `graph`, `architecture_claims`, or `assurance_manifest` exists in this slice -- each requires the parser/HIR/graph tranche above to have a real `.spx`-declared protocol to project in the first place; projecting a Rust-only reference kernel would be a second, disconnected source of truth. |
+| Applied subsystem regressions and bounded model-checking integration (required tests/evidence) | **Bounded model-checking: met**, at the graph-shape level -- `model_check::check_bounded` (see [Bounded model-checking](#bounded-model-checking)). **Applied subsystem regression: not met** -- there is no real subsystem migrated onto this kernel for a regression to protect; the two example protocols are this module's own fixtures, not another module's code. |
 
 ## Gate
 
-`cargo test --locked -p semaprax --lib session_protocol::` (30 unit tests)
+`cargo test --locked -p semaprax --lib session_protocol::` (34 unit tests)
 and `cargo test --locked -p semaprax --doc session_protocol` (3
 `compile_fail` doctests: grant-for-wrong-capability, double-use of a
 consumed `Endpoint`, and the capability module's own copy of the

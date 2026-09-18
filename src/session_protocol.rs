@@ -104,6 +104,7 @@
 pub mod capability;
 pub mod duality;
 pub mod engine;
+pub mod model_check;
 pub mod protocols;
 pub mod spec;
 #[cfg(test)]
@@ -114,4 +115,5 @@ pub use engine::{
     AdvanceOutcome, Checkpoint, CheckpointError, CleanupHandler, Endpoint, ProtocolError,
     ResourceToken, SessionTable, TerminalOutcome,
 };
+pub use model_check::{check_bounded, ModelCheckError};
 pub use spec::{Kind, Label, Next, OwnershipMove, ProtocolSpec, SpecError, StateId, Transition};

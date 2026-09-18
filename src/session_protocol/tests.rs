@@ -12,6 +12,7 @@ use std::panic::{self, AssertUnwindSafe};
 use super::capability::*;
 use super::duality::*;
 use super::engine::*;
+use super::model_check::*;
 use super::protocols::{model_stream_protocol, resource_transaction_protocol};
 use super::spec::*;
 
@@ -1245,3 +1246,6 @@ fn a_grant_for_the_declared_capability_type_checks_and_runs() {
     let commit_grant: Grant<CommitCapability> = Grant::issue();
     commit(&commit_grant);
 }
+
+#[cfg(test)]
+mod model_check_and_determinism;

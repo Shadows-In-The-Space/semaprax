@@ -1,10 +1,14 @@
 # Bounded Owning-Capture Closures v1
 
-Status: reviewed bounded design and negative-test corpus, source-level only.
-**Not hosted, not backend-executable.** HIR resolution refuses this profile
-with a stable diagnostic pending independent maintainer review (see
-[Review checkpoint](#review-checkpoint-and-what-remains)); no interpreter,
-native, or Wasm evidence exists or is claimed.
+Status: reviewed bounded design, past its review checkpoint for the
+interpreter. **The interpreter executes this profile end to end; native
+C11 and Core Wasm still refuse it.** `hir::resolve` itself keeps refusing
+`own fn(...)` with the same stable diagnostic as before (see
+[Review checkpoint](#review-checkpoint-and-what-remains)) for every direct
+caller, which is what native and Wasm codegen use; only
+`interpreter::interpret` substitutes the bounded construction-plus-its-one-
+call with a direct call before resolving, so it alone gets real execution.
+See [Execution: the interpreter path](#execution-the-interpreter-path).
 
 Audience: language users, compiler contributors, backend implementers, and
 reviewers deciding whether to admit this profile beyond source checking.
@@ -98,52 +102,84 @@ same move/availability lattice (`Availability::Moved`, diagnostic
 
 ## Review checkpoint and what remains
 
-**This profile is checked and negative-tested at the source level only.**
-[`hir::resolve`](../src/hir/closure/resolve.rs) refuses every program
-containing `own fn(...)` with a stable diagnostic
+**This profile is checked and negative-tested at the source level.**
+[`hir::resolve`](../src/hir/closure/resolve.rs) still refuses every program
+containing `own fn(...)` with the same stable diagnostic
 (`SPX-H006`, message containing "owning-capture closures" and "not yet
-lowered") before any lowering happens. This is deliberate
-agreement-by-refusal, applied uniformly: since HIR resolution is what every
-backend (interpreter, native C11, Core Wasm) is built from, refusing here
-means no backend can ever observe, execute, or disagree about a
-partially-lowered owning capture. A program that is clean at
-`semaprax::check` and refused at `hir::resolve` is exactly the corpus this
-module's tests assert.
+lowered") before any lowering happens, for every *direct* caller of
+`hir::resolve` -- which includes `codegen::emit_c` (native C11) and
+`wasm::emit_module` (Core Wasm). Neither backend was changed by the
+interpreter work below, and neither needed to be: both keep resolving the
+original, unmodified program and are refused exactly as before.
 
-**Why the profile stops here rather than lowering further:** giving this
-closure literal a genuine owning runtime environment (rather than treating
-its checked identity as sentinel bookkeeping local to `source_verify`) is
-the seam this document exists to name precisely, so an independent reviewer
-can decide the next step rather than have an implementing agent self-approve
-it. Two designs were evaluated and rejected before landing this slice:
+**Why the profile stopped at source checking for native/Wasm rather than
+lowering further:** giving this closure literal a genuine owning runtime
+environment inside shared HIR (rather than treating its checked identity as
+sentinel bookkeeping local to `source_verify`) is the seam this document
+originally existed to name precisely. Two designs were evaluated and
+rejected:
 
 1. **A new `ExprKind`/`Type`/`ResolvedType` variant carrying real owning
    semantics through HIR.** `ExprKind` alone is matched exhaustively in over
    two dozen files, several of them (`src/project/candidate/*`,
    `src/assurance_manifest/smt_discharge/*`) leased to other concurrent
-   workers in this session and off-limits to this change. A `Type`/
-   `ResolvedType` variant is worse: those enums are matched in well over a
-   hundred sites across native/Wasm codegen, cache/graph codecs, and public
-   ABI surfaces. Either change ripples far outside a "closure module."
+   workers and off-limits to this change. A `Type`/`ResolvedType` variant is
+   worse: those enums are matched in well over a hundred sites across
+   native/Wasm codegen, cache/graph codecs, and public ABI surfaces. Either
+   change ripples far outside a "closure module."
 2. **A lexically-scoped construction-to-call association threaded through
    HIR's iterative statement/expression resolver**, so `own fn` sugar could
    desugar directly into an ordinary call at the one call site a `let`
-   permits. This is plausible but requires either widening the shared
-   per-function `Binding` type (constructed at roughly sixty sites across
-   HIR resolution, all outside this feature's owning modules) or special-
-   casing block resolution inside the single large iterative HIR expression
-   resolver that every other language feature also depends on. Both carry
-   real risk of destabilizing unrelated resolution paths without deep,
-   time-boxed familiarity with that resolver, which this bounded slice does
-   not attempt to acquire.
+   permits. This requires either widening the shared per-function `Binding`
+   type (constructed at roughly sixty sites across HIR resolution) or
+   special-casing block resolution inside the single large iterative HIR
+   expression resolver every other language feature also depends on. Both
+   carry real risk of destabilizing unrelated resolution paths.
 
-Either path is a legitimate way to give this profile real backend execution.
-Both cross this feature's file lease and this session's bounded-review
-instruction ("submit the bounded design and negative tests for independent
-maintainer review" -- this issue's own text). This document, the sentinel
-encoding, and the test corpus in
-[`../tests/language/function_values/owning_closures.rs`](../tests/language/function_values/owning_closures.rs)
-are exactly that submission.
+Both designs above touch shared HIR machinery consumed by every backend at
+once, which is exactly why they were deferred pending review. Once approved
+to proceed for the **interpreter only**, a third, smaller path became
+available that neither design needed: since `own fn() -> R { target(payload)
+}` is checked (by `source_verify::owning_closure`) to carry no state beyond
+"which target" and "which captured local," and its only admitted use is one
+direct zero-argument call, construction-plus-its-one-call is a pure
+*source-text* substitution -- replace the one `name()` call site with the
+target call, drop the now-dead `let name = own fn ...` binding -- with no
+new runtime carrier, no HIR variant, and no shared-resolver change at all.
+[`hir::closure::desugar_owning_closures`](../src/hir/closure/owning_desugar.rs)
+performs exactly that rewrite on an already-verified `Program`, and only
+`interpreter::interpret` calls it, before its own `hir::resolve`. Every
+other caller -- native, Wasm, and `hir::resolve` itself when called
+directly -- never sees the rewrite and keeps refusing the original program.
+
+This document, the sentinel encoding, the negative-test corpus in
+[`../tests/language/function_values/owning_closures.rs`](../tests/language/function_values/owning_closures.rs),
+and that same file's `backend_execution` module (the interpreter-execution
+and native/Wasm-refusal evidence) are the record of that reviewed step.
+
+## Execution: the interpreter path
+
+`interpreter::interpret` substitutes before resolving, so HIR never lowers
+an owning closure at all -- there is nothing to lower, because the
+construction and its one call have already become an ordinary direct call
+by the time `hir::resolve` runs. Concretely, for
+`let clo = own fn() -> R { target(payload) }; clo()`:
+
+- **Called.** The rewrite produces `target(payload)` where `clo()` stood.
+  `payload` is transferred into the call's one argument slot exactly once
+  and committed by exactly one `CallCommit`; no exit ever also finalizes
+  (drops) it, so a captured owner is never doubly settled.
+- **Dropped uncalled.** The rewrite removes the dead `let clo = ...`
+  binding entirely and leaves `payload` an ordinary, never-moved owned
+  local. It settles through the language's existing scope-exit drop --
+  exactly one `FinalizeAction`, freeing it once, with no closure-specific
+  mechanism involved.
+
+Both shapes are proven directly against the built `cleanup_plan::CleanupPlan`
+in [`hir::closure::owning_desugar`'s tests](../src/hir/closure/owning_desugar/tests.rs),
+so "cleaned up exactly once" is checked against the same canonical,
+deterministic cleanup-plan structure every other owned value in this
+language is checked against -- not a parallel, closure-specific claim.
 
 ## What is proven today
 
@@ -161,16 +197,25 @@ are exactly that submission.
 - Owning closures are refused inside generic functions (`SPX-T291`) and in
   contract expressions (`SPX-O119`).
 - Canonical formatting round-trips the authored `own fn` syntax exactly.
+- The interpreter executes both the called and the uncalled shape end to
+  end and returns the correct value in each case; native C11 and Core Wasm
+  still refuse the profile with the same stable diagnostic.
+- The captured owner settles exactly once in both interpreter shapes,
+  checked directly against the built cleanup plan (see
+  [Execution: the interpreter path](#execution-the-interpreter-path)).
 - HIR resolution refuses an otherwise source-clean program with the stable
   message above.
 
 ## What is not proven, and is not claimed
 
-- No interpreter, native C11, or Core Wasm execution of any kind. No
-  "settles exactly once" runtime evidence exists; the source-level move
-  bookkeeping is not the same claim as a backend freeing memory once.
-  "Calling once succeeds" is proven only as "source verification reports no
-  diagnostics for one call," not as an observed program result.
+- No native C11 or Core Wasm execution of any kind: both still refuse this
+  profile with `SPX-H006`, proven by
+  `backend_execution::native_and_wasm_backends_refuse_the_owning_closure_with_the_stable_diagnostic`
+  in the test corpus above.
+- The interpreter's execution evidence covers exactly the bounded shape this
+  document describes (zero explicit parameters, one lexical owned `Bytes`
+  capture, a body that is exactly one transferring call); it makes no claim
+  about any broader owning-capture shape.
 - No combination with the existing Copy-scalar capture profiles.
 - No explicit closure parameters (the profile is fixed at zero).
 - No nested owning captures, no capture of a borrowed view, and no public

@@ -1985,7 +1985,12 @@ fn interpret_on_current_thread(
     }
     let parsed_arguments = bind_arguments(function, arguments)?;
 
-    let resolved = hir::resolve(&program)?;
+    // SPX-AI-021 bounded owning closures: only the interpreter substitutes
+    // `own fn(...)` construction-plus-call with a direct call before
+    // resolving; every other caller keeps refusing it unmodified (see
+    // `hir::closure::desugar_owning_closures`, `docs/CLOSURES-OWNING-V1.md`).
+    let desugared = hir::closure::desugar_owning_closures(&program);
+    let resolved = hir::resolve(desugared.as_ref().unwrap_or(&program))?;
     let entry = resolved
         .functions
         .iter()

@@ -1,12 +1,17 @@
 //! SPX-AI-021 bounded owning-capture closure: `own fn() -> R { body }`.
 //!
-//! This is a reviewed bounded *source-level* profile: it is fully admitted
-//! and diagnosed by `source_verify` (including the compile-time one-shot
-//! diagnostic this module exists to prove), but HIR resolution refuses it
-//! with a stable diagnostic pending independent review -- see
-//! `docs/CLOSURES-OWNING-V1.md` for the exact seam and what remains. These
-//! tests therefore check `semaprax::check` (source verification) directly,
-//! and separately prove the HIR refusal fires exactly there.
+//! This is a reviewed bounded profile, fully admitted and diagnosed by
+//! `source_verify` (including the compile-time one-shot diagnostic this
+//! module exists to prove). `hir::resolve` refuses `own fn(...)` for every
+//! *direct* caller -- native C11 (`codegen::emit_c`), Core Wasm
+//! (`wasm::emit_module`), and `hir::resolve` itself -- with a stable
+//! diagnostic; see `docs/CLOSURES-OWNING-V1.md` for the exact seam. The
+//! interpreter alone now executes this bounded profile end to end, by
+//! substituting the construction-plus-its-one-call with a direct call
+//! before resolving (`hir::closure::desugar_owning_closures`, exercised
+//! from `interpreter::interpret` only); it never lowers the closure
+//! literal itself, so the refusal above is unaffected and this file's
+//! source-level tests below are unchanged.
 
 use semaprax::diagnostic::Diagnostic;
 use semaprax::hir;
@@ -573,4 +578,122 @@ fn hir_resolution_refuses_an_otherwise_source_clean_owning_closure() {
                 && error.message.contains("not yet lowered")),
         "the refusal must use the stable internal-shape diagnostic code and name this exact seam, got {errors:?}"
     );
+}
+
+// The tests below exercise real backend execution/refusal for the bounded
+// profile, once the reviewed source-level design above was approved to
+// proceed past its review checkpoint. `hir::resolve` itself, and every
+// direct caller other than `interpreter::interpret`, are completely
+// unchanged (see the module doc comment), so `own fn` still refuses HIR
+// resolution exactly as proven above; only the interpreter's own entry
+// point gets a substitution step before resolving.
+
+mod backend_execution {
+    use super::{source, Diagnostic};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use semaprax::interpreter::{self, InterpreterOptions};
+    use semaprax::{codegen, wasm};
+
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn write_temp(source: &str) -> std::path::PathBuf {
+        let ordinal = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "semaprax-owning-closures-{}-{ordinal}.spx",
+            std::process::id()
+        ));
+        std::fs::write(&path, source).unwrap();
+        path
+    }
+
+    fn cleanup(path: &Path) {
+        let _ = std::fs::remove_file(path);
+    }
+
+    const CALLED_BODY: &str = r#"
+    let payload = bytes_zeroed(4usize);
+    let clo = own fn() -> i64 { checksum(payload) };
+    clo()
+"#;
+
+    const UNCALLED_BODY: &str = r#"
+    let payload = bytes_zeroed(4usize);
+    let clo = own fn() -> i64 { checksum(payload) };
+    99
+"#;
+
+    /// Required evidence: an `own fn` program executes on the interpreter
+    /// end to end and returns the correct value. Nothing else in this
+    /// backend-execution module or in the profile's own diagnostics is
+    /// weakened to get this result -- source verification and the
+    /// `hir::resolve` refusal proven above are exercised unmodified.
+    #[test]
+    fn interpreter_executes_a_called_owning_closure_and_returns_the_target_result() {
+        let path = write_temp(&source(CALLED_BODY));
+        let interpretation =
+            interpreter::interpret(&path, "owning.main", &[], &InterpreterOptions::default());
+        cleanup(&path);
+        let interpretation = interpretation.expect("interpreter must execute the bounded profile");
+        assert!(
+            interpretation.envelope.contains("\"kind\":\"returned\""),
+            "got {}",
+            interpretation.envelope
+        );
+        assert!(
+            interpretation.envelope.contains("\"value\":\"42\""),
+            "the closure's one call must reach `checksum` and return its result, got {}",
+            interpretation.envelope
+        );
+    }
+
+    /// Required evidence: dropping an owning closure uncalled still
+    /// executes cleanly on the interpreter (its captured owner settles
+    /// through the ordinary scope-exit drop proven at the HIR level in
+    /// `hir::closure::owning_desugar::tests`), returning the caller's own
+    /// tail value rather than the closure's target result.
+    #[test]
+    fn interpreter_executes_an_uncalled_owning_closure_and_returns_the_caller_tail_value() {
+        let path = write_temp(&source(UNCALLED_BODY));
+        let interpretation =
+            interpreter::interpret(&path, "owning.main", &[], &InterpreterOptions::default());
+        cleanup(&path);
+        let interpretation = interpretation.expect("interpreter must execute the bounded profile");
+        assert!(
+            interpretation.envelope.contains("\"value\":\"99\""),
+            "an uncalled closure must never invoke its target, got {}",
+            interpretation.envelope
+        );
+    }
+
+    /// Required evidence: native C11 and Core Wasm keep refusing this
+    /// profile with the exact same stable diagnostic proven above for
+    /// `hir::resolve` -- an explicit, clear refusal, never silent
+    /// divergence or miscompilation.
+    #[test]
+    fn native_and_wasm_backends_refuse_the_owning_closure_with_the_stable_diagnostic() {
+        let program = semaprax::check(&source(CALLED_BODY), "owning-closures.spx")
+            .expect("source verification must admit this program cleanly");
+
+        let native_error =
+            codegen::emit_c(&program).expect_err("native C11 must refuse an owning closure");
+        assert_owning_closure_refusal(&native_error);
+
+        let wasm_error =
+            wasm::emit_module(&program).expect_err("Core Wasm must refuse an owning closure");
+        assert_owning_closure_refusal(&wasm_error);
+    }
+
+    fn assert_owning_closure_refusal(error: &Diagnostic) {
+        assert_eq!(
+            error.code, "SPX-H006",
+            "backends must refuse through the same stable HIR-resolution diagnostic, got {error:?}"
+        );
+        assert!(
+            error.message.contains("owning-capture closures")
+                && error.message.contains("not yet lowered"),
+            "the refusal must name this exact seam, got {error:?}"
+        );
+    }
 }

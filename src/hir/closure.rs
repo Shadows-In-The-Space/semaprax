@@ -118,6 +118,9 @@ mod validation;
 pub(crate) use validation::validate_shape;
 pub(crate) use validation::validate_shape_scoped;
 
+mod owning_desugar;
+pub(crate) use owning_desugar::desugar_owning_closures;
+
 #[cfg(test)]
 mod tests;
 

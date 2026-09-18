@@ -59,6 +59,39 @@ production external-store implementation. A successful authentication result
 returns only the subject and public issue/expiry/generation claims; it never
 returns a bearer token or signing key.
 
+### Signing key rotation
+
+`SessionService::with_key_rotation` accepts one optional retired key wrapped
+in `SigningKeyRotation::new(key, grace_until)`. New tokens are always signed
+with the current key; a token signed with the retired key still verifies
+while the caller's `now` has not yet passed `grace_until`, after which it is
+refused identically to an unknown key. This mirrors `std.auth`'s pure
+`token_key_is_current_or_in_grace` policy at the host layer: rotating the
+server signing key does not need to invalidate every live session
+immediately, and the bound is explicit and caller-supplied, never open-ended.
+A rotation cannot name the same key as both current and previous.
+`authentication::session::tests::
+signing_key_rotation_accepts_the_old_key_only_within_its_grace_window` proves
+a pre-rotation token verifies within the grace window and is refused past it,
+that a party holding only the new key cannot verify a pre-rotation token,
+and that a party holding only the retired key (with no configured grace)
+cannot verify a post-rotation token.
+
+### Hostile input and concurrent sessions
+
+`authentication::session::tests::
+oversized_truncated_and_control_byte_bearer_tokens_are_refused` and
+`authentication::session::tests::
+control_bytes_and_unicode_confusable_subjects_are_refused_at_issue` cover
+oversized bearer strings, truncated tokens missing their tag, an empty
+bearer, embedded NUL and control bytes, and a Unicode-confusable subject
+(Cyrillic "а" for Latin "a") that is refused when malformed and kept
+byte-distinct rather than normalized when well-formed.
+`authentication::session::tests::
+concurrent_sessions_for_the_same_subject_are_independent` proves the store
+admits more than one simultaneously active session per subject and that
+revocation is per-session, not per-subject.
+
 ## Password records
 
 `authentication::password` is a native host service. It admits only RustCrypto
@@ -119,3 +152,25 @@ The executable composition gate is
 It performs real hashing, wrong-password rejection, login, protected access,
 rotation, old-token refusal and logout. It is a Rust embedding test, not an
 HTTP deployment or a source-language/backend conformance claim.
+
+## Audit events
+
+`authentication::audit::AuthAuditEvent` is a closed, redaction-safe record: a
+closed `AuthAuditKind` (`Signup`, `Login`, `SessionVerify`, `SessionRotate`,
+`Logout`), a closed `AuthAuditOutcome` (`Allowed` or `Denied(AuthError)`), a
+bounded pseudonymous subject identifier re-validated at construction, and a
+host-supplied timestamp tick. `AuthAuditOutcome::from_result` derives the
+outcome directly from an existing `AuthService` call's `Result` without a
+host needing to re-derive the allow/deny decision. No constructor on this
+type accepts a `SecretBytes`, `SessionToken`, or `StoredPasswordHash`; its
+`Display` and derived `Debug` need no redaction because every field was
+already established as non-secret when the event was built, not because a
+value was hidden after being stored.
+`authentication::audit::tests::audit_event_is_complete_and_never_carries_secret_material`
+pairs a non-vacuity control (a real Argon2id hash and a real wrong-password
+verification failure both actually happen, using a bytes marker) with a
+negative assertion that neither the marker, the stored PHC record, nor the
+rejected password appears in the event's rendered `Display` or `Debug`
+output. This is a host-layer building block a caller composes after calling
+`AuthService`; it does not itself write to any sink, matching `std.log`'s
+existing, unmodified role for that.

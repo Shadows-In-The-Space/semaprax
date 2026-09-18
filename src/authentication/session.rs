@@ -259,21 +259,59 @@ impl SessionStore for InMemorySessionStore {
     }
 }
 
-/// Host service using fixed HS256 HMAC verification. The key is selected by
-/// the server at construction and is never chosen by token data.
+/// A previous signing key retained only until `grace_until`, so rotating the
+/// server signing key does not immediately invalidate every live session.
+/// New tokens are never signed with a previous key; it is accepted only for
+/// verifying tokens issued before the rotation, and only while the caller's
+/// `now` has not yet passed `grace_until`.
+pub struct SigningKeyRotation {
+    key: SecretBytes,
+    grace_until: u64,
+}
+
+impl SigningKeyRotation {
+    pub fn new(key: SecretBytes, grace_until: u64) -> Result<Self, AuthError> {
+        if key.as_bytes().len() < MAC_BYTES {
+            return Err(AuthError::InvalidPolicy);
+        }
+        Ok(Self { key, grace_until })
+    }
+}
+
+/// Host service using fixed HS256 HMAC verification. The signing key is
+/// selected by the server at construction and is never chosen by token data.
 pub struct SessionService {
     policy: SessionPolicy,
     signing_key: SecretBytes,
+    previous_key: Option<SigningKeyRotation>,
 }
 
 impl SessionService {
     pub fn new(policy: SessionPolicy, signing_key: SecretBytes) -> Result<Self, AuthError> {
+        Self::with_key_rotation(policy, signing_key, None)
+    }
+
+    /// Creates a service that signs new tokens with `signing_key` and, while
+    /// `previous` names a still-in-grace key, also accepts tokens signed with
+    /// that retired key. `previous`'s key must differ from `signing_key`: a
+    /// rotation names a change, not the same key twice.
+    pub fn with_key_rotation(
+        policy: SessionPolicy,
+        signing_key: SecretBytes,
+        previous: Option<SigningKeyRotation>,
+    ) -> Result<Self, AuthError> {
         if signing_key.as_bytes().len() < MAC_BYTES {
             return Err(AuthError::InvalidPolicy);
+        }
+        if let Some(previous) = &previous {
+            if previous.key.as_bytes() == signing_key.as_bytes() {
+                return Err(AuthError::InvalidPolicy);
+            }
         }
         Ok(Self {
             policy,
             signing_key,
+            previous_key: previous,
         })
     }
 
@@ -369,7 +407,7 @@ impl SessionService {
         bearer: &str,
         now: u64,
     ) -> Result<Claims, AuthError> {
-        let claims = self.decode_token(bearer)?;
+        let claims = self.decode_token(bearer, now)?;
         if claims.policy_id != self.policy.policy_id
             || claims.issuer != self.policy.issuer
             || claims.audience != self.policy.audience
@@ -406,7 +444,7 @@ impl SessionService {
 
     fn encode_token(&self, claims: &Claims) -> Result<SessionToken, AuthError> {
         let payload = claims.encode()?;
-        let mut mac = self.mac()?;
+        let mut mac = Self::mac_for(&self.signing_key)?;
         mac.update(MAC_DOMAIN);
         mac.update(&payload);
         let tag = mac.finalize().into_bytes();
@@ -422,7 +460,7 @@ impl SessionService {
         )?))
     }
 
-    fn decode_token(&self, bearer: &str) -> Result<Claims, AuthError> {
+    fn decode_token(&self, bearer: &str, now: u64) -> Result<Claims, AuthError> {
         if bearer.is_empty() || bearer.len() > MAX_TOKEN_BYTES {
             return Err(AuthError::InvalidCredential);
         }
@@ -437,17 +475,52 @@ impl SessionService {
         if tag.len() != MAC_BYTES {
             return Err(AuthError::InvalidCredential);
         }
-        let mut mac = self.mac()?;
-        mac.update(MAC_DOMAIN);
-        mac.update(&payload);
-        mac.verify_slice(&tag)
-            .map_err(|_| AuthError::InvalidCredential)?;
+        if !self.tag_matches(&self.signing_key, &payload, &tag)?
+            && !self.tag_matches_previous_key_in_grace(&payload, &tag, now)?
+        {
+            return Err(AuthError::InvalidCredential);
+        }
         Claims::decode(&payload)
     }
 
-    fn mac(&self) -> Result<HmacSha256, AuthError> {
-        HmacSha256::new_from_slice(self.signing_key.as_bytes())
-            .map_err(|_| AuthError::InvalidPolicy)
+    /// Checks the tag under one candidate key. A malformed key (wrong byte
+    /// length for HMAC-SHA-256's key-init step) is a policy error, not a
+    /// tag mismatch; both keys admitted by this service's constructors
+    /// already satisfy HMAC's key-length requirement, so this only guards
+    /// against a future caller of `mac_for` outside that contract.
+    fn tag_matches(
+        &self,
+        key: &SecretBytes,
+        payload: &[u8],
+        tag: &[u8],
+    ) -> Result<bool, AuthError> {
+        let mut mac = Self::mac_for(key)?;
+        mac.update(MAC_DOMAIN);
+        mac.update(payload);
+        Ok(mac.verify_slice(tag).is_ok())
+    }
+
+    /// A retired key verifies a tag only while it is still within its
+    /// declared grace window; past `grace_until` it is refused identically
+    /// to an unknown key, exactly like `token_key_is_current_or_in_grace`'s
+    /// pure policy counterpart in `std.auth`.
+    fn tag_matches_previous_key_in_grace(
+        &self,
+        payload: &[u8],
+        tag: &[u8],
+        now: u64,
+    ) -> Result<bool, AuthError> {
+        let Some(previous) = &self.previous_key else {
+            return Ok(false);
+        };
+        if now > previous.grace_until {
+            return Ok(false);
+        }
+        self.tag_matches(&previous.key, payload, tag)
+    }
+
+    fn mac_for(key: &SecretBytes) -> Result<HmacSha256, AuthError> {
+        HmacSha256::new_from_slice(key.as_bytes()).map_err(|_| AuthError::InvalidPolicy)
     }
 }
 
@@ -816,6 +889,228 @@ mod tests {
         assert_eq!(
             tightened.verify(&store, token.bearer(), 10),
             Err(AuthError::InvalidCredential)
+        );
+    }
+
+    #[test]
+    fn signing_key_rotation_accepts_the_old_key_only_within_its_grace_window() {
+        let policy = SessionPolicy::new("policy-1", "issuer", "audience", 1, 60).unwrap();
+        let old_key = SecretBytes::try_from_bytes(&[1; 32]).unwrap();
+        let issuing_service = SessionService::new(policy.clone(), old_key).unwrap();
+        let mut store = InMemorySessionStore::new(4).unwrap();
+        let mut entropy = entropy();
+        let token = issuing_service
+            .issue(&mut store, &mut entropy, "user-1", 10, 40)
+            .unwrap();
+
+        // A service that knows only the new key cannot verify a pre-rotation
+        // token at all.
+        let new_key_only = SessionService::new(
+            policy.clone(),
+            SecretBytes::try_from_bytes(&[2; 32]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            new_key_only.verify(&store, token.bearer(), 11),
+            Err(AuthError::InvalidCredential)
+        );
+
+        // A rotated service names the retired key with an explicit grace
+        // deadline. Within the window the old token verifies; new tokens it
+        // issues are signed with the new key, never the retired one.
+        let rotated = SessionService::with_key_rotation(
+            policy.clone(),
+            SecretBytes::try_from_bytes(&[2; 32]).unwrap(),
+            Some(
+                SigningKeyRotation::new(SecretBytes::try_from_bytes(&[1; 32]).unwrap(), 20)
+                    .unwrap(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            rotated
+                .verify(&store, token.bearer(), 15)
+                .unwrap()
+                .subject(),
+            "user-1"
+        );
+        let fresh = rotated
+            .issue(&mut store, &mut entropy, "user-2", 15, 20)
+            .unwrap();
+        // The new token is signed with the new key: a party holding only the
+        // new key verifies it directly.
+        assert_eq!(
+            new_key_only
+                .verify(&store, fresh.bearer(), 16)
+                .unwrap()
+                .subject(),
+            "user-2"
+        );
+        // A party holding only the retired key (no configured previous-key
+        // grace) cannot verify a post-rotation token.
+        assert_eq!(
+            issuing_service.verify(&store, fresh.bearer(), 16),
+            Err(AuthError::InvalidCredential)
+        );
+        assert_eq!(
+            rotated
+                .verify(&store, fresh.bearer(), 16)
+                .unwrap()
+                .subject(),
+            "user-2"
+        );
+
+        // Past the grace deadline the retired key is refused identically to
+        // an unknown key, even though the session record itself is still
+        // otherwise active and unexpired.
+        assert_eq!(
+            rotated.verify(&store, token.bearer(), 21),
+            Err(AuthError::InvalidCredential)
+        );
+
+        // A rotation cannot name the same key twice.
+        assert_eq!(
+            SessionService::with_key_rotation(
+                policy,
+                SecretBytes::try_from_bytes(&[2; 32]).unwrap(),
+                Some(
+                    SigningKeyRotation::new(SecretBytes::try_from_bytes(&[2; 32]).unwrap(), 20)
+                        .unwrap()
+                ),
+            )
+            .err(),
+            Some(AuthError::InvalidPolicy)
+        );
+    }
+
+    #[test]
+    fn oversized_truncated_and_control_byte_bearer_tokens_are_refused() {
+        let service = service();
+        let mut store = InMemorySessionStore::new(4).unwrap();
+        let mut entropy = entropy();
+        let token = service
+            .issue(&mut store, &mut entropy, "user-1", 10, 20)
+            .unwrap();
+
+        // Oversized: well past MAX_TOKEN_BYTES.
+        let oversized = "A".repeat(MAX_TOKEN_BYTES + 1);
+        assert_eq!(
+            service.verify(&store, &oversized, 11),
+            Err(AuthError::InvalidCredential)
+        );
+
+        // Truncated: payload with no tag, and an empty bearer.
+        let mut truncated = token.bearer().split('.');
+        let payload_only = truncated.next().unwrap();
+        assert_eq!(
+            service.verify(&store, payload_only, 11),
+            Err(AuthError::InvalidCredential)
+        );
+        assert_eq!(
+            service.verify(&store, "", 11),
+            Err(AuthError::InvalidCredential)
+        );
+
+        // Control bytes and interior NUL are not valid base64url and cannot
+        // decode to a real payload or tag.
+        assert_eq!(
+            service.verify(&store, "A\0B.CDEF", 11),
+            Err(AuthError::InvalidCredential)
+        );
+        assert_eq!(
+            service.verify(&store, "\n\t.\r", 11),
+            Err(AuthError::InvalidCredential)
+        );
+
+        // Multi-byte UTF-8 (unicode-confusable content) is never valid
+        // base64url either.
+        assert_eq!(
+            service.verify(&store, "café.token", 11),
+            Err(AuthError::InvalidCredential)
+        );
+    }
+
+    #[test]
+    fn control_bytes_and_unicode_confusable_subjects_are_refused_at_issue() {
+        let service = service();
+        let mut store = InMemorySessionStore::new(4).unwrap();
+        let mut rejected_entropy = entropy();
+        // Invalid subjects are refused before any entropy is consumed, so
+        // one fixture with unused fills is enough for both cases.
+        assert_eq!(
+            service
+                .issue(&mut store, &mut rejected_entropy, "user\u{0}one", 10, 20)
+                .err(),
+            Some(AuthError::InvalidInput)
+        );
+        assert_eq!(
+            service
+                .issue(&mut store, &mut rejected_entropy, "user\ncontrol", 10, 20)
+                .err(),
+            Some(AuthError::InvalidInput)
+        );
+        // A confusable subject (Cyrillic "а" instead of Latin "a") is
+        // distinct bytes, not silently normalized or conflated.
+        let mut latin_entropy = entropy();
+        let latin = service
+            .issue(&mut store, &mut latin_entropy, "alice", 10, 20)
+            .unwrap();
+        let mut confusable_entropy = Entropy(vec![[3; SESSION_ID_BYTES]]);
+        let confusable = service
+            .issue(&mut store, &mut confusable_entropy, "\u{0430}lice", 10, 20)
+            .unwrap();
+        assert_ne!(
+            service
+                .verify(&store, latin.bearer(), 11)
+                .unwrap()
+                .subject(),
+            service
+                .verify(&store, confusable.bearer(), 11)
+                .unwrap()
+                .subject()
+        );
+    }
+
+    #[test]
+    fn concurrent_sessions_for_the_same_subject_are_independent() {
+        let service = service();
+        let mut store = InMemorySessionStore::new(4).unwrap();
+        let mut entropy = Entropy(vec![[5; SESSION_ID_BYTES], [4; SESSION_ID_BYTES]]);
+        let first = service
+            .issue(&mut store, &mut entropy, "user-1", 10, 20)
+            .unwrap();
+        let second = service
+            .issue(&mut store, &mut entropy, "user-1", 10, 20)
+            .unwrap();
+        assert_ne!(first.bearer(), second.bearer());
+        // Both sessions for the same subject are simultaneously valid.
+        assert_eq!(
+            service
+                .verify(&store, first.bearer(), 11)
+                .unwrap()
+                .subject(),
+            "user-1"
+        );
+        assert_eq!(
+            service
+                .verify(&store, second.bearer(), 11)
+                .unwrap()
+                .subject(),
+            "user-1"
+        );
+        // Revoking one leaves the other active: revocation is per-session,
+        // not per-subject.
+        service.revoke(&mut store, first.bearer(), 12).unwrap();
+        assert_eq!(
+            service.verify(&store, first.bearer(), 12),
+            Err(AuthError::Revoked)
+        );
+        assert_eq!(
+            service
+                .verify(&store, second.bearer(), 12)
+                .unwrap()
+                .subject(),
+            "user-1"
         );
     }
 }

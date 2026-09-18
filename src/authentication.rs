@@ -1,6 +1,7 @@
 //! Explicit-capability authentication for Rust hosts. No source-language authority is added.
 use zeroize::Zeroizing;
 
+pub mod audit;
 pub mod password;
 pub mod service;
 pub mod session;

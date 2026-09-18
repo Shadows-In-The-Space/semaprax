@@ -119,6 +119,46 @@ failure case #204 names explicitly).
   `terminal` — failure selection is sticky by construction, not by a
   downstream check.
 
+`src/resumable_effects/capability.rs`:
+
+- `CapabilityPolicy`: a bounded (≤64, mirroring
+  `AGENT-TYPED-EFFECTS-V3.md`'s own registry ceiling), ordered, duplicate-
+  and empty-id-rejecting allowlist of capability ids.
+- `CapabilityGatedHandler`: wraps an already-injected `EffectHandler` and
+  refuses, before the wrapped handler is ever called, any request whose
+  caller-supplied `capability_of` mapping names an id outside the current
+  policy. A denial is reported through the driver's existing
+  `HandlerFailed`/`ObservationFailed` path — the same one a genuine host
+  failure already takes — so it is durable journal evidence, not a silently
+  dropped decision, and replaying a denied journal reports the same denial
+  again without a second call to the wrapped handler (or the gate itself).
+  This implements the "Effect declarations and capability requirements"
+  scope bullet as a decorator at the existing effect-authority boundary,
+  rather than a change to `run`/`resume` or the `ResumableEffectProgram`
+  trait.
+
+`src/resumable_effects/migration.rs`:
+
+- `StateMigration<From, To>` / `migrate_suspended`: a pure state-migration
+  function between two `ResumableEffectProgram`s' `State` types, evaluated
+  *twice* and rejected on disagreement, mirroring the exact pattern
+  `execution_revision::typed_migration` and `live_invocation::migration`
+  already prove for real checked state types ("evaluate a pure migration
+  function twice, reject disagreement, carry cumulative budget forward").
+  Only a genuinely `Suspend`ed outcome is a migration candidate; migrating
+  under an unchanged `program_root` is refused (`resume`'s journal-replay
+  path is correct there, not migration). A successful migration carries the
+  old revision's cumulative `Outcome::dispatched` count forward in
+  `MigratedState` rather than silently resetting it. This function mints no
+  effect authority and performs no dispatch itself — its result is a new
+  `State` a caller must still drive through the ordinary `run`/`resume`
+  machinery under a freshly derived scope. This implements implementation-
+  sequence step 7 ("Implement pure state migration functions between
+  compatible ProgramRoot revisions and reject incompatible state changes")
+  at the reference level; it does not yet migrate a real checked state type
+  produced by source-syntax lowering, because no such lowering exists yet
+  (see [Scope boundary](#scope-boundary)).
+
 ## What matters, and how it is tested
 
 - **Replay is not re-execution.** `resume_from_a_truncated_journal_only_dispatches_the_new_tail`
@@ -196,14 +236,16 @@ Explicitly **not** done in this slice, and why:
   `yield` point to the existing ownership/ cleanup-plan machinery
   (`cleanup_plan::build`) so the compiler itself computes which locals cross
   a suspension is follow-up work this design enables but does not perform.
-- **No state migration across ProgramRoot revisions.** `execution_revision::typed_migration`
-  and `live_invocation::migration` already prove the shape a real checked
-  migration takes (evaluate a pure migration function twice, reject
-  disagreement, carry cumulative budget forward). A `resumable_effects`
-  migration hook would follow that exact pattern once real checked state
-  types exist to migrate between; adding a placeholder hook ahead of that
-  would be a second source of truth this document's design explicitly
-  avoids.
+- **State migration exists only at the reference level.**
+  `src/resumable_effects/migration.rs`'s `migrate_suspended` now proves the
+  checked-migration *pattern* (`execution_revision::typed_migration` and
+  `live_invocation::migration`'s "evaluate twice, reject disagreement,
+  carry cumulative budget forward") for an arbitrary caller-chosen `State`
+  pair. It does not migrate a real checked state type produced by
+  compiler-owned source-syntax lowering, because no such lowering exists
+  yet; that is still downstream of the syntax/HIR tranche below, and this
+  module intentionally does not add a second, competing migration story
+  once that lowering lands.
 - **No native/Wasm lowering, no Agent-runtime migration onto this
   mechanism.** Both are named in #204's implementation sequence as steps 8
   and "interpreter first, then native/Wasm" — downstream of the
@@ -220,13 +262,13 @@ Explicitly **not** done in this slice, and why:
 | --- | --- |
 | A non-Agent function can yield typed requests and resume safely | **Reference-validator level only.** `ResumableEffectProgram` is a Rust trait any non-Agent Rust type can implement and drive; no `.spx` source can do this yet. |
 | Generated state machines are deterministic semantic projections | Proven at the reference level: `transition` is required to be a pure function and drift from that requirement is caught (`RequestDrift`/`TransitionDrift`). Not yet a compiler-generated projection from source. |
-| Ownership, effects, contracts and authority survive suspension correctly | Ownership: reference-level `'static`/`Clone` gate only (see above). Effects: `EffectHandler` is the sole authority boundary. Contracts (pre/postconditions) and real compiler-checked ownership: **open**, need HIR integration. |
+| Ownership, effects, contracts and authority survive suspension correctly | Ownership: reference-level `'static`/`Clone` gate only (see above). Effects: `EffectHandler` is the sole authority boundary, and `CapabilityGatedHandler` additionally checks a declared capability id against a bounded allowlist before that boundary is reached. Contracts (pre/postconditions) and real compiler-checked ownership: **open**, need HIR integration. |
 | Checkpoint/recovery never grants effect authority by itself | **Met**, including at the "reminted resume" level: `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. |
 | Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture onto `resumable_effects` is follow-up work once the syntax/HIR tranche exists for it to lower into. |
 
 ## Gate
 
-`cargo test --locked -p semaprax --lib resumable_effects::` (19 unit tests)
+`cargo test --locked -p semaprax --lib resumable_effects::` (30 unit tests)
 and `cargo test --locked -p semaprax --doc resumable_effects` (2
 `compile_fail` doctests proving the typed-resume and ownership compile-time
 rejections) are this module's focused selectors.

@@ -89,11 +89,17 @@
 //! }
 //! ```
 
+pub mod capability;
 pub mod core;
+pub mod migration;
 #[cfg(test)]
 mod tests;
 
+pub use capability::{
+    CapabilityDenial, CapabilityGatedHandler, CapabilityPolicy, CapabilityPolicyError,
+};
 pub use core::{
     resume, run, CleanupHandler, DriverError, EffectHandler, EffectScope, Journal, JournalEntry,
     JournalError, Outcome, ResumableEffectProgram, Step,
 };
+pub use migration::{migrate_suspended, MigratedState, MigrationError, StateMigration};

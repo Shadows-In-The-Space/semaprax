@@ -20,7 +20,10 @@
 //!   and the decision is a separate recorded action bound to an exact
 //!   revision, role, scope and expiry, granting only the one named edge.
 //! - A compensating effect never runs twice for one key, including across a
-//!   restored snapshot; see [`compensation`].
+//!   restored snapshot; see [`compensation`]. Compensations must additionally
+//!   replay in the exact reverse of their commit order; that claim is
+//!   checked as inert proof data, never as permission to run anything, by
+//!   [`compensation_order`].
 //! - An uncertain outcome is never retried automatically. [`retry`] reuses
 //!   [`crate::model_budget_policy::classification`] rather than introducing a
 //!   second, divergent notion of which failures are safe.
@@ -48,6 +51,7 @@
 
 pub mod checkpoint;
 pub mod compensation;
+pub mod compensation_order;
 pub mod engine;
 pub mod graph;
 pub mod human_gate;

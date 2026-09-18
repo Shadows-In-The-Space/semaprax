@@ -1249,3 +1249,6 @@ fn a_grant_for_the_declared_capability_type_checks_and_runs() {
 
 #[cfg(test)]
 mod model_check_and_determinism;
+
+#[cfg(test)]
+mod duality_continuation;

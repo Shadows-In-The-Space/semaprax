@@ -170,8 +170,9 @@ later resume."
 protocols are explicitly out of scope per the issue). Given a spec pair, it
 requires every transition on each side to have a counterpart on the other
 (same state, same label) with a complementary kind (`Send`/`Receive`,
-`Call`/`Return`, or identical escape kind), an identical payload tag, *and*
-an identical required capability. The capability check is not incidental:
+`Call`/`Return`, or identical escape kind), an identical payload tag, an
+identical required capability, an identical `OwnershipMove`, *and* an
+agreeing continuation. The capability check is not incidental:
 "duality can be unsound when payload effects or capabilities differ" (issue
 #206's own failure-case list) is exercised directly by
 `capability_divergence_is_refused_distinctly_from_a_generic_mismatch`, which
@@ -179,6 +180,54 @@ constructs a pair that is dual in every other respect and asserts the
 specific `DualityError::CapabilityDivergence` variant, never the generic
 `MissingCounterpart`/`KindNotComplementary` a naive structural-only check
 would conflate it with.
+
+#### Continuation duality
+
+Comparing only kind, payload and capability makes the compatibility proof
+hold for exactly *one* message: nothing stops the two roles from landing in
+different states afterwards and reading their next legal moves from
+disagreeing states. The module's internal `check_continuation` closes that, with three
+separate refusals so a caller can tell which property broke:
+
+- `BranchNotOffered` -- the side that **selects** a branch may choose a
+  label the peer's counterpart has no case for. This is the "a branch the
+  peer never offers" defect. The rule is directional by kind, not by
+  argument order: for the unambiguous `Send`/`Receive` pair the sender
+  chooses what to emit and the receiver must have a case for every choice
+  the sender may make, so it is a **subset** rule, not an equality rule --
+  a receiving role that offers *extra* branches the sender can never select
+  is safe, and `an_offering_peer_with_extra_branches_stays_compatible` pins
+  that, so the refusal cannot degrade into "the two choice sets differ".
+  Only `Receive` is treated as purely offering. `Call`/`Return` is
+  deliberately **not** relaxed: which half selects a branching continuation
+  depends on what the branch encodes (the caller issues the operation, the
+  returning side decides its outcome), so both halves are treated as
+  selecting and the effective rule for such a pair is set equality. Escape
+  kinds (`Cancel`/`Timeout`/`Fail`) are identical on both roles and reach
+  set equality the same way
+  (`an_escape_branch_is_required_on_both_sides_because_escapes_are_symmetric`).
+  Equality can only refuse more pairs than the subset rule, never fewer, so
+  this costs precision on `Call`/`Return` branches and never soundness;
+  narrowing it is a stated future refinement, not a hidden defect.
+- `ContinuationShapeDivergence` -- one role continues unconditionally
+  (`Next::Then`) where the other branches (`Next::Choice`). Rendered as the
+  closed tags `"then"`/`"choice"`, never a formatted state list, so the
+  refusal is deterministic.
+- `ContinuationDivergence` -- the two roles agree on the message and (for a
+  branch) on the choice label, but declare **different next states**.
+  `choice` is `None` for a `Then` continuation and names the branch
+  otherwise.
+
+`OwnershipDivergence` completes the per-transition comparison in the same
+pass: payload, capability and ownership are the three things a transition
+carries besides its kind, and ownership was the one the check did not
+compare. A pair that agrees on the first two while one side alone consumes a
+`ResourceToken` is not dual -- one role believes a resource was transferred
+and the other does not.
+
+This layer adds no authority and no transport: it compares two declared
+`ProtocolSpec` values and returns refusals. Agreeing on a continuation is
+not permission to take it.
 
 ### Bounded model-checking
 
@@ -230,8 +279,9 @@ requires to be unique) is normalized out of both traces.
   `ProtocolError` (10 variants), `CheckpointError` (3 variants),
   `Checkpoint`, `TerminalOutcome`, `AdvanceOutcome`, `CleanupHandler`,
   `SessionTable` (`open`, `advance`, `checkpoint`).
-- `duality.rs`: `DualityError` (4 variants), `check_duality_one_way`,
-  `check_duality`.
+- `duality.rs`: `DualityError` (8 variants), `check_duality_one_way`,
+  `check_duality`, and the internal `check_continuation` (see
+  [Continuation duality](#continuation-duality)).
 - `model_check.rs`: `ModelCheckError` (2 variants), `check_bounded` -- a
   whole-graph bounded BFS, distinct from `ProtocolSpec::validate`'s
   per-transition checks (see [Bounded model-checking](#bounded-model-checking)).
@@ -298,6 +348,26 @@ requires to be unique) is normalized out of both traces.
   each assert the exact `DualityError` variant present and assert the
   confusable neighbour variant is absent from every error the check
   returned.
+- **Duality: a branch the peer never offers, a divergent continuation, and
+  an ownership mismatch.** The `tests::duality_continuation` submodule pairs
+  a compatible branching client/server (`a_dual_branching_pair_is_compatible`,
+  with `the_branching_fixtures_are_well_formed_and_model_check_cleanly`
+  proving the fixtures themselves validate and model-check, so no refusal
+  below is an artifact of a malformed declaration) with
+  `a_branch_the_peer_never_offers_is_refused_distinctly`,
+  `an_offering_peer_with_extra_branches_stays_compatible` (the subset rule's
+  other side),
+  `an_escape_branch_is_required_on_both_sides_because_escapes_are_symmetric`,
+  `a_divergent_then_target_is_refused_distinctly_from_a_missing_counterpart`,
+  `a_shared_branch_landing_in_different_states_is_refused_distinctly_from_an_unoffered_branch`,
+  `a_continuation_shape_mismatch_is_refused_distinctly_from_a_target_divergence`,
+  and
+  `ownership_divergence_is_refused_distinctly_from_payload_and_capability_divergence`.
+  Each asserts its exact variant *and* asserts every confusable neighbour is
+  absent from the rendered errors, and
+  `continuation_duality_errors_are_deterministic_across_runs` compares the
+  exact rendered error vector across two independent runs while asserting
+  the fixture really produces both refusal families.
 - **The affine layer's own drop bomb.**
   `abandoned_nonterminal_endpoint_panics_on_drop` proves dropping a live,
   non-terminal `Endpoint` panics (via `catch_unwind`), with a message
@@ -336,7 +406,10 @@ requires to be unique) is normalized out of both traces.
   serialization codec from existing), but refused when replayed.
 - **Duality can be unsound when payload effects or capabilities differ.**
   Addressed directly: `check_duality` compares required capability
-  identity, not mere presence, per transition pair.
+  identity, not mere presence, per transition pair, and likewise compares
+  `OwnershipMove`. Duality is also unsound when the two roles agree on a
+  message but not on where it leaves them -- see
+  [Continuation duality](#continuation-duality).
 - **Timeout may leave the remote side in an uncertain state.** Addressed by
   routing every declared `Timeout` transition in both applied protocols to
   a distinct `Uncertain` terminal, never conflated with a clean `Cancel`.
@@ -393,7 +466,7 @@ Explicitly **not** done in this slice, and why:
 
 ## Gate
 
-`cargo test --locked -p semaprax --lib session_protocol::` (34 unit tests)
+`cargo test --locked -p semaprax --lib session_protocol::` (44 unit tests)
 and `cargo test --locked -p semaprax --doc session_protocol` (3
 `compile_fail` doctests: grant-for-wrong-capability, double-use of a
 consumed `Endpoint`, and the capability module's own copy of the

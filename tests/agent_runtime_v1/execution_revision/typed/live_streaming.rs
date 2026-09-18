@@ -585,5 +585,198 @@ fn bound_model_policy_refuses_before_factory_and_keeps_prior_reservations() {
     .unwrap();
 }
 
+/// The capability set an adapter must announce to satisfy the deployment
+/// binding built from `identity()` below. Each refusal case below copies this
+/// and varies exactly one pinned field.
+fn bound_capabilities() -> AdapterCapabilities {
+    AdapterCapabilities {
+        adapter_identity: "scripted-streaming-adapter".to_owned(),
+        adapter_version: "1.0.0".to_owned(),
+        provider_profile: "fixture".to_owned(),
+        structured_output_modes: vec![StructuredOutputMode::RawText],
+        supports_streaming: true,
+        token_accounting_source: TokenAccountingSource::LocalEstimate,
+        cancellation_semantics: CancellationSemantics::BestEffortRequestStop,
+        retryable_failure_classes: vec![],
+        endpoint_policy: EndpointPolicy::HostInjected,
+        max_request_bytes: 65_536,
+        max_response_bytes: 65_536,
+        max_context_tokens: 8192,
+        max_output_tokens: 2048,
+    }
+}
+
+/// An adapter that streams the admitted document correctly but announces a
+/// different label than the one the deployment pinned.
+struct RelabelledStreamingAdapter {
+    capabilities: AdapterCapabilities,
+    inner: ScriptedStreamingAdapter,
+    starts: Rc<Cell<usize>>,
+}
+
+impl ProviderAdapter for RelabelledStreamingAdapter {
+    fn capabilities(&self) -> &AdapterCapabilities {
+        &self.capabilities
+    }
+
+    fn start(
+        &mut self,
+        capability: &AdapterInvocationCapability,
+        request: &semaprax::provider_adapter_sdk::AdapterRequest,
+    ) -> Result<(), AdapterRefusal> {
+        self.starts.set(self.starts.get() + 1);
+        self.inner.start(capability, request)
+    }
+
+    fn poll(&mut self) -> AdapterPoll {
+        self.inner.poll()
+    }
+
+    fn cancel(&mut self, reason: &str) {
+        self.inner.cancel(reason);
+    }
+}
+
+fn relabelled_factory(
+    document: String,
+    capabilities: AdapterCapabilities,
+    constructions: Rc<Cell<usize>>,
+    starts: Rc<Cell<usize>>,
+) -> impl SourceAdapterFactory {
+    let document = RefCell::new(Some(document));
+    move || {
+        constructions.set(constructions.get() + 1);
+        let document = document
+            .borrow_mut()
+            .take()
+            .expect("one fresh adapter per attempted source proposal");
+        Box::new(RelabelledStreamingAdapter {
+            capabilities: capabilities.clone(),
+            inner: ScriptedStreamingAdapter::new(
+                document
+                    .as_bytes()
+                    .chunks(5)
+                    .map(ToOwned::to_owned)
+                    .collect(),
+                document.into_bytes(),
+                usage(1, 1, 1),
+                true,
+            ),
+            starts: Rc::clone(&starts),
+        }) as Box<dyn ProviderAdapter>
+    }
+}
+
+/// A deployment pins an exact `(adapter_identity, adapter_version,
+/// provider_profile)` triple. A host that substitutes a differently labelled
+/// adapter must be refused after construction and strictly before `start`,
+/// even when that adapter would negotiate every required capability and return
+/// the correct document: otherwise provider work could be performed, and
+/// billed, under a label the deployment never authorized.
+///
+/// Each pinned field is varied on its own so that dropping any one of them
+/// from the comparison fails here rather than silently admitting an
+/// unauthorized provider.
+#[test]
+fn a_relabelled_adapter_is_refused_before_start_on_every_pinned_field() {
+    let fixture = typed_fixture();
+    with_authenticated_project(&fixture.0.join("semaprax.toml"), |snapshot| {
+        let project = snapshot.retain_revision();
+        let root = project.program_root()?;
+        let compiled = compile_source_agent_lifecycle_v2(
+            project.sources()[0].source(),
+            project.sources()[0].path(),
+            "fixture.agent",
+            "fixture.agent.type.step",
+        )?;
+        let schema = compiled.proposal_schema();
+        let identity = || SourceModelAdapterIdentity {
+            provider_id: "fake.local".to_owned(),
+            model_id: "fake-basic".to_owned(),
+            adapter_identity: "scripted-streaming-adapter".to_owned(),
+            adapter_version: "1.0.0".to_owned(),
+            provider_profile: "fixture".to_owned(),
+        };
+        let document =
+            crate::agent_lifecycle_v1::proposal(schema.schema().digest(), "5", false, "0");
+
+        let mut wrong_identity = bound_capabilities();
+        wrong_identity.adapter_identity = "substituted-streaming-adapter".to_owned();
+        let mut wrong_version = bound_capabilities();
+        wrong_version.adapter_version = "2.0.0".to_owned();
+        let mut wrong_profile = bound_capabilities();
+        wrong_profile.provider_profile = "production".to_owned();
+
+        for (field, capabilities) in [
+            ("adapter_identity", wrong_identity),
+            ("adapter_version", wrong_version),
+            ("provider_profile", wrong_profile),
+        ] {
+            let runtime = bind(project.clone(), &root)?;
+            let binding = runtime.source_model_binding(identity())?;
+            let policy =
+                runtime.source_model_policy_binding(&binding, ModelBudgetLimits::unbounded())?;
+            let constructions = Rc::new(Cell::new(0));
+            let starts = Rc::new(Cell::new(0));
+            let mut factory = relabelled_factory(
+                document.clone(),
+                capabilities,
+                Rc::clone(&constructions),
+                Rc::clone(&starts),
+            );
+            let cancellation = AgentCancellation::new();
+            let clock = StepClock::new(0);
+            let mut quoter = ExactPolicyQuoter;
+            let mut source = StreamingSourceProposalAdapter::new_bound_with_policy(
+                &mut factory,
+                AdapterInvocationCapability::grant("relabelled adapter fixture"),
+                schema,
+                binding.clone(),
+                binding.invocation_capability(),
+                policy,
+                &mut quoter,
+                &cancellation,
+                &clock,
+                0,
+            )?;
+            let mut handler = Handler {
+                calls: Vec::new(),
+                wrong: false,
+            };
+            let result = runtime.run_live_bound_model(&mut source, &mut handler, &cancellation);
+            assert!(
+                result.is_err(),
+                "a mismatched {field} must refuse the source proposal"
+            );
+            let failure = result.err().expect("a relabelled adapter is refused");
+            assert_eq!(
+                constructions.get(),
+                1,
+                "the adapter is constructed before its label is compared ({field})"
+            );
+            assert_eq!(
+                starts.get(),
+                0,
+                "a relabelled adapter must never be started ({field})"
+            );
+            assert_eq!(failure.model_evidence().attempts().len(), 1);
+            assert_eq!(
+                failure.model_evidence().attempts()[0].terminal(),
+                "adapter_identity_refused",
+                "the recorded terminal names the label refusal ({field})"
+            );
+            assert!(
+                failure
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "source.model_adapter_identity"),
+                "the refusal carries its stable diagnostic code ({field})"
+            );
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+
 #[path = "live_streaming/durable.rs"]
 mod durable;

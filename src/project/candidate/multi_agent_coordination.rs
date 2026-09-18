@@ -29,9 +29,13 @@
 //! typed per-agent proposals against that session. It fails closed
 //! (`SPX-Z503`) when the session is bound to a different candidate revision
 //! than `self` -- the "intervening edit" case -- and treats a single
-//! proposal's own stale base revision, unknown agent id, or out-of-scope
-//! target as a *recorded rejection* rather than aborting the whole batch:
-//! one bad proposal never hides the classification of the others. Two
+//! proposal's own stale base revision, unknown agent id, out-of-scope
+//! target, or declared [`OperationClass`] that provably does not match its
+//! own target's real declaration kind (`operation_class_mismatch`, checked
+//! via [`operation_class_matches_target`], never trusted from the caller for
+//! `Call`/`Type`/`Test`) as a *recorded rejection* rather than aborting the
+//! whole batch: one bad proposal never hides the classification of the
+//! others. Two
 //! surviving proposals from different agents that name the same stable id
 //! are a `same_target` conflict: both intentions, the affected ids, and a
 //! closed set of resolution choices are recorded, and neither is silently
@@ -84,8 +88,9 @@
 //!   a session cannot be governed by one of its own working agents).
 //!
 //! A per-proposal rejection (`unknown_agent`, `stale_base_revision`,
-//! `scope_violation`) is recorded as data in the evaluation record rather
-//! than one of the above codes: it is expected batch content, not a
+//! `scope_violation`, `operation_class_mismatch`) is recorded as data in the
+//! evaluation record rather than one of the above codes: it is expected
+//! batch content, not a
 //! malformed call.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -190,10 +195,24 @@ pub struct CoordinationParticipant<'a> {
 /// The typed operation classes this module classifies conflicts over,
 /// matching the issue's named conflict-class list (same target plus
 /// call/type/contract/effect/ownership/requirement/ABI/architecture/test),
-/// with `GeneratedArtifact` covering contracted generated artifacts. Purely
-/// a caller-declared label carried through into evidence: this module does
-/// not independently verify that a proposal's declared class matches what
-/// its target ids actually are.
+/// with `GeneratedArtifact` covering contracted generated artifacts.
+///
+/// A caller-declared label, but no longer a *trusted* one for every class:
+/// [`ProjectCandidate::evaluate_agent_proposals`] independently checks
+/// `Call`, `Type` and `Test` against the target's own real, already-computed
+/// declaration kind and home module (see
+/// [`operation_class_matches_target`]) and rejects a proven mismatch as
+/// `operation_class_mismatch` rather than trusting it into a conflict
+/// record. `Contract`, `Effect`, `Ownership`, `Requirement`, `Architecture`,
+/// `PublicAbi` and `GeneratedArtifact` describe an intended *change* a
+/// proposal has not yet made -- a target's current requires/ensures,
+/// effects, or parameter ownership shape says nothing about whether an
+/// unapplied proposal would add, keep, or remove that shape, so requiring
+/// "must already have one" would reject legitimate additive proposals (for
+/// example, a proposal that adds a function's first precondition). Those
+/// seven classes remain a caller declaration, not independently verified;
+/// the evaluation record's `nonclaims` say so precisely rather than as one
+/// blanket claim.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationClass {
     Call,
@@ -223,6 +242,87 @@ impl OperationClass {
             Self::Ownership => "ownership",
         }
     }
+}
+
+/// Declaration kinds (as [`crate::workspace_analysis`] renders them via
+/// `image_symbol`'s `"kind"` field) a `Call`-classed proposal's target may
+/// name: exactly the callable kind.
+const CALL_KINDS: &[&str] = &["function"];
+
+/// Declaration kinds a `Type`-classed proposal's target may name: every kind
+/// that names a type-shaped declaration, never a function or an import
+/// binding.
+const TYPE_KINDS: &[&str] = &[
+    "resource",
+    "resource_drop",
+    "record",
+    "class",
+    "field",
+    "variant",
+    "variant_case",
+    "case_field",
+    "interface",
+];
+
+/// Independently check one proposal's declared `operation_class` against
+/// real, already-computed compiler facts about its own target: the target's
+/// actual declaration kind, and, for `Test`, its actual home module against
+/// this exact candidate's own configured test module. Both facts are
+/// properties of what the target stable id *already and permanently is* --
+/// no proposal against this exact id can ever change what kind of
+/// declaration it names or move it to a different module without a
+/// separately tracked rename/move -- so a declared class outside its
+/// target's real kind (or, for `Test`, real module) is a proven mislabel,
+/// unlike `Contract`/`Effect`/`Ownership`/`Requirement`/`Architecture`/
+/// `PublicAbi`/`GeneratedArtifact`, which describe an intended change this
+/// module has no diff to inspect (see the `OperationClass` documentation).
+fn operation_class_matches_target(
+    class: OperationClass,
+    kind: &str,
+    module: &str,
+    test_module: &str,
+) -> bool {
+    match class {
+        OperationClass::Call => CALL_KINDS.contains(&kind),
+        OperationClass::Type => TYPE_KINDS.contains(&kind),
+        OperationClass::Test => kind == "function" && module == test_module,
+        OperationClass::GeneratedArtifact
+        | OperationClass::Requirement
+        | OperationClass::Architecture
+        | OperationClass::PublicAbi
+        | OperationClass::Contract
+        | OperationClass::Effect
+        | OperationClass::Ownership => true,
+    }
+}
+
+/// Real `kind` and `module` for one already-scope-verified target id, reused
+/// from the existing [`crate::workspace_analysis::WorkspaceAnalysis::image_symbol`]
+/// artifact (the same one `open_coordination_session` already consulted, via
+/// `impact_summary`, to prove this id exists in this exact candidate).
+/// Treated as an internal-consistency failure rather than caller input: the
+/// id can only reach this call after already having been proven to exist in
+/// this exact, digest-bound candidate.
+fn target_kind_and_module(candidate: &ProjectCandidate, id: &str) -> Result<(String, String)> {
+    let symbol = candidate
+        .revision
+        .semantic
+        .image_symbol(id)
+        .ok_or_else(|| {
+            stale(
+                "coordination proposal target id no longer resolves in this exact candidate's own \
+             declaration index",
+            )
+        })?;
+    let kind = symbol["kind"]
+        .as_str()
+        .expect("image_symbol always renders a kind string")
+        .to_owned();
+    let module = symbol["module"]
+        .as_str()
+        .expect("image_symbol always renders a module string")
+        .to_owned();
+    Ok((kind, module))
 }
 
 /// One agent's typed transaction proposal: exact preconditions
@@ -456,6 +556,7 @@ impl ProjectCandidate {
             intention: &'a str,
         }
 
+        let test_module = self.revision.manifest().test_module().to_owned();
         let mut rejected: Vec<Value> = Vec::new();
         let mut accepted: Vec<Accepted<'_>> = Vec::new();
 
@@ -504,6 +605,32 @@ impl ProjectCandidate {
                     "index": index,
                     "agent_id": proposal.agent_id,
                     "reason": "scope_violation",
+                }));
+                continue;
+            }
+            // Independent check, not a trusted caller claim: every target
+            // id's real kind (and, for `Test`, real module) must be
+            // consistent with the proposal's own declared operation class.
+            // See `operation_class_matches_target`.
+            let mut class_mismatch = false;
+            for id in target_set.iter().copied() {
+                let (kind, module) = target_kind_and_module(self, id)?;
+                if !operation_class_matches_target(
+                    proposal.operation_class,
+                    &kind,
+                    &module,
+                    &test_module,
+                ) {
+                    class_mismatch = true;
+                    break;
+                }
+            }
+            if class_mismatch {
+                rejected.push(json!({
+                    "index": index,
+                    "agent_id": proposal.agent_id,
+                    "reason": "operation_class_mismatch",
+                    "operation_class": proposal.operation_class.token(),
                 }));
                 continue;
             }
@@ -655,7 +782,8 @@ impl ProjectCandidate {
                 "compatible_order_is_guidance_for_a_separate_authorized_invocation",
                 "same_target_and_cross_target_via_the_existing_reverse_impact_artifact_are_the_only_proven_automatic_conflict_detection",
                 "cross_target_detection_covers_only_the_reverse_impact_artifacts_own_six_edge_families",
-                "operation_class_is_caller_declared_not_independently_verified",
+                "operation_class_call_type_and_test_are_checked_against_the_targets_own_real_kind_and_module_and_a_mismatch_is_rejected",
+                "operation_class_contract_effect_ownership_requirement_architecture_public_abi_and_generated_artifact_remain_caller_declared_not_independently_verified",
                 "graph_independence_can_miss_hidden_external_or_generated_coupling",
             ],
         });

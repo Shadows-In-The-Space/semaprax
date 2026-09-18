@@ -961,3 +961,299 @@ fn a_rename_rebase_lets_a_fresh_session_resolve_the_same_stable_id_while_the_old
     // evaluation ever touched the fixture's files on disk.
     assert_eq!(fixture.bytes(), before);
 }
+
+#[test]
+fn a_declared_type_class_against_a_function_target_is_rejected_as_an_operation_class_mismatch() {
+    // `OperationClass` used to be a pure caller-declared label: nothing
+    // checked that a proposal declaring itself `Type` actually named a
+    // type-shaped declaration. `coordination.divide` is a `function`
+    // declaration (see `LIB`), so declaring `Type` for it is a proven
+    // mislabel, independent of anything the caller claims in `intention`.
+    let fixture = Fixture::new();
+    let candidate = open(&fixture.revision());
+    let participants = [CoordinationParticipant {
+        agent_id: "agent-a",
+        granted_scope: &["coordination.divide"],
+        budget_units: 10,
+    }];
+    let session = session_for(&candidate, "coordinator", &participants);
+    let base = session["base_project_revision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let session_text = session.to_string();
+
+    let proposals = [AgentProposal {
+        agent_id: "agent-a",
+        declared_base_project_revision: &base,
+        target_ids: &["coordination.divide"],
+        operation_class: OperationClass::Type,
+        intention: "falsely declares a function target as a type change",
+    }];
+    let evaluation = candidate
+        .evaluate_agent_proposals(candidate.candidate_digest(), &session_text, &proposals)
+        .unwrap();
+    let evaluation: Value = serde_json::from_str(&evaluation).unwrap();
+    let rejected = evaluation["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0]["reason"], json!("operation_class_mismatch"));
+    assert_eq!(rejected[0]["operation_class"], json!("type"));
+    assert_eq!(evaluation["conflicts"], json!([]));
+    assert_eq!(evaluation["compatible_order"], json!([]));
+
+    // The same target, honestly declared `Call`, is accepted: the check
+    // rejects a proven mismatch, not the target itself.
+    let honest_proposals = [AgentProposal {
+        operation_class: OperationClass::Call,
+        intention: "honestly declares divide as a call-site change",
+        ..proposals[0]
+    }];
+    let honest_evaluation = candidate
+        .evaluate_agent_proposals(
+            candidate.candidate_digest(),
+            &session_text,
+            &honest_proposals,
+        )
+        .unwrap();
+    let honest_evaluation: Value = serde_json::from_str(&honest_evaluation).unwrap();
+    assert_eq!(honest_evaluation["rejected"], json!([]));
+    assert_eq!(
+        honest_evaluation["compatible_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn a_declared_test_class_outside_the_project_test_module_is_rejected_as_an_operation_class_mismatch(
+) {
+    // `coordination.divide` lives in `coordination.lib`, not the
+    // project's configured test module (`coordination.tests`), so
+    // declaring `Test` for it is a proven mislabel.
+    let fixture = Fixture::new();
+    let candidate = open(&fixture.revision());
+    let participants = [CoordinationParticipant {
+        agent_id: "agent-a",
+        granted_scope: &["coordination.divide"],
+        budget_units: 10,
+    }];
+    let session = session_for(&candidate, "coordinator", &participants);
+    let base = session["base_project_revision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let session_text = session.to_string();
+
+    let proposals = [AgentProposal {
+        agent_id: "agent-a",
+        declared_base_project_revision: &base,
+        target_ids: &["coordination.divide"],
+        operation_class: OperationClass::Test,
+        intention: "falsely declares a non-test-module target as a test change",
+    }];
+    let evaluation = candidate
+        .evaluate_agent_proposals(candidate.candidate_digest(), &session_text, &proposals)
+        .unwrap();
+    let evaluation: Value = serde_json::from_str(&evaluation).unwrap();
+    let rejected = evaluation["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0]["reason"], json!("operation_class_mismatch"));
+    assert_eq!(evaluation["compatible_order"], json!([]));
+}
+
+#[test]
+fn a_declared_test_class_naming_an_actual_test_module_declaration_is_accepted() {
+    // The positive control for the two mismatch tests above:
+    // `coordination.tests.check` really does live in the project's
+    // configured test module (`OTHER`, `coordination.tests`), so
+    // declaring `Test` for it is verified, not mislabeled, and the
+    // proposal is accepted normally.
+    let fixture = Fixture::new();
+    let candidate = open(&fixture.revision());
+    let participants = [CoordinationParticipant {
+        agent_id: "agent-a",
+        granted_scope: &["coordination.tests.check"],
+        budget_units: 10,
+    }];
+    let session = session_for(&candidate, "coordinator", &participants);
+    let base = session["base_project_revision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let session_text = session.to_string();
+
+    let proposals = [AgentProposal {
+        agent_id: "agent-a",
+        declared_base_project_revision: &base,
+        target_ids: &["coordination.tests.check"],
+        operation_class: OperationClass::Test,
+        intention: "honestly declares a real test-module target as a test change",
+    }];
+    let evaluation = candidate
+        .evaluate_agent_proposals(candidate.candidate_digest(), &session_text, &proposals)
+        .unwrap();
+    let evaluation: Value = serde_json::from_str(&evaluation).unwrap();
+    assert_eq!(evaluation["rejected"], json!([]));
+    assert_eq!(evaluation["compatible_order"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn a_crash_between_an_in_memory_apply_and_publication_leaves_source_untouched_and_recovery_never_double_applies(
+) {
+    // Every other test in this module proves classification never
+    // mutates anything. This test goes one step further, into the one
+    // real state-changing operation `compatible_order` guidance could
+    // ever feed (a real `rename_declaration` through
+    // `ProjectCandidate::apply`, the same production path
+    // `a_rename_rebase_lets_a_fresh_session_resolve_the_same_stable_id...`
+    // exercises), and simulates a crash *between* that in-memory apply
+    // and the separate, authorized publication step this module never
+    // performs -- the exact boundary AGENTS.md draws: "a settlement or
+    // concurrency model is proof data, not permission to perform a
+    // physical finalizer ... or publish an artifact." Recovery is
+    // modeled the only honest way a real recovery path could work: a
+    // brand new process re-opening the project from its authoritative
+    // on-disk source, with no memory of the crashed in-memory candidate.
+    let fixture = Fixture::new();
+    let before_crash = fixture.bytes();
+
+    let candidate = open(&fixture.revision());
+    let participants = [CoordinationParticipant {
+        agent_id: "agent-a",
+        granted_scope: &["coordination.helper"],
+        budget_units: 10,
+    }];
+    let session = session_for(&candidate, "coordinator", &participants);
+    let base = session["base_project_revision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let session_text = session.to_string();
+
+    let proposals = [AgentProposal {
+        agent_id: "agent-a",
+        declared_base_project_revision: &base,
+        target_ids: &["coordination.helper"],
+        operation_class: OperationClass::Call,
+        intention: "agent-a's accepted proposal",
+    }];
+    let evaluation = candidate
+        .evaluate_agent_proposals(candidate.candidate_digest(), &session_text, &proposals)
+        .unwrap();
+    let evaluation: Value = serde_json::from_str(&evaluation).unwrap();
+    assert_eq!(evaluation["compatible_order"].as_array().unwrap().len(), 1);
+
+    // The accepted proposal is carried into the one real state-changing
+    // step this module's guidance could feed: a genuine `apply`. This
+    // really succeeds -- it is not a failed attempt -- before the
+    // simulated crash discards it.
+    let rename_intent = json!({
+        "kind": "rename_declaration",
+        "target": "coordination.helper",
+        "name": "helper_committed",
+    });
+    let rename_change =
+        SemanticChange::new(candidate.revision().project_revision(), &rename_intent).unwrap();
+    let crashed_candidate = candidate
+        .apply(candidate.candidate_digest(), &rename_change)
+        .unwrap();
+    assert_ne!(
+        crashed_candidate.candidate_digest(),
+        candidate.candidate_digest()
+    );
+    let crashed_source = crashed_candidate
+        .revision()
+        .sources()
+        .iter()
+        .find(|source| source.path() == "src/app.spx")
+        .unwrap()
+        .source()
+        .to_owned();
+    assert!(crashed_source.contains("helper_committed"));
+
+    // The crash: everything the "in-flight" process held, including the
+    // successfully-applied-but-never-published candidate, is gone. No
+    // publication, no execution, nothing further ever runs from it.
+    drop(crashed_candidate);
+
+    // Authoritative source is exactly as it was before any of this:
+    // `apply` builds a new in-memory candidate and never itself writes
+    // source, so a crash after it (and before a separate, authorized
+    // publication) leaves zero trace on disk.
+    assert_eq!(fixture.bytes(), before_crash);
+
+    // Recovery: a brand new process re-opens the project from its
+    // on-disk authoritative source -- the only truth a real recovery
+    // path can consult, since the crashed in-memory candidate is gone
+    // and was never published anywhere durable.
+    let recovered = open(&fixture.revision());
+    assert_eq!(recovered.candidate_digest(), candidate.candidate_digest());
+    let recovered_source = recovered
+        .revision()
+        .sources()
+        .iter()
+        .find(|source| source.path() == "src/app.spx")
+        .unwrap()
+        .source()
+        .to_owned();
+    // The crashed rename is invisible to recovery: it sees zero
+    // applications, never a partial or half-landed one.
+    assert!(recovered_source.contains("fn helper("));
+    assert!(!recovered_source.contains("helper_committed"));
+
+    // Recovery re-runs the same coordinated proposal from scratch
+    // against the recovered, untouched candidate.
+    let recovery_session = session_for(&recovered, "coordinator", &participants);
+    let recovery_base = recovery_session["base_project_revision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let recovery_session_text = recovery_session.to_string();
+    let recovery_proposals = [AgentProposal {
+        agent_id: "agent-a",
+        declared_base_project_revision: &recovery_base,
+        target_ids: &["coordination.helper"],
+        operation_class: OperationClass::Call,
+        intention: "recovery replays agent-a's proposal from disk truth",
+    }];
+    let recovery_evaluation = recovered
+        .evaluate_agent_proposals(
+            recovered.candidate_digest(),
+            &recovery_session_text,
+            &recovery_proposals,
+        )
+        .unwrap();
+    let recovery_evaluation: Value = serde_json::from_str(&recovery_evaluation).unwrap();
+    assert_eq!(
+        recovery_evaluation["compatible_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // Recovery applies the recovered proposal exactly once, through the
+    // same real `apply` path, from the untouched on-disk state.
+    let recovered_apply = recovered
+        .apply(recovered.candidate_digest(), &rename_change)
+        .unwrap();
+    // That single, real application from disk truth is byte-for-byte
+    // the same result the original (crashed, never-published) apply
+    // would have produced from the same untouched starting candidate --
+    // proving recovery reproduces exactly one application, never a
+    // doubled or corrupted one, because there was never a second,
+    // independent success to fold in.
+    let equivalent_apply = candidate
+        .apply(candidate.candidate_digest(), &rename_change)
+        .unwrap();
+    assert_eq!(
+        recovered_apply.candidate_digest(),
+        equivalent_apply.candidate_digest()
+    );
+
+    // Still never touched disk, even after two separate successful
+    // in-memory applies and a full recovery replay.
+    assert_eq!(fixture.bytes(), before_crash);
+}

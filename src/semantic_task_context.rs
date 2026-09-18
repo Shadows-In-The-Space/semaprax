@@ -98,35 +98,67 @@
 //!    own embedded `query` object. `filters` is deliberately absent from this
 //!    summary: `AgentContextV2Options` exposes no public accessor for it, and
 //!    it remains visible per seed inside that seed's own compiled content.
+//! 9. **A second, genuinely derivable seed kind**
+//!    ([`seed_id_for_diagnostic`], [`CompilationSeed::from_diagnostic`]):
+//!    a seed resolved from a diagnostic's structural `span` -- the byte
+//!    range the parser/resolver already computed -- to the smallest
+//!    enclosing function, type, or class method's persistent stable id.
+//!    `diagnostic.message` (free text, possibly natural language) is never
+//!    inspected; only `span` and the declarations' own
+//!    `stable_id`/`span` fields decide the result
+//!    (`tests::diagnostic_derived_seed_ignores_message_text`). Proven to
+//!    resolve to the exact id, and therefore compile to the exact closure,
+//!    a hand-written [`CompilationSeed::new`] with that id would
+//!    (`tests::diagnostic_derived_seed_selects_the_same_closure_as_the_hand_written_stable_id`).
+//! 10. **Cross-seed deduplication** ([`dedup_seed_json`], internal to
+//!    [`compile`]). A fact `agent_context_v2_json` renders for one
+//!    declaration id is a pure function of `(program, id, filters, schema)`
+//!    (see the module-internal "Cross-seed deduplication" section below for
+//!    why), so two seeds sharing `per_seed_options` that both reach the same
+//!    declaration render byte-identical fact text for it. When a
+//!    lower-priority seed's closure reaches a declaration an earlier,
+//!    higher-priority *included* seed in the same goal already delivered in
+//!    full, this seed's own copy is replaced by a small
+//!    `{"id":...,"deduplicated_owner_seed":...}` reference stub instead of
+//!    being re-embedded and re-charged against the budget -- real savings,
+//!    not merely an accounting fiction: the stub is what is actually
+//!    embedded and what `byte-v1`/`lexical-v1` actually count, so the exact
+//!    tokenizer's "exact" label still means exactly what it always meant
+//!    (the literal size of what this call embeds). A seed's own root
+//!    declaration is always kept in full inside its own entry, even when an
+//!    earlier seed's closure already carries a copy of the same content, so
+//!    reading one seed's entry never requires chasing a reference elsewhere
+//!    to see what was actually asked for. Proven
+//!    (`tests::cross_seed_dedup_total_is_byte_identical_to_the_manually_unioned_total`)
+//!    against an independently, manually unioned reference total -- not
+//!    merely smaller than the naive double-counted total, but byte-for-byte
+//!    equal to it.
+//! 11. **Requirement/test/candidate-diff facets integrated into the closure**
+//!    ([`DeclarationFacets`], [`compile_with_declaration_facets`]), attached
+//!    per declaration id inside the same bundle a caller already reads,
+//!    rather than a separate report the caller must cross-reference by hand.
+//!    This module still has no ambient authority to discover requirements,
+//!    tests, or a candidate diff itself; a caller who already has this data
+//!    (for example from [`crate::requirement_traceability`], a project's own
+//!    test index, or a [`crate::patch`]-computed diff) supplies it, keyed by
+//!    exact declaration id, never by free text.
 //!
 //! # Deliberately out of scope here
 //!
 //! Issue #197 asks for a much larger surface this module still does not
-//! cover: requirement/test/diagnostic/candidate-diff seeds integrated into
-//! the semantic closure itself (a seed is still exactly one stable
-//! declaration id), real content summarization of a distant or omitted item
-//! (this module and the engine it composes only ever include or omit a whole
-//! typed unit, never a compressed substitute for one), and CLI/MCP/SDK
-//! exposure of the cache and suggestion additions (the existing `compact
-//! task-context` CLI route, documented in
-//! `docs/SEMANTIC-TASK-CONTEXT-V1.md`, wires the goal/budget surface only).
-//! This is still one honestly-scoped slice, matching the precedent
-//! `semantic_embedding` set for shipping one narrow slice of a large issue
-//! rather than an unverifiable broader claim (see
+//! cover: real content summarization of a distant or omitted item (this
+//! module and the engine it composes only ever include or omit a whole typed
+//! unit, or a dedup reference stub, never a compressed substitute for one),
+//! automatic discovery of requirement/test/candidate-diff data (residual 3 is
+//! met only for caller-supplied data joined by exact id -- this module still
+//! opens no file and calls no other subsystem to derive it itself), and
+//! CLI/MCP/SDK exposure of the cache, suggestion, diagnostic-derived seed,
+//! and declaration-facets additions (the existing `compact task-context` CLI
+//! route, documented in `docs/SEMANTIC-TASK-CONTEXT-V1.md`, wires the
+//! goal/budget surface only). This is still one honestly-scoped slice,
+//! matching the precedent `semantic_embedding` set for shipping one narrow
+//! slice of a large issue rather than an unverifiable broader claim (see
 //! `docs/SEMANTIC-EMBEDDING-V1.md`).
-//!
-//! # No cross-seed deduplication
-//!
-//! Two seeds whose closures overlap (for example, two functions that share
-//! a common callee) each compile their **own** independent context; a
-//! shared declaration's facts appear once per seed that reaches it, and its
-//! token cost is charged once per seed. This module does not merge or
-//! deduplicate declaration facts across seeds -- doing so would require
-//! re-deriving the single-seed engine's own per-declaration facet rules,
-//! which this module is designed specifically not to duplicate. A caller
-//! that wants only the smallest possible closure over many related seeds
-//! should still call the existing multi-seed-unaware engine directly with
-//! the union of call sites as its one root, when that shape fits.
 //!
 //! # No ambient authority
 //!
@@ -136,34 +168,43 @@
 //! process, and contacts no network. [`suggest_seeds`] additionally calls
 //! [`crate::doc::document`] on the same already-parsed `&Program` plus a
 //! caller-supplied `&Comments` -- it does not lex or read anything itself.
-//! [`TaskContextCache`] holds compiled bytes only in process memory; it
-//! opens no file and outlives nothing beyond the caller's own process.
+//! [`seed_id_for_diagnostic`] reads only `program.functions`/`program.types`
+//! (and their spans/stable ids) and the caller-supplied `Diagnostic`'s
+//! `span`; it never reads `diagnostic.message`. [`TaskContextCache`] holds
+//! compiled bytes only in process memory; it opens no file and outlives
+//! nothing beyond the caller's own process.
+//! [`compile_with_declaration_facets`] takes its facets as an argument the
+//! caller already computed; it discovers none of that data itself.
 //!
 //! # Honesty bar
 //!
-//! This module claims exactly seven things: an explicit multi-seed goal
-//! representation, an explicit and honestly labeled token-accounting unit
-//! carrying its own algorithm-identity digest, deterministic whole-seed
-//! selection under a real budget enforced (not advisory) at an exact
-//! boundary, a cache-key digest sensitive to every field that determines the
-//! output, a working (if unbounded, unevicting) in-memory cache keyed by
-//! that digest and separated by caller-declared access scope, a
-//! deterministic lexical seed *suggestion* that never influences selection
-//! on its own, and a top-level summary of the shared inclusion policy's
-//! exposable fields. It does not claim natural-language goal
-//! *understanding*, cross-seed semantic deduplication, real content
-//! summarization of an omitted or distant item, requirement/test/diagnostic
-//! seed integration, cache eviction or persistence, or any CLI/MCP/SDK
-//! surface for the cache and suggestion additions specifically (the existing
-//! `compact task-context` route, described in
+//! This module claims exactly ten things: an explicit multi-seed goal
+//! representation, a second seed kind derived from a diagnostic's structural
+//! span rather than its message, an explicit and honestly labeled
+//! token-accounting unit carrying its own algorithm-identity digest,
+//! deterministic whole-seed selection under a real budget enforced (not
+//! advisory) at an exact boundary, real cross-seed deduplication that
+//! shrinks what is actually embedded (not only what is accounted), a
+//! cache-key digest sensitive to every field that determines the output, a
+//! working (if unbounded, unevicting) in-memory cache keyed by that digest
+//! and separated by caller-declared access scope, a deterministic lexical
+//! seed *suggestion* that never influences selection on its own, a
+//! top-level summary of the shared inclusion policy's exposable fields, and
+//! caller-supplied requirement/test/candidate-diff facets joined into the
+//! closure by exact declaration id. It does not claim natural-language goal
+//! *understanding*, automatic requirement/test/candidate-diff discovery,
+//! real content summarization of an omitted or distant item, cache eviction
+//! or persistence, or any CLI/MCP/SDK surface for the cache, suggestion,
+//! diagnostic-derived seed, or declaration-facets additions specifically
+//! (the existing `compact task-context` route, described in
 //! `docs/SEMANTIC-TASK-CONTEXT-V1.md`, covers goal/budget only).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use sha2::{Digest, Sha256};
 
 use crate::agent_economics::lexical_tokens;
-use crate::ast::Program;
+use crate::ast::{Program, Span, TypeDeclarationKind};
 use crate::diagnostic::{quote_json, Diagnostic};
 use crate::digest_hex::LowerHex;
 use crate::doc;
@@ -211,6 +252,74 @@ fn seed_not_found(id: &str) -> Diagnostic {
     )
 }
 
+fn diagnostic_seed_not_found(diagnostic: &Diagnostic) -> Diagnostic {
+    Diagnostic::io(
+        "SPX-Z805",
+        match diagnostic.span {
+            Some(span) => format!(
+                "diagnostic `{}` at byte offset {} does not resolve to any function or type \
+                 declaration in this program",
+                diagnostic.code, span.start
+            ),
+            None => format!(
+                "diagnostic `{}` carries no span and cannot be resolved to a declaration",
+                diagnostic.code
+            ),
+        },
+    )
+}
+
+/// Resolve a diagnostic's structural span to the persistent stable id of the
+/// smallest top-level function, type declaration, or class method whose own
+/// span encloses it -- using only [`crate::ast::Function::span`] /
+/// [`crate::ast::TypeDeclaration::span`] and their `stable_id`, never the
+/// diagnostic's `message` text. This is issue #197's "seed detection beyond
+/// stable IDs" residual: a second, genuinely derivable seed kind, proven
+/// (`tests::diagnostic_derived_seed_selects_the_same_closure_as_the_hand_written_stable_id`)
+/// to resolve to the exact same stable id -- and therefore compile to the
+/// exact same closure -- a caller who already knew that id would have
+/// written by hand. `message` is never inspected
+/// (`tests::diagnostic_derived_seed_ignores_message_text`): only `span`, a
+/// byte range the parser/resolver already computed, decides the result, so
+/// a diagnostic's caller-authored explanatory text can never steer which
+/// seed is derived.
+///
+/// Returns `None` when `diagnostic` carries no span, or its span falls
+/// within no declaration in `program` (for example a module-level
+/// diagnostic). Only `functions`, `types`, and class `methods` are
+/// searched; interfaces, protocols, implementations, and agent
+/// declarations are not yet covered by this derivation.
+#[must_use]
+pub fn seed_id_for_diagnostic(program: &Program, diagnostic: &Diagnostic) -> Option<String> {
+    let span = diagnostic.span?;
+    let mut best: Option<(usize, String)> = None;
+    let mut consider = |candidate_span: Span, id: &str, best: &mut Option<(usize, String)>| {
+        if candidate_span.start > span.start || span.start >= candidate_span.end {
+            return;
+        }
+        let width = candidate_span.end - candidate_span.start;
+        let better = match best {
+            None => true,
+            Some((best_width, _)) => width < *best_width,
+        };
+        if better {
+            *best = Some((width, id.to_owned()));
+        }
+    };
+    for function in &program.functions {
+        consider(function.span, &function.stable_id, &mut best);
+    }
+    for declaration in &program.types {
+        consider(declaration.span, &declaration.stable_id, &mut best);
+        if let TypeDeclarationKind::Class { methods, .. } = &declaration.kind {
+            for method in methods {
+                consider(method.span, &method.stable_id, &mut best);
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
 /// One caller-declared contribution to a [`CompilationGoal`].
 ///
 /// `reason` is untrusted, caller-supplied explanatory text (it may hold
@@ -236,6 +345,26 @@ impl CompilationSeed {
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Construct a seed from a diagnostic's structural span rather than a
+    /// hand-written stable id -- see [`seed_id_for_diagnostic`], issue
+    /// #197's "seed detection beyond stable IDs" residual. Fails closed
+    /// (`SPX-Z805`) instead of silently falling back to a default seed when
+    /// the diagnostic carries no span or its span resolves to no
+    /// declaration. `reason` remains caller-declared, untrusted
+    /// explanatory text with the same guarantee as [`Self::new`]: the
+    /// derivation itself never reads `diagnostic.message`, only its
+    /// `span`.
+    pub fn from_diagnostic(
+        program: &Program,
+        diagnostic: &Diagnostic,
+        priority: u32,
+        reason: impl Into<String>,
+    ) -> Result<Self, Diagnostic> {
+        let id = seed_id_for_diagnostic(program, diagnostic)
+            .ok_or_else(|| diagnostic_seed_not_found(diagnostic))?;
+        Ok(Self::new(id, priority, reason))
     }
 }
 
@@ -374,7 +503,6 @@ impl CompilationBudget {
 struct CompiledSeed<'a> {
     seed: &'a CompilationSeed,
     json: String,
-    tokens: usize,
 }
 
 /// The one deterministic seed order this module ever uses: descending
@@ -400,28 +528,86 @@ pub fn compile(
     per_seed_options: &AgentContextV2Options,
     budget: CompilationBudget,
 ) -> Result<String, Vec<Diagnostic>> {
+    compile_inner(program, goal, per_seed_options, budget, None)
+}
+
+/// [`compile`], plus caller-supplied [`DeclarationFacets`] joined into each
+/// included seed's own closure by exact declaration id -- issue #197's
+/// residual 3 ("requirement, test, and candidate-diff facets integrated
+/// into the closure itself, rather than available separately"). A separate
+/// function rather than a new parameter on [`compile`]: this module's
+/// existing callers (the `compact task-context` CLI route) call `compile`
+/// directly and are outside this change's file lease, so `compile`'s
+/// signature and byte-for-byte output are left completely unchanged; a
+/// caller that has no facet data keeps calling `compile` exactly as before.
+///
+/// This module still has no ambient authority to discover requirements,
+/// tests, or a candidate diff itself -- no file is opened, no other module
+/// is called into for this data. A caller who already computed it (for
+/// example from [`crate::requirement_traceability`], a project's own test
+/// index, or a [`crate::patch`]-computed diff) supplies it as
+/// [`DeclarationFacets`], keyed by the exact declaration ids the facets
+/// name; nothing here interprets free text.
+pub fn compile_with_declaration_facets(
+    program: &Program,
+    goal: &CompilationGoal,
+    per_seed_options: &AgentContextV2Options,
+    budget: CompilationBudget,
+    facets: &DeclarationFacets,
+) -> Result<String, Vec<Diagnostic>> {
+    compile_inner(program, goal, per_seed_options, budget, Some(facets))
+}
+
+fn compile_inner(
+    program: &Program,
+    goal: &CompilationGoal,
+    per_seed_options: &AgentContextV2Options,
+    budget: CompilationBudget,
+    facets: Option<&DeclarationFacets>,
+) -> Result<String, Vec<Diagnostic>> {
     let source_revision = graph::revision(program);
 
     let mut compiled = Vec::with_capacity(goal.seeds.len());
     for seed in &goal.seeds {
         let json = graph::agent_context_v2_json(program, &seed.id, per_seed_options)?
             .ok_or_else(|| vec![seed_not_found(&seed.id)])?;
-        let tokens = budget.tokenizer.count(&json);
-        compiled.push(CompiledSeed { seed, json, tokens });
+        compiled.push(CompiledSeed { seed, json });
     }
 
     // Deterministic merge order: descending priority, then ascending stable
     // ID. Never the caller's list order or any hash-map iteration order.
     compiled.sort_by(|a, b| seed_order_key(a.seed).cmp(&seed_order_key(b.seed)));
 
+    // Cross-seed deduplication (issue #197 residual 2). `seen_fact_ids` and
+    // `owner_of_fact` accumulate only across seeds that actually end up
+    // `included`, walked in the same deterministic merge order as above, so
+    // a fact's dedup "owner" is always the first included, highest-priority
+    // seed whose closure reaches it. See `dedup_seed_json`.
     let mut used_tokens = 0usize;
+    let mut seen_fact_ids: BTreeSet<String> = BTreeSet::new();
+    let mut owner_of_fact: BTreeMap<String, String> = BTreeMap::new();
     let mut entries = Vec::with_capacity(compiled.len());
     for item in &compiled {
-        let included = used_tokens.saturating_add(item.tokens) <= budget.max_tokens;
+        let dedup = dedup_seed_json(&item.json, &item.seed.id, &seen_fact_ids, &owner_of_fact);
+        let tokens = budget.tokenizer.count(&dedup.rewritten_json);
+        let included = used_tokens.saturating_add(tokens) <= budget.max_tokens;
         if included {
-            used_tokens += item.tokens;
+            used_tokens += tokens;
+            for id in dedup.newly_present_ids {
+                seen_fact_ids.insert(id.clone());
+                owner_of_fact
+                    .entry(id)
+                    .or_insert_with(|| item.seed.id.clone());
+            }
         }
-        entries.push(render_entry(item, included));
+        entries.push(render_entry(
+            item,
+            included,
+            tokens,
+            &dedup.rewritten_json,
+            &dedup.all_ids,
+            facets,
+        ));
     }
 
     let goal_digest = digest(&source_revision, budget, &compiled);
@@ -448,27 +634,48 @@ pub fn compile(
     ))
 }
 
-fn render_entry(item: &CompiledSeed<'_>, included: bool) -> String {
-    if included {
-        format!(
-            "{{\"id\":{id},\"priority\":{priority},\"reason\":{reason},\"tokens\":{tokens},\
-             \"status\":\"included\",\"context\":{context}}}",
-            id = quote_json(&item.seed.id),
-            priority = item.seed.priority,
-            reason = quote_json(&item.seed.reason),
-            tokens = item.tokens,
-            context = item.json,
-        )
-    } else {
-        format!(
+fn render_entry(
+    item: &CompiledSeed<'_>,
+    included: bool,
+    tokens: usize,
+    rewritten_json: &str,
+    all_ids: &[String],
+    facets: Option<&DeclarationFacets>,
+) -> String {
+    if !included {
+        return format!(
             "{{\"id\":{id},\"priority\":{priority},\"reason\":{reason},\"tokens\":{tokens},\
              \"status\":\"omitted_budget_exhausted\"}}",
             id = quote_json(&item.seed.id),
             priority = item.seed.priority,
             reason = quote_json(&item.seed.reason),
-            tokens = item.tokens,
-        )
+            tokens = tokens,
+        );
     }
+    let mut out = format!(
+        "{{\"id\":{id},\"priority\":{priority},\"reason\":{reason},\"tokens\":{tokens},\
+         \"status\":\"included\",\"context\":{context}",
+        id = quote_json(&item.seed.id),
+        priority = item.seed.priority,
+        reason = quote_json(&item.seed.reason),
+        tokens = tokens,
+        context = rewritten_json,
+    );
+    if let Some(facets) = facets {
+        let facet_entries: Vec<String> = all_ids
+            .iter()
+            .filter_map(|id| {
+                facets
+                    .facet_fields_for(id)
+                    .map(|fields| format!("{{\"id\":{},{}}}", quote_json(id), fields))
+            })
+            .collect();
+        out.push_str(",\"declaration_facets\":[");
+        out.push_str(&facet_entries.join(","));
+        out.push(']');
+    }
+    out.push('}');
+    out
 }
 
 /// A digest sensitive to every field that determines `compile`'s exact
@@ -711,6 +918,350 @@ fn lexical_words(text: &str) -> BTreeSet<String> {
         .filter(|word| !word.is_empty())
         .map(str::to_ascii_lowercase)
         .collect()
+}
+
+// --- Requirement/test/candidate-diff facets (issue #197 residual 3). ---
+
+/// Caller-supplied, structurally-keyed facets joined into a compiled
+/// closure by exact declaration id -- never by free text. See
+/// [`compile_with_declaration_facets`] for why this module accepts this
+/// data from the caller rather than discovering it itself.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DeclarationFacets {
+    requirements: BTreeMap<String, BTreeSet<String>>,
+    tests: BTreeMap<String, BTreeSet<String>>,
+    candidate_diff: BTreeSet<String>,
+}
+
+impl DeclarationFacets {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record that requirement `requirement_id` names `declaration_id` as
+    /// one of its assurance subjects. Both are opaque, caller-declared
+    /// identifiers this module never interprets beyond exact matching.
+    #[must_use]
+    pub fn with_requirement(
+        mut self,
+        declaration_id: impl Into<String>,
+        requirement_id: impl Into<String>,
+    ) -> Self {
+        self.requirements
+            .entry(declaration_id.into())
+            .or_default()
+            .insert(requirement_id.into());
+        self
+    }
+
+    /// Record that test `test_id` exercises `declaration_id`.
+    #[must_use]
+    pub fn with_test(
+        mut self,
+        declaration_id: impl Into<String>,
+        test_id: impl Into<String>,
+    ) -> Self {
+        self.tests
+            .entry(declaration_id.into())
+            .or_default()
+            .insert(test_id.into());
+        self
+    }
+
+    /// Record that `declaration_id` was changed by the candidate diff under
+    /// review.
+    #[must_use]
+    pub fn with_candidate_diff_change(mut self, declaration_id: impl Into<String>) -> Self {
+        self.candidate_diff.insert(declaration_id.into());
+        self
+    }
+
+    /// The JSON object fields (without the enclosing braces) to attach for
+    /// `declaration_id`, or `None` when it carries no requirement, test, or
+    /// candidate-diff facet at all -- so a declaration untouched by any of
+    /// this data never gets a bare, all-empty entry.
+    fn facet_fields_for(&self, declaration_id: &str) -> Option<String> {
+        let requirements = self.requirements.get(declaration_id);
+        let tests = self.tests.get(declaration_id);
+        let in_diff = self.candidate_diff.contains(declaration_id);
+        if requirements.is_none() && tests.is_none() && !in_diff {
+            return None;
+        }
+        let requirements_json = requirements
+            .map(|ids| {
+                ids.iter()
+                    .map(|id| quote_json(id))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
+        let tests_json = tests
+            .map(|ids| {
+                ids.iter()
+                    .map(|id| quote_json(id))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
+        Some(format!(
+            "\"requirements\":[{requirements_json}],\"tests\":[{tests_json}],\
+             \"candidate_diff\":{in_diff}"
+        ))
+    }
+}
+
+// --- Cross-seed deduplication (issue #197 residual 2). ---
+//
+// Every fact `agent_context_v2_json` renders for one declaration id is a
+// pure function of `(program, id, filters, schema)`: it never embeds the
+// requesting root's identity, its depth from that root, or which direction
+// reached it (those live only in the surrounding `frontier`/`reached_by`
+// bookkeeping, never inside a fact's own JSON -- see
+// `graph::agent_function_json_for_schema`). That means two different
+// seeds sharing `per_seed_options` that both reach the same declaration
+// render byte-identical fact text for it
+// (`tests::shared_fact_content_is_byte_identical_regardless_of_which_seed_reaches_it`).
+// The functions below exploit that: they locate each seed's already-
+// compiled `facts` array by scanning the exact compact JSON
+// `agent_context_v2_json` returned (never re-serializing it, so no
+// re-ordering or re-escaping can silently change what byte-v1 counts as
+// "exact"), and replace a fact already fully delivered by an earlier,
+// higher-priority *included* seed with a small reference stub instead of
+// re-embedding and re-charging it. A seed's own root fact is always kept in
+// full inside its own entry, even if some other seed already carries a copy
+// of the same content, so a caller reading one seed's entry always gets
+// that seed's own requested declaration without having to chase a
+// reference elsewhere.
+
+/// The result of deduplicating one seed's already-compiled context JSON
+/// against the facts already introduced by earlier, higher-priority
+/// *included* seeds in the same [`compile`] call.
+struct DedupResult {
+    /// The seed's context JSON with any duplicate fact fully replaced by a
+    /// small `{"id":...,"deduplicated_owner_seed":...}` stub. Byte-
+    /// identical to the original when nothing was deduplicated.
+    rewritten_json: String,
+    /// Declaration ids this seed's closure reaches for the first time in
+    /// this compile (not already in the caller's `seen` set when this seed
+    /// was processed). Folded into the shared `seen`/`owner` state by the
+    /// caller only if this seed ends up `included`.
+    newly_present_ids: Vec<String>,
+    /// Every declaration id this seed's closure reaches, in the engine's
+    /// original order, regardless of whether it was kept full or stubbed.
+    /// Used to attach [`DeclarationFacets`] to exactly the ids a seed's
+    /// closure actually reaches.
+    all_ids: Vec<String>,
+}
+
+fn dedup_seed_json(
+    json: &str,
+    own_root_id: &str,
+    seen: &BTreeSet<String>,
+    owner_of: &BTreeMap<String, String>,
+) -> DedupResult {
+    let Some((_, start, end)) = top_level_object_fields(json)
+        .into_iter()
+        .find(|(key, _, _)| *key == "facts")
+    else {
+        return DedupResult {
+            rewritten_json: json.to_owned(),
+            newly_present_ids: Vec::new(),
+            all_ids: Vec::new(),
+        };
+    };
+
+    let elements = json_array_elements(&json[start..end]);
+    let mut rewritten = Vec::with_capacity(elements.len());
+    let mut newly_present_ids = Vec::new();
+    let mut all_ids = Vec::with_capacity(elements.len());
+    for element in elements {
+        let Some(id) = fact_id(element) else {
+            // Never seen in practice (every fact this module compiles
+            // starts with `"id":`), but fail safe rather than drop content
+            // silently if the engine's fact shape ever changes underneath.
+            rewritten.push(element.to_owned());
+            continue;
+        };
+        let already_seen = seen.contains(&id);
+        if id == own_root_id || !already_seen {
+            rewritten.push(element.to_owned());
+            if !already_seen {
+                newly_present_ids.push(id.clone());
+            }
+        } else {
+            let owner = owner_of.get(&id).map(String::as_str).unwrap_or("");
+            rewritten.push(format!(
+                "{{\"id\":{},\"deduplicated_owner_seed\":{}}}",
+                quote_json(&id),
+                quote_json(owner)
+            ));
+        }
+        all_ids.push(id);
+    }
+
+    let rewritten_facts = format!("[{}]", rewritten.join(","));
+    let rewritten_json = format!("{}{}{}", &json[..start], rewritten_facts, &json[end..]);
+    DedupResult {
+        rewritten_json,
+        newly_present_ids,
+        all_ids,
+    }
+}
+
+/// Decode a `"id"` field's value text from a fact element, using this
+/// module's own writer's escaping rules ([`quote_json`]) in reverse.
+/// Declaration ids are plain identifier-shaped text that `quote_json`
+/// never needs to escape in practice, but this decodes properly rather than
+/// assuming that.
+fn fact_id(fact_text: &str) -> Option<String> {
+    let (_, start, end) = top_level_object_fields(fact_text)
+        .into_iter()
+        .find(|(key, _, _)| *key == "id")?;
+    decode_json_string(&fact_text[start..end])
+}
+
+fn decode_json_string(literal: &str) -> Option<String> {
+    let inner = literal.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next()? {
+            '"' => out.push('"'),
+            '\\' => out.push('\\'),
+            '/' => out.push('/'),
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            'b' => out.push('\u{8}'),
+            'f' => out.push('\u{c}'),
+            'u' => {
+                let hex: String = chars.by_ref().take(4).collect();
+                let code = u32::from_str_radix(&hex, 16).ok()?;
+                out.push(char::from_u32(code)?);
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+/// Parse the *direct* (top-level) fields of a compact JSON object, returning
+/// each field's key and the exact byte range of its value within `json`
+/// (never a re-serialized copy). Assumes `json` is well-formed, compact
+/// (no insignificant whitespace) JSON, which is what every writer this
+/// module calls into always emits.
+fn top_level_object_fields(json: &str) -> Vec<(&str, usize, usize)> {
+    let bytes = json.as_bytes();
+    let mut fields = Vec::new();
+    if bytes.first() != Some(&b'{') {
+        return fields;
+    }
+    let mut i = 1usize;
+    loop {
+        if i >= bytes.len() || bytes[i] == b'}' {
+            break;
+        }
+        if bytes[i] != b'"' {
+            break;
+        }
+        let key_start = i;
+        let key_end = skip_json_string(bytes, i);
+        let key = &json[key_start + 1..key_end - 1];
+        i = key_end;
+        if bytes.get(i) != Some(&b':') {
+            break;
+        }
+        i += 1;
+        let value_start = i;
+        let value_end = skip_json_value(bytes, i);
+        fields.push((key, value_start, value_end));
+        i = value_end;
+        if bytes.get(i) == Some(&b',') {
+            i += 1;
+        }
+    }
+    fields
+}
+
+/// Split the inner text of a compact JSON array (including its enclosing
+/// `[`/`]`) into its top-level elements, as exact byte-substrings of
+/// `array_text` -- never re-serialized.
+fn json_array_elements(array_text: &str) -> Vec<&str> {
+    let bytes = array_text.as_bytes();
+    let mut elements = Vec::new();
+    if bytes.first() != Some(&b'[') {
+        return elements;
+    }
+    let mut i = 1usize;
+    loop {
+        if i >= bytes.len() || bytes[i] == b']' {
+            break;
+        }
+        let start = i;
+        let end = skip_json_value(bytes, i);
+        elements.push(&array_text[start..end]);
+        i = end;
+        if bytes.get(i) == Some(&b',') {
+            i += 1;
+        }
+    }
+    elements
+}
+
+/// Advance past one JSON value starting at `bytes[i]`, returning the index
+/// just past its end. Handles strings, objects, and arrays (recursively,
+/// respecting nested strings and escapes) and treats any other value
+/// (number, `true`, `false`, `null`) as running until the next unescaped
+/// structural delimiter.
+fn skip_json_value(bytes: &[u8], i: usize) -> usize {
+    match bytes.get(i) {
+        Some(b'"') => skip_json_string(bytes, i),
+        Some(b'{' | b'[') => {
+            let mut depth = 1i32;
+            let mut j = i + 1;
+            while j < bytes.len() && depth > 0 {
+                match bytes[j] {
+                    b'"' => j = skip_json_string(bytes, j),
+                    b'{' | b'[' => {
+                        depth += 1;
+                        j += 1;
+                    }
+                    b'}' | b']' => {
+                        depth -= 1;
+                        j += 1;
+                    }
+                    _ => j += 1,
+                }
+            }
+            j
+        }
+        _ => {
+            let mut j = i;
+            while j < bytes.len() && !matches!(bytes[j], b',' | b'}' | b']') {
+                j += 1;
+            }
+            j
+        }
+    }
+}
+
+/// Advance past one JSON string literal starting at `bytes[i] == b'"'`,
+/// returning the index just past its closing quote.
+fn skip_json_string(bytes: &[u8], i: usize) -> usize {
+    let mut j = i + 1;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'\\' => j += 2,
+            b'"' => return j + 1,
+            _ => j += 1,
+        }
+    }
+    bytes.len()
 }
 
 #[cfg(test)]

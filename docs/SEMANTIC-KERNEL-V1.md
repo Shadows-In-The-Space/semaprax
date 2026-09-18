@@ -2,9 +2,14 @@
 
 - Status: proposed; trust-reduction programme opened, TCB inventoried, Kernel-0
   defined with a paper (not mechanized) type-safety sketch, three capacity
-  ceilings measured with exact regression fixtures, and the self-hosting gate
-  ladder defined with rung 0 reached and evidenced. No rung above 0 is
-  reached. No proof in this document is machine-checked.
+  ceilings measured with exact regression fixtures (one since fixed,
+  `SPX-P207` — see "Ceiling 3"), the Kernel-0 reification predicate
+  implemented and tested as an executable HIR admission check
+  (`src/kernel_zero.rs`), and the self-hosting gate ladder defined with
+  rung 0 reached and evidenced. No rung above 0 is reached. No proof in this
+  document is machine-checked, and the reification predicate's own
+  faithfulness to real evaluation (not just admission) is not yet checked
+  either — see "Reification" below.
 - Audience: compiler contributors, language designers, and any agent asked to
   extend, self-host, or formally verify part of SEMAPRAX.
 
@@ -23,10 +28,11 @@ as evidence of correctness by itself.
 This document is that programme's opening chapter: a trusted-computing-base
 inventory, a tiny kernel language (**Kernel-0**) with syntax, typing, and
 operational semantics stated independently of the Rust implementation, a paper
-proof sketch of its safety properties, an explicit and unproved
-compiler-HIR-to-kernel-term translation relation, and a **self-hosting gate
-ladder** with an honest statement of which rung is reached today: **rung 0**,
-evidenced below, and no further.
+proof sketch of its safety properties, an explicit compiler-HIR-to-kernel-term
+admission predicate now implemented and tested as executable code (its
+*faithfulness to real evaluation* remains unproved -- see "Reification"), and
+a **self-hosting gate ladder** with an honest statement of which rung is
+reached today: **rung 0**, evidenced below, and no further.
 
 Two independently measured compiler capacity ceilings
 ([issue #241](https://github.com/wavect/semaprax/issues/241)) bound what a
@@ -51,9 +57,16 @@ Read this section before citing this document elsewhere.
   reached and evidenced; every higher rung, including the formatter
   self-hosting target the issue names as the first realistic candidate, is
   unreached and is recorded as a target, not a result.
-- **The compiler-to-Kernel-0 translation is manual and unproved.** Section
-  "Reification: HIR to Kernel-0, and its unproved edge" names the exact gap
-  the issue's own failure-cases section warns about.
+- **The compiler-to-Kernel-0 translation's *admission* half is now
+  mechanically checked; its *faithfulness* half is still unproved.**
+  `src/kernel_zero.rs` decides, mechanically, whether a given
+  `ResolvedFunction` matches Kernel-0's grammar. It does not check, and
+  nothing yet checks, whether that function's real evaluation (interpreter,
+  native, or Wasm) actually agrees with Kernel-0's operational semantics on
+  it -- that half needs a reference interpreter and a differential test,
+  neither of which exists yet. Section "Reification: HIR to Kernel-0, and
+  its unproved edge" names the exact remaining gap the issue's own
+  failure-cases section warns about.
 - **The `SPX-G171` byte figures below are not independently re-measured at
   full scale in this session.** The 18,874,368-byte `MAX_BUILDER_BYTES`
   constant is read directly from source and cited with its exact location;
@@ -77,7 +90,7 @@ both explicit.
 
 | Layer | Owning module(s) | What the TCB currently assumes |
 |---|---|---|
-| Lexer/parser | `src/lexer.rs`, `src/parser.rs`, `src/parser/*` | Tokenization and grammar admission are correct; `SPX-P207`'s nesting pre-check is correct (see ceiling 3 below -- it is not, in one specific way) |
+| Lexer/parser | `src/lexer.rs`, `src/parser.rs`, `src/parser/*` | Tokenization and grammar admission are correct; `SPX-P207`'s token-level nesting pre-check had a counting defect found by this document's first draft ([issue #247](https://github.com/wavect/semaprax/issues/247)) and fixed by a later commit in this same programme (see ceiling 3 below) |
 | Resolver / HIR | `src/hir.rs`, `src/hir/resolve_*.rs`, `src/hir/validation.rs` | Name resolution, type inference/checking, exhaustiveness, and the source verifier (`src/source_verify/*`) together enforce RFC 0001's static guarantees |
 | Ownership / cleanup | `src/cleanup.rs`, `src/cleanup_plan.rs`, `src/cleanup_plan/build.rs`, `src/cleanup_plan/replay.rs`, `src/loan_plan.rs` | `CleanupPlan` construction is sound and its independent replay (`hir::validate`) is a genuine, not rubber-stamp, second check of exactly-once cleanup |
 | Semantic graph | `src/workspace_graph.rs`, `src/workspace_graph/*`, `src/graph.rs` | Stable-ID assignment and deterministic graph projection from HIR are correct and injective across rename/move |
@@ -270,6 +283,14 @@ Per the issue's implementation sequence step 4, a real Kernel-0 admission
 predicate over the compiler's own HIR (`ResolvedProgram`/`ResolvedFunction` in
 `src/hir.rs`) is:
 
+*(Scope note on step 4's second half, "reject compiler states that cannot be
+reified": the predicate below is now implemented and tested as a standalone
+`pub(crate)` checker, but it is not wired into any compiler diagnostic path.
+Calling it never rejects a real program -- it only answers "does this
+function's HIR shape match Kernel-0's grammar" for a caller, today only its
+own tests, that asks. Wiring it into an actual admission gate, if ever
+wanted, is separate, undone work.)*
+
 > A `ResolvedFunction` **reifies into Kernel-0** iff every parameter and its
 > return type is `i64` or `bool`, its `uses`/effect set is empty, it has no
 > `own`/`borrow` parameter or return mode, its body's expression tree uses
@@ -278,30 +299,57 @@ predicate over the compiler's own HIR (`ResolvedProgram`/`ResolvedFunction` in
 > reify into Kernel-0, and the subgraph of reifying functions reachable from
 > it by `Call` is acyclic.
 
-This predicate is stated here, in this document, but **it is not implemented
-as executable code against `ResolvedFunction` in this session**, and no test
-enforces it. This is exactly the risk the issue names in its own "Failure and
-security cases" section: *"the compiler-to-model translation can become the
-unproved weak link."* Concretely:
+**Update (a later session in this same trust-reduction programme, per this
+issue's own audit):** this predicate is now implemented as executable code,
+`kernel_zero::reifies_into_kernel_zero` (`src/kernel_zero.rs`), checked
+directly against `hir::ResolvedProgram`/`ResolvedFunction` with no parser or
+codegen dependency, and its own `#[cfg(test)]` submodule exercises it against
+real source through the ordinary `parse` -> `hir::resolve` path -- a positive
+Kernel-0-shaped case (scalars, `if`, `let`, arithmetic/comparison, a
+non-recursive call, and a `bool`-typed function using `&&`), and four negative
+cases refused for exactly the reason named (a declared effect, a record
+type reachable through a return value and transitively through a caller, a
+`requires` contract clause, and a mutually recursive call pair). The
+implementation is stricter than this section's prose predicate in one way,
+found while implementing it: it also rejects a non-empty `requires`/`ensures`
+list, since Kernel-0's grammar has no contract syntax at all and the original
+prose above did not mention this case. Confirmed against the built CLI while
+implementing it: `own`/`borrow` on a Copy value type (`i64`/`bool` included)
+is refused by the compiler itself with `SPX-O002`, so the predicate's
+`param.ownership == OwnershipMode::Value` conjunct, while kept as the
+faithful translation of "no `own`/`borrow` parameter... mode" above, is
+unreachable for any admitted function that also passes the scalar-type
+check -- no admitted source can combine an `i64`/`bool` parameter with a
+non-`Value` ownership mode in the first place, so no test exercises that
+specific conjunct directly.
 
-- The three new regression tests added by this session
+This is exactly the risk the issue names in its own "Failure and security
+cases" section: *"the compiler-to-model translation can become the unproved
+weak link."* What is closed now, and what remains open:
+
+- The three regression tests from the prior iteration
   (`tests/cleanup_backends/kernel_boundary.rs`,
   `src/parser/depth/tests.rs`) check **admission** (does the real toolchain
-  accept or reject a given source text with a given diagnostic), which is
-  necessary evidence but is not the same claim as "this admitted program's
-  HIR reifies into the Kernel-0 term whose safety is proved above, and the
+  accept or reject a given source text with a given diagnostic). The
+  reification predicate now additionally checks, mechanically, whether an
+  *admitted* `ResolvedFunction`'s HIR shape matches Kernel-0's grammar --
+  closing the "predicate stated in prose only" half of this section's
+  original gap.
+- **Still open:** "this function reifies" is not yet the same claim as "the
   compiler's interpreter/native/Wasm lowerings agree with Kernel-0's
-  operational semantics on it." The latter needs the reification predicate
-  above implemented as a real HIR walk plus a differential test against a
-  from-scratch Kernel-0 reference interpreter, neither of which exists yet.
-- Until that reifier exists and is itself tested, this document's Kernel-0
-  proof is **necessary but not sufficient** evidence about the real
-  compiler: it proves a term-rewriting system on paper is safe; it does not
-  yet prove any specific compiler pass reduces real source to that system
-  faithfully.
+  operational semantics on it." That needs a from-scratch Kernel-0 reference
+  interpreter plus a differential test between that reference and the
+  compiler's own backends over a generated corpus of reifying programs --
+  neither exists yet. Until it does, this document's Kernel-0 proof remains
+  **necessary but not sufficient** evidence about the real compiler: it
+  proves a term-rewriting system on paper is safe, and now mechanically
+  identifies which real functions are claimed to reduce to that system, but
+  does not yet mechanically prove any specific compiler pass reduces them to
+  it *faithfully* (i.e. that evaluating the real function and evaluating its
+  Kernel-0 term agree).
 
-This gap is named, not closed, in this iteration. It is the highest-priority
-follow-up this document identifies (see "Immediate follow-ups").
+This narrower remaining gap is the highest-priority follow-up this document
+identifies (see "Immediate follow-ups").
 
 ## What is and is not mechanically checked
 
@@ -309,7 +357,8 @@ follow-up this document identifies (see "Immediate follow-ups").
 |---|---|---|
 | Kernel-0 syntax/typing/semantics are internally consistent (progress, preservation) | **No.** Paper proof only. | This document, "Paper safety proof" |
 | A given `.spx` source text is admitted or rejected by the real toolchain, with a named diagnostic, at a named boundary | **Yes**, for the three ceilings below | `tests/cleanup_backends/kernel_boundary.rs`, `src/parser/depth/tests.rs` |
-| A real `ResolvedFunction` reifies into a Kernel-0 term | **No.** Predicate stated in prose only. | "Reification" above |
+| A real `ResolvedFunction`'s HIR shape matches Kernel-0's grammar (the admission predicate itself) | **Yes.** | `src/kernel_zero.rs`, its `tests` submodule |
+| A reifying function's real evaluation (interpreter/native/Wasm) agrees with Kernel-0's operational semantics on it | **No.** No reference interpreter or differential test exists yet. | "Reification" above, "Immediate follow-ups" item 1 |
 | Interpreter, native, and Wasm backends agree on one concrete Kernel-0-shaped program's observable output | **Partially, for one hand-run example this session**, not as an automated, repeatable gate | "Rung 0 evidence" below |
 | Deterministic stable-ID graph projection | **No new checking added by this session.** Existing coverage is in `tests/workspace/semantic_graph.rs` and `src/workspace_graph/*`; this document does not extend it. | out of scope this session |
 | Semantic-transaction precondition/replay validity | **No new checking added by this session.** Existing coverage is in `src/semantic_workspace_*.rs`. | out of scope this session |
@@ -405,7 +454,7 @@ fixture now have one.
   (not a synthesized `CleanupPlan` mutation) and reduced to a committed,
   passing regression fixture at the exact boundary.
 
-### Ceiling 3 — `SPX-P207`, the token-level nesting pre-check (new finding)
+### Ceiling 3 — `SPX-P207`, the token-level nesting pre-check (found and fixed)
 
 - **Constant:** `MAX_SOURCE_NESTING: usize = 128` —
   `src/parser/depth.rs:4`. This one constant backs **two independent
@@ -415,45 +464,44 @@ fixture now have one.
      `src/parser/depth/tests.rs::contract_clauses_are_walked_as_nesting_roots`,
      `...::class_method_bodies_are_walked_as_nesting_roots`).
   2. `src/parser/entry.rs::reject_token_nesting` — a **token-level**
-     pre-check that runs before any AST exists, at `Parser::new()`
-     (`src/parser/entry.rs:44-77`).
-- **The finding:** `reject_token_nesting` increments one running
-  `delimiters` counter for `LParen`, `LBrace`, `LBracket`, **and `Lt`**
-  (`<`) tokens alike, and only decrements it for `RParen`, `RBrace`,
-  `RBracket`, and a literal `Gt` (`>`) token
-  (`src/parser/entry.rs:46-56`). It does not distinguish a generic
-  angle-bracket open (`Vec<...>`, matched by a later `>`) from an ordinary
-  scalar less-than comparison (`x < 5`, matched by nothing, ever), and the
-  counter is **never reset between sibling top-level declarations** — it
-  runs once over the whole file's token stream. Consequently:
-  - A file of **127 syntactically independent, individually shallow
-    functions** (each just `fn f_i(value: i64) -> i64 { if value < i { value } else { value } }`,
-    per-function AST depth ~4-5, nowhere near 128) is **rejected** with
-    `SPX-P207` ("source nesting depth exceeds the admitted maximum (128)")
-    purely from the file-wide count of unmatched `<` tokens, not from any
-    real nesting. Reproduced exactly at the boundary this session:
-    126 such functions parse; 127 do not.
-  - The same shape with each `<` **immediately paired with a literal `>`**
-    in the same condition (e.g. `value < i && value > -1_000_000`) parses
-    fine at **200** functions and beyond — conclusively isolating "unmatched
-    `<` count" as the trigger, independent of true nesting or declaration
-    count.
-  - Regressions committed this session:
-    `src/parser/depth/tests.rs::many_unmatched_less_than_tokens_exhaust_the_token_level_nesting_precheck`
-    and
-    `...::the_same_less_than_count_parses_once_each_is_closed_by_a_literal_greater_than`.
-- **Why this belongs in a kernel/ceiling report:** RFC 0001 states this bound
-  as being about "expression trees" admitting "at most 128 nested
-  constructs," and the diagnostic's own message says "nesting depth." Neither
-  description matches what `reject_token_nesting` actually measures. Ordinary
-  validation/classification code — exactly the kernel-sized shape this
-  document's Rung 1 targets — leans on `<`/`>` comparisons far more than on
-  real bracket nesting, so this is, in practice, the **cheapest of the three
-  ceilings to hit by accident**: roughly 127 net unmatched `<` tokens
-  anywhere in one file, an amount an ordinary range-checking module can reach
-  with no deep nesting and no owned data at all. This is filed here as new,
-  session-local evidence for issue #241's continued investigation, not as a
-  fix — no source behavior is changed by this document or its tests.
+     pre-check that runs before any AST exists, at `Parser::new()`.
+- **The finding, as it stood when this document was first written:**
+  `reject_token_nesting` incremented one running `delimiters` counter for
+  `LParen`, `LBrace`, `LBracket`, **and `Lt`** (`<`) tokens alike, decrementing
+  it only for `RParen`, `RBrace`, `RBracket`, and a literal `Gt` (`>`) token,
+  never reset between sibling top-level declarations. A file of **127**
+  syntactically independent, individually shallow functions (each just
+  `fn f_i(value: i64) -> i64 { if value < i { value } else { value } }`,
+  per-function AST depth ~4-5, nowhere near 128) was rejected with
+  `SPX-P207` purely from the file-wide count of unmatched `<` tokens, not
+  from any real nesting; 126 such functions parsed, 127 did not. This was
+  filed as [issue #247](https://github.com/wavect/semaprax/issues/247).
+- **Status: fixed**, by a later commit in this same trust-reduction
+  programme (`3e560d41`, "fix(parser): stop counting every `<` as unclosed
+  nesting in SPX-P207"), closing issue #247. `reject_token_nesting` now
+  tracks `<`/`>` in a separate tentative `generic_depth` counter that only
+  accumulates while the token run since the last unmatched `<` still looks
+  like a real generic-argument list, and resets the instant a token appears
+  that no generic-argument list could contain (or an enclosing bracket
+  closes first). Genuine nested generic brackets (`T<T<T<...>>>`) deep
+  enough to exceed the budget are still refused with `SPX-P207` before the
+  type parser ever runs
+  (`src/parser/depth/tests.rs::token_level_precheck_still_refuses_genuinely_nested_generic_brackets`);
+  127 independent flat comparisons in one file now parse
+  (`...::many_unmatched_less_than_tokens_no_longer_exhaust_the_token_level_nesting_precheck`,
+  the renamed and inverted former regression for the bug —
+  legitimate per this repository's rules because it pinned a bug, not a
+  contract). The heuristic is narrower, not perfect: many bare comparisons
+  joined only by commas inside one unclosed bracketed list
+  (`f(a < b, c < d, ...)`) can still over-count, which is documented in
+  `reject_token_nesting`'s own doc comment rather than repeated here.
+  Verified passing on the current tree as part of this issue's (#188) audit;
+  see the "Rung 0 evidence" verification note below the gate ladder.
+- **TCB-table correction:** the row above ("Lexer/parser") previously read
+  "`SPX-P207`'s nesting pre-check is correct... it is not, in one specific
+  way," describing this ceiling's own bug as still live. That was accurate
+  the session this document was written and is stale now that #247 is
+  closed; do not cite the old wording elsewhere.
 
 ## Self-hosting gate ladder
 
@@ -506,20 +554,25 @@ near the ceilings above, not comfortably under them.
 In priority order, given the gaps this document names explicitly rather than
 papering over:
 
-1. **Implement the Kernel-0 reification predicate** ("Reification" above) as
-   an executable HIR walk, plus a from-scratch Kernel-0 reference
-   interpreter, plus a differential test between that reference interpreter
-   and the compiler's own interpreter/native/Wasm backends over a generated
-   corpus of reifying programs. This closes this document's largest named
-   gap: today's Kernel-0 proof is about a term-rewriting system on paper,
-   not yet provably about any specific compiler pass.
+1. **Implement the Kernel-0 reification predicate as an executable HIR
+   walk: done** (`src/kernel_zero.rs`, this session; see "Reification"
+   above). **Still open:** a from-scratch Kernel-0 reference interpreter,
+   plus a differential test between that reference interpreter and the
+   compiler's own interpreter/native/Wasm backends over a generated corpus
+   of reifying programs. This remaining half closes this document's largest
+   named gap: today's Kernel-0 proof is about a term-rewriting system on
+   paper, mechanically connected to which real functions claim to reduce to
+   it, but not yet provably about how any specific compiler pass evaluates
+   them.
 2. **File issue #241's three required-evidence items** using this document's
    exact numbers: a boundary regression fixture for `SPX-H006` (now added,
    here, ahead of that issue landing it independently — coordination needed
    to avoid duplicate fixtures), the same for `SPX-G171` at realistic
-   multi-module scale, and the `SPX-P207` token-counting finding as a new,
-   separate report (it was not previously known and is not one of #241's
-   two named ceilings).
+   multi-module scale. Done for the third item: the `SPX-P207` token-counting
+   finding was filed separately as
+   [issue #247](https://github.com/wavect/semaprax/issues/247) (it was not
+   previously known and is not one of #241's two named ceilings) and has
+   since been fixed and closed — see "Ceiling 3" above.
 3. **Decide, per ceiling, whether to raise the budget, make it incremental,
    or document it as a permanent limit** in the completion matrix and
    roadmap. A later session (issue #241) made this decision for both named

@@ -105,6 +105,7 @@ pub mod installed_fix_plan;
 pub mod installed_guidance;
 pub mod interpreter;
 pub(crate) mod iterator_ops;
+pub(crate) mod kernel_zero;
 pub mod lexer;
 pub mod live_invocation;
 pub mod loan_plan;

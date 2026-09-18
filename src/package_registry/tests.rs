@@ -14,8 +14,8 @@ use super::*;
 // registry-level `package`/`version` fields the check under test actually
 // looks at -- never conjuring a self-consistent-but-differently-named
 // Subject-v3 fixture, which `create_subject` would refuse to build.
-const MEANING: &str = "examples.meaning";
-const CALCULATOR: &str = "examples.calculator";
+pub(super) const MEANING: &str = "examples.meaning";
+pub(super) const CALCULATOR: &str = "examples.calculator";
 
 fn report(path: &str) -> String {
     crate::package_report_v2::generate(
@@ -74,7 +74,7 @@ fn entry_from(package: &str, version: &str, subject_bytes: String, seed: &str) -
     }
 }
 
-fn yanked(entry: PublishedEntry, reason: &str) -> PublishedEntry {
+pub(super) fn yanked(entry: PublishedEntry, reason: &str) -> PublishedEntry {
     PublishedEntry {
         status: PublicationStatus::Yanked {
             reason: reason.to_owned(),
@@ -84,14 +84,14 @@ fn yanked(entry: PublishedEntry, reason: &str) -> PublishedEntry {
 }
 
 /// A fully valid, self-consistent `examples.meaning@version` entry.
-fn meaning_entry(version: &str, seed: &str) -> PublishedEntry {
+pub(super) fn meaning_entry(version: &str, seed: &str) -> PublishedEntry {
     let subject_bytes =
         subject_with_capabilities(MEANING, version, &report("examples/meaning.spx"), &[]);
     entry_from(MEANING, version, subject_bytes, seed)
 }
 
 /// A fully valid, self-consistent `examples.calculator@version` entry.
-fn calculator_entry(version: &str, seed: &str) -> PublishedEntry {
+pub(super) fn calculator_entry(version: &str, seed: &str) -> PublishedEntry {
     let subject_bytes =
         subject_with_capabilities(CALCULATOR, version, &report("examples/calculator.spx"), &[]);
     entry_from(CALCULATOR, version, subject_bytes, seed)

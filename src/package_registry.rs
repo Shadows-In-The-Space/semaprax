@@ -115,6 +115,8 @@ use crate::diagnostic::{quote_json, Diagnostic, Severity};
 use crate::package_lock_v3;
 use crate::package_range::{self, Version};
 
+pub mod federation;
+
 #[cfg(test)]
 mod tests;
 
@@ -283,32 +285,55 @@ pub fn project_subjects(
     let mut subjects = Vec::with_capacity(snapshot.entries.len());
     let mut warnings = Vec::new();
     for ((package, version), entry) in &snapshot.entries {
-        match (&entry.status, policy) {
-            (PublicationStatus::Active, _) => subjects.push(entry.subject_bytes.clone()),
-            (PublicationStatus::Yanked { .. }, YankPolicy::ExcludeYanked) => {}
-            (PublicationStatus::Yanked { reason }, YankPolicy::RefuseIfYanked) => {
-                return Err(yank_refused_error(format!(
-                    "`{package}@{}` is yanked ({reason}) and the active policy refuses any yanked package",
-                    canonical_version_text(*version)
-                )));
-            }
-            (PublicationStatus::Yanked { reason }, YankPolicy::AllowYankedWithWarning) => {
-                subjects.push(entry.subject_bytes.clone());
-                warnings.push(Diagnostic {
-                    code: "SPX-PKR609",
-                    severity: Severity::Warning,
-                    message: format!(
-                        "including yanked `{package}@{}` ({reason})",
-                        canonical_version_text(*version)
-                    ),
-                    path: None,
-                    span: None,
-                    help: None,
-                });
-            }
-        }
+        apply_yank_policy(
+            package,
+            *version,
+            entry,
+            policy,
+            &mut subjects,
+            &mut warnings,
+        )?;
     }
     Ok(ProjectedCatalog { subjects, warnings })
+}
+
+/// The single per-entry yank decision shared by [`project_subjects`] and
+/// [`federation::project_federated_subjects`], so a federated catalog cannot
+/// drift into a second, subtly different revocation policy. Callers supply
+/// the iteration order; this decides only what one entry contributes.
+fn apply_yank_policy(
+    package: &str,
+    version: Version,
+    entry: &PublishedEntry,
+    policy: YankPolicy,
+    subjects: &mut Vec<String>,
+    warnings: &mut Vec<Diagnostic>,
+) -> Result<(), Diagnostic> {
+    match (&entry.status, policy) {
+        (PublicationStatus::Active, _) => subjects.push(entry.subject_bytes.clone()),
+        (PublicationStatus::Yanked { .. }, YankPolicy::ExcludeYanked) => {}
+        (PublicationStatus::Yanked { reason }, YankPolicy::RefuseIfYanked) => {
+            return Err(yank_refused_error(format!(
+                "`{package}@{}` is yanked ({reason}) and the active policy refuses any yanked package",
+                canonical_version_text(version)
+            )));
+        }
+        (PublicationStatus::Yanked { reason }, YankPolicy::AllowYankedWithWarning) => {
+            subjects.push(entry.subject_bytes.clone());
+            warnings.push(Diagnostic {
+                code: "SPX-PKR609",
+                severity: Severity::Warning,
+                message: format!(
+                    "including yanked `{package}@{}` ({reason})",
+                    canonical_version_text(version)
+                ),
+                path: None,
+                span: None,
+                help: None,
+            });
+        }
+    }
+    Ok(())
 }
 
 struct BuiltSnapshot {
@@ -636,4 +661,14 @@ fn replay_error(message: impl Into<String>) -> Diagnostic {
 }
 fn yank_refused_error(message: impl Into<String>) -> Diagnostic {
     Diagnostic::io("SPX-PKR610", message.into())
+}
+/// Cross-registry dependency confusion: one package name reachable from, or
+/// claimed by two different publishers across, more than one registry.
+fn dependency_confusion_error(message: impl Into<String>) -> Diagnostic {
+    Diagnostic::io("SPX-PKR611", message.into())
+}
+/// The namespace-ownership table does not authorize exactly one registry for
+/// a namespace a federation actually serves.
+fn namespace_authority_error(message: impl Into<String>) -> Diagnostic {
+    Diagnostic::io("SPX-PKR612", message.into())
 }

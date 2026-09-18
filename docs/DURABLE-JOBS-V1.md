@@ -262,6 +262,27 @@ socket, spawns no thread, and grants no authority; it is local evidence that
 the decision procedures above compose into something a real job runner could
 implement, nothing more.
 
+**Lease fencing across reclaim.** Until this tranche, `JobStore::claim`
+derived a job's next `lease_generation` from the *currently outstanding*
+lease (`self.lease.map_or(0, |lease| lease.lease_generation) + 1`), which
+becomes `None` after every completion and every expiry-driven reclaim — so
+the very next claim's generation restarted from `1` every time. Two
+different lease grants for the same job could therefore be handed the
+identical `lease_generation`, and a worker whose call arrived late (after
+its lease had been reassigned) would satisfy `lease.is_current` against the
+new holder's still-current lease by coincidence — exactly the "lease expiry
+... can produce concurrent execution" failure case this issue names.
+`JobRecord::lease_epoch` closes this: a counter on the record itself,
+incremented once per `claim` and never reset by a completion or a reclaim,
+so no two lease grants a job ever makes can share a generation. The new
+regression test proving this,
+`job_fixture::tests::a_reclaimed_workers_stale_completion_can_never_land_over_the_new_holders_run`,
+drives a second worker's claim all the way to `Running`, inside its own
+still-current deadline, before the first (reclaimed) worker's stale
+completion call arrives, so the refusal cannot be explained by the job
+simply not having reached `Running` yet the way the pre-existing reclaim
+test's ordering allowed.
+
 **Completion durability.** Until this tranche, `complete` mutated only the
 in-memory job record: the ledger's `state` column, once written by
 `enqueue` as a placeholder, was never rewritten by anything, so nothing
@@ -320,6 +341,10 @@ Checkpoint failure poisons that runtime instance: further mutation refuses
 until the caller recovers from storage. Evidence grants no authority; recovery
 requires explicit storage and the current schema. The revision byte follows
 the fixture's known-revision range, not a cryptographic handler identity.
+`JobRuntime::compensation_is_required` exposes the fixture's own pure
+predicate (true exactly when the job actually started running and ended
+`PermanentFailure` or `Cancelled`) to a host driving this runtime directly;
+it selects and runs no compensating action itself.
 This runtime currently drives one job; physical database integration
 remains follow-on work.
 

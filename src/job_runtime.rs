@@ -467,6 +467,19 @@ impl<'schema> JobRuntime<'schema> {
         &self.submission.payload_descriptor
     }
 
+    /// Whether a compensation hook must run for this job, per
+    /// `JobStore::compensation_is_required`: true exactly when the job
+    /// actually started running and its final state is `PermanentFailure`
+    /// or `Cancelled`. This is a pure predicate over already-recorded
+    /// lifecycle facts; it does not select, invoke, or authorize any
+    /// compensating action itself.
+    #[must_use]
+    pub fn compensation_is_required(&self) -> bool {
+        self.store
+            .compensation_is_required(self.job_id)
+            .expect("runtime job exists")
+    }
+
     /// Persists an explicit cancellation through the canonical JobStore
     /// reducer. A running job is refused by that reducer and no checkpoint is
     /// written; a successful cancellation is immediately checkpointed.

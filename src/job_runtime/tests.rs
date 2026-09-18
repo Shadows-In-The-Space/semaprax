@@ -103,6 +103,38 @@ fn compiled_schema() -> CompiledInteractionSchema {
     compiled
 }
 
+const SCHEMA_FIXTURE_V2: &str = r#"
+module test.job_runtime;
+
+@id("answer.type")
+record Answer {
+    @id("answer.note")
+    note: string,
+    @id("answer.extra")
+    extra: string,
+}
+
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+
+/// A second, differently shaped schema under the same root type ID: it
+/// compiles to a different digest, standing in for a handler/payload schema
+/// change made between when a job was enqueued and a later recovery.
+fn compiled_schema_variant() -> CompiledInteractionSchema {
+    let unique = TEMP_FILE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "semaprax-job-runtime-variant-{}-{unique}.spx",
+        std::process::id()
+    ));
+    std::fs::write(&path, SCHEMA_FIXTURE_V2).unwrap();
+    let compiled =
+        crate::agent_interaction_schema::compile_agent_interaction_schema(&path, "answer.type")
+            .expect("job runtime schema variant fixture compiles");
+    std::fs::remove_file(path).unwrap();
+    compiled
+}
+
 fn admitted_payload(schema: &CompiledInteractionSchema) -> Vec<u8> {
     format!(
         "{{\"schema\":\"semaprax.agent-interaction-value.v1\",\"root_type_id\":\"answer.type\",\"schema_digest\":{},\"value\":{{\"fields\":{{\"answer.note\":\"retry test\"}}}}}}\n",
@@ -493,4 +525,174 @@ fn heartbeat_refuses_tick_overflow_without_poisoning_or_blocking_completion() {
     // and never poisons the runtime or blocks the job from completing.
     assert_eq!(handler.deadline_after_extend, Some(110));
     assert_eq!(runtime.state(), JobState::Succeeded);
+}
+
+/// The strongest possible proof that a job's effect never runs twice: a
+/// handler that panics the instant it is invoked at all. Any test that
+/// drives to completion with `drive_once` returning `NoWork` while holding
+/// this handler proves, by construction rather than inspection, that no
+/// stray re-dispatch occurred.
+struct PanicIfCalledHandler;
+
+impl HostJobHandler for PanicIfCalledHandler {
+    fn execute(
+        &mut self,
+        _admitted_payload: &[u8],
+        _heartbeat: &mut dyn JobHeartbeat,
+    ) -> HostJobOutcome {
+        panic!("a completed or non-retriable job must never redispatch its handler");
+    }
+}
+
+#[test]
+fn a_recovered_succeeded_job_never_redispatches_its_handler() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut runtime = JobRuntime::enqueue(
+        &mut checkpoints,
+        &schema,
+        1,
+        submission(&schema, b"idempotent-terminal"),
+    )
+    .unwrap();
+    let mut handler = ScriptedHandler::new([HostJobOutcome::Succeeded]);
+    assert_eq!(
+        runtime.drive_once(&mut checkpoints, &mut handler, 1, 100, 10),
+        Ok(DriveOutcome::Completed(JobState::Succeeded))
+    );
+    // Recovering, as a separate crash-and-resume attempt would, must not
+    // reopen a terminal job.
+    let mut recovered = JobRuntime::recover(&mut checkpoints, &schema, 1).unwrap();
+    assert_eq!(recovered.state(), JobState::Succeeded);
+    let mut panic_handler = PanicIfCalledHandler;
+    // A terminal job is never legal to claim again, so `drive_once` must
+    // refuse without ever invoking the handler that would panic if it did.
+    assert_eq!(
+        recovered.drive_once(&mut checkpoints, &mut panic_handler, 2, 200, 10),
+        Ok(DriveOutcome::NoWork)
+    );
+    // A second, independent recovery still agrees: the effect never ran
+    // twice at any point along this crash-and-resume path.
+    assert_eq!(
+        JobRuntime::recover(&mut checkpoints, &schema, 1)
+            .unwrap()
+            .state(),
+        JobState::Succeeded
+    );
+}
+
+#[test]
+fn an_uncertain_non_idempotent_job_never_redispatches_even_after_a_refused_retry_reconcile() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut job = submission(&schema, b"uncertain-non-idempotent");
+    job.is_idempotent_handler = false;
+    let mut runtime = JobRuntime::enqueue(&mut checkpoints, &schema, 1, job).unwrap();
+    // Fail the checkpoint write for the `BegunExecution` persist (call 3:
+    // enqueue, claim, begin-execution) after it has already physically
+    // landed, the same crash-after-write simulation the CAS-poison test
+    // above uses. Recovery must then find a `Running` checkpoint and force
+    // `Uncertain` before any handler could possibly run again.
+    checkpoints.fail_on(3, true);
+    let mut handler = ScriptedHandler::new([HostJobOutcome::Succeeded]);
+    assert_eq!(
+        runtime.drive_once(&mut checkpoints, &mut handler, 1, 100, 10),
+        Err(JobRuntimeError::Checkpoint)
+    );
+    let mut recovered = JobRuntime::recover(&mut checkpoints, &schema, 1).unwrap();
+    assert_eq!(recovered.state(), JobState::Uncertain);
+    let mut panic_handler = PanicIfCalledHandler;
+    // `Uncertain` is not a claimable state: no drive can dispatch the
+    // handler while reconciliation is still pending.
+    assert_eq!(
+        recovered.drive_once(&mut checkpoints, &mut panic_handler, 2, 200, 10),
+        Ok(DriveOutcome::NoWork)
+    );
+    // Explicitly requesting a retry is refused to change the state at all,
+    // because the handler was declared non-idempotent: issue #192 requires
+    // exactly this, an uncertain non-idempotent effect is never
+    // automatically retried.
+    assert_eq!(
+        recovered.reconcile(&mut checkpoints, 2),
+        Ok(JobState::Uncertain)
+    );
+    // And still never dispatches: with a `PanicIfCalledHandler`, any stray
+    // re-dispatch here would fail loudly rather than passing silently.
+    assert_eq!(
+        recovered.drive_once(&mut checkpoints, &mut panic_handler, 2, 300, 10),
+        Ok(DriveOutcome::NoWork)
+    );
+}
+
+#[test]
+fn enqueue_refuses_a_payload_that_does_not_decode_against_the_schema() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut job = submission(&schema, b"bad-payload");
+    job.payload = b"not an admitted interaction value".to_vec();
+    assert!(matches!(
+        JobRuntime::enqueue(&mut checkpoints, &schema, 1, job),
+        Err(JobRuntimeError::PayloadRefused)
+    ));
+}
+
+#[test]
+fn recover_refuses_a_checkpoint_whose_schema_digest_no_longer_matches() {
+    let schema = compiled_schema();
+    let variant_schema = compiled_schema_variant();
+    assert_ne!(schema.schema().digest(), variant_schema.schema().digest());
+    let mut checkpoints = MemoryCheckpointStore::default();
+    JobRuntime::enqueue(
+        &mut checkpoints,
+        &schema,
+        1,
+        submission(&schema, b"schema-changed-underneath"),
+    )
+    .unwrap();
+    // A caller recovering with today's (changed) schema must fail closed
+    // rather than decode a queued job against a schema it was never
+    // admitted under.
+    assert!(matches!(
+        JobRuntime::recover(&mut checkpoints, &variant_schema, 1),
+        Err(JobRuntimeError::PayloadRefused)
+    ));
+}
+
+#[test]
+fn compensation_is_required_exactly_when_a_running_job_ends_in_permanent_failure() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut runtime = JobRuntime::enqueue(
+        &mut checkpoints,
+        &schema,
+        1,
+        submission(&schema, b"compensation-needed"),
+    )
+    .unwrap();
+    assert!(!runtime.compensation_is_required());
+    let mut handler = ScriptedHandler::new([HostJobOutcome::PermanentFailure]);
+    assert_eq!(
+        runtime.drive_once(&mut checkpoints, &mut handler, 1, 100, 10),
+        Ok(DriveOutcome::Completed(JobState::PermanentFailure))
+    );
+    assert!(runtime.compensation_is_required());
+    let recovered = JobRuntime::recover(&mut checkpoints, &schema, 1).unwrap();
+    assert!(recovered.compensation_is_required());
+}
+
+#[test]
+fn compensation_is_not_required_when_a_job_is_cancelled_before_it_ever_ran() {
+    let schema = compiled_schema();
+    let mut checkpoints = MemoryCheckpointStore::default();
+    let mut runtime = JobRuntime::enqueue(
+        &mut checkpoints,
+        &schema,
+        1,
+        submission(&schema, b"never-ran-cancelled"),
+    )
+    .unwrap();
+    assert_eq!(runtime.cancel(&mut checkpoints), Ok(JobState::Cancelled));
+    // Cancelling a job that never started running leaves no partial
+    // external effect outstanding, so no compensation hook is required.
+    assert!(!runtime.compensation_is_required());
 }

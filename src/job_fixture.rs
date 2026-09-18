@@ -232,6 +232,22 @@ struct JobRecord {
     bound_revision: u8,
     state: JobState,
     job_generation: u64,
+    /// Strictly increases on every [`JobStore::claim`], across every
+    /// completion and reclaim this job ever undergoes, and is never derived
+    /// from (or reset by) the currently outstanding lease. `claim` folding
+    /// this value from `self.lease`'s own stored generation instead would
+    /// restart the count from `1` the moment `self.lease` is `None` again —
+    /// which happens after *every* completion and *every* expiry-driven
+    /// reclaim — so two different lease grants for the same job could be
+    /// handed the identical `lease_generation`. A worker whose call arrives
+    /// late (after its lease was reassigned) would then satisfy
+    /// [`decisions::lease_is_current`] against the new holder's lease by
+    /// coincidence, exactly the "lease expiry ... can produce concurrent
+    /// execution" case issue #192 requires be refused. Keeping this counter
+    /// on the record itself, incremented once per claim and never reset,
+    /// guarantees every lease this job ever grants gets a value no other
+    /// grant can ever match again.
+    lease_epoch: u64,
     lease: Option<Lease>,
     attempt: u8,
     max_attempts: u8,
@@ -386,6 +402,7 @@ impl JobStore {
                 bound_revision: self.current_revision,
                 state,
                 job_generation: 0,
+                lease_epoch: 0,
                 lease: None,
                 attempt: 0,
                 max_attempts,
@@ -438,7 +455,13 @@ impl JobStore {
         if !claim_is_legal(job.state.code(), is_due) {
             return Err(JobFixtureError::ClaimNotLegal);
         }
-        let lease_generation = job.lease.map_or(0, |lease| lease.lease_generation) + 1;
+        // Never derived from `job.lease`: see `JobRecord::lease_epoch`'s doc
+        // comment for exactly why folding this from the outstanding lease
+        // (which becomes `None`, and would restart this count from `1`,
+        // after every completion and every expiry-driven reclaim) would let
+        // two different lease grants collide on the same value.
+        job.lease_epoch += 1;
+        let lease_generation = job.lease_epoch;
         let deadline_tick = now_tick + lease_ticks;
         job.state = JobState::Leased;
         job.lease = Some(Lease {
@@ -986,6 +1009,80 @@ mod tests {
                 id,
                 lease_generation_2,
                 deadline + 2,
+                OutcomeKind::Success,
+                1,
+                100,
+            )
+            .unwrap();
+        assert_eq!(state, JobState::Succeeded);
+    }
+
+    /// The fencing regression the reclaim test above does not actually
+    /// exercise: that test's stale completion is refused only because the
+    /// reclaimed job has not yet reached `Running` again, so it would pass
+    /// even if lease generations collided. Here the reclaiming worker *has*
+    /// already reached `Running` — with a still-current deadline — when the
+    /// original, reclaimed worker's own stale completion call arrives. A
+    /// worker whose lease was reassigned after expiry must never be able to
+    /// complete the job out from under whoever now legitimately holds it,
+    /// exactly the "lease expiry ... can produce concurrent execution"
+    /// failure case issue #192 requires be refused.
+    #[test]
+    fn a_reclaimed_workers_stale_completion_can_never_land_over_the_new_holders_run() {
+        let mut ledger = DatabaseFixture::new();
+        JobStore::install_ledger_schema(&mut ledger);
+        let mut store = JobStore::new(1);
+        let EnqueueOutcome::Created(id) = store
+            .enqueue(
+                &mut ledger,
+                b"key-fence".to_vec(),
+                descriptor(),
+                None,
+                3,
+                false,
+            )
+            .unwrap()
+        else {
+            panic!("expected a fresh job");
+        };
+        // Worker 1 claims and starts running, then goes silent past its
+        // lease deadline without ever completing.
+        let (_, stale_lease_generation, deadline) = store.claim(id, 1, 0, 10).unwrap();
+        store
+            .begin_execution(id, stale_lease_generation, 1)
+            .unwrap();
+        assert_eq!(store.expire_stale_leases(deadline), vec![id]);
+        // Worker 2 claims the reclaimed job and is already running it, well
+        // inside its own fresh, still-current deadline.
+        let (_, current_lease_generation, new_deadline) = store.claim(id, 2, deadline, 10).unwrap();
+        store
+            .begin_execution(id, current_lease_generation, deadline + 1)
+            .unwrap();
+        assert_ne!(stale_lease_generation, current_lease_generation);
+        // Worker 1's long-delayed completion call now arrives, presenting
+        // its own original lease generation and a tick still inside worker
+        // 2's current deadline window. It must be refused, not accepted as
+        // if it were worker 2's own completion.
+        assert_eq!(
+            store.complete(
+                id,
+                stale_lease_generation,
+                deadline + 2,
+                OutcomeKind::Success,
+                1,
+                100,
+            ),
+            Err(JobFixtureError::LeaseNotCurrent)
+        );
+        assert_eq!(store.state_of(id), Some(JobState::Running));
+        // Worker 2's own completion, using its own current generation,
+        // still succeeds normally.
+        assert_eq!(store.leased_worker_id(id), Some(2));
+        let state = store
+            .complete(
+                id,
+                current_lease_generation,
+                new_deadline - 1,
                 OutcomeKind::Success,
                 1,
                 100,

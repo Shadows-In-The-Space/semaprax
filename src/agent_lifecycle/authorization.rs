@@ -32,6 +32,12 @@ use crate::interpreter::retained_call::{
 use super::stages::AuthorizeStage;
 use super::{encode_value, StageRecord};
 
+mod native_executor;
+mod wasm_executor;
+
+use native_executor::NativeStageExecutor;
+use wasm_executor::WasmStageExecutor;
+
 const BINDING_DOMAIN: &[u8] = b"semaprax.agent-lifecycle.authorization.v1\0";
 
 /// One opaque, one-use authorization.
@@ -261,10 +267,14 @@ pub(super) fn run_authorize_stage(
 // that would close it.
 
 mod sealed {
-    /// Closed over this module. Nothing outside `authorization.rs` can name
-    /// `Sealed`, so nothing outside this file can implement
-    /// [`super::StageExecutor`] -- the standard Rust sealed-trait idiom,
-    /// enforced by the compiler at the `impl` site, not by convention.
+    /// Closed over this module and its descendants. `sealed` is a private
+    /// module, so only `authorization.rs` itself and the submodules it
+    /// declares (`native_executor`, `wasm_executor`) can name `Sealed`, and
+    /// therefore only they can implement [`super::StageExecutor`] -- the
+    /// standard Rust sealed-trait idiom, enforced by the compiler at the
+    /// `impl` site, not by convention. Nothing outside this module tree,
+    /// including every other module in this crate's own file lease, can
+    /// name it.
     pub trait Sealed {}
 }
 
@@ -294,11 +304,14 @@ impl ExecutionAuthority {
 /// retained-call body for execution.
 ///
 /// Every backend capable of running a bound stage implements this trait --
-/// today, exactly one: the interpreter. `StageExecutor` is `pub` so its
-/// contract is inspectable from outside the crate, but it cannot be
-/// *implemented* from outside this file: the supertrait bound requires
-/// `sealed::Sealed`, and `sealed` is a private module nested here, so
-/// nothing else can name it. This is checked by the compiler at the `impl`
+/// today, exactly three: the interpreter ([`InterpreterStageExecutor`]),
+/// native C11 ([`native_executor::NativeStageExecutor`], #142), and Core
+/// Wasm ([`wasm_executor::WasmStageExecutor`], #143). `StageExecutor` is
+/// `pub` so its contract is inspectable from outside the crate, but it
+/// cannot be *implemented* from outside this module's own tree
+/// (`authorization.rs` and its declared submodules): the supertrait bound
+/// requires `sealed::Sealed`, and `sealed` is a private module nested here,
+/// so nothing else can name it. This is checked by the compiler at the `impl`
 /// site, not by convention:
 ///
 /// ```compile_fail
@@ -339,8 +352,11 @@ pub trait StageExecutor: sealed::Sealed {
 
 /// The interpreter-backed stage executor.
 ///
-/// Until a native or Wasm executor is admitted, this is the crate's only
-/// implementation of [`StageExecutor`].
+/// The default, and today the only, backend any production call site in
+/// this crate's file lease selects. [`NativeStageExecutor`] (#142) and
+/// [`WasmStageExecutor`] (#143) are the seam's other two implementors --
+/// reachable only through [`dispatch_on`], never through a second,
+/// uncoordinated call into `evaluate_retained_call`.
 pub(super) struct InterpreterStageExecutor;
 
 impl sealed::Sealed for InterpreterStageExecutor {}
@@ -358,25 +374,64 @@ impl StageExecutor for InterpreterStageExecutor {
     }
 }
 
+/// Which [`StageExecutor`] one [`dispatch_on`] call selects.
+///
+/// This is data a caller must name explicitly -- never an ambient default
+/// baked into a second function -- so every backend, including the two
+/// added for #142/#143, is reachable through the exact same single call
+/// point [`dispatch`] already was.
+pub(super) enum StageBackend {
+    Interpreter,
+    Native,
+    Wasm,
+}
+
 /// The single call point this module tree dispatches a bound stage's
 /// prepared body through.
 ///
-/// Every stage dispatch this crate's file lease can reach calls this
-/// instead of `evaluate_retained_call` directly, so a second, uncoordinated
-/// call site into the interpreter cannot reappear silently within that
-/// lease: it would have to show up as one more `StageExecutor`
-/// implementation, which `tests.rs`'s
+/// Every stage dispatch this crate's file lease can reach calls this (or
+/// its `Interpreter`-selecting convenience wrapper [`dispatch`]) instead of
+/// `evaluate_retained_call` directly, so a second, uncoordinated call site
+/// into a backend cannot reappear silently within that lease: it would have
+/// to show up as one more `StageExecutor` implementation, which `tests.rs`'s
 /// `the_stage_executor_seam_has_exactly_one_implementation_and_one_dispatch_route`
-/// pins at exactly one, rather than as one more scattered call to
-/// `evaluate_retained_call`.
+/// pins at exactly the number this crate has actually reviewed and admitted
+/// (three: interpreter, native, Wasm), rather than as one more scattered
+/// call to `evaluate_retained_call` or a hand-rolled backend invocation.
+pub(super) fn dispatch_on(
+    backend: StageBackend,
+    program: &hir::ResolvedProgram,
+    prepared: &PreparedRetainedCall,
+    arguments: &[RetainedValue],
+    max_steps: usize,
+) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
+    let authority = ExecutionAuthority::grant();
+    match backend {
+        StageBackend::Interpreter => {
+            InterpreterStageExecutor.execute(authority, program, prepared, arguments, max_steps)
+        }
+        StageBackend::Native => {
+            NativeStageExecutor.execute(authority, program, prepared, arguments, max_steps)
+        }
+        StageBackend::Wasm => {
+            WasmStageExecutor.execute(authority, program, prepared, arguments, max_steps)
+        }
+    }
+}
+
+/// Convenience wrapper over [`dispatch_on`] selecting [`StageBackend::Interpreter`],
+/// the behavior every existing production call site in this crate's file
+/// lease -- including the one remaining call site outside it,
+/// `CompiledAgentLifecycle::evaluate` in `agent_lifecycle.rs` -- already
+/// depends on unchanged.
 pub(super) fn dispatch(
     program: &hir::ResolvedProgram,
     prepared: &PreparedRetainedCall,
     arguments: &[RetainedValue],
     max_steps: usize,
 ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
-    InterpreterStageExecutor.execute(
-        ExecutionAuthority::grant(),
+    dispatch_on(
+        StageBackend::Interpreter,
         program,
         prepared,
         arguments,

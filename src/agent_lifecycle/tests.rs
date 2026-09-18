@@ -393,8 +393,10 @@ fn the_authorization_value_has_exactly_one_mint_site_in_the_crate() {
 }
 
 #[test]
-fn the_stage_executor_seam_has_exactly_one_implementation_and_one_dispatch_route() {
+fn the_stage_executor_seam_has_exactly_three_implementations_and_one_dispatch_route() {
     let authorization = include_str!("authorization.rs");
+    let native_executor = include_str!("authorization/native_executor.rs");
+    let wasm_executor = include_str!("authorization/wasm_executor.rs");
     let lifecycle = include_str!("../agent_lifecycle.rs");
     let stages = include_str!("stages.rs");
     let durable = include_str!("durable.rs");
@@ -404,13 +406,21 @@ fn the_stage_executor_seam_has_exactly_one_implementation_and_one_dispatch_route
     let driver = include_str!("iterative/driver.rs");
     let live = include_str!("iterative/driver/live.rs");
 
-    // `StageExecutor` is implemented exactly once in the whole tree, here,
-    // by the interpreter-backed executor. Its sealing supertrait, defined in
-    // a private `mod sealed` nested in this same file, is named nowhere
-    // else -- so nothing else could add a second implementation even if it
-    // tried; the compiler, not this scan, is what actually enforces that
-    // (see the `compile_fail` doctest on `StageExecutor` itself).
+    // `StageExecutor` is implemented exactly three times in the whole tree:
+    // the interpreter-backed executor here in `authorization.rs`, the
+    // native C11 executor (#142) in `authorization/native_executor.rs`, and
+    // the Core Wasm executor (#143) in `authorization/wasm_executor.rs`.
+    // Extending this count from one to three is the deliberate, reviewed
+    // outcome of admitting those two backends -- not a regression of the
+    // seal. `sealed::Sealed`, defined once in a private `mod sealed` nested
+    // in `authorization.rs`, is visible only to `authorization.rs` and the
+    // two submodules it declares, so nothing outside this module's own tree
+    // could add a fourth implementation even if it tried; the compiler, not
+    // this scan, is what actually enforces that (see the `compile_fail`
+    // doctest on `StageExecutor` itself).
     assert_eq!(authorization.matches("impl StageExecutor for").count(), 1);
+    assert_eq!(native_executor.matches("impl StageExecutor for").count(), 1);
+    assert_eq!(wasm_executor.matches("impl StageExecutor for").count(), 1);
     assert_eq!(authorization.matches("mod sealed").count(), 1);
     for (name, source) in [
         ("agent_lifecycle.rs", lifecycle),
@@ -429,11 +439,19 @@ fn the_stage_executor_seam_has_exactly_one_implementation_and_one_dispatch_route
         );
         assert_eq!(source.matches("mod sealed").count(), 0, "{name}");
     }
+    for (name, source) in [
+        ("authorization/native_executor.rs", native_executor),
+        ("authorization/wasm_executor.rs", wasm_executor),
+    ] {
+        assert_eq!(source.matches("mod sealed").count(), 0, "{name}");
+    }
 
     // Every stage dispatch this crate's `src/agent_lifecycle/**` file lease
-    // can reach now calls the sealed `dispatch` instead of
+    // can reach now calls the sealed `dispatch`/`dispatch_on` instead of
     // `evaluate_retained_call` directly. The Rich Proposal binder used to
-    // call it twice (authorize and reduce); it now calls it zero times.
+    // call it twice (authorize and reduce); it now calls it zero times. The
+    // native and Wasm executors never call it at all -- they compile and
+    // run the stage body through their own backend instead.
     assert_eq!(authorization.matches("evaluate_retained_call(").count(), 1);
     for (name, source) in [
         ("rich_stage.rs", rich_stage),
@@ -441,6 +459,8 @@ fn the_stage_executor_seam_has_exactly_one_implementation_and_one_dispatch_route
         ("iterative/driver.rs", driver),
         ("iterative/driver/live.rs", live),
         ("stages.rs", stages),
+        ("authorization/native_executor.rs", native_executor),
+        ("authorization/wasm_executor.rs", wasm_executor),
     ] {
         assert_eq!(
             source.matches("evaluate_retained_call(").count(),
@@ -484,6 +504,312 @@ fn the_sealed_dispatch_reaches_the_interpreter_and_matches_its_direct_evaluation
         panic!("initialize did not return a state through the sealed seam");
     };
     assert!(compiled.carries(&state, "state"));
+}
+
+// ---------------------------------------------------------------------------
+// #142 / #143: NativeStageExecutor and WasmStageExecutor, dispatched only
+// through `authorization::dispatch_on`.
+// ---------------------------------------------------------------------------
+
+fn native_wasm_tools_available() -> bool {
+    std::process::Command::new("clang")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+        && std::process::Command::new("node")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+}
+
+/// Parity evidence for #142: the native C11 executor agrees with the
+/// interpreter on every deterministic stage of the same lifecycle fixture
+/// `authorize` above shares -- `initialize`, `observe`, both branches of
+/// `authorize` (granted and refused), and `reduce` -- not merely that both
+/// happen to succeed.
+#[test]
+fn native_executor_agrees_with_the_interpreter_on_every_deterministic_stage() {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping native executor parity: clang or node unavailable");
+        return;
+    }
+    let compiled = lifecycle();
+
+    let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
+    let interpreter_initialize = authorization::dispatch_on(
+        authorization::StageBackend::Interpreter,
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("interpreter evaluates initialize");
+    let native_initialize = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("native evaluates initialize");
+    assert_eq!(interpreter_initialize.outcome, native_initialize.outcome);
+    let RetainedCallOutcome::Returned(state) = interpreter_initialize.outcome else {
+        panic!("initialize did not return a state");
+    };
+
+    let interpreter_observe = authorization::dispatch_on(
+        authorization::StageBackend::Interpreter,
+        &compiled.program,
+        compiled.binding.observe.prepared(),
+        std::slice::from_ref(&state),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("interpreter evaluates observe");
+    let native_observe = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &compiled.program,
+        compiled.binding.observe.prepared(),
+        std::slice::from_ref(&state),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("native evaluates observe");
+    assert_eq!(interpreter_observe.outcome, native_observe.outcome);
+
+    // `authorize`: both the grant branch and the refusal branch, so
+    // agreement is never proven by a single happy path alone.
+    for (budget, sequence, label) in [(5i64, 1u64, "granted"), (50i64, 1u64, "refused")] {
+        let arguments = [
+            state.clone(),
+            RetainedValue::I64(budget),
+            RetainedValue::Bool(false),
+            RetainedValue::Usize(sequence),
+        ];
+        let interpreter = authorization::dispatch_on(
+            authorization::StageBackend::Interpreter,
+            &compiled.program,
+            compiled.binding.authorize.stage().prepared(),
+            &arguments,
+            DEFAULT_STAGE_STEPS,
+        )
+        .unwrap_or_else(|error| panic!("interpreter evaluates authorize ({label}): {error:?}"));
+        let native = authorization::dispatch_on(
+            authorization::StageBackend::Native,
+            &compiled.program,
+            compiled.binding.authorize.stage().prepared(),
+            &arguments,
+            DEFAULT_STAGE_STEPS,
+        )
+        .unwrap_or_else(|error| panic!("native evaluates authorize ({label}): {error:?}"));
+        assert_eq!(interpreter.outcome, native.outcome, "authorize {label}");
+    }
+
+    let outcome = payload(&compiled.binding.outcome, b"observed".to_vec(), 4);
+    let reduce_arguments = [
+        state.clone(),
+        RetainedValue::I64(3),
+        RetainedValue::Bool(false),
+        RetainedValue::Usize(1),
+        outcome,
+    ];
+    let interpreter_reduce = authorization::dispatch_on(
+        authorization::StageBackend::Interpreter,
+        &compiled.program,
+        compiled.binding.reduce.prepared(),
+        &reduce_arguments,
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("interpreter evaluates reduce");
+    let native_reduce = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &compiled.program,
+        compiled.binding.reduce.prepared(),
+        &reduce_arguments,
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("native evaluates reduce");
+    assert_eq!(interpreter_reduce.outcome, native_reduce.outcome);
+}
+
+/// Recovery without repeated effects: every deterministic Agent stage body
+/// this crate ever binds is provably pure (`stages.rs::function` refuses any
+/// declared effect on one), and `NativeStageExecutor` keeps no durable state
+/// of its own between calls (a fresh temporary directory and a fresh
+/// out-of-process compile and run every time, removed before returning).
+/// Replaying the same dispatch -- exactly what a crash-recovery retry does --
+/// can therefore never repeat a side effect, because there is not one to
+/// repeat, and it settles to the identical decoded value every time.
+#[test]
+fn native_executor_replays_the_same_dispatch_without_repeating_any_effect() {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping native executor replay: clang or node unavailable");
+        return;
+    }
+    let compiled = lifecycle();
+    let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
+
+    let first = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("the first native dispatch evaluates initialize");
+    let second = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("a replayed native dispatch evaluates initialize identically");
+    assert_eq!(first.outcome, second.outcome);
+}
+
+/// Wrong ProgramRoot / wrong entry refusal, for both backends: a prepared
+/// call whose named entry is absent from the program it is dispatched
+/// against is refused before any compile or run is attempted, not silently
+/// evaluated against a different function that happens to share a slot.
+#[test]
+fn native_and_interpreter_executors_refuse_a_prepared_call_whose_entry_is_absent_from_the_given_program(
+) {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping native executor wrong-entry refusal: clang or node unavailable");
+        return;
+    }
+    let compiled = lifecycle();
+    let other = hir::resolve(
+        &crate::parse(
+            "module test.native_executor_wrong_program;\n@id(\"app.main\") fn main() -> i64 { 0 }\n",
+            std::path::Path::new("native-executor-wrong-program.spx"),
+        )
+        .expect("the unrelated fixture parses"),
+    )
+    .expect("the unrelated fixture resolves");
+    let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
+
+    let native_error = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &other,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err("native must refuse a prepared call for an entry absent from the given program");
+    assert_eq!(native_error.len(), 1);
+    assert_eq!(native_error[0].code, "SPX-G570");
+
+    let interpreter_error = authorization::dispatch_on(
+        authorization::StageBackend::Interpreter,
+        &other,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err(
+        "the interpreter must likewise refuse the same wrong-ProgramRoot dispatch, not just native",
+    );
+    assert!(!interpreter_error.is_empty());
+}
+
+/// Malformed-argument settlement: an argument whose runtime shape does not
+/// match its declared parameter type is refused before any C is generated
+/// or compiled, not coerced or silently miscompiled.
+#[test]
+fn native_executor_refuses_a_malformed_argument_shape_before_any_compile() {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping native executor malformed-argument refusal: clang or node unavailable");
+        return;
+    }
+    let compiled = lifecycle();
+
+    // Wrong arity.
+    let arity_error = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        &[],
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err("initialize takes one argument, not zero");
+    assert_eq!(arity_error[0].code, "SPX-G570");
+
+    // Right arity, wrong runtime shape: `observe` takes one borrowed
+    // `State` record, not a bare `i64`.
+    let shape_error = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &compiled.program,
+        compiled.binding.observe.prepared(),
+        &[RetainedValue::I64(0)],
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err("observe's state argument must be a State record, not a scalar");
+    assert_eq!(shape_error[0].code, "SPX-G570");
+}
+
+/// A result shape outside this executor's closed, reviewed vocabulary
+/// (neither a record nor a variant built only from `Bytes`/`i64` leaves) is
+/// refused with a diagnostic, never guessed at or partially decoded.
+#[test]
+fn native_executor_refuses_a_result_shape_outside_its_closed_vocabulary() {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping native executor result-shape refusal: clang or node unavailable");
+        return;
+    }
+    let program = hir::resolve(
+        &crate::parse(
+            "module test.native_executor_scalar_result;\n@id(\"scalar.fn\") fn scalar_result() -> i64 { 0 }\n@id(\"app.main\") fn main() -> i64 { 0 }\n",
+            std::path::Path::new("native-executor-scalar-result.spx"),
+        )
+        .expect("the scalar-result fixture parses"),
+    )
+    .expect("the scalar-result fixture resolves");
+    let prepared = crate::interpreter::retained_call::prepare_retained_call(&program, "scalar.fn")
+        .expect("the scalar-result function prepares");
+
+    let error = authorization::dispatch_on(
+        authorization::StageBackend::Native,
+        &program,
+        &prepared,
+        &[],
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err("a bare scalar result is outside this executor's record/variant vocabulary");
+    assert_eq!(error.len(), 1);
+    assert_eq!(error[0].code, "SPX-G570");
+}
+
+/// #143's honest state, pinned as an executable finding rather than left as
+/// prose: `src/project/public_api.rs::parameter_type` -- the admission rule
+/// of the exact existing Wasm/Node owned-data arena #143 requires reusing --
+/// accepts only `i64`/`bool` by value and `borrow Str`/`borrow SliceU8` as
+/// parameters. Every bound Agent stage takes at least one `own`/`borrow`
+/// record parameter (`Task`/`State`/`Outcome`), so no real stage call is
+/// admitted by that arena today. `WasmStageExecutor` detects exactly this
+/// and fails closed with a diagnostic instead of silently returning a wrong
+/// value, panicking, or reimplementing the arena to route around the gap.
+#[test]
+fn wasm_executor_fails_closed_on_every_real_bound_stage_shape() {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping wasm executor gap evidence: clang or node unavailable");
+        return;
+    }
+    let compiled = lifecycle();
+    let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
+
+    let error = authorization::dispatch_on(
+        authorization::StageBackend::Wasm,
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err(
+        "no bound Agent stage call is admitted by the existing owned-data Wasm arena's \
+         parameter vocabulary today",
+    );
+    assert_eq!(error.len(), 1);
+    assert_eq!(error[0].code, "SPX-G570");
 }
 
 #[test]

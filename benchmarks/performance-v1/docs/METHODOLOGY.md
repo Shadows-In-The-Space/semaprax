@@ -73,17 +73,54 @@ Bench groups:
     inside every timed sample. Each must return exactly the same product as
     its corresponding prepared arm (including full trace bytes when traced).
     The traced prepared arm still carries evidence work; compare matching
-    traced/untraced modes for lifecycle costs. Stage observations and quiet
-    repeated measurements remain part of #85.
+    traced/untraced modes for lifecycle costs.
+
+    **#85 measurement** (`cargo bench --bench interpreter -- --quick`, release
+    profile, 11-core host, load average 2.3–2.9 at start, rising to ~4.9 under
+    concurrent unrelated builds on this shared checkout — not the quiet window
+    a committed baseline requires): `scalar-loop` (traced) 18.3 ms vs
+    `scalar-loop-untraced` 3.91 ms, against `scalar-loop-retained` (unprepared,
+    untraced) at 3.91 ms in the same run. Untraced prepared execution lands
+    exactly on the unprepared retained arm, and traced execution is ~4.7x that
+    — so trace collection/rendering, not a defect in the prepared seam,
+    accounts for the previously reported inversion. The same shape reproduces
+    larger in `project-retained/apex-supply-chain` below (~93x). Tracing is
+    genuinely this expensive; `execute_entry_untraced` (added for #85) is the
+    correct fix, and it is now the arm to use whenever a caller does not need
+    a `ProjectSourceTrace`. What remains open is a quiet-host repetition to
+    pin an exact, citable ratio — these numbers establish the mechanism and
+    rough magnitude, not a stable baseline figure.
 - `project`:
   - `project-cold-load`: `check`, `run` and `test` through
     `project::with_authenticated_project` for the shipped `calculator-project`
     and `apex-supply-chain` manifests — the whole per-invocation CLI cost.
   - `project-retained`: one retained revision: steady-state `execute_entry`,
     prepared-interpreter execution, and interpreter preparation itself.
+    **#85 measurement** (`cargo bench --bench project -- --quick`, same
+    profile and host, load average 4.9–5.4 at start — heavier than the
+    interpreter run above, from concurrent unrelated builds on this shared
+    checkout): `apex-supply-chain`
+    `prepared-run` (traced) 1.88 ms vs `prepared-run-untraced` 20.2 µs vs
+    `retained-run` (unprepared, untraced) 2.09 ms. The fixture's actual
+    evaluator work is only tens of microseconds; almost the entire traced cost
+    is building and rendering the trace, not evaluation. This is the same
+    mechanism as `interpreter-prepared-evaluator`, at a larger ratio because
+    this fixture does less real work per call.
   - `project-frontend-cache`: `ProjectFrontendCache` reanalysis at 1x/2x/4x of a
     generated multi-module fixture — cold, unchanged rebuild, one leaf edited,
-    and the provider every module consumes edited.
+    and the provider every module consumes edited. **#85 measurement** (same
+    run): `cold` vs `rebuild-unchanged` was 2.81/2.79 ms at 1x, 5.44/5.30 ms at
+    2x, 16.25/16.23 ms at 4x — rebuild-unchanged tracks `cold` rather than
+    beating it, reproducing the shape #85 reported (no speedup despite
+    `modules_parsed == 0`). This is not a defect to fix here:
+    `docs/PROJECT-SEMANTIC-CACHE-V1.md#what-a-hit-is-worth` documents why an
+    AST-cache hit is worth much less than it sounds — `lookup` in
+    `src/project/incremental.rs` returns a deep clone of the whole cached
+    `Program`, a cost of the same order as the parse it replaces, and the four
+    full-cost phases (source verification, HIR validation, cross-file checks,
+    link/profile admission) still run in full on every rebuild regardless of
+    the hit. `modules_parsed: 0` is accurate about parsing being skipped; it is
+    not a proxy for wall-clock savings.
 
 The generated fixture is ordinary canonical `.spx` source with an ordinary
 `semaprax.project.v1` manifest. `tests/documentation/benchmark_fixtures.rs`

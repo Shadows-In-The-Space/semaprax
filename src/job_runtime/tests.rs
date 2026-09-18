@@ -74,6 +74,86 @@ fn physical_store_refuses_stale_cas_and_retains_current_generation() {
     let _ = fs::remove_dir(&root);
 }
 
+/// A genuine multi-OS-thread proof that [`FileJobCheckpointStore`]'s CAS
+/// contract holds under real concurrent file access, not just the single
+/// in-process sequential calls the test above makes. `docs/DURABLE-JOBS-V1.md`
+/// disclosed this store as untested "concurrently from a second process";
+/// this closes the "real OS threads ... racing on a shared
+/// `FileJobCheckpointStore`" half of that gap (`src/job_fixture.rs`'s own
+/// `real_os_thread_concurrent_claim_race_grants_the_lease_to_exactly_one_worker`
+/// closes the same half for the in-memory `JobStore`). A true second *process*
+/// — a separate address space, no shared `Arc` — is a distinct, larger claim
+/// this test does not make and the store's own doc comment still does not.
+///
+/// Every racing thread opens its **own** `FileJobCheckpointStore` handle
+/// (mirroring independent workers, not one shared Rust value) rooted at the
+/// same directory, lines up on a `Barrier`, then repeatedly attempts
+/// `compare_and_swap(None, ..)` with its own distinct document. The store's
+/// advisory file lock is non-blocking (`try_lock_exclusive`), so a thread
+/// that loses the race for the lock retries rather than queuing; the bounded
+/// retry loop below tolerates that without masking a real correctness bug —
+/// every retry after the first successful write still race the *same*
+/// `expected_generation: None`, which only the genuinely-first writer can
+/// ever satisfy again. Which thread wins is left to the OS scheduler.
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+#[test]
+fn real_os_thread_cas_race_lets_exactly_one_writer_win_the_shared_checkpoint_file() {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    const WRITERS: usize = 12;
+    const ATTEMPTS_PER_WRITER: usize = 200;
+
+    let root = std::env::temp_dir().join(format!(
+        "semaprax-job-runtime-cas-race-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+
+    let barrier = Arc::new(Barrier::new(WRITERS));
+    let handles: Vec<_> = (0..WRITERS)
+        .map(|writer_id| {
+            let root = root.clone();
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                let mut store = FileJobCheckpointStore::open(&root).unwrap();
+                let document = format!("writer-{writer_id}").into_bytes();
+                // All writers line up here so their first `compare_and_swap`
+                // attempt below fires as close to simultaneously as the OS
+                // scheduler allows.
+                barrier.wait();
+                for _ in 0..ATTEMPTS_PER_WRITER {
+                    if store.compare_and_swap(None, &document) == Ok(1) {
+                        return Some(document);
+                    }
+                }
+                None
+            })
+        })
+        .collect();
+
+    let winners: Vec<Vec<u8>> = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .filter_map(|result| result)
+        .collect();
+
+    assert_eq!(
+        winners.len(),
+        1,
+        "exactly one real OS thread must ever land generation 1, got {winners:?}"
+    );
+    let mut store = FileJobCheckpointStore::open(&root).unwrap();
+    let stored = store.load().unwrap().unwrap();
+    assert_eq!(stored.generation, 1);
+    assert_eq!(&stored.bytes, &winners[0]);
+
+    let _ = fs::remove_file(root.join(STORE_FILE));
+    let _ = fs::remove_file(root.join(STORE_LOCK));
+    let _ = fs::remove_dir(&root);
+}
+
 const SCHEMA_FIXTURE: &str = r#"
 module test.job_runtime;
 

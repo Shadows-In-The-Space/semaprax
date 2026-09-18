@@ -366,9 +366,11 @@ process that crashes right after a confirmed heartbeat and then recovers
 replays the extended window rather than the shorter one originally claimed.
 Because `FileJobCheckpointStore` writes through a real file, a heartbeat's
 extended deadline is genuinely visible to any other process reading that same
-checkpoint at that moment; no test here exercises that concurrently from a
-second process, matching the disclosed single-threaded-simulation limits of
-the concurrent-claim tests elsewhere in this document.
+checkpoint at that moment; no test here exercises *this specific heartbeat
+scenario* concurrently from a second reader. The store's underlying CAS write
+path is, however, now exercised under genuine concurrent access: see
+`real_os_thread_cas_race_lets_exactly_one_writer_win_the_shared_checkpoint_file`
+in `src/job_runtime/tests.rs`, and the "Model true concurrency" entry below.
 
 ### Retained source-handler binding v1
 
@@ -485,11 +487,26 @@ touches no file under `src/hir`, `src/wasm`, `src/codegen`,
   for a real database driver; [Project Dependencies
   v1](PROJECT-DEPENDENCIES-V1.md#rust-crate-inputs) is the same extension
   point a real broker adapter would use.
-- **Model true concurrency.** `src/job_fixture.rs`'s concurrent-claim test is
-  a deterministic single-threaded simulation of two racing workers, exactly
-  the technique `database_fixture.rs` already uses for its own concurrent
-  migration test; it is local evidence the decision procedure is race-safe on
-  paper, not a proof about a real multi-threaded or multi-process runner.
+- **Model true multi-process concurrency.** `src/job_fixture.rs`'s original
+  concurrent-claim test is a deterministic single-threaded simulation of two
+  racing workers, exactly the technique `database_fixture.rs` already uses for
+  its own concurrent migration test; that remains local evidence the decision
+  procedure is race-safe on paper, not proof against a real runner. Two
+  further tests now close the *real OS thread* half of that gap specifically:
+  `src/job_fixture.rs`'s
+  `real_os_thread_concurrent_claim_race_grants_the_lease_to_exactly_one_worker`
+  races 16 genuine OS threads (synchronized on a `Barrier`, so the OS
+  scheduler — not the test — decides call order) against a shared
+  `Mutex<JobStore>` and asserts exactly one ever wins, repeated across 25
+  independent jobs; `src/job_runtime/tests.rs`'s
+  `real_os_thread_cas_race_lets_exactly_one_writer_win_the_shared_checkpoint_file`
+  does the same against `FileJobCheckpointStore`'s real advisory-locked CAS
+  file write, with independent racing threads each opening their own store
+  handle at the same directory. Neither test claims to prove true
+  multi-*process* concurrency (separate address spaces, no shared `Arc`, real
+  process scheduling and signal delivery) — that remains open, and is the
+  larger claim a physical database driver behind `DatabaseFixture` would still
+  need its own dedicated test to establish.
 
 ## Local evidence
 

@@ -10,15 +10,20 @@
 //! every backend. This module is a separate, Rust-only proof that the same
 //! decision procedures compose into something a real job runner could
 //! implement: real lease claims with generation and deadline tracking, real
-//! heartbeats, real worker-crash recovery, a real (simulated, single
-//! threaded) concurrent-claim race, real retry with bounded backoff, and a
-//! real dead-letter ceiling. It composes with `crate::database_fixture`
-//! rather than reinventing a parallel ledger: `enqueue` commits a job row and
-//! an idempotency-key uniqueness check through the *same*
-//! `DatabaseFixture` transaction as any application-state row a caller wants
-//! written atomically alongside it. It grants no filesystem, network, or
-//! process authority, opens no socket, spawns no thread, and is used only by
-//! this module's own tests.
+//! heartbeats, real worker-crash recovery, a deterministic single-threaded
+//! *scripted* concurrent-claim simulation, a second concurrent-claim race
+//! driven by genuine OS threads racing under a `Barrier` (proving the same
+//! fencing invariant under real nondeterministic scheduling rather than a
+//! call order this module's own test chose), real retry with bounded
+//! backoff, and a real dead-letter ceiling. It composes with
+//! `crate::database_fixture` rather than reinventing a parallel ledger:
+//! `enqueue` commits a job row and an idempotency-key uniqueness check
+//! through the *same* `DatabaseFixture` transaction as any application-state
+//! row a caller wants written atomically alongside it. In production use —
+//! outside this module's own tests, which alone spawn real OS threads solely
+//! to race against it — `JobStore` and `DatabaseFixture` grant no
+//! filesystem, network, or process authority, open no socket, and spawn no
+//! thread of their own.
 //!
 //! **Classified uncertainty.** The checked atomic-write provider route now
 //! returns `Published`, `NotPublished`, or `Uncertain` as a checked value
@@ -1096,6 +1101,10 @@ mod tests {
     /// `concurrent_runner_duplicate_attempt_is_never_applied_twice` uses),
     /// not real concurrent threads. Only the first claim succeeds; the
     /// second observes the job is no longer claimable.
+    ///
+    /// [`real_os_thread_concurrent_claim_race_grants_the_lease_to_exactly_one_worker`]
+    /// below proves the same fencing invariant under genuine OS-thread
+    /// scheduling rather than a scripted call order.
     #[test]
     fn concurrent_claim_race_grants_the_lease_to_exactly_one_worker() {
         let mut ledger = DatabaseFixture::new();
@@ -1112,6 +1121,86 @@ mod tests {
         assert!(first.is_ok());
         assert_eq!(second, Err(JobFixtureError::ClaimNotLegal));
         assert_eq!(store.leased_worker_id(id), Some(1));
+    }
+
+    /// A genuine multi-threaded proof of the same fencing invariant the
+    /// scripted test above only simulates: real OS threads, synchronized by
+    /// a [`std::sync::Barrier`] so their `claim` calls are issued as close to
+    /// simultaneously as the OS scheduler allows, race for the same job
+    /// behind a shared `Mutex<JobStore>`. Which worker wins is genuinely
+    /// nondeterministic across runs (the OS scheduler decides, not this
+    /// test's call order); what must hold on every run, and is asserted
+    /// here, is that exactly one of them ever wins. The store's own `Mutex`
+    /// still serializes the actual mutation, exactly as a real lock-based
+    /// store (in-memory or a physical database's row lock) would — the value
+    /// of real threads over the scripted simulation above is that the
+    /// *scheduling* of who reaches the lock first is real, not scripted.
+    /// This closes the "real OS threads ... racing" half of the concurrency
+    /// gap `docs/DURABLE-JOBS-V1.md#non-claims-and-remaining-work` disclosed;
+    /// true multi-*process* concurrency (separate OS processes, no shared
+    /// address space) is a distinct, larger claim this test does not make.
+    #[test]
+    fn real_os_thread_concurrent_claim_race_grants_the_lease_to_exactly_one_worker() {
+        use std::sync::{Arc, Barrier, Mutex};
+        use std::thread;
+
+        const WORKERS: u32 = 16;
+        const ITERATIONS: usize = 25;
+
+        for iteration in 0..ITERATIONS {
+            let mut ledger = DatabaseFixture::new();
+            JobStore::install_ledger_schema(&mut ledger);
+            let mut store = JobStore::new(1);
+            let EnqueueOutcome::Created(id) = store
+                .enqueue(
+                    &mut ledger,
+                    format!("race-{iteration}").into_bytes(),
+                    descriptor(),
+                    None,
+                    3,
+                    false,
+                )
+                .unwrap()
+            else {
+                panic!("expected a fresh job");
+            };
+            let store = Arc::new(Mutex::new(store));
+            let barrier = Arc::new(Barrier::new(WORKERS as usize));
+
+            let handles: Vec<_> = (1..=WORKERS)
+                .map(|worker_id| {
+                    let store = Arc::clone(&store);
+                    let barrier = Arc::clone(&barrier);
+                    thread::spawn(move || {
+                        // All threads line up here so the actual `claim`
+                        // calls below fire as close to simultaneously as the
+                        // OS scheduler allows, rather than in a fixed order
+                        // the test itself picked.
+                        barrier.wait();
+                        store.lock().unwrap().claim(id, worker_id, 0, 10)
+                    })
+                })
+                .collect();
+
+            let results: Vec<_> = handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect();
+
+            let winners: Vec<_> = results.iter().filter(|result| result.is_ok()).collect();
+            assert_eq!(
+                winners.len(),
+                1,
+                "iteration {iteration}: exactly one real thread must win the claim race, got {winners:?}"
+            );
+            for result in &results {
+                if result.is_err() {
+                    assert_eq!(*result, Err(JobFixtureError::ClaimNotLegal));
+                }
+            }
+            let store = store.lock().unwrap();
+            assert!(store.leased_worker_id(id).is_some());
+        }
     }
 
     #[test]

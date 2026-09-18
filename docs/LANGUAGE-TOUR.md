@@ -3,7 +3,7 @@
 Audience: programmers who already know a systems language and want to read and
 write SEMAPRAX source.
 
-Status: pre-alpha guided tour over committed examples. It teaches the shapes
+Status: alpha guided tour over committed examples. It teaches the shapes
 that exist in this checkout and makes no readiness claim; the
 [completion matrix](COMPLETION-MATRIX.md) is the sole status authority, and
 [RFC 0001](RFC-0001.md) is the language contract.

@@ -1,6 +1,6 @@
 # Using the SEMAPRAX CLI
 
-Status: public pre-alpha user guide.
+Status: public alpha user guide.
 
 Audience: language users running the compiler locally or from automation.
 
@@ -280,7 +280,7 @@ Compiler diagnostics carry stable `SPX-...` codes so tests and tools can bind
 to the diagnostic kind instead of matching an entire human-readable message.
 Human-readable diagnostics include `path:line:column` when the compiler knows
 the source location; `--json` remains the stable automation interface.
-SEMAPRAX remains pre-alpha, so consult the release notes and versioned
+SEMAPRAX remains alpha, so consult the release notes and versioned
 references before treating a diagnostic, schema, or ABI as stable across
 releases.
 

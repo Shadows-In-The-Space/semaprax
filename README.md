@@ -23,7 +23,7 @@ Build runtime agents whose proposals must pass checked code before they can act.
 https://github.com/user-attachments/assets/8768f221-86c3-40a8-ad62-e75ee74ee66c
 
 > [!WARNING]
-> Semaprax is **pre-alpha research software**, not a production-ready language.
+> Semaprax is **alpha research software**, not a production-ready language.
 > Syntax, protocols, and binary interfaces can change. Use it to experiment,
 > build prototypes, and help shape the language, not for production or
 > safety-critical workloads.
@@ -362,7 +362,7 @@ build, payment, or publication authority.
 
 ## Project status
 
-**Development version: 0.5.0 · Maturity: pre-alpha · Full product goal: Partial.**
+**Development version: 0.5.0 · Maturity: alpha · Full product goal: Partial.**
 
 There is executable language, graph, semantic-change, runtime, and host-integration
 work to explore today. There is not yet a production application toolchain,

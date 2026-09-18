@@ -92,7 +92,7 @@ unpublished, or unpromoted.
    and any prerequisite profile decisions. Require fresh evidence for later
    code changes rather than attributing them to v0.4.0.
 
-The full-toolchain archives remain pre-alpha and do not publish workspace-private
+The full-toolchain archives remain alpha and do not publish workspace-private
 library crates. The source-selected/private-host distribution boundary must
 remain explicit until promoted workflows intentionally hide it from users.
 

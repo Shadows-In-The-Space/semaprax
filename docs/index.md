@@ -10,7 +10,7 @@ the language and its supported workflows. Contributor process, implementation
 evidence, private experiments, and repository internals live in the separate
 [development guide](DEVELOPMENT.md).
 
-> SEMAPRAX is pre-alpha. A versioned document describes an exact bounded
+> SEMAPRAX is alpha. A versioned document describes an exact bounded
 > contract; it does not imply that the broader feature is complete or stable.
 > The [completion matrix](COMPLETION-MATRIX.md) is the product-status authority.
 > The [v0.4.0 baseline](RELEASE-0.4.0-STATUS.md) records **HOSTED GREEN** for the
@@ -22,7 +22,7 @@ archives. The implemented release code has **HOSTED GREEN** evidence; the
 release-note publication issue is not an outstanding code-evidence gate.
 See the [release baseline](RELEASE-0.4.0-STATUS.md) and
 [release record and checksums](RELEASE-PROCESS.md#040-hosted-release-evidence).
-The release remains unsigned, not notarized, and pre-alpha.
+The release remains unsigned, not notarized, and alpha.
 Recent project and tooling notes are summarized in [CHANGELOG.md](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md),
 with compact highlights in [CHANGELOG-SUMMARY.md](CHANGELOG-SUMMARY.md),
 and full history in [docs/CHANGELOG-ARCHIVE.md](CHANGELOG-ARCHIVE.md).

@@ -1,6 +1,6 @@
 # Citing Semaprax
 
-Semaprax is pre-alpha research. Cite the exact repository state and evidence
+Semaprax is alpha research. Cite the exact repository state and evidence
 surface that supports your statement.
 
 ## Repository citation
@@ -43,5 +43,5 @@ and the relevant evidence specification when making a narrower technical
 claim. The tag and archives are unsigned, and the published checksums are
 integrity facts rather than signatures or provenance.
 
-Semaprax is created and maintained by Wavect GmbH as Apache-2.0 pre-alpha
+Semaprax is created and maintained by Wavect GmbH as Apache-2.0 alpha
 research. This is factual project attribution, not a commercial service claim.

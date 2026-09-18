@@ -1,6 +1,6 @@
 # Security policy
 
-SEMAPRAX is pre-alpha and is not suitable for production or safety-critical
+SEMAPRAX is alpha and is not suitable for production or safety-critical
 software. Security properties in an RFC are design requirements unless the
 [completion matrix](docs/COMPLETION-MATRIX.md) links them to qualifying
 executable evidence. A private or proof-only host fixture is not a supported

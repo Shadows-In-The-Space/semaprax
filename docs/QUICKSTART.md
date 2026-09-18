@@ -2,7 +2,7 @@
 
 Audience: new SEMAPRAX users and contributors.
 
-Status: pre-alpha bounded calculator workflow; not a production-readiness claim.
+Status: alpha bounded calculator workflow; not a production-readiness claim.
 
 This quickstart uses the standalone `semaprax` CLI to create the built-in
 calculator Project v1 template and then exercise it. Install it from the
@@ -56,7 +56,7 @@ the authenticated project, including the generated application and its imported
 modules. The final command creates the single
 missing `dist` parent and publishes the Web package at `dist/web`.
 
-SEMAPRAX remains pre-alpha. This flow demonstrates the bounded calculator
+SEMAPRAX remains alpha. This flow demonstrates the bounded calculator
 project contract; it is not a production-readiness or broader ecosystem claim.
 
 The executable quickstart suite's previously recorded nine tests passed locally on macOS arm64

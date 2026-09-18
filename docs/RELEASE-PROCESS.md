@@ -378,7 +378,7 @@ Artifact matrix jobs retain read-only repository authority. The final
 `publish-release` job alone receives `contents: write`, and only after both
 `release-gate` and every artifact-matrix child succeed. It authenticates the
 exact three-archive inventory, writes one `SHA256SUMS`, and publishes a GitHub
-prerelease because SEMAPRAX remains pre-alpha. The publisher derives the body
+prerelease because SEMAPRAX remains alpha. The publisher derives the body
 with `scripts/release-notes.py`: it selects only the tagged version's dated
 `CHANGELOG.md` section, stopping at the next release heading, and surrounds it
 with the release nonclaims. A missing, duplicate, or empty section fails the

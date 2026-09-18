@@ -8,7 +8,7 @@ Official Visual Studio Code support for the Semaprax programming language, publi
 Semaprax is an experimental AI-agent-native systems programming language built around stable semantic identity, compiler-checked meaning, explicit effects, ownership, contracts, typed transformations, and reproducible source review.
 
 > **Preview software**
-> Semaprax is currently pre-alpha research software. The language, graph schemas, diagnostics, ABIs, and editor workflows may change. Do not use it for production or safety-critical workloads yet.
+> Semaprax is currently alpha research software. The language, graph schemas, diagnostics, ABIs, and editor workflows may change. Do not use it for production or safety-critical workloads yet.
 
 ## What you get
 

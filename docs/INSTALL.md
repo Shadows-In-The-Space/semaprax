@@ -1,6 +1,6 @@
 # Installing SEMAPRAX
 
-Status: public pre-alpha installation guide; not a production-readiness claim.
+Status: public alpha installation guide; not a production-readiness claim.
 
 Audience: new SEMAPRAX users and contributors putting a working toolchain on a
 local machine.
@@ -12,7 +12,7 @@ install works, and what the first failure messages mean. The
 [quickstart](QUICKSTART.md) then walks the calculator project flow, and the
 [CLI user guide](CLI-GUIDE.md) covers day-to-day command shapes.
 
-SEMAPRAX is pre-alpha research software. Installing it does not make any
+SEMAPRAX is alpha research software. Installing it does not make any
 feature production-ready; the [completion matrix](COMPLETION-MATRIX.md) is the
 sole authority for what is implemented and what evidence backs it.
 
@@ -184,7 +184,7 @@ A CLI built from a tag archive reports its injected commit instead of
 `unknown`. The JSON form is the machine-readable version of the same identity:
 
 ```text
-{"schema":"semaprax.version.v1","version":"0.5.0","commit":null,"maturity":"pre-alpha","rust_min":"1.88"}
+{"schema":"semaprax.version.v1","version":"0.5.0","commit":null,"maturity":"alpha","rust_min":"1.88"}
 ```
 
 `check` prints the verified path and its source digest, and `run` prints `42`:

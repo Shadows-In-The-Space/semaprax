@@ -184,7 +184,7 @@ fn release_automation_checks_version_surfaces_and_renders_only_one_changelog_buc
         String::from_utf8_lossy(&notes.stderr)
     );
     let notes = String::from_utf8(notes.stdout).expect("release notes must be UTF-8");
-    let title = format!("SEMAPRAX v{version} is pre-alpha research software.");
+    let title = format!("SEMAPRAX v{version} is alpha research software.");
     // Three sampled entries of the current bucket, taken from the top, middle,
     // and bottom of its section, plus the fixed frame. Samples are re-picked
     // each release; the point they hold is that the renderer emits this
@@ -314,7 +314,7 @@ fn both_packagers_bind_version_commit_manifest_inventory_and_smoke() {
             "stable language ABI",
             "stable public protocol",
             "safety-critical suitability",
-            "pre-alpha",
+            "alpha",
             "release-manifest.json",
             "smoke/meaning.spx",
             "semaprax.version.v1",
@@ -369,7 +369,7 @@ fn release_documentation_preserves_all_nonclaims() {
         "No cross-host reproducible build is claimed",
         "integrity facts, not signatures",
         "does not promote any completion-matrix row",
-        "pre-alpha",
+        "alpha",
     ] {
         assert!(docs.contains(exact), "release nonclaim lost: {exact}");
     }
@@ -656,7 +656,7 @@ def manifest_bytes(version, commit, target):
         'version': version,
         'commit': commit,
         'target': target,
-        'maturity': 'pre-alpha',
+        'maturity': 'alpha',
         'binaries': ['semaprax', 'semapraxd'],
         'nonclaims': [],
     }).encode('utf-8')

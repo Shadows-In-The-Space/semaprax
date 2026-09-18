@@ -2154,7 +2154,7 @@ jobs:
           done
           (cd dist && sha256sum "${archives[@]}") > dist/SHA256SUMS
           test "$(wc -l < dist/SHA256SUMS | tr -d ' ')" = "${#archives[@]}"
-      - name: Publish the pre-alpha archives only after complete aggregation
+      - name: Publish the alpha archives only after complete aggregation
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

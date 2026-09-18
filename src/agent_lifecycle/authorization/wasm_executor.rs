@@ -28,11 +28,91 @@
 //! trusts) -- a bounded but real new piece of resolver-adjacent
 //! infrastructure (it must go through the ordinary HIR resolver so cleanup
 //! and loan planning stay correct), not a a call-site change within this
-//! file. That is out of this file's safe scope; see the handoff report for
-//! specifics. Calling the *existing* raw Wasm export directly with
-//! hand-encoded linear-memory arguments was considered and rejected: doing
-//! so without the arena's own bookkeeping is exactly the "re-implement the
-//! arena" the hand-off says not to do.
+//! file. That is out of this file's safe scope. Calling the *existing* raw
+//! Wasm export directly with hand-encoded linear-memory arguments was
+//! considered and rejected: doing so without the arena's own bookkeeping is
+//! exactly the "re-implement the arena" the hand-off says not to do.
+//!
+//! ## The concrete design for closing this (not yet implemented here)
+//!
+//! Audited against the current tree (#143). Named precisely so the next
+//! change does not have to re-derive it:
+//!
+//! 1. **Synthesize driver source, do not hand-build HIR.** For one call,
+//!    render a small `.spx` function as text: params restricted by
+//!    construction to the four shapes [`admitted_parameter`]/
+//!    [`admitted_result`] already check (`i64`/`bool` by value, `borrow
+//!    Str`/`borrow SliceU8`); its body reconstructs the stage's real
+//!    `Task`/`State`/`Outcome` argument as an ordinary record literal from
+//!    those scalars, calls the target stage by its existing `@id`, and
+//!    encodes the `Decision`/`Step` result back down to an admissible
+//!    scalar -- the same encode shape `tests/agent_runtime_v1/
+//!    stage_backend_parity.rs`'s hand-written wrapper cases already use for
+//!    Decision/Step (#142/#143 audit history). Appending source text and
+//!    re-parsing is deliberately preferred over building `ast::Function` by
+//!    hand: the parser and resolver then validate every literal field
+//!    against the real `Task`/`State`/`Outcome` declaration, instead of this
+//!    file re-implementing that checking.
+//! 2. **Get a genuine plan, the only way one exists today.** The plan
+//!    builders are `loan_plan::build_plan(program: &ResolvedProgram,
+//!    function: &ResolvedFunction) -> Result<LoanPlan, Diagnostic>`
+//!    (`src/loan_plan.rs:112-120`) and `cleanup_plan::build::build_plan`
+//!    (`src/cleanup_plan/build.rs:478-483`), but both consume an
+//!    already-resolved `ResolvedFunction` -- they are not an entry point on
+//!    their own. The only thing that produces one, by calling exactly those
+//!    two builders internally through `resolve_function`/
+//!    `resolve_function_in_scope` (`src/hir/resolve_program.rs:585-592`,
+//!    `825-952`), is the whole-program pass `pub fn hir::resolve(program:
+//!    &ast::Program) -> Result<ResolvedProgram, Vec<Diagnostic>>`
+//!    (`src/hir.rs:433-441`), or its incremental sibling
+//!    `pub(crate) fn hir::resolve_with_function_reuse` (`src/hir.rs:
+//!    449-482`), which still requires the complete current `&ast::Program`
+//!    and only skips replanning functions whose full AST is byte-identical
+//!    to a prior resolution. **There is no resolver entry point today that
+//!    adds or replans one function against an already-resolved
+//!    `ResolvedProgram` without the complete source `ast::Program` that
+//!    produced it** -- confirmed from `Resolver<'a> { program: &'a Program,
+//!    .. }` (`src/hir.rs:563-568`), which borrows the whole AST program for
+//!    the life of one resolution. So the driver must be spliced into real
+//!    `.spx` source text and the *whole module* re-resolved through
+//!    `hir::resolve`, not attached to the `ResolvedProgram` this executor
+//!    already holds.
+//! 3. **The source text this needs does not reach this file.** The only
+//!    place in the reachable call graph holding the original `.spx` text is
+//!    `CompiledAgentLifecycle.source: String` (`src/agent_lifecycle.rs:
+//!    346-355`); parsing it back to `ast::Program` uses `pub fn
+//!    crate::parse(source: &str, path: impl AsRef<Path>) -> Result<Program,
+//!    Diagnostic>` (`src/lib.rs:240`), and the driver function is then one
+//!    more push onto `ast::Program.functions: Vec<Function>`
+//!    (`src/ast.rs:187-201`) before calling `hir::resolve` on the extended
+//!    program. But `StageExecutor::execute`'s signature
+//!    (`src/agent_lifecycle/authorization.rs:341-351`) receives only
+//!    `program: &hir::ResolvedProgram` -- never the source text or a parsed
+//!    `ast::Program` -- so nothing this file can change reaches it. Adding a
+//!    parameter to that trait means editing `authorization.rs` itself (its
+//!    `StageExecutor` trait, `dispatch`/`dispatch_on`, and
+//!    `run_authorize_stage`) and every call site that currently calls
+//!    `dispatch`/`dispatch_on`: `agent_lifecycle.rs::
+//!    CompiledAgentLifecycle::evaluate` (`agent_lifecycle.rs:787`, already a
+//!    documented residual bypass per `authorization.rs:262-267`),
+//!    `durable.rs`, `iterative/driver.rs`, `iterative/driver/live.rs`, and
+//!    `rich_stage.rs`. None of those files are `src/agent_lifecycle/
+//!    authorization/**` or `tests.rs`, so this is real scope beyond a
+//!    single-file change, not a fact this file's own contents could hide.
+//! 4. **The re-derived program must still name the same declarations.**
+//!    Re-parsing and re-resolving the whole module from text is expected to
+//!    reproduce identical `DeclarationId`s for every function/record/variant
+//!    already in `program` (they come from explicit `@id`s, and identity is
+//!    persistent by the crate's own invariant), so the driver's call target
+//!    and the caller's already-validated `prepared.function_id()` should
+//!    still agree; that equivalence is asserted, not assumed, by comparing
+//!    the re-resolved program's matching function against the one this
+//!    executor was handed, before ever deriving a descriptor from it.
+//! 5. **No admission-rule change.** The driver's own parameters/result are
+//!    scalar/borrow shapes by construction, so `project::public_api::
+//!    parameter_type`/`result_type` (`src/project/public_api.rs:675-688`,
+//!    `690-717`) admit it unmodified; the record/variant argument and result
+//!    never cross that boundary, only the driver's own scalar wrapper does.
 //!
 //! This executor therefore does the honest thing: it checks whether the
 //! requested call's parameters and result are inside the existing

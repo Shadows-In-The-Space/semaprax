@@ -47,8 +47,7 @@ use crate::agent_runtime::AgentCancellation;
 use crate::diagnostic::{quote_json, Diagnostic};
 use crate::hir;
 use crate::interpreter::retained_call::{
-    evaluate_retained_call, RetainedCallEvaluation, RetainedCallOutcome, RetainedField,
-    RetainedRecord, RetainedValue,
+    RetainedCallEvaluation, RetainedCallOutcome, RetainedField, RetainedRecord, RetainedValue,
 };
 
 pub mod authorization;
@@ -798,7 +797,7 @@ impl CompiledAgentLifecycle {
         arguments: &[RetainedValue],
         max_steps: usize,
     ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
-        evaluate_retained_call(&self.program, stage.prepared(), arguments, max_steps)
+        authorization::dispatch(&self.program, stage.prepared(), arguments, max_steps)
     }
 
     /// Projects one decoded proposal into the ordered scalar arguments the

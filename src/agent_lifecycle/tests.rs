@@ -8,6 +8,7 @@
 //! `agent_runtime_v1` harness.
 
 use super::*;
+use crate::interpreter::retained_call::evaluate_retained_call;
 
 /// The `runtime_v1` compatibility material of the frozen fixture definition.
 /// The definition compiler supplies its own schema and nonclaims.
@@ -189,13 +190,13 @@ fn authorize(
     compiled: &CompiledAgentLifecycle,
     budget: i64,
 ) -> (RetainedValue, String, Authorized) {
-    let evaluation = compiled
-        .evaluate(
-            &compiled.binding.initialize,
-            &[payload(&compiled.binding.task, b"alpha".to_vec(), budget)],
-            DEFAULT_STAGE_STEPS,
-        )
-        .expect("initialize evaluates");
+    let evaluation = authorization::dispatch(
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        &[payload(&compiled.binding.task, b"alpha".to_vec(), budget)],
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("initialize evaluates");
     let RetainedCallOutcome::Returned(state) = evaluation.outcome else {
         panic!("initialize did not return a state");
     };
@@ -389,6 +390,100 @@ fn the_authorization_value_has_exactly_one_mint_site_in_the_crate() {
             assert!(!source.contains(forbidden), "{name} contains {forbidden}");
         }
     }
+}
+
+#[test]
+fn the_stage_executor_seam_has_exactly_one_implementation_and_one_dispatch_route() {
+    let authorization = include_str!("authorization.rs");
+    let lifecycle = include_str!("../agent_lifecycle.rs");
+    let stages = include_str!("stages.rs");
+    let durable = include_str!("durable.rs");
+    let checkpoint = include_str!("durable/checkpoint.rs");
+    let journal = include_str!("durable/journal.rs");
+    let rich_stage = include_str!("rich_stage.rs");
+    let driver = include_str!("iterative/driver.rs");
+    let live = include_str!("iterative/driver/live.rs");
+
+    // `StageExecutor` is implemented exactly once in the whole tree, here,
+    // by the interpreter-backed executor. Its sealing supertrait, defined in
+    // a private `mod sealed` nested in this same file, is named nowhere
+    // else -- so nothing else could add a second implementation even if it
+    // tried; the compiler, not this scan, is what actually enforces that
+    // (see the `compile_fail` doctest on `StageExecutor` itself).
+    assert_eq!(authorization.matches("impl StageExecutor for").count(), 1);
+    assert_eq!(authorization.matches("mod sealed").count(), 1);
+    for (name, source) in [
+        ("agent_lifecycle.rs", lifecycle),
+        ("stages.rs", stages),
+        ("durable.rs", durable),
+        ("durable/checkpoint.rs", checkpoint),
+        ("durable/journal.rs", journal),
+        ("rich_stage.rs", rich_stage),
+        ("iterative/driver.rs", driver),
+        ("iterative/driver/live.rs", live),
+    ] {
+        assert_eq!(
+            source.matches("impl StageExecutor for").count(),
+            0,
+            "{name}"
+        );
+        assert_eq!(source.matches("mod sealed").count(), 0, "{name}");
+    }
+
+    // Every stage dispatch this crate's `src/agent_lifecycle/**` file lease
+    // can reach now calls the sealed `dispatch` instead of
+    // `evaluate_retained_call` directly. The Rich Proposal binder used to
+    // call it twice (authorize and reduce); it now calls it zero times.
+    assert_eq!(authorization.matches("evaluate_retained_call(").count(), 1);
+    for (name, source) in [
+        ("rich_stage.rs", rich_stage),
+        ("durable.rs", durable),
+        ("iterative/driver.rs", driver),
+        ("iterative/driver/live.rs", live),
+        ("stages.rs", stages),
+    ] {
+        assert_eq!(
+            source.matches("evaluate_retained_call(").count(),
+            0,
+            "{name}"
+        );
+    }
+
+    // The module-root `CompiledAgentLifecycle::evaluate` was the last
+    // bypass: it called `evaluate_retained_call` directly, outside the
+    // seam. It now routes through `authorization::dispatch` like every
+    // other stage execution, so the count here is zero. If it ever becomes
+    // non-zero again a second, unsealed execution route has reappeared.
+    assert_eq!(lifecycle.matches("evaluate_retained_call(").count(), 0);
+}
+
+#[test]
+fn the_sealed_dispatch_reaches_the_interpreter_and_matches_its_direct_evaluation() {
+    let compiled = lifecycle();
+    let arguments = [payload(&compiled.binding.task, b"alpha".to_vec(), 5)];
+
+    let direct = evaluate_retained_call(
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        &arguments,
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("the interpreter evaluates initialize directly");
+    let sealed = authorization::dispatch(
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        &arguments,
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("the sealed executor evaluates initialize");
+
+    // The seam is not a second, drifting implementation: it reaches the same
+    // interpreter and returns the identical decoded outcome.
+    assert_eq!(direct.outcome, sealed.outcome);
+    let RetainedCallOutcome::Returned(state) = sealed.outcome else {
+        panic!("initialize did not return a state through the sealed seam");
+    };
+    assert!(compiled.carries(&state, "state"));
 }
 
 #[test]

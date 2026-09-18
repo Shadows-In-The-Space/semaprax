@@ -305,7 +305,12 @@ impl CompiledIterativeLifecycle {
             ($stage:expr, $arguments:expr) => {{
                 boundary!();
                 driver.before_stage($stage.role(), run.iterations, budget.max_steps_per_stage)?;
-                let evaluation = inner.evaluate($stage, $arguments, budget.max_steps_per_stage)?;
+                let evaluation = authorization::dispatch(
+                    &inner.program,
+                    $stage.prepared(),
+                    $arguments,
+                    budget.max_steps_per_stage,
+                )?;
                 run.stages.push(StageRecord::of($stage, &evaluation));
                 match evaluation.outcome {
                     RetainedCallOutcome::Returned(value) => value,

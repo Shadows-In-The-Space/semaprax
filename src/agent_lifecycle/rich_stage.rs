@@ -118,8 +118,8 @@ use crate::hir::{
     ResolvedTypeDeclarationKind,
 };
 use crate::interpreter::retained_call::{
-    evaluate_retained_call, prepare_retained_call, PreparedRetainedCall, RetainedCallOutcome,
-    RetainedField, RetainedRecord, RetainedValue,
+    prepare_retained_call, PreparedRetainedCall, RetainedCallOutcome, RetainedField,
+    RetainedRecord, RetainedValue,
 };
 
 fn invariant(field: &str) -> Diagnostic {
@@ -560,7 +560,7 @@ pub fn run_rich_turn(
         .map_err(|_| refused("turn.proposal_projection"))?;
 
     let authorize_args = [state.clone(), proposal_value.clone()];
-    let evaluation = evaluate_retained_call(
+    let evaluation = super::authorization::dispatch(
         &stages.program,
         &stages.authorize,
         &authorize_args,
@@ -595,7 +595,7 @@ pub fn run_rich_turn(
 
     let reduce_args = [state, proposal_value, RetainedValue::Bytes(outcome_bytes)];
     let evaluation =
-        evaluate_retained_call(&stages.program, &stages.reduce, &reduce_args, max_steps)
+        super::authorization::dispatch(&stages.program, &stages.reduce, &reduce_args, max_steps)
             .map_err(|_| refused("reduce.evaluate"))?;
     let RetainedCallOutcome::Returned(RetainedValue::Variant(transition)) = evaluation.outcome
     else {

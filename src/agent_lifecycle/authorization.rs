@@ -25,7 +25,8 @@ use sha2::{Digest, Sha256};
 use crate::diagnostic::Diagnostic;
 use crate::hir;
 use crate::interpreter::retained_call::{
-    evaluate_retained_call, RetainedCallOutcome, RetainedValue,
+    evaluate_retained_call, PreparedRetainedCall, RetainedCallEvaluation, RetainedCallOutcome,
+    RetainedValue,
 };
 
 use super::stages::AuthorizeStage;
@@ -163,7 +164,7 @@ pub(super) fn run_authorize_stage(
             "authorize.retained_call.identity",
         )]);
     }
-    let evaluation = evaluate_retained_call(program, prepared, arguments, max_steps)?;
+    let evaluation = dispatch(program, prepared, arguments, max_steps)?;
     if evaluation.function_id.as_str() != stage.stage().function_id() {
         return Err(vec![super::stages::invariant(
             "authorize.retained_call.dispatch",
@@ -228,4 +229,157 @@ pub(super) fn run_authorize_stage(
         RetainedCallOutcome::GuardError(_) => AuthorizationOutcome::Undecided("guard"),
     };
     Ok((outcome, record))
+}
+
+// ---------------------------------------------------------------------------
+// The sealed executor seam.
+// ---------------------------------------------------------------------------
+//
+// Before this seam existed, every stage evaluation still funneled through
+// the single function `evaluate_retained_call`, but through four
+// independent, uncoordinated call sites: this module's own
+// `run_authorize_stage` above, `rich_stage.rs`'s authorize and reduce
+// dispatch (two sites), and `CompiledAgentLifecycle::evaluate` in the parent
+// module file (`agent_lifecycle.rs`). A fifth backend could have been wired
+// into any one of them without the others -- or a reviewer -- noticing.
+//
+// `StageExecutor` closes that for every site this crate's file lease can
+// reach: it is the one trait a backend implements to run a bound stage's
+// prepared body, it is sealed so no second implementation can appear, and
+// dispatching through it requires an explicit, unforgeable
+// `ExecutionAuthority` value rather than relying on being called from the
+// "right" module. `run_authorize_stage` above, and every stage dispatch in
+// `durable.rs`, `iterative/driver.rs`, `iterative/driver/live.rs` and
+// `rich_stage.rs`, now call `dispatch` below instead of
+// `evaluate_retained_call` directly.
+//
+// `CompiledAgentLifecycle::evaluate` in `agent_lifecycle.rs` is outside this
+// module's own file and still calls `evaluate_retained_call` directly; nothing
+// in this crate's `src/agent_lifecycle/**` file lease can rewrite that
+// method's body, so that one remaining call site is a residual, reported gap
+// rather than a closed one. See the change notes for the exact one-line edit
+// that would close it.
+
+mod sealed {
+    /// Closed over this module. Nothing outside `authorization.rs` can name
+    /// `Sealed`, so nothing outside this file can implement
+    /// [`super::StageExecutor`] -- the standard Rust sealed-trait idiom,
+    /// enforced by the compiler at the `impl` site, not by convention.
+    pub trait Sealed {}
+}
+
+/// Explicit, unforgeable authority to dispatch one stage's prepared body to
+/// a [`StageExecutor`].
+///
+/// `ExecutionAuthority` has no public constructor, no `Clone`, no `Copy`,
+/// and no `Default` -- the same no-forging shape [`Authorized`] already
+/// uses in this module. A caller cannot build one from a struct literal
+/// (its field is private) and cannot manufacture one from nothing; the only
+/// route is [`ExecutionAuthority::grant`].
+pub struct ExecutionAuthority(());
+
+impl ExecutionAuthority {
+    /// Grants execution authority for one dispatch.
+    ///
+    /// Restricted to this crate's agent lifecycle runtime: nothing outside
+    /// this module tree -- no unrelated module, no external crate -- can
+    /// call this, so nothing outside the tree can even attempt to drive a
+    /// [`StageExecutor`], whether or not it could otherwise obtain one.
+    pub(super) fn grant() -> Self {
+        ExecutionAuthority(())
+    }
+}
+
+/// The sealed executor seam for dispatching one Agent stage's prepared
+/// retained-call body for execution.
+///
+/// Every backend capable of running a bound stage implements this trait --
+/// today, exactly one: the interpreter. `StageExecutor` is `pub` so its
+/// contract is inspectable from outside the crate, but it cannot be
+/// *implemented* from outside this file: the supertrait bound requires
+/// `sealed::Sealed`, and `sealed` is a private module nested here, so
+/// nothing else can name it. This is checked by the compiler at the `impl`
+/// site, not by convention:
+///
+/// ```compile_fail
+/// struct RogueExecutor;
+///
+/// impl semaprax::agent_lifecycle::authorization::StageExecutor for RogueExecutor {
+///     fn execute(
+///         &self,
+///         _authority: semaprax::agent_lifecycle::authorization::ExecutionAuthority,
+///         _program: &semaprax::hir::ResolvedProgram,
+///         _prepared: &semaprax::interpreter::retained_call::PreparedRetainedCall,
+///         _arguments: &[semaprax::interpreter::retained_call::RetainedValue],
+///         _max_steps: usize,
+///     ) -> Result<
+///         semaprax::interpreter::retained_call::RetainedCallEvaluation,
+///         Vec<semaprax::diagnostic::Diagnostic>,
+///     > {
+///         unimplemented!()
+///     }
+/// }
+/// ```
+///
+/// Dispatching through the one real implementation still requires a live
+/// [`ExecutionAuthority`], passed by value as an ordinary parameter: the
+/// authority to execute is data a caller must hold, not an ambient property
+/// of which function happens to be calling.
+pub trait StageExecutor: sealed::Sealed {
+    /// Executes one prepared stage body.
+    fn execute(
+        &self,
+        authority: ExecutionAuthority,
+        program: &hir::ResolvedProgram,
+        prepared: &PreparedRetainedCall,
+        arguments: &[RetainedValue],
+        max_steps: usize,
+    ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>>;
+}
+
+/// The interpreter-backed stage executor.
+///
+/// Until a native or Wasm executor is admitted, this is the crate's only
+/// implementation of [`StageExecutor`].
+pub(super) struct InterpreterStageExecutor;
+
+impl sealed::Sealed for InterpreterStageExecutor {}
+
+impl StageExecutor for InterpreterStageExecutor {
+    fn execute(
+        &self,
+        _authority: ExecutionAuthority,
+        program: &hir::ResolvedProgram,
+        prepared: &PreparedRetainedCall,
+        arguments: &[RetainedValue],
+        max_steps: usize,
+    ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
+        evaluate_retained_call(program, prepared, arguments, max_steps)
+    }
+}
+
+/// The single call point this module tree dispatches a bound stage's
+/// prepared body through.
+///
+/// Every stage dispatch this crate's file lease can reach calls this
+/// instead of `evaluate_retained_call` directly, so a second, uncoordinated
+/// call site into the interpreter cannot reappear silently within that
+/// lease: it would have to show up as one more `StageExecutor`
+/// implementation, which `tests.rs`'s
+/// `the_stage_executor_seam_has_exactly_one_implementation_and_one_dispatch_route`
+/// pins at exactly one, rather than as one more scattered call to
+/// `evaluate_retained_call`.
+pub(super) fn dispatch(
+    program: &hir::ResolvedProgram,
+    prepared: &PreparedRetainedCall,
+    arguments: &[RetainedValue],
+    max_steps: usize,
+) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
+    InterpreterStageExecutor.execute(
+        ExecutionAuthority::grant(),
+        program,
+        prepared,
+        arguments,
+        max_steps,
+    )
 }

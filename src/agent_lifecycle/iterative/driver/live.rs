@@ -114,7 +114,12 @@ impl CompiledIterativeLifecycle {
                         budget.max_steps_per_stage,
                     )?;
                 }
-                let evaluation = inner.evaluate($stage, $arguments, budget.max_steps_per_stage)?;
+                let evaluation = authorization::dispatch(
+                    &inner.program,
+                    $stage.prepared(),
+                    $arguments,
+                    budget.max_steps_per_stage,
+                )?;
                 run.stages.push(StageRecord::of($stage, &evaluation));
                 if let Some(session) = session.as_deref_mut() {
                     session.record_stage(run.stages.last().expect("stage just pushed"));

@@ -607,8 +607,9 @@ impl Machine<'_> {
                 "no_fuel_for_initialize",
             ));
         }
-        let evaluation = lifecycle.evaluate(
-            &lifecycle.binding.initialize,
+        let evaluation = authorization::dispatch(
+            &lifecycle.program,
+            lifecycle.binding.initialize.prepared(),
             &[payload(
                 &lifecycle.binding.task,
                 task.objective.clone(),
@@ -642,8 +643,9 @@ impl Machine<'_> {
                 "no_fuel_for_observe",
             ));
         }
-        let evaluation = lifecycle.evaluate(
-            &lifecycle.binding.observe,
+        let evaluation = authorization::dispatch(
+            &lifecycle.program,
+            lifecycle.binding.observe.prepared(),
             std::slice::from_ref(&state),
             self.allot(),
         )?;
@@ -937,7 +939,12 @@ impl Machine<'_> {
         arguments.push(state);
         arguments.extend(projected);
         arguments.push(payload(&lifecycle.binding.outcome, observation, 0));
-        let evaluation = lifecycle.evaluate(&lifecycle.binding.reduce, &arguments, self.allot())?;
+        let evaluation = authorization::dispatch(
+            &lifecycle.program,
+            lifecycle.binding.reduce.prepared(),
+            &arguments,
+            self.allot(),
+        )?;
         self.spend(evaluation.steps_used);
         self.records
             .push(StageRecord::of(&lifecycle.binding.reduce, &evaluation));

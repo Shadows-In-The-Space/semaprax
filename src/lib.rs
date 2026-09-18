@@ -218,6 +218,7 @@ pub mod semantic_workspace_operations;
 pub mod semantic_workspace_structural_change;
 pub mod session_protocol;
 mod source_verify;
+pub mod typed_workflow;
 #[cfg(feature = "unstable-workflow-profiling")]
 pub mod workflow_profile;
 pub mod workspace_analysis;

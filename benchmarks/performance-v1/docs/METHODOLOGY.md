@@ -87,9 +87,30 @@ Bench groups:
     larger in `project-retained/apex-supply-chain` below (~93x). Tracing is
     genuinely this expensive; `execute_entry_untraced` (added for #85) is the
     correct fix, and it is now the arm to use whenever a caller does not need
-    a `ProjectSourceTrace`. What remains open is a quiet-host repetition to
-    pin an exact, citable ratio — these numbers establish the mechanism and
-    rough magnitude, not a stable baseline figure.
+    a `ProjectSourceTrace`.
+
+    **#85 quiet-host repetition** (full `cargo bench --bench interpreter --
+    interpreter-prepared-evaluator`, not `--quick`; release profile, 11-core
+    host; load average **1.33 at start**, rising to ~3.6 from the benchmark
+    process itself; **no concurrent cargo, rustc or criterion process on the
+    host**, verified by `ps` before starting — this is the quiet window the
+    measurements above lacked):
+
+    | case | time (median, 95% CI) |
+    |---|---|
+    | `scalar-loop` (prepared, traced) | 17.430 ms [17.403, 17.460] |
+    | `scalar-loop-untraced` (prepared, untraced) | 3.7927 ms [3.7765, 3.8203] |
+    | `scalar-loop-retained` (unprepared, untraced) | 3.7621 ms [3.7438, 3.7946] |
+    | `scalar-loop-cold-untraced` | 5.8668 ms [5.8520, 5.8837] |
+    | `scalar-loop-cold-traced` | 19.727 ms [19.686, 19.771] |
+
+    The untraced prepared arm and the unprepared retained arm are within
+    0.8% of each other and their confidence intervals overlap, so they are
+    indistinguishable at this resolution. Traced prepared execution is
+    **4.60x** the untraced arm. **There is no inversion in the prepared
+    seam**: the reported inversion was trace collection and rendering,
+    entirely and measurably. This is now a citable figure, not an indicative
+    one.
 - `project`:
   - `project-cold-load`: `check`, `run` and `test` through
     `project::with_authenticated_project` for the shipped `calculator-project`
@@ -121,6 +142,25 @@ Bench groups:
     link/profile admission) still run in full on every rebuild regardless of
     the hit. `modules_parsed: 0` is accurate about parsing being skipped; it is
     not a proxy for wall-clock savings.
+
+    **#85 quiet-host repetition** (full `cargo bench --bench project`, not
+    `--quick`; load average 1.33 at start, no concurrent cargo/rustc/criterion
+    process, verified by `ps`):
+
+    | scale | `cold` | `rebuild-unchanged` | delta |
+    |---|---|---|---|
+    | 1x (5 modules, 1241 B) | 2.8559 ms | 2.8182 ms | −1.3% |
+    | 2x (7 modules, 2237 B) | 5.2210 ms | 5.1916 ms | −0.6% |
+    | 4x (11 modules, 4229 B) | 16.434 ms | 16.211 ms | −1.4% |
+
+    Parity at all three scales on a quiet host, so the earlier result was not
+    contention noise: an unchanged rebuild genuinely costs what a cold one
+    costs. The deep-clone `lookup` and the four uncached full-cost phases are
+    the whole explanation, and they bound what any AST-cache hit can be worth
+    until one of them changes. `project-retained/calculator-project` in the
+    same run shows the other side of it: `prepared-run-untraced` at 5.085 µs
+    against `retained-run` at 179.50 µs — **35x**, once tracing is not being
+    paid for.
 
 The generated fixture is ordinary canonical `.spx` source with an ordinary
 `semaprax.project.v1` manifest. `tests/documentation/benchmark_fixtures.rs`

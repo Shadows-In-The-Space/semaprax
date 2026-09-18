@@ -709,3 +709,63 @@ fn a_certificate_whose_embedded_lean_document_was_weakened_is_refused_by_re_deri
     assert!(error.message.contains("re-rendering"), "{}", error.message);
     std::fs::remove_file(&path).ok();
 }
+
+/// `artifact_binding_accepts_only_the_exact_bound_bytes` above only proves
+/// rejection of a *corrupted copy* of the certificate's own artifact (one
+/// byte appended). That leaves the actually dangerous case unproven: a
+/// certificate minted against a **prior head** of the exact same source
+/// file, replayed via the compiler-free, filesystem-free
+/// `verify_certificate_against_artifact` against the **current head**'s
+/// genuinely, independently compiled artifact. If that bound only a weak
+/// property (e.g. shape or length), a stale certificate could be presented
+/// as evidence about a live build after the source moved on. It must not
+/// bind, and it must fail with the drift code, not the structural one,
+/// since the certificate is perfectly self-consistent on its own.
+#[test]
+fn verify_certificate_against_artifact_rejects_a_prior_heads_artifact() {
+    let path = write_temp(FIXTURE, "priorhead");
+
+    // Prior head: mint a certificate bound to this file's current bytes and
+    // compile its real Wasm core module.
+    let certificate = certificate_for(&path);
+    let prior_source = std::fs::read_to_string(&path).unwrap();
+    let prior_program = crate::parse(&prior_source, &path).unwrap();
+    let prior_resolved = crate::hir::resolve(&prior_program).unwrap();
+    let prior_artifact = crate::wasm::emit_resolved_module(&prior_resolved).unwrap();
+
+    // Current head: the same declaration and path, but a source edit that
+    // stays inside the profile (still admitted, still exports a certifiable
+    // obligation) and changes a literal that participates in the compiled
+    // module, so the two artifacts are genuinely distinct compiled bytes —
+    // not a corrupted copy of one another.
+    let advanced = FIXTURE.replace("requires a <= 1000", "requires a <= 500");
+    assert_ne!(
+        advanced, FIXTURE,
+        "the edit must actually change the source"
+    );
+    std::fs::write(&path, with_main(&advanced)).unwrap();
+    let current_source = std::fs::read_to_string(&path).unwrap();
+    let current_program = crate::parse(&current_source, &path).unwrap();
+    let current_resolved = crate::hir::resolve(&current_program).unwrap();
+    let current_artifact = crate::wasm::emit_resolved_module(&current_resolved).unwrap();
+
+    assert_ne!(
+        prior_artifact, current_artifact,
+        "the source edit must produce a genuinely different compiled artifact, \
+         or the rejection below would be vacuous"
+    );
+
+    // Control: the prior-head certificate still binds to its own, genuine
+    // artifact.
+    verify_certificate_against_artifact(&certificate, &prior_artifact)
+        .expect("a certificate must still bind to its own prior-head artifact");
+
+    // The replay attack: presenting the current head's real, validly
+    // compiled artifact against the prior-head certificate must be refused,
+    // not accepted because both are "the same target and shape".
+    let error = verify_certificate_against_artifact(&certificate, &current_artifact)
+        .expect_err("a prior-head certificate must not bind to a later head's artifact");
+    assert_eq!(error.code, "SPX-Z112");
+
+    std::fs::remove_file(&path).ok();
+}

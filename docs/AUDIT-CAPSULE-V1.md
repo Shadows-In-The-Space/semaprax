@@ -1,10 +1,10 @@
 # Audit Capsule v1
 
 Status: versioned manifest schema, object-type/relation/role/algorithm
-registries, and an independent structural verifier. Cryptographic signing and
-real transparency-log submission/verification are `HUMAN_BLOCKED` -- neither
-exists in this repository, and this document must not be read as claiming
-otherwise.
+registries, a canonical builder, an independent structural verifier, and a
+structural diff. Cryptographic signing and real transparency-log
+submission/verification are `HUMAN_BLOCKED` -- neither exists in this
+repository, and this document must not be read as claiming otherwise.
 
 Audience: implementers wiring a capsule producer, reviewers auditing a
 capsule, and anyone extending `src/audit_capsule.rs`.
@@ -38,6 +38,17 @@ tests issue #209 names.
 - The `transparency_leaf_digest` / `capsule_digest` split (see below) -- a
   genuinely new design decision this work had to make, not copied from any
   existing schema.
+- [`render_capsule`]: a canonical builder that assembles the same typed
+  pieces [`ParsedCapsule`] carries into well-formed manifest bytes, sorting
+  objects into canonical order itself. Before this, the module had a
+  decoder and a verifier but no producer at all -- a real emitter had no
+  in-crate way to assemble a capsule short of hand-writing JSON. Every call
+  round-trips its own output through [`parse_capsule`] before returning, so
+  it can never hand back bytes this module's own decoder would reject.
+- [`diff_capsules`] and [`CapsuleDiff`]: a pure, read-only structural diff
+  between two already-parsed capsules (added/removed/changed objects,
+  associations, and signature roles, plus subject and profile changes) --
+  the library half of issue #209's `audit diff`.
 
 **What existing modules already deliver, reused here only by reference (all
 four are read-only from this module's perspective; none of their files are
@@ -70,15 +81,20 @@ the referenced object's exact bytes -- the same digest an independent
   #209 leaves unspecified.
 - **No CLI surface.** Issue #209's implementation sequence asks for
   `semaprax audit verify`, `audit inspect`, and `audit diff` subcommands.
-  Wiring those touches `src/cli_driver.rs`, a large, shared, actively-worked
-  file outside this change's file lease (`src/audit_capsule.rs`, this
-  document, and its tests only). The verifier functions
-  ([`verify_capsule`], [`parse_capsule`], and the individual `check_*`
-  functions) are the library surface a thin CLI wrapper would call; adding
-  that wrapper is follow-up work for whoever owns `cli_driver.rs` next.
-- **No `audit diff`.** Comparing two capsules structurally (which objects
-  were added/removed/changed) is not implemented; [`ParsedCapsule`]'s public
-  fields are enough to build one, but no diff algorithm exists here yet.
+  Wiring those touches `src/cli/help.rs` (the `CommandId` enum and the
+  `CommandSpec` table, e.g. around the existing `Context`/`Graph`/`Verify`
+  entries) and `src/cli_driver.rs`'s dispatch `match` -- both large, shared,
+  actively-worked files outside this change's file lease
+  (`src/audit_capsule.rs`, this document, and its tests only). The library
+  surface a thin CLI wrapper would call already exists: [`verify_capsule`]
+  and [`parse_capsule`] for `audit verify`, [`ParsedCapsule`]'s public
+  fields for `audit inspect`, and [`diff_capsules`] for `audit diff`.
+  Adding the wrapper is follow-up work for whoever owns `cli/help.rs` and
+  `cli_driver.rs` next.
+- **`diff_capsules` compares two already-parsed capsules, not two capsule
+  files.** A CLI `audit diff` would still need to load and independently
+  `parse_capsule` both manifests first; [`diff_capsules`] itself never reads
+  a file and never re-verifies either side.
 
 ## Schema: `semaprax.audit-capsule.v1`
 
@@ -159,6 +175,30 @@ have received at submission time, before its inclusion proof was appended
 back onto the capsule. [`capsule_digest`] remains the plain SHA-256 of the
 literal bytes handed to it, an identity for one exact byte-for-byte capsule
 version, used for nothing else in this module.
+
+### Building a capsule: `render_capsule`
+
+[`render_capsule`] takes a profile, a subject map, and slices of
+[`ObjectRef`]/[`AssociationEdge`]/[`SignatureEntry`] plus an optional
+[`TransparencyEntry`], and returns canonical manifest bytes. It sorts
+`objects` into ascending order by `id` itself -- a builder's job is to
+*produce* canonical bytes, not merely to demand the caller already supplied
+them in order -- and rejects a `subject` whose key set does not exactly
+match the profile's [`Profile::subject_keys`]. Before returning, it
+round-trips its own output through [`parse_capsule`], so a caller can never
+receive rendered bytes that this module's own decoder would refuse to
+accept back.
+
+### Diffing two capsules: `diff_capsules`
+
+[`diff_capsules`] takes two already-`parse_capsule`d [`ParsedCapsule`]
+values and returns a [`CapsuleDiff`]: profile/subject changes, added and
+removed object ids, per-id [`ObjectChange`] (digest/type/schema change vs.
+a redaction-only change), and added/removed associations and signature
+roles. It is pure data comparison -- it never re-verifies either capsule
+and never reads a file; a CLI `audit diff` would still need to
+independently `parse_capsule` (and likely `verify_capsule`) each manifest
+first.
 
 ### Portability
 

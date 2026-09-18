@@ -822,3 +822,511 @@ fn an_object_claiming_to_be_an_audit_capsule_itself_is_rejected() {
     let error = parse_capsule(self_embedding.as_bytes()).unwrap_err();
     assert_eq!(error.code, "SPX-Z902");
 }
+
+// ---------------------------------------------------------------------
+// `render_capsule`: the "emit" half of issue #209 -- building canonical
+// manifest bytes from typed pieces, round-tripping through `parse_capsule`
+// and `verify_capsule` exactly like a hand-written fixture.
+// ---------------------------------------------------------------------
+
+fn revision_binds(revision: &str) -> BTreeMap<String, String> {
+    let mut binds = BTreeMap::new();
+    binds.insert("revision".to_owned(), revision.to_owned());
+    binds
+}
+
+fn source_binds() -> BTreeMap<String, String> {
+    let mut binds = BTreeMap::new();
+    binds.insert(
+        "source_digest".to_owned(),
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+    );
+    binds
+}
+
+fn change_subject(revision: &str) -> BTreeMap<String, String> {
+    let mut subject = BTreeMap::new();
+    subject.insert(
+        "source_digest".to_owned(),
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+    );
+    subject.insert(
+        "root_digest".to_owned(),
+        "sha256:2222222222222222222222222222222222222222222222222222222222222222".to_owned(),
+    );
+    subject.insert("revision".to_owned(), revision.to_owned());
+    subject
+}
+
+#[test]
+fn render_capsule_builds_bytes_that_verify_identically_to_a_hand_written_manifest() {
+    let (_, object_bytes) = change_fixture("r1");
+    let subject = change_subject("r1");
+
+    // Deliberately handed in *descending* order: `render_capsule` must sort
+    // into the canonical ascending order itself rather than merely
+    // requiring the caller to have done so already.
+    let objects = vec![
+        ObjectRef {
+            id: "obj-d-source-projection".to_owned(),
+            object_type: "source-projection".to_owned(),
+            schema: "semaprax.program-root.v3".to_owned(),
+            digest: sha256_digest(OBJECT_D_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: source_binds(),
+        },
+        ObjectRef {
+            id: "obj-c-assurance-manifest".to_owned(),
+            object_type: "assurance-manifest".to_owned(),
+            schema: "semaprax.assurance-manifest.v1".to_owned(),
+            digest: sha256_digest(OBJECT_C_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: BTreeMap::new(),
+        },
+        ObjectRef {
+            id: "obj-b-semantic-transaction".to_owned(),
+            object_type: "semantic-transaction".to_owned(),
+            schema: "semaprax.project-candidate-semantic-delta.v1".to_owned(),
+            digest: sha256_digest(OBJECT_B_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: revision_binds("r1"),
+        },
+        ObjectRef {
+            id: "obj-a-program-root".to_owned(),
+            object_type: "program-root".to_owned(),
+            schema: "semaprax.program-root.v3".to_owned(),
+            digest: sha256_digest(OBJECT_A_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: revision_binds("r1"),
+        },
+    ];
+    let associations = vec![
+        AssociationEdge {
+            from_id: "obj-b-semantic-transaction".to_owned(),
+            relation: "derived_from".to_owned(),
+            to_id: "obj-a-program-root".to_owned(),
+        },
+        AssociationEdge {
+            from_id: "obj-c-assurance-manifest".to_owned(),
+            relation: "attests".to_owned(),
+            to_id: "obj-b-semantic-transaction".to_owned(),
+        },
+    ];
+
+    let rendered = render_capsule(
+        Profile::Change,
+        &subject,
+        &objects,
+        &associations,
+        &[],
+        None,
+    )
+    .expect("well-formed pieces render into a well-formed manifest");
+    let report = verify_capsule(
+        &rendered,
+        &object_bytes,
+        &empty_signature_ctx(),
+        &empty_transparency_ctx(),
+    )
+    .expect("rendered capsule verifies exactly like the hand-written fixture");
+    assert_eq!(report.verified_object_ids.len(), 4);
+
+    let capsule = parse_capsule(&rendered).expect("rendered bytes parse");
+    let ids: Vec<&str> = capsule.objects.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "obj-a-program-root",
+            "obj-b-semantic-transaction",
+            "obj-c-assurance-manifest",
+            "obj-d-source-projection"
+        ],
+        "render_capsule must emit objects in ascending canonical order regardless of input order"
+    );
+}
+
+#[test]
+fn render_capsule_rejects_a_subject_missing_a_required_key_for_its_profile() {
+    let mut subject = BTreeMap::new();
+    subject.insert(
+        "source_digest".to_owned(),
+        "sha256:1111111111111111111111111111111111111111111111111111111111111111".to_owned(),
+    );
+    // "root_digest" and "revision" are missing.
+    let error = render_capsule(Profile::Change, &subject, &[], &[], &[], None).unwrap_err();
+    assert_eq!(error.code, "SPX-Z901");
+    assert!(
+        error.message.contains("subject keys must be exactly"),
+        "{}",
+        error.message
+    );
+}
+
+// ---------------------------------------------------------------------
+// Selective disclosure: a redacted release and a later disclosed release
+// of the same object commit to the exact same digest, so a verifier can
+// check a disclosure against a fact the redacted capsule already recorded
+// rather than trusting a brand-new, unrelated claim.
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_disclosed_object_verifies_against_the_exact_commitment_a_prior_redacted_capsule_recorded() {
+    let subject = change_subject("r1");
+    let secret_bytes = b"program root containing a private path the author chose to withhold";
+    let secret_digest = sha256_digest(secret_bytes);
+
+    let other_objects = vec![
+        ObjectRef {
+            id: "obj-b-semantic-transaction".to_owned(),
+            object_type: "semantic-transaction".to_owned(),
+            schema: "semaprax.project-candidate-semantic-delta.v1".to_owned(),
+            digest: sha256_digest(OBJECT_B_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: revision_binds("r1"),
+        },
+        ObjectRef {
+            id: "obj-c-assurance-manifest".to_owned(),
+            object_type: "assurance-manifest".to_owned(),
+            schema: "semaprax.assurance-manifest.v1".to_owned(),
+            digest: sha256_digest(OBJECT_C_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: BTreeMap::new(),
+        },
+        ObjectRef {
+            id: "obj-d-source-projection".to_owned(),
+            object_type: "source-projection".to_owned(),
+            schema: "semaprax.program-root.v3".to_owned(),
+            digest: sha256_digest(OBJECT_D_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: BTreeMap::new(),
+        },
+    ];
+
+    let redacted_object = ObjectRef {
+        id: "obj-a-program-root".to_owned(),
+        object_type: "program-root".to_owned(),
+        schema: "semaprax.program-root.v3".to_owned(),
+        digest: secret_digest.clone(),
+        redacted: true,
+        redaction_reason: Some("contains a private filesystem path".to_owned()),
+        binds: revision_binds("r1"),
+    };
+    let mut redacted_objects = vec![redacted_object];
+    redacted_objects.extend(other_objects.iter().cloned());
+    let redacted_manifest =
+        render_capsule(Profile::Change, &subject, &redacted_objects, &[], &[], None)
+            .expect("redacted capsule renders");
+
+    let mut object_bytes_without_secret = BTreeMap::new();
+    object_bytes_without_secret.insert(
+        "obj-b-semantic-transaction".to_owned(),
+        OBJECT_B_BYTES.to_vec(),
+    );
+    object_bytes_without_secret.insert(
+        "obj-c-assurance-manifest".to_owned(),
+        OBJECT_C_BYTES.to_vec(),
+    );
+    object_bytes_without_secret.insert(
+        "obj-d-source-projection".to_owned(),
+        OBJECT_D_BYTES.to_vec(),
+    );
+    let redacted_report = verify_capsule(
+        &redacted_manifest,
+        &object_bytes_without_secret,
+        &empty_signature_ctx(),
+        &empty_transparency_ctx(),
+    )
+    .expect("a capsule with one redacted object still verifies");
+    assert_eq!(redacted_report.unavailable_claims.len(), 1);
+    assert_eq!(
+        redacted_report.unavailable_claims[0].0,
+        "obj-a-program-root"
+    );
+
+    let disclosed_object = ObjectRef {
+        id: "obj-a-program-root".to_owned(),
+        object_type: "program-root".to_owned(),
+        schema: "semaprax.program-root.v3".to_owned(),
+        digest: secret_digest,
+        redacted: false,
+        redaction_reason: None,
+        binds: revision_binds("r1"),
+    };
+    let mut disclosed_objects = vec![disclosed_object];
+    disclosed_objects.extend(other_objects);
+    let disclosed_manifest = render_capsule(
+        Profile::Change,
+        &subject,
+        &disclosed_objects,
+        &[],
+        &[],
+        None,
+    )
+    .expect("disclosed capsule renders");
+    let mut object_bytes_with_secret = object_bytes_without_secret;
+    object_bytes_with_secret.insert("obj-a-program-root".to_owned(), secret_bytes.to_vec());
+    let disclosed_report = verify_capsule(
+        &disclosed_manifest,
+        &object_bytes_with_secret,
+        &empty_signature_ctx(),
+        &empty_transparency_ctx(),
+    )
+    .expect("the disclosed object's bytes must match the digest the redacted capsule already committed to");
+    assert!(disclosed_report.unavailable_claims.is_empty());
+    assert_eq!(disclosed_report.verified_object_ids.len(), 4);
+
+    // The commitment itself never moved between the two releases.
+    let redacted_capsule = parse_capsule(&redacted_manifest).unwrap();
+    let disclosed_capsule = parse_capsule(&disclosed_manifest).unwrap();
+    let redacted_digest = &redacted_capsule
+        .objects
+        .iter()
+        .find(|o| o.id == "obj-a-program-root")
+        .unwrap()
+        .digest;
+    let disclosed_digest = &disclosed_capsule
+        .objects
+        .iter()
+        .find(|o| o.id == "obj-a-program-root")
+        .unwrap()
+        .digest;
+    assert_eq!(redacted_digest, disclosed_digest);
+}
+
+// ---------------------------------------------------------------------
+// Decision records stay a distinct object type from technical evidence,
+// and a role-tagged signature is a third, separate mechanism again --
+// issue #209's "do not collapse technical evidence and human decisions
+// into one status."
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_decision_record_object_stays_distinct_from_technical_evidence_and_from_signatures() {
+    let (manifest, mut object_bytes) = change_fixture("r1");
+    let decision_bytes = b"decision record: approver decided to proceed for revision r1";
+    let decision_digest = sha256_digest(decision_bytes);
+    let decision_entry = format!(
+        ",\n    {{\"id\": \"obj-z-decision-record\", \"object_type\": \"decision-record\", \
+         \"schema\": \"semaprax.decision-record.v1\", \"digest\": \"{decision_digest}\", \
+         \"redacted\": false, \"redaction_reason\": null, \"binds\": {{}}}}"
+    );
+    let marker = "\n  ],\n  \"associations\"";
+    assert!(manifest.contains(marker));
+    let with_decision = manifest
+        .replacen(marker, &format!("{decision_entry}{marker}"), 1)
+        .replacen(
+            "\"signatures\": []",
+            r#""signatures": [{"role": "approver", "identity": "agent://carol", "algorithm": "ed25519-raw-v1", "signature": "fixture-sig", "not_valid_after_unix_seconds": 9999999999}]"#,
+            1,
+        );
+    object_bytes.insert("obj-z-decision-record".to_owned(), decision_bytes.to_vec());
+
+    let capsule = parse_capsule(with_decision.as_bytes()).expect("manifest is well-formed");
+    let decision_objects: Vec<&ObjectRef> = capsule
+        .objects
+        .iter()
+        .filter(|candidate| candidate.object_type == "decision-record")
+        .collect();
+    assert_eq!(decision_objects.len(), 1);
+    // The decision-record object (a human decision, recorded as evidence)
+    // and the approver signature (who attests to it) are two distinct
+    // facts -- neither is implied by, nor collapsed into, the other.
+    assert_eq!(capsule.signatures.len(), 1);
+    assert_eq!(capsule.signatures[0].role, "approver");
+
+    let ctx = SignaturePolicyContext {
+        verification_time_unix_seconds: 1_000,
+        revoked_identities: Default::default(),
+        required_roles: vec!["approver".to_owned()],
+    };
+    let report = verify_capsule(
+        with_decision.as_bytes(),
+        &object_bytes,
+        &ctx,
+        &empty_transparency_ctx(),
+    )
+    .expect("technical evidence and a human decision coexist and both verify");
+    assert_eq!(report.verified_object_ids.len(), 5);
+}
+
+// ---------------------------------------------------------------------
+// Verification code never accidentally executes an included artifact
+// (issue #209's failure list) -- a hostile-looking payload is still just
+// opaque, hashed bytes.
+// ---------------------------------------------------------------------
+
+#[test]
+fn an_artifact_object_containing_executable_looking_bytes_verifies_as_opaque_data() {
+    // Shebang plus an ELF magic number: bytes that look maximally
+    // dangerous to run, deliberately chosen so this test would be the one
+    // to fail if `check_object_bytes` ever grew a code path that
+    // interpreted, spawned, or loaded an object's bytes instead of only
+    // hashing and comparing them.
+    let hostile_artifact: &[u8] = b"#!/bin/sh\nrm -rf / --no-preserve-root\n\x7fELF\x02\x01\x01";
+    let (manifest, mut object_bytes) = change_fixture("r1");
+    let artifact_digest = sha256_digest(hostile_artifact);
+    let artifact_entry = format!(
+        ",\n    {{\"id\": \"obj-z-artifact\", \"object_type\": \"artifact\", \"schema\": \
+         \"semaprax.release-manifest.v1\", \"digest\": \"{artifact_digest}\", \"redacted\": \
+         false, \"redaction_reason\": null, \"binds\": {{}}}}"
+    );
+    let marker = "\n  ],\n  \"associations\"";
+    let with_artifact = manifest.replacen(marker, &format!("{artifact_entry}{marker}"), 1);
+    object_bytes.insert("obj-z-artifact".to_owned(), hostile_artifact.to_vec());
+
+    let report = verify_capsule(
+        with_artifact.as_bytes(),
+        &object_bytes,
+        &empty_signature_ctx(),
+        &empty_transparency_ctx(),
+    )
+    .expect("hostile-looking bytes are still just an opaque, verifiable blob");
+    assert_eq!(report.verified_object_ids.len(), 5);
+    assert!(report
+        .verified_object_ids
+        .contains(&"obj-z-artifact".to_owned()));
+}
+
+// ---------------------------------------------------------------------
+// Evidence, not authority: verifying the same capsule repeatedly never
+// changes, because verification is a pure read-only check that grants
+// nothing that could be spent, expired by use, or double-checked against a
+// prior "already used" record. If verification conferred one-time
+// authority, a second identical call would have to behave differently.
+// ---------------------------------------------------------------------
+
+#[test]
+fn verifying_the_same_capsule_repeatedly_produces_byte_identical_reports_every_time() {
+    let (manifest, object_bytes) = change_fixture("r1");
+    let first = verify_capsule(
+        manifest.as_bytes(),
+        &object_bytes,
+        &empty_signature_ctx(),
+        &empty_transparency_ctx(),
+    )
+    .expect("verifies");
+    for _ in 0..5 {
+        let repeat = verify_capsule(
+            manifest.as_bytes(),
+            &object_bytes,
+            &empty_signature_ctx(),
+            &empty_transparency_ctx(),
+        )
+        .expect("verifies identically every time -- nothing here is consumed by a prior call");
+        assert_eq!(repeat.profile, first.profile);
+        assert_eq!(repeat.verified_object_ids, first.verified_object_ids);
+        assert_eq!(repeat.unavailable_claims, first.unavailable_claims);
+    }
+}
+
+// ---------------------------------------------------------------------
+// `diff_capsules`: the library half of issue #209's `semaprax audit diff`.
+// ---------------------------------------------------------------------
+
+#[test]
+fn diffing_two_capsules_built_from_identical_bytes_is_empty() {
+    let (manifest, _) = change_fixture("r1");
+    let capsule_one = parse_capsule(manifest.as_bytes()).unwrap();
+    let capsule_two = parse_capsule(manifest.as_bytes()).unwrap();
+    let diff = diff_capsules(&capsule_one, &capsule_two);
+    assert!(diff.is_empty());
+}
+
+#[test]
+fn diffing_two_revisions_reports_the_subject_change() {
+    let (manifest_r1, _) = change_fixture("r1");
+    let (manifest_r2, _) = change_fixture("r2");
+    let capsule_r1 = parse_capsule(manifest_r1.as_bytes()).unwrap();
+    let capsule_r2 = parse_capsule(manifest_r2.as_bytes()).unwrap();
+    let diff = diff_capsules(&capsule_r1, &capsule_r2);
+    assert_eq!(
+        diff.subject_changed.get("revision"),
+        Some(&(Some("r1".to_owned()), Some("r2".to_owned())))
+    );
+    assert!(diff.added_object_ids.is_empty());
+    assert!(diff.removed_object_ids.is_empty());
+}
+
+#[test]
+fn diffing_capsules_with_an_added_object_and_a_changed_digest_reports_both_distinctly() {
+    let (manifest, _) = change_fixture("r1");
+    let capsule_before = parse_capsule(manifest.as_bytes()).unwrap();
+
+    let new_digest = sha256_digest(b"a newer program-root for the same revision");
+    let changed = manifest.replacen(&sha256_digest(OBJECT_A_BYTES), &new_digest, 1);
+    let extra_entry = format!(
+        ",\n    {{\"id\": \"obj-z-decision-record\", \"object_type\": \"decision-record\", \
+         \"schema\": \"semaprax.decision-record.v1\", \"digest\": \"{}\", \"redacted\": false, \
+         \"redaction_reason\": null, \"binds\": {{}}}}",
+        sha256_digest(b"a brand new decision record")
+    );
+    let marker = "\n  ],\n  \"associations\"";
+    let after_manifest = changed.replacen(marker, &format!("{extra_entry}{marker}"), 1);
+    let capsule_after = parse_capsule(after_manifest.as_bytes()).unwrap();
+
+    let diff = diff_capsules(&capsule_before, &capsule_after);
+    assert_eq!(
+        diff.added_object_ids,
+        vec!["obj-z-decision-record".to_owned()]
+    );
+    assert!(diff.removed_object_ids.is_empty());
+    assert_eq!(diff.changed_objects.len(), 1);
+    match diff.changed_objects.get("obj-a-program-root") {
+        Some(ObjectChange::Changed {
+            before_digest,
+            after_digest,
+        }) => {
+            assert_eq!(before_digest, &sha256_digest(OBJECT_A_BYTES));
+            assert_eq!(after_digest, &new_digest);
+        }
+        other => panic!("expected a Changed entry for obj-a-program-root, got {other:?}"),
+    }
+}
+
+#[test]
+fn diffing_capsules_reports_an_added_association_edge() {
+    let (manifest, _) = change_fixture("r1");
+    let capsule_before = parse_capsule(manifest.as_bytes()).unwrap();
+    let with_extra_edge = manifest.replacen(
+        r#""associations": [
+    {"from_id": "obj-b-semantic-transaction", "relation": "derived_from", "to_id": "obj-a-program-root"},
+    {"from_id": "obj-c-assurance-manifest", "relation": "attests", "to_id": "obj-b-semantic-transaction"}
+  ]"#,
+        r#""associations": [
+    {"from_id": "obj-b-semantic-transaction", "relation": "derived_from", "to_id": "obj-a-program-root"},
+    {"from_id": "obj-c-assurance-manifest", "relation": "attests", "to_id": "obj-b-semantic-transaction"},
+    {"from_id": "obj-d-source-projection", "relation": "attests", "to_id": "obj-a-program-root"}
+  ]"#,
+        1,
+    );
+    let capsule_after = parse_capsule(with_extra_edge.as_bytes()).unwrap();
+    let diff = diff_capsules(&capsule_before, &capsule_after);
+    assert_eq!(diff.added_associations.len(), 1);
+    assert_eq!(
+        diff.added_associations[0].from_id,
+        "obj-d-source-projection"
+    );
+    assert!(diff.removed_associations.is_empty());
+}
+
+#[test]
+fn diffing_capsules_reports_added_and_removed_signature_roles() {
+    let manifest_before = signed_manifest(
+        r#"[{"role": "proposer", "identity": "agent://alice", "algorithm": "ed25519-raw-v1", "signature": "fixture-sig-1", "not_valid_after_unix_seconds": 5000}]"#,
+    );
+    let manifest_after = signed_manifest(
+        r#"[{"role": "approver", "identity": "agent://bob", "algorithm": "ed25519-raw-v1", "signature": "fixture-sig-2", "not_valid_after_unix_seconds": 5000}]"#,
+    );
+    let capsule_before = parse_capsule(manifest_before.as_bytes()).unwrap();
+    let capsule_after = parse_capsule(manifest_after.as_bytes()).unwrap();
+    let diff = diff_capsules(&capsule_before, &capsule_after);
+    assert_eq!(diff.removed_signature_roles, vec!["proposer".to_owned()]);
+    assert_eq!(diff.added_signature_roles, vec!["approver".to_owned()]);
+}

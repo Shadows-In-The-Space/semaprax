@@ -1109,5 +1109,285 @@ pub fn capsule_digest(manifest_bytes: &[u8]) -> String {
     sha256_digest(manifest_bytes)
 }
 
+/// Builds canonical `semaprax.audit-capsule.v1` manifest bytes from typed
+/// pieces -- the "emit" half of issue #209's title that no other function in
+/// this module provides: every other public entry point here only
+/// *decodes* a manifest ([`parse_capsule`]) or *checks* one, so a real
+/// producer had no in-crate way to assemble one short of hand-writing JSON.
+///
+/// Sorts `objects` into ascending canonical order by [`ObjectRef::id`]
+/// (parse_capsule's own canonical-ordering requirement) rather than
+/// rejecting an unsorted caller-supplied slice, since producing canonical
+/// bytes -- not merely accepting them -- is a builder's job. Every
+/// requirement [`parse_capsule`] enforces (closed vocabularies, exact
+/// subject keys, digest wire form, at most one signature per role, object
+/// count bounds, ...) is still re-checked, because this function round-trips
+/// the freshly rendered bytes through [`parse_capsule`] before returning
+/// them: `render_capsule` can never hand a caller manifest bytes that this
+/// module's own decoder would reject.
+pub fn render_capsule(
+    profile: Profile,
+    subject: &BTreeMap<String, String>,
+    objects: &[ObjectRef],
+    associations: &[AssociationEdge],
+    signatures: &[SignatureEntry],
+    transparency: Option<&TransparencyEntry>,
+) -> Result<Vec<u8>, Diagnostic> {
+    let subject_keys: BTreeSet<&str> = subject.keys().map(String::as_str).collect();
+    let expected_keys: BTreeSet<&str> = profile.subject_keys().iter().copied().collect();
+    if subject_keys != expected_keys {
+        return Err(shape_error(format!(
+            "subject keys must be exactly {:?} for profile `{}`, found {:?}",
+            profile.subject_keys(),
+            profile.as_str(),
+            subject_keys
+        )));
+    }
+
+    let mut sorted_objects = objects.to_vec();
+    sorted_objects.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let subject_json: Value = Value::Object(
+        subject
+            .iter()
+            .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+            .collect(),
+    );
+
+    let objects_json: Vec<Value> = sorted_objects
+        .iter()
+        .map(|candidate| {
+            let binds_json: Value = Value::Object(
+                candidate
+                    .binds
+                    .iter()
+                    .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+                    .collect(),
+            );
+            serde_json::json!({
+                "id": candidate.id,
+                "object_type": candidate.object_type,
+                "schema": candidate.schema,
+                "digest": candidate.digest,
+                "redacted": candidate.redacted,
+                "redaction_reason": candidate.redaction_reason,
+                "binds": binds_json,
+            })
+        })
+        .collect();
+
+    let associations_json: Vec<Value> = associations
+        .iter()
+        .map(|edge| {
+            serde_json::json!({
+                "from_id": edge.from_id,
+                "relation": edge.relation,
+                "to_id": edge.to_id,
+            })
+        })
+        .collect();
+
+    let signatures_json: Vec<Value> = signatures
+        .iter()
+        .map(|signature| {
+            serde_json::json!({
+                "role": signature.role,
+                "identity": signature.identity,
+                "algorithm": signature.algorithm,
+                "signature": signature.signature,
+                "not_valid_after_unix_seconds": signature.not_valid_after_unix_seconds,
+            })
+        })
+        .collect();
+
+    let transparency_json = match transparency {
+        None => Value::Null,
+        Some(entry) => serde_json::json!({
+            "log_id": entry.log_id,
+            "leaf_digest": entry.leaf_digest,
+            "inclusion_proof": entry.inclusion_proof,
+            "observed_checkpoint_size": entry.observed_checkpoint_size,
+        }),
+    };
+
+    let manifest = serde_json::json!({
+        "schema": CAPSULE_SCHEMA,
+        "profile": profile.as_str(),
+        "subject": subject_json,
+        "objects": objects_json,
+        "associations": associations_json,
+        "signatures": signatures_json,
+        "transparency": transparency_json,
+    });
+
+    let mut bytes = serde_json::to_vec(&manifest)
+        .map_err(|_| shape_error("rendered audit capsule cannot be serialized".to_owned()))?;
+    bytes.push(b'\n');
+
+    // Never hand back bytes this module's own decoder would reject: prove
+    // the round trip before returning, rather than trusting the assembly
+    // above to have matched every rule `parse_capsule` enforces.
+    parse_capsule(&bytes)?;
+    Ok(bytes)
+}
+
+/// One entry in a [`CapsuleDiff`]: what changed about one object id between
+/// two capsules that share it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObjectChange {
+    /// The digest, object type, schema, or redaction state differs.
+    Changed {
+        before_digest: String,
+        after_digest: String,
+    },
+    /// The object is redacted on one side and retained on the other, with
+    /// the same digest -- a disclosure or a new redaction, not a
+    /// substitution.
+    RedactionChanged { digest: String },
+}
+
+/// The structural difference between two parsed capsules: read-only,
+/// pure-data comparison of already-independently-verified
+/// [`ParsedCapsule`] values. Never re-verifies either capsule itself --
+/// callers pass the output of [`parse_capsule`] (or a `verify_capsule` that
+/// already succeeded), and never executes, publishes, or spawns anything,
+/// exactly like every other function in this module.
+///
+/// This is the library half of issue #209's `semaprax audit diff`: the
+/// diffing logic lives here so a thin CLI wrapper (out of this module's file
+/// lease; see `docs/AUDIT-CAPSULE-V1.md`) has something to call.
+#[derive(Debug, Clone, Default)]
+pub struct CapsuleDiff {
+    pub profile_changed: Option<(Profile, Profile)>,
+    pub subject_changed: BTreeMap<String, (Option<String>, Option<String>)>,
+    pub added_object_ids: Vec<String>,
+    pub removed_object_ids: Vec<String>,
+    pub changed_objects: BTreeMap<String, ObjectChange>,
+    pub added_associations: Vec<AssociationEdge>,
+    pub removed_associations: Vec<AssociationEdge>,
+    pub added_signature_roles: Vec<String>,
+    pub removed_signature_roles: Vec<String>,
+}
+
+impl CapsuleDiff {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.profile_changed.is_none()
+            && self.subject_changed.is_empty()
+            && self.added_object_ids.is_empty()
+            && self.removed_object_ids.is_empty()
+            && self.changed_objects.is_empty()
+            && self.added_associations.is_empty()
+            && self.removed_associations.is_empty()
+            && self.added_signature_roles.is_empty()
+            && self.removed_signature_roles.is_empty()
+    }
+}
+
+fn association_key(edge: &AssociationEdge) -> (String, String, String) {
+    (
+        edge.from_id.clone(),
+        edge.relation.clone(),
+        edge.to_id.clone(),
+    )
+}
+
+/// Computes the structural difference between two already-parsed capsules.
+/// Pure, read-only, in-memory data comparison -- see [`CapsuleDiff`].
+#[must_use]
+pub fn diff_capsules(before: &ParsedCapsule, after: &ParsedCapsule) -> CapsuleDiff {
+    let mut diff = CapsuleDiff::default();
+
+    if before.profile != after.profile {
+        diff.profile_changed = Some((before.profile, after.profile));
+    }
+
+    let subject_keys: BTreeSet<&String> =
+        before.subject.keys().chain(after.subject.keys()).collect();
+    for key in subject_keys {
+        let before_value = before.subject.get(key);
+        let after_value = after.subject.get(key);
+        if before_value != after_value {
+            diff.subject_changed
+                .insert(key.clone(), (before_value.cloned(), after_value.cloned()));
+        }
+    }
+
+    let before_objects: BTreeMap<&str, &ObjectRef> =
+        before.objects.iter().map(|o| (o.id.as_str(), o)).collect();
+    let after_objects: BTreeMap<&str, &ObjectRef> =
+        after.objects.iter().map(|o| (o.id.as_str(), o)).collect();
+
+    for (&id, before_object) in &before_objects {
+        match after_objects.get(&id) {
+            None => diff.removed_object_ids.push(id.to_owned()),
+            Some(after_object) => {
+                if before_object.digest != after_object.digest
+                    || before_object.object_type != after_object.object_type
+                    || before_object.schema != after_object.schema
+                {
+                    diff.changed_objects.insert(
+                        id.to_owned(),
+                        ObjectChange::Changed {
+                            before_digest: before_object.digest.clone(),
+                            after_digest: after_object.digest.clone(),
+                        },
+                    );
+                } else if before_object.redacted != after_object.redacted {
+                    diff.changed_objects.insert(
+                        id.to_owned(),
+                        ObjectChange::RedactionChanged {
+                            digest: after_object.digest.clone(),
+                        },
+                    );
+                }
+            }
+        }
+    }
+    for &id in after_objects.keys() {
+        if !before_objects.contains_key(id) {
+            diff.added_object_ids.push(id.to_owned());
+        }
+    }
+
+    let before_associations: BTreeSet<(String, String, String)> =
+        before.associations.iter().map(association_key).collect();
+    let after_associations: BTreeSet<(String, String, String)> =
+        after.associations.iter().map(association_key).collect();
+    for edge in &before.associations {
+        if !after_associations.contains(&association_key(edge)) {
+            diff.removed_associations.push(edge.clone());
+        }
+    }
+    for edge in &after.associations {
+        if !before_associations.contains(&association_key(edge)) {
+            diff.added_associations.push(edge.clone());
+        }
+    }
+
+    let before_roles: BTreeSet<&str> = before
+        .signatures
+        .iter()
+        .map(|signature| signature.role.as_str())
+        .collect();
+    let after_roles: BTreeSet<&str> = after
+        .signatures
+        .iter()
+        .map(|signature| signature.role.as_str())
+        .collect();
+    for &role in &before_roles {
+        if !after_roles.contains(role) {
+            diff.removed_signature_roles.push(role.to_owned());
+        }
+    }
+    for &role in &after_roles {
+        if !before_roles.contains(role) {
+            diff.added_signature_roles.push(role.to_owned());
+        }
+    }
+
+    diff
+}
+
 #[cfg(test)]
 mod tests;

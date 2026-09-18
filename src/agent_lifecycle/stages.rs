@@ -476,6 +476,36 @@ fn payload_shape(
     })
 }
 
+/// The admitted record shape of the State and Observation roles: a
+/// non-generic record with one or more fields, each an owned `Bytes` leaf or
+/// a plain `i64` scalar.
+///
+/// This reuses exactly the closed field vocabulary [`payload_shape`] already
+/// admits for Task and Outcome (`Bytes`/`i64`), generalized from that role's
+/// fixed two-field, one-of-each convention to an open field count: State and
+/// Observation carry no equivalent fixed downstream consumer forcing that
+/// exact arity, and every State and Observation actually bound in this tree
+/// today is a record of one `Bytes` field plus one or more `i64` fields, or
+/// of `i64` fields alone. A record outside this vocabulary -- a `Variant`,
+/// `Resource` or `Class` declaration, an empty field list, or any field type
+/// other than `Bytes`/`i64` -- fails closed here instead of surfacing later
+/// as an opaque interpreter admission error.
+fn carrier_shape(declaration: &ResolvedTypeDeclaration, field: &str) -> Result<(), Diagnostic> {
+    let ResolvedTypeDeclarationKind::Record { fields } = &declaration.kind else {
+        return Err(invariant(&format!("{field}.kind")));
+    };
+    if fields.is_empty() {
+        return Err(invariant(&format!("{field}.fields")));
+    }
+    if fields
+        .iter()
+        .any(|item| item.ty != ResolvedType::Bytes && item.ty != ResolvedType::I64)
+    {
+        return Err(invariant(&format!("{field}.field.type")));
+    }
+    Ok(())
+}
+
 /// The ordered scalar projection of the Proposal role record.
 fn proposal_projection(
     program: &hir::ResolvedProgram,
@@ -627,6 +657,12 @@ pub(super) fn bind_with_step_result(
         payload_shape(outcome_declaration, "outcome_type").map_err(|error| vec![error])?;
     let proposal =
         proposal_projection(program, types[3].1.as_str()).map_err(|error| vec![error])?;
+    let state_declaration =
+        declaration(program, types[1].1.as_str(), "state_type").map_err(|error| vec![error])?;
+    carrier_shape(state_declaration, "state_type").map_err(|error| vec![error])?;
+    let observation_declaration = declaration(program, types[2].1.as_str(), "observation_type")
+        .map_err(|error| vec![error])?;
+    carrier_shape(observation_declaration, "observation_type").map_err(|error| vec![error])?;
 
     let operation = |role: &str| -> Result<&str, Vec<Diagnostic>> {
         operation_ids

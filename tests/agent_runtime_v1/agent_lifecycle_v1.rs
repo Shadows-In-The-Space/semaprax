@@ -544,7 +544,7 @@ fn cancellation_before_initialize_and_budget_exhaustion_are_fail_closed() {
 #[test]
 fn unresolved_incompatible_and_effectful_stages_are_rejected_before_any_run() {
     let source = definition(&profile());
-    let cases: [(String, &str); 7] = [
+    let cases: [(String, &str); 9] = [
         // An unresolved stage identity.
         (
             MODULE.replace(
@@ -614,6 +614,51 @@ fn unresolved_incompatible_and_effectful_stages_are_rejected_before_any_run() {
             ),
             "authorize.decision.cases",
         ),
+        // A State field outside the {Bytes, i64} carrier vocabulary.
+        (
+            MODULE
+                .replace(
+                    "    @id(\"fixture.agent.type.state.epoch\")\n    epoch: i64,\n}",
+                    concat!(
+                        "    @id(\"fixture.agent.type.state.epoch\")\n    epoch: i64,\n",
+                        "    @id(\"fixture.agent.type.state.note\")\n    note: bool,\n}"
+                    ),
+                )
+                .replace(
+                    "State { objective: task.objective, budget: task.budget, epoch: 1 }",
+                    "State { objective: task.objective, budget: task.budget, epoch: 1, note: true }",
+                ),
+            "state_type.field.type",
+        ),
+        // An Observation field outside the {Bytes, i64} carrier vocabulary.
+        (
+            MODULE
+                .replace(
+                    "    @id(\"fixture.agent.type.observation.epoch\")\n    epoch: i64,\n}",
+                    concat!(
+                        "    @id(\"fixture.agent.type.observation.epoch\")\n    epoch: i64,\n",
+                        "    @id(\"fixture.agent.type.observation.flag\")\n    flag: bool,\n}"
+                    ),
+                )
+                .replace(
+                    concat!(
+                        "    Observation {\n",
+                        "        tag: bytes_copy(array_as_slice(tag)),\n",
+                        "        budget: state.budget,\n",
+                        "        epoch: state.epoch,\n",
+                        "    }"
+                    ),
+                    concat!(
+                        "    Observation {\n",
+                        "        tag: bytes_copy(array_as_slice(tag)),\n",
+                        "        budget: state.budget,\n",
+                        "        epoch: state.epoch,\n",
+                        "        flag: true,\n",
+                        "    }"
+                    ),
+                ),
+            "observation_type.field.type",
+        ),
     ];
     for (module, field) in cases {
         assert_ne!(module, MODULE, "the `{field}` fixture edit did not apply");
@@ -628,6 +673,29 @@ fn unresolved_incompatible_and_effectful_stages_are_rejected_before_any_run() {
             "{field}: {errors:?}"
         );
     }
+}
+
+#[test]
+fn a_state_record_with_an_additional_admitted_field_still_binds() {
+    // The carrier vocabulary admits any number of `Bytes`/`i64` fields, not
+    // only the fixture's exact three -- an extra `i64` field is still an
+    // admitted State shape.
+    let source = definition(&profile());
+    let module = MODULE
+        .replace(
+            "    @id(\"fixture.agent.type.state.epoch\")\n    epoch: i64,\n}",
+            concat!(
+                "    @id(\"fixture.agent.type.state.epoch\")\n    epoch: i64,\n",
+                "    @id(\"fixture.agent.type.state.extra\")\n    extra: i64,\n}"
+            ),
+        )
+        .replace(
+            "State { objective: task.objective, budget: task.budget, epoch: 1 }",
+            "State { objective: task.objective, budget: task.budget, epoch: 1, extra: 0 }",
+        );
+    assert_ne!(module, MODULE, "the extra-field fixture edit did not apply");
+    compile_agent_lifecycle(&module, MODULE_PATH, &source)
+        .expect("a State record with an extra Bytes/i64-only field still binds");
 }
 
 #[test]

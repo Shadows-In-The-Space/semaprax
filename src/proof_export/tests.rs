@@ -1,0 +1,711 @@
+//! Tests for the Lean obligation export, its coverage accounting, the
+//! pinned-kernel result parser, and certificate replay.
+//!
+//! **No Lean toolchain is executed by any test here, and none was executed
+//! when they were written.** The kernel is a capability
+//! ([`super::LeanKernel`]); every test supplies a fixture implementation
+//! that replays recorded output in Lean's real `#print axioms` format. So
+//! these tests establish, honestly: the export is deterministic, the
+//! coverage accounting is total, the result parser refuses every shape of
+//! non-proof, and a certificate fails closed on drift. They establish
+//! nothing at all about whether Lean accepts the generated proofs — that
+//! claim requires a real `lake build`, which has not been run here.
+
+use std::path::{Path, PathBuf};
+
+use super::certificate::{render_coverage, ARTIFACT_TARGET};
+use super::kernel_report::{parse, KernelVerdict, Rejection, PINNED_TOOLCHAIN};
+use super::lean::{escape_ident, export_function, export_module, NAMESPACE};
+use super::verify::{
+    verify_certificate, verify_certificate_against_artifact, verify_certificate_against_source,
+    verify_certificate_with_capability,
+};
+use super::{export_obligation_certificate, export_source, KernelRun, LeanKernel};
+
+use crate::assurance_manifest::proof_certificate::ExternalKernelCapability;
+use crate::diagnostic::Diagnostic;
+
+// ---------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------
+
+/// Every fixture module needs an executable entry point: `hir::resolve`
+/// (and so the Wasm artifact binding) rejects a module with no
+/// `fn main() -> i64`.
+fn with_main(source: &str) -> String {
+    format!("{source}\n@id(\"app.t.proof_export_test_main\")\nfn main() -> i64 {{ 0 }}\n")
+}
+
+fn write_temp(source: &str, label: &str) -> PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "semaprax-proof-export-{label}-{}-{}.spx",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, with_main(source)).unwrap();
+    path
+}
+
+fn program(source: &str) -> crate::ast::Program {
+    crate::parse(source, "proof-export-test.spx").expect("parse")
+}
+
+/// The one module every determinism, golden and certificate test uses. Its
+/// `requires` bounds are deliberately tight enough that the generated range
+/// obligation is *plausibly* provable by `omega` — but nothing here has ever
+/// asked a Lean kernel whether it actually is, and no test asserts that.
+const FIXTURE: &str = "module app.t;\n\
+@id(\"app.t.shifted\")\n\
+fn shifted(a: i64, b: i64) -> i64\n\
+    requires a >= 0\n\
+    requires a <= 1000\n\
+    requires b >= 0\n\
+    requires b <= 1000\n\
+    ensures result >= a\n\
+{ let total = a + b; total }\n";
+
+fn fixture_module() -> super::ModuleExport {
+    let parsed = program(&with_main(FIXTURE));
+    let revision = crate::graph::revision(&parsed);
+    export_module(&parsed, &revision)
+}
+
+/// A kernel that reports the pinned toolchain and accepts every expected
+/// theorem with Lean's three standard axioms, in Lean's real output shape.
+struct AcceptingKernel;
+
+fn accepting_output(lean_source: &str) -> String {
+    let mut out = String::from("info: [1/1] Building Export\n");
+    for line in lean_source.lines() {
+        if let Some(name) = line.strip_prefix("#print axioms ") {
+            out.push_str(&format!(
+                "info: Export.lean:1:0: '{name}' depends on axioms: [propext, Classical.choice, Quot.sound]\n"
+            ));
+        }
+    }
+    out
+}
+
+impl LeanKernel for AcceptingKernel {
+    fn check(&self, lean_source: &str) -> Result<KernelRun, Diagnostic> {
+        Ok(KernelRun {
+            toolchain: PINNED_TOOLCHAIN.to_owned(),
+            output: accepting_output(lean_source),
+        })
+    }
+}
+
+struct FixedKernel {
+    toolchain: String,
+    output: String,
+}
+
+impl LeanKernel for FixedKernel {
+    fn check(&self, _lean_source: &str) -> Result<KernelRun, Diagnostic> {
+        Ok(KernelRun {
+            toolchain: self.toolchain.clone(),
+            output: self.output.clone(),
+        })
+    }
+}
+
+fn certificate_for(path: &Path) -> String {
+    export_obligation_certificate(path, "app.t.shifted", 0, &AcceptingKernel)
+        .expect("fixture certificate")
+}
+
+// ---------------------------------------------------------------------
+// Determinism and the pinned golden
+// ---------------------------------------------------------------------
+
+#[test]
+fn the_same_module_renders_byte_identical_lean_source_every_time() {
+    let first = fixture_module().lean_source;
+    let second = fixture_module().lean_source;
+    assert_eq!(first, second);
+}
+
+fn golden_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/proof_export/testdata/shifted.lean.golden")
+}
+
+#[test]
+fn the_rendered_lean_source_matches_the_pinned_golden() {
+    let golden = std::fs::read_to_string(golden_path()).expect("pinned golden");
+    assert_eq!(
+        fixture_module().lean_source,
+        golden,
+        "the Lean export changed; review the diff and re-pin \
+         src/proof_export/testdata/shifted.lean.golden deliberately"
+    );
+}
+
+#[test]
+fn the_lean_source_is_independent_of_where_the_source_file_lives() {
+    // Byte-determinism must survive two checkouts at different paths, so the
+    // rendered document carries the module name and semantic revision but
+    // never the host path it was read from.
+    let source = with_main(FIXTURE);
+    let first = crate::parse(&source, "/one/checkout/app.spx").expect("parse");
+    let second = crate::parse(&source, "/a/completely/different/place/app.spx").expect("parse");
+    let revision = crate::graph::revision(&first);
+    assert_eq!(revision, crate::graph::revision(&second));
+    assert_eq!(
+        export_module(&first, &revision).lean_source,
+        export_module(&second, &revision).lean_source
+    );
+    assert!(!export_module(&first, &revision)
+        .lean_source
+        .contains("checkout"));
+}
+
+// ---------------------------------------------------------------------
+// Coverage: every declaration lands in exactly one list
+// ---------------------------------------------------------------------
+
+#[test]
+fn every_declaration_is_either_exported_or_reported_unsupported() {
+    let source = with_main(
+        "module app.t;\n\
+record Point { x: i64, y: i64, }\n\
+@id(\"app.t.ok\")\n\
+fn ok(a: i64) -> i64 requires a >= 0 ensures result >= 0 { a }\n\
+@id(\"app.t.branchy\")\n\
+fn branchy(a: i64) -> i64 ensures result >= 0 { if a >= 0 { a } else { 0 } }\n",
+    );
+    let parsed = program(&source);
+    let declarations = parsed.functions.len() + parsed.types.len();
+    let export = export_module(&parsed, "rev");
+    assert_eq!(
+        export.exported.len() + export.unsupported.len(),
+        declarations
+    );
+    assert!(export
+        .exported
+        .iter()
+        .any(|item| item.declaration_id == "app.t.ok"));
+    let reasons: Vec<&str> = export
+        .unsupported
+        .iter()
+        .map(|(_, _, reason)| reason.code())
+        .collect();
+    assert!(reasons.contains(&"non_function_declaration"));
+    assert!(reasons.contains(&"conditional_expression"));
+    // `main` has no contract clause at all, which is its own closed reason.
+    assert!(reasons.contains(&"no_contract_clauses"));
+}
+
+#[test]
+fn the_generated_lean_header_names_every_refused_declaration() {
+    let source = with_main(
+        "module app.t;\n\
+@id(\"app.t.branchy\")\n\
+fn branchy(a: i64) -> i64 ensures result >= 0 { if a >= 0 { a } else { 0 } }\n",
+    );
+    let export = export_module(&program(&source), "rev");
+    assert!(export.lean_source.contains("NOT exported, NOT claimed"));
+    assert!(export.lean_source.contains("app.t.branchy"));
+    assert!(export.lean_source.contains("conditional_expression"));
+}
+
+fn refusal_code(source: &str) -> String {
+    let parsed = program(&with_main(source));
+    let function = parsed
+        .functions
+        .iter()
+        .find(|item| item.name == "f")
+        .expect("fixture declares `f`");
+    export_function(function)
+        .err()
+        .expect("expected this declaration to be refused")
+        .code()
+        .to_owned()
+}
+
+#[test]
+fn each_out_of_profile_construct_has_its_own_closed_reason() {
+    let cases: [(&str, &str); 9] = [
+        (
+            "module app.t;\nfn f<T>(a: i64) -> i64 ensures result >= 0 { a }\n",
+            "generic_function",
+        ),
+        (
+            "module app.t;\nfn f(a: i64) -> i64 uses { io } ensures result >= 0 { a }\n",
+            "effectful_function",
+        ),
+        (
+            "module app.t;\nfn f(a: i64) -> i64 ensures result >= 0 { if a >= 0 { a } else { 0 } }\n",
+            "conditional_expression",
+        ),
+        (
+            "module app.t;\nfn f(a: i64, b: i64) -> i64 ensures result >= 0 { a / b }\n",
+            "expr",
+        ),
+        (
+            "module app.t;\nfn f(a: bool) -> i64 ensures result >= 0 { 0 }\n",
+            "bool_valued_position",
+        ),
+        (
+            "module app.t;\nfn f(a: i64) -> bool ensures result { true }\n",
+            "bool_valued_position",
+        ),
+        (
+            "module app.t;\nfn f(a: i64) -> i64 requires a >= 0 { a }\n",
+            "no_ensures_clause",
+        ),
+        (
+            "module app.t;\nfn f(a: i64) -> i64 { a }\n",
+            "no_contract_clauses",
+        ),
+        (
+            "module app.t;\nfn f(a: i64) -> i64 ensures result >= 0 { let mut t = a; t }\n",
+            "mutable_local_binding",
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(refusal_code(source), expected, "source: {source}");
+    }
+}
+
+// ---------------------------------------------------------------------
+// Name mangling
+// ---------------------------------------------------------------------
+
+#[test]
+fn identifier_escaping_is_injective_across_shapes_that_would_otherwise_collide() {
+    // `a.b` and `a_b` both become `a_b` under a naive "replace punctuation
+    // with underscore" scheme; under this one they cannot.
+    let candidates = ["a.b", "a_b", "a-b", "a b", "ab", "a__b", "a.b.c", "a:b"];
+    let mut escaped: Vec<String> = candidates.iter().map(|item| escape_ident(item)).collect();
+    escaped.sort();
+    let before = escaped.len();
+    escaped.dedup();
+    assert_eq!(escaped.len(), before, "escaping collided: {escaped:?}");
+    assert!(escape_ident("a.b")
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_'));
+}
+
+#[test]
+fn two_declarations_with_the_same_display_name_get_distinct_theorem_names() {
+    let export = export_module(
+        &program(&with_main(
+            "module app.t;\n\
+@id(\"app.t.one.f\")\n\
+fn f(a: i64) -> i64 ensures result >= a { a }\n",
+        )),
+        "rev",
+    );
+    let names: Vec<String> = export
+        .obligations()
+        .iter()
+        .map(|item| item.theorem_name.clone())
+        .collect();
+    assert!(names.iter().all(|name| name.contains("app")), "{names:?}");
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names.len());
+}
+
+// ---------------------------------------------------------------------
+// Obligation structure
+// ---------------------------------------------------------------------
+
+#[test]
+fn every_arithmetic_node_gets_its_own_checked_range_obligation() {
+    let export = fixture_module();
+    let obligations = export.obligations();
+    let ranges: Vec<_> = obligations
+        .iter()
+        .filter(|item| item.kind == "checked_arithmetic_range")
+        .collect();
+    assert_eq!(ranges.len(), 1, "`a + b` is the only arithmetic node");
+    assert!(ranges[0].goal.contains("9223372036854775807"));
+    assert_eq!(
+        obligations
+            .iter()
+            .filter(|item| item.kind == "postcondition")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_parameter_range_is_a_hypothesis_and_an_arithmetic_range_is_a_goal() {
+    let lean = fixture_module().lean_source;
+    // The parameter bound appears as a binder hypothesis...
+    assert!(lean.contains("(h_lo_0 : (-9223372036854775808 : Int) ≤ v_a)"));
+    // ...and the arithmetic node's bound appears as a goal, never as a
+    // hypothesis. Conflating the two is issue #184's worst bug.
+    assert!(lean.contains("_range_0"));
+    assert!(!lean.contains("(h_range"));
+}
+
+// ---------------------------------------------------------------------
+// Kernel result parsing: nothing but a clean acceptance is a proof
+// ---------------------------------------------------------------------
+
+fn expected_names() -> Vec<String> {
+    vec![format!("{NAMESPACE}.spx_demo")]
+}
+
+fn clean_output() -> String {
+    format!(
+        "info: '{NAMESPACE}.spx_demo' depends on axioms: [propext, Classical.choice, Quot.sound]\n"
+    )
+}
+
+#[test]
+fn a_clean_run_of_every_expected_theorem_is_accepted() {
+    match parse(&expected_names(), PINNED_TOOLCHAIN, &clean_output()) {
+        KernelVerdict::Checked { axioms } => {
+            assert_eq!(axioms.len(), 1);
+            assert_eq!(
+                axioms[0].1,
+                vec!["Classical.choice", "Quot.sound", "propext"]
+            );
+        }
+        other => panic!("expected Checked, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_theorem_with_no_axioms_at_all_is_accepted() {
+    let output = format!("info: '{NAMESPACE}.spx_demo' does not depend on any axioms\n");
+    assert!(matches!(
+        parse(&expected_names(), PINNED_TOOLCHAIN, &output),
+        KernelVerdict::Checked { .. }
+    ));
+}
+
+#[test]
+fn every_shape_of_non_proof_is_refused() {
+    let cases: [(&str, &str); 6] = [
+        (
+            &format!("warning: Export.lean:3:0: declaration uses 'sorry'\ninfo: '{NAMESPACE}.spx_demo' depends on axioms: [sorryAx]\n"),
+            "admitted_hole",
+        ),
+        (
+            &format!("info: '{NAMESPACE}.spx_demo' depends on axioms: [propext, myAxiom]\n"),
+            "forbidden_axiom",
+        ),
+        (
+            "error: Export.lean:9:2: omega could not prove the goal\n",
+            "build_error",
+        ),
+        (
+            "info: Export.lean:9:2: (deterministic) timeout at whnf\n",
+            "timeout",
+        ),
+        (
+            "info: 'SemapraxExport.something_else' depends on axioms: [propext]\n",
+            "missing_theorem",
+        ),
+        ("info: [1/1] Building Export\n", "unrecognized_output"),
+    ];
+    for (output, expected) in cases {
+        match parse(&expected_names(), PINNED_TOOLCHAIN, output) {
+            KernelVerdict::Rejected(rejection) => {
+                assert_eq!(rejection.code(), expected, "output: {output}");
+            }
+            other => panic!("expected a rejection for {output}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_duplicate_axiom_line_for_one_theorem_is_refused() {
+    let output = clean_output().repeat(2);
+    match parse(&expected_names(), PINNED_TOOLCHAIN, &output) {
+        KernelVerdict::Rejected(Rejection::DuplicateTheorem { .. }) => {}
+        other => panic!("expected DuplicateTheorem, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_kernel_reporting_a_different_toolchain_is_refused_before_anything_else() {
+    match parse(
+        &expected_names(),
+        "leanprover/lean4:v4.99.0",
+        &clean_output(),
+    ) {
+        KernelVerdict::Rejected(Rejection::ToolchainDrift { reported }) => {
+            assert_eq!(reported, "leanprover/lean4:v4.99.0");
+        }
+        other => panic!("expected ToolchainDrift, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_pinned_toolchain_is_the_one_the_repository_already_pins_for_kernel_zero() {
+    let pinned = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("proofs/kernel0-lean/lean-toolchain"),
+    )
+    .expect("issue #188 pinned this file");
+    assert_eq!(
+        pinned.trim(),
+        PINNED_TOOLCHAIN,
+        "this export must reuse the repository's single Lean pin, not introduce a second"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Certificates
+// ---------------------------------------------------------------------
+
+#[test]
+fn a_certificate_from_an_accepting_kernel_replays_structurally_and_against_source() {
+    let path = write_temp(FIXTURE, "happy");
+    let certificate = certificate_for(&path);
+    let checked = verify_certificate(&certificate).expect("structural replay");
+    assert_eq!(checked.declaration_id, "app.t.shifted");
+    assert_eq!(checked.ensures_index, 0);
+    verify_certificate_against_source(&certificate, &path).expect("source-bound replay");
+    assert!(certificate.contains(ARTIFACT_TARGET));
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_certificate_fails_closed_when_the_bound_source_drifts() {
+    let path = write_temp(FIXTURE, "drift");
+    let certificate = certificate_for(&path);
+    std::fs::write(
+        &path,
+        with_main(&FIXTURE.replace("ensures result >= a", "ensures result >= 0")),
+    )
+    .unwrap();
+    let error = verify_certificate_against_source(&certificate, &path)
+        .expect_err("source drift must fail closed");
+    assert_eq!(error.code, "SPX-Z112");
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_certificate_fails_closed_when_its_payload_is_tampered_with() {
+    let path = write_temp(FIXTURE, "tamper");
+    let certificate = certificate_for(&path);
+    let tampered = certificate.replace("\"kernel_checked\"", "\"kernel_chocked\"");
+    assert_ne!(tampered, certificate);
+    assert!(verify_certificate(&tampered).is_err());
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_certificate_whose_embedded_lean_document_was_edited_is_refused() {
+    let path = write_temp(FIXTURE, "leanedit");
+    let certificate = certificate_for(&path);
+    // Weaken a theorem statement inside the embedded document, then repair
+    // the envelope digest so only the *re-derivation* can catch it.
+    let edited = certificate.replace("spx_app", "spx_zpx");
+    assert_ne!(edited, certificate);
+    assert!(verify_certificate(&edited).is_err());
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_certificate_fails_closed_when_the_compiler_identity_drifts() {
+    let path = write_temp(FIXTURE, "compiler");
+    let certificate = certificate_for(&path);
+    let moved = certificate.replace(
+        &format!("\"compiler_version\":\"{}\"", env!("CARGO_PKG_VERSION")),
+        "\"compiler_version\":\"0.0.0-not-this-compiler\"",
+    );
+    assert_ne!(moved, certificate);
+    // The envelope digest no longer matches, so structural replay already
+    // refuses; the version check is a second, independent guard for a
+    // certificate whose digest was recomputed by whoever edited it.
+    assert!(verify_certificate_against_source(&moved, &path).is_err());
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn artifact_binding_accepts_only_the_exact_bound_bytes() {
+    let path = write_temp(FIXTURE, "artifact");
+    let certificate = certificate_for(&path);
+    let parsed = crate::parse(&std::fs::read_to_string(&path).unwrap(), &path).unwrap();
+    let resolved = crate::hir::resolve(&parsed).unwrap();
+    let artifact = crate::wasm::emit_resolved_module(&resolved).unwrap();
+    verify_certificate_against_artifact(&certificate, &artifact).expect("bound artifact");
+    let mut mutated = artifact.clone();
+    mutated.push(0);
+    assert!(verify_certificate_against_artifact(&certificate, &mutated).is_err());
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn no_certificate_is_produced_when_the_kernel_reports_an_admitted_hole() {
+    let path = write_temp(FIXTURE, "sorry");
+    let kernel = FixedKernel {
+        toolchain: PINNED_TOOLCHAIN.to_owned(),
+        output: "warning: Export.lean:3:0: declaration uses 'sorry'\n".to_owned(),
+    };
+    let error = export_obligation_certificate(&path, "app.t.shifted", 0, &kernel)
+        .expect_err("an admitted hole is not a proof");
+    assert!(error[0].message.contains("admitted_hole"), "{error:?}");
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn no_certificate_is_produced_for_a_declaration_outside_the_profile() {
+    let source = "module app.t;\n\
+@id(\"app.t.branchy\")\n\
+fn branchy(a: i64) -> i64 ensures result >= 0 { if a >= 0 { a } else { 0 } }\n";
+    let path = write_temp(source, "outside");
+    let error = export_obligation_certificate(&path, "app.t.branchy", 0, &AcceptingKernel)
+        .expect_err("outside the profile");
+    assert!(
+        error[0].message.contains("conditional_expression"),
+        "{error:?}"
+    );
+    std::fs::remove_file(&path).ok();
+}
+
+// ---------------------------------------------------------------------
+// The external-kernel capability seam
+// ---------------------------------------------------------------------
+
+struct AlwaysConfirms;
+
+impl ExternalKernelCapability for AlwaysConfirms {
+    fn confirm(&self, _script: &str) -> Result<(), Diagnostic> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_capability_that_always_confirms_cannot_rescue_a_drifted_certificate() {
+    let path = write_temp(FIXTURE, "capability");
+    let certificate = certificate_for(&path);
+    verify_certificate_with_capability(&certificate, &path, &AlwaysConfirms)
+        .expect("bindings hold, capability confirms");
+    std::fs::write(
+        &path,
+        with_main(&FIXTURE.replace("ensures result >= a", "ensures result >= 0")),
+    )
+    .unwrap();
+    assert!(
+        verify_certificate_with_capability(&certificate, &path, &AlwaysConfirms).is_err(),
+        "binding checks must run before the capability is consulted"
+    );
+    std::fs::remove_file(&path).ok();
+}
+
+// ---------------------------------------------------------------------
+// Coverage report
+// ---------------------------------------------------------------------
+
+#[test]
+fn the_coverage_report_is_deterministic_and_lists_refusals_with_reasons() {
+    let export = export_module(
+        &program(&with_main(
+            "module app.t;\n\
+@id(\"app.t.branchy\")\n\
+fn branchy(a: i64) -> i64 ensures result >= 0 { if a >= 0 { a } else { 0 } }\n",
+        )),
+        "rev",
+    );
+    let first = render_coverage(&export);
+    let second = render_coverage(&export);
+    assert_eq!(first, second);
+    assert!(first.contains("conditional_expression"));
+    assert!(first.contains("A6-translation-tcb"));
+    assert!(first.contains("semaprax.lean-export-coverage.v1"));
+}
+
+#[test]
+fn export_source_reports_coverage_and_never_writes_to_the_source() {
+    let path = write_temp(FIXTURE, "readonly");
+    let before = std::fs::read_to_string(&path).unwrap();
+    let (export, coverage) = export_source(&path).expect("export");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    assert!(coverage.contains("app.t.shifted"));
+    assert!(export.lean_source.contains("#print axioms"));
+    std::fs::remove_file(&path).ok();
+}
+
+/// The deliberate re-pin path for
+/// `testdata/shifted.lean.golden`. Ignored by default so a changed export can
+/// never re-pin itself: an operator re-pins on purpose with
+/// `cargo test -p semaprax --lib rewrite_the_pinned_lean_golden -- --ignored`
+/// and reviews the resulting diff.
+#[test]
+#[ignore = "re-pins the golden; run deliberately and review the diff"]
+fn rewrite_the_pinned_lean_golden() {
+    std::fs::write(golden_path(), fixture_module().lean_source).unwrap();
+}
+
+#[test]
+fn a_certificate_whose_embedded_lean_document_was_weakened_is_refused_by_re_derivation() {
+    // The headline test. Build a *fully self-consistent* certificate — correct
+    // envelope digest, correct `lean_source_sha256`, correct axiom records —
+    // around a Lean document whose postcondition theorem has been weakened to
+    // a tautology. Structural replay therefore passes: nothing inside the
+    // certificate is inconsistent. Only re-deriving the document from the
+    // bound source can catch it, which is exactly why
+    // `verify_certificate_against_source` re-renders instead of trusting the
+    // embedded bytes.
+    let path = write_temp(FIXTURE, "weakened");
+    let source = std::fs::read_to_string(&path).unwrap();
+    let parsed = crate::parse(&source, &path).unwrap();
+    let revision = crate::graph::revision(&parsed);
+    let mut export = export_module(&parsed, &revision);
+    let weakened = export
+        .lean_source
+        .replace("(result ≥ v_a)", "(result ≥ result)");
+    assert_ne!(
+        weakened, export.lean_source,
+        "the fixture goal must be present"
+    );
+    export.lean_source = weakened;
+
+    let function = export
+        .exported
+        .iter()
+        .find(|item| item.declaration_id == "app.t.shifted")
+        .expect("fixture declaration")
+        .clone_for_test();
+    let obligation = function
+        .iter()
+        .find(|item| item.ensures_index == Some(0))
+        .expect("postcondition obligation");
+    let theorem_name = format!("{NAMESPACE}.{}", obligation.theorem_name);
+    let obligation_id = obligation.obligation_id.clone();
+    let axioms: Vec<(String, Vec<String>)> = export
+        .theorem_names()
+        .into_iter()
+        .map(|name| (name, vec!["propext".to_owned()]))
+        .collect();
+
+    let resolved = crate::hir::resolve(&parsed).unwrap();
+    let artifact = crate::wasm::emit_resolved_module(&resolved).unwrap();
+    let path_text = path.display().to_string();
+    let source_sha256 = super::certificate::source_digest(&source);
+    let artifact_sha256 = super::certificate::artifact_digest(&artifact);
+    let certificate =
+        super::certificate::render_certificate(&super::certificate::CertificateInput {
+            source_path_text: &path_text,
+            source_sha256: &source_sha256,
+            export: &export,
+            declaration_id: "app.t.shifted",
+            ensures_index: 0,
+            obligation_id: &obligation_id,
+            theorem_name: &theorem_name,
+            compiler_version: env!("CARGO_PKG_VERSION"),
+            toolchain: PINNED_TOOLCHAIN,
+            axioms: &axioms,
+            artifact_sha256: &artifact_sha256,
+            artifact_bytes: artifact.len(),
+        });
+
+    verify_certificate(&certificate)
+        .expect("a self-consistent certificate passes structural replay");
+    let error = verify_certificate_against_source(&certificate, &path)
+        .expect_err("a weakened embedded theorem must be refused by re-derivation");
+    assert_eq!(error.code, "SPX-Z112");
+    assert!(error.message.contains("re-rendering"), "{}", error.message);
+    std::fs::remove_file(&path).ok();
+}

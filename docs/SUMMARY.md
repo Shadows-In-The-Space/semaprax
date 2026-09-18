@@ -409,6 +409,7 @@ Audience: all documentation readers.
 - [Assurance Policy v1](ASSURANCE-POLICY-V1.md)
 - [Bounded SMT Discharge v1](SMT-DISCHARGE-V1.md)
 - [SMT Proof Certificate v1](SMT-PROOF-CERTIFICATE-V1.md)
+- [Lean obligation export v1](LEAN-OBLIGATION-EXPORT-V1.md)
 - [Bounded Model Checking v1](BOUNDED-MODEL-CHECKING-V1.md)
 - [Requirement Traceability v1](REQUIREMENT-TRACEABILITY-V1.md)
 - [Owned record collection element v1](OWNED-RECORD-COLLECTION-ELEMENT-V1.md)

@@ -145,6 +145,7 @@ pub mod project;
 pub mod project_revision_store;
 #[doc(hidden)]
 pub mod project_transport;
+pub mod proof_export;
 pub mod properties;
 pub mod protocol_check;
 pub mod provider_adapter_sdk;

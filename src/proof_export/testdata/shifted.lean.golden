@@ -1,0 +1,65 @@
+/-
+SEMAPRAX Lean obligation export
+schema: semaprax.lean-obligation-export.v1
+module: app.t
+revision: sha256:d8b4fbed4a598bf89a7ae5d5654edee31467cead6cb562fc84d3735486b5f53e
+profile: semaprax-lean-export-profile-v1: non-generic, effect-free, all-by-value pure functions over i64/i32/u8/usize; add/sub/mul/neg, comparisons and and/or/not inside contracts, immutable let, at least one `ensures`; no bool-valued parameters/lets/returns, no `if`, no division/remainder, no calls, no loops, no mutation, no aggregates; see docs/LEAN-OBLIGATION-EXPORT-V1.md
+
+Trusted base and assumptions:
+  A1-int-model: SEMAPRAX scalars are modeled as Lean `Int` with declared-range hypotheses; this is faithful to SEMAPRAX's checked (trapping) arithmetic only in conjunction with A2.
+  A2-range-obligations-required: Every arithmetic node emits a separate range obligation theorem; a postcondition is claimed only when every range obligation of the same function was kernel-checked in the same file.
+  A3-requires-assumed: `requires` clauses are assumed, not proved: this export says nothing about whether any caller establishes them.
+  A4-lean-standard-axioms: Lean's three standard axioms (propext, Classical.choice, Quot.sound) are trusted; any other axiom, including sorryAx, invalidates the result.
+  A5-lean-kernel-tcb: The pinned Lean 4 toolchain and its kernel are trusted; they are not verified by SEMAPRAX.
+  A6-translation-tcb: This Rust translation from validated SEMAPRAX source to Lean is itself trusted and unverified; a translation bug is not detectable by the Lean kernel.
+  A7-purity: The admitted profile is pure, total and effect-free, so SEMAPRAX's left-to-right evaluation order is unobservable and is not modeled.
+  A8-no-lowering-claim: Nothing here claims the native or Wasm lowering preserves a proved source theorem; a certificate binds artifact bytes, it does not verify the backend.
+
+Declarations outside this profile (NOT exported, NOT claimed):
+  app.t.proof_export_test_main (`main`): no_contract_clauses — function has no requires/ensures clause to discharge
+-/
+
+namespace SemapraxExport
+
+/-- SEMAPRAX declaration `app.t.shifted` (`shifted`) — checked_arithmetic_range obligation, origin `body`.
+    Obligation id: `semaprax.lean-export.range.v1:13:app.t.shifted:0`. -/
+theorem spx_app_2et_2eshifted_range_0
+    (v_a : Int)
+    (v_b : Int)
+    (h_lo_0 : (-9223372036854775808 : Int) ≤ v_a)
+    (h_hi_0 : v_a ≤ (9223372036854775807 : Int))
+    (h_lo_1 : (-9223372036854775808 : Int) ≤ v_b)
+    (h_hi_1 : v_b ≤ (9223372036854775807 : Int))
+    (h_req_0 : (v_a ≥ (0 : Int)))
+    (h_req_1 : (v_a ≤ (1000 : Int)))
+    (h_req_2 : (v_b ≥ (0 : Int)))
+    (h_req_3 : (v_b ≤ (1000 : Int)))
+    : (-9223372036854775808 : Int) ≤ (v_a + v_b) ∧ (v_a + v_b) ≤ (9223372036854775807 : Int) := by
+  omega
+
+/-- SEMAPRAX declaration `app.t.shifted` (`shifted`) — postcondition obligation, origin `ensures[0]`.
+    Obligation id: `semaprax.obligation.v1:13:postcondition:13:app.t.shifted:8:ensure:0`. -/
+theorem spx_app_2et_2eshifted_ensures_0
+    (v_a : Int)
+    (v_b : Int)
+    (h_lo_0 : (-9223372036854775808 : Int) ≤ v_a)
+    (h_hi_0 : v_a ≤ (9223372036854775807 : Int))
+    (h_lo_1 : (-9223372036854775808 : Int) ≤ v_b)
+    (h_hi_1 : v_b ≤ (9223372036854775807 : Int))
+    (h_req_0 : (v_a ≥ (0 : Int)))
+    (h_req_1 : (v_a ≤ (1000 : Int)))
+    (h_req_2 : (v_b ≥ (0 : Int)))
+    (h_req_3 : (v_b ≤ (1000 : Int)))
+    (v_total_0 : Int)
+    (h_def_0 : v_total_0 = (v_a + v_b))
+    (result : Int)
+    (h_result : result = v_total_0)
+    : (result ≥ v_a) := by
+  omega
+
+end SemapraxExport
+
+/-! No-admitted-holes gate: every exported theorem must report only Lean's three
+standard axioms. Any other axiom, and `sorryAx` in particular, invalidates it. -/
+#print axioms SemapraxExport.spx_app_2et_2eshifted_range_0
+#print axioms SemapraxExport.spx_app_2et_2eshifted_ensures_0

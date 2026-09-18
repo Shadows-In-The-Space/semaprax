@@ -719,6 +719,66 @@ fn main() -> i64 { 0 }
     assert_eq!(error.code, "SPX-WIT110");
 }
 
+/// Hostile identity fixture: two distinct trivial-drop resource
+/// declarations, `MY_TOKEN` and `My_Token`, normalize to the identical WIT
+/// resource identifier `my-token` under `wit_resource_ident`'s
+/// underscore-to-dash-plus-lowercase encoding. `emit_wit` must fail closed
+/// with `SPX-WIT110` instead of silently emitting one resource under a name
+/// that no longer identifies which source declaration it came from.
+#[test]
+fn colliding_resource_identities_are_refused_not_silently_merged() {
+    let program = crate::parse(
+        r#"module test.wit_resource_name_collision;
+
+@id("token.a.type")
+resource MY_TOKEN {
+    @id("token.a.drop")
+    drop trivial;
+}
+
+@id("token.b.type")
+resource My_Token {
+    @id("token.b.drop")
+    drop trivial;
+}
+
+@id("app.main")
+fn main() -> i64 { 0 }
+"#,
+        std::path::Path::new("wit-resource-name-collision.spx"),
+    )
+    .unwrap();
+
+    let error = crate::wit_component::emit_wit(&program).unwrap_err();
+    assert_eq!(error.code, "SPX-WIT110");
+    assert!(
+        error.message.contains("my-token"),
+        "error must name the colliding WIT identifier: {}",
+        error.message
+    );
+
+    // The same fixture with only one of the two resources removed must
+    // succeed, so the refusal above is specifically about the collision and
+    // not some unrelated property of the fixture.
+    let non_colliding = crate::parse(
+        r#"module test.wit_resource_name_no_collision;
+
+@id("token.a.type")
+resource MY_TOKEN {
+    @id("token.a.drop")
+    drop trivial;
+}
+
+@id("app.main")
+fn main() -> i64 { 0 }
+"#,
+        std::path::Path::new("wit-resource-name-no-collision.spx"),
+    )
+    .unwrap();
+    crate::wit_component::emit_wit(&non_colliding)
+        .expect("a single trivial-drop resource must not be refused");
+}
+
 #[test]
 fn feature_consumer_can_only_read_checked_component_digests_through_accessors() {
     let directory = ConsumerDirectory::create();

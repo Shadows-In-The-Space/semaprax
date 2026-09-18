@@ -42,6 +42,8 @@ use function @id("std.auth.oauth.pkce_method_is_allowed") from std.auth as oauth
 use function @id("std.auth.oauth.pkce_challenge_is_valid") from std.auth as oauth_pkce_challenge_is_valid;
 use function @id("std.auth.oauth.authorization_request_is_valid") from std.auth as oauth_authorization_request_is_valid;
 use function @id("std.auth.oauth.callback_is_valid") from std.auth as oauth_callback_is_valid;
+use type @id("std.auth.secret") from std.auth as Secret;
+use function @id("std.auth.secret.self_check") from std.auth as secret_self_check;
 
 // `ct_bytes_equal` must return the functionally correct answer regardless of
 // WHERE the first differing byte falls (first, middle, last) or whether the
@@ -271,10 +273,22 @@ fn oauth_request_and_callback_composition() -> bool
     request_valid && request_rejects_disallowed_pkce_method && full_callback_valid && callback_rejects_state_substitution && callback_rejects_redirect_substitution && callback_rejects_invalid_pkce && callback_rejects_replayed_code
 }
 
+// `Secret<T>`'s own compile-time non-leak guarantees (whole-value equality
+// refused with `SPX-T207`, no format/print facility exists at all) cannot
+// be exercised from inside a source file that must itself compile — a
+// hostile case that is supposed to fail to compile cannot live in a
+// package under test. Those are proven directly against the compiler in
+// `src/authentication/secret_source_tests.rs`. `secret_self_check` (defined
+// in `auth.spx`, next to `Secret<T>`'s own doc comment — see its points 4
+// and 5 for why no wrap/expose/match function over `Secret<T>` ships at
+// all) is the positive control: a `Secret<i64>`/`Secret<bool>` literal
+// round-trips its value through direct field access unchanged, matching
+// handles/flags compare equal through the unwrapped scalar, and differing
+// ones do not.
 @id("std.auth.tests.summary_secrets_and_sessions")
 fn summary_secrets_and_sessions() -> bool
 {
-    constant_time_equality() && session_state_validity() && session_expiry_boundaries() && session_usability()
+    constant_time_equality() && session_state_validity() && session_expiry_boundaries() && session_usability() && secret_self_check()
 }
 
 @id("std.auth.tests.summary_session_transitions")

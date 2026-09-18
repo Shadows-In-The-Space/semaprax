@@ -1,5 +1,93 @@
 module std.auth;
 
+// ---------------------------------------------------------------------
+// Secret<T>: an opaque, non-leaking scalar handle (issue #191)
+// ---------------------------------------------------------------------
+// This is the `.spx`-visible nominal wrapper the issue asks for. It is
+// deliberately narrow, and the narrowness is load-bearing, not an
+// oversight — every claim below was checked against the compiler, not
+// assumed:
+//
+// 1. Whole-value equality is already refused for every nominal type.
+//    `left == right` on two `Secret<T>` values (or any other `record`/
+//    `variant`) fails to compile with `SPX-T207` ("aggregate equality is
+//    outside the executable comparison profile"), raised by
+//    `reject_aggregate_equality` in `src/source_verify/diagnostics.rs` for
+//    every `Type::Named`. This is an existing, general compiler invariant
+//    `Secret<T>` inherits for free — it is not a new check this package
+//    adds, and it cannot be bypassed by this or any other package. Proven
+//    directly against the compiler in
+//    `src/authentication/secret_source_tests.rs`.
+// 2. The language has no `Debug`/`Display`/string-interpolation/reflection
+//    facility at all: the lexer (`src/lexer.rs`) recognizes ordinary string
+//    literals and their escapes and nothing else, so there is no construct
+//    in `.spx` that turns an arbitrary value — `Secret<T>` included — into
+//    text. "Cannot be printed" is therefore a fact about the whole
+//    language, not a property this package had to implement.
+// 3. The compiler's generic-copy-type admission for a user-declared record
+//    (`SPX-T223`, "generic copy type `Secret` accepts only direct `i64` or
+//    `bool` arguments") allows a use-site instantiation of `Secret<T>` for
+//    exactly `T = i64` or `T = bool`; `Secret<usize>` — the type this
+//    package's own session/state code uses everywhere else — fails to
+//    compile with exactly that diagnostic, checked directly and not
+//    asserted (`src/authentication/secret_source_tests.rs`). A fully
+//    generic `fn f<T>(...) -> Secret<T>` fails separately with
+//    `SPX-T224`/`SPX-T226` ("must return/use the direct-scalar profile"),
+//    so no single generic `wrap`/`expose` function can cover both
+//    instantiations even where one is admitted at all (see point 5).
+//    `Secret<Bytes>` (with an `own Bytes` parameter) was also checked and,
+//    perhaps surprisingly, statically admitted — but is unexplored beyond
+//    that static check, since interpreter execution of it is unverified
+//    (see point 4), so this package does not build a byte-carrying
+//    `Secret<T>` on that basis alone. `Secret<T>` therefore ships as an
+//    opaque numeric handle or opaque decided-flag wrapper here; real secret
+//    bytes (a password, a signing key, a session token) remain the
+//    existing `borrow Slice<u8>` idiom this package's token/CSRF/OAuth
+//    functions already use and never retain past one call, and the real
+//    byte-shaped secret material itself lives only in the Rust host layer
+//    under `src/authentication/**`, which has its own independent
+//    non-leak proof (no `Clone`, redacted `Debug`, zeroize-on-drop).
+//    `Secret<T>` here is the source-language half of the same discipline,
+//    applied to the opaque scalars a deployment hands this pure decision
+//    layer (a numeric session/key handle, or an already-decided boolean
+//    like the kind `token_verification_admits`'s `has_valid_signature`
+//    takes).
+// 4. CAPACITY CEILING, checked directly and not worked around: calling any
+//    function whose parameter or return type mentions a user generic
+//    record fails on the interpreter backend with `SPX-F102`
+//    ("interpreter admission failed (unsupported_callee)"), even though
+//    `semaprax check` admits the declarations and the calls statically.
+//    Isolated by direct bisection with throwaway `secret_wrap_i64`/
+//    `secret_expose_i64` functions (since removed — see point 5): a bare
+//    record literal (`Secret<i64> { value: 42 }`) followed by direct field
+//    access (`.value`) executes cleanly on the interpreter; substituting
+//    either step for a call to a function typed over `Secret<i64>`
+//    reproduces `SPX-F102` at that exact call. This is a real
+//    interpreter-backend admission gap for user generic records used
+//    across a function boundary, not specific to secrets or to this
+//    package — `semaprax run`/`semaprax test` hit it identically. Closing
+//    it is `src/interpreter.rs` work outside this change's lease and
+//    outside a single-package change's scope; reported here rather than
+//    silently narrowed around.
+// 5. A second, independent reason no wrap/expose/match function over
+//    `Secret<T>` ships: this package's own conformance-completeness gate
+//    (`tests/project/standard_library.rs`'s
+//    `every_public_declaration_has_a_std_identity_contracts_examples_and_conformance`)
+//    requires `std.auth.tests` to `use function` import every `@id`'d
+//    declaration in this module, and `use function` cannot import a
+//    function whose signature mentions a record at all (`SPX-G172`,
+//    "function signature leaves the admitted scalar/Copy workspace
+//    domain") — checked directly by adding such functions and watching
+//    both gates in turn, not assumed. Point 4 and point 5 independently
+//    rule out the same shape, so `Secret<T>` values stay call-local here:
+//    constructed and read with a literal and `.value`, exactly like
+//    `secret_self_check` below.
+@id("std.auth.secret")
+record Secret<T> {
+    @id("std.auth.secret.value")
+    value: T,
+}
+
 // This module is the pure, effect-free decision-procedure layer for issue
 // #191's authentication/session profile: session lifecycle legality, CSRF
 // and cookie policy, constant-time secret comparison, closed-algorithm token
@@ -439,4 +527,45 @@ fn oauth_authorization_request_is_valid(state: borrow Slice<u8>, expected_state:
 fn oauth_callback_is_valid(state: borrow Slice<u8>, expected_state: borrow Slice<u8>, redirect_uri: borrow Slice<u8>, expected_redirect_uri: borrow Slice<u8>, pkce_method_id: u8, code_verifier: borrow Slice<u8>, code_challenge: borrow Slice<u8>, has_valid_s256_hash: bool, code_seen_before: bool) -> bool
 {
     oauth_state_matches(state, expected_state) && oauth_redirect_uri_matches(redirect_uri, expected_redirect_uri) && oauth_pkce_challenge_is_valid(pkce_method_id, code_verifier, code_challenge, has_valid_s256_hash) && oauth_authorization_code_is_fresh(code_seen_before)
+}
+
+// No `secret_wrap_i64`/`secret_expose_i64`/`*_handles_match` function ships
+// here, even though each one individually compiles: the package's own
+// conformance-completeness gate
+// (`tests/project/standard_library.rs`'s
+// `every_public_declaration_has_a_std_identity_contracts_examples_and_conformance`)
+// requires `std.auth.tests` to `use function` import every `@id`'d
+// declaration in this module — checked directly, not assumed, by adding
+// exactly these functions and watching that gate fail with "conformance
+// module does not import `std.auth.secret.wrap_i64`" before removing them
+// again. `use function` cannot import a function whose signature mentions a
+// record (`SPX-G172`, "function signature leaves the admitted scalar/Copy
+// workspace domain" — see point 4 above), so no wrap/expose/match function
+// over `Secret<T>` can satisfy both gates at once today. `Secret<T>` values
+// therefore stay call-local, constructed and read with a literal and `.value`
+// exactly like `secret_self_check` below — the only shape this tranche can
+// both ship and prove complete.
+@id("std.auth.secret.self_check")
+fn secret_self_check() -> bool
+{
+    let handle = Secret<i64> { value: 42 };
+    let handle_round_trips = handle.value == 42;
+    let zero_handle = Secret<i64> { value: 0 };
+    let zero_handle_round_trips = zero_handle.value == 0;
+    let negative_handle = Secret<i64> { value: 0 - 7 };
+    let negative_handle_round_trips = negative_handle.value == 0 - 7;
+    let same_handle_a = Secret<i64> { value: 9 };
+    let same_handle_b = Secret<i64> { value: 9 };
+    let matching_handles_match = same_handle_a.value == same_handle_b.value;
+    let other_handle = Secret<i64> { value: 10 };
+    let differing_handles_do_not_match = same_handle_a.value != other_handle.value;
+    let true_flag = Secret<bool> { value: true };
+    let true_flag_round_trips = true_flag.value;
+    let false_flag = Secret<bool> { value: false };
+    let false_flag_round_trips = !false_flag.value;
+    let other_true_flag = Secret<bool> { value: true };
+    let other_false_flag = Secret<bool> { value: false };
+    let matching_flags_match = true_flag.value == other_true_flag.value && false_flag.value == other_false_flag.value;
+    let differing_flags_do_not_match = true_flag.value != false_flag.value;
+    handle_round_trips && zero_handle_round_trips && negative_handle_round_trips && matching_handles_match && differing_handles_do_not_match && true_flag_round_trips && false_flag_round_trips && matching_flags_match && differing_flags_do_not_match
 }

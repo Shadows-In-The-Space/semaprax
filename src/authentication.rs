@@ -6,6 +6,13 @@ pub mod password;
 pub mod service;
 pub mod session;
 
+/// Hostile compile-time proof for `std.auth.secret.Secret<T>`
+/// (declared in `std/auth/src/auth.spx`) — the `.spx`-visible half of issue
+/// #191's non-leaking secret type. See that module's own doc comment for
+/// what it does and does not claim.
+#[cfg(test)]
+mod secret_source_tests;
+
 /// Closed failures never contain credentials or bearer tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthError {

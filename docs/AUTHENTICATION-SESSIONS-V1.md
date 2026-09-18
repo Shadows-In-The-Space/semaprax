@@ -3,8 +3,9 @@
 Audience: language users, tool authors, and compiler contributors.
 
 Status: first bounded slice of issue #191's authentication/session profile,
-plus a second tranche adding the OAuth/OIDC authorization-code callback
-policy. `std.auth` ships the pure, effect-free decision procedures for
+a second tranche adding the OAuth/OIDC authorization-code callback policy,
+and a third tranche adding the `std.auth.secret.Secret<T>` opaque scalar
+handle type. `std.auth` ships the pure, effect-free decision procedures for
 session lifecycle legality, CSRF and cookie policy, constant-time secret
 comparison, closed-algorithm token verification, password-hash *policy*
 bounds, audit-event safety, and an OAuth/OIDC authorization-code callback
@@ -12,9 +13,12 @@ policy (state binding, redirect-uri matching, PKCE challenge validity, and
 single-use code freshness — see
 [OAuth/OIDC authorization-code callback policy](#oauthoidc-authorization-code-callback-policy)).
 It does **not** ship a password hash function, a real signature/MAC
-implementation, an `Secret<T>` wrapper type, a real PKCE `S256` hash
-computation, an OAuth token-endpoint or discovery-document client, or any new
-host operation, `permit`, or dependency. See
+implementation, a real PKCE `S256` hash computation, an OAuth token-endpoint
+or discovery-document client, or any new host operation, `permit`, or
+dependency. A third tranche adds `std.auth.secret.Secret<T>`, a narrow
+`.spx`-visible opaque scalar wrapper — see
+[Secret value semantics](#secret-value-semantics-secrett) for exactly what it
+covers and does not. See
 [Non-claims and remaining work](#non-claims-and-remaining-work) for exactly
 why and what would be required to lift each one, and
 [Acceptance-criteria mapping](#acceptance-criteria-mapping) for a line-by-line
@@ -63,59 +67,112 @@ importantly, what it explicitly does not.
 | Log/audit leakage | `audit_event_is_safe` is a closed refusal over six named secret-bearing fields (raw password, password hash, session token, bearer token, CSRF token, authorization header); it is `false` if *any* one is present, regardless of what else the event carries | a logging sink, redaction pipeline, or structured writer — `std.log` (see [Non-claims](#non-claims-and-remaining-work)) is the existing package for that, unmodified here |
 | OAuth callback CSRF / authorization-code interception / PKCE downgrade | `oauth_state_matches` binds a callback to its request; `oauth_pkce_method_is_allowed` refuses "no PKCE" and any unrecognized method identically; `oauth_authorization_code_is_fresh` refuses a replayed code | opening the redirect, calling the token endpoint, or computing the `S256` digest itself (see [OAuth/OIDC authorization-code callback policy](#oauthoidc-authorization-code-callback-policy)) |
 
-## Secret value semantics: why there is no `Secret<T>`
+## Secret value semantics: `Secret<T>`
 
 Issue #191 asks for "an opaque `Secret<T>` or equivalent non-printable/
 non-serializable resource" whose value cannot leak "through derived traits,
-panic messages, evidence, or generated clients." Two facts about the current
-language change what that requirement means here, and both are worth stating
-plainly rather than working around silently:
+panic messages, evidence, or generated clients." An earlier revision of this
+document said flatly that SEMAPRAX's generic-record admission ruled this out
+entirely and that shipping `Secret<T>` would need cross-backend compiler work
+outside any single package's lease. **That earlier claim was checked directly
+against the compiler for this tranche and found to be wrong in its strongest
+form**: a user-declared generic record instantiated over a scalar type
+argument compiles and executes today, on all three backends, with no compiler
+change. `std.auth.secret.Secret<T>` (declared in `std/auth/src/auth.spx`) ships on that
+basis. What follows states exactly what was verified, what remains a genuine
+ceiling, and why the type is still narrower than a general-purpose secret
+container:
 
 1. **There is no derive, `Debug`, `Display`, or reflection mechanism in
-   SEMAPRAX today.** A grep of every `.spx` package under `std/` and of
-   [RFC 0002](RFC-0002-ALGEBRAIC-DATA.md) turns up no `derive`, no format
-   trait, and no generic "print this value" operation. A record cannot be
-   printed, formatted, or serialized except by a function the author writes
-   by hand, byte by byte (exactly how `std.log`'s `Event` renders itself: an
-   explicit `append_event` function that copies named fields into a caller
-   owned `Writer`, never an automatic trait). **The entire class of leak this
-   requirement worries about — "leaks through derived traits" — does not
-   exist as an attack surface in this language, because the mechanism that
-   would produce it does not exist.** This is a real, load-bearing finding,
-   not an evasion: it means a wrapper type's main job in a language like Rust
-   (blocking an auto-derived `Debug`/`Display`) has no analogue to block here.
-2. **A wrapper record would still buy real things** — a distinct nominal
-   type so a secret cannot be passed where an ordinary `Slice<u8>` is
-   expected by accident, and a single declared place to hang a
-   non-serialization contract for a future `std.data.json`/`std.log`
-   integration. Both require record-field projection patterns this session's
-   audit confirmed the reference interpreter does not admit uniformly
-   (`std.db`/`std.jobs`/`app.http_router` all represent structured state as
-   ordered `usize`/`u8` tags and `Slice<u8>` views for exactly this reason,
-   not preference), and extending that is downstream compiler work outside
-   this package's lease (`src/hir/**`, `src/interpreter*`, `src/codegen/**`,
-   `src/wasm/**` are all out of scope for this change).
+   SEMAPRAX today.** `src/lexer.rs` recognizes ordinary string literals and
+   their escapes and nothing else — no interpolation token, no format trait,
+   no generic "print this value" operation, audited directly rather than
+   asserted. A record cannot be printed, formatted, or serialized except by a
+   function the author writes by hand, byte by byte. **The entire class of
+   leak this requirement worries about most in a language like Rust — "leaks
+   through derived traits" — does not exist as an attack surface here at
+   all**, for `Secret<T>` or any other type, because the mechanism that would
+   produce it does not exist.
+2. **Whole-value equality is refused for every nominal type at compile
+   time.** `left == right` on two `Secret<T>` values fails with `SPX-T207`
+   ("aggregate equality is outside the executable comparison profile"),
+   raised by `reject_aggregate_equality` in `src/source_verify/diagnostics.rs`
+   for every `Type::Named` — an existing, general invariant `Secret<T>`
+   inherits for free, proven directly (not merely cited) in
+   `src/authentication/secret_source_tests.rs`, paired with a positive
+   control showing the unwrapped-scalar-field comparison it is meant to be
+   replaced with still compiles.
+3. **The type argument is narrow, and this was found by bisection against
+   the compiler, not designed in advance.** The compiler's generic-copy-type
+   admission (`SPX-T223`, "generic copy type `Secret` accepts only direct
+   `i64` or `bool` arguments") allows exactly `T = i64` or `T = bool` at a use
+   site. `Secret<usize>` — the type this package's own session/state code
+   uses everywhere else — fails to compile with that exact diagnostic
+   (checked in `secret_source_tests.rs`). A fully generic
+   `fn f<T>(...) -> Secret<T>` fails separately with `SPX-T224`/`SPX-T226`,
+   so a single generic `wrap`/`expose` covering both instantiations was never
+   an option even before point 5 below ruled out shipping any such function
+   at all. `Secret<Bytes>` with an `own Bytes` field was checked too and is,
+   perhaps surprisingly, statically admitted — but its interpreter execution
+   is unverified, so this tranche does not build a byte-carrying `Secret<T>`
+   on the strength of the static check alone; that is real follow-up work,
+   not a closed non-claim.
+4. **A genuine, previously-unknown interpreter-backend ceiling.** Calling any
+   function whose parameter or return type mentions a user generic record
+   fails on the reference interpreter with `SPX-F102` ("interpreter
+   admission failed (unsupported_callee)"), even though `semaprax check` and
+   `semaprax test`'s static phase admit the declarations and the calls.
+   Isolated by direct bisection with throwaway `secret_wrap_i64`/
+   `secret_expose_i64` functions (built to find this, then removed — see
+   point 5): a bare record literal (`Secret<i64> { value: 42 }`) followed by
+   direct field access (`.value`) executes cleanly under `semaprax
+   test`/`semaprax run` and under the full `interpreter`/`native
+   C11`/`Core Wasm` three-backend conformance harness
+   (`auth_backend_audit::auth_executes_on_all_three_backends`); substituting
+   either step for a call to a function typed over `Secret<i64>` reproduced
+   `SPX-F102` at that exact call, on the interpreter, before native or Wasm
+   were even reached. This is real interpreter-backend work
+   (`src/interpreter.rs`) outside this change's lease and outside a
+   single-package change's scope — reported here rather than silently routed
+   around.
+5. **A second, independent reason no wrap/expose/match function over
+   `Secret<T>` ships.** `tests/project/standard_library.rs`'s
+   `every_public_declaration_has_a_std_identity_contracts_examples_and_conformance`
+   requires `std.auth.tests` to `use function` (and, for the `Secret` type
+   declaration itself, `use type`) import every `@id`'d declaration in
+   `std.auth`, and `use function` cannot import a function whose signature
+   mentions a record at all (`SPX-G172`, "function signature leaves the
+   admitted scalar/Copy workspace domain") — checked directly by adding such
+   functions and watching both gates fail in turn (the
+   conformance-completeness gate first, naming the missing import by exact
+   `@id`; the interpreter ceiling in point 4 second), not assumed. Points 4
+   and 5 independently rule out the same shape, so `std.auth`'s own test
+   coverage (`secret_self_check`) exercises only what both gates admit:
+   construct a `Secret<i64>`/`Secret<bool>` literal directly and read
+   `.value` back, call-local, never through a wrap/expose/match function.
 
-Given both, `std.auth` does not define a `Secret` record. Its actual
-guarantee is narrower and stated exactly: **every function in this package
-takes secret-shaped bytes as an ordinary `borrow Slice<u8>` parameter, reads
-them for the duration of one call, and returns only a `bool` or a closed
-`usize`/`i64` state code — never the bytes themselves, a copy of them, or any
-value derived from them other than a policy decision.** No function in this
-package has an environment, filesystem, network, or keyring capability to
-read a secret from, so there is no ambient path by which one could reach this
-code without a caller choosing to pass it. A caller that wants the
-"cannot be logged" property today gets it by construction: nothing here
-returns a secret to be logged, and using `audit_event_is_safe` (above) is how
-a caller checks its own event shape before handing it to `std.log`.
+`Secret<T>` therefore ships as an opaque numeric handle (`Secret<i64>`) or
+opaque decided-flag wrapper (`Secret<bool>`) — comparing the unwrapped
+handle/flag by identity is intentional and safe, exactly like this package's
+existing `key_id`/`policy_id` comparisons, while comparing the `Secret<T>`
+values themselves is refused per point 2. It does **not** wrap raw secret
+bytes: that remains the existing `borrow Slice<u8>` idiom this package's
+token/CSRF/OAuth functions already use and never retain past one call, and
+the real byte-shaped secret material (a password, a signing key, a session
+token) lives only in the Rust host layer under `src/authentication/**`, which
+has its own independent non-leak proof (no `Clone`, redacted `Debug`,
+zeroize-on-drop). `Secret<T>` here is the source-language half of the same
+discipline, applied to the opaque scalars a deployment hands this pure
+decision layer today (a numeric session/key handle, or an already-decided
+boolean like the kind `token_verification_admits`'s `has_valid_signature`
+takes).
 
-**If a future tranche adds a `Secret<T>` wrapper record**, it should be
-proposed and reviewed only alongside whatever record-field-projection work
-lifts admission for the reference interpreter, native, and Wasm backends
-together (AGENTS.md's change protocol: parser, formatter, resolver/HIR,
-verifier, semantic graph, native backend, and Wasm backend move together for
-syntax with runtime meaning) — not added as a special-cased single-backend
-type here.
+**Two concrete follow-ups this tranche surfaced but did not pursue**: lifting
+the `SPX-F102` interpreter ceiling for calls across a user-generic-record
+boundary (the compiler work item above), and verifying whether the
+statically-admitted `Secret<Bytes>` executes on any backend — which, if it
+does, would let a future tranche widen `Secret<T>` to real byte-shaped
+secrets without further language work.
 
 ## Constant-time comparison
 
@@ -385,7 +442,7 @@ Restated plainly, matched against issue #191's "In scope" list:
 
 | In scope (#191) | Status here |
 | --- | --- |
-| Opaque `Secret<T>` or equivalent | **Not shipped.** See [Secret value semantics](#secret-value-semantics-why-there-is-no-secrett) for why the language's lack of any derive/Debug/reflection mechanism changes what this requirement means, and what would be needed to add a wrapper record correctly. |
+| Opaque `Secret<T>` or equivalent | **Shipped**, narrowly: `std.auth.secret.Secret<T>` for `T = i64`/`T = bool` (an opaque handle/decided-flag), with whole-value equality refused at compile time (`SPX-T207`) and no format/print facility reachable for any type. See [Secret value semantics](#secret-value-semantics-secrett) for exactly what is and is not covered, including the real interpreter-backend ceiling (`SPX-F102`) this tranche found and reported rather than routed around. |
 | Password hashing via a maintained memory-hard algorithm through an explicit host/runtime implementation | **Not shipped**, `HUMAN_BLOCKED`. Policy bounds only; see [Password hashing](#password-hashing-policy-only-not-an-algorithm). |
 | Session IDs, storage contract, rotation, expiry, revocation, CSRF policy, secure cookies | **Shipped** as pure decision procedures (this document's session/CSRF/cookie sections). A storage contract (where session records actually live) is not shipped — like `std.db` and `std.jobs`, that is a host/driver concern this pure layer only decides over, never performs. |
 | Signed token verification with algorithm/key policy and claims validation | **Policy shipped**; the signature/MAC computation itself is not (same reason as password hashing). |
@@ -408,10 +465,12 @@ Issue #191's acceptance criteria, matched exactly:
   this change's lease.
 - "Secrets cannot enter ordinary source, logs, diagnostics, or public
   evidence" — **met for what this package touches**: no function returns
-  secret bytes it was not handed, and `audit_event_is_safe` gives a caller a
-  checkable predicate before emitting an event. Not met in the sense of an
-  enforced `Secret<T>` type distinct from `Slice<u8>` — see
-  [Secret value semantics](#secret-value-semantics-why-there-is-no-secrett).
+  secret bytes it was not handed, `audit_event_is_safe` gives a caller a
+  checkable predicate before emitting an event, and `Secret<T>` now gives an
+  opaque handle/flag type whose whole-value comparison is refused at compile
+  time. Still not met in the sense of a `Secret<T>` that wraps raw secret
+  *bytes* — the type argument is bounded to `i64`/`bool` today — see
+  [Secret value semantics](#secret-value-semantics-secrett).
 - "Authentication and authorization remain separate typed concepts" — **met
   at the function-signature level**: see
   [Authentication is not authorization](#authentication-is-not-authorization).

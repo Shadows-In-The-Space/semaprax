@@ -7,9 +7,21 @@
   implemented and tested as an executable HIR admission check
   (`src/kernel_zero.rs`), and the self-hosting gate ladder defined with
   rung 0 reached and evidenced. No rung above 0 is reached. No proof in this
-  document is machine-checked, and the reification predicate's own
-  faithfulness to real evaluation (not just admission) is not yet checked
-  either — see "Reification" below.
+  document is machine-checked. A later session added a from-scratch Kernel-0
+  reference interpreter (`src/kernel_zero/{term,value,eval}.rs`), an HIR
+  translator (`src/kernel_zero/reify.rs`), and a differential test against
+  the compiler's own interpreter backend over a deterministic 74-program
+  corpus (`src/kernel_zero/{corpus,differential}.rs`) — see "Reification"
+  and "Differential testing" below. This closes the reification predicate's
+  *faithfulness* gap only against a finite, non-exhaustive corpus and only
+  for the interpreter backend; it is evidence, not a proof, and it does not
+  cover the native or Wasm backends. The differential test run this session
+  found **zero disagreements**, and, independently of the compiler, found
+  that this document's own Progress theorem is incomplete as literally
+  stated for `i64` overflow and division/remainder by zero, and that its
+  typing table omits an operator combination (`bool == bool`/`bool !=
+  bool`) the real language and the reification predicate both admit — both
+  are recorded below rather than silently patched.
 - Audience: compiler contributors, language designers, and any agent asked to
   extend, self-host, or formally verify part of SEMAPRAX.
 
@@ -57,16 +69,23 @@ Read this section before citing this document elsewhere.
   reached and evidenced; every higher rung, including the formatter
   self-hosting target the issue names as the first realistic candidate, is
   unreached and is recorded as a target, not a result.
-- **The compiler-to-Kernel-0 translation's *admission* half is now
-  mechanically checked; its *faithfulness* half is still unproved.**
-  `src/kernel_zero.rs` decides, mechanically, whether a given
-  `ResolvedFunction` matches Kernel-0's grammar. It does not check, and
-  nothing yet checks, whether that function's real evaluation (interpreter,
-  native, or Wasm) actually agrees with Kernel-0's operational semantics on
-  it -- that half needs a reference interpreter and a differential test,
-  neither of which exists yet. Section "Reification: HIR to Kernel-0, and
-  its unproved edge" names the exact remaining gap the issue's own
-  failure-cases section warns about.
+- **The compiler-to-Kernel-0 translation's *admission* half is mechanically
+  checked; its *faithfulness* half now has a differential test, which is
+  evidence, not a proof.** `src/kernel_zero.rs` decides, mechanically,
+  whether a given `ResolvedFunction` matches Kernel-0's grammar.
+  `src/kernel_zero/differential.rs` now checks a from-scratch reference
+  interpreter (`src/kernel_zero/eval.rs`) against the compiler's real
+  interpreter backend, driven through its ordinary public
+  `interpreter::interpret` entry point, over a deterministic 74-program
+  corpus (14 hand-written edge cases plus 60 generated programs, 197
+  concrete-argument comparisons total, seed `0x4b65726e656c3021` --
+  see "Differential testing" below for exact counts and what was found).
+  This is **not** a proof that the interpreter always agrees with Kernel-0's
+  operational semantics: the corpus is finite, and it is silent on the
+  **native and Wasm backends**, which this session's differential test does
+  not touch at all. Section "Reification: HIR to Kernel-0, and its
+  unproved edge" and "Differential testing" together name what is now
+  checked and what remains open.
 - **The `SPX-G171` byte figures below are not independently re-measured at
   full scale in this session.** The 18,874,368-byte `MAX_BUILDER_BYTES`
   constant is read directly from source and cited with its exact location;
@@ -335,21 +354,132 @@ weak link."* What is closed now, and what remains open:
   *admitted* `ResolvedFunction`'s HIR shape matches Kernel-0's grammar --
   closing the "predicate stated in prose only" half of this section's
   original gap.
-- **Still open:** "this function reifies" is not yet the same claim as "the
-  compiler's interpreter/native/Wasm lowerings agree with Kernel-0's
-  operational semantics on it." That needs a from-scratch Kernel-0 reference
-  interpreter plus a differential test between that reference and the
-  compiler's own backends over a generated corpus of reifying programs --
-  neither exists yet. Until it does, this document's Kernel-0 proof remains
-  **necessary but not sufficient** evidence about the real compiler: it
-  proves a term-rewriting system on paper is safe, and now mechanically
-  identifies which real functions are claimed to reduce to that system, but
-  does not yet mechanically prove any specific compiler pass reduces them to
-  it *faithfully* (i.e. that evaluating the real function and evaluating its
-  Kernel-0 term agree).
+- **Partially closed, this session:** "this function reifies" is now checked
+  against "the compiler's interpreter backend agrees with Kernel-0's
+  operational semantics on it" for a finite corpus, by a from-scratch
+  Kernel-0 reference interpreter (`src/kernel_zero/{term,value,eval}.rs`), a
+  total-on-admission HIR translator (`src/kernel_zero/reify.rs`), and a
+  differential test (`src/kernel_zero/differential.rs`) -- see "Differential
+  testing" below for the corpus, the seed, and the exact result. **Still
+  open:** the native and Wasm backends are not compared at all, the corpus
+  is finite and not exhaustive (a passing differential test is evidence a
+  disagreement was not found, not a proof none exists), and Kernel-0's own
+  operational-semantics rules turned out to need an explicit extension
+  before a reference interpreter could even be written against them --
+  "Differential testing" documents that extension rather than treating it as
+  already covered by the "Paper safety proof" above.
 
-This narrower remaining gap is the highest-priority follow-up this document
-identifies (see "Immediate follow-ups").
+This narrower remaining gap was the highest-priority follow-up this document
+identified; "Differential testing" below records what closing part of it
+found, in both directions (the compiler's behavior, and two gaps in this
+document's own stated grammar/semantics that a from-scratch reference
+implementation surfaced by simply needing to make every case computable).
+
+## Differential testing: reference interpreter vs. the compiler's interpreter
+
+**What ran.** `src/kernel_zero/differential.rs`'s single test,
+`reference_interpreter_agrees_with_the_compiler_over_the_kernel_zero_corpus`,
+runs every case below through two independent paths and asserts the two
+outcomes are identical:
+
+1. **Reference side:** `crate::parse` the case's `.spx` source, `hir::resolve`
+   it, translate the entry function via `reify::translate_program` (defined
+   only where `kernel_zero::reifies_into_kernel_zero` already admits the
+   function -- the predicate is the gate, the translator is total on what it
+   admits), and evaluate with `eval::eval_program`. This path shares no code
+   with `src/interpreter.rs`: no function, type, or constant from that module
+   is imported anywhere under `src/kernel_zero/`.
+2. **Compiler side:** the same source, written to a temp file, run through
+   `interpreter::interpret` -- the same public entry point
+   `tests/interpreter_v1.rs`'s own golden-envelope tests call -- never by
+   constructing an `Evaluator` or calling `evaluate`/`combine` directly.
+
+**Corpus.** 14 hand-written edge cases (`i64` add/sub/mul overflow,
+division/remainder by zero, `i64::MIN` divided/remaindered by `-1`, negating
+`i64::MIN`, an untaken `if` branch that would fault if evaluated, `false &&
+<would-fault>`, `true || <would-fault>`, `bool == bool` over all four
+argument combinations, a three-level non-recursive call chain with a
+non-commutative operator to make left-to-right argument evaluation
+observable, and the nested `let`/`if`/call/arithmetic shape "Rung 0
+evidence" above hand-ran) plus 60 generated programs from a deterministic
+xorshift64 PRNG seeded with the fixed constant `0x4b65726e656c3021`
+(`src/kernel_zero/corpus.rs::CORPUS_SEED`; ASCII `"Kernel0!"`), each 1-4
+helper functions plus one entry function combining `if`/`let`/arithmetic/
+comparison/`&&`/`||`/non-recursive calls, sampled at up to four concrete
+argument tuples biased toward `0`, `1`, `-1`, `i64::MAX`, and `i64::MIN`. 197
+concrete-argument comparisons total.
+
+**Result, this session: zero disagreements.** Every one of the 197
+comparisons produced an identical outcome (the same returned `i64`/`bool`
+value, or the same one of the eight checked-arithmetic fault codes) on both
+sides. This is evidence over one finite, seeded corpus that the interpreter
+backend's checked-arithmetic, short-circuit, evaluation-order, and call
+semantics agree with Kernel-0's operational semantics (as extended below) on
+every case this corpus reached -- it is not a proof that no disagreement
+exists outside this corpus, and it says nothing about the native or Wasm
+backends.
+
+**Two gaps this exercise found, neither of them a compiler bug:**
+
+1. **Kernel-0's stated operational semantics do not cover `i64` overflow or
+   division/remainder by zero, so its Progress theorem is incomplete as
+   literally written for those inputs.** "Operational semantics" states one
+   total-looking rule, `n1 op n2 = n ("ordinary arithmetic")`, with no side
+   condition. But `Div`/`Rem` are undefined in ordinary arithmetic at a zero
+   divisor, and `Add`/`Sub`/`Mul`/`Div`/`Rem`/(unary) `Neg` are undefined on
+   `i64` outside its representable range (`i64::MIN`/`-1` for `Div`/`Rem`
+   specifically). A term such as `1 / 0` is well-typed under the stated
+   typing rules (both operands are `i64`) but has no reduction rule that
+   fires and is not a value -- exactly the stuck state "Progress" claims
+   cannot happen. This was found by trying to write a reference evaluator
+   directly against the stated rules and discovering `n1 op n2 = n` has no
+   answer for these inputs; `src/interpreter.rs`'s existing checked-
+   arithmetic handling was read afterward only to see how the real compiler
+   already resolves the identical gap (permitted by this task's own
+   instructions), not copied from -- the reference evaluator's `Fault`
+   arithmetic is written from Rust's `checked_add`/`checked_sub`/
+   `checked_mul`/`checked_div`/`checked_rem`/`checked_neg` directly against
+   which `i64` operations are partial, and the two independently-derived
+   resolutions turn out to name the same eight cases because there is
+   essentially one sensible way to make `i64` arithmetic total via an
+   explicit stuck/fault outcome, not because one copied the other.
+   **Resolution recorded here, not silently folded into the proof above:**
+   `src/kernel_zero/value.rs`'s `Fault` type and `src/kernel_zero/eval.rs`
+   extend the calculus with a third outcome alongside "reduces to a value"
+   and "diverges" (which Kernel-0's acyclic call graph already rules out):
+   "reaches one of eight named stuck points," matching exactly the family of
+   partial operations named above. The real compiler resolves the same gap
+   the same way, independently: `src/interpreter.rs`'s checked arithmetic
+   (`combine`, read-only, never imported) turns each of these into a
+   `Flow::Failure`/`NormalizedStatus` outcome rather than panicking or
+   wrapping, under the domain `semaprax.arithmetic.v1` with the eight codes
+   `StatusCase::code()` assigns (`src/cleanup_plan.rs`) -- the differential
+   test's 0-disagreement result is exactly the claim that the reference
+   evaluator's from-scratch `Fault` resolution and the compiler's
+   independently-existing checked-arithmetic resolution agree on which stuck
+   points arise and in which order. The paper proof's Preservation/Progress
+   theorems above are unaffected in spirit (every non-arithmetic rule is
+   still total on well-typed terms) but are **not restated** here to cover
+   the extended three-outcome calculus; doing so rigorously is future work,
+   not claimed by this section.
+2. **Kernel-0's typing table does not state a rule for `bool == bool` /
+   `bool != bool`, but the real language and `reifies_into_kernel_zero` both
+   admit it.** "Static typing" gives `==`/`!=`/`<`/`<=`/`>`/`>=` only over
+   `i64` operands, and gives `bool` operands only to `&&`/`||`. Confirmed
+   against the built CLI: `fn f(a: bool, b: bool) -> bool { a == b }`
+   verifies (`bool < bool` correctly does not, with `SPX-T208`, matching the
+   stated table). `expr_reifies` in `src/kernel_zero.rs` admits `Binary`
+   generically once both operands reify and the result is a Kernel-0 scalar,
+   without checking which specific operator/operand-type pairs the typing
+   table states, so it already accepted this case before this session; the
+   reference interpreter and generated corpus (`src/kernel_zero/corpus.rs`)
+   both exercise it deliberately (case 12 above) rather than leaving it
+   untested. This is a documentation completeness gap, not a soundness one:
+   the missing rule (`Γ⊢e1:bool Γ⊢e2:bool` implies
+   `Γ⊢e1 BinOp e2:bool` for `BinOp ∈ {==, !=}`) has the identical shape the
+   Preservation proof already handles for the `i64` case, so extending the
+   proof sketch to cover it is routine, not attempted here, and not claimed
+   as done.
 
 ## What is and is not mechanically checked
 
@@ -358,7 +488,8 @@ identifies (see "Immediate follow-ups").
 | Kernel-0 syntax/typing/semantics are internally consistent (progress, preservation) | **No.** Paper proof only. | This document, "Paper safety proof" |
 | A given `.spx` source text is admitted or rejected by the real toolchain, with a named diagnostic, at a named boundary | **Yes**, for the three ceilings below | `tests/cleanup_backends/kernel_boundary.rs`, `src/parser/depth/tests.rs` |
 | A real `ResolvedFunction`'s HIR shape matches Kernel-0's grammar (the admission predicate itself) | **Yes.** | `src/kernel_zero.rs`, its `tests` submodule |
-| A reifying function's real evaluation (interpreter/native/Wasm) agrees with Kernel-0's operational semantics on it | **No.** No reference interpreter or differential test exists yet. | "Reification" above, "Immediate follow-ups" item 1 |
+| A reifying function's real evaluation agrees with Kernel-0's operational semantics on it, for the **interpreter backend**, over a finite corpus | **Partially.** 197 comparisons across 74 seeded, deterministic programs, 0 disagreements this session. Not exhaustive; a passing run is evidence, not a proof. | `src/kernel_zero/differential.rs`, "Differential testing" above |
+| The same, for the **native or Wasm backends** | **No.** Not attempted; the differential test added this session compares the interpreter backend only. | "Differential testing" above |
 | Interpreter, native, and Wasm backends agree on one concrete Kernel-0-shaped program's observable output | **Partially, for one hand-run example this session**, not as an automated, repeatable gate | "Rung 0 evidence" below |
 | Deterministic stable-ID graph projection | **No new checking added by this session.** Existing coverage is in `tests/workspace/semantic_graph.rs` and `src/workspace_graph/*`; this document does not extend it. | out of scope this session |
 | Semantic-transaction precondition/replay validity | **No new checking added by this session.** Existing coverage is in `src/semantic_workspace_*.rs`. | out of scope this session |
@@ -555,15 +686,22 @@ In priority order, given the gaps this document names explicitly rather than
 papering over:
 
 1. **Implement the Kernel-0 reification predicate as an executable HIR
-   walk: done** (`src/kernel_zero.rs`, this session; see "Reification"
-   above). **Still open:** a from-scratch Kernel-0 reference interpreter,
-   plus a differential test between that reference interpreter and the
-   compiler's own interpreter/native/Wasm backends over a generated corpus
-   of reifying programs. This remaining half closes this document's largest
-   named gap: today's Kernel-0 proof is about a term-rewriting system on
-   paper, mechanically connected to which real functions claim to reduce to
-   it, but not yet provably about how any specific compiler pass evaluates
-   them.
+   walk: done** (`src/kernel_zero.rs`). **A from-scratch Kernel-0 reference
+   interpreter plus a differential test against the compiler's interpreter
+   backend over a generated corpus: done, this session** (see "Differential
+   testing" above; `src/kernel_zero/{term,value,eval,reify,corpus,
+   differential}.rs`), with two document-level gaps found and recorded
+   rather than silently patched (Progress's incompleteness at `i64`
+   overflow/division-by-zero, and the missing `bool == bool`/`bool != bool`
+   typing rule). **Still open:** the same differential comparison against
+   the **native and Wasm backends** (this session's test compares the
+   interpreter backend only), a **larger or adversarially-chosen corpus**
+   rather than one seeded generator's 60 programs (a passing differential
+   test bounds the search that was actually done, not the space of possible
+   disagreements), and a **restated paper proof** for the three-outcome
+   (value/fault/divergence) calculus "Differential testing" above's first
+   finding shows the original two-outcome (value/divergence) proof sketch
+   does not, as literally written, cover.
 2. **File issue #241's three required-evidence items** using this document's
    exact numbers: a boundary regression fixture for `SPX-H006` (now added,
    here, ahead of that issue landing it independently — coordination needed

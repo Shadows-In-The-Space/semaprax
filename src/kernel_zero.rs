@@ -25,12 +25,18 @@
 //! - It makes the reification predicate real and mechanically checked
 //!   instead of prose-only, for the "does this `ResolvedFunction` reify"
 //!   half of the gap; see this module's tests.
-//! - It does **not** add a from-scratch Kernel-0 reference interpreter or a
-//!   differential test between that reference and the compiler's own
-//!   interpreter/native/Wasm backends. That remains open -- see the
-//!   specification document's "Immediate follow-ups", item 1 -- and is a
-//!   materially larger task (a second, independent evaluator plus a
-//!   generated corpus) than this predicate alone.
+//! - A later session added the from-scratch Kernel-0 reference interpreter
+//!   and differential test this bullet used to say did not exist:
+//!   `eval`/`term`/`value`/`reify` (the reference interpreter and HIR
+//!   translator, always compiled) and `corpus`/`differential`
+//!   (`#[cfg(test)]`-only: the deterministic generator and the differential
+//!   test itself). It compares only the **interpreter** backend, over a
+//!   finite seeded corpus -- see the specification document's "Differential
+//!   testing" section for the corpus, the seed, the result, and two gaps in
+//!   this document's own stated grammar/semantics that writing an
+//!   independent evaluator against it surfaced. The native and Wasm
+//!   backends, and any corpus larger than this session's, remain open --
+//!   see the specification document's "Immediate follow-ups", item 1.
 //! - It is stricter than the document's stated prose predicate in one way:
 //!   it additionally requires empty `requires`/`ensures` contract lists.
 //!   Kernel-0's grammar (in the specification document) has no contract
@@ -45,6 +51,24 @@ use crate::hir::{
     ResolvedProgram, ResolvedStatement, ResolvedType,
 };
 use std::collections::HashSet;
+
+// The from-scratch Kernel-0 reference interpreter (term grammar, evaluator,
+// and HIR translator) plus the deterministic corpus generator and
+// differential test that checks it against the real compiler -- see each
+// module's own doc comment, and "Reification: HIR to Kernel-0, and its
+// unproved edge" / "Immediate follow-ups" in
+// `docs/SEMANTIC-KERNEL-V1.md` for why this exists.
+mod eval;
+mod reify;
+mod term;
+mod value;
+
+// The deterministic corpus generator and the differential test itself are
+// test-only infrastructure, not part of the reference interpreter proper.
+#[cfg(test)]
+mod corpus;
+#[cfg(test)]
+mod differential;
 
 /// Returns `true` iff the function declared as `id` in `program` reifies
 /// into Kernel-0, per this module's predicate. `false` covers both "no such

@@ -17,6 +17,14 @@ mod cxx_calling_consumer;
 mod fixture;
 #[path = "public_generic_native_adapter_v1/malformed_trusted_descriptor.rs"]
 mod malformed_trusted_descriptor;
+/// Issue #140's "max bounds" callable cell: a payload that exactly
+/// saturates the boundary profile (256 owned leaves of 64 KiB each, i.e.
+/// exactly `MAX_TOTAL_PAYLOAD_BYTES`) driven through the generated Rust,
+/// C11 and C++17 calling consumers against the real compiled provider --
+/// the only route in this harness that can reach each consumer's
+/// total-payload guard at all.
+#[path = "public_generic_native_adapter_v1/max_bounds_saturation.rs"]
+mod max_bounds_saturation;
 /// The generated Rust *calling* consumer (issue #156): a real, standalone
 /// external crate built against the same compiled native provider `fixture`
 /// exercises from C, executed end to end.

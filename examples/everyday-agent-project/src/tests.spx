@@ -1,0 +1,8 @@
+module everyday.tests;
+use function @id("everyday.manifest.max-input-bytes") from everyday.manifest as max_input_bytes;
+
+@id("everyday.tests.main")
+fn main() -> i64
+{
+    if max_input_bytes() == 4096usize { 0 } else { 1 }
+}

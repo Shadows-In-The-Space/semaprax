@@ -335,6 +335,8 @@ mod agent_proposal_client_execution;
 mod agent_proposal_runtime_v1_compatibility;
 #[path = "agent_runtime_v1/agent_proposal_schema_v1.rs"]
 mod agent_proposal_schema_v1;
+#[path = "agent_runtime_v1/everyday_agent_product.rs"]
+mod everyday_agent_product;
 #[path = "agent_runtime_v1/source_agent_lifecycle.rs"]
 mod source_agent_lifecycle;
 #[path = "agent_runtime_v1/source_agent_lowering.rs"]

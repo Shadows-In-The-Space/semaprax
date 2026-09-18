@@ -1,0 +1,25 @@
+schema = "semaprax.manifest.v1"
+
+[package]
+name = "everyday-agent"
+version = "1.0.0"
+profile = "filesystem-io.v3"
+
+[modules]
+entry = "everyday.manifest"
+sources = ["src/manifest_json.spx", "src/tests.spx"]
+tests = ["everyday.tests"]
+
+[exports]
+web = []
+
+[command]
+function = "everyday.manifest.review-ok"
+
+[capabilities]
+required = ["fs.read", "fs.write"]
+
+[dependencies]
+std.fs = "^0.1.0"
+std.io = "^0.1.0"
+std.path.value = "^0.1.0"

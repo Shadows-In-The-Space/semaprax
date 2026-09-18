@@ -1,0 +1,388 @@
+module everyday.manifest;
+use type @id("std.io.reader") from std.io as Reader;
+use type @id("std.io.writer") from std.io as Writer;
+use function @id("std.io.reader.finish") from std.io as reader_finish;
+use function @id("std.io.writer.from-bytes") from std.io as writer_from_bytes;
+use function @id("std.io.writer.write-u8") from std.io as writer_write_u8;
+use type @id("std.path.value.path") from std.path.value as Path;
+use function @id("std.path.value.from-bytes") from std.path.value as path_from_bytes;
+use function @id("std.fs.read") from std.fs as fs_read;
+use function @id("std.fs.write-new") from std.fs as fs_write_new;
+
+permit { fs.read, fs.write }
+
+// Bounded manifest-review data slice of the Everyday Agent validation
+// product (ABI-09A.17). This module performs the real typed filesystem and
+// bounded JSON work; it never runs through `semaprax run` alone (that grants
+// no ambient filesystem authority, by design), only through a host that
+// binds a scoped filesystem provider, exactly as std.fs itself requires.
+//
+// The JSON scanner below validates and walks exactly one bounded, flat
+// (non-nested) top-level object, the only shape this product's manifest and
+// report schemas ever use. It is a deliberately narrower rewrite of the
+// general recursive scanner in std.data.json.doc: depending on that package
+// here, alongside std.fs (a "hosted" multi-backend tier package), exceeded
+// the SPX-G171 Workspace Semantic Graph `builder_bytes` pre-bound
+// (18,874,368) even for a two-line command body, and a local copy of the
+// general recursive/depth-bounded scanner exceeded it again purely from its
+// own nested match/state-table size once compiled for that same hosted
+// profile. See README.md "Scope and nonclaims" for the exact reproduction.
+// A flat-only scanner is smaller and is exactly what this bounded manifest
+// shape needs; it is not a general JSON document scanner.
+@id("everyday.manifest.json.at-in")
+fn at_in(input: borrow Slice<u8>, index: usize, low: u8, high: u8) -> bool
+{
+    match byte_get(input, index) { Option::Some { value: byte } => byte >= low && byte <= high, Option::None {} => false, }
+}
+
+@id("everyday.manifest.json.skip-space")
+fn skip_space(input: borrow Slice<u8>, start: usize) -> usize
+    ensures result <= byte_len(input)
+{
+    let length = byte_len(input);
+    let mut index = if start > length { length } else { start };
+    let mut scanning = index < length;
+    while scanning {
+        let space = at_in(input, index, 32u8, 32u8) || at_in(input, index, 9u8, 10u8) || at_in(input, index, 13u8, 13u8);
+        index = if space { index + 1usize } else { index };
+        scanning = space && index < length;
+        scanning
+    }
+    index
+}
+
+@id("everyday.manifest.json.string-end")
+fn string_end(input: borrow Slice<u8>, start: usize) -> usize
+{
+    let mut index = start + 1usize;
+    let mut fault = start;
+    let mut bad = !at_in(input, start, 34u8, 34u8);
+    let mut running = !bad;
+    while running {
+        let closed = at_in(input, index, 34u8, 34u8);
+        let escape = at_in(input, index, 92u8, 92u8);
+        let plain = at_in(input, index, 32u8, 255u8);
+        let step = if closed { index } else { if escape { index + 2usize } else { if plain { index + 1usize } else { byte_len(input) + 1usize + index } } };
+        bad = step > byte_len(input);
+        fault = if bad { index } else { fault };
+        index = if closed || bad { index } else { step };
+        running = !closed && !bad;
+        running
+    }
+    if bad { byte_len(input) + 1usize + fault } else { index + 1usize }
+}
+
+@id("everyday.manifest.json.digits-end")
+fn digits_end(input: borrow Slice<u8>, start: usize) -> usize
+{
+    let mut index = start;
+    let mut scanning = at_in(input, index, 48u8, 57u8);
+    while scanning {
+        index = index + 1usize;
+        scanning = at_in(input, index, 48u8, 57u8);
+        scanning
+    }
+    if index == start { byte_len(input) + 1usize + start } else { index }
+}
+
+@id("everyday.manifest.json.value-end")
+fn value_end(input: borrow Slice<u8>, start: usize) -> usize
+{
+    if at_in(input, start, 34u8, 34u8) { string_end(input, start) } else { digits_end(input, start) }
+}
+
+@id("everyday.manifest.json.same-byte-in")
+fn same_byte_in(input: borrow Slice<u8>, left: usize, right: usize) -> bool
+{
+    match byte_get(input, right) { Option::Some { value: byte } => at_in(input, left, byte, byte), Option::None {} => false, }
+}
+
+@id("everyday.manifest.json.span-same")
+fn span_same(input: borrow Slice<u8>, left: usize, right: usize, length: usize) -> bool
+{
+    let mut offset = 0usize;
+    let mut same = true;
+    let mut running = offset < length;
+    while running {
+        same = same_byte_in(input, left + offset, right + offset);
+        offset = offset + 1usize;
+        running = same && offset < length;
+        running
+    }
+    same
+}
+
+@id("everyday.manifest.json.same-byte-across")
+fn same_byte_across(input: borrow Slice<u8>, left: usize, name: borrow Slice<u8>, right: usize) -> bool
+{
+    match byte_get(name, right) { Option::Some { value: byte } => at_in(input, left, byte, byte), Option::None {} => false, }
+}
+
+@id("everyday.manifest.json.token-is")
+fn token_is(input: borrow Slice<u8>, token: usize, name: borrow Slice<u8>) -> bool
+{
+    let end = string_end(input, token);
+    let mut offset = 0usize;
+    let mut same = end <= byte_len(input) && end == token + byte_len(name) + 2usize;
+    let mut running = same && offset < byte_len(name);
+    while running {
+        same = same_byte_across(input, token + 1usize + offset, name, offset);
+        offset = offset + 1usize;
+        running = same && offset < byte_len(name);
+        running
+    }
+    same
+}
+
+@id("everyday.manifest.json.first-key")
+fn first_key(input: borrow Slice<u8>) -> usize
+{
+    let open = skip_space(input, 0usize);
+    let first = skip_space(input, open + 1usize);
+    if at_in(input, open, 123u8, 123u8) && at_in(input, first, 34u8, 34u8) { first } else { byte_len(input) + 1usize + open }
+}
+
+// Sentinel-based advance: returns a position `> byte_len(input)` once there
+// is no further member (no trailing comma). Used only where "found the next
+// key, or ran out" is the whole question (`member`, `key_before`); the
+// flat-object structural check below tracks the true end itself instead of
+// relying on this sentinel.
+@id("everyday.manifest.json.next-key")
+fn next_key(input: borrow Slice<u8>, key: usize) -> usize
+{
+    let colon = skip_space(input, string_end(input, key));
+    let value = skip_space(input, colon + 1usize);
+    let after = skip_space(input, value_end(input, value));
+    if at_in(input, after, 44u8, 44u8) { skip_space(input, after + 1usize) } else { byte_len(input) + 1usize + after }
+}
+
+@id("everyday.manifest.json.key-before")
+fn key_before(input: borrow Slice<u8>, first: usize, key: usize) -> bool
+{
+    let length = string_end(input, key) - key;
+    let mut here = first;
+    let mut found = false;
+    let mut running = here < key;
+    while running {
+        found = string_end(input, here) - here == length && span_same(input, here, key, length);
+        here = next_key(input, here);
+        running = !found && here < key;
+        running
+    }
+    found
+}
+
+@id("everyday.manifest.member")
+fn member(input: borrow Slice<u8>, name: borrow Slice<u8>) -> usize
+{
+    let mut here = first_key(input);
+    let mut found = here <= byte_len(input) && token_is(input, here, name);
+    let mut running = !found && here < byte_len(input);
+    while running {
+        here = next_key(input, here);
+        found = here < byte_len(input) && token_is(input, here, name);
+        running = !found && here < byte_len(input);
+        running
+    }
+    if found { skip_space(input, skip_space(input, string_end(input, here)) + 1usize) } else { byte_len(input) + 1usize + 0usize }
+}
+
+// The one structural gate: exactly one flat top-level object, every key
+// unique, every value a string or an unsigned integer, and nothing after the
+// closing brace but whitespace.
+@id("everyday.manifest.json.flat-object-valid")
+fn flat_object_valid(input: borrow Slice<u8>) -> bool
+{
+    let open = skip_space(input, 0usize);
+    if !at_in(input, open, 123u8, 123u8) { false } else { let first = skip_space(input, open + 1usize); let mut here = first; let mut unique = true; let mut last_after = first; let mut running = at_in(input, here, 34u8, 34u8); while running { unique = unique && !key_before(input, first, here); let colon = skip_space(input, string_end(input, here)); let value = skip_space(input, colon + 1usize); let after = skip_space(input, value_end(input, value)); last_after = after; here = if at_in(input, after, 44u8, 44u8) { skip_space(input, after + 1usize) } else { byte_len(input) + 1usize + after }; running = unique && here < byte_len(input); running } let closed = at_in(input, last_after, 125u8, 125u8); let tail_end = if closed { skip_space(input, last_after + 1usize) } else { byte_len(input) + 1usize }; unique && closed && tail_end == byte_len(input) }
+}
+
+@id("everyday.manifest.max-input-bytes")
+fn max_input_bytes() -> usize
+{
+    4096usize
+}
+
+@id("everyday.manifest.max-payload-bytes")
+fn max_payload_bytes() -> usize
+{
+    16usize
+}
+
+@id("everyday.manifest.report-len")
+fn report_len() -> usize
+{
+    7usize
+}
+
+@id("everyday.manifest.payload-len")
+fn payload_len(input: borrow Slice<u8>, at: usize) -> usize
+{
+    let end = string_end(input, at);
+    if end <= at + 1usize { 0usize } else { end - at - 2usize }
+}
+
+@id("everyday.manifest.record-count-is-three")
+fn record_count_is_three(input: borrow Slice<u8>, at: usize) -> bool
+{
+    at_in(input, at, 51u8, 51u8) && !at_in(input, at + 1usize, 48u8, 57u8)
+}
+
+@id("everyday.manifest.tag-code")
+fn tag_code(input: borrow Slice<u8>, at: usize) -> i64
+{
+    let ok = [111u8, 107u8];
+    let warn = [119u8, 97u8, 114u8, 110u8];
+    if token_is(input, at, array_as_slice(ok)) { 0 } else { if token_is(input, at, array_as_slice(warn)) { 1 } else { 2 } }
+}
+
+// ---- one record's acceptance, unrolled per bounded slot (no growable
+// collection exists in the language; three fixed slots is the whole bound) ----
+@id("everyday.manifest.record-accepted")
+fn record_accepted(input: borrow Slice<u8>, tag_at: usize, payload_at: usize) -> bool
+{
+    tag_at <= byte_len(input) && payload_at <= byte_len(input) && tag_code(input, tag_at) == 0 && payload_len(input, payload_at) <= max_payload_bytes()
+}
+
+@id("everyday.manifest.record-present")
+fn record_present(input: borrow Slice<u8>, id_at: usize, tag_at: usize, payload_at: usize) -> bool
+{
+    id_at <= byte_len(input) && tag_at <= byte_len(input) && payload_at <= byte_len(input)
+}
+
+@id("everyday.manifest.bool-to-count")
+fn bool_to_count(value: bool) -> i64
+{
+    if value { 1 } else { 0 }
+}
+
+@id("everyday.manifest.present-count")
+fn present_count(input: borrow Slice<u8>) -> i64
+{
+    let rec0_id = [114u8, 101u8, 99u8, 48u8, 95u8, 105u8, 100u8];
+    let rec0_tag = [114u8, 101u8, 99u8, 48u8, 95u8, 116u8, 97u8, 103u8];
+    let rec0_payload = [114u8, 101u8, 99u8, 48u8, 95u8, 112u8, 97u8, 121u8, 108u8, 111u8, 97u8, 100u8];
+    let rec1_id = [114u8, 101u8, 99u8, 49u8, 95u8, 105u8, 100u8];
+    let rec1_tag = [114u8, 101u8, 99u8, 49u8, 95u8, 116u8, 97u8, 103u8];
+    let rec1_payload = [114u8, 101u8, 99u8, 49u8, 95u8, 112u8, 97u8, 121u8, 108u8, 111u8, 97u8, 100u8];
+    let rec2_id = [114u8, 101u8, 99u8, 50u8, 95u8, 105u8, 100u8];
+    let rec2_tag = [114u8, 101u8, 99u8, 50u8, 95u8, 116u8, 97u8, 103u8];
+    let rec2_payload = [114u8, 101u8, 99u8, 50u8, 95u8, 112u8, 97u8, 121u8, 108u8, 111u8, 97u8, 100u8];
+    let rec0_present = record_present(input, member(input, array_as_slice(rec0_id)), member(input, array_as_slice(rec0_tag)), member(input, array_as_slice(rec0_payload)));
+    let rec1_present = record_present(input, member(input, array_as_slice(rec1_id)), member(input, array_as_slice(rec1_tag)), member(input, array_as_slice(rec1_payload)));
+    let rec2_present = record_present(input, member(input, array_as_slice(rec2_id)), member(input, array_as_slice(rec2_tag)), member(input, array_as_slice(rec2_payload)));
+    bool_to_count(rec0_present) + bool_to_count(rec1_present) + bool_to_count(rec2_present)
+}
+
+@id("everyday.manifest.accepted-count")
+fn accepted_count(input: borrow Slice<u8>) -> i64
+{
+    let rec0_id = [114u8, 101u8, 99u8, 48u8, 95u8, 105u8, 100u8];
+    let rec0_tag = [114u8, 101u8, 99u8, 48u8, 95u8, 116u8, 97u8, 103u8];
+    let rec0_payload = [114u8, 101u8, 99u8, 48u8, 95u8, 112u8, 97u8, 121u8, 108u8, 111u8, 97u8, 100u8];
+    let rec1_id = [114u8, 101u8, 99u8, 49u8, 95u8, 105u8, 100u8];
+    let rec1_tag = [114u8, 101u8, 99u8, 49u8, 95u8, 116u8, 97u8, 103u8];
+    let rec1_payload = [114u8, 101u8, 99u8, 49u8, 95u8, 112u8, 97u8, 121u8, 108u8, 111u8, 97u8, 100u8];
+    let rec2_id = [114u8, 101u8, 99u8, 50u8, 95u8, 105u8, 100u8];
+    let rec2_tag = [114u8, 101u8, 99u8, 50u8, 95u8, 116u8, 97u8, 103u8];
+    let rec2_payload = [114u8, 101u8, 99u8, 50u8, 95u8, 112u8, 97u8, 121u8, 108u8, 111u8, 97u8, 100u8];
+    let rec0_id_at = member(input, array_as_slice(rec0_id));
+    let rec0_tag_at = member(input, array_as_slice(rec0_tag));
+    let rec0_payload_at = member(input, array_as_slice(rec0_payload));
+    let rec1_id_at = member(input, array_as_slice(rec1_id));
+    let rec1_tag_at = member(input, array_as_slice(rec1_tag));
+    let rec1_payload_at = member(input, array_as_slice(rec1_payload));
+    let rec2_id_at = member(input, array_as_slice(rec2_id));
+    let rec2_tag_at = member(input, array_as_slice(rec2_tag));
+    let rec2_payload_at = member(input, array_as_slice(rec2_payload));
+    let rec0_ok = record_present(input, rec0_id_at, rec0_tag_at, rec0_payload_at) && record_accepted(input, rec0_tag_at, rec0_payload_at);
+    let rec1_ok = record_present(input, rec1_id_at, rec1_tag_at, rec1_payload_at) && record_accepted(input, rec1_tag_at, rec1_payload_at);
+    let rec2_ok = record_present(input, rec2_id_at, rec2_tag_at, rec2_payload_at) && record_accepted(input, rec2_tag_at, rec2_payload_at);
+    bool_to_count(rec0_ok) + bool_to_count(rec1_ok) + bool_to_count(rec2_ok)
+}
+
+@id("everyday.manifest.digit-byte")
+fn digit_byte(value: i64) -> u8
+{
+    match value { 0 => 48u8, 1 => 49u8, 2 => 50u8, 3 => 51u8, _ => 63u8, }
+}
+
+// The canonical report is `{"a":<accepted_digit>}`, 7 bytes. `record_count`
+// is pinned at 3 by `review`'s own gate, so a reader recovers
+// `rejected_count` as `3 - accepted_count` without a second field.
+//
+// The write-once byte chain that builds it (`writer_from_bytes` then
+// chained `writer_write_u8` calls, mirroring `std.fs.examples.roundtrip`)
+// is deliberately this short: `review`'s interprocedural `bytes_copy`/
+// write-once site count already spends 8 sites on `input_path`,
+// `output_path`, and their fixed overhead before a single report byte is
+// written, and `SPX-T267` admits at most 16 sites total. Nine or more
+// `writer_write_u8` calls here (i.e. an 8-byte-or-larger report reachable
+// from `review`) is refused with "bytes_copy path reaches 17 sites; limit
+// is 16", reproduced exactly at that boundary. A `while`-loop `bytes_set`
+// writer (the pattern `std.data.json.write.count_into` uses for longer
+// output) does not raise the site count, but combining it with this
+// module's JSON scanner and `std.fs` (a "hosted" multi-backend package)
+// instead exceeds the separate `SPX-G171` Workspace Semantic Graph
+// `builder_bytes` pre-bound (18,874,368) — reproduced by re-adding
+// `report_into`/`report_byte_value` in place of this chain. See README.md
+// "Scope and nonclaims" for both reproductions in one place.
+@id("everyday.manifest.report-writer")
+fn report_writer(accepted: i64, rejected: i64) -> Writer
+{
+    let w0 = writer_from_bytes(bytes_zeroed(7usize));
+    let w1 = writer_write_u8(w0, 123u8);
+    let w2 = writer_write_u8(w1, 34u8);
+    let w3 = writer_write_u8(w2, 97u8);
+    let w4 = writer_write_u8(w3, 34u8);
+    let w5 = writer_write_u8(w4, 58u8);
+    let w6 = writer_write_u8(w5, digit_byte(accepted));
+    writer_write_u8(w6, 125u8)
+}
+
+@id("everyday.manifest.input-path")
+fn input_path() -> Path
+{
+    let input_name = [102u8, 105u8, 120u8, 116u8, 117u8, 114u8, 101u8, 115u8, 47u8, 105u8, 110u8, 112u8, 117u8, 116u8, 46u8, 106u8, 115u8, 111u8, 110u8];
+    path_from_bytes(bytes_copy(array_as_slice(input_name)))
+}
+
+@id("everyday.manifest.output-path")
+fn output_path() -> Path
+{
+    let output_name = [102u8, 105u8, 120u8, 116u8, 117u8, 114u8, 101u8, 115u8, 47u8, 114u8, 101u8, 112u8, 111u8, 114u8, 116u8, 46u8, 106u8, 115u8, 111u8, 110u8];
+    path_from_bytes(bytes_copy(array_as_slice(output_name)))
+}
+
+// ---- the bounded workflow ----
+@id("everyday.manifest.review")
+fn review() -> i64
+    uses { fs.read, fs.write }
+{
+    let reader = fs_read(input_path(), max_input_bytes());
+    let input_bytes = reader_finish(reader);
+    let input = bytes_as_slice(input_bytes);
+    let structurally_valid = flat_object_valid(input);
+    let schema_key = [115u8, 99u8, 104u8, 101u8, 109u8, 97u8];
+    let schema_value = [101u8, 118u8, 101u8, 114u8, 121u8, 100u8, 97u8, 121u8, 45u8, 97u8, 103u8, 101u8, 110u8, 116u8, 45u8, 109u8, 97u8, 110u8, 105u8, 102u8, 101u8, 115u8, 116u8, 46u8, 118u8, 49u8];
+    let schema_at = member(input, array_as_slice(schema_key));
+    let schema_valid = schema_at <= byte_len(input) && token_is(input, schema_at, array_as_slice(schema_value));
+    let count_key = [114u8, 101u8, 99u8, 111u8, 114u8, 100u8, 95u8, 99u8, 111u8, 117u8, 110u8, 116u8];
+    let count_at = member(input, array_as_slice(count_key));
+    let count_valid = count_at <= byte_len(input) && record_count_is_three(input, count_at);
+    let admitted = structurally_valid && schema_valid && count_valid;
+    if !admitted { -1 } else { let present = present_count(input); let accepted = accepted_count(input); let rejected = present - accepted; if present != 3 { -2 } else { let written = fs_write_new(output_path(), report_writer(accepted, rejected)); if written == report_len() { 0 } else { -3 } } }
+}
+
+@id("everyday.manifest.review-ok")
+fn review_ok() -> bool
+    uses { fs.read, fs.write }
+{
+    review() == 0
+}
+
+@id("everyday.manifest.main")
+fn main() -> i64
+{
+    0
+}

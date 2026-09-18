@@ -586,21 +586,24 @@ impl<'a> HirValidator<'a> {
                             "resolved variant contains compiler-owned Bytes outside flat v1",
                         ));
                     }
+                    // Site 4 of the five admitted-variant-payload-profile
+                    // classifiers named in issue #261. Shares its field
+                    // admission test with site 3,
+                    // `type_reachability::is_admitted_owned_string_variant`,
+                    // through the one owning resolved-level ("ResolvedType")
+                    // predicate `type_reachability::
+                    // is_admitted_owned_string_variant_field`. The
+                    // source-level ("Type") twin,
+                    // `TypeTable::is_admitted_owned_string_variant_field`, is
+                    // consulted by sites 1 and 2 before resolution; site 5,
+                    // `Interpreter::value_has_type` (`SPX-F105`), checks a
+                    // runtime value rather than a field type but consults the
+                    // same underlying `is_admitted_copy_aggregate_variant_field`.
                     if has_direct_string
                         && !has_direct_bytes
                         && (!declaration.type_parameters.is_empty()
                             || fields.iter().any(|field| {
-                                field.ty != ResolvedType::String
-                                && !super::type_reachability::nested_record_copy_scalar_is_admitted(
-                                    &field.ty,
-                                )
-                                // Copy Aggregate Variant Payload v1 sibling: no
-                                // drop, so the variant stays a direct owned-string
-                                // variant. Fourth site that had to learn this
-                                // profile; see the commit widening SPX-T268,
-                                // `is_flat_owned_string_variant` and the HIR
-                                // `is_admitted_owned_string_variant` twin.
-                                && !super::type_reachability::is_admitted_copy_aggregate_variant_field(
+                                !super::type_reachability::is_admitted_owned_string_variant_field(
                                     &self.program.declarations,
                                     &field.ty,
                                 )

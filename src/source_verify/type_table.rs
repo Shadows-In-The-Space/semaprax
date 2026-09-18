@@ -704,6 +704,36 @@ impl<'a> TypeTable<'a> {
                 && cases.len() == 2)
     }
 
+    /// Field-level admission test for the owned-string variant profile: a
+    /// direct `string`, a direct Copy scalar, or a drop-free Copy Aggregate
+    /// Variant Payload v1 sibling record. This is the source-level ("Type")
+    /// half of what issue #261 calls out as five independent classifiers of
+    /// admitted variant payload profiles: this predicate is the one owning
+    /// definition for sites 1 and 2 (both operating on `Type`, before
+    /// resolution) --
+    ///
+    /// 1. `check_byte_data_declarations` in
+    ///    `source_verify/declaration/declarations.rs` (`SPX-T268`), and
+    /// 2. `is_flat_owned_string_variant` just below, in this file
+    ///    (`SPX-O002`/`SPX-O104`).
+    ///
+    /// The resolved-level ("ResolvedType") twin used after HIR resolution is
+    /// `hir::type_reachability::is_admitted_owned_string_variant_field`,
+    /// consulted by sites 3 (`is_admitted_owned_string_variant`, `SPX-O117`)
+    /// and 4 (`hir/validation.rs`, `SPX-H006`). Site 5
+    /// (`interpreter.rs::value_has_type`, `SPX-F105`) checks a runtime
+    /// `Value` rather than a field type, but consults the same resolved-level
+    /// `is_admitted_copy_aggregate_variant_field` this predicate also calls.
+    /// A source `Type` and its resolved `ResolvedType` are genuinely
+    /// different representations, so this predicate cannot itself be the one
+    /// definition all five sites share; keeping exactly one owning predicate
+    /// per abstraction level is the strongest sharing the split admits.
+    pub(super) fn is_admitted_owned_string_variant_field(&self, ty: &Type) -> bool {
+        *ty == Type::String
+            || owned_byte_record_copy_field_is_admitted(ty)
+            || self.is_admitted_copy_aggregate_variant_field(ty)
+    }
+
     /// Direct, monomorphic owned-string variant profile. `string` is a
     /// uniquely owned leaf, so it is deliberately separate from Bytes and
     /// cannot be selected by a generic instantiation.
@@ -725,20 +755,10 @@ impl<'a> TypeTable<'a> {
                 .iter()
                 .flat_map(|case| &case.fields)
                 .any(|field| field.ty == Type::String)
-            && cases.iter().flat_map(|case| &case.fields).all(|field| {
-                field.ty == Type::String
-                    || owned_byte_record_copy_field_is_admitted(&field.ty)
-                    // A Copy Aggregate Variant Payload v1 sibling needs no drop
-                    // at all, so the variant's cleanup is still just the string
-                    // leaf and its ownership mode is unchanged. Omitting this
-                    // made a variant that SPX-T215 and SPX-T268 both admit as a
-                    // declaration unusable as a function parameter or result:
-                    // own/borrow mode refused with SPX-O002 and Value mode with
-                    // SPX-O104, on the same type. "Flat" in this name predates
-                    // that payload profile and now means "needs no cleanup
-                    // beyond the string leaf", not "has no nested record".
-                    || self.is_admitted_copy_aggregate_variant_field(&field.ty)
-            })
+            && cases
+                .iter()
+                .flat_map(|case| &case.fields)
+                .all(|field| self.is_admitted_owned_string_variant_field(&field.ty))
     }
 
     /// Copy Aggregate Variant Payload v1: a variant case field may name a

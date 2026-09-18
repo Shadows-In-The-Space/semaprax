@@ -97,6 +97,21 @@ pub(super) fn check_byte_data_declarations<'p>(
                     }
                 }
             }
+            // Site 1 of the five admitted-variant-payload-profile classifiers
+            // named in issue #261. The owned-string field admission test just
+            // below (`types.is_admitted_owned_string_variant_field`) is the
+            // one owning source-level ("Type") predicate this site shares
+            // with site 2, `TypeTable::is_flat_owned_string_variant` in
+            // `type_table.rs` (`SPX-O002`/`SPX-O104`). The other three sites
+            // run after HIR resolution, on `ResolvedType` rather than `Type`,
+            // and share their own owning predicate,
+            // `type_reachability::is_admitted_owned_string_variant_field`:
+            // site 3, `is_admitted_owned_string_variant` in
+            // `hir/type_reachability.rs` (`SPX-O117`); site 4, the variant
+            // profile gate in `hir/validation.rs` (`SPX-H006`); and site 5,
+            // `Interpreter::value_has_type` in `interpreter.rs` (`SPX-F105`),
+            // which checks a runtime value rather than a field type but
+            // consults the same resolved-level copy-aggregate predicate.
             TypeDeclarationKind::Variant { cases } => {
                 let fields = cases
                     .iter()
@@ -153,9 +168,7 @@ pub(super) fn check_byte_data_declarations<'p>(
                         ));
                     } else if has_direct_string
                         && !has_direct_bytes
-                        && field.ty != Type::String
-                        && !owned_byte_record_copy_field_is_admitted(&field.ty)
-                        && !types.is_admitted_copy_aggregate_variant_field(&field.ty)
+                        && !types.is_admitted_owned_string_variant_field(&field.ty)
                     {
                         diagnostics.push(error(
                             program,

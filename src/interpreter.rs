@@ -3732,6 +3732,18 @@ impl Evaluator<'_> {
         Ok(Value::Bytes(value))
     }
 
+    /// Site 5 of the five admitted-variant-payload-profile classifiers named
+    /// in issue #261: sites 1 (`check_byte_data_declarations`, `SPX-T268`)
+    /// and 2 (`TypeTable::is_flat_owned_string_variant`, `SPX-O002`/`SPX-O104`)
+    /// gate source `Type`s; sites 3 (`is_admitted_owned_string_variant`,
+    /// `SPX-O117`) and 4 (`hir/validation.rs`, `SPX-H006`) gate resolved
+    /// `ResolvedType`s. This site checks a runtime `Value` instead, so it
+    /// cannot share either owning field predicate directly, but the Record
+    /// arm below still consults the same resolved-level
+    /// `is_admitted_copy_aggregate_variant_field` that sites 3 and 4 do.
+    /// Missing this disjunct is the worst-case symptom of the five: a
+    /// verified program that fails construction at run time on the
+    /// `SPX-F105` "impossible post-verify state" guard.
     fn value_has_type(&self, value: &Value, ty: &ResolvedType) -> bool {
         match (value, ty) {
             (Value::Int(_), ResolvedType::I64)
@@ -3752,13 +3764,8 @@ impl Evaluator<'_> {
             (Value::Record(carrier), ResolvedType::Nominal { declaration, .. }) => {
                 &carrier.record == declaration
                     && (is_admitted_owned_byte_record(self.declarations, ty)
-                        // Copy Aggregate Variant Payload v1. Without this, a
-                        // nested-record variant payload the verifier admits
-                        // fails construction at run time with the SPX-F105
-                        // "impossible post-verify state" guard -- a verified
-                        // program that cannot execute. The predicate itself
-                        // proves the record is Copy, sized, resource-free and
-                        // drop-free, so admitting it here widens nothing else.
+                        // Copy Aggregate Variant Payload v1 (see the doc
+                        // comment above `value_has_type`).
                         || crate::hir::is_admitted_copy_aggregate_variant_field(
                             self.declarations,
                             ty,

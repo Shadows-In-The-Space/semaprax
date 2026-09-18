@@ -416,6 +416,39 @@ pub(crate) fn is_admitted_concrete_owned_byte_variant(
             && cases.len() == 2)
 }
 
+/// Field-level admission test for the owned-string variant profile: a
+/// direct `ResolvedType::String`, a direct Copy scalar, or a drop-free Copy
+/// Aggregate Variant Payload v1 sibling record. This is the resolved-level
+/// ("ResolvedType") half of what issue #261 calls out as five independent
+/// classifiers of admitted variant payload profiles: this predicate is the
+/// one owning definition for sites 3 and 4 (both operating on `ResolvedType`,
+/// after HIR resolution) --
+///
+/// 3. `is_admitted_owned_string_variant` just below, in this file
+///    (`SPX-O117`, via `resolver_admits_owned_variant`), and
+/// 4. the owned-string variant profile gate in `hir/validation.rs`
+///    (`SPX-H006`).
+///
+/// The source-level ("Type") twin used before resolution is
+/// `source_verify::type_table::TypeTable::is_admitted_owned_string_variant_field`,
+/// consulted by sites 1 (`check_byte_data_declarations`, `SPX-T268`) and 2
+/// (`is_flat_owned_string_variant`, `SPX-O002`/`SPX-O104`). Site 5
+/// (`interpreter.rs::value_has_type`, `SPX-F105`) checks a runtime `Value`
+/// rather than a field type, but consults the same
+/// `is_admitted_copy_aggregate_variant_field` this predicate also calls. A
+/// source `Type` and its resolved `ResolvedType` are genuinely different
+/// representations, so this predicate cannot itself be the one definition
+/// all five sites share; keeping exactly one owning predicate per
+/// abstraction level is the strongest sharing the split admits.
+pub(super) fn is_admitted_owned_string_variant_field(
+    declarations: &DeclarationIndex,
+    ty: &ResolvedType,
+) -> bool {
+    *ty == ResolvedType::String
+        || nested_record_copy_scalar_is_admitted(ty)
+        || is_admitted_copy_aggregate_variant_field(declarations, ty)
+}
+
 /// The direct, monomorphic owned-string variant profile. A string leaf is a
 /// separate owned runtime carrier: it is never a Copy payload and never shares
 /// the owned-Bytes or generic-variant profiles.
@@ -455,18 +488,10 @@ pub(crate) fn is_admitted_owned_string_variant(
                 .iter()
                 .flat_map(|case| &case.fields)
                 .any(|field| field.ty == ResolvedType::String)
-                && cases.iter().flat_map(|case| &case.fields).all(|field| {
-                    field.ty == ResolvedType::String
-                        || nested_record_copy_scalar_is_admitted(&field.ty)
-                        // The HIR twin of the same widening applied to
-                        // `TypeTable::is_flat_owned_string_variant`. A Copy
-                        // Aggregate Variant Payload v1 sibling needs no drop, so
-                        // the variant's cleanup is still just the string leaf.
-                        // Without this, `resolver_admits_owned_variant` refused
-                        // `match own` on a variant the source verifier admits,
-                        // with SPX-O117.
-                        || is_admitted_copy_aggregate_variant_field(declarations, &field.ty)
-                })
+                && cases
+                    .iter()
+                    .flat_map(|case| &case.fields)
+                    .all(|field| is_admitted_owned_string_variant_field(declarations, &field.ty))
         })
 }
 

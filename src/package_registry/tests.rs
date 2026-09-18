@@ -250,6 +250,63 @@ fn an_exact_bundled_std_name_is_also_reserved() {
     assert_eq!(build_snapshot(&[reserved]).unwrap_err().code, "SPX-PKR602");
 }
 
+// --- Ownership continuity / anti-squatting -------------------------------------
+
+#[test]
+fn a_different_publisher_identity_for_the_same_package_is_refused_as_a_squatting_attempt() {
+    // Two different versions of the *same* package, each independently
+    // valid and self-consistent, but claiming two different signer
+    // identities (`entry_from`'s identity is derived from `seed`, which
+    // differs between the two calls below) -- exactly what a squatter
+    // hijacking an existing package name across a later version would look
+    // like from this module's point of view.
+    let first = meaning_entry("1.0.0", "alpha");
+    let second = meaning_entry("2.0.0", "gamma");
+    assert_ne!(first.signature.identity, second.signature.identity);
+    assert_eq!(
+        build_snapshot(&[first, second]).unwrap_err().code,
+        "SPX-PKR604"
+    );
+}
+
+#[test]
+fn the_same_publisher_identity_across_versions_of_one_package_is_allowed() {
+    // Control for the squatting test above: legitimate continuity -- the
+    // *same* claimed identity publishing a second version of its own
+    // package -- is not affected by the check.
+    let first = meaning_entry("1.0.0", "alpha");
+    let mut second = meaning_entry("2.0.0", "gamma");
+    second.signature.identity = first.signature.identity.clone();
+    assert!(build_snapshot(&[first, second]).is_ok());
+}
+
+#[test]
+fn ownership_conflict_is_detected_regardless_of_entry_order() {
+    let first = meaning_entry("1.0.0", "alpha");
+    let second = meaning_entry("2.0.0", "gamma");
+    assert_eq!(
+        build_snapshot(&[first.clone(), second.clone()])
+            .unwrap_err()
+            .code,
+        "SPX-PKR604"
+    );
+    assert_eq!(
+        build_snapshot(&[second, first]).unwrap_err().code,
+        "SPX-PKR604"
+    );
+}
+
+#[test]
+fn ownership_continuity_is_scoped_per_package_not_global() {
+    // Two different packages are free to carry two different publisher
+    // identities in the same snapshot; the check only compares entries that
+    // share one `package` name.
+    let meaning = meaning_entry("1.0.0", "alpha");
+    let calculator = calculator_entry("2.0.0", "beta");
+    assert_ne!(meaning.signature.identity, calculator.signature.identity);
+    assert!(build_snapshot(&[meaning, calculator]).is_ok());
+}
+
 // --- Digest binding ------------------------------------------------------------
 
 #[test]
@@ -274,6 +331,19 @@ fn declared_coordinate_must_match_the_embedded_subject_coordinate() {
     );
 }
 
+#[test]
+fn declared_version_must_match_the_embedded_subject_version() {
+    // Same idea as the coordinate-mismatch test above, but isolating the
+    // version half alone: the declared `package` is still correct and the
+    // subject bytes are still genuinely bound to their own content_digest --
+    // only the declared `version` field disagrees with the version embedded
+    // in the authenticated Subject-v3 coordinate ("version-confused"
+    // metadata).
+    let mut confused = meaning_entry("1.0.0", "version-confused");
+    confused.version = "9.9.9".to_owned();
+    assert_eq!(build_snapshot(&[confused]).unwrap_err().code, "SPX-PKR603");
+}
+
 // --- Shape / grammar ------------------------------------------------------------
 
 #[test]
@@ -290,11 +360,60 @@ fn a_malformed_digest_shape_is_refused() {
     assert_eq!(build_snapshot(&[malformed]).unwrap_err().code, "SPX-PKR601");
 }
 
+#[test]
+fn an_empty_license_is_refused() {
+    let mut malformed = meaning_entry("1.0.0", "alpha");
+    malformed.license = String::new();
+    assert_eq!(build_snapshot(&[malformed]).unwrap_err().code, "SPX-PKR601");
+}
+
+#[test]
+fn a_control_byte_in_the_signature_identity_is_refused() {
+    let mut malformed = meaning_entry("1.0.0", "alpha");
+    malformed.signature.identity = "signer\u{0007}bell".to_owned();
+    assert_eq!(build_snapshot(&[malformed]).unwrap_err().code, "SPX-PKR601");
+}
+
 // --- Capacity --------------------------------------------------------------------
 
 #[test]
 fn an_empty_entry_list_is_refused() {
     assert_eq!(build_snapshot(&[]).unwrap_err().code, "SPX-PKR606");
+}
+
+#[test]
+fn more_than_max_entries_is_refused_before_any_per_entry_validation() {
+    // The entry-count bound is checked before iterating, so this is cheap
+    // to exercise even with entries that would otherwise fail every
+    // per-entry check (empty package/version/digest fields here) --
+    // confirming the count bound really is enforced up front and does not
+    // depend on entries individually being valid.
+    let garbage = PublishedEntry {
+        package: String::new(),
+        version: String::new(),
+        content_digest: String::new(),
+        api_digest: String::new(),
+        license: String::new(),
+        provenance_digest: None,
+        signature: RegistrySignature {
+            algorithm: String::new(),
+            identity: String::new(),
+            signature: String::new(),
+        },
+        status: PublicationStatus::Active,
+        subject_bytes: String::new(),
+    };
+    let entries = vec![garbage; MAX_ENTRIES + 1];
+    assert_eq!(build_snapshot(&entries).unwrap_err().code, "SPX-PKR606");
+}
+
+#[test]
+fn an_oversized_single_entry_subject_bytes_is_refused() {
+    // `subject_bytes` past the per-entry byte bound is refused before the
+    // (expensive) content_digest/Subject-v3 replay checks run.
+    let mut oversized = meaning_entry("1.0.0", "alpha");
+    oversized.subject_bytes = "x".repeat(MAX_ENTRY_BYTES + 1);
+    assert_eq!(build_snapshot(&[oversized]).unwrap_err().code, "SPX-PKR606");
 }
 
 // --- Revocation / yank policy ------------------------------------------------------

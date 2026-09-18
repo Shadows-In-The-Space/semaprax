@@ -67,6 +67,22 @@
 //! against exactly the dependency-confusion/squatting failure mode issue
 //! #195 names.
 //!
+//! ## Ownership continuity (anti-squatting)
+//!
+//! [`build_snapshot`] also refuses a snapshot in which the same `package`
+//! name appears under two *different* `signature.identity` claims, reusing
+//! the existing immutable-conflict `SPX-PKR604` code rather than minting a
+//! new one -- both are "an established fact about this package
+//! cannot be silently replaced" refusals. Having accepted one version's
+//! claimed publisher identity for a package name, a later version cannot
+//! silently substitute a different one in the same snapshot. This is
+//! **not** authentication -- no identity claim is cryptographically
+//! verified anywhere in this module, per the section above -- it is a
+//! structural continuity check against exactly the "package-name
+//! squatting" and dependency-confusion failure mode issue #195 names for a
+//! single open-namespace package name. See
+//! `tests::a_different_publisher_identity_for_the_same_package_is_refused_as_a_squatting_attempt`.
+//!
 //! ## Revocation
 //!
 //! [`PublicationStatus::Yanked`] never removes or mutates an entry; it is
@@ -80,7 +96,9 @@
 //!
 //! ## Nonclaims
 //!
-//! This module performs no publisher authentication, no cryptographic
+//! This module performs no *cryptographic* publisher authentication (the
+//! "Ownership continuity" section above is a structural claimed-identity
+//! continuity check only, never a proof of who anyone is), no cryptographic
 //! signature or transparency-log verification, no network access, no
 //! filesystem access, no CLI wiring, and no build execution. It does not
 //! itself compute `api_digest` or `provenance_digest`; both are caller-owned
@@ -341,6 +359,7 @@ fn build(entries: &[PublishedEntry]) -> Result<BuiltSnapshot, Diagnostic> {
         }
         ordered.insert(key, entry.clone());
     }
+    verify_ownership_continuity(&ordered)?;
     let payload = render_payload(&ordered);
     let envelope = render_wrapper(&payload);
     if envelope.len() > MAX_OUTPUT_BYTES {
@@ -354,6 +373,49 @@ fn build(entries: &[PublishedEntry]) -> Result<BuiltSnapshot, Diagnostic> {
         envelope,
         digest,
     })
+}
+
+/// Refuses a snapshot in which the *same* package name is published under
+/// two *different* signer identities. This is a structural anti-squatting
+/// check, not authentication: nobody's identity claim is cryptographically
+/// verified anywhere in this module (see the module docstring), so this
+/// does not prove either identity is who it claims to be. It only enforces
+/// that, having accepted `signature.identity` as this package's opaque
+/// publisher claim once, a later entry for the *same* package name cannot
+/// silently substitute a different claimed identity in the same snapshot --
+/// exactly the "package-name squatting" / dependency-confusion failure mode
+/// issue #195 names. Iteration is over the already-canonically-keyed
+/// `BTreeMap`, so which identity is "first" (and therefore which conflicting
+/// entry is reported) is a pure function of `(package, version)` content,
+/// never of the caller's argument order -- see
+/// `tests::entry_order_does_not_affect_canonical_bytes`'s sibling
+/// `tests::ownership_conflict_is_detected_regardless_of_entry_order`.
+fn verify_ownership_continuity(
+    ordered: &BTreeMap<(String, Version), PublishedEntry>,
+) -> Result<(), Diagnostic> {
+    let mut owners: BTreeMap<&str, &str> = BTreeMap::new();
+    for ((package, _version), entry) in ordered {
+        let identity = entry.signature.identity.as_str();
+        match owners.get(package.as_str()) {
+            None => {
+                owners.insert(package.as_str(), identity);
+            }
+            Some(existing) if *existing != identity => {
+                // Reuses `immutable_conflict_error` (`SPX-PKR604`), the same
+                // code an already-published coordinate's content_digest
+                // conflict uses: both are "an established fact about this
+                // package cannot be silently replaced" refusals, and no new
+                // `SPX-` diagnostic code is introduced for this check.
+                return Err(immutable_conflict_error(format!(
+                    "`{package}` was already published in this snapshot under signer identity \
+                     `{existing}` and cannot also carry a different claimed identity `{identity}` \
+                     for another version; publisher ownership must stay continuous across versions"
+                )));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
 }
 
 fn validate_and_bind(entry: &PublishedEntry, work: &mut usize) -> Result<Version, Diagnostic> {

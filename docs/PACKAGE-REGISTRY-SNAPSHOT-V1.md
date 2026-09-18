@@ -1,7 +1,7 @@
 # Package Registry Snapshot v1
 
 Status: implemented, **local-only** bounded module. Unit-tested in this
-worktree (`cargo test --locked -p semaprax --lib package_registry`, 24
+worktree (`cargo test --locked -p semaprax --lib package_registry`, 33
 selected tests, all passing); not run through `scripts/quality.sh full`, not
 released, not hosted, and not wired into any CLI route.
 
@@ -87,6 +87,24 @@ check instead of duplicating a name list. `build_snapshot` refuses any
 reserved for the compiler-bundled closed registry, which is exactly the
 dependency-confusion/squatting failure mode issue #195 names.
 
+## Ownership continuity (anti-squatting)
+
+`build_snapshot` refuses a snapshot in which the same `package` name appears
+under two *different* `signature.identity` claims, reusing the existing
+immutable-conflict `SPX-PKR604` code rather than minting a new one. This is
+**not** authentication -- no identity claim is cryptographically verified
+anywhere in this module -- it is a structural continuity check: having
+accepted one version's claimed publisher identity for a package name, a
+later version in the same snapshot cannot silently substitute a different
+one. It directly targets the "package-name squatting" / dependency-confusion
+failure mode issue #195 names for a single open-namespace package name.
+The check is scoped per package name (two different packages may carry two
+different identities in the same snapshot,
+`tests::ownership_continuity_is_scoped_per_package_not_global`) and its
+outcome does not depend on caller argument order
+(`tests::ownership_conflict_is_detected_regardless_of_entry_order`), since it
+runs over the already canonically-keyed `BTreeMap`, not the input slice.
+
 ## Revocation
 
 `PublicationStatus::Yanked` never removes or mutates an entry; it is carried
@@ -104,7 +122,7 @@ include them with an explicit `SPX-PKR609` warning diagnostic
 | `SPX-PKR601` | Shape/grammar: identity, non-canonical version text, digest shape, or bounded-text (license/signature/reason) violation. |
 | `SPX-PKR602` | Package name is in the reserved `std.*` namespace. |
 | `SPX-PKR603` | `content_digest` does not match the plain SHA-256 of `subject_bytes`, `subject_bytes` failed Subject-v3/Report-v2 replay, or its embedded coordinate differs from the declared `package`/`version`. |
-| `SPX-PKR604` | Same `(package, version)` already published with a *different* `content_digest` (immutable conflict). |
+| `SPX-PKR604` | Same `(package, version)` already published with a *different* `content_digest` (immutable conflict), **or** the same `package` name is claimed by two different `signature.identity` values within one snapshot (ownership-continuity / anti-squatting; deliberately reuses this code rather than minting a new one). |
 | `SPX-PKR605` | Same `(package, version)` already published with the *same* `content_digest` (publication is one-time, not idempotent). |
 | `SPX-PKR606` | Entry count or byte bound exceeded. |
 | `SPX-PKR607` | Cumulative render-budget overflow. |
@@ -125,19 +143,26 @@ layers compose rather than duplicate one another's determinism.
 
 ## Evidence and nonclaims
 
-`src/package_registry/tests.rs` pins 24 cases: determinism (repeat-call,
+`src/package_registry/tests.rs` pins 33 cases: determinism (repeat-call,
 reorder, changed-input, stale-evidence-refusal), immutable no-overwrite
 (duplicate and conflicting-digest refusal, each with a single-entry control
 proving the coordinate alone is not the cause), reserved-namespace refusal
-(both a synthetic name and the exact bundled `std.auth`), digest-binding and
-coordinate-mismatch refusal, shape/grammar refusal, capacity refusal, all
-three yank policies, the opaque signature/provenance nonclaim, and the
-resolver-v2 composition round trip. Every refusal test asserts the exact
-diagnostic code.
+(both a synthetic name and the exact bundled `std.auth`), ownership
+continuity / anti-squatting (conflicting-identity refusal order-independence,
+the same-identity control, and the per-package scoping control), digest
+binding, coordinate-mismatch, and version-only-mismatch refusal,
+shape/grammar refusal (including dedicated empty-license and
+control-byte-in-identity hostile cases), capacity refusal (entry-count
+ceiling and an oversized single entry, each hostile before the expensive
+per-entry checks run), all three yank policies, the opaque
+signature/provenance nonclaim, and the resolver-v2 composition round trip.
+Every refusal test asserts the
+exact diagnostic code.
 
-This module performs no publisher authentication, no cryptographic signature
-or transparency-log verification, no network access, no filesystem access,
-no CLI wiring, and no build execution. It does not compute `api_digest` or
+This module performs no cryptographic publisher authentication (only the
+structural ownership-continuity check above), no cryptographic signature or
+transparency-log verification, no network access, no filesystem access, no
+CLI wiring, and no build execution. It does not compute `api_digest` or
 `provenance_digest` itself; both are caller-owned opaque values it stores and
 structurally bounds. It does not solve dependency graphs. It is not run
 through the full quality-gate profile and is not a support or publication

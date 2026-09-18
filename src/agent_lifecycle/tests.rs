@@ -779,35 +779,240 @@ fn native_executor_refuses_a_result_shape_outside_its_closed_vocabulary() {
     assert_eq!(error[0].code, "SPX-G570");
 }
 
-/// #143's honest state, pinned as an executable finding rather than left as
-/// prose: `src/project/public_api.rs::parameter_type` -- the admission rule
-/// of the exact existing Wasm/Node owned-data arena #143 requires reusing --
-/// accepts only `i64`/`bool` by value and `borrow Str`/`borrow SliceU8` as
-/// parameters. Every bound Agent stage takes at least one `own`/`borrow`
-/// record parameter (`Task`/`State`/`Outcome`), so no real stage call is
-/// admitted by that arena today. `WasmStageExecutor` detects exactly this
-/// and fails closed with a diagnostic instead of silently returning a wrong
-/// value, panicking, or reimplementing the arena to route around the gap.
+/// The invariant the previous `wasm_executor_fails_closed_on_every_real_bound_stage_shape`
+/// actually protected, kept executable now that the executor no longer fails
+/// closed: the owned-data arena's own admission rule
+/// (`src/project/public_api.rs::parameter_type`, which accepts only
+/// `i64`/`bool` by value and `borrow Str`/`borrow SliceU8`) is NOT widened to
+/// let an Agent stage through. Handing a real bound stage's record-taking
+/// signature straight to `derive_public_api_descriptor` must still be
+/// refused. The Wasm executor reaches Wasm by injecting a checked
+/// zero-parameter driver whose own signature the arena already admits -- not
+/// by relaxing a backend's verification.
 #[test]
-fn wasm_executor_fails_closed_on_every_real_bound_stage_shape() {
+fn the_owned_data_arena_still_refuses_a_bound_stage_signature_directly() {
+    let compiled = lifecycle();
+    const FACT: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    for role in [
+        "fixture.agent.fn.initialize",
+        "fixture.agent.fn.observe",
+        "fixture.agent.fn.authorize",
+        "fixture.agent.fn.reduce",
+    ] {
+        let subject = crate::project::PublicApiSubject {
+            project_schema: crate::project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
+            project_revision: FACT,
+            workspace_revision: FACT,
+            project_graph_digest: FACT,
+        };
+        assert!(
+            crate::project::derive_public_api_descriptor(
+                &compiled.program,
+                &[role.to_owned()],
+                subject,
+            )
+            .is_err(),
+            "{role} takes an own/borrow record and must stay outside the arena's \
+             parameter vocabulary",
+        );
+    }
+}
+
+/// Parity evidence for #182: the SAME source program, the SAME arguments and
+/// the SAME decoded `RetainedCallOutcome` on all three executors --
+/// interpreter, native C11, and Core Wasm -- for every deterministic stage
+/// the fixture binds, including both branches of `authorize` so agreement is
+/// never established by a single happy path.
+///
+/// The Core Wasm leg is a real module: the stage body is compiled into a Core
+/// Wasm owned-data package and executed under a real `node`/V8 host through
+/// `project::prepare_owned_data_npm_build`. It is not the interpreter wrapped
+/// in a Wasm-shaped name.
+///
+/// What this does NOT claim: no budget, cancellation, effect-dispatch or
+/// evidence loop runs on Wasm here, `steps_used` is not comparable across
+/// engines (native and Wasm both report `0`), and this is local, re-runnable
+/// evidence requiring `clang` and `node` -- not a hosted run, a browser run,
+/// or a production-support decision.
+#[test]
+fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_program() {
     if !native_wasm_tools_available() {
-        eprintln!("skipping wasm executor gap evidence: clang or node unavailable");
+        eprintln!("skipping three-engine stage parity: clang or node unavailable");
         return;
     }
     let compiled = lifecycle();
+    // The Wasm backend re-resolves exactly the module source the caller
+    // supplies -- here the same `MODULE` text `lifecycle()` compiled.
+    // `CompiledAgentLifecycle::source` is NOT that text: it is the rendered
+    // lifecycle document, so the module source has to be threaded in
+    // explicitly rather than recovered from the compiled product.
+    let source = MODULE;
+    let mut wasm_dispatches = 0usize;
+
+    let mut compare = |label: &str,
+                       prepared: &crate::interpreter::retained_call::PreparedRetainedCall,
+                       arguments: &[RetainedValue]|
+     -> RetainedCallOutcome {
+        let interpreter = authorization::dispatch_on(
+            authorization::StageBackend::Interpreter,
+            &compiled.program,
+            prepared,
+            arguments,
+            DEFAULT_STAGE_STEPS,
+        )
+        .unwrap_or_else(|error| panic!("interpreter evaluates {label}: {error:?}"));
+        let native = authorization::dispatch_on(
+            authorization::StageBackend::Native,
+            &compiled.program,
+            prepared,
+            arguments,
+            DEFAULT_STAGE_STEPS,
+        )
+        .unwrap_or_else(|error| panic!("native evaluates {label}: {error:?}"));
+        let wasm = authorization::dispatch_on(
+            authorization::StageBackend::Wasm { source },
+            &compiled.program,
+            prepared,
+            arguments,
+            DEFAULT_STAGE_STEPS,
+        )
+        .unwrap_or_else(|error| panic!("Core Wasm evaluates {label}: {error:?}"));
+        wasm_dispatches += 1;
+        assert_eq!(interpreter.outcome, native.outcome, "{label}: native");
+        assert_eq!(interpreter.outcome, wasm.outcome, "{label}: Core Wasm");
+        interpreter.outcome
+    };
+
+    let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
+    let initialized = compare(
+        "initialize",
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+    );
+    let RetainedCallOutcome::Returned(state) = initialized else {
+        panic!("initialize did not return a state");
+    };
+
+    compare(
+        "observe",
+        compiled.binding.observe.prepared(),
+        std::slice::from_ref(&state),
+    );
+
+    for (budget, label) in [(5i64, "authorize granted"), (50i64, "authorize refused")] {
+        let arguments = [
+            state.clone(),
+            RetainedValue::I64(budget),
+            RetainedValue::Bool(false),
+            RetainedValue::Usize(1),
+        ];
+        let decision = compare(
+            label,
+            compiled.binding.authorize.stage().prepared(),
+            &arguments,
+        );
+        let RetainedCallOutcome::Returned(RetainedValue::Variant(variant)) = decision else {
+            panic!("{label} did not return a Decision variant");
+        };
+        // The branch actually taken is asserted, so "both engines agreed" can
+        // never be satisfied by both taking the same wrong branch silently.
+        let expected = if budget == 5 {
+            "fixture.agent.type.decision.granted"
+        } else {
+            "fixture.agent.type.decision.refused"
+        };
+        assert_eq!(variant.case.as_str(), expected, "{label}: case");
+    }
+
+    let outcome = payload(&compiled.binding.outcome, b"observed".to_vec(), 4);
+    compare(
+        "reduce",
+        compiled.binding.reduce.prepared(),
+        &[
+            state.clone(),
+            RetainedValue::I64(3),
+            RetainedValue::Bool(false),
+            RetainedValue::Usize(1),
+            outcome,
+        ],
+    );
+
+    // Positive proof the Wasm leg really ran rather than being skipped: five
+    // stage dispatches, each of which built and executed a Core Wasm module.
+    assert_eq!(wasm_dispatches, 5);
+    eprintln!("core wasm stage dispatches executed: {wasm_dispatches}");
+}
+
+/// Wrong ProgramRoot / wrong entry, and a malformed argument shape, are
+/// refused by the Wasm executor before any source is synthesized, any module
+/// is built, or any Node process is started.
+#[test]
+fn wasm_executor_refuses_a_wrong_entry_and_a_malformed_argument_before_building_anything() {
+    let compiled = lifecycle();
+    let source = MODULE;
+    let other = hir::resolve(
+        &crate::parse(
+            "module test.wasm_executor_wrong_program;\n@id(\"app.main\") fn main() -> i64 { 0 }\n",
+            std::path::Path::new("wasm-executor-wrong-program.spx"),
+        )
+        .expect("the unrelated fixture parses"),
+    )
+    .expect("the unrelated fixture resolves");
+    let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
+
+    let absent = authorization::dispatch_on(
+        authorization::StageBackend::Wasm { source },
+        &other,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err("Wasm must refuse a prepared call for an entry absent from the given program");
+    assert_eq!(absent.len(), 1);
+    assert_eq!(absent[0].code, "SPX-G570");
+
+    let arity = authorization::dispatch_on(
+        authorization::StageBackend::Wasm { source },
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        &[],
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err("initialize takes one argument, not zero");
+    assert_eq!(arity[0].code, "SPX-G570");
+
+    let shape = authorization::dispatch_on(
+        authorization::StageBackend::Wasm { source },
+        &compiled.program,
+        compiled.binding.observe.prepared(),
+        &[RetainedValue::I64(0)],
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err("observe's state argument must be a State record, not a scalar");
+    assert_eq!(shape[0].code, "SPX-G570");
+}
+
+/// Stale-source fail-closed: the Wasm executor re-resolves the source it is
+/// handed and compares the re-derived entry against the `ResolvedFunction` it
+/// was given. Source that is not the program's own text is refused rather
+/// than silently executing a different body under the stage's name.
+#[test]
+fn wasm_executor_refuses_source_that_is_not_the_program_it_was_handed() {
+    let compiled = lifecycle();
+    // Same declarations, but one stage body changed: re-resolution succeeds
+    // and yields a DIFFERENT `ResolvedFunction` for the same `@id`.
+    let drifted = MODULE.replace("epoch: 1 }", "epoch: 2 }");
+    assert_ne!(drifted, MODULE);
     let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
 
     let error = authorization::dispatch_on(
-        authorization::StageBackend::Wasm,
+        authorization::StageBackend::Wasm { source: &drifted },
         &compiled.program,
         compiled.binding.initialize.prepared(),
         std::slice::from_ref(&task),
         DEFAULT_STAGE_STEPS,
     )
-    .expect_err(
-        "no bound Agent stage call is admitted by the existing owned-data Wasm arena's \
-         parameter vocabulary today",
-    );
+    .expect_err("source drift must fail closed, not execute a different body");
     assert_eq!(error.len(), 1);
     assert_eq!(error[0].code, "SPX-G570");
 }

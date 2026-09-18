@@ -380,10 +380,16 @@ impl StageExecutor for InterpreterStageExecutor {
 /// baked into a second function -- so every backend, including the two
 /// added for #142/#143, is reachable through the exact same single call
 /// point [`dispatch`] already was.
-pub(super) enum StageBackend {
+/// [`StageBackend::Wasm`] carries the module source text its executor is
+/// allowed to re-check and re-resolve when it must inject a projection
+/// driver (#143/#182). That source is data the caller supplies -- the
+/// lifecycle's own retained `.spx` text -- never something the executor
+/// reads from the filesystem, so selecting the Wasm backend grants no
+/// ambient authority the interpreter backend does not have.
+pub(super) enum StageBackend<'a> {
     Interpreter,
     Native,
-    Wasm,
+    Wasm { source: &'a str },
 }
 
 /// The single call point this module tree dispatches a bound stage's
@@ -399,7 +405,7 @@ pub(super) enum StageBackend {
 /// (three: interpreter, native, Wasm), rather than as one more scattered
 /// call to `evaluate_retained_call` or a hand-rolled backend invocation.
 pub(super) fn dispatch_on(
-    backend: StageBackend,
+    backend: StageBackend<'_>,
     program: &hir::ResolvedProgram,
     prepared: &PreparedRetainedCall,
     arguments: &[RetainedValue],
@@ -413,8 +419,8 @@ pub(super) fn dispatch_on(
         StageBackend::Native => {
             NativeStageExecutor.execute(authority, program, prepared, arguments, max_steps)
         }
-        StageBackend::Wasm => {
-            WasmStageExecutor.execute(authority, program, prepared, arguments, max_steps)
+        StageBackend::Wasm { source } => {
+            WasmStageExecutor { source }.execute(authority, program, prepared, arguments, max_steps)
         }
     }
 }

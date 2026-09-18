@@ -176,13 +176,31 @@ fn existing_core_matrix_and_global_authority_remain_bounded() {
     let verify = job(&workflow, "verify");
 
     assert!(workflow.contains("permissions:\n  contents: read\n"));
+    // Pinned exactly. Two separate defects, and the second one hid behind the
+    // fix for the first. `cancel-in-progress: true` cancelled 98 of 100
+    // consecutive `main` runs; scoping it to non-`main` refs fixed that, but
+    // `main` runs kept being cancelled anyway — 23 of the last 30, measured on
+    // 2026-09-18. GitHub keeps at most one *pending* run per concurrency
+    // group, so with one run executing and one queued, a third arrival cancels
+    // the queued one. Turning off cancel-in-progress protects only the run
+    // that already started. On a matrix that takes hours, every commit behind
+    // the leader is still lost. The group must therefore carry the commit on
+    // `main`: a gate whose verdict can only be observed at the tip cannot
+    // produce hosted evidence for an exact implementation commit, which is
+    // what the public-generic milestone's PG-8 requires.
     assert!(
-        workflow.contains("concurrency:\n  group: ci-${{ github.workflow }}-${{ github.ref }}\n")
+        workflow.contains(
+            "  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == \
+             'refs/heads/main' && github.sha || 'ref-tip' }}\n"
+        ),
+        "the concurrency group must include the commit so no `main` run is \
+         ever superseded while pending"
     );
-    // Pinned exactly, because the weaker `cancel-in-progress: true` cancelled 98
-    // of 100 consecutive `main` runs and left the required gates with no verdict
-    // of either colour. A push to `main` must always be allowed to finish;
-    // anything else may still be superseded by its own tip.
+    assert!(
+        !workflow.contains("  group: ci-${{ github.workflow }}-${{ github.ref }}\n"),
+        "the ref-only group must not return: it lets a later push cancel a \
+         pending `main` run, which is neither a pass nor a failure"
+    );
     assert!(
         workflow.contains("  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}\n"),
         "`main` runs must never be cancelled by a later push"
@@ -227,8 +245,26 @@ fn existing_core_matrix_and_global_authority_remain_bounded() {
 fn docs_workflow_never_cancels_a_completed_main_publish() {
     let workflow = docs_workflow();
 
+    // Pinned exactly. The group must carry the commit on `main`, because
+    // `cancel-in-progress: false` alone does not stop a cancellation: GitHub
+    // keeps at most one *pending* run per concurrency group, so with one run
+    // executing and one queued, a third arrival cancels the queued one. Only
+    // the already-started run is protected. `docs.yml` is fast enough that it
+    // usually finishes before the next push, which is why it stayed mostly
+    // green while `ci.yml` was cancelled 23 times in 30 runs — the same latent
+    // defect, hidden by duration rather than absent.
     assert!(
-        workflow.contains("concurrency:\n  group: docs-${{ github.workflow }}-${{ github.ref }}\n")
+        workflow.contains(
+            "  group: docs-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == \
+             'refs/heads/main' && github.sha || 'ref-tip' }}\n"
+        ),
+        "the concurrency group must include the commit so no `main` publish is \
+         ever superseded while pending"
+    );
+    assert!(
+        !workflow.contains("  group: docs-${{ github.workflow }}-${{ github.ref }}\n"),
+        "the ref-only group must not return: it lets a later push cancel a \
+         pending `main` publish"
     );
     assert!(
         workflow.contains("  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}\n"),

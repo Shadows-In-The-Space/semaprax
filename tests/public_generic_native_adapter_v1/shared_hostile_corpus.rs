@@ -53,7 +53,7 @@ use semaprax::public_generic_consumer::rust_calling::{
 };
 
 #[path = "../support/public_generic_hostile_corpus.rs"]
-mod public_generic_hostile_corpus;
+pub(crate) mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
     assert_matches_expected, baseline_descriptor_bytes, parse_shared_corpus_lines,
     structured_descriptor_cases, MAX_BYTES_PER_LEAF,

@@ -184,6 +184,138 @@ pub fn structured_descriptor_cases() -> Vec<(&'static str, Vec<u8>, &'static str
     cases
 }
 
+/// The twelve canonical Descriptor-v1 frame ranges of
+/// [`baseline_descriptor_bytes`], as content ranges (the eight-byte
+/// little-endian length prefix of frame `n` occupies
+/// `frames[n].start - 8 .. frames[n].start`). Field order is frozen by
+/// `src/public_generic_abi/descriptor.rs::identity_preimage` plus the
+/// trailing `export_name` frame: 0 schema, 1 boundary_profile,
+/// 2 type_grammar_schema, 3 export_id, 4 program_root_digest,
+/// 5 source_projection_digest, 6 public_surface_digest, 7 input.term,
+/// 8 input.instance_digest, 9 result.term, 10 result.instance_digest,
+/// 11 export_name.
+fn baseline_frames() -> Vec<std::ops::Range<usize>> {
+    let baseline = baseline_descriptor_bytes();
+    let mut frames = Vec::with_capacity(12);
+    let mut offset = 0usize;
+    for _ in 0..12 {
+        let prefix: [u8; 8] = baseline[offset..offset + 8].try_into().unwrap();
+        let length = usize::try_from(u64::from_le_bytes(prefix)).unwrap();
+        let start = offset + 8;
+        frames.push(start..start + length);
+        offset = start + length;
+    }
+    assert_eq!(offset, baseline.len());
+    frames
+}
+
+/// Issue #173: descriptors a generated calling consumer is *configured
+/// with*, i.e. the caller submits bytes that are identical to the trusted
+/// bytes the consumer embedded at generation time.
+///
+/// This is the discriminating half of the hostile corpus.
+/// [`structured_descriptor_cases`] submits mutated bytes to a consumer
+/// generated from the *canonical* baseline, so the consumer's byte-exact
+/// pairing check alone already refuses every one of them — a consumer whose
+/// structural envelope check were deleted entirely would still pass that
+/// family. Here pairing cannot refuse anything, because the submitted and
+/// trusted bytes are equal by construction, so only the consumer's own
+/// bounded Descriptor-v1 envelope check can fail closed. Each case drives
+/// exactly one distinct branch of that check (`canonical_descriptor_v1` in
+/// each generated consumer, and its C11/TypeScript transliterations):
+///
+/// | case | branch it alone exercises |
+/// |---|---|
+/// | `truncated_final_frame` | a declared frame runs past the end of the document |
+/// | `unknown_descriptor_schema` | frame 0 is not the frozen descriptor schema literal |
+/// | `stale_boundary_profile_version` | frame 1 is not the frozen boundary-profile literal |
+/// | `stale_type_grammar_version` | frame 2 is not the frozen type-grammar literal |
+/// | `invalid_utf8_export_id` | a frame's content is not UTF-8 |
+/// | `trailing_bytes_after_final_frame` | bytes remain after the twelfth frame |
+///
+/// Returned tuple: the stable case id, the bytes, the reference
+/// `descriptor::decode` refusal code — `None` where the reference decoder
+/// deliberately *admits* the document — and the reference
+/// `descriptor::replay`-against-the-canonical-baseline refusal code.
+///
+/// The two `stale_*_version` cases are the reason the third element is an
+/// `Option`. `decode` validates framing, bounds, UTF-8 and the descriptor
+/// schema literal only; the frozen boundary-profile and type-grammar
+/// versions are enforced by `replay` (`SPX-PG704`), not by `decode`. A
+/// generated consumer has no trusted peer descriptor to replay against when
+/// its own configured bytes are the hostile ones, so it must enforce all
+/// three frozen version literals structurally — which is exactly the
+/// "allowing a consumer to ignore fields it does not understand in a closed
+/// v1 schema" failure issue #173 puts explicitly out of scope. These two
+/// cases are the only ones in this corpus a reference-decoder-only reading
+/// of the contract would let through.
+///
+/// Four of these six documents are byte-identical to a
+/// [`structured_descriptor_cases`] entry (`truncated_final_frame`,
+/// `unknown_descriptor_schema`, `invalid_utf8_export_id`,
+/// `trailing_bytes_after_final_frame`). That is deliberate and is not
+/// duplicated coverage: the same bytes prove a different property in each
+/// family. There they are *submitted* to a consumer generated from the
+/// canonical baseline, where pairing refuses them; here they *are* the
+/// consumer's configured trusted value, where pairing cannot. Reusing the
+/// same bytes is what makes the two results comparable.
+pub fn malformed_trusted_descriptor_cases(
+) -> Vec<(&'static str, Vec<u8>, Option<&'static str>, &'static str)> {
+    let baseline = baseline_descriptor_bytes();
+    let frames = baseline_frames();
+    let mut cases = Vec::new();
+
+    let mut changed = baseline.to_vec();
+    changed.pop().expect("the canonical baseline is non-empty");
+    cases.push((
+        "truncated_final_frame",
+        changed,
+        Some("SPX-PG701"),
+        "SPX-PG701",
+    ));
+
+    // Frames 0, 1 and 2 are the three frozen schema literals. Each mutation
+    // rewrites only the trailing version digit, so the document stays
+    // well-framed, in-bounds and valid UTF-8 and nothing but the version
+    // literal itself can refuse it.
+    for (frame, case) in [
+        (0usize, "unknown_descriptor_schema"),
+        (1, "stale_boundary_profile_version"),
+        (2, "stale_type_grammar_version"),
+    ] {
+        let last = frames[frame].end - 1;
+        assert_eq!(baseline[last], b'1', "{case}: expected a v1 literal");
+        let mut changed = baseline.to_vec();
+        changed[last] = b'2';
+        // `decode` checks frame 0 only; frames 1 and 2 reach `replay`.
+        let decode_refusal = if frame == 0 { Some("SPX-PG701") } else { None };
+        let replay_refusal = if frame == 0 { "SPX-PG701" } else { "SPX-PG704" };
+        cases.push((case, changed, decode_refusal, replay_refusal));
+    }
+
+    let mut changed = baseline.to_vec();
+    changed[frames[3].start] = 0xff;
+    cases.push((
+        "invalid_utf8_export_id",
+        changed,
+        Some("SPX-PG701"),
+        "SPX-PG701",
+    ));
+
+    // A thirteenth, zero-length frame. Every one of the twelve canonical
+    // frames still parses; only the "no bytes may remain" rule refuses it.
+    let mut changed = baseline.to_vec();
+    changed.extend_from_slice(&0u64.to_le_bytes());
+    cases.push((
+        "trailing_bytes_after_final_frame",
+        changed,
+        Some("SPX-PG701"),
+        "SPX-PG701",
+    ));
+
+    cases
+}
+
 /// Restates `src/public_generic_abi/boundary_profile.rs::MAX_BYTES_PER_LEAF`
 /// (64 KiB), exactly like every generated consumer already restates it
 /// rather than depending on the `semaprax` crate (a generated artifact must
@@ -350,6 +482,73 @@ mod tests {
                 assert_eq!(error.code, expected_code, "{name}");
             }
         }
+    }
+
+    /// Issue #173: pin every malformed-trusted case's exact reference
+    /// refusal, and pin the two the reference decoder deliberately admits.
+    ///
+    /// This is the manifest half of the contract: it proves the bytes each
+    /// generated consumer is handed really are hostile, independently of
+    /// whether any toolchain is installed on the host, so a skipped
+    /// clang/node route cannot make the corpus look covered.
+    #[test]
+    fn malformed_trusted_cases_have_exact_reference_outcomes() {
+        use semaprax::public_generic_abi::descriptor::{decode, replay};
+        use sha2::{Digest as _, Sha256};
+
+        let trusted = decode(baseline_descriptor_bytes()).unwrap();
+        let cases = malformed_trusted_descriptor_cases();
+        assert_eq!(cases.len(), 6);
+
+        // Every case is a distinct document, distinct from the baseline, and
+        // pinned by digest so a regenerated corpus cannot silently drift.
+        let mut digests = std::collections::BTreeMap::new();
+        for (name, bytes, decode_refusal, replay_refusal) in &cases {
+            assert_ne!(
+                bytes.as_slice(),
+                baseline_descriptor_bytes(),
+                "{name}: a hostile case must differ from the canonical baseline"
+            );
+            match decode(bytes) {
+                Ok(_) => assert_eq!(
+                    *decode_refusal, None,
+                    "{name}: the reference decoder admitted a document pinned as refused"
+                ),
+                Err(error) => assert_eq!(
+                    Some(error.code),
+                    *decode_refusal,
+                    "{name}: wrong reference decode refusal"
+                ),
+            }
+            let error = replay(bytes, &trusted)
+                .err()
+                .unwrap_or_else(|| panic!("{name}: independent replay must fail closed"));
+            assert_eq!(error.code, *replay_refusal, "{name}: wrong replay refusal");
+            let digest = format!(
+                "{:x}",
+                semaprax::digest_hex::LowerHex(Sha256::digest(bytes))
+            );
+            assert!(
+                digests.insert(digest, *name).is_none(),
+                "{name}: two hostile cases collapsed to the same bytes"
+            );
+        }
+
+        // The two version cases are the ones a reference-decoder-only
+        // reading of the contract would let through; keep that distinction
+        // explicit rather than implied by the table above.
+        let admitted: Vec<&str> = cases
+            .iter()
+            .filter(|(_, _, decode_refusal, _)| decode_refusal.is_none())
+            .map(|(name, _, _, _)| *name)
+            .collect();
+        assert_eq!(
+            admitted,
+            vec![
+                "stale_boundary_profile_version",
+                "stale_type_grammar_version"
+            ]
+        );
     }
 
     #[test]

@@ -54,8 +54,8 @@ use super::reference_wasm_module;
 #[path = "../support/public_generic_hostile_corpus.rs"]
 mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
-    assert_matches_expected, baseline_descriptor_bytes, parse_shared_corpus_lines,
-    structured_descriptor_cases, MAX_BYTES_PER_LEAF,
+    assert_matches_expected, baseline_descriptor_bytes, malformed_trusted_descriptor_cases,
+    parse_shared_corpus_lines, structured_descriptor_cases, MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -520,11 +520,6 @@ fn malformed_trusted_descriptor_is_rejected_before_wasm_instantiation() {
     let wasm_bytes = reference_wasm_module::build();
     let (input, output) = shapes();
     let binding = fixture_binding(&wasm_bytes);
-    let unknown_schema = structured_descriptor_cases()
-        .into_iter()
-        .find(|(name, _, _, _)| *name == "descriptor_unknown_schema")
-        .unwrap()
-        .1;
     let baseline = baseline_descriptor_bytes();
     let schema_length =
         usize::try_from(u64::from_le_bytes(baseline[..8].try_into().unwrap())).unwrap();
@@ -533,10 +528,24 @@ fn malformed_trusted_descriptor_is_rejected_before_wasm_instantiation() {
     bom_schema.extend_from_slice(&[0xef, 0xbb, 0xbf]);
     bom_schema.extend_from_slice(&baseline[8..]);
     assert!(semaprax::public_generic_abi::descriptor::decode(&bom_schema).is_err());
-    for (name, malformed) in [
-        ("unknown-schema", unknown_schema),
-        ("bom-prefixed-schema", bom_schema),
-    ] {
+
+    // Issue #173: the closed malformed-trusted manifest, plus this route's
+    // own BOM-prefixed schema case (a schema frame that is valid UTF-8 and
+    // correctly framed but is not the frozen literal -- the case that caught
+    // the generated TypeScript decoder stripping a BOM, and which no other
+    // route reproduces, so it stays local rather than joining the shared
+    // manifest). The manifest's own `unknown_descriptor_schema` is the
+    // byte-identical successor of this test's former local
+    // `"unknown-schema"` entry, taken from the shared corpus so the native
+    // and TypeScript routes can no longer drift apart on it.
+    let mut shapes_to_run: Vec<(String, Vec<u8>)> = malformed_trusted_descriptor_cases()
+        .into_iter()
+        .map(|(name, bytes, _, _)| (name.replace('_', "-"), bytes))
+        .collect();
+    assert_eq!(shapes_to_run.len(), 6, "the manifest is closed");
+    shapes_to_run.push(("bom-prefixed-schema".to_owned(), bom_schema));
+    for (name, malformed) in shapes_to_run {
+        let name = name.as_str();
         let consumer = generate_typescript_calling_consumer(&malformed, &binding, &input, &output)
             .expect(
                 "generation stores configured descriptor bytes without granting them authority",

@@ -3,6 +3,18 @@
 //! descriptor and the caller submits those exact embedded bytes.  The native
 //! provider would accept that byte-exact pair, so the generated consumer must
 //! reject the descriptor envelope itself before it can allocate or call it.
+//!
+//! The original regression pinned one malformed shape (a truncated final
+//! frame).  `malformed_trusted_corpus_is_refused_by_the_c11_and_cxx17_consumers`
+//! and `..._by_the_rust_consumer` below extend that to the whole closed
+//! manifest in
+//! `tests/support/public_generic_hostile_corpus.rs::malformed_trusted_descriptor_cases`,
+//! so every branch of the generated consumers' bounded Descriptor-v1
+//! envelope check — not only "a frame runs off the end" — is driven by a
+//! case whose byte-exact pairing check cannot refuse it.  That manifest's
+//! module documentation explains why this family, and not
+//! `structured_descriptor_cases`, is the one that discriminates a real
+//! envelope check from a deleted one.
 
 use std::env;
 use std::fs;
@@ -19,6 +31,8 @@ use semaprax::public_generic_consumer::cxx_calling::generate_cxx_calling_consume
 use semaprax::public_generic_consumer::rust_calling::{
     generate_rust_calling_consumer, OwnedByteField, RecordShape,
 };
+
+use crate::shared_hostile_corpus::public_generic_hostile_corpus::malformed_trusted_descriptor_cases;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -168,16 +182,21 @@ int main() {
 }
 "#;
 
-#[test]
-fn generated_native_consumers_reject_a_byte_identical_malformed_trusted_descriptor_before_open() {
-    let bytes = malformed_descriptor();
-    let binding = binding();
+/// Generate, build and run the C11 and C++17 calling consumers configured
+/// with `bytes` as their trusted descriptor, and require each to refuse
+/// those same bytes with `DESCRIPTOR_REJECTED`, leaving no live allocation
+/// and no opened consumer handle (the drivers above assert both).
+fn assert_c11_and_cxx17_consumers_reject(
+    label: &str,
+    bytes: &[u8],
+    binding: &NativeProviderBindingV1,
+) {
     let (input, output) = shapes();
-    let workspace = Workspace::new("native");
-    let provider = compile_provider(&workspace.0, &bytes, &binding);
+    let workspace = Workspace::new(label);
+    let provider = compile_provider(&workspace.0, bytes, binding);
     let clang = tool("CLANG", "clang");
 
-    let c = generate_c_calling_consumer(&bytes, &binding, &input, &output)
+    let c = generate_c_calling_consumer(bytes, binding, &input, &output)
         .expect("generation keeps its byte-oriented API for this regression");
     let c_root = workspace.0.join("c");
     fs::create_dir_all(&c_root).unwrap();
@@ -192,14 +211,14 @@ fn generated_native_consumers_reject_a_byte_identical_malformed_trusted_descript
             .arg(&provider)
             .arg("-o")
             .arg(&c_binary),
-        "build C11 malformed-descriptor driver",
+        &format!("[{label}] build C11 malformed-descriptor driver"),
     );
     run(
         Command::new(&c_binary).current_dir(&c_root),
-        "run C11 malformed-descriptor driver",
+        &format!("[{label}] run C11 malformed-descriptor driver"),
     );
 
-    let cxx = generate_cxx_calling_consumer(&bytes, &binding, &input, &output)
+    let cxx = generate_cxx_calling_consumer(bytes, binding, &input, &output)
         .expect("generation keeps its byte-oriented API for this regression");
     let cxx_root = workspace.0.join("cxx");
     fs::create_dir_all(&cxx_root).unwrap();
@@ -213,7 +232,7 @@ fn generated_native_consumers_reject_a_byte_identical_malformed_trusted_descript
             .arg("spx_pg_calling_consumer.c")
             .arg("-o")
             .arg(&c_consumer),
-        "compile C11 consumer for C++17 driver",
+        &format!("[{label}] compile C11 consumer for C++17 driver"),
     );
     let cxx_binary = cxx_root.join(format!("malformed{}", env::consts::EXE_SUFFIX));
     run(
@@ -233,23 +252,24 @@ fn generated_native_consumers_reject_a_byte_identical_malformed_trusted_descript
             .arg(&provider)
             .arg("-o")
             .arg(&cxx_binary),
-        "build C++17 malformed-descriptor driver",
+        &format!("[{label}] build C++17 malformed-descriptor driver"),
     );
     run(
         Command::new(&cxx_binary).current_dir(&cxx_root),
-        "run C++17 malformed-descriptor driver",
+        &format!("[{label}] run C++17 malformed-descriptor driver"),
     );
 }
 
-#[test]
-fn generated_rust_consumer_rejects_a_byte_identical_malformed_trusted_descriptor_before_open() {
-    let bytes = malformed_descriptor();
-    let binding = binding();
+/// The Rust half of [`assert_c11_and_cxx17_consumers_reject`]: the generated
+/// crate's own test asserts `Error::DescriptorRejected` and an unchanged
+/// live-allocation count, so a refusal that happened after allocation would
+/// fail.
+fn assert_rust_consumer_rejects(label: &str, bytes: &[u8], binding: &NativeProviderBindingV1) {
     let (input, output) = shapes();
-    let consumer = generate_rust_calling_consumer(&bytes, &binding, &input, &output)
+    let consumer = generate_rust_calling_consumer(bytes, binding, &input, &output)
         .expect("generation keeps its byte-oriented API for this regression");
-    let workspace = Workspace::new("rust");
-    let provider = compile_provider(&workspace.0, &bytes, &binding);
+    let workspace = Workspace::new(label);
+    let provider = compile_provider(&workspace.0, bytes, binding);
     let lib_dir = workspace.0.join("provider-lib");
     fs::create_dir_all(&lib_dir).unwrap();
     let archive = lib_dir.join("libspx_pg_reference_provider.a");
@@ -287,5 +307,49 @@ fn exact_malformed_trusted_bytes_are_rejected_before_provider_allocation() {
         .env("SPX_PG_PROVIDER_LIB_NAME", "spx_pg_reference_provider")
         .env_remove("RUSTC_WRAPPER")
         .args(["test", "--", "--test-threads=1"]);
-    run_cargo(&mut cargo, "run Rust malformed-descriptor driver");
+    run_cargo(
+        &mut cargo,
+        &format!("[{label}] run Rust malformed-descriptor driver"),
+    );
+}
+
+#[test]
+fn generated_native_consumers_reject_a_byte_identical_malformed_trusted_descriptor_before_open() {
+    assert_c11_and_cxx17_consumers_reject("native", &malformed_descriptor(), &binding());
+}
+
+#[test]
+fn generated_rust_consumer_rejects_a_byte_identical_malformed_trusted_descriptor_before_open() {
+    assert_rust_consumer_rejects("rust", &malformed_descriptor(), &binding());
+}
+
+/// Issue #173: every case of the closed malformed-trusted manifest, through
+/// really compiled and executed C11 and C++17 consumers.
+///
+/// Each case's bytes are simultaneously the consumer's embedded trusted
+/// descriptor and the caller's submission, so
+/// `spx_pg_ccc_verify_pairing`'s byte-equality check admits all of them and
+/// only `spx_pg_ccc_descriptor_v1` can refuse. Deleting any single branch of
+/// that function therefore turns exactly one case green-to-red rather than
+/// being masked by the pairing check.
+#[test]
+fn malformed_trusted_corpus_is_refused_by_the_c11_and_cxx17_consumers() {
+    let cases = malformed_trusted_descriptor_cases();
+    assert_eq!(cases.len(), 6, "the manifest is closed");
+    for (name, bytes, _, _) in cases {
+        assert_c11_and_cxx17_consumers_reject(name, &bytes, &binding());
+    }
+}
+
+/// The same closed manifest through the really built and executed generated
+/// Rust consumer, so a divergence between the C11 and Rust transliterations
+/// of the same frozen envelope rules fails here rather than silently
+/// widening one language's admitted set.
+#[test]
+fn malformed_trusted_corpus_is_refused_by_the_rust_consumer() {
+    let cases = malformed_trusted_descriptor_cases();
+    assert_eq!(cases.len(), 6, "the manifest is closed");
+    for (name, bytes, _, _) in cases {
+        assert_rust_consumer_rejects(name, &bytes, &binding());
+    }
 }

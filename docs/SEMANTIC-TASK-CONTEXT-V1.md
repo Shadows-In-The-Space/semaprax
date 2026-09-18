@@ -78,28 +78,80 @@ produced by calling `agent_context_v2_json` unchanged.
    JSON is ever truncated mid-document.
 4. **A cache-key digest.** `compile`'s `goal_digest` output field is a
    `sha256:`-prefixed digest over the schema, the exact source revision, the
-   tokenizer and budget, and every seed's identity, priority, reason, and
-   exact compiled content. It changes whenever any of those change
-   (`tests::digest_changes_with_revision`,
+   tokenizer (name and algorithm digest, item 5 below) and budget, and every
+   seed's identity, priority, reason, and exact compiled content. It changes
+   whenever any of those change (`tests::digest_changes_with_revision`,
    `tests::digest_changes_with_tokenizer`,
-   `tests::digest_changes_with_budget`) -- the property a future cache layer
-   needs to reject a stale entry by key mismatch. **This module computes
-   that key only; it does not implement a cache store, eviction, or
-   invalidation.** See "Honesty bar" below.
+   `tests::digest_changes_with_budget`). This digest is computed *from* the
+   compiled output; it identifies content after the fact and is not itself a
+   pre-compile cache key -- see item 7 below for that.
+5. **A tokenizer algorithm identity.** `TokenizerId::algorithm_digest()` is a
+   `sha256:`-prefixed digest of each unit's exact counting algorithm,
+   separate from and stricter than its short name (`byte-v1`/`lexical-v1`).
+   Issue #197's failure list names "tokenizer version drift changes the
+   budget" -- an algorithm's counting behavior changing without its short
+   name changing. This digest, reported in every bundle's
+   `budget.tokenizer_digest` field and folded into `goal_digest` and
+   `cache_key`, is the value a future change to either algorithm is
+   obligated to bump so such a drift still changes the cache-key identity
+   (`tests::tokenizer_algorithm_digest_differs_between_units_and_is_reported_in_the_bundle`).
+   This module cannot detect an undeclared drift on its own -- only the
+   discipline of bumping that digest's domain string when behavior changes.
+6. **A top-level inclusion-policy summary.** Every bundle's `policy` field
+   reports the shared `AgentContextV2Options`'s exposable fields (`depth`,
+   `max_bytes`, `max_nodes`, `direction`) once at the bundle level, rather
+   than requiring a reader to find them inside each seed's own embedded
+   `query` object (`tests::compiled_bundle_reports_the_shared_inclusion_policy`).
+   `filters` is not in this summary: `AgentContextV2Options` exposes no
+   public accessor for it, and this module does not re-derive the
+   underlying engine's private representation to get one. `filters` remains
+   visible per seed, inside that seed's own compiled content.
+7. **Pre-compile cache key and in-memory replay cache.** `cache_key`
+   computes an input-only digest -- unlike `goal_digest`, computable
+   *before* compiling -- over the source revision, the goal's seeds
+   (order-independent, like `compile`'s own merge), the shared policy
+   (hashed via `AgentContextV2Options`'s `Debug` projection, for the same
+   `filters`-accessor reason as above), the tokenizer and its algorithm
+   digest, the budget, and a caller-declared `access_scope` string naming
+   the caller's own authorization boundary -- the security list's "context
+   caching can leak source across authorization boundaries"
+   (`tests::different_access_scopes_never_share_a_cache_entry`).
+   `TaskContextCache` is a plain in-memory key-value store (no eviction, no
+   expiry, no persistence), and `compile_cached` wraps `compile` with it,
+   reporting whether a call was served from cache. A changed revision,
+   tokenizer, budget, policy, goal, or access scope is proven to never
+   reuse a stale entry
+   (`tests::compile_cached_never_serves_a_stale_value_after_the_source_revision_changes`,
+   `tests::compile_cached_never_serves_a_stale_value_after_the_tokenizer_changes`,
+   `tests::compile_cached_never_serves_a_stale_value_after_the_policy_changes`,
+   `tests::cache_key_changes_with_every_declared_dimension`).
+8. **Lexical seed suggestion.** `suggest_seeds(program, comments, query)` is
+   a pure, side-effect-free function ranking each declaration's plain name
+   and leading doc comment lines (`crate::doc::document`) by deterministic
+   word-overlap score against a caller-supplied, untrusted `query` string --
+   issue #197 step 2's "deterministic lexical matching over names/docs...
+   only as a seed suggestion, never as a replacement for semantic
+   resolution." Nothing in this module calls it, and it never builds,
+   mutates, or feeds a `CompilationGoal` on its own
+   (`tests::suggest_seeds_never_influences_a_goal_that_does_not_explicitly_include_it`).
+   A hostile, instruction-shaped query still only ever contributes plain
+   lowercase words to the overlap count
+   (`tests::suggest_seeds_hostile_query_text_never_panics_and_is_treated_as_plain_words`).
 
 ## Deliberately out of scope
 
-Issue #197 describes a much larger surface: natural-language-driven seed
-*suggestion* (lexical matching over names/docs, explicitly required by the
-issue to never replace explicit semantic resolution), integrating
-requirements, tests, diagnostics, and candidate diffs into the closure
-itself, an actual persistent cache store with invalidation, and CLI/MCP/SDK
-exposure. None of that is in this module. This is one narrow, honestly-scoped
-slice -- the "structured goal" and "token budget, not byte budget" bullets of
-#197's "In scope" list -- shipped as a Rust-host library capability, matching
-the precedent `semantic_embedding` set (see `docs/SEMANTIC-EMBEDDING-V1.md`)
-for shipping one demonstrable slice of a large issue rather than a broader
-claim this tranche could not back with evidence.
+Issue #197 describes a larger surface this module still does not cover:
+requirement/test/diagnostic/candidate-diff seeds integrated into the
+semantic closure itself (a seed is still exactly one stable declaration id),
+real content summarization of a distant or omitted item (this module and
+the engine it composes only ever include or omit a whole typed unit, never
+a compressed substitute for one), and CLI/MCP/SDK exposure of the cache and
+suggestion additions specifically (the existing `compact task-context`
+route below wires the goal/budget surface only). This is still one
+honestly-scoped slice, matching the precedent `semantic_embedding` set (see
+`docs/SEMANTIC-EMBEDDING-V1.md`) for shipping one demonstrable slice of a
+large issue rather than a broader claim this tranche could not back with
+evidence.
 
 ## No cross-seed deduplication
 
@@ -119,13 +171,54 @@ goal.
 `compile` takes an already-parsed `&Program` and calls only
 `crate::graph::agent_context_v2_json` and
 `crate::agent_economics::lexical_tokens`. It opens no file, spawns no
-process, and contacts no network.
+process, and contacts no network. `suggest_seeds` additionally calls
+`crate::doc::document` on the same already-parsed `&Program` plus a
+caller-supplied `&Comments` -- it does not lex or read anything itself.
+`TaskContextCache` holds compiled bytes only in process memory.
 
 ## Evidence
 
 Local, offline unit tests
-(`cargo test --locked -p semaprax --lib semantic_task_context`, 16 tests)
-cover:
+(`cargo test --locked -p semaprax --lib semantic_task_context`, 32 tests)
+cover everything below, plus:
+
+- Tokenizer algorithm digests differ between `byte-v1` and `lexical-v1`, are
+  reported in the bundle, and are deterministic across repeated calls
+  (`tokenizer_algorithm_digest_differs_between_units_and_is_reported_in_the_bundle`).
+- The bundle's top-level `policy` field reports the shared
+  `AgentContextV2Options`'s `depth`/`max_bytes`/`max_nodes`/`direction`
+  (`compiled_bundle_reports_the_shared_inclusion_policy`).
+- `cache_key` is deterministic for repeated identical input, insensitive to
+  seed list order (matching `compile`'s own order-independence), and
+  changes when the revision, policy, tokenizer, budget, access scope, seed
+  priority, or seed reason changes
+  (`cache_key_is_deterministic_for_repeated_calls_on_identical_input`,
+  `cache_key_is_insensitive_to_seed_list_order`,
+  `cache_key_changes_with_every_declared_dimension`).
+- `compile_cached` hits on identical input and returns byte-identical
+  output, and never serves a stale value after the source revision, the
+  tokenizer, or the shared policy changes -- each case recompiles fresh
+  rather than reusing the prior entry
+  (`compile_cached_hits_on_identical_inputs_and_returns_byte_identical_value`,
+  `compile_cached_never_serves_a_stale_value_after_the_source_revision_changes`,
+  `compile_cached_never_serves_a_stale_value_after_the_tokenizer_changes`,
+  `compile_cached_never_serves_a_stale_value_after_the_policy_changes`).
+- Two different `access_scope` values never share a cache entry even with
+  every other input identical, and each scope's own entry is still a hit on
+  a later exact repeat (`different_access_scopes_never_share_a_cache_entry`).
+- `suggest_seeds` ranks by word overlap and omits non-matching declarations
+  entirely, breaks ties by ascending stable id, returns nothing for an
+  empty or punctuation-only query, treats an instruction-shaped hostile
+  query as plain words without granting it any special effect or panicking,
+  and never influences a `compile` call that does not explicitly include a
+  suggested id
+  (`suggest_seeds_ranks_by_word_overlap_and_omits_non_matches`,
+  `suggest_seeds_ranks_ties_by_ascending_stable_id`,
+  `suggest_seeds_with_empty_or_punctuation_only_query_yields_no_suggestions`,
+  `suggest_seeds_hostile_query_text_never_panics_and_is_treated_as_plain_words`,
+  `suggest_seeds_never_influences_a_goal_that_does_not_explicitly_include_it`).
+
+The original slice's tests still cover:
 
 - Goal-awareness: two goals naming different seeds compile to different
   bundles, and the compiled content shows *why* -- each seed's own forward
@@ -174,16 +267,23 @@ process, or contacts a network.
 
 ## Honesty bar
 
-This module claims exactly four things: an explicit multi-seed goal
+This module claims exactly seven things: an explicit multi-seed goal
 representation whose free-text `reason` field is proven inert against
 selection and budget; an explicit and honestly labeled token-accounting unit
-that never reports an approximation as exact; deterministic whole-seed
-selection under a real budget enforced -- not advisory -- at an exact
-boundary; and a cache-key digest sensitive to every field that determines the
-rendered output byte-for-byte. It does not claim natural-language goal
-understanding, cross-seed semantic deduplication, a working cache store,
-requirement/test/diagnostic-facing integration, or an MCP route for structured
-goals. The compact CLI route is described below.
+that never reports an approximation as exact and carries its own
+algorithm-identity digest; deterministic whole-seed selection under a real
+budget enforced -- not advisory -- at an exact boundary; a cache-key digest
+sensitive to every field that determines the rendered output byte-for-byte;
+a working (if unbounded, unevicting, non-persistent) in-memory cache keyed
+by a pre-compile digest and separated by caller-declared access scope; a
+deterministic lexical seed suggestion that never influences selection on its
+own; and a top-level summary of the shared inclusion policy's exposable
+fields. It does not claim natural-language goal *understanding*, cross-seed
+semantic deduplication, real content summarization of an omitted or distant
+item, requirement/test/diagnostic-facing seed integration, cache eviction or
+persistence across process restarts, or an MCP/CLI route for the cache and
+suggestion additions specifically. The compact CLI route below still covers
+goal/budget only.
 
 ## Multi-seed CLI selection
 

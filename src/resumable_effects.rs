@@ -92,6 +92,7 @@
 pub mod capability;
 pub mod core;
 pub mod migration;
+pub mod signature;
 #[cfg(test)]
 mod tests;
 
@@ -103,3 +104,7 @@ pub use core::{
     JournalError, Outcome, ResumableEffectProgram, Step,
 };
 pub use migration::{migrate_suspended, MigratedState, MigrationError, StateMigration};
+pub use signature::{
+    validate_journal_signatures, EffectSignature, EffectSignatureTable, EffectTag,
+    JournalSignatureError, SignatureCheckedHandler, SignatureMismatch, SignatureTableError,
+};

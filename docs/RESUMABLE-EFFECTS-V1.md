@@ -159,6 +159,60 @@ failure case #204 names explicitly).
   produced by source-syntax lowering, because no such lowering exists yet
   (see [Scope boundary](#scope-boundary)).
 
+`src/resumable_effects/signature.rs`:
+
+- `EffectSignatureTable`: a bounded (≤64, the same ceiling), ordered,
+  duplicate- and empty-rejecting table of `EffectSignature { effect_id,
+  request_shape, answer_shape }`. `answer_shape` is the "what resuming this
+  suspension must supply" half of a typed resumable effect — the half
+  `core`'s whole-program `Observation` type parameter cannot express.
+- **Why it is needed.** `ResumableEffectProgram` fixes exactly one
+  `Request`/`Observation` pair per program, so `rustc` rejects an
+  observation of the wrong *Rust* type. That is a whole-program channel
+  type, not a per-effect one. A computation that waits on several distinct
+  effects must model `Request`/`Observation` as enums or tagged records, and
+  at that point Rust sees one type and checks nothing about *which* effect a
+  given answer answers: a `clock` suspension can be resumed with a `model`
+  answer, and both the handler boundary and a recovered journal accept it
+  silently. This module is that missing check, and only that check.
+- `SignatureCheckedHandler`: a decorator over an already-injected
+  `EffectHandler`, in the same shape as `CapabilityGatedHandler` and
+  composable with it in either order. It refuses an undeclared effect id or
+  a request whose shape disagrees with its declaration *before* the wrapped
+  handler — the only physical effect boundary — is called at all, and
+  refuses an answer that names a different effect, or the right effect in
+  the wrong shape, before that answer can become the observation a
+  `transition` reads. Both refusals travel the driver's existing
+  `HandlerFailed`/`ObservationFailed` path, so `run`/`resume` are unchanged,
+  the refusal is durable journal evidence, and it can never replace an
+  already-selected terminal status. The answer check necessarily runs after
+  the wrapped handler returns — an answer cannot be inspected before it
+  exists — so a genuinely authorized physical effect may already have
+  happened when an answer is refused; what the refusal guarantees is that a
+  mismatched answer never becomes an `Observed` entry or reaches a
+  `transition`.
+- `validate_journal_signatures`: the same check re-applied to a *recovered*
+  journal. `Journal::validate` checks scope, ordering and request identity,
+  but it compares an `Observed` entry's observation against nothing —
+  observation and request are the program's own two Rust types and any pair
+  of them is structurally legal. A hand-tampered or corrupted checkpoint can
+  therefore pass `Journal::validate` and still be refused here, reported as
+  the exact entry index plus a distinct `SignatureMismatch` variant
+  (`UnknownEffect`, `RequestShapeMismatch`, `AnswerForWrongEffect`,
+  `AnswerShapeMismatch`). Journal order is preserved: the first offending
+  entry is reported, and the journal is never sorted, skipped past, or
+  repaired.
+- **Nothing here runs anything.** Constructing a table, checking a shape and
+  validating a journal are pure functions over caller-supplied data: they
+  dispatch no effect, spawn no work, and mint no authority. A signature is
+  proof data about what an answer must look like, never permission for
+  anything to produce one. Shapes are caller-supplied opaque strings
+  compared for exact equality, not nominal HIR type identities; deriving a
+  shape string from a real checked source type is owned by the
+  syntax/HIR tranche in [Scope boundary](#scope-boundary), which this
+  checking discipline is deliberately independent of so that it is testable
+  now.
+
 ## What matters, and how it is tested
 
 - **Replay is not re-execution.** `resume_from_a_truncated_journal_only_dispatches_the_new_tail`
@@ -213,6 +267,25 @@ failure case #204 names explicitly).
   `owned_state_transfers_intact_across_a_suspension` carries a growing,
   non-`Copy` `Vec<String>` log through two suspensions and asserts its exact
   contents in the `Suspend` carrier.
+- **A resume that does not match is refused, twice over.**
+  `an_undeclared_effect_is_refused_before_the_wrapped_handler_is_called` and
+  `a_request_whose_shape_disagrees_with_its_declaration_is_refused_before_the_wrapped_handler`
+  wire a wrapped handler whose `dispatch` **panics** if called at all, so
+  "refused before the effect boundary" is proven rather than asserted.
+  `an_answer_naming_a_different_effect_never_becomes_an_observation` offers a
+  perfectly well-formed `model` answer against a pending `clock` suspension —
+  a swap `rustc` cannot see, because both are the same Rust type — and
+  asserts the run fails and the journal contains **no** `Observed` entry.
+  `a_tampered_answer_that_structural_validation_accepts_is_refused_by_signature_checking`
+  asserts `Journal::validate` returns `Ok` for the tampered journal and
+  `validate_journal_signatures` still refuses it at the exact entry index,
+  so the new check demonstrably catches something the existing structural
+  validator cannot.
+  `a_journal_recovered_under_a_table_that_no_longer_declares_its_effect_is_refused`
+  is the "resuming after a code change can execute state under incompatible
+  semantics" case. `a_refused_answer_is_replayed_as_the_same_refusal_without_a_second_dispatch`
+  proves the refusal is exactly-once: the replay wires a panicking handler.
+
 
 ## Scope boundary
 
@@ -228,6 +301,13 @@ Explicitly **not** done in this slice, and why:
   follow-up work implements against — the same relationship
   `LIVE-INVOCATION-CONTRACT-V1.md` already has to the HIR-integration issues
   it exists to unblock (#109–#116, #178–#181 per that document).
+- **Shapes are opaque caller-supplied strings, not checked source types.**
+  `EffectSignature`'s `request_shape`/`answer_shape` are compared for exact
+  equality. Deriving such a shape from a real checked source type — so that
+  the *compiler* computes what a suspension waits for rather than the caller
+  declaring it — belongs to the syntax/HIR tranche below. What exists here
+  is the checking discipline and its refusals, not a source-derived type
+  identity.
 - **No compiler-checked ownership analysis.** `'static + Clone + Eq + Debug`
   is this reference module's own approximation of "plain owned, transferable
   data" — it rejects a borrow or a non-`'static` handle the same way a real
@@ -260,15 +340,17 @@ Explicitly **not** done in this slice, and why:
 
 | Criterion (from issue #204) | Status |
 | --- | --- |
-| A non-Agent function can yield typed requests and resume safely | **Reference-validator level only.** `ResumableEffectProgram` is a Rust trait any non-Agent Rust type can implement and drive; no `.spx` source can do this yet. |
+| A non-Agent function can yield typed requests and resume safely | **Reference-validator level only.** `ResumableEffectProgram` is a Rust trait any non-Agent Rust type can implement and drive; no `.spx` source can do this yet. "Typed" is now per-effect, not only per-program: `EffectSignatureTable` declares what each effect's request looks like and what resuming it must supply, and a resume that does not match is refused (`SignatureCheckedHandler` before the effect boundary, `validate_journal_signatures` on a recovered journal). |
 | Generated state machines are deterministic semantic projections | Proven at the reference level: `transition` is required to be a pure function and drift from that requirement is caught (`RequestDrift`/`TransitionDrift`). Not yet a compiler-generated projection from source. |
-| Ownership, effects, contracts and authority survive suspension correctly | Ownership: reference-level `'static`/`Clone` gate only (see above). Effects: `EffectHandler` is the sole authority boundary, and `CapabilityGatedHandler` additionally checks a declared capability id against a bounded allowlist before that boundary is reached. Contracts (pre/postconditions) and real compiler-checked ownership: **open**, need HIR integration. |
+| Ownership, effects, contracts and authority survive suspension correctly | Ownership: reference-level `'static`/`Clone` gate only (see above). Effects: `EffectHandler` is the sole authority boundary; `CapabilityGatedHandler` checks a declared capability id against a bounded allowlist before that boundary is reached, and `SignatureCheckedHandler` independently checks the declared request and answer shapes, refusing an answer that answers a different effect before it can become an observation. Contracts (pre/postconditions) and real compiler-checked ownership: **open**, need HIR integration. |
 | Checkpoint/recovery never grants effect authority by itself | **Met**, including at the "reminted resume" level: `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. |
 | Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture onto `resumable_effects` is follow-up work once the syntax/HIR tranche exists for it to lower into. |
 
 ## Gate
 
-`cargo test --locked -p semaprax --lib resumable_effects::` (30 unit tests)
-and `cargo test --locked -p semaprax --doc resumable_effects` (2
-`compile_fail` doctests proving the typed-resume and ownership compile-time
-rejections) are this module's focused selectors.
+`cargo test --locked -p semaprax --lib resumable_effects::` (46 unit tests:
+30 for `core`/`capability`/`migration`, 16 for `signature`) and
+`cargo test --locked -p semaprax --doc resumable_effects` (2 `compile_fail`
+doctests proving the typed-resume and ownership compile-time rejections) are
+this module's focused selectors. All of it is local, offline, re-runnable
+evidence; nothing hosted, native, or Wasm is claimed.

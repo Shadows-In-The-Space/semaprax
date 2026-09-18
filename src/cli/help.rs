@@ -152,7 +152,7 @@ static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: CommandId::Doc, canonical: "doc", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax doc <file> [--json]"] },
     CommandSpec { id: CommandId::Verify, canonical: "verify", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax verify <file> <patch.spatch> <evidence.json>", "semaprax verify <root> <patch.wspatch>|<proposal.json> <evidence.json>", "semaprax verify <definition.json> <profile.json> <graph.json>", "semaprax verify <manifest> <image.json>"] },
     CommandSpec { id: CommandId::Agent, canonical: "agent", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax agent inspect <definition.json> [--profile]", "semaprax agent run <definition.json> <task.json> <transcript.json> [--evidence|--trace]", "semaprax agent replay <definition.json> <task.json> <transcript.json> <evidence.json>", "semaprax agent skill [--require-schema <schema>]"] },
-    CommandSpec { id: CommandId::SourceLive, canonical: "source-live", aliases: &[], availability: Availability::Private, global: true, usages: &["semaprax-full source-live run <config.json> <checkpoint-dir> --opencode <absolute-executable> --scratch <empty-absolute-dir>", "semaprax-full source-live resume <config.json> <checkpoint-dir> --opencode <absolute-executable> --scratch <empty-absolute-dir>", "semaprax-full source-live migrate <old-config.json> <old-checkpoint-dir> <new-config.json> <new-checkpoint-dir> <function-id> <steps> --opencode <absolute-executable> --scratch <empty-absolute-dir>"] },
+    CommandSpec { id: CommandId::SourceLive, canonical: "source-live", aliases: &[], availability: Availability::Private, global: true, usages: &["semaprax-full source-live run <config.json> <checkpoint-dir> --opencode <absolute-executable> --scratch <empty-absolute-dir>", "semaprax-full source-live resume <config.json> <checkpoint-dir> --opencode <absolute-executable> --scratch <empty-absolute-dir>", "semaprax-full source-live migrate <old-config.json> <old-checkpoint-dir> <new-config.json> <new-checkpoint-dir> <function-id> <steps> --opencode <absolute-executable> --scratch <empty-absolute-dir>", "semaprax-full source-live repair run <repair-config.json> <checkpoint-dir>", "semaprax-full source-live repair resume <repair-config.json> <checkpoint-dir>"] },
     CommandSpec { id: CommandId::Skills, canonical: "skills", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax skills get <agent|language|graph|stdlib|packages|effects>"] },
     CommandSpec { id: CommandId::Explain, canonical: "explain", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax explain <SPX-CODE> [--json]"] },
     CommandSpec { id: CommandId::Fix, canonical: "fix", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax fix --plan", "semaprax fix <file> assign-function-id <automatic-function-id> --plan"] },
@@ -1141,6 +1141,9 @@ mod tests {
         assert!(!catalog(false).contains("source-live"));
         let help = scoped("source-live", true).unwrap();
         for verb in ["run", "resume", "migrate"] {
+            assert!(help.contains(&format!("source-live {verb} ")));
+        }
+        for verb in ["repair run", "repair resume"] {
             assert!(help.contains(&format!("source-live {verb} ")));
         }
         assert!(catalog(true).contains("semaprax-full source-live"));

@@ -7,6 +7,7 @@
 mod checkpoint;
 mod offline_repair_cli;
 mod options;
+mod repair;
 mod run;
 
 #[cfg(test)]
@@ -43,6 +44,7 @@ impl CliError {
 pub fn run(arguments: &[String]) -> Result<String, (String, u8)> {
     let result = match arguments.split_first() {
         Some((verb, rest)) if verb == "offline-repair" => offline_repair_cli::run(rest),
+        Some((verb, rest)) if verb == "repair" => repair::run(rest),
         _ => options::Command::parse(arguments).and_then(run::execute),
     };
     result.map_err(|error| (error.reason, error.code))

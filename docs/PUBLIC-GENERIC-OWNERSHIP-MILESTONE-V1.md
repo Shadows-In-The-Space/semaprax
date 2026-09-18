@@ -416,6 +416,240 @@ The decision is revisited only when all of the following hold together:
 Partial completion changes nothing. Eight green gates and an unmade decision
 still mean unsupported and unpublished.
 
+**Reverified 2026-09-18 against `main` at `e02ee0ef`, for issues #165 and
+#141.** The 2026-09-11 conclusion is unchanged: still not supported, still
+not published. Nothing below is a new decision; it is the prepared record
+those two issues ask for, evidenced against current `main` rather than copied
+from either issue's own text. Only a named maintainer may convert the
+recommended option into an approved one, by posting the filled review-comment
+template each issue requires.
+
+## PG-9 prepared decision record
+
+### Scope note: #165 and #141 are the same decision, two angles
+
+#165 asks for the PG-9 decision for the whole Public Generic Ownership v1
+milestone (PG-1 through PG-9). #141 (`SPX-AI-042`) asks for the same decision
+restated for the specific slice #140 (`SPX-AI-041`) executed: the generic
+*callable boundary* — real calling consumers, malformed-descriptor rejection,
+and settlement, as opposed to the grammar/metadata half that was already
+hosted green before #140 started. They are not independent: #141's own gate
+is "#140 is accepted," and #140's own closing comment states plainly that its
+four residual cells "are owned by other open issues (#173, #229)," so #141
+cannot honestly move ahead of #165. There is no scope in which #141 would
+recommend a different support/publication state than #165; this record
+answers both from one evidence base and says so once rather than twice.
+
+### Gate-by-gate table, verified against current `main`
+
+Evidence kind uses the vocabulary this task requires: **hosted** (a completed
+GitHub Actions run on a hosted runner), **local** (a command run on a
+developer machine only), **proof-only** (a mathematical/property argument
+with no execution), **absent** (no evidence exists for the claim).
+
+| Gate | Passes? | At what head | Evidence kind | Source |
+| --- | --- | --- | --- | --- |
+| PG-1 (type grammar) | Yes | `2ef043ba1b989f49b256e456f71fb6e89068bf33` | Hosted (Linux/macOS/Windows) | [run 34594793245](https://github.com/wavect/semaprax/actions/runs/34594793245), jobs 103248047092/103248046648/103248046983 |
+| PG-2 (template/argument identity) | Yes | same commit/run as PG-1 | Hosted | same run |
+| PG-3 (compatibility rules) | Yes | same commit/run as PG-1 | Hosted | same run |
+| PG-4 (candidate delta) | Yes | same commit/run as PG-1 | Hosted | same run |
+| PG-5 (4-language calling consumers) | Grammar/metadata half only | `2ef043ba…` (grammar half); calling half at `main` (local only) | **Split**: grammar half hosted, calling half **local only** | milestone doc "Gate scope notes"; #140's audit (`e31a3fe2`): 40/2/3 and 22/1/1 local pass/fail/ignore counts, 3 failures environmental (`python3` shim), not product defects |
+| PG-6 (hostile descriptor/carrier replay) | Grammar half only | same split as PG-5 | **Split**: grammar half hosted, descriptor/carrier hostile corpus **local only** | #173 still OPEN; #140 comment: "structured_descriptor_cases… driven through all four real compiled consumers," local |
+| PG-7 (cross-engine settlement) | Partial (4 of 8 required engines/consumers) | `main` | **Local only** | #162 still OPEN; its own comment: "The acceptance list names eight engines and consumers. Four are now covered." Generated Rust/TS/C11/C++17 callers not yet in the corpus |
+| PG-8 (hosted cross-platform run for the *complete* corpus) | No — only the **narrower**, pre-#140 grammar/metadata corpus is hosted green | `2ef043ba…`, a commit that **predates** all PG-5/PG-6/PG-7 calling, hostile-carrier, and settlement code | **Hosted, but scope-stale** | Milestone doc, verified directly against `.github/workflows/ci.yml`: the job's consumer step "is unchanged and still invokes only `cargo test --locked -p semaprax --test projections public_generic_consumers`" — it does not run the new work at all |
+| PG-9 (the decision) | No | — | **Absent** | #165 OPEN, #141 OPEN, both unclosed by any maintainer comment |
+
+Three gates that read "local only" above are not close to hosted: #163 (host
+matrix refresh) is OPEN with one preflight-tooling commit landed
+(`1d2a3e09`) and states explicitly "#162 completion and fresh three-host
+expanded corpus/evidence are still required." #164 (freeze the release
+candidate) is OPEN and has not started — it depends on #163. #175 (widen the
+release-blocking job, P1) is OPEN. So the chain PG-5/6/7 → #163 → #164 → #165
+has its first two links unmet, not merely its last one.
+
+Two additional blockers sit underneath PG-5/PG-6/PG-7 rather than beside
+them:
+
+- **#229** (OPEN): no compiled `.wasm` artifact implements the public-generic
+  provider ABI (`open`/`input_prepare`/`call`/`result_export`/`release`).
+  `WasmProvider` is an in-process Rust model; the TypeScript consumer keeps
+  allocator/handle bookkeeping host-side. The one thing that *is* newly
+  real — a genuinely compiled `.wasm` scalar byte-reversal export via
+  `build_web_with_scalar_exports` — is explicitly a "bounded, labelled
+  stand-in," not the provider ABI, per #229's own second audit. That audit
+  also found the blocker is architectural (`SPX-W115` closes both the byte-
+  and scalar-export Wasm profiles to this shape) and, one level further back,
+  that no manifest/Project profile admits a generic `web_export` at all yet
+  — so a provider cannot even be *derived* from a checked generic export
+  today, compiled or not. #229 is flagged `HUMAN_BLOCKED` on a target-profile
+  design decision, not a bounded-worker task.
+- **Every physical adapter (interpreter, native, Wasm) still binds a fixture
+  endpoint**, not a function body generated from a real admitted
+  public-generic `.spx` export. No real monomorphized public generic export
+  has ever been called through this boundary end to end. This is stated in
+  four places in the source itself
+  (`src/public_generic_abi/native.rs:25`, `wasm/provider.rs:85-86`,
+  `interpreter.rs:97`, `native/provider_body.c:22`) and confirmed live in the
+  `examples/everyday-agent-project` Agent product added today
+  (`f4c5327d`, 2026-09-18): its own commit message states the real
+  public-generic consumer call and provider execution are "blocked on #162
+  and #163 (both open, P0)," and that the fixture provider used in testing
+  is deliberately named `unsupported-unpublished`.
+
+**One correction to the milestone doc's own "what remains" table above**: it
+still lists "MSRV and the 16 MiB bound for foreign consumers (#226)" as
+outstanding under PG-5/PG-6. #226 is **closed** (`d9410607`) — the generated
+Rust consumer now builds against the pinned MSRV toolchain and the native
+provider's true payload ceiling was proven and reconciled with the documented
+16 MiB bound (a real cross-implementation divergence was found and fixed
+under the follow-up #250, also closed). That work is done, locally verified,
+not hosted, and does not change the overall recommendation — it just means
+the residual-gap list above is one item shorter than the milestone doc's
+existing table records. This is the kind of drift this record exists to
+catch: it runs in the *optimistic* direction here (a closed issue still
+listed as open work), which is the opposite of the backlog's usual bias and
+is called out explicitly per this task's instructions.
+
+### Exact scope the decision would cover, if approved
+
+**Admitted semantic scope** (all "v1"): monomorphic public generic signatures
+only, no runtime generic specialization; one owned instance parameter with
+flat (non-nested) owned `Bytes` leaves only — nested/multi-level owned
+records are not exercised in any adapter; admitted Copy scalar arguments per
+[Public Generic Type Grammar v1](PUBLIC-GENERIC-TYPE-GRAMMAR-V1.md); bounds
+`MAX_BYTES_PER_LEAF` = 64 KiB, `MAX_OWNED_LEAVES_PER_INSTANCE` = 256,
+`MAX_TOTAL_PAYLOAD_BYTES` = 16 MiB; synchronous and effect-free only — no
+cancellation, concurrency, callbacks, borrows, resources, or generic
+variants; sticky failure selection and canonical reverse cleanup order.
+
+**Ownership rules**: an owned call stages arguments left to right and
+transfers them together at its declared commit boundary (repository
+invariant), enforced identically by [Public Generic Settlement Obligations
+v1](PUBLIC-GENERIC-SETTLEMENT-V1.md) and bound to the compiler's own cleanup
+facts; any disagreement is a refusal.
+
+**Allocator responsibility**: the provider (native/Wasm/interpreter adapter)
+owns input/result leaf allocation and release; the native adapter's own
+allocator headroom (registry/bookkeeping bytes) is distinct from the logical
+16 MiB payload bound (see #250, closed, for the reconciliation).
+
+**Error/failure semantics**: closed reason vocabulary, sticky primary status,
+deterministic secondary cleanup evidence, zero live resources after every
+terminal case — proven locally for interpreter/native-O0/native-O2/Wasm-model
+parity (`carrier::settlement_corpus`, 9/9 local), not yet for any of the four
+generated calling consumers.
+
+**Target/toolchain versions**: native C11 (`clang`, both `-O0`/`-O2`), Core
+Wasm (model only — no compiled artifact implements the provider ABI, see
+#229), Rust generated consumer pinned to MSRV 1.88 (proven locally,
+`d9410607`), TypeScript/Wasm via `tsc` 5.8.3 (pinned in CI preflight,
+`1d2a3e09`, itself not yet exercised against the full corpus), C++17.
+Hosted-green platform evidence exists **only** for the narrower pre-#140
+grammar/metadata corpus, on `ubuntu-latest`/`macos-latest`/`windows-latest`
+at `2ef043ba…` — it says nothing about the calling, hostile-carrier, or
+settlement work, all of which has run only on one developer's macOS arm64
+host.
+
+**Explicitly excluded**: generic variants, borrowed aggregates, resources,
+effects, callbacks, concurrent or distributed calling, runtime
+specialization, any manifest-profile-derived generic `web_export` (none
+exists), any compiled Wasm provider ABI, any published package of any kind.
+
+### What would have to become true to change this decision
+
+Each item is a precondition, tied to the issue that owns it. None is
+optional; #165 states that a missing required gate makes "the only valid
+current decision" retain unsupported/unpublished.
+
+1. **#173** — hostile descriptor/carrier replay proven through all four
+   *generated* calling consumers (not only the reference decoder), closed.
+2. **#229** — a maintainer-authorized target-profile decision on the
+   compiled Wasm provider ABI, then an actual compiled `.wasm` artifact
+   implementing `open`/`input_prepare`/`call`/`result_export`/`release`,
+   closed.
+3. **#140** — the callable-boundary/malformed-descriptor matrix accepted;
+   its own last comment says it is blocked purely on #173 and #229 above,
+   not on new code of its own.
+4. **#162** — the remaining four engines (generated Rust/TypeScript/C11/C++17
+   callers) added to the cross-engine settlement corpus, closed.
+5. **#175** — the release-blocking `public-generic-ownership-milestone` CI
+   job widened so PG-5/PG-6/PG-7 selectors are mandatory on every host, not
+   only the old grammar/metadata step.
+6. **#163** — one fresh, complete hosted run of the *widened* job on Linux,
+   macOS, and Windows, for one exact commit, recorded with real run/job IDs.
+7. **#164** — exact-head release-candidate convergence: no commit lands
+   between the frozen SHA and the evidence claim, full local+hosted gate
+   convergence, a frozen evidence packet.
+8. **#165 / #141** — only after all seven above: a named maintainer records
+   the filled review-comment template (`Decision:`, `Exact candidate SHA:`,
+   `Hosted evidence run/jobs:`, `Supported state:`, `Published
+   state/channels:`, …) as an issue comment. A thumbs-up is explicitly not
+   sufficient per #165's own text.
+
+Every one of 1–7 is an **open** GitHub issue today (verified via `gh issue
+view`, 2026-09-18). None is in progress toward completion in a way that
+changes the recommendation below.
+
+### Recommended option
+
+**Option A — remain unsupported and unpublished**, per #165's own decision
+menu. This is not a preference; it is the only option the evidence supports,
+because gates PG-5, PG-6, PG-7, and PG-8-for-the-new-corpus are not hosted
+green, and PG-9 itself requires all eight to be. Options B/C/D (experimental
+preview, full support, or a split decision) all presuppose evidence this
+repository does not yet have.
+
+**Support state**: `unsupported` (repository's closed vocabulary — see
+`docs/COMPLETION-MATRIX.md`'s "Partial" / status-tooling conventions; no
+`experimental-preview` or `supported-preview` label is warranted because no
+consumer package or provider artifact has ever been distributed to anyone
+outside this repository).
+
+**Publication state**: `unpublished`. No package registry, GitHub prerelease,
+toolchain archive, or generated-source channel carries any public-generic
+descriptor, carrier, consumer, or provider artifact. A generated package
+existing under `tests/public_generic_*` or in a local `target/` build is not
+publication.
+
+**Rationale in one sentence**: three of the milestone's nine gates (PG-5,
+PG-6, PG-7) have only local evidence, one more (PG-8) is hosted green for a
+commit that predates the code those three gates need, and #165 states its
+own default for exactly this shape of evidence gap.
+
+### Identity and authority (to be completed by the approving maintainer)
+
+- Decision identifier/version: unassigned — no decision has been recorded.
+- Decision date: unassigned.
+- Authorized approver(s): unassigned — #165 and #141 both require a named
+  Semaprax maintainer; this record was prepared by an agent and carries no
+  approval authority.
+- Exact candidate commit SHA: unassigned — no candidate has been frozen
+  (that is #164's undone job).
+- Exact hosted workflow run/job IDs for the *complete* corpus: unassigned —
+  none exists yet; PG-8's only hosted run (`34594793245`) predates PG-5/6/7.
+- Release-candidate evidence packet: does not exist — #164 has not started.
+
+### Packaging, integrity, compatibility, and security posture
+
+Not applicable while the recommendation is unsupported/unpublished: there is
+no checksum, signature, notarization, reproducible-build, versioning,
+deprecation, vulnerability-reporting, or revocation posture to record,
+because nothing is published. Recording any of those fields now, before
+publication is authorized, would itself be the kind of premature claim this
+task and #165 both warn against. These fields become required inputs to the
+*next* revision of this record, at the point a maintainer selects Option B,
+C, or D.
+
+### Nonclaims (unchanged by this record)
+
+No runtime generic specialization; no generic variants, resources, or
+borrowed aggregates; no ambient publication authority; no universal
+target/platform support; no automatic semantic-version decision; no
+compiled Wasm provider ABI; no compiler-derived generic export reaching any
+adapter; no guarantee beyond the exact bounded profile described above; no
+reinterpretation of Project v8/v9/v11 formats; no distributed/concurrent
+calling; no hidden allocator ABI.
+
 ## Nonclaims
 
 This document admits no syntax, defines no descriptor, carrier, package, or

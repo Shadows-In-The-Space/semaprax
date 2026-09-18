@@ -178,6 +178,78 @@ choice, not an oversight to be quietly worked around:
    only for the exact toolchain versions and task equivalence recorded
    beside it.
 
+## Agent driver seam
+
+`run.py` (the harness this whole document otherwise describes) scores a
+fixed, human-written source tree — it has no model, provider, sampling, or
+budget concept, and no code path in it invokes a model. `agent/` (a sibling
+directory) adds the seam a real Agent-driven run would go through, without
+modifying `run.py`:
+
+- **`agent/contracts.py`** defines the request a solver must be given —
+  `ModelIdentity` (provider, model, revision; a mutable alias such as
+  `"latest"` or `"@main"` is rejected at construction, same rule
+  `adapters.json` already follows for toolchain selectors), `SamplingParams`
+  (temperature, top_p, an explicit `seed`), and `Budget` (max prompt/
+  completion/total tokens, max retries, max cost). Every one of these is a
+  required constructor argument; none has an environment-variable or other
+  ambient fallback (`AGENTS.md`: "Capabilities are explicit... no ambient...
+  secret, key... authority" — read here as applying to model authority, not
+  only filesystem/network authority).
+- **`agent/budget.py`**'s `BudgetLedger` charges usage against a `Budget` and
+  raises `BudgetExceededError` or `RetriesExhaustedError` the instant a
+  ceiling would be crossed, leaving its own recorded usage exactly as it was
+  before the rejected charge. `agent/orchestrator.py` catches either and
+  writes a terminal record (`status: "budget_exceeded"` or
+  `"retries_exhausted"`) with **no** `public`/`hidden` key — the same
+  discipline `run.py` already uses for `blocked` and `drifted` (see "Scoring
+  and hidden-test isolation" above): a pair that never reached a build/run
+  step is recorded as one, not silently absorbed into `failed`.
+- **`agent/replay_transport.py`** is a deterministic, offline
+  `SolverTransport`: it reads one committed JSON fixture
+  (`benchmark.cross_language.agent.replay_fixture.v1`) and replays its
+  scripted attempt sequence verbatim — no network call, no clock, no RNG.
+  Given the same fixture and request, two runs on any host produce
+  byte-identical usage and transcript digests
+  (`tests/test_agent_driver.py::ReplayTransportTests.test_replay_is_byte_for_byte_deterministic`).
+  A fixture is a hand-authored script standing in for a model response —
+  the offline analogue of `tests/documentation/cross_language_benchmark_suite.rs`'s
+  `MockLanguage` — never a recorded real-model transcript; every committed
+  fixture says so in its own `_non_claim` field.
+- **`agent/live_transport.py`** is a real-provider `SolverTransport`.
+  Declared, never exercised in this repository: it refuses to construct
+  without an explicit, non-empty `api_key` argument (never `os.environ`),
+  and refuses to `complete()` even when a key is supplied, because no HTTP
+  request/response mapping in it has ever been verified against a real
+  provider response here (no network access, no credentials in this
+  environment, and none acquired to build this seam). Shipping a "working"
+  HTTP call that has never actually been exercised would itself be the
+  untested-capability pattern this document's audit calls out; refusing is
+  the honest alternative until a human supplies credentials, a
+  network-egress decision, and reviews the wire mapping against a real
+  response.
+- **`agent/orchestrator.py`**'s `evaluate_agent_pair` is the agent-driven
+  analogue of `run.py::evaluate_pair`: it calls the transport, and — only if
+  a candidate was actually produced within budget — writes the candidate's
+  files into the same two-phase (`public` then `hidden`) scratch-tree
+  scoring, by *importing* `run.py`'s own `digest_tree`, `stage`,
+  `relative_files`, and `copy_tree` (via `agent/_harness.py`) rather than
+  reimplementing them. The leak check and provenance computation are
+  therefore the same code, not a second copy that could drift from it. The
+  provenance block this path records binds the task's own digest, the
+  adapter's observed toolchain version, the model identity, the sampling
+  seed, the exact prompt's digest, and the transcript's digest together —
+  the "Transcript capture bound to the run's provenance" requirement.
+
+This closes the "no LLM anywhere" gap at the level that is actually
+testable without credentials: the full driver path (prompt construction,
+budget enforcement, retry accounting, transcript capture, scoring, leak
+check) executes end to end, offline, deterministically, against a real
+committed task and a real `rustc` toolchain
+(`tests/test_agent_driver.py::RealToolchainEndToEndTests`). It does **not**
+mean a live Agent has been benchmarked: see `agent/README.md`'s Non-claims,
+and the unchanged `HUMAN_BLOCKED: model budget and credentials` entry below.
+
 ## What the harness cannot yet check
 
 Recorded honestly rather than silently assumed:
@@ -197,11 +269,21 @@ Recorded honestly rather than silently assumed:
 - **A live Agent pilot run**: issue #211 also asks for "at least one pilot
   task run across all initial languages and two models." That needs a model
   API budget, credentials, and a publication decision, none of which a
-  bounded implementation worker holds — recorded as
-  `HUMAN_BLOCKED: model budget and credentials for a live Agent pilot`.
-  What is built here is the harness that pilot would run through, exercised
-  end to end with three real, non-mocked languages
-  (`sequence-digest-v1::semaprax`, `::rust`, `::typescript`) and with
-  deterministic mock adapters in this suite's own test module
-  (`tests/documentation/cross_language_benchmark_suite.rs`) standing in for
-  the six languages with no available toolchain in this sandbox.
+  bounded implementation worker holds — still recorded as
+  `HUMAN_BLOCKED: model budget and credentials for a live Agent pilot`. What
+  changed is what "the harness that pilot would run through" now includes:
+  beyond `run.py`'s toolchain-conformance scoring (exercised end to end with
+  three real, non-mocked languages —
+  `sequence-digest-v1::semaprax`, `::rust`, `::typescript` — and with
+  deterministic mock adapters in
+  `tests/documentation/cross_language_benchmark_suite.rs` standing in for
+  the six languages with no available toolchain in this sandbox), the
+  agent-driver seam described above (`agent/`) means the request/response
+  contract, budget enforcement, retry accounting, and transcript-to-
+  provenance binding that pilot would need are now implemented and
+  exercised too — through `agent/replay_transport.py`, never through
+  `agent/live_transport.py`, which stays declared and unexercised for the
+  exact reason named above. A human supplying credentials still only needs
+  to wire a working `LiveTransport.complete()` against a real endpoint and
+  verify it; the request/response contract, budget accounting, and scoring
+  path it plugs into do not need to be invented at that point.

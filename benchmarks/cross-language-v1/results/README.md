@@ -15,3 +15,13 @@ When a real run is recorded here, name it for the revision it measured
 (e.g. `results/<short-commit>.json`) and render it to Markdown the way
 `benchmarks/performance-v1/results/baseline.md` does, rather than
 overwriting a fixed `baseline.json` silently.
+
+The same discipline applies, doubly, to a `benchmark.cross_language.agent.v1`
+document produced through `../agent/`: no such document belongs here either,
+for the contention reason above **and** because no run through that seam has
+ever called a real model — every one so far used the deterministic replay
+transport against a hand-authored fixture (see `../agent/README.md`'s
+Non-claims). A real Agent-pilot result belongs here only once a human has
+supplied model credentials, run `../agent/live_transport.py` for real, and
+the resulting document has been produced on a quiet host under this
+directory's existing rule.

@@ -1,18 +1,33 @@
-# Cross-language Agent benchmark laboratory (v1)
+# Cross-language benchmark laboratory (v1)
 
 This suite is the **laboratory**, not a result: the harness, the task and
 adapter inventories, the provenance binding, and the comparison/regression
-logic that issue #211 asks for. It intentionally ships with **no committed
-timing measurement**. See [Non-claims](#non-claims) below for why, and
+logic that issue #211 asks for.
+
+**What is, and is not, "Agent" here.** `run.py` (this directory's original
+harness) scores a fixed, human-written source tree through each language's
+official toolchain. It has no model, no provider, no sampling parameters, and
+no budget anywhere in it — it is a cross-language *toolchain-conformance and
+scoring* harness, not something that has ever run a model. `agent/` (added
+alongside it) is the seam an Agent-driven run would go through: an explicit
+solver-request/response contract, a deterministic offline replay transport
+that exercises that whole path end to end with no credentials and no
+network, and a declared-but-inert live-provider transport that has never
+been executed against a real endpoint in this repository. **No result in
+this directory or in `results/` was ever produced by a real model.** See
+[`agent/README.md`](agent/README.md) for that seam's design and non-claims,
+and [Non-claims](#non-claims) below for the rest (timing, single-host
+evidence, and the six unimplemented languages). See
 [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) for the full equivalence
-contract, provenance model, and what a future quiet-host run must do to
-produce real numbers.
+contract, provenance model, and what a future quiet-host or credentialed run
+must do to produce real numbers.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `run.py` | The harness: resolves tasks/adapters, builds and tests each task/language pair, records provenance, scores comparisons |
+| `run.py` | The toolchain-conformance harness: resolves tasks/adapters, builds and tests each task/language pair against a fixed, human-written source tree, records provenance, scores comparisons. No model involved. |
+| `agent/` | The agent-driver seam: explicit model/sampling/budget contracts, a deterministic offline replay transport, a declared-but-inert live transport, and an orchestrator that scores a transport-produced candidate through `run.py`'s own build/test/leak-check/provenance machinery. See `agent/README.md`. |
 | `tasks.json` | Task inventory (schema `benchmark.cross_language.tasks.v1`). Each task declares a `split` — `development` (the frozen original pilot) or `held_out` (issue #106's contamination-protected extension; see that task's `EQUIVALENCE.md`) |
 | `adapters.json` | Per-language adapter inventory (schema `benchmark.cross_language.adapters.v1`): official toolchain invocation, version probe, success signal |
 | `tasks/<task-id>/EQUIVALENCE.md` | That task's fairness contract: inputs, outputs, measured boundary, allowed optimizations |
@@ -55,6 +70,20 @@ official toolchain is available in a pinned, network-free form (see
 
 ## Non-claims
 
+- **No Agent-driven result in this directory was ever produced by a real
+  model.** `agent/`'s replay transport is a deterministic, hand-authored
+  script standing in for a model response, the same way
+  `tests/documentation/cross_language_benchmark_suite.rs`'s `MockLanguage`
+  stands in for a real language toolchain to pin the harness's own logic —
+  never a recorded real-model transcript. `agent/`'s live transport is
+  declared and has never been executed against a real endpoint: it refuses
+  to construct without explicit credentials (never an environment-variable
+  fallback) and refuses to run even when credentials are supplied, because
+  this repository has never verified its wire mapping against a real
+  response. A live, credentialed, two-model pilot stays
+  `HUMAN_BLOCKED: model budget and credentials`, exactly as before — this
+  seam makes that pilot's eventual code path testable today, it does not
+  perform it. See `agent/README.md`.
 - **No timing was measured to produce this suite, and none is committed.**
   This host runs many concurrent build lanes at once; a wall-clock number
   measured here would record contention, not the compiler or the language

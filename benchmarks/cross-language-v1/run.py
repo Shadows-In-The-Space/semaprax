@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """
-Cross-language Agent benchmark laboratory runner (v1).
+Cross-language toolchain-conformance harness (v1).
+
+This module scores a fixed, human-written source tree against each
+language's official toolchain; it has no model, provider, sampling, or
+budget concept, and no code path here invokes a model. `agent/run_agent.py`
+(a sibling module, not this one) is where an Agent-driven candidate — today
+only through a deterministic offline replay transport — is scored through
+the same build/test/leak-check/provenance machinery this module owns; see
+`agent/README.md`.
 
 Usage:
   python3 benchmarks/cross-language-v1/run.py --dry-run --output /tmp/plan.json
@@ -399,7 +407,7 @@ def dry_run(root: pathlib.Path, tasks: list, adapters: dict, args) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="cross-language Agent benchmark laboratory")
+    parser = argparse.ArgumentParser(description="cross-language toolchain-conformance harness")
     parser.add_argument("--output", required=True, help="output JSON path")
     parser.add_argument("--compare", help="baseline JSON to compare against")
     parser.add_argument("--dry-run", action="store_true", help="resolve the inventory, run nothing")

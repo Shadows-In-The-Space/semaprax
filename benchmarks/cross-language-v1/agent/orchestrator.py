@@ -1,0 +1,191 @@
+"""Wires a `SolverTransport`'s output into `run.py`'s existing scoring.
+
+`evaluate_agent_pair` is the agent-driven analogue of `run.py::evaluate_pair`:
+same digesting, same two-phase (public then hidden) scratch-tree scoring,
+same leak check, same `stage()` build/run step — all imported from `run.py`
+via `_harness.run_module()`, never reimplemented. The only thing this module
+adds is what sits *before* that scoring: build a prompt, call a transport,
+enforce its budget, and (only if a candidate was actually produced within
+budget) hand the candidate's files to the exact same scratch-tree machinery
+every other adapter already goes through.
+
+A pair never reaches the build/run step at all when the transport raises
+`BudgetExceededError` or `RetriesExhaustedError`: the record is written with
+status `budget_exceeded` or `retries_exhausted` and no `public`/`hidden` key,
+the same discipline `run.py` already uses for `blocked` and `drifted` pairs
+(see `evaluate_pair`'s doc comment and the "Result statuses" note at the top
+of `run.py`) — a terminal outcome that took no compute is recorded as one,
+not silently upgraded or downgraded into a `failed` build that never ran.
+"""
+from __future__ import annotations
+
+import shutil
+
+from ._harness import run_module
+from .budget import BudgetExceededError, RetriesExhaustedError
+from .contracts import SolverRequest, transcript_digest
+from .prompts import build_prompt
+from .transport import CredentialsRequiredError, LiveTransportUnexercisedError, SolverTransport
+
+AGENT_SCHEMA = "benchmark.cross_language.agent.v1"
+
+
+def build_request(task, language, model, sampling, budget, pricing, equivalence_text, public_dir, candidate_paths):
+    prompt = build_prompt(task["id"], language, equivalence_text, public_dir, candidate_paths)
+    return SolverRequest(
+        task_id=task["id"],
+        language=language,
+        prompt=prompt,
+        model=model,
+        sampling=sampling,
+        budget=budget,
+        pricing=pricing,
+    )
+
+
+def _write_candidate(scratch, candidate_files: dict) -> None:
+    for relative, content in candidate_files.items():
+        target = scratch / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+
+
+def _terminal(record: dict, status: str, error) -> dict:
+    transcript = list(getattr(error, "transcript", []))
+    record.update(
+        status=status,
+        reason=str(error),
+        usage=error.usage.to_dict(),
+        transcript=[entry.to_dict() for entry in transcript],
+        transcript_digest=transcript_digest(transcript) if transcript else None,
+    )
+    return record
+
+
+def evaluate_agent_pair(
+    root,
+    task: dict,
+    language: str,
+    adapter: dict,
+    transport: SolverTransport,
+    request: SolverRequest,
+    semaprax_binary: str = "semaprax",
+    candidate_paths=None,
+) -> dict:
+    """Score one (task, language) pair by asking `transport` for a candidate
+    and then running it through `run.py`'s own build/test/leak-check/
+    provenance machinery. `candidate_paths` names which relative path(s) in
+    the task's public tree the transport's `candidate_files` are expected to
+    supply; every other file in the public tree is fixed scaffold, copied
+    unchanged (the same fixed test harness a human solver would also see and
+    could not alter).
+    """
+    run = run_module()
+    candidate_paths = list(candidate_paths or [])
+    record = {
+        "schema": AGENT_SCHEMA,
+        "id": f"{task['id']}::{language}",
+        "task": task["id"],
+        "language": language,
+        "category": task.get("category"),
+        "transport": type(transport).__name__,
+        "request": request.to_dict(),
+    }
+
+    try:
+        response = transport.complete(request)
+    except BudgetExceededError as error:
+        return _terminal(record, "budget_exceeded", error)
+    except RetriesExhaustedError as error:
+        return _terminal(record, "retries_exhausted", error)
+    except (CredentialsRequiredError, LiveTransportUnexercisedError) as error:
+        record.update(status="blocked", reason=str(error))
+        return record
+
+    record["usage"] = response.usage.to_dict()
+    record["transcript"] = [entry.to_dict() for entry in response.transcript]
+    record["transcript_digest"] = response.transcript_digest
+
+    languages = task.get("languages", {})
+    paths = languages.get(language)
+    if paths is None:
+        record.update(status="blocked", reason=f"task declares no {language} implementation")
+        return record
+
+    public_dir = root / paths["public"]
+    hidden_dir = root / paths["hidden"]
+    if not public_dir.is_dir():
+        record.update(status="failed", reason=f"missing public directory: {public_dir}")
+        return record
+
+    missing = sorted(set(candidate_paths) - set(response.candidate_files))
+    if missing:
+        record.update(
+            status="failed",
+            reason=f"transport did not supply required candidate path(s): {missing}",
+        )
+        return record
+
+    scaffold_digest = run.digest_tree(public_dir)
+    hidden_digest = run.digest_tree(hidden_dir)
+    candidate_rows = sorted(f"{k}\0{v}" for k, v in response.candidate_files.items())
+    candidate_digest = run.sha256_bytes("\n".join(candidate_rows).encode())
+    combined = run.sha256_bytes(f"{scaffold_digest}\n{candidate_digest}\n{hidden_digest}".encode())
+    record["provenance"] = {
+        "adapter_version": run.tool_version(run.command_for(adapter, "version_command", semaprax_binary)),
+        "scaffold_digest": scaffold_digest,
+        "candidate_digest": candidate_digest,
+        "hidden_digest": hidden_digest,
+        "digest": combined,
+        "prompt_digest": request.prompt_digest,
+        "transcript_digest": record["transcript_digest"],
+        "model": request.model.to_dict(),
+        "seed": request.sampling.seed,
+    }
+
+    public_scratch = run.scratch_dir(f"agent-public-{language}")
+    hidden_scratch = run.scratch_dir(f"agent-hidden-{language}")
+    try:
+        run.copy_tree(public_dir, public_scratch)
+        _write_candidate(public_scratch, response.candidate_files)
+        public_outcome = run.stage(public_scratch, adapter, semaprax_binary)
+
+        # Same leak check `run.py::evaluate_pair` performs, over the same
+        # scratch tree shape, reusing the same function rather than a second
+        # copy of the comparison.
+        leaked = run.relative_files(hidden_dir) & run.relative_files(public_scratch)
+        hidden_only = run.relative_files(hidden_dir) - run.relative_files(public_dir)
+        leaked_only = leaked & hidden_only
+        record["leak_check"] = "ok" if not leaked_only else sorted(leaked_only)
+
+        record["public"] = {"passed": public_outcome["passed"], "detail": public_outcome["detail"]}
+        if not public_outcome["passed"]:
+            record.update(
+                status="failed",
+                reason=f"public {public_outcome['phase']}: {'; '.join(public_outcome['detail'])}",
+            )
+            return record
+        if leaked_only:
+            record.update(
+                status="failed",
+                reason=f"hidden path leaked into the public build tree: {sorted(leaked_only)}",
+            )
+            return record
+
+        run.copy_tree(public_dir, hidden_scratch)
+        _write_candidate(hidden_scratch, response.candidate_files)
+        run.copy_tree(hidden_dir, hidden_scratch)  # overlay: same-path files replace
+        hidden_outcome = run.stage(hidden_scratch, adapter, semaprax_binary)
+        record["hidden"] = {"passed": hidden_outcome["passed"], "detail": hidden_outcome["detail"]}
+        if not hidden_outcome["passed"]:
+            record.update(
+                status="failed",
+                reason=f"hidden {hidden_outcome['phase']}: {'; '.join(hidden_outcome['detail'])}",
+            )
+            return record
+
+        record["status"] = "ok"
+        return record
+    finally:
+        shutil.rmtree(public_scratch, ignore_errors=True)
+        shutil.rmtree(hidden_scratch, ignore_errors=True)

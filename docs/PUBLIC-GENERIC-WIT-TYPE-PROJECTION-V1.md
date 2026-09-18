@@ -186,6 +186,70 @@ corrupting one field's `: ` separator, and appending one trailing byte after
 the closing `world` block are each rejected with `SPX-PGWIT105`, independently
 of each other.
 
+## Owned-leaf census agreement
+
+A projection nothing checks is documentation that drifts. The rendering above
+is syntactically valid WIT whatever it contains: a projection that dropped a
+`Bytes` field, reached a record the classifier did not, or attached a leaf
+under a different field identity would still render, and a foreign consumer
+reading it would build a value whose owned-leaf inventory silently disagrees
+with the carrier the compiler actually verified.
+
+[`leaf_census`](../src/public_generic_abi/wit_projection/leaf_census.rs)
+closes that gap. It recomputes the owned-leaf inventory a **second,
+independent way** — walking the rendered projection's `WitRecordV1` /
+`WitFieldV1` structure from the input and result roots, framing each leaf's
+path as the grammar's own `@<len>:<id>` segments joined by `/` — and refuses
+unless the result is element-for-element identical to
+`InstanceFacts::owned_leaves`, which
+[`src/public_generic_type.rs`](../src/public_generic_type.rs) derived by
+walking substituted `ResolvedType`s instead. The two derivations share no
+code path, so their agreement is evidence rather than a tautology.
+
+`project_admitted_subject` runs the check before returning, so the gate is at
+the producer: a disagreeing projection is refused, never handed back as
+plausible WIT.
+
+The check's identity framing is a deliberate second spelling of the grammar
+module's private `write_identity`. That is not a silent duplicate: the
+agreement comparison is exactly what fails if the two spellings ever drift,
+on the very next projection.
+
+### Bounds and refusals
+
+The walk is structural, so it expands each record *reference* (a record
+declared once can be reached from several places). It is bounded by the same
+[Public Generic Boundary Profile v1](PUBLIC-GENERIC-BOUNDARY-PROFILE-V1.md)
+numbers the carrier is bounded by, never by a number chosen here:
+`MAX_VISITED_NODES_PER_INSTANCE`, `MAX_NESTING_DEPTH`, and
+`MAX_OWNED_LEAVES_PER_INSTANCE`.
+
+| Code | Refusal |
+| --- | --- |
+| `SPX-PGWIT106` | the projected structure's owned-leaf inventory is not the descriptor's, for the input or the result; the message names the role and either the first differing index with both paths, or both counts |
+| `SPX-PGWIT107` | the census walk exceeded a boundary-profile bound — a refusal, never a truncated census |
+| `SPX-PGWIT108` | a field names a record type the projection never declared |
+
+### Evidence
+
+Each negative case mutates the *structured* projection and re-runs the check
+against unchanged classifier facts, so each proves the gate catches one
+specific corruption rather than that a well-formed projection passes:
+a dropped owned-leaf field, a leaf reached under a different field identity,
+a field naming an undeclared record, and one more owned leaf than the profile
+admits. The positive case pins the expected inventory itself
+(`@24:wit_projection.pair.left/@24:wit_projection.leaf.head`) before
+comparing, so a vacuous empty-equals-empty pass is impossible.
+
+A **byte golden** pins the rendered WIT's exact length and SHA-256. The
+pre-existing determinism test only proved two calls in one process agree;
+the golden additionally pins layout, record order, and identifier encoding
+across refactors and across machines.
+
+**Evidence class: local, re-runnable.** No hosted run and no Component Model
+runtime is involved in any of this; no `wasm-tools`, `wit-bindgen`, or
+`wasmtime` invocation is part of the gate.
+
 ## Nonclaims
 
 This document and its module admit no `.spx` syntax, define no calling

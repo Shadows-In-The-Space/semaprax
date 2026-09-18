@@ -66,6 +66,8 @@ use crate::public_generic_type::{
 
 use super::classifier::AdmittedSubject;
 
+pub mod leaf_census;
+
 /// The versioned projection schema. A new mapping row is a new schema.
 pub const WIT_TYPE_PROJECTION_SCHEMA: &str =
     "semaprax.public-generic-type-grammar.v1.wit-projection.v1";
@@ -319,7 +321,7 @@ pub fn project_admitted_subject(
     if wit.len() > MAX_WIT_PROJECTION_BYTES {
         return Err(capacity("WIT projection byte limit"));
     }
-    Ok(WitTypeProjectionV1 {
+    let projection = WitTypeProjectionV1 {
         schema: WIT_TYPE_PROJECTION_SCHEMA,
         package: WIT_PACKAGE,
         interface: WIT_INTERFACE,
@@ -329,7 +331,12 @@ pub fn project_admitted_subject(
         input_type,
         result_type,
         wit,
-    })
+    };
+    // Fail closed: a rendering whose own structure no longer implies exactly
+    // the descriptor's owned-leaf inventory is refused here rather than
+    // returned as plausible-looking WIT. See [`leaf_census`].
+    leaf_census::check_owned_leaf_census(subject, &projection)?;
+    Ok(projection)
 }
 
 fn render(records: &[WitRecordV1], uses_owned_bytes_resource: bool) -> String {

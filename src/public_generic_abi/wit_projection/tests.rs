@@ -23,7 +23,7 @@ use crate::parse;
 use crate::public_generic_abi::classifier::classify;
 use crate::public_generic_type::{FieldFact, InstanceFacts, TemplateIdentity};
 
-const BASE: &str = r#"
+pub(super) const BASE: &str = r#"
 module test.public_generic_wit_projection;
 
 permit { clock.read }
@@ -74,7 +74,7 @@ fn scalars_take(value: own Scalars) -> Scalars { value }
 fn main() -> i64 { 0 }
 "#;
 
-fn resolved(source: &str) -> ResolvedProgram {
+pub(super) fn resolved(source: &str) -> ResolvedProgram {
     let parsed = parse(source, Path::new("wit_projection.spx")).unwrap();
     hir::resolve(&parsed).unwrap()
 }

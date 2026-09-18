@@ -32,6 +32,7 @@ pub use fixture::{FixtureNetworkProvider, FIXTURE_SCHEMA_V3, MAX_NETWORK_FIXTURE
 pub use resolver::{NameResolver, ResolveFailure, ScriptedResolver, SystemResolver};
 pub use tcp::TcpNetworkProvider;
 
+use crate::model_budget_policy::classification::AttemptOutcomeClass;
 use crate::network_io_ops;
 
 /// One normalized failure from a complete HTTPS request. This is kept
@@ -57,6 +58,43 @@ impl HttpFailure {
             Self::ResponseTooLarge => network_io_ops::HTTP_RESPONSE_TOO_LARGE,
             Self::UnsupportedVersion => network_io_ops::HTTP_UNSUPPORTED_VERSION,
             Self::AuthorityDenied => network_io_ops::HTTP_AUTHORITY_DENIED,
+        }
+    }
+
+    /// Classify this failure with the repository's one closed
+    /// attempt-outcome vocabulary ([`AttemptOutcomeClass`], defined for
+    /// model-provider retry/failover safety in
+    /// `model_budget_policy::classification`) rather than inventing a
+    /// second, divergent taxonomy for outbound HTTP/webhook delivery
+    /// (issue #193: "mirror `retry_is_permitted`, ... reuse the established
+    /// classification").
+    ///
+    /// `InvalidUrl`, `InsecureScheme`, `UnsupportedVersion`, and
+    /// `AuthorityDenied` are refused locally before any byte of this
+    /// attempt reaches the wire, so retrying after fixing the local cause
+    /// never risks a duplicate external effect: [`AttemptOutcomeClass::NotDispatched`].
+    ///
+    /// `TransportFailed` covers both a connection that never completed and a
+    /// reset or timeout mid-transfer *after* a POST body was already sent;
+    /// this call cannot tell which happened, so it is never safe to retry
+    /// automatically: [`AttemptOutcomeClass::Uncertain`]. This is the direct
+    /// implementation of "a timeout or transport failure must never be
+    /// recorded as proof of non-delivery, and must not be auto-retried when
+    /// the outcome is unknown."
+    ///
+    /// `ResponseTooLarge` means the request was already sent and a response
+    /// was already arriving when the byte bound was hit, so the
+    /// destination-side effect (if any) already happened:
+    /// [`AttemptOutcomeClass::CompletedWithResponse`] (retry not
+    /// permitted).
+    pub const fn attempt_outcome_class(self) -> AttemptOutcomeClass {
+        match self {
+            Self::InvalidUrl
+            | Self::InsecureScheme
+            | Self::UnsupportedVersion
+            | Self::AuthorityDenied => AttemptOutcomeClass::NotDispatched,
+            Self::TransportFailed => AttemptOutcomeClass::Uncertain,
+            Self::ResponseTooLarge => AttemptOutcomeClass::CompletedWithResponse,
         }
     }
 }
@@ -99,6 +137,42 @@ impl NetworkFailure {
             Self::TlsFailed => network_io_ops::TLS_FAILED,
             Self::ListenFailed => network_io_ops::LISTEN_FAILED,
             Self::AcceptFailed => network_io_ops::ACCEPT_FAILED,
+        }
+    }
+
+    /// Classify this failure with the same closed attempt-outcome
+    /// vocabulary as [`HttpFailure::attempt_outcome_class`] (issue #193;
+    /// see that method's doc comment for why this reuses
+    /// `model_budget_policy::classification::AttemptOutcomeClass` rather
+    /// than a second taxonomy). A webhook or email adapter built over this
+    /// provider's `send`/`recv` consults this to decide whether an outcome
+    /// is safe to retry.
+    ///
+    /// `ConnectFailed`, `InvalidEndpoint`, `UnknownHandle`,
+    /// `CapacityExceeded`, `AuthorityDenied`, `ListenFailed`, and
+    /// `AcceptFailed` are refused before any application byte belonging to
+    /// this attempt left the wire — a `connect` that never completed, or a
+    /// purely local admission refusal — so retrying is provably safe:
+    /// [`AttemptOutcomeClass::NotDispatched`]. `TlsFailed` happens during
+    /// or before the TLS handshake, strictly before this connection's
+    /// application data (the caller's actual payload) could exist, so it
+    /// is also `NotDispatched`.
+    ///
+    /// `TransferFailed` is a reset or failure on an already-established
+    /// connection's `send` or `recv`; bytes already queued for `send` may
+    /// already have reached the peer, so this is never safe to retry
+    /// automatically: [`AttemptOutcomeClass::Uncertain`].
+    pub const fn attempt_outcome_class(self) -> AttemptOutcomeClass {
+        match self {
+            Self::ConnectFailed
+            | Self::InvalidEndpoint
+            | Self::UnknownHandle
+            | Self::CapacityExceeded
+            | Self::AuthorityDenied
+            | Self::TlsFailed
+            | Self::ListenFailed
+            | Self::AcceptFailed => AttemptOutcomeClass::NotDispatched,
+            Self::TransferFailed => AttemptOutcomeClass::Uncertain,
         }
     }
 }
@@ -317,5 +391,81 @@ mod tests {
         assert_eq!(WaitState::Closed.code(), 2);
         assert_eq!(ProviderConnection::new(7).token(), 7);
         assert_eq!(ProviderListener::new(3).token(), 3);
+    }
+
+    // Issue #193: a timeout or transport failure must never be recorded as
+    // proof of non-delivery, and must not be auto-retried when the outcome
+    // is unknown. These two tests are the executable proof, over every
+    // variant of both closed failure enums, using the repository's one
+    // shared attempt-outcome vocabulary rather than a second one invented
+    // for this issue.
+    #[test]
+    fn http_failure_classification_permits_retry_only_before_any_byte_is_sent() {
+        use crate::model_budget_policy::classification::retry_is_permitted;
+
+        let locally_refused = [
+            HttpFailure::InvalidUrl,
+            HttpFailure::InsecureScheme,
+            HttpFailure::UnsupportedVersion,
+            HttpFailure::AuthorityDenied,
+        ];
+        for failure in locally_refused {
+            assert_eq!(
+                failure.attempt_outcome_class(),
+                AttemptOutcomeClass::NotDispatched
+            );
+            assert!(retry_is_permitted(failure.attempt_outcome_class()));
+        }
+
+        // The two outcomes that follow dispatch: never safe to retry
+        // automatically, regardless of which one occurred.
+        assert_eq!(
+            HttpFailure::TransportFailed.attempt_outcome_class(),
+            AttemptOutcomeClass::Uncertain
+        );
+        assert!(!retry_is_permitted(
+            HttpFailure::TransportFailed.attempt_outcome_class()
+        ));
+        assert_eq!(
+            HttpFailure::ResponseTooLarge.attempt_outcome_class(),
+            AttemptOutcomeClass::CompletedWithResponse
+        );
+        assert!(!retry_is_permitted(
+            HttpFailure::ResponseTooLarge.attempt_outcome_class()
+        ));
+    }
+
+    #[test]
+    fn network_failure_classification_permits_retry_only_before_any_byte_is_sent() {
+        use crate::model_budget_policy::classification::retry_is_permitted;
+
+        let locally_refused = [
+            NetworkFailure::ConnectFailed,
+            NetworkFailure::InvalidEndpoint,
+            NetworkFailure::UnknownHandle,
+            NetworkFailure::CapacityExceeded,
+            NetworkFailure::AuthorityDenied,
+            NetworkFailure::TlsFailed,
+            NetworkFailure::ListenFailed,
+            NetworkFailure::AcceptFailed,
+        ];
+        for failure in locally_refused {
+            assert_eq!(
+                failure.attempt_outcome_class(),
+                AttemptOutcomeClass::NotDispatched
+            );
+            assert!(retry_is_permitted(failure.attempt_outcome_class()));
+        }
+
+        // A reset or failure on an already-established connection's
+        // send/recv: bytes already queued may already have reached the
+        // peer, so this is never safe to retry automatically.
+        assert_eq!(
+            NetworkFailure::TransferFailed.attempt_outcome_class(),
+            AttemptOutcomeClass::Uncertain
+        );
+        assert!(!retry_is_permitted(
+            NetworkFailure::TransferFailed.attempt_outcome_class()
+        ));
     }
 }

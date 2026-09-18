@@ -31,7 +31,22 @@ semaprax semantic-cache-persist <manifest> <store-root>
 semaprax semantic-cache-load <store-root> <entry-digest>
 semaprax semantic-cache-evict <store-root> <entry-digest>
 semaprax semantic-cache-lifecycle <manifest> <empty-store-root>
+semaprax semantic-cache-cold-open <manifest>
+semaprax semantic-cache-warm-open <manifest> <store-root> <entry-digest>
 ```
+
+`semantic-cache-cold-open` and `semantic-cache-warm-open` are each one
+standalone fresh-process invocation that shares `semantic-cache-lifecycle`'s
+first two stages' code path
+(`VNextSession::open_with_semantic_cache` / `open_with_retained_semantic_cache`)
+but, unlike `lifecycle`, does not bundle persist, refresh, and eviction into
+the same process. They exist so an external timer comparing one process
+launch of each measures cache state as the only varying input — see
+[Measured fresh-process workflow timing](#measured-fresh-process-workflow-timing)
+below. A `semantic-cache-warm-open` against a stale or evicted digest fails
+closed with `SPX-G308`, the same as `semantic-cache-load`; recovery is an
+explicit, separate `semantic-cache-cold-open` call, never an implicit
+fallback inside the failed command.
 
 Initialization emits `semaprax.semantic-cache-initialized.v1`; persistence emits
 `semaprax.semantic-cache-receipt.v1` with `entry_digest`, `compiler_digest`, and
@@ -157,11 +172,89 @@ required cold/warm work profile; exact compiler mismatch; and closed older/new
 startup policy validation. The compiler-mismatch case applies only when both
 executables satisfy the supported 256 MiB bound.
 
+The same harness additionally proves, for the standalone `cold-open`/`warm-open`
+pair: unchanged source gives identical `project_revision`/`image_revision`
+between one fresh `cold-open` and one fresh `warm-open` process, with the warm
+side landing on the existing three-hit/zero-resolve work profile; a body-only
+edit to a module nothing imports (`src/app.spx`) invalidates exactly that
+module while its two unedited siblings stay a whole-module checked-HIR hit;
+editing the shared provider (`src/core.spx`) seeds the conservative
+reverse-import inventory so every consumer is reparsed, while unaffected
+functions still reuse exact monomorphic HIR; and a `warm-open` against an
+evicted digest fails closed with `SPX-G308` and a following `cold-open`
+reproduces the original cold product exactly.
+
 Private codec regressions additionally cover full HIR with nonempty cleanup and
 loan plans, canonical reencoding, malformed containers, allocation limits,
 unknown tags/tokens, and truncation. Store-local regressions cover private key
 initialization, hostile filesystem shapes, and authentication before decoding.
 These implemented codec, store and cross-process recovery regressions are
 HOSTED GREEN for v0.4.0. The cache can reuse authenticated checked HIR under
-this exact private profile; broader cache compatibility and measured
-cross-process time/memory improvements remain separate requirements.
+this exact private profile; broader cache compatibility remains a separate
+requirement. Fresh-process time/memory measurement is now available: see
+below.
+
+## Measured fresh-process workflow timing
+
+[`benchmarks/performance-v1/observe-semantic-cache-workflow.py`](../benchmarks/performance-v1/observe-semantic-cache-workflow.py)
+times `semantic-cache-cold-open` and `semantic-cache-warm-open` as literal,
+independent OS-process launches — genuine cross-process latency, not an
+in-process capture — for cold open, warm open on unchanged source, warm open
+after a local body edit, warm open after a provider edit, and stale-entry
+recovery (a failing warm-open followed by the caller's own cold-open). Every
+repetition uses an isolated fixture and store directory, and every subprocess
+runs a private read-only single-link compiler copy staged once per invocation
+of the script (a live `target/debug/semaprax` fails the store's own
+single-link/no-group-write check whenever a concurrent build is relinking it
+on a shared checkout, which this script assumes is routine). Wall time is an
+outer `time.perf_counter()` around the whole process; peak RSS is parsed from
+`/usr/bin/time -l` on macOS or `-v` on Linux and recorded `null` with a
+disclosed reason elsewhere. The script does not gate on a quiet host — it
+records `host_before`/`host_after` load average and available memory around
+every single repetition instead, and refuses to run at all without
+`--acknowledge-loaded-host`, so a loaded run can never be mistaken for a quiet
+one after the fact.
+
+[`results/semantic-cache-workflow-loaded-host.json`](../benchmarks/performance-v1/results/semantic-cache-workflow-loaded-host.json)
+is one recorded run, `n=11` fresh-process repetitions per role, on a shared
+11-core macOS host with **other agents building concurrently** (load average
+5.0-7.5 throughout the run — not idle, not requested to be idle, and not
+comparable to the quiet-host discipline `results/baseline.json` requires) and
+an unoptimized `dev`-profile binary (not `release`). Reported as measured,
+not as a hosted or release-profile claim:
+
+| role | n | wall seconds (min / median / max) |
+| --- | ---: | --- |
+| `cold_open` | 11 | 0.037 / 0.038 / 1.042 |
+| `warm_open` (unchanged) | 11 | 1.070 / 1.090 / 1.122 |
+| `warm_open` (local body edit) | 11 | 1.067 / 1.087 / 1.181 |
+| `warm_open` (provider edit) | 11 | 1.073 / 1.106 / 1.190 |
+| `stale_warm_open_attempt` (fails closed) | 11 | 0.512 / 0.517 / 0.739 |
+| `cold_open_recovery` | 11 | 0.037 / 0.039 / 0.045 |
+
+The dominant shape, on this host and this debug build: a fresh-process warm
+open costs roughly **28x** a fresh-process cold open's median, not less, and
+recovery from a stale/evicted entry costs the same as an ordinary cold open
+(no degraded-fallback penalty). This inverts the naive expectation that a
+cache hit is cheaper than no cache, and it is the opposite direction from the
+now-resolved `interpreter-prepared-evaluator` trace-collection cost in issue
+#85 — there the "prepared" path *was* cheap once trace collection was
+isolated; here the persisted-store path is measurably expensive on its own
+terms, independent of tracing. The likely cost carriers are the private
+envelope's HMAC-SHA256 authentication and the private HIR codec's per-field
+validation (`docs/SEMANTIC-CACHE-STORE-V1.md`), both unoptimized in a `dev`
+build; this has not been isolated further or measured under `--release`, so
+it is reported as an open, disclosed observation and a release-profile
+re-measurement is the natural next step (a SPX-AI-032 candidate) rather than
+an implementation change made on the strength of this number alone. The one
+`cold_open` outlier at 1.042s (max, against a 0.038s median) is disclosed
+rather than discarded: it is the first repetition's fixture directory, most
+plausibly page-cache/disk warmup contending with concurrent build activity on
+this host, not a claim about the operation's typical cost.
+
+Re-run with `python3 benchmarks/performance-v1/observe-semantic-cache-workflow.py
+--semaprax <built-binary> --repetitions N --output <path>
+--acknowledge-loaded-host`; add `--profile release` (label only — build the
+release binary yourself and pass it via `--semaprax`) when reporting a
+release-profile number. This is local, single-host evidence; it is not a
+hosted, cross-platform, or production-latency claim.

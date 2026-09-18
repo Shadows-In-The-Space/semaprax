@@ -237,6 +237,32 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
             print!("{output}");
             Ok(())
         }
+        CommandId::SemanticCacheColdOpen | CommandId::SemanticCacheWarmOpen => {
+            let arity = if command == "semantic-cache-cold-open" {
+                2
+            } else {
+                4
+            };
+            if args.len() != arity
+                || args[1..]
+                    .iter()
+                    .any(|argument| argument.is_empty() || argument.starts_with('-'))
+            {
+                eprintln!("{command} requires its exact positional operands; see --help");
+                return Err(2);
+            }
+            let output = match command {
+                "semantic-cache-cold-open" => cli::semantic_cache::cold_open(Path::new(&args[1])),
+                _ => cli::semantic_cache::warm_open(
+                    Path::new(&args[1]),
+                    Path::new(&args[2]),
+                    &args[3],
+                ),
+            }
+            .map_err(|errors| report(&errors, false))?;
+            print!("{output}");
+            Ok(())
+        }
         CommandId::RetentionMetadataInventory => {
             if args.len() != 2 || args[1].is_empty() || args[1].starts_with('-') {
                 eprintln!("{command} requires exactly <declarations.json>");

@@ -133,6 +133,22 @@ impl Fixture {
             .output()
             .unwrap()
     }
+    fn cold_open(&self) -> Output {
+        Command::new(&self.compiler)
+            .arg("semantic-cache-cold-open")
+            .arg(self.root.join("semaprax.toml"))
+            .output()
+            .unwrap()
+    }
+    fn warm_open(&self, digest: &str) -> Output {
+        Command::new(&self.compiler)
+            .arg("semantic-cache-warm-open")
+            .arg(self.root.join("semaprax.toml"))
+            .arg(&self.store)
+            .arg(digest)
+            .output()
+            .unwrap()
+    }
     fn lifecycle(&self) -> Output {
         Command::new(&self.compiler)
             .arg("semantic-cache-lifecycle")
@@ -356,6 +372,194 @@ fn lifecycle_receipt_binds_cold_restore_refresh_evict_and_identical_rebuild() {
         1,
         "successful lifecycle retains only the initialized store key"
     );
+}
+
+/// `semantic-cache-cold-open` and `semantic-cache-warm-open` are the two
+/// fresh-process halves of the lifecycle: each is one standalone compiler
+/// invocation on the same manifest, differing only in whether a persisted
+/// cache is threaded in. Same product on unchanged source is the guarantee
+/// that a caller timing them externally is comparing cache state alone, not
+/// two different operations.
+#[test]
+fn cold_open_and_warm_open_agree_on_unchanged_source_and_isolate_cache_state() {
+    let fixture = Fixture::new();
+    fixture.initialize();
+    let cold_before_persist = value(fixture.cold_open());
+    assert_eq!(
+        cold_before_persist["schema"],
+        "semaprax.semantic-cache-cold-open.v1"
+    );
+    assert_eq!(cold_before_persist["store_effect"], "none");
+    assert_eq!(
+        cold_before_persist["frontend_work"]["work"]["modules_resolved"],
+        3
+    );
+    assert_eq!(
+        cold_before_persist["frontend_work"]["work"]["checked_HIR_reused"],
+        0
+    );
+
+    let receipt = fixture.persist();
+    let digest = receipt["entry_digest"].as_str().unwrap();
+    let warm_report = value(fixture.warm_open(digest));
+    assert_eq!(
+        warm_report["schema"],
+        "semaprax.semantic-cache-warm-open.v1"
+    );
+    assert_eq!(warm_report["store_effect"], "entry_read_only");
+    warm(&warm_report["frontend_work"]);
+    assert_eq!(
+        warm_report["frontend_work"]["invalidated_sources"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    // Same manifest, same store entry, cache state is the only input that
+    // differs between the two commands' processes.
+    assert_eq!(
+        cold_before_persist["project_revision"],
+        warm_report["project_revision"]
+    );
+    assert_eq!(
+        cold_before_persist["image_revision"],
+        warm_report["image_revision"]
+    );
+    // Warm hits coexist with substantial remaining total work: the four
+    // full_* phases still ran, so a warm report is not zero-cost reuse.
+    for phase in [
+        "full_source_verification",
+        "full_HIR_validation",
+        "full_cross_file_checks",
+        "full_link_and_profile_admission",
+    ] {
+        assert_eq!(warm_report["frontend_work"]["work"][phase], true);
+    }
+}
+
+/// A body-only edit to a module nothing else imports invalidates exactly
+/// that module; its unrelated siblings remain a whole-module checked-HIR hit.
+#[test]
+fn warm_open_after_local_body_edit_reuses_unaffected_modules() {
+    let fixture = Fixture::new();
+    fixture.initialize();
+    let receipt = fixture.persist();
+    let digest = receipt["entry_digest"].as_str().unwrap();
+
+    let path = fixture.root.join("src/app.spx");
+    let changed = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("multiply(6, 7)", "multiply(7, 6)");
+    let canonical = semaprax::format::canonical(&semaprax::parse(&changed, "src/app.spx").unwrap());
+    std::fs::write(&path, &canonical).unwrap();
+
+    let warm_report = value(fixture.warm_open(digest));
+    let invalidated: Vec<&str> = warm_report["frontend_work"]["invalidated_sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(invalidated, ["src/app.spx"]);
+    assert_eq!(warm_report["frontend_work"]["work"]["modules_resolved"], 1);
+    assert_eq!(
+        warm_report["frontend_work"]["work"]["checked_HIR_reused"],
+        2
+    );
+
+    // A fresh cold open of the edited manifest lands on the same admitted
+    // identity, but with strictly more resolution work: the warm path really
+    // did skip work the cold path repeated, on the exact edited source.
+    let cold_report = value(fixture.cold_open());
+    assert_eq!(
+        cold_report["project_revision"],
+        warm_report["project_revision"]
+    );
+    assert_eq!(cold_report["image_revision"], warm_report["image_revision"]);
+    assert_eq!(cold_report["frontend_work"]["work"]["modules_resolved"], 3);
+    assert_eq!(
+        cold_report["frontend_work"]["work"]["checked_HIR_reused"],
+        0
+    );
+}
+
+/// Editing the shared provider seeds the conservative reverse-import
+/// inventory: every consumer is marked invalidated and reparsed, even though
+/// only the provider's own body changed and consumers keep exact function
+/// identity where the checked module still matches.
+#[test]
+fn warm_open_after_provider_edit_invalidates_the_reverse_import_closure() {
+    let fixture = Fixture::new();
+    fixture.initialize();
+    let receipt = fixture.persist();
+    let digest = receipt["entry_digest"].as_str().unwrap();
+
+    let path = fixture.root.join("src/core.spx");
+    let changed = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("left + right", "right + left");
+    let canonical =
+        semaprax::format::canonical(&semaprax::parse(&changed, "src/core.spx").unwrap());
+    std::fs::write(&path, &canonical).unwrap();
+
+    let warm_report = value(fixture.warm_open(digest));
+    let mut invalidated: Vec<&str> = warm_report["frontend_work"]["invalidated_sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    invalidated.sort_unstable();
+    assert_eq!(
+        invalidated,
+        ["src/app.spx", "src/core.spx", "src/tests.spx"]
+    );
+    assert_eq!(warm_report["frontend_work"]["work"]["modules_parsed"], 3);
+    // The reverse-import closure is reparsed, but app.spx/tests.spx keep
+    // function-level reuse for every call whose exact monomorphic
+    // environment is unchanged, so this stays strictly cheaper than a cold
+    // open on the same edited source.
+    assert!(
+        warm_report["frontend_work"]["work"]["monomorphic_function_HIR_reused"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    let cold_report = value(fixture.cold_open());
+    assert_eq!(
+        cold_report["project_revision"],
+        warm_report["project_revision"]
+    );
+    assert_eq!(cold_report["frontend_work"]["work"]["modules_resolved"], 3);
+    assert_eq!(
+        cold_report["frontend_work"]["work"]["checked_HIR_reused"],
+        0
+    );
+}
+
+/// A stale/evicted entry digest fails closed rather than silently falling
+/// back to a cold open, and the caller's own explicit `cold_open` afterward
+/// is the recovery path: same product as the original cold open, since
+/// canonical source was never touched by the failed warm attempt or by
+/// eviction.
+#[test]
+fn stale_or_evicted_entry_fails_closed_then_cold_open_recovers_the_same_product() {
+    let fixture = Fixture::new();
+    fixture.initialize();
+    let original_cold = value(fixture.cold_open());
+    let receipt = fixture.persist();
+    let digest = receipt["entry_digest"].as_str().unwrap();
+    warm(&value(fixture.warm_open(digest))["frontend_work"].clone());
+
+    value(fixture.evict(digest));
+    let stale = fixture.warm_open(digest);
+    assert!(!stale.status.success());
+    assert!(stale.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("SPX-G308"));
+
+    let recovered = value(fixture.cold_open());
+    assert_eq!(recovered, original_cold);
 }
 
 #[test]

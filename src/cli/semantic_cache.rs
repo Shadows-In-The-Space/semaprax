@@ -47,6 +47,70 @@ pub(crate) fn persist(manifest: &Path, root: &Path) -> Result<String, Vec<Diagno
     value.sort_all_objects();
     Ok(format!("{value}\n"))
 }
+/// Open a fresh Project session with no persisted cache. This is the cold
+/// counterpart to [`warm_open`]: same session-opening code path
+/// (`VNextSession::open_with_semantic_cache`), same reported work shape, only
+/// without a restored cache threaded in. Comparing one fresh-process
+/// invocation of this against one fresh-process invocation of `warm_open` on
+/// the same manifest isolates cache-state as the only varying input; each
+/// command is a single self-contained process launch so an external timer can
+/// measure genuine cross-process wall time without either command's own
+/// output claiming to be a timing artifact.
+pub(crate) fn cold_open(manifest: &Path) -> Result<String, Vec<Diagnostic>> {
+    let mut session =
+        VNextSession::open_with_semantic_cache(&absolute(manifest)?, VNextPolicy::default())?;
+    let work = initial_work(&session)?;
+    let project_revision = text(&work, "project_revision")?.to_owned();
+    let image_revision = session.image_revision().to_owned();
+    session.finish()?;
+    let mut value = json!({
+        "schema":"semaprax.semantic-cache-cold-open.v1",
+        "project_revision":project_revision,
+        "image_revision":image_revision,
+        "frontend_work":work,
+        "source_authority":false,
+        "store_effect":"none",
+        "nonclaims":["not_wall_clock_or_RSS_measurement"],
+    });
+    value.sort_all_objects();
+    Ok(format!("{value}\n"))
+}
+
+/// Open a Project session from an existing store entry, in a fresh process.
+/// Loads and authenticates the stored envelope, then opens exactly like
+/// [`cold_open`] except the restored checked-module cache is threaded in.
+/// A store, entry, or authentication failure (including a stale or evicted
+/// digest) surfaces as an ordinary rejected command, not a silent fallback to
+/// a cold open; recovery from that state is a separate `cold_open`
+/// invocation, never implicit inside this one.
+pub(crate) fn warm_open(
+    manifest: &Path,
+    root: &Path,
+    expected: &str,
+) -> Result<String, Vec<Diagnostic>> {
+    let restored = semantic_cache_store::load(root, expected)?;
+    let mut session = VNextSession::open_with_retained_semantic_cache(
+        &absolute(manifest)?,
+        VNextPolicy::default(),
+        restored,
+    )?;
+    let work = initial_work(&session)?;
+    let project_revision = text(&work, "project_revision")?.to_owned();
+    let image_revision = session.image_revision().to_owned();
+    session.finish()?;
+    let mut value = json!({
+        "schema":"semaprax.semantic-cache-warm-open.v1",
+        "project_revision":project_revision,
+        "image_revision":image_revision,
+        "frontend_work":work,
+        "source_authority":false,
+        "store_effect":"entry_read_only",
+        "nonclaims":["not_wall_clock_or_RSS_measurement","not_crash_or_power_loss_recovery_evidence"],
+    });
+    value.sort_all_objects();
+    Ok(format!("{value}\n"))
+}
+
 pub(crate) fn load(root: &Path, expected: &str) -> Result<String, Vec<Diagnostic>> {
     let cache = semantic_cache_store::load(root, expected)?;
     cache.restored_work().map(str::to_owned).ok_or_else(|| {

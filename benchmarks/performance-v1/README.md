@@ -15,6 +15,7 @@ comparison). It measures *throughput and latency*, not agent productivity.
 | `project` | authenticated `check` / `test` / `run` of shipped multi-file manifests, retained and prepared execution, and frontend reanalysis at 1x/2x/4x | ns/op, bytes/s | `cargo bench --bench project` |
 | `macro` | one direct execution of a selected `semaprax` binary: `check`/`graph`/`context`/`run`/`test`/`build` over committed `examples/` entries | wall ms, p50/p95 | `benchmarks/performance-v1/run.py` or `benchmarks/performance-v1/run.sh` |
 | `build` | `native` and `web` artifact emission (Clang C11, wasm) where toolchain is present | wall ms | `benchmarks/performance-v1/run.py --with-build` |
+| `semantic-cache-workflow` | fresh-process cold open / warm open (unchanged, local edit, provider edit) / stale-entry recovery, over the persistent semantic cache CLI (`semantic-cache-cold-open`/`semantic-cache-warm-open`; see [`docs/PERSISTENT-SEMANTIC-CACHE-V1.md`](../../docs/PERSISTENT-SEMANTIC-CACHE-V1.md#measured-fresh-process-workflow-timing)) | wall seconds, peak RSS, min/median/max over n | `benchmarks/performance-v1/observe-semantic-cache-workflow.py` |
 
 All benchmarks are **deterministic and offline** — no network, no registry.
 
@@ -34,6 +35,12 @@ cargo build --locked --bench workflow_observer --features unstable-workflow-prof
 python3 benchmarks/performance-v1/observe-workflows.py \
   --observer target/debug/deps/workflow_observer \
   --profile dev --output /tmp/workflow-campaign.json
+
+# fresh-process persistent semantic-cache workflow timing (cold/warm/edited/
+# recovered); does not gate on a quiet host, so it must acknowledge one
+python3 benchmarks/performance-v1/observe-semantic-cache-workflow.py \
+  --semaprax target/debug/semaprax --repetitions 11 \
+  --output /tmp/semantic-cache-workflow.json --acknowledge-loaded-host
 
 # macrobenchmarks (CLI, JSON + markdown)
 python3 benchmarks/performance-v1/run.py --output benchmarks/performance-v1/results/local.json

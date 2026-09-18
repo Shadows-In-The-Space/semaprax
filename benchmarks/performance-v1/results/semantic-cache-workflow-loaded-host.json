@@ -1,0 +1,3927 @@
+{
+  "schema": "benchmark.semantic-cache-workflow.v1",
+  "profile": "debug",
+  "repetitions": 11,
+  "binary": {
+    "path": "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+    "digest": "sha256:afad38156489f52db8e540349bccec02cea10699a207d690c623c88c3007b55b",
+    "staged_from": "/Users/kevin/Documents/ChatGPT/AI-Lang/target/debug/semaprax",
+    "staging_note": "copied read-only single-link before measurement; see install_compiler()"
+  },
+  "git": {
+    "commit": "61e2ed95f0f25a11d5238bf05ec027ba380eb1e7",
+    "dirty": true
+  },
+  "scenarios": {
+    "cold_open": {
+      "records": [
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-0/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0416800839884672,
+          "peak_rss_bytes": 37371904,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7567949824,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7598653440,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-1/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03836195799522102,
+          "peak_rss_bytes": 36929536,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7597588480,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7575584768,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-2/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03688183400663547,
+          "peak_rss_bytes": 37339136,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7573880832,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7562592256,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-3/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03735904200584628,
+          "peak_rss_bytes": 37273600,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7530168320,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7518470144,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-4/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03837674998794682,
+          "peak_rss_bytes": 37388288,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7505575936,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7493713920,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-5/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03732237499207258,
+          "peak_rss_bytes": 37355520,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7496024064,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7492239360,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-6/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03672054101480171,
+          "peak_rss_bytes": 37257216,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7490797568,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7494795264,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-7/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.038346916990121827,
+          "peak_rss_bytes": 37355520,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7494778880,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7625408512,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-8/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03757495901663788,
+          "peak_rss_bytes": 36978688,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7628406784,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7626899456,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-9/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03662170798634179,
+          "peak_rss_bytes": 37322752,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7626866688,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7625490432,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "cold_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/cold_open-10/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.06361433400888927,
+          "peak_rss_bytes": 36978688,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7621214208,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7600848896,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.96,
+              5.68,
+              5.47
+            ]
+          }
+        }
+      ],
+      "summary": {
+        "cold_open": {
+          "n": 11,
+          "n_matched_expectation": 11,
+          "n_unexpected": 0,
+          "wall_seconds": {
+            "min": 0.03662170798634179,
+            "median": 0.03757495901663788,
+            "max": 1.0416800839884672
+          },
+          "peak_rss_bytes": {
+            "min": 36929536,
+            "median": 37322752,
+            "max": 37388288
+          }
+        }
+      }
+    },
+    "warm_open_unchanged": {
+      "records": [
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-0/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-0/.semaprax-semantic-cache",
+            "sha256:9e59095e9cc217821af22f2e80cb4eb394d855ebfc288217209fa8e70afdb2ab"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0715788750094362,
+          "peak_rss_bytes": 37142528,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7476379648,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.05,
+              5.69,
+              5.48
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7579992064,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.05,
+              5.69,
+              5.48
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-1/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-1/.semaprax-semantic-cache",
+            "sha256:1f39fc47c85da5edee5347c54118c74a47b149641337831ea45ecc517e784297"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1199348339869175,
+          "peak_rss_bytes": 37470208,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7117012992,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.05,
+              5.69,
+              5.48
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 7181123584,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.88,
+              5.64,
+              5.46
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-2/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-2/.semaprax-semantic-cache",
+            "sha256:8cd9aae64323de7e334cee130ff6d1da20b3381ee11efff2ab9c34a4ebbef749"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.097839042020496,
+          "peak_rss_bytes": 37076992,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6961250304,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.88,
+              5.64,
+              5.46
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6739689472,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.88,
+              5.64,
+              5.46
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-3/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-3/.semaprax-semantic-cache",
+            "sha256:b2ec49c2d5e34878ba97dcd26d2dd9c2512aa13663a5859c4ff8db4ded23ef2f"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.078838541987352,
+          "peak_rss_bytes": 37175296,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6680674304,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.77,
+              5.81,
+              5.52
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6665830400,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.77,
+              5.81,
+              5.52
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-4/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-4/.semaprax-semantic-cache",
+            "sha256:74f64702461cc6839fac2e9675f3ea5d96c616493842feba3b13634796b4b03f"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.122359041008167,
+          "peak_rss_bytes": 37175296,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6514393088,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.77,
+              5.81,
+              5.52
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6825967616,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.47,
+              5.75,
+              5.5
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-5/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-5/.semaprax-semantic-cache",
+            "sha256:1b5ea90b108f5a0d8512c9effb522e1a299f94756e748dfeb19eeaccc33637d7"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0937168750097044,
+          "peak_rss_bytes": 37371904,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6736216064,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.47,
+              5.75,
+              5.5
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6735675392,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.47,
+              5.75,
+              5.5
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-6/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-6/.semaprax-semantic-cache",
+            "sha256:c9aa0860f7975e1fef41aa3869a6a13f4f639d52545aca2d23b0e8d750013968"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0794629580050241,
+          "peak_rss_bytes": 37502976,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6655918080,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.43,
+              5.74,
+              5.5
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6743703552,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.43,
+              5.74,
+              5.5
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-7/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-7/.semaprax-semantic-cache",
+            "sha256:3310a8a71a199ba51a980be37e3480d8a06bd73ea00c64572d40eea4e4a9175a"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0904368750052527,
+          "peak_rss_bytes": 37224448,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6685949952,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.43,
+              5.74,
+              5.5
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6676250624,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.4,
+              5.72,
+              5.5
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-8/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-8/.semaprax-semantic-cache",
+            "sha256:7d77c6d5d57e3321ed79cec377f76e28bb9ce9373a67ac5b2adcb42d03fa29b6"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.070911208022153,
+          "peak_rss_bytes": 37126144,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6297223168,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.4,
+              5.72,
+              5.5
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6201524224,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.4,
+              5.72,
+              5.5
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-9/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-9/.semaprax-semantic-cache",
+            "sha256:9ca3c9fd50acb3e00b77a73aa8e75fb989c1814b182303d1e7873323ae76161b"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0909943750011735,
+          "peak_rss_bytes": 37126144,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6171328512,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.29,
+              5.69,
+              5.49
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6125600768,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.29,
+              5.69,
+              5.49
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-10/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_unchanged-10/.semaprax-semantic-cache",
+            "sha256:7650e59b4b78569c1d76b185fbe0c6cf79b9b388a149e8a82308c3ca04f06eaf"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0703968750021886,
+          "peak_rss_bytes": 37240832,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1725,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6078300160,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.29,
+              5.69,
+              5.49
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6049841152,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.18,
+              5.67,
+              5.48
+            ]
+          }
+        }
+      ],
+      "summary": {
+        "warm_open": {
+          "n": 11,
+          "n_matched_expectation": 11,
+          "n_unexpected": 0,
+          "wall_seconds": {
+            "min": 1.0703968750021886,
+            "median": 1.0904368750052527,
+            "max": 1.122359041008167
+          },
+          "peak_rss_bytes": {
+            "min": 37076992,
+            "median": 37175296,
+            "max": 37502976
+          }
+        }
+      }
+    },
+    "warm_open_local_edit": {
+      "records": [
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-0/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-0/.semaprax-semantic-cache",
+            "sha256:6ebe9a1c41daae2dc153440b44ebb5e8abbeadae857843ffe364d553c4a62217"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0703381249913946,
+          "peak_rss_bytes": 37961728,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6008946688,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.18,
+              5.67,
+              5.48
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5941542912,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.18,
+              5.67,
+              5.48
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-1/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-1/.semaprax-semantic-cache",
+            "sha256:99d0ad55935eab5623557565ba4253fb715e53eae11cd5520ede6b76e4a50177"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.087449957994977,
+          "peak_rss_bytes": 38141952,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5885476864,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.01,
+              5.62,
+              5.46
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5992628224,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.01,
+              5.62,
+              5.46
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-2/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-2/.semaprax-semantic-cache",
+            "sha256:a808d6cf0a1519fc25eb2d75bff17e71afffc08b16d5484a0c900b3e4f8a644e"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0674462910101283,
+          "peak_rss_bytes": 38273024,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6224297984,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.01,
+              5.62,
+              5.46
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6230441984,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.25,
+              5.66,
+              5.48
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-3/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-3/.semaprax-semantic-cache",
+            "sha256:75ff51dfef01f5d85b4ed241e087c2d097a4207a292190fb5705b39045dc6156"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0948694170219824,
+          "peak_rss_bytes": 37847040,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6233374720,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.25,
+              5.66,
+              5.48
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6231310336,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.25,
+              5.66,
+              5.48
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-4/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-4/.semaprax-semantic-cache",
+            "sha256:d5daf2df6881f53a372422c1bbb269d2eab633734400e708d385a47b47b85acf"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0716312500007916,
+          "peak_rss_bytes": 38338560,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6228819968,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.15,
+              5.63,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6221103104,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.15,
+              5.63,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-5/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-5/.semaprax-semantic-cache",
+            "sha256:276fb3d0ac21a086d35bb81f11248c1e6ace5a53011e2307579535f4536e7830"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0766001669981051,
+          "peak_rss_bytes": 38305792,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6213943296,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.15,
+              5.63,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6214631424,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.45,
+              5.69,
+              5.49
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-6/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-6/.semaprax-semantic-cache",
+            "sha256:18f94eeed4ff4d840a6cd09f248e88abd219c8ce3d93311982e4443cca66f563"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.073202042025514,
+          "peak_rss_bytes": 38092800,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6211256320,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.45,
+              5.69,
+              5.49
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6215827456,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.45,
+              5.69,
+              5.49
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-7/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-7/.semaprax-semantic-cache",
+            "sha256:d419a89d293430329cc10dfff0339603cac868094d77bd81b10e601a3802f238"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0912321250070818,
+          "peak_rss_bytes": 38322176,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6100402176,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.26,
+              5.64,
+              5.48
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 6057164800,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.26,
+              5.64,
+              5.48
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-8/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-8/.semaprax-semantic-cache",
+            "sha256:265aa53ceb32bad819ab6ff476b2561c4f2aaf6ef2e20ae30800c66bbd3536d0"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1054177499900106,
+          "peak_rss_bytes": 38305792,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5985566720,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.26,
+              5.64,
+              5.48
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5954764800,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.26,
+              5.64,
+              5.48
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-9/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-9/.semaprax-semantic-cache",
+            "sha256:11044b82b632b830d4208e4bd4d3f90d38f8cd3ed05423079734fac2748a786f"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1460980830015615,
+          "peak_rss_bytes": 38387712,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5770887168,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.16,
+              5.62,
+              5.47
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5787205632,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.16,
+              5.62,
+              5.47
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-10/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_local_edit-10/.semaprax-semantic-cache",
+            "sha256:37f2bcf78353802e4f32a5e5c83e9ede31b6547de48da18aae04f090c490e5e0"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1805248330056202,
+          "peak_rss_bytes": 38338560,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1740,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5577293824,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.06,
+              5.59,
+              5.46
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5467144192,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.06,
+              5.59,
+              5.46
+            ]
+          }
+        }
+      ],
+      "summary": {
+        "warm_open": {
+          "n": 11,
+          "n_matched_expectation": 11,
+          "n_unexpected": 0,
+          "wall_seconds": {
+            "min": 1.0674462910101283,
+            "median": 1.087449957994977,
+            "max": 1.1805248330056202
+          },
+          "peak_rss_bytes": {
+            "min": 37847040,
+            "median": 38305792,
+            "max": 38387712
+          }
+        }
+      }
+    },
+    "warm_open_provider_edit": {
+      "records": [
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-0/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-0/.semaprax-semantic-cache",
+            "sha256:cf07a025b3bba076ce333a65c7fe8c60ea4fec58981d2dac9a52e437d8cdeca6"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.171046541974647,
+          "peak_rss_bytes": 38354944,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5105369088,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.06,
+              5.59,
+              5.46
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5103976448,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.9,
+              5.55,
+              5.44
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-1/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-1/.semaprax-semantic-cache",
+            "sha256:534157befcd3fbeafea5de3eaf9a7b940f5931f44d15690e0cf6ad0cc9f82251"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1085706660232972,
+          "peak_rss_bytes": 38010880,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5064704000,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.9,
+              5.55,
+              5.44
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 5033492480,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.9,
+              5.55,
+              5.44
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-2/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-2/.semaprax-semantic-cache",
+            "sha256:b97b283dc7b15fa2f89e10a25d87b7cca58450526a2f08cff60e58922c8b9f97"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1902216670277994,
+          "peak_rss_bytes": 37978112,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4983062528,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.83,
+              5.52,
+              5.43
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4776247296,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.83,
+              5.52,
+              5.43
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-3/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-3/.semaprax-semantic-cache",
+            "sha256:b96042f5fbedb08091ce0345fd3af649d3330da6c92a32cce9d7f36e6fecc8e6"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.072982666984899,
+          "peak_rss_bytes": 38338560,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4596580352,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.83,
+              5.52,
+              5.43
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4791762944,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.68,
+              5.48,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-4/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-4/.semaprax-semantic-cache",
+            "sha256:cfed41ea1fbecd7b9a48af1a2f2f300b1d0f77c9bad073e406eecf014afd7c39"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1078719170182012,
+          "peak_rss_bytes": 37863424,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4602118144,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.68,
+              5.48,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4456054784,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.68,
+              5.48,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-5/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-5/.semaprax-semantic-cache",
+            "sha256:6ec0e01405d376aefb3a757a56dc8e7f41bb5c5170523f0ec728d8de1ec72b75"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1055969999870285,
+          "peak_rss_bytes": 37945344,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4442996736,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.71,
+              5.47,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4451811328,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.71,
+              5.47,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-6/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-6/.semaprax-semantic-cache",
+            "sha256:8826bf4b0c25f5607c48df00e6a413fa1cd1163b7d76c0b76af867fb8a98e756"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.091586875001667,
+          "peak_rss_bytes": 38354944,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4463869952,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.71,
+              5.47,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4436869120,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.65,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-7/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-7/.semaprax-semantic-cache",
+            "sha256:c3e90b6ec939b1edf02c36b6e788c9b55d9b74d7c0430cdb8232436613cdca1c"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0743822090153117,
+          "peak_rss_bytes": 38387712,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4437360640,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.65,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4428005376,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.65,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-8/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-8/.semaprax-semantic-cache",
+            "sha256:b0d747e3d8258173f7836d4f43f8bbb864267abca0077d0dd6a17039aab38a92"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0804583750141319,
+          "peak_rss_bytes": 38371328,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4472455168,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.68,
+              5.44,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4453728256,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.68,
+              5.44,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-9/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-9/.semaprax-semantic-cache",
+            "sha256:d662cba563df18b0acf25a8604d833cff013c9d26f275ef5b864fb239eb616cc"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.1499265409947839,
+          "peak_rss_bytes": 37830656,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4434722816,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.68,
+              5.44,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4213735424,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.86,
+              5.46,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "warm_open",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-10/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/warm_open_provider_edit-10/.semaprax-semantic-cache",
+            "sha256:0688b93d99219c4b04074059acc0f0691444a43a80d76dfdc90dc8e44b2cbd18"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 1.0780308750108816,
+          "peak_rss_bytes": 38420480,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1769,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4156293120,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.86,
+              5.46,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4248043520,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.86,
+              5.46,
+              5.42
+            ]
+          }
+        }
+      ],
+      "summary": {
+        "warm_open": {
+          "n": 11,
+          "n_matched_expectation": 11,
+          "n_unexpected": 0,
+          "wall_seconds": {
+            "min": 1.072982666984899,
+            "median": 1.1055969999870285,
+            "max": 1.1902216670277994
+          },
+          "peak_rss_bytes": {
+            "min": 37830656,
+            "median": 38338560,
+            "max": 38420480
+          }
+        }
+      }
+    },
+    "stale_recovery": {
+      "records": [
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-0/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-0/.semaprax-semantic-cache",
+            "sha256:38d35789321d69b68c4ffe11012bb46d49f040cc45df06d10d61537947a6311d"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.530978791997768,
+          "peak_rss_bytes": 12222464,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.52 real         0.49 user         0.02 sys\n            12222464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1013  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 964  involuntary context switches\n          4504843156  instructions retired\n          1847463193  cycles elapsed\n             2933168  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4306583552,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.95,
+              5.47,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4204871680,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.95,
+              5.47,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-0/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.04429616700508632,
+          "peak_rss_bytes": 36913152,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4205363200,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.95,
+              5.47,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4209639424,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.95,
+              5.47,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-1/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-1/.semaprax-semantic-cache",
+            "sha256:5f5e008be66cf6b4b38b02fa619c457f47e467ee554355baccce35e05ed605c0"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5173460420046467,
+          "peak_rss_bytes": 12222464,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.51 real         0.49 user         0.01 sys\n            12222464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1013  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 354  involuntary context switches\n          4498832402  instructions retired\n          1825849240  cycles elapsed\n             2933168  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4190388224,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.95,
+              5.47,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4361027584,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.95,
+              5.47,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-1/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03803862500353716,
+          "peak_rss_bytes": 37388288,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4360978432,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.95,
+              5.47,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4350312448,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.95,
+              5.47,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-2/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-2/.semaprax-semantic-cache",
+            "sha256:1b50fd041db7bd739ffad9ff5b85e1be32f22857f326f3531b0455cd00b2dd82"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5140959999989718,
+          "peak_rss_bytes": 12238848,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.51 real         0.49 user         0.01 sys\n            12238848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1014  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 285  involuntary context switches\n          4497542739  instructions retired\n          1821292678  cycles elapsed\n             2965960  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4396679168,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.88,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4422074368,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.88,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-2/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.039256125019164756,
+          "peak_rss_bytes": 37306368,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4424859648,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.88,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4428791808,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.88,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-3/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-3/.semaprax-semantic-cache",
+            "sha256:8417dbc70c9919abe0b7fdf0649ebd8209d169efbabbc8c124acaaade8f2c826"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5129842080059461,
+          "peak_rss_bytes": 12206080,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.51 real         0.49 user         0.01 sys\n            12206080  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1012  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 297  involuntary context switches\n          4498755077  instructions retired\n          1820908507  cycles elapsed\n             2933192  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4416077824,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.88,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4406280192,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.46,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-3/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03756512500694953,
+          "peak_rss_bytes": 37404672,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4427366400,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.46,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4423565312,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.46,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-4/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-4/.semaprax-semantic-cache",
+            "sha256:926e2c216efe23829a139c2ae3df84252dbe674844bb31de3294779bef2061e9"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5120653749909252,
+          "peak_rss_bytes": 12238848,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.51 real         0.49 user         0.01 sys\n            12238848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1014  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 288  involuntary context switches\n          4497484169  instructions retired\n          1818533275  cycles elapsed\n             2949552  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4416389120,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.46,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4407984128,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.46,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-4/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.0391946250165347,
+          "peak_rss_bytes": 36978688,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4407263232,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.46,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4408721408,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.46,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-5/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-5/.semaprax-semantic-cache",
+            "sha256:dd37fde549863d2a801212ecfc007459aac0a8bb89def299124680021c4dd9b3"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5150944589986466,
+          "peak_rss_bytes": 12238848,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.51 real         0.49 user         0.01 sys\n            12238848  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1014  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 308  involuntary context switches\n          4498027565  instructions retired\n          1823968648  cycles elapsed\n             2982368  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4366548992,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4408426496,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-5/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03828558401437476,
+          "peak_rss_bytes": 37322752,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4407771136,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4409704448,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-6/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-6/.semaprax-semantic-cache",
+            "sha256:e8ff67b14846a0806915daf870094933f48556a31cb80206c5109c1f8b6fae04"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5159007080073934,
+          "peak_rss_bytes": 12222464,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.51 real         0.49 user         0.01 sys\n            12222464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1013  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 237  involuntary context switches\n          4496961352  instructions retired\n          1826784235  cycles elapsed\n             2965984  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4412932096,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4406312960,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-6/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03721479102387093,
+          "peak_rss_bytes": 37404672,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4404133888,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 4389978112,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              4.97,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-7/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-7/.semaprax-semantic-cache",
+            "sha256:b12a68a41192736edf4f2ae0e8d26b54e0086d8c8427a1ac017dde5b6edf639e"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.739182458986761,
+          "peak_rss_bytes": 11157504,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.73 real         0.59 user         0.05 sys\n            11157504  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1090  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                6340  involuntary context switches\n          4570735322  instructions retired\n          2138187116  cycles elapsed\n             2982344  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3098574848,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.13,
+              5.47,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 2815148032,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.13,
+              5.47,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-7/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.042385207983898,
+          "peak_rss_bytes": 36896768,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 2794897408,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.13,
+              5.47,
+              5.42
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3142877184,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.13,
+              5.47,
+              5.42
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-8/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-8/.semaprax-semantic-cache",
+            "sha256:0a8d345caa40d353e3c94bd4fcbaaca0564235af1f638bc183a938346d627fa4"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5202358749811538,
+          "peak_rss_bytes": 12222464,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.51 real         0.49 user         0.01 sys\n            12222464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1013  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 495  involuntary context switches\n          4500407522  instructions retired\n          1832479951  cycles elapsed\n             2965984  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3788013568,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.04,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3768238080,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.04,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-8/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.03968987500411458,
+          "peak_rss_bytes": 37257216,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3766321152,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.04,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3747332096,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.04,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-9/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-9/.semaprax-semantic-cache",
+            "sha256:adfae5a7603cde9da6209e3c83f7331d9e61b093e860b930ba19750062ac6d6f"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5209369580261409,
+          "peak_rss_bytes": 12222464,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.51 real         0.49 user         0.01 sys\n            12222464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1013  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 579  involuntary context switches\n          4500581579  instructions retired\n          1832365613  cycles elapsed\n             2965984  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3747282944,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.04,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3709960192,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.04,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-9/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.04009191697696224,
+          "peak_rss_bytes": 37322752,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3712565248,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.04,
+              5.45,
+              5.41
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3699916800,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.04,
+              5.45,
+              5.41
+            ]
+          }
+        },
+        {
+          "role": "stale_warm_open_attempt",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-warm-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-10/semaprax.toml",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-10/.semaprax-semantic-cache",
+            "sha256:acc3dee0500873a74973512dc882c9d44f4ddd868de010c02a37644e65907ac4"
+          ],
+          "exit_code": 1,
+          "ok": false,
+          "matched_expectation": true,
+          "wall_seconds": 0.5499375829822384,
+          "peak_rss_bytes": 12222464,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 0,
+          "stderr_tail": "error[SPX-G308]: selected semantic cache is absent from the store\n        0.54 real         0.51 user         0.02 sys\n            12222464  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1013  page reclaims\n                   0  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 668  involuntary context switches\n          4504628746  instructions retired\n          1876302660  cycles elapsed\n             2949576  peak memory footprint\n",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3541909504,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.28,
+              5.49,
+              5.43
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3795386368,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.28,
+              5.49,
+              5.43
+            ]
+          }
+        },
+        {
+          "role": "cold_open_recovery",
+          "argv": [
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/semaprax-installed",
+            "semantic-cache-cold-open",
+            "/private/tmp/claude-501/-Users-kevin-Documents-ChatGPT-AI-Lang/a5a0d65a-26da-4c12-955b-ae78d4a3ad6b/scratchpad/wf-run2/stale_recovery-10/semaprax.toml"
+          ],
+          "exit_code": 0,
+          "ok": true,
+          "matched_expectation": true,
+          "wall_seconds": 0.04515079199336469,
+          "peak_rss_bytes": 37289984,
+          "peak_rss_basis": "darwin_time_dash_l_maximum_resident_set_size_bytes",
+          "stdout_bytes": 1713,
+          "stderr_tail": "",
+          "host_before": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3793321984,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.28,
+              5.49,
+              5.43
+            ]
+          },
+          "host_after": {
+            "platform": "darwin-arm64",
+            "system": "Darwin",
+            "release": "25.5.0",
+            "machine": "arm64",
+            "cpu_count": 11,
+            "python": "3.14.2",
+            "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18) (Homebrew)",
+            "cargo": "cargo 1.98.0 (797e8a9bc 2026-08-05) (Homebrew)",
+            "clang": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+            "available_memory": {
+              "bytes": 3783131136,
+              "basis": "macos:vm_stat:free+inactive"
+            },
+            "load_average": [
+              5.28,
+              5.49,
+              5.43
+            ]
+          }
+        }
+      ],
+      "summary": {
+        "stale_warm_open_attempt": {
+          "n": 11,
+          "n_matched_expectation": 11,
+          "n_unexpected": 0,
+          "wall_seconds": {
+            "min": 0.5120653749909252,
+            "median": 0.5173460420046467,
+            "max": 0.739182458986761
+          },
+          "peak_rss_bytes": {
+            "min": 11157504,
+            "median": 12222464,
+            "max": 12238848
+          }
+        },
+        "cold_open_recovery": {
+          "n": 11,
+          "n_matched_expectation": 11,
+          "n_unexpected": 0,
+          "wall_seconds": {
+            "min": 0.03721479102387093,
+            "median": 0.039256125019164756,
+            "max": 0.04515079199336469
+          },
+          "peak_rss_bytes": {
+            "min": 36896768,
+            "median": 37306368,
+            "max": 37404672
+          }
+        }
+      }
+    }
+  },
+  "nonclaims": [
+    "not_a_quiet_host_measurement",
+    "not_hosted_or_cross_platform_evidence",
+    "not_a_speedup_claim",
+    "wall_time_includes_process_spawn_and_is_a_debug_build_unless___profile_release_was_passed"
+  ]
+}

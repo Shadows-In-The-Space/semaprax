@@ -1,3 +1,5 @@
+#[path = "quickstart_v1/installed_journey.rs"]
+mod installed_journey;
 #[path = "support/project_directory_link.rs"]
 mod project_directory_link;
 

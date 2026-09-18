@@ -34,6 +34,27 @@ pub(crate) const RELEASE_BLOCKERS: &[&str] = &[
     "msrv",
 ];
 
+/// Jobs that run only on `refs/tags/v*` and so are never release blockers.
+const TAG_ONLY: [&str; 3] = ["release-gate", "release-artifacts", "publish-release"];
+
+/// Jobs deliberately outside `release-gate`'s `needs:` because the hosted
+/// runner cannot yet execute the thing they gate, so requiring them would
+/// require a check that only ever takes its own skip path.
+///
+/// `kernel0-lean-proof-gate` is the standing case: GitHub-hosted runners ship
+/// no Lean toolchain, and AGENTS.md forbids the build-time network fetch that
+/// installing one needs, so every hosted run takes the explicit-skip half of
+/// `scripts/kernel0-lean-gate.py`'s build check. Its source-level half (pinned
+/// signatures, headline theorems, the comment-aware sorry/admit/axiom scan)
+/// does run on every push; that is worth having, and is not worth calling a
+/// proof-build release blocker. Wiring it in is future work, gated on a
+/// hermetic or pre-baked Lean toolchain.
+///
+/// This list is not a parking space. `a_not_yet_hosted_job_declares_that_status_in_the_workflow`
+/// requires each entry to say so in its own job body, and forbids an entry
+/// that is simultaneously listed as a blocker.
+const NOT_YET_HOSTED: [&str; 1] = ["kernel0-lean-proof-gate"];
+
 fn workflow() -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml"))
         .expect("CI workflow must be readable")
@@ -304,24 +325,65 @@ fn workflow_jobs(workflow: &str) -> Vec<String> {
 /// silently narrower aggregate.
 #[test]
 fn every_job_that_is_not_a_tag_only_release_step_is_a_release_blocker() {
-    const TAG_ONLY: [&str; 3] = ["release-gate", "release-artifacts", "publish-release"];
     let workflow = workflow();
     let jobs = workflow_jobs(&workflow);
 
     assert_eq!(
         jobs.len(),
-        RELEASE_BLOCKERS.len() + TAG_ONLY.len(),
+        RELEASE_BLOCKERS.len() + TAG_ONLY.len() + NOT_YET_HOSTED.len(),
         "unexpected CI job inventory: {jobs:?}"
     );
     let blocking: Vec<&str> = jobs
         .iter()
         .map(String::as_str)
-        .filter(|job| !TAG_ONLY.contains(job))
+        .filter(|job| !TAG_ONLY.contains(job) && !NOT_YET_HOSTED.contains(job))
         .collect();
     assert_eq!(
         blocking, RELEASE_BLOCKERS,
         "every non-release job must be a declared release blocker"
     );
+}
+
+/// The exemption above is only as honest as its evidence. A job named in
+/// `NOT_YET_HOSTED` must say so in its own body, in the workflow, next to the
+/// reason -- otherwise the list degrades into a place to park any job someone
+/// did not want to wire into the aggregate, and the inventory rule it carves
+/// out of stops meaning anything.
+///
+/// The marker is deliberately a full sentence rather than a bare token, so it
+/// cannot be pasted onto a job without also stating what is not hosted and
+/// why.
+#[test]
+fn a_not_yet_hosted_job_declares_that_status_in_the_workflow() {
+    let workflow = workflow();
+    for exempt in NOT_YET_HOSTED {
+        let body = job(&workflow, exempt);
+        assert!(
+            body.contains("# NOT-YET-HOSTED, deliberately:"),
+            "`{exempt}` is exempt from the release-blocker inventory but its \
+             job body does not carry the `# NOT-YET-HOSTED, deliberately:` \
+             marker and the reason; either wire it into `release-gate`'s \
+             `needs:` and add it to RELEASE_BLOCKERS, or state in the \
+             workflow what cannot run hosted yet"
+        );
+        assert!(
+            !release_gate_needs(&workflow).contains(&exempt.to_string()),
+            "`{exempt}` claims not-yet-hosted status but *is* listed in \
+             `release-gate`'s `needs:`; a job cannot be both exempt and a \
+             blocker -- drop it from NOT_YET_HOSTED once it is wired in"
+        );
+    }
+}
+
+/// The job identifiers listed under `release-gate`'s `needs:`.
+fn release_gate_needs(workflow: &str) -> Vec<String> {
+    let gate = job(workflow, "release-gate");
+    gate.split_once("    needs:\n")
+        .expect("release-gate must declare needs")
+        .1
+        .lines()
+        .map_while(|line| line.strip_prefix("      - ").map(str::to_owned))
+        .collect()
 }
 
 /// Exercises the gate's verdict directly over synthetic `needs` contexts. The

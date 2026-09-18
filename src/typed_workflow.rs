@@ -12,10 +12,13 @@
 //! Authority boundaries this module holds to, each proven by test rather than
 //! asserted here:
 //!
-//! - Reaching a [`graph::StepKind::HumanGate`] never authorizes the gated
-//!   transition. Approval is a separate recorded decision bound to an exact
-//!   revision, role, scope and expiry, and grants only the one named edge; see
-//!   [`human_gate`].
+//! - Reaching a [`graph::StepKind::HumanGate`] step never authorizes the
+//!   gated transition, in the graph schema ([`human_gate`]) *and* in the
+//!   executor that actually walks the graph ([`engine`]): [`engine::run`]
+//!   only crosses a gate given an explicit, separately evaluated
+//!   [`human_gate::GateDecision`] supplied through [`engine::ExecInputs`],
+//!   and the decision is a separate recorded action bound to an exact
+//!   revision, role, scope and expiry, granting only the one named edge.
 //! - A compensating effect never runs twice for one key, including across a
 //!   restored snapshot; see [`compensation`].
 //! - An uncertain outcome is never retried automatically. [`retry`] reuses
@@ -26,13 +29,22 @@
 //! - Resuming a checkpoint fails closed on revision drift or corruption, and a
 //!   migration without a mapping for the actual step is refused; see
 //!   [`checkpoint`].
+//! - `Parallel`/`Join` execution never introduces real concurrency: every
+//!   branch runs on the one calling thread, in ascending step-id order, so
+//!   there is nothing to race and the resulting trace is byte-identical
+//!   across repeated runs of the same graph and inputs; see the
+//!   `parallel_join` tests in [`engine`].
 //!
 //! Scope boundary: [`engine::run`] executes Sequential, Conditional, bounded
-//! Loop, ModelCall and Terminal steps deterministically. Parallel and Join are
-//! validated at the graph level but refused at execution with
-//! [`engine::ExecError::NotExecutable`], and the declared step kinds
-//! (Agent/Tool/Job/SemanticChange/TestBuild/PublicationRequest) are schema
-//! only. Checkpoints are an in-memory model, not a versioned wire format.
+//! Loop, ModelCall, HumanGate, and bounded Parallel/Join steps
+//! deterministically, each dispatched through the sealed
+//! [`engine::StepExecutor`] seam. The declared step kinds
+//! (Agent/Tool/Job/SemanticChange/TestBuild/PublicationRequest) remain
+//! schema only — admitted into the graph and refused at execution with
+//! [`engine::ExecError::NotExecutable`], never silently no-opped.
+//! Checkpoints are an in-memory model, not a versioned wire format;
+//! checkpoint/compensation ledgers are not yet threaded through
+//! [`engine::run`] itself.
 
 pub mod checkpoint;
 pub mod compensation;

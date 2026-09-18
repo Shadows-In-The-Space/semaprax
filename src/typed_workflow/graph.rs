@@ -9,14 +9,22 @@
 //! compiler phases and grants no semantics or authority; this module
 //! defines the workflow engine's own step/edge/port schema.
 //!
-//! Only [`StepKind::Sequential`], [`StepKind::Conditional`],
+//! [`StepKind::Sequential`], [`StepKind::Conditional`],
 //! [`StepKind::Parallel`]/[`StepKind::Join`], [`StepKind::Loop`],
-//! [`StepKind::ModelCall`] and [`StepKind::Terminal`] have execution
-//! semantics, in [`super::engine`]. [`StepKind::HumanGate`] has no
-//! execution semantics here by design: reaching it grants nothing (see
-//! [`super::human_gate`]). [`StepKind::Declared`] variants are admitted
-//! into the graph schema and validated structurally, but have no executor
-//! in this slice; running one is a defined refusal, not a silent no-op.
+//! [`StepKind::ModelCall`], [`StepKind::HumanGate`] and
+//! [`StepKind::Terminal`] all have execution semantics in
+//! [`super::engine`]. `Parallel`/`Join` execute as a deterministic
+//! sequential simulation — every branch runs, in ascending [`StepId`]
+//! order, on the one calling thread; there is no real concurrency to race
+//! and no scheduler nondeterminism to reproduce (see
+//! [`super::engine::StepExecutor`] for the seam every step kind's executor
+//! goes through). [`StepKind::HumanGate`] grants nothing merely by being
+//! reached: the engine only advances past it given an explicit, separately
+//! evaluated [`super::human_gate::GateDecision`] (see [`super::human_gate`]
+//! for the authority argument). [`StepKind::Declared`] variants are
+//! admitted into the graph schema and validated structurally, but have no
+//! executor in this slice; running one is a defined refusal, not a silent
+//! no-op.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -94,13 +102,28 @@ pub enum StepKind {
     /// Fan-out to a bounded set of direct successor steps (its branches).
     /// The branch set is exactly this step's out-edge targets, deduplicated
     /// — there is no separate declared branch list to drift from the edges.
+    /// Because every non-branching step kind admits exactly one outgoing
+    /// edge (see [`GraphError::AmbiguousOutEdges`]), and a `Join` step's
+    /// declared predecessors must equal exactly this set (see
+    /// [`GraphError::MissingJoinPath`]/[`GraphError::UnexpectedJoinPredecessor`]),
+    /// a branch in a validated graph is always exactly one step whose sole
+    /// out edge targets the join. The engine (see
+    /// [`super::engine::StepExecutor`]) runs each branch step in ascending
+    /// [`StepId`] order on one thread — a deterministic simulation of
+    /// concurrency, not real concurrency, so there is nothing to race.
     Parallel,
-    /// Waits for every branch of `parallel` and only those branches.
+    /// Waits for every branch of `parallel` and only those branches, then
+    /// continues along its own single out edge. The engine reaches this
+    /// kind only immediately after it has itself executed every branch of
+    /// `parallel`; a `Join` step is never independently dispatched.
     Join { parallel: StepId },
     /// Explicit human decision boundary. Carries no authority by itself:
-    /// see [`super::human_gate`]. The engine never executes this kind on
-    /// its own; a caller must present an explicit, evaluated
-    /// [`super::human_gate::GateDecision`] out of band.
+    /// see [`super::human_gate`]. The engine advances past this kind only
+    /// given an explicit, separately evaluated
+    /// [`super::human_gate::GateDecision`] presented out of band through
+    /// [`super::engine::ExecInputs`]; reaching the step without one is a
+    /// defined refusal ([`super::engine::ExecError::GateNotDecided`]), never
+    /// a silent pass-through.
     HumanGate,
     /// Bounded loop controller. `max_iterations` must be nonzero. Only a
     /// [`StepKind::Loop`] step may be the target of a back edge (see
@@ -291,6 +314,16 @@ impl WorkflowGraph {
                     }
                     if out_count == 0 {
                         return Err(GraphError::DeadEnd(step.id));
+                    }
+                    // A `Join` step continues with exactly one successor once
+                    // every branch has arrived, the same single-exit rule
+                    // every other non-branching kind gets below. Without
+                    // this, `engine::only_out_edge` would silently pick
+                    // whichever of two out edges happened to be first in
+                    // the vector instead of this being a caught authoring
+                    // error.
+                    if out_count > 1 {
+                        return Err(GraphError::AmbiguousOutEdges(step.id));
                     }
                 }
                 StepKind::Loop { max_iterations } => {
@@ -711,6 +744,31 @@ mod tests {
         assert_eq!(
             graph.validate(),
             Err(GraphError::MissingJoinPath(StepId(0), StepId(10)))
+        );
+    }
+
+    #[test]
+    fn join_step_with_two_out_edges_is_rejected_as_ambiguous() {
+        let mut graph = parallel_join_graph(2, true);
+        // Give the join step (StepId(1)) a second outgoing edge alongside
+        // its existing one to StepId(2); a bare `Terminal` sink keeps this
+        // fixture otherwise well-formed.
+        graph.steps.push(StepDef {
+            id: StepId(50),
+            kind: StepKind::Terminal,
+            in_ports: vec![unit_port(0)],
+            out_ports: vec![],
+        });
+        graph.edges.push(EdgeDef {
+            id: EdgeId(998),
+            from: StepId(1),
+            from_port: PortId(0),
+            to: StepId(50),
+            to_port: PortId(0),
+        });
+        assert_eq!(
+            graph.validate(),
+            Err(GraphError::AmbiguousOutEdges(StepId(1)))
         );
     }
 

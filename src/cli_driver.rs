@@ -361,6 +361,12 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
             let rewritten = cli::package::long_form(&args[1..])?;
             run(rewritten, host)
         }
+        CommandId::Release => {
+            let directory = cli::release::parse(&args[1..])?;
+            let receipt = cli::release::run(&directory).map_err(|error| report(&[error], false))?;
+            print!("{receipt}");
+            Ok(())
+        }
         CommandId::Add => {
             let options = cli::add::parse(&args[1..])?;
             cli::add::run(&options, |errors| report(errors, false))

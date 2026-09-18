@@ -31,6 +31,8 @@ mod release_packaging_unix;
 mod release_packaging_windows;
 #[path = "offline_package/release_provenance.rs"]
 mod release_provenance;
+#[path = "offline_package/release_verify_cli.rs"]
+mod release_verify_cli;
 #[path = "offline_package/release_workflow.rs"]
 mod release_workflow;
 #[path = "offline_package/report.rs"]

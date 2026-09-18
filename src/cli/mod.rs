@@ -26,6 +26,7 @@ pub(crate) mod project_image;
 pub(crate) mod project_lock;
 pub(crate) mod project_runtime;
 pub(crate) mod query;
+pub(crate) mod release;
 pub(crate) mod resolve;
 pub(crate) mod retention_metadata;
 pub(crate) mod review;

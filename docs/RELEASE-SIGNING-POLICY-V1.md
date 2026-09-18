@@ -186,6 +186,44 @@ by `tests/offline_package/release_provenance.rs`) provides:
   stand-in for wiring only, never a claim about the real algorithm, which
   stays Sigstore/cosign per this document.
 
+### The one documented command
+
+`semaprax release verify <release-dir>` is the single command a downloader
+runs over an unpacked release directory. It is a thin front over the module
+above and adds no verification of its own: it reads
+`release-manifest.json`, `release-provenance.json`, and -- if present --
+`release-signature-claim.json` from that directory, then hands their exact
+bytes to `verify_provenance_binds_manifest`,
+`verify_manifest_artifacts_on_disk`, and
+`verify_signature_claim_binds_provenance`. Everything is re-derived from
+what is on disk: the manifest digest is recomputed from the manifest's real
+bytes, every archive the manifest names is re-hashed from its real bytes,
+and a claim's subject digest is recomputed from the provenance statement's
+real bytes. Nothing a document says about itself is trusted.
+
+```sh
+semaprax release verify dist
+```
+
+It fails closed on the first disagreement, exiting non-zero with the owning
+module's stable code -- `SPX-Z701` (document shape), `SPX-Z702` (binding:
+altered manifest, provenance for another commit or tag, replayed claim),
+`SPX-Z703` (identity policy: unapproved issuer, repository, or workflow),
+`SPX-Z704` (artifact: missing, resized, or substituted archive) -- plus its
+own `SPX-Z705` when the directory presents no readable document at all. It
+opens only the exact paths the manifest names, lists no directory, touches
+no network, spawns no process, and never executes or unpacks an artifact.
+
+A successful run prints `status: VERIFIED UNSIGNED RELEASE`. That is a
+successful verification of an **unsigned** release, never evidence that a
+release was signed: no SEMAPRAX release is signed today and no signing key
+or keyless identity exists for this repository. The status is unchanged when
+a `semaprax.release-signature-claim.v1` document is present and correctly
+bound -- the command verifies that claim's *binding* only, and never decodes
+or cryptographically verifies its `signature`/`certificate` bytes, exactly
+as the next section describes. Verifying, publishing, signing, and
+installing remain separate: this command performs only the first.
+
 ### What verification does and does not prove
 
 **Does prove:** that a manifest, a provenance document, and a signature
@@ -265,12 +303,12 @@ research project.
    and `release-provenance.bundle` as release assets alongside the three
    archives. This is a recommendation, not a change made here.
 5. **Publish verification instructions with the one documented command.**
-   Once the above exists, `docs/RELEASE-PROCESS.md` should gain a worked
-   `cosign verify-blob` invocation plus a call into this repository's own
-   `verify_release_binding` (through a small CLI wrapper -- adding a
-   `semaprax release verify` subcommand touches `src/cli_driver.rs`, which is
-   outside this change's file lease; see the final report for the exact
-   recommendation).
+   The command itself now exists: `semaprax release verify <release-dir>`
+   (see "The one documented command" above) performs the binding, artifact,
+   and identity checks offline. What remains human-owned is pairing it with
+   a real signature check once one exists: `docs/RELEASE-PROCESS.md` should
+   gain a worked `cosign verify-blob` invocation alongside it, and its
+   nonclaims should keep saying releases are unsigned until item 6 holds.
 6. **Only after a real signed release has shipped**, update
    `docs/RELEASE-PROCESS.md`'s nonclaims to stop describing releases as
    unsigned, and add that release's own dated hosted-evidence section

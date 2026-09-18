@@ -1,11 +1,13 @@
 # Provisioned Linux offline doctor lifecycle gate v1
 
-Status: **executed, and failed**, four times, most recently 2026-09-06 against
-`c53386a9` ([run 34047743589](https://github.com/wavect/semaprax/actions/runs/34047743589)).
-Preconditions and settlement pass every time. The fourth run reached a suite
-the first three never did: a zero-syscall "spin" fixture that can only run
-forever also failed, so **the confined child never reaches the tool's own
-code** — the rejection is at or before `execve`. See [Executions](#executions).
+Status: **executed, and still failing, but narrowly**, most recently
+2026-09-17 against `bfb1da19`
+([run 35274228390](https://github.com/wavect/semaprax/actions/runs/35274228390)).
+Preconditions and settlement pass every time. Both admitted suites now report
+**12 passed, 1 failed** of 13. The single remaining failure in each is the
+`real-distributions` fixture, and `clang` inside it now completes and reports
+its own version — so the pre-`execve` diagnosis recorded below for the fourth
+run **no longer describes the current head**. See [Executions](#executions).
 
 Audience: release engineers and security reviewers who can supply one
 disposable, trusted Linux x86-64 host, or dispatch this gate against a
@@ -116,13 +118,74 @@ change (a protocol surface this gate exists to protect) — or, more cheaply,
 bisecting `child.rs::enter`'s enumerated rejections directly on a provisioned
 host, which needs no code change. No run has done any of these yet.
 
+### Runs five through thirty-eight, and what they overturned
+
+The four runs above are no longer the record. `gh run list --workflow
+doctor-provisioned-linux.yml` reports **38 dispatches** — 30 `failure`, 8
+`cancelled` — the most recent on 2026-09-17 against `bfb1da19`
+([run 35274228390](https://github.com/wavect/semaprax/actions/runs/35274228390)).
+The gate has been iterated on continuously rather than left where the fourth
+run stopped, and the commits doing it are on `main`: raising the worker's
+rlimits (`NOFILE` 64 → 256, `AS` 2G → 4G), admitting `O_NOATIME` and `O_PATH`
+in the worker's `open` filter, tolerating `EINVAL` in the signal reset, and
+admitting the event-loop syscalls a real `node --version` issues.
+
+**The pre-`execve` conclusion above is now falsified at the current head, by
+this gate's own output.** Read directly from run 35274228390's log, the
+`platform-sys-lib` suite reports:
+
+```
+test result: FAILED. 12 passed; 1 failed; 0 ignored; 0 measured; 188 filtered out
+```
+
+and the `collector-provisioned` suite reports the same shape:
+
+```
+test result: FAILED. 12 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out
+```
+
+Two things follow, and both contradict the fourth-run reading:
+
+1. `doctor::offline_worker::tests::lifecycle::post_exec_capabilities_and_supervisor_death_are_observed_externally`
+   — the zero-syscall `jmp self` sentinel whose failure was the whole basis
+   for "the child never reaches its own code" — **now passes**. Whatever
+   rejected it inside `child.rs::enter` has been fixed.
+2. The confined child demonstrably reaches and runs real tool code. In the one
+   remaining failing fixture, the emitted report carries
+   `"id":"clang" ... "status":"ok"` with the detail
+   `clang version 17.0.6`, read out of the real provisioned distribution. A
+   confined process that never reached `execve` cannot report a version string
+   it had to execute a compiler to obtain.
+
+The remaining failure is therefore **narrow and specific, not structural**:
+`clang` succeeds while `node` and `rust` both report `offline tool terminated
+unsuccessfully`, leaving the overall report exit 1 where the fixture asserts
+exit 0. The two failing test names are
+`doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions`
+(panicking at `offline_worker/tests.rs:404` with "real selected tool must
+complete under confinement: Exit") and
+`real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions`.
+
+**What this does not license.** Two of thirteen fixtures still fail, so WP-05
+stays unpromoted and no confinement property is claimed as established on the
+strength of this section. The evidence is a GitHub-hosted `ubuntu-24.04`
+runner only; nothing here is evidence for macOS, Windows, or a physical
+device. The cause of the `node`/`rust` failure is not established — only that
+it is downstream of `execve` rather than before it, which is where the four
+earlier runs placed it.
+
 ## What is true today
 
 The private Linux doctor boundary has substantial implementation and
 source-layout coverage. It now also has runtime evidence that its mechanics
-execute on a real host — see [Executions](#executions) — but none that its
-confinement *properties* hold, because every fixture that would demonstrate
-one fails first on the tool-execution defect recorded there.
+execute on a real host, and — unlike when the first four runs were recorded —
+the property fixtures themselves now execute and pass: 12 of 13 in each
+admitted suite, including the hostile ones that reject image defects, digest
+drift, a missing loader, and a non-child pidfd. See
+[Executions](#executions). What remains unestablished is narrower than
+"properties do not hold": one `real-distributions` fixture in each suite still
+fails on `node` and `rust`, so the boundary is not yet demonstrated against
+the full real toolchain, and WP-05 stays unpromoted on that basis.
 
 - `tests/doctor_production_provisioner_v1.rs` reads the provisioner's source
   text: it pins the fixed descriptor inventory, the capsule parser, the clone

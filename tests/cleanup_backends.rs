@@ -12,9 +12,10 @@
 //! from a distinct literal prefix — `semaprax-aggregate-*`,
 //! `semaprax-generic-function-*`, `semaprax-generic-record-*`,
 //! `semaprax-generic-variant-*`, `semaprax-option-try-*`,
-//! `semaprax-record-pattern-*`, `semaprax-shared-loan-*`,
-//! `semaprax-try-*`, and `semaprax-variant-*` — so sharing one process id does
-//! not make two modules derive the same fixture path.
+//! `semaprax-owning-closure-exec-*`, `semaprax-record-pattern-*`,
+//! `semaprax-shared-loan-*`, `semaprax-try-*`, and `semaprax-variant-*` — so
+//! sharing one process id does not make two modules derive the same fixture
+//! path.
 //!
 //! `scalar_status_backend_equivalence` is deliberately not a module here: CI
 //! names it with `--test scalar_status_backend_equivalence`, so it must remain
@@ -40,6 +41,8 @@ mod executable_aggregate;
 mod executable_generic_function;
 #[path = "cleanup_backends/executable_generic_record.rs"]
 mod executable_generic_record;
+#[path = "cleanup_backends/executable_owning_closure.rs"]
+mod executable_owning_closure;
 #[path = "cleanup_backends/executable_record_pattern.rs"]
 mod executable_record_pattern;
 #[path = "cleanup_backends/executable_try.rs"]

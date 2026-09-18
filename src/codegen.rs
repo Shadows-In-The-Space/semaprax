@@ -133,8 +133,16 @@ pub fn emit_c(program: &Program) -> Result<String, Diagnostic> {
             "native Rust imports are unavailable for the ordinary native target",
         ));
     }
-    let resolved = hir::resolve(program).map_err(first_backend_diagnostic)?;
-    emit_resolved_c_with_source(program, &resolved)
+    // SPX-AI-021 bounded owning closures: substitute `own fn(...)`
+    // construction-plus-call with a direct call before resolving, exactly as
+    // the interpreter does. `contract_labels` pairs source declarations with
+    // resolved ones, so the rewritten program must be used for BOTH -- passing
+    // the original alongside a desugared resolution would pair mismatched
+    // bodies.
+    let desugared = hir::closure::desugar_owning_closures(program);
+    let source = desugared.as_ref().unwrap_or(program);
+    let resolved = hir::resolve(source).map_err(first_backend_diagnostic)?;
+    emit_resolved_c_with_source(source, &resolved)
 }
 
 /// Resolve source and emit the bounded native stdout-transcript profile.

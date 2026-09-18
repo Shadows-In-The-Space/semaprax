@@ -781,7 +781,10 @@ impl ByteOutput for crate::bounded_output::CappedVec {
 
 pub fn emit_module(program: &Program) -> Result<Vec<u8>, Diagnostic> {
     reject_native_rust_imports(program)?;
-    let resolved = hir::resolve(program).map_err(|diagnostics| {
+    // SPX-AI-021 bounded owning closures: same pre-resolution substitution the
+    // interpreter and native backend apply.
+    let desugared = hir::closure::desugar_owning_closures(program);
+    let resolved = hir::resolve(desugared.as_ref().unwrap_or(program)).map_err(|diagnostics| {
         diagnostics
             .into_iter()
             .find(|item| item.severity.is_error())

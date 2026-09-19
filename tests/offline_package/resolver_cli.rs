@@ -282,6 +282,24 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
         assert_eq!(current.matches(line).count(), 1);
         current = current.replacen(line, "", 1);
     }
+    // `semaprax registry search|add|lock|fetch|verify|publish` was added by
+    // issue #195's CLI surface, also after these witnesses were pinned.
+    // Normalized away here for the same reason as the workflow block above,
+    // so the historical byte and digest pins below keep describing the
+    // surface they were taken from.
+    const REGISTRY_LINES: [&str; 7] = [
+        "semaprax registry search <registry.json> <query>\n",
+        "semaprax registry add <registry.json> <package> <range>\n",
+        "semaprax registry lock <registry.json> <template.json>\n",
+        "semaprax registry fetch <registry.json> <package> <version>\n",
+        "semaprax registry verify <registry.json> <snapshot-evidence.json>\n",
+        "semaprax registry verify <registry.json> <template.json> <lock-evidence.json>\n",
+        "semaprax registry publish <registry.json> <entry.json>\n",
+    ];
+    for line in REGISTRY_LINES {
+        assert_eq!(current.matches(line).count(), 1);
+        current = current.replacen(line, "", 1);
+    }
     const CACHE_OPEN_LINES: [&str; 2] = [
         "semaprax semantic-cache-cold-open <manifest>\n",
         "semaprax semantic-cache-warm-open <manifest> <store-root> <entry-digest>\n",

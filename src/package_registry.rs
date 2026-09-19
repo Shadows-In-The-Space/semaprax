@@ -116,7 +116,9 @@ use crate::package_lock_v3;
 use crate::package_range::{self, Version};
 
 pub mod binding;
+pub mod catalog;
 pub mod federation;
+pub mod wire;
 
 #[cfg(test)]
 mod tests;

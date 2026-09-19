@@ -129,6 +129,7 @@ include them with an explicit `SPX-PKR609` warning diagnostic
 | `SPX-PKR608` | `verify_snapshot` evidence does not byte-replay the supplied entries. |
 | `SPX-PKR609` | Warning: a yanked entry was included under `AllowYankedWithWarning`. |
 | `SPX-PKR610` | A yanked entry is present and the active policy is `RefuseIfYanked`. |
+| `SPX-PKR613` | `package_registry::wire`: these bytes are not a well-formed registry, entry, or resolution-template document at all -- decided before any registry rule runs, which is why it is not `SPX-PKR601`. |
 
 ## Composition with the resolver
 
@@ -161,9 +162,63 @@ exact diagnostic code.
 
 This module performs no cryptographic publisher authentication (only the
 structural ownership-continuity check above), no cryptographic signature or
-transparency-log verification, no network access, no filesystem access, no
-CLI wiring, and no build execution. It does not compute `api_digest` or
+transparency-log verification, no network access, no filesystem access, and
+no build execution. The CLI front described below reads caller-supplied
+files and performs no publication, no network access, and no write. It does not compute `api_digest` or
 `provenance_digest` itself; both are caller-owned opaque values it stores and
 structurally bounds. It does not solve dependency graphs. It is not run
 through the full quality-gate profile and is not a support or publication
 decision for any package.
+
+## CLI surface (`semaprax registry`)
+
+`src/cli/registry.rs` is a thin front over this module, in the shape of
+`cli::audit` and `cli::typed_workflow`: it reads bytes the caller already has
+on disk, calls the owning functions, and reports. It owns no registry rule,
+and a registry refusal keeps the owning module's own `SPX-PKR6xx` code.
+
+| Verb | What it does | Authority |
+| --- | --- | --- |
+| `registry search <registry.json> <query>` | Lists published coordinates whose package name contains `query`, as a plain substring comparison over decoded data. | Reads one file. `query` is an opaque string, never joined into a path. |
+| `registry add <registry.json> <package> <range>` | Reports the highest published version satisfying `range` (`catalog::select_version`) and the requirement to record. | Reads one file. Edits no manifest; there is no implicit "latest". |
+| `registry lock <registry.json> <template.json>` | `binding::bind_to_snapshot`; prints the canonical Registry-Bound Resolution v1 document on stdout. | Reads two files. Writes nothing -- the caller redirects. |
+| `registry fetch <registry.json> <package> <version>` | Prints one coordinate's exact published Subject-v3 bytes. This is the offline mirror path. | Reads one file. No cache, no network, no fallback. |
+| `registry verify <registry.json> <evidence.json>` | `verify_snapshot`: independent rebuild plus byte comparison. | Read-only, fails closed with `SPX-PKR608`. |
+| `registry verify <registry.json> <template.json> <lock.json>` | `binding::verify_bound_resolution`, which additionally replays the embedded resolver-v2 evidence. | Read-only, fails closed with `SPX-PKR608`. |
+| `registry publish <registry.json> <entry.json>` | Rebuilds the snapshot the candidate entry would produce -- so `602`/`603`/`604`/`605`/`606` all run -- then prints the registry document that *would* hold it. | **Decide-and-record only.** Publishes nothing, writes nothing, signs nothing, contacts nothing. Making that document real is a separate human act. |
+
+Two codes belong to the front itself and to nothing else: `SPX-Z926` for "the
+requested document could not be read at all" (missing, oversized, not UTF-8),
+and `SPX-Z927` for "the registry was read and checked, and does not contain
+the requested coordinate". Neither is ever used for a registry rule.
+
+### Wire formats
+
+`package_registry::wire` owns both documents and is a decoder only -- it
+performs no registry checking, which `wire::tests` pins by decoding a
+reserved `std.*` entry successfully and showing `build_snapshot` is what
+refuses it (`SPX-PKR602`), with an admitted-name control alongside.
+
+- `semaprax.package-registry-document.v1`: `{"schema", "entries":[...]}`,
+  each entry carrying exactly `package`, `version`, `content_digest`,
+  `api_digest`, `license`, `provenance_digest` (string or `null`),
+  `signature` (`algorithm`/`identity`/`signature`), `status`
+  (`{"state":"active"}` or `{"state":"yanked","reason":...}`) and
+  `subject_bytes`. Closed keys throughout: an unknown field is refused, never
+  ignored. `render_registry_document` is the exact inverse, pinned by a
+  round-trip test.
+- `semaprax.registry-resolution-template.v1`: `{"schema", "requirements":
+  [{"package","range"}], "target", "allowed_capabilities", "yank_policy",
+  "max_bytes"}`. `yank_policy` uses the same three spellings the bound
+  envelope renders, so a lock and its template cannot disagree; `max_bytes`
+  is validated by `package_resolver_v2::ResolutionOptions::new` and keeps
+  that module's code.
+
+### What the CLI does *not* add
+
+No network path, no registry URL, no default registry, and no search path --
+a search path is the dependency-confusion vulnerability, so the format has
+none. No cache or mirror directory: a registry document *is* the mirror. No
+cryptography: `signature.identity` is reported as an unverified claim and
+issue #168 still owns the signing key. No publication authority, and no clean
+install-and-build of a reference application from locked packages.

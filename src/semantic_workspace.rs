@@ -708,14 +708,28 @@ fn validate_path_set_values(paths: &[String]) -> Result<(), Vec<Diagnostic>> {
     if paths.len() > MAX_MANAGED_FILES {
         return Err(storage_limit("managed_files", MAX_MANAGED_FILES));
     }
-    if paths
+    // Issue #272: these are two unrelated conditions and were reported with
+    // one message, so a caller could not tell an inadmissible path from a
+    // mis-ordered list, and had no idea WHICH path was at fault. Both now
+    // name the offending path. The code is unchanged.
+    if let Some(path) = paths
         .iter()
-        .any(|path| !workspace::evidence_path_is_valid(path))
-        || paths.windows(2).any(|pair| pair[0] >= pair[1])
+        .find(|path| !workspace::evidence_path_is_valid(path))
     {
-        return Err(grammar(
-            "Semantic Workspace path-set values are not canonical",
-        ));
+        return Err(grammar(format!(
+            "Semantic Workspace path `{path}` is outside the canonical managed path domain"
+        )));
+    }
+    if let Some(pair) = paths.windows(2).find(|pair| pair[0] >= pair[1]) {
+        let (first, second) = (&pair[0], &pair[1]);
+        let reason = if first == second {
+            "duplicated"
+        } else {
+            "out of order"
+        };
+        return Err(grammar(format!(
+            "Semantic Workspace paths must be strictly sorted and unique; `{first}` is {reason}"
+        )));
     }
     Ok(())
 }
@@ -1011,6 +1025,20 @@ fn is_source_graph_schema(value: &str) -> bool {
     )
 }
 
+/// Present one stable public message per schema, without discarding which
+/// condition actually failed.
+///
+/// The headline stays byte-identical per schema on purpose: it is a public
+/// string, and a caller matching on it must keep working. But the inner
+/// parsers distinguish at least six conditions -- malformed JSON, wrong
+/// schema, source count, a path outside the managed domain, an unsorted or
+/// duplicated path list, and a non-canonical round trip -- and flattening all
+/// of them into one string left a reader unable to tell which had fired.
+/// Issue #272: a project with bundled dependencies was refused here and the
+/// reason could not be determined from the diagnostic at all.
+///
+/// The specific reason now rides in `help`, which is additive: the code and
+/// the message are unchanged, so nothing pinned to either moves.
 fn normalize_parser_diagnostics(
     diagnostics: Vec<Diagnostic>,
     canonical_message: &'static str,
@@ -1021,7 +1049,8 @@ fn normalize_parser_diagnostics(
             if diagnostic.code == "SPX-G174"
                 && diagnostic.message != "Semantic Workspace requires 2..16 source files"
             {
-                Diagnostic::io("SPX-G174", canonical_message)
+                let reason = diagnostic.message;
+                Diagnostic::io("SPX-G174", canonical_message).with_help(reason)
             } else {
                 diagnostic
             }

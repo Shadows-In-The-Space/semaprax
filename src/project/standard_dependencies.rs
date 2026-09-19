@@ -286,6 +286,17 @@ pub(super) fn extend_sources(
     }
     for name in selected {
         let package = package(name).expect("selected bundled dependency exists");
+        // Idempotent on purpose. The `selected` set above dedupes within one
+        // call, but this function was pushing unconditionally, so a caller
+        // that extended the same source vector twice produced the same
+        // bundled path twice. The workspace path set refuses a duplicate, so
+        // the symptom surfaced far away as
+        // `SPX-G174: ... paths must be strictly sorted and unique` with no
+        // indication of which path or why (issue #272). Guarding here fixes
+        // it for every caller rather than for the one that was found.
+        if sources.iter().any(|source| source.path == package.path) {
+            continue;
+        }
         sources.push(SemanticWorkspaceSource {
             path: package.path.to_owned(),
             source: package.source.to_owned(),
@@ -328,6 +339,43 @@ mod tests {
     // `sources` entry, not a dependency) could check them. This regression
     // pins that they are now reachable the same way every other bundled
     // package is.
+    /// Issue #272: `extend_sources` deduplicates within one call but pushed
+    /// unconditionally, so extending the same vector twice produced the same
+    /// bundled path twice. The workspace path set then refused the project
+    /// with `SPX-G174`, naming neither the path nor the reason. This pins the
+    /// idempotency rather than the caller that happened to double-extend.
+    #[test]
+    fn extending_the_same_sources_twice_adds_each_bundled_package_once() {
+        let manifest = ProjectManifest::parse(
+            "schema = \"semaprax.manifest.v1\"\n\n[package]\nname = \"dup\"\nversion = \"0.1.0\"\nprofile = \"useful-data.v1\"\n\n[modules]\nentry = \"dup.app\"\nsources = [\"src/app.spx\", \"src/tests.spx\"]\ntests = [\"dup.tests\"]\n\n[exports]\nweb = [\"dup.app.ok\"]\n\n[dependencies]\nstd.auth = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\n",
+        )
+        .expect("the fixture manifest parses");
+
+        let mut once = Vec::new();
+        extend_sources(&manifest, &mut once).expect("first extension resolves");
+        let after_one = once.len();
+        assert!(
+            after_one >= 3,
+            "expected std.auth, std.jobs and the transitive std.bytes, got {after_one}"
+        );
+
+        extend_sources(&manifest, &mut once).expect("second extension resolves");
+        assert_eq!(
+            once.len(),
+            after_one,
+            "a second extension must add nothing: {:?}",
+            once.iter().map(|s| s.path.clone()).collect::<Vec<_>>()
+        );
+
+        let mut paths = once.iter().map(|s| s.path.clone()).collect::<Vec<_>>();
+        paths.sort();
+        let unique = paths
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        assert_eq!(unique, paths.len(), "duplicate bundled path in {paths:?}");
+    }
+
     #[test]
     fn issue_189_192_packages_are_bundled() {
         for name in ["std.auth", "std.db", "std.http", "std.jobs"] {

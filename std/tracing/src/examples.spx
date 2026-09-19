@@ -1,0 +1,57 @@
+module std.tracing.examples;
+use function @id("std.tracing.traceparent_shape_admitted") from std.tracing as traceparent_shape_admitted;
+use function @id("std.tracing.traceparent_sampled") from std.tracing as traceparent_sampled;
+use function @id("std.tracing.tracestate_member_count_admitted") from std.tracing as tracestate_member_count_admitted;
+use function @id("std.tracing.tracestate_combined_length_admitted") from std.tracing as tracestate_combined_length_admitted;
+
+// A synthetic inbound-header walk: the checks a receiver would run against an
+// incoming `traceparent` before it ever creates a child span. Nothing here
+// performs I/O.
+@id("std.tracing.examples.main")
+fn main() -> i64
+{
+    // `00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-aaaaaaaaaaaaaaaa-01`: a
+    // well-formed, sampled traceparent.
+    let mut header = bytes_zeroed(55usize);
+    let mut index = 0usize;
+    while index < 55usize {
+        header = bytes_set(header, index, 97u8);
+        index = index + 1usize;
+        index < 55usize
+    }
+    header = bytes_set(header, 0usize, 48u8);
+    header = bytes_set(header, 1usize, 48u8);
+    header = bytes_set(header, 2usize, 45u8);
+    header = bytes_set(header, 35usize, 45u8);
+    header = bytes_set(header, 52usize, 45u8);
+    header = bytes_set(header, 53usize, 48u8);
+    header = bytes_set(header, 54usize, 49u8);
+    let well_formed = traceparent_shape_admitted(bytes_as_slice(header));
+    let sampled = traceparent_sampled(bytes_as_slice(header));
+    // Clearing the sampled bit alone must not disturb the shape judgement.
+    header = bytes_set(header, 54usize, 48u8);
+    let unsampled = !traceparent_sampled(bytes_as_slice(header));
+    let still_well_formed = traceparent_shape_admitted(bytes_as_slice(header));
+    // Version `ff` is refused outright, independent of everything else being
+    // well-formed.
+    header = bytes_set(header, 0usize, 102u8);
+    header = bytes_set(header, 1usize, 102u8);
+    let version_ff_refused = !traceparent_shape_admitted(bytes_as_slice(header));
+    // Restoring the version and zeroing the trace-id reproduces the spec's
+    // highest-value refusal: an all-zero trace-id means no trace context at
+    // all, not a real one.
+    header = bytes_set(header, 0usize, 48u8);
+    header = bytes_set(header, 1usize, 48u8);
+    let mut trace_id_index = 3usize;
+    while trace_id_index < 35usize {
+        header = bytes_set(header, trace_id_index, 48u8);
+        trace_id_index = trace_id_index + 1usize;
+        trace_id_index < 35usize
+    }
+    let all_zero_trace_id_refused = !traceparent_shape_admitted(bytes_as_slice(header));
+    let tracestate_member_count_ok = tracestate_member_count_admitted(32usize);
+    let tracestate_member_count_refused = !tracestate_member_count_admitted(33usize);
+    let tracestate_length_ok = tracestate_combined_length_admitted(512usize);
+    let tracestate_length_refused = !tracestate_combined_length_admitted(513usize);
+    if well_formed && sampled && unsampled && still_well_formed && version_ff_refused && all_zero_trace_id_refused && tracestate_member_count_ok && tracestate_member_count_refused && tracestate_length_ok && tracestate_length_refused { 0 } else { 1 }
+}

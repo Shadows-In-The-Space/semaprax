@@ -4747,6 +4747,204 @@ fn saturating_add_milliseconds(left: i64, right: i64) -> i64
     ensures result >= left && result >= right
 ```
 
+## `std.tracing`
+
+Package `std/tracing`, tier `portable`, status partial. Required project profile: `useful-data.v2`. Dependency: `std.tracing = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
+
+### `std.tracing.byte_is_lower_hex`
+
+Issue #193's tracing slice: the pure, effect-free decision layer that
+admits or refuses a W3C Trace Context `traceparent` header BEFORE a caller
+creates, propagates, or exports a span. It performs no I/O, declares no
+`permit`, calls no `uses`-gated operation, and never accepts, retains, or
+returns anything beyond the header bytes it is asked to judge.
+
+What this package is NOT: it does not generate a trace-id or a parent-id,
+does not create, start, or export a span, and does not implement a
+sampler. It does not parse a `tracestate` header's list-members from raw
+bytes either — splitting on `,` and `=` while tolerating the header's
+optional whitespace needs a general delimiter scanner this package does
+not implement, so only the two aggregate `tracestate` budgets a caller can
+compute without parsing (list-member count, combined header length) are
+exposed as predicates.
+
+It also does not implement the spec's forward-compatibility allowance for
+a higher-version header carrying additional bytes past position 55 (W3C
+Trace Context section 3.2.4): `traceparent_shape_admitted` refuses any header
+whose length is not exactly 55, including a spec-valid longer header from
+a future version that a tolerant receiver would still accept. Handling
+that needs slicing an unbounded trailing region, which this predicate
+layer intentionally avoids; a caller that must support future versions
+should truncate to the first 55 bytes itself before calling this
+predicate. Nothing here is evidence that trace generation, propagation,
+sampling, or export exists.
+
+Every function is scalar-in/scalar-out or `borrow Slice<u8>`-in/
+scalar-out, so a header's bytes are never copied into or out of this
+package.
+---------------------------------------------------------------------
+Hex alphabet
+---------------------------------------------------------------------
+`traceparent` is lowercase-hex-only (W3C Trace Context Section 3.2.2): an
+uppercase hex digit is a well-formed hex character in general but is not
+an admitted `traceparent` byte, so it is refused here rather than
+silently downcased.
+
+```semaprax
+fn byte_is_lower_hex(candidate: u8) -> bool
+```
+
+### `std.tracing.byte_at_equals`
+
+---------------------------------------------------------------------
+Field scanning primitives
+---------------------------------------------------------------------
+Every field-level predicate below is built from these three scans over a
+caller-supplied byte range, rather than each reimplementing its own bounds
+check. A range that runs past the end of the header is refused rather than
+read.
+
+```semaprax
+fn byte_at_equals(header: borrow Slice<u8>, index: usize, expected: u8) -> bool
+```
+
+### `std.tracing.byte_at`
+
+```semaprax
+fn byte_at(header: borrow Slice<u8>, index: usize) -> u8
+```
+
+### `std.tracing.hex_run_admitted`
+
+```semaprax
+fn hex_run_admitted(header: borrow Slice<u8>, start: usize, length: usize) -> bool
+```
+
+### `std.tracing.field_is_all_zero`
+
+The property that makes an all-numeric-zero trace-id or parent-id
+detectable: every byte in the range is the ASCII digit `0`, which is
+exactly the hex spelling of sixteen zero bytes.
+
+```semaprax
+fn field_is_all_zero(header: borrow Slice<u8>, start: usize, length: usize) -> bool
+```
+
+### `std.tracing.traceparent_len`
+
+---------------------------------------------------------------------
+Wire shape
+---------------------------------------------------------------------
+`version "-" trace-id "-" parent-id "-" trace-flags` is exactly 2 + 1 + 32
++ 1 + 16 + 1 + 2 = 55 bytes wide for the one version this package admits.
+
+```semaprax
+fn traceparent_len() -> usize
+```
+
+### `std.tracing.dash_positions_admitted`
+
+```semaprax
+fn dash_positions_admitted(header: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.version_is_forbidden`
+
+---------------------------------------------------------------------
+Version
+---------------------------------------------------------------------
+Version `ff` is forbidden outright (W3C Trace Context Section 3.2.2.1); every
+other two-digit lowercase-hex version, including ones not yet defined,
+shares this package's fixed 55-byte shape.
+
+```semaprax
+fn version_is_forbidden(header: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.version_field_admitted`
+
+```semaprax
+fn version_field_admitted(header: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.trace_id_admitted`
+
+---------------------------------------------------------------------
+Trace-id and parent-id: the all-zero refusal
+---------------------------------------------------------------------
+The highest-value predicate in this package. Both an all-zero trace-id and
+an all-zero parent-id are declared invalid by the spec (Section 3.2.2.3,
+Section 3.2.2.4): a receiver that only checks hex shape accepts a header meant to
+carry no trace context at all as if it were a real one.
+
+```semaprax
+fn trace_id_admitted(header: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.parent_id_admitted`
+
+```semaprax
+fn parent_id_admitted(header: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.trace_flags_field_admitted`
+
+---------------------------------------------------------------------
+Trace-flags and the sampled bit
+---------------------------------------------------------------------
+Every byte value is an admitted `trace-flags` field; the seven reserved
+bits carry no admission rule of their own (Section 3.2.2.5), only a hex-shape one.
+
+```semaprax
+fn trace_flags_field_admitted(header: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.traceparent_sampled`
+
+The sampled flag is the least-significant bit of the decoded flags byte
+(Section 3.2.2.5.1), which is entirely determined by the final hex digit: the
+first digit's contribution is always a multiple of 16, hence always even.
+
+```semaprax
+fn traceparent_sampled(header: borrow Slice<u8>) -> bool
+    requires traceparent_shape_admitted(header)
+```
+
+### `std.tracing.traceparent_shape_admitted`
+
+---------------------------------------------------------------------
+Composed traceparent admission
+---------------------------------------------------------------------
+The judgement a receiver actually calls. Every clause is one of the named
+predicates above, so a refusal is always attributable to a named rule
+rather than to this function as a whole.
+
+```semaprax
+fn traceparent_shape_admitted(header: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.tracestate_member_count_admitted`
+
+---------------------------------------------------------------------
+Tracestate budgets
+---------------------------------------------------------------------
+The two `tracestate` (Section 3.3) limits a caller can enforce without parsing a
+single list-member out of the header: at most 32 members (Section 3.3.1.1), and a
+combined header this package treats as bounded at the 512-character
+threshold the spec recommends a vendor propagate (Section 3.3.1.5) — an admission
+ceiling rather than a truncation rule, so an oversized header is refused
+outright instead of silently shortened.
+
+```semaprax
+fn tracestate_member_count_admitted(count: usize) -> bool
+```
+
+### `std.tracing.tracestate_combined_length_admitted`
+
+```semaprax
+fn tracestate_combined_length_admitted(length: usize) -> bool
+```
+
 ## `std.url`
 
 Package `std/url`, tier `portable`, status partial. Required project profile: `scalar`. Dependency: `std.url = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.

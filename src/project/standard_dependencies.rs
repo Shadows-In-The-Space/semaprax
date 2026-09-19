@@ -239,6 +239,12 @@ const PACKAGES: &[BundledPackage] = &[
         dependencies: &[],
     },
     BundledPackage {
+        name: "std.tracing",
+        path: "dependencies/std.tracing/0.1.0/policy.spx",
+        source: include_str!("../../std/tracing/src/policy.spx"),
+        dependencies: &["std.encoding"],
+    },
+    BundledPackage {
         name: "std.url",
         path: "dependencies/std.url/0.1.0/url.spx",
         source: include_str!("../../std/url/src/url.spx"),

@@ -44,6 +44,7 @@
     {"directory": "test-bytes", "module": "std.test.bytes", "tier": "test", "targets": ["interpreter", "native-c11", "core-wasm"], "status": "partial"},
     {"directory": "text", "module": "std.text", "tier": "core", "targets": ["interpreter", "native-c11", "core-wasm"], "status": "partial"},
     {"directory": "time", "module": "std.time", "tier": "core", "targets": ["interpreter", "native-c11", "core-wasm"], "status": "partial"},
+    {"directory": "tracing", "module": "std.tracing", "tier": "portable", "targets": ["interpreter", "native-c11", "core-wasm"], "status": "partial"},
     {"directory": "url", "module": "std.url", "tier": "portable", "targets": ["interpreter", "native-c11", "core-wasm"], "status": "partial"},
     {"directory": "webhook", "module": "std.webhook", "tier": "portable", "targets": ["interpreter", "native-c11", "core-wasm"], "status": "partial"}
   ]

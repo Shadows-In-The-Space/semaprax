@@ -78,6 +78,7 @@ fn declared_owners() -> Vec<(&'static str, Owner)> {
         ("std.test.bytes", Test("testing::test_bytes_package_and_bundled_consumer_execute_across_engines")),
         ("std.text", Test("collections_mem_text_backend_audit::collections_mem_text_execute_on_all_three_backends")),
         ("std.time", Test("core_num_backend_audit::core_num_random_time_test_execute_on_all_three_backends")),
+        ("std.tracing", Test("tracing_backend_audit::tracing_executes_on_all_three_backends")),
         ("std.url", Test("data_encoding_backend_audit::data_encoding_url_path_execute_on_all_three_backends")),
         ("std.webhook", Test("webhook_backend_audit::webhook_executes_on_all_three_backends")),
     ]

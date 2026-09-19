@@ -1,0 +1,262 @@
+module std.tracing.tests;
+use function @id("std.tracing.byte_is_lower_hex") from std.tracing as byte_is_lower_hex;
+use function @id("std.tracing.byte_at_equals") from std.tracing as byte_at_equals;
+use function @id("std.tracing.byte_at") from std.tracing as byte_at;
+use function @id("std.tracing.hex_run_admitted") from std.tracing as hex_run_admitted;
+use function @id("std.tracing.field_is_all_zero") from std.tracing as field_is_all_zero;
+use function @id("std.tracing.traceparent_len") from std.tracing as traceparent_len;
+use function @id("std.tracing.dash_positions_admitted") from std.tracing as dash_positions_admitted;
+use function @id("std.tracing.version_is_forbidden") from std.tracing as version_is_forbidden;
+use function @id("std.tracing.version_field_admitted") from std.tracing as version_field_admitted;
+use function @id("std.tracing.trace_id_admitted") from std.tracing as trace_id_admitted;
+use function @id("std.tracing.parent_id_admitted") from std.tracing as parent_id_admitted;
+use function @id("std.tracing.trace_flags_field_admitted") from std.tracing as trace_flags_field_admitted;
+use function @id("std.tracing.traceparent_sampled") from std.tracing as traceparent_sampled;
+use function @id("std.tracing.traceparent_shape_admitted") from std.tracing as traceparent_shape_admitted;
+use function @id("std.tracing.tracestate_member_count_admitted") from std.tracing as tracestate_member_count_admitted;
+use function @id("std.tracing.tracestate_combined_length_admitted") from std.tracing as tracestate_combined_length_admitted;
+
+// The hex alphabet boundary bytes, asserted at the predicate the scanners
+// are built from rather than only through them. An uppercase hex digit is a
+// well-formed hex character in general but is refused here.
+@id("std.tracing.tests.hex_alphabet_boundaries")
+fn hex_alphabet_boundaries() -> bool
+{
+    byte_is_lower_hex(48u8) && byte_is_lower_hex(57u8) && byte_is_lower_hex(97u8) && byte_is_lower_hex(102u8) && !byte_is_lower_hex(47u8) && !byte_is_lower_hex(58u8) && !byte_is_lower_hex(96u8) && !byte_is_lower_hex(103u8) && !byte_is_lower_hex(65u8)
+}
+
+@id("std.tracing.tests.traceparent_len_is_fifty_five")
+fn traceparent_len_is_fifty_five() -> bool
+{
+    traceparent_len() == 55usize
+}
+
+// `byte_at_equals` and `byte_at` agree in range and each degrade safely
+// out of range, rather than one of them reading past the buffer.
+@id("std.tracing.tests.byte_accessors_agree")
+fn byte_accessors_agree() -> bool
+{
+    let mut probe = bytes_zeroed(2usize);
+    probe = bytes_set(probe, 0usize, 45u8);
+    probe = bytes_set(probe, 1usize, 97u8);
+    let in_range_match = byte_at_equals(bytes_as_slice(probe), 0usize, 45u8);
+    let in_range_mismatch = !byte_at_equals(bytes_as_slice(probe), 0usize, 97u8);
+    let out_of_range_refused = !byte_at_equals(bytes_as_slice(probe), 5usize, 45u8);
+    let value_read = byte_at(bytes_as_slice(probe), 1usize) == 97u8;
+    let out_of_range_defaults_zero = byte_at(bytes_as_slice(probe), 5usize) == 0u8;
+    in_range_match && in_range_mismatch && out_of_range_refused && value_read && out_of_range_defaults_zero
+}
+
+// A run that fits and is all lowercase hex is admitted; a run whose length
+// runs past the buffer is refused without reading anything, and a single
+// uppercase byte anywhere in the run refuses the whole run.
+@id("std.tracing.tests.hex_run_boundaries")
+fn hex_run_boundaries() -> bool
+{
+    let mut run = bytes_zeroed(3usize);
+    run = bytes_set(run, 0usize, 97u8);
+    run = bytes_set(run, 1usize, 98u8);
+    run = bytes_set(run, 2usize, 99u8);
+    let admitted = hex_run_admitted(bytes_as_slice(run), 0usize, 3usize);
+    let past_end_refused = !hex_run_admitted(bytes_as_slice(run), 1usize, 5usize);
+    run = bytes_set(run, 2usize, 71u8);
+    let uppercase_refused = !hex_run_admitted(bytes_as_slice(run), 0usize, 3usize);
+    admitted && past_end_refused && uppercase_refused
+}
+
+// All-zero is detected exactly, one non-zero byte anywhere refuses it, and a
+// range past the buffer end is refused rather than read.
+@id("std.tracing.tests.all_zero_field_boundaries")
+fn all_zero_field_boundaries() -> bool
+{
+    let mut field = bytes_zeroed(4usize);
+    field = bytes_set(field, 0usize, 48u8);
+    field = bytes_set(field, 1usize, 48u8);
+    field = bytes_set(field, 2usize, 48u8);
+    field = bytes_set(field, 3usize, 48u8);
+    let all_zero = field_is_all_zero(bytes_as_slice(field), 0usize, 4usize);
+    let past_end_refused = !field_is_all_zero(bytes_as_slice(field), 1usize, 10usize);
+    field = bytes_set(field, 3usize, 49u8);
+    let one_nonzero_refused = !field_is_all_zero(bytes_as_slice(field), 0usize, 4usize);
+    all_zero && past_end_refused && one_nonzero_refused
+}
+
+// `00` is admitted, `ff` is forbidden outright, and a non-hex version byte
+// is refused by the hex-run clause before the forbidden-value clause even
+// matters.
+@id("std.tracing.tests.version_field_cases")
+fn version_field_cases() -> bool
+{
+    let mut version = bytes_zeroed(2usize);
+    version = bytes_set(version, 0usize, 48u8);
+    version = bytes_set(version, 1usize, 48u8);
+    let zero_admitted = version_field_admitted(bytes_as_slice(version)) && !version_is_forbidden(bytes_as_slice(version));
+    version = bytes_set(version, 0usize, 102u8);
+    version = bytes_set(version, 1usize, 102u8);
+    let ff_forbidden = version_is_forbidden(bytes_as_slice(version)) && !version_field_admitted(bytes_as_slice(version));
+    version = bytes_set(version, 0usize, 48u8);
+    version = bytes_set(version, 1usize, 71u8);
+    let non_hex_refused = !version_field_admitted(bytes_as_slice(version));
+    zero_admitted && ff_forbidden && non_hex_refused
+}
+
+// All three dash positions are checked individually: a header wrong at only
+// the middle dash is refused exactly as one wrong at either outer dash.
+@id("std.tracing.tests.dash_positions_cases")
+fn dash_positions_cases() -> bool
+{
+    let mut header = bytes_zeroed(55usize);
+    let mut index = 0usize;
+    while index < 55usize {
+        header = bytes_set(header, index, 97u8);
+        index = index + 1usize;
+        index < 55usize
+    }
+    header = bytes_set(header, 2usize, 45u8);
+    header = bytes_set(header, 35usize, 45u8);
+    header = bytes_set(header, 52usize, 45u8);
+    let admitted = dash_positions_admitted(bytes_as_slice(header));
+    header = bytes_set(header, 35usize, 97u8);
+    let middle_dash_wrong_refused = !dash_positions_admitted(bytes_as_slice(header));
+    admitted && middle_dash_wrong_refused
+}
+
+// The all-zero trace-id refusal, asserted on its own: a trace-id of all `a`
+// is admitted, and the same field zeroed out is refused even though it is
+// still perfectly well-formed hex.
+@id("std.tracing.tests.trace_id_all_zero_refused")
+fn trace_id_all_zero_refused() -> bool
+{
+    let mut field = bytes_zeroed(35usize);
+    let mut index = 0usize;
+    while index < 35usize {
+        field = bytes_set(field, index, 97u8);
+        index = index + 1usize;
+        index < 35usize
+    }
+    let nonzero_admitted = trace_id_admitted(bytes_as_slice(field));
+    let mut zero_index = 3usize;
+    while zero_index < 35usize {
+        field = bytes_set(field, zero_index, 48u8);
+        zero_index = zero_index + 1usize;
+        zero_index < 35usize
+    }
+    let all_zero_refused = !trace_id_admitted(bytes_as_slice(field));
+    nonzero_admitted && all_zero_refused
+}
+
+// The all-zero parent-id refusal, split from the trace-id case above rather
+// than sharing its buffer: this package's conformance module is declared
+// arena-bounded, so at most one `Bytes` value may be live at a time.
+@id("std.tracing.tests.parent_id_all_zero_refused")
+fn parent_id_all_zero_refused() -> bool
+{
+    let mut field = bytes_zeroed(52usize);
+    let mut index = 0usize;
+    while index < 52usize {
+        field = bytes_set(field, index, 98u8);
+        index = index + 1usize;
+        index < 52usize
+    }
+    let nonzero_admitted = parent_id_admitted(bytes_as_slice(field));
+    let mut zero_index = 36usize;
+    while zero_index < 52usize {
+        field = bytes_set(field, zero_index, 48u8);
+        zero_index = zero_index + 1usize;
+        zero_index < 52usize
+    }
+    let all_zero_refused = !parent_id_admitted(bytes_as_slice(field));
+    nonzero_admitted && all_zero_refused
+}
+
+// Every trace-flags byte value is admitted so long as it is two lowercase
+// hex digits; only the hex shape is checked here, never a value range.
+@id("std.tracing.tests.trace_flags_field_cases")
+fn trace_flags_field_cases() -> bool
+{
+    let mut field = bytes_zeroed(55usize);
+    field = bytes_set(field, 53usize, 102u8);
+    field = bytes_set(field, 54usize, 102u8);
+    let admitted = trace_flags_field_admitted(bytes_as_slice(field));
+    field = bytes_set(field, 54usize, 71u8);
+    let non_hex_refused = !trace_flags_field_admitted(bytes_as_slice(field));
+    admitted && non_hex_refused
+}
+
+// The sampled bit is read from the final hex digit alone: flipping only the
+// last character between `1` and `0` flips the result, with the rest of the
+// header untouched and still well-formed.
+@id("std.tracing.tests.sampled_bit_extraction")
+fn sampled_bit_extraction() -> bool
+{
+    let mut header = bytes_zeroed(55usize);
+    let mut index = 0usize;
+    while index < 55usize {
+        header = bytes_set(header, index, 97u8);
+        index = index + 1usize;
+        index < 55usize
+    }
+    header = bytes_set(header, 0usize, 48u8);
+    header = bytes_set(header, 1usize, 48u8);
+    header = bytes_set(header, 2usize, 45u8);
+    header = bytes_set(header, 35usize, 45u8);
+    header = bytes_set(header, 52usize, 45u8);
+    header = bytes_set(header, 53usize, 48u8);
+    header = bytes_set(header, 54usize, 49u8);
+    let shape_holds = traceparent_shape_admitted(bytes_as_slice(header));
+    let sampled = traceparent_sampled(bytes_as_slice(header));
+    header = bytes_set(header, 54usize, 48u8);
+    let unsampled = !traceparent_sampled(bytes_as_slice(header));
+    let shape_still_holds = traceparent_shape_admitted(bytes_as_slice(header));
+    shape_holds && sampled && unsampled && shape_still_holds
+}
+
+// A header of any other length is refused outright, independent of every
+// other field being well-formed. Split into its own function so this probe
+// never coexists with another package-conformance buffer.
+@id("std.tracing.tests.wrong_length_refused")
+fn wrong_length_refused() -> bool
+{
+    let mut short = bytes_zeroed(54usize);
+    let mut index = 0usize;
+    while index < 54usize {
+        short = bytes_set(short, index, 97u8);
+        index = index + 1usize;
+        index < 54usize
+    }
+    !traceparent_shape_admitted(bytes_as_slice(short))
+}
+
+// The `tracestate` budgets are inclusive at their ceiling and refuse one
+// unit past it.
+@id("std.tracing.tests.tracestate_budget_boundaries")
+fn tracestate_budget_boundaries() -> bool
+{
+    let member_zero_ok = tracestate_member_count_admitted(0usize);
+    let member_ceiling_ok = tracestate_member_count_admitted(32usize);
+    let member_over_refused = !tracestate_member_count_admitted(33usize);
+    let length_zero_ok = tracestate_combined_length_admitted(0usize);
+    let length_ceiling_ok = tracestate_combined_length_admitted(512usize);
+    let length_over_refused = !tracestate_combined_length_admitted(513usize);
+    member_zero_ok && member_ceiling_ok && member_over_refused && length_zero_ok && length_ceiling_ok && length_over_refused
+}
+
+@id("std.tracing.tests.main")
+fn main() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if hex_alphabet_boundaries() { 0 } else { 1 };
+    failed = failed + if traceparent_len_is_fifty_five() { 0 } else { 2 };
+    failed = failed + if byte_accessors_agree() { 0 } else { 4 };
+    failed = failed + if hex_run_boundaries() { 0 } else { 8 };
+    failed = failed + if all_zero_field_boundaries() { 0 } else { 16 };
+    failed = failed + if version_field_cases() { 0 } else { 32 };
+    failed = failed + if dash_positions_cases() { 0 } else { 64 };
+    failed = failed + if trace_id_all_zero_refused() { 0 } else { 128 };
+    failed = failed + if parent_id_all_zero_refused() { 0 } else { 256 };
+    failed = failed + if trace_flags_field_cases() { 0 } else { 512 };
+    failed = failed + if sampled_bit_extraction() { 0 } else { 1024 };
+    failed = failed + if wrong_length_refused() { 0 } else { 2048 };
+    failed = failed + if tracestate_budget_boundaries() { 0 } else { 4096 };
+    failed
+}

@@ -1,0 +1,17 @@
+schema = "semaprax.manifest.v1"
+
+[package]
+name = "std-tracing"
+version = "0.1.0"
+profile = "useful-data.v2"
+
+[modules]
+entry = "std.tracing.examples"
+sources = ["src/examples.spx", "src/policy.spx", "src/tests.spx"]
+tests = ["std.tracing.tests"]
+
+[exports]
+web = []
+
+[dependencies]
+std.encoding = "^0.1.0"

@@ -105,7 +105,7 @@ fn expected_role(tool: DoctorOfflineTool) -> u8 {
 }
 
 #[test]
-fn common_and_deny_inventories_are_exact_and_role_extensions_start_empty() {
+fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
     let expected_x86 = BASELINE
         .iter()
         .map(|(_, x86, _)| *x86)
@@ -143,13 +143,58 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_start_empty() {
             281, 424, 425, 426, 427, 434, 435, 437, 438,
         ]
     );
-    assert!(X86_SAFE_ADDITIONS.is_empty());
+    // The one admitted role-scoped extension, pinned by exact inventory and by
+    // the named operation each number is. `accept4` and `perf_event_open` are
+    // the two entries that are not obviously event-loop primitives; they are
+    // pinned here so a reader sees them rather than finding them inside a
+    // bare number list. See the x86-only note on `X86_EVENT_LOOP`.
+    assert_eq!(
+        X86_SAFE_ADDITIONS,
+        &[232, 233, 281, 283, 284, 286, 287, 288, 290, 291, 292, 293, 294, 295, 296, 297, 298,]
+    );
+    for (name, number) in EVENT_LOOP_NAMES {
+        assert!(
+            X86_SAFE_ADDITIONS.contains(number),
+            "{name} left the admitted event-loop inventory"
+        );
+    }
+    assert_eq!(EVENT_LOOP_NAMES.len(), X86_SAFE_ADDITIONS.len());
+    // AArch64 gets nothing: `ARM_COMMON` has no equivalents and none is invented.
     assert!(ARM_SAFE_ADDITIONS.is_empty());
     for policy in ROLE_POLICIES {
-        assert!(policy.x86_additional.is_empty());
-        assert!(policy.arm_additional.is_empty());
+        // clang is a static binary that needs no event loop, so its row stays
+        // empty. This is the assertion that keeps the extension from silently
+        // becoming a union again.
+        let expected: &[u32] = match policy.tool {
+            DoctorOfflineTool::Clang => &[],
+            DoctorOfflineTool::Node | DoctorOfflineTool::Rustc => X86_SAFE_ADDITIONS,
+        };
+        assert_eq!(policy.x86_additional, expected, "{:?}", policy.tool);
+        assert!(policy.arm_additional.is_empty(), "{:?}", policy.tool);
     }
 }
+
+/// The admitted role-scoped x86 inventory, by name, so the numbers above can
+/// be read and reviewed rather than trusted.
+const EVENT_LOOP_NAMES: &[(&str, u32)] = &[
+    ("epoll_wait", 232),
+    ("epoll_ctl", 233),
+    ("epoll_pwait", 281),
+    ("timerfd_create", 283),
+    ("eventfd", 284),
+    ("timerfd_settime", 286),
+    ("timerfd_gettime", 287),
+    ("accept4", 288),
+    ("eventfd2", 290),
+    ("epoll_create1", 291),
+    ("dup3", 292),
+    ("pipe2", 293),
+    ("inotify_init1", 294),
+    ("preadv", 295),
+    ("pwritev", 296),
+    ("rt_tgsigqueueinfo", 297),
+    ("perf_event_open", 298),
+];
 
 #[test]
 fn role_table_is_closed_single_role_only_and_rejects_union_widening() {

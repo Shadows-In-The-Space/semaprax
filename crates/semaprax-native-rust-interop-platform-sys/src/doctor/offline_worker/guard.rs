@@ -23,11 +23,20 @@ const CAPACITY: usize = 256;
 const X86_COMMON: &[u32] = &[
     0, 19, 17, 3, 5, 262, 332, 8, 79, 89, 267, 21, 269, 439, 12, 9, 10, 11, 25, 28, 13, 14, 15,
     131, 228, 96, 35, 230, 39, 110, 186, 102, 107, 104, 108, 63, 24, 204, 202, 218, 273, 334, 158,
-    318, 60, 231, 59, // base
-    // Real Node 22 and Rust 1.88 need event loop primitives even for --version
-    // (libuv, tokio). The previous inventory denied them with EPERM, causing
-    // the real-distribution gate to fail while synthetic static fixtures and
-    // the static clang passed.
+    318, 60, 231, 59,
+];
+
+// Real Node 22 and Rust 1.88 reach libuv/tokio event-loop primitives even for
+// `--version`; the original inventory denied them with EPERM, which is why the
+// real-distribution gate failed while the static clang and the synthetic
+// fixtures passed. These are x86-only: `ARM_COMMON` has no AArch64 equivalents
+// and this change does not invent any.
+//
+// They are admitted through the role table rather than added to `X86_COMMON`,
+// because that union is shared with clang -- a static binary that needs none
+// of them -- and the role table's own contract says "later compatibility work
+// must add a syscall to exactly one reviewed row rather than widen a union".
+const X86_EVENT_LOOP: &[u32] = &[
     232, 233, 281, 283, 284, 286, 287, 288, 290, 291, 292, 293, 294, 295, 296, 297, 298,
 ];
 const ARM_COMMON: &[u32] = &[
@@ -37,15 +46,18 @@ const ARM_COMMON: &[u32] = &[
 ];
 
 // A role-local syscall must first be admitted here for its exact native ABI.
-// This independent gate is intentionally empty: populating a RolePolicy row
-// alone must never be enough to widen the executable filter.
-const X86_SAFE_ADDITIONS: &[u32] = &[];
+// This is an independent second key: populating a RolePolicy row alone must
+// never be enough to widen the executable filter, and `validate_policy`
+// refuses a role addition that is not also listed here. AArch64 admits
+// nothing, so its gate stays closed.
+const X86_SAFE_ADDITIONS: &[u32] = X86_EVENT_LOOP;
 const ARM_SAFE_ADDITIONS: &[u32] = &[];
 
 // A role row is the only route from an authenticated worker tool identity to
-// syscall policy. Keep the rows explicit even while the initial --version
-// profiles share the same proven syscall inventory: later compatibility work
-// must add a syscall to exactly one reviewed row rather than widen a union.
+// syscall policy. Keep the rows explicit: compatibility work must add a
+// syscall to exactly the reviewed rows that need it rather than widen a
+// union. clang is a static binary with no event loop, so its row stays empty
+// while Node and rustc carry `X86_EVENT_LOOP`.
 #[derive(Clone, Copy)]
 struct RolePolicy {
     role: u8,
@@ -64,13 +76,13 @@ const ROLE_POLICIES: [RolePolicy; 3] = [
     RolePolicy {
         role: 2,
         tool: DoctorOfflineTool::Node,
-        x86_additional: &[],
+        x86_additional: X86_EVENT_LOOP,
         arm_additional: &[],
     },
     RolePolicy {
         role: 4,
         tool: DoctorOfflineTool::Rustc,
-        x86_additional: &[],
+        x86_additional: X86_EVENT_LOOP,
         arm_additional: &[],
     },
 ];

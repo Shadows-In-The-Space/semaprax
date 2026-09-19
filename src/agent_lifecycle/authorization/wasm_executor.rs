@@ -194,17 +194,40 @@ fn run_direct(
     let mut call_args = Vec::with_capacity(arguments.len());
     for (parameter, argument) in entry.params.iter().zip(arguments) {
         let literal = match (&parameter.ty, argument) {
-            (ResolvedType::I64, RetainedValue::I64(value)) => value.to_string(),
+            // The generated bindings' own argument snapshot requires a
+            // genuine JS `bigint` for an `i64` parameter, never a `Number` --
+            // an un-suffixed literal like `10` is rejected with "argument 0
+            // must be signed i64 bigint" before the call is even attempted.
+            // Unlike the injected-driver path's SPX literal (which has no
+            // negative-integer-literal syntax and must synthesize `0 - N`),
+            // this is a JS expression: `-9223372036854775808n` is a plain
+            // valid BigInt literal, so `i64::MIN` needs no special case here.
+            (ResolvedType::I64, RetainedValue::I64(value)) => format!("{value}n"),
             (ResolvedType::Bool, RetainedValue::Bool(value)) => value.to_string(),
             _ => return Err(invariant("wasm_executor.argument.shape")),
         };
         call_args.push(literal);
     }
-    let call = format!(
-        "api.functions['{}']({})",
-        entry.id.as_str(),
-        call_args.join(", ")
-    );
+    // The decode below always parses plain decimal text as `i64`. A raw
+    // `i64` result is a `bigint`, which THROWS if concatenated with the
+    // trailing `'\n'` string (`out.map(value => value + '\n')` in
+    // `drive_node`) rather than coercing like a `Number` or `boolean` would;
+    // a raw `bool` result prints as `"true"`/`"false"`, which the same `i64`
+    // parse cannot read either. Both are normalized to decimal text here
+    // instead of guessing a decode per return type below.
+    let call = match entry.return_type {
+        ResolvedType::I64 => format!(
+            "String(api.functions['{}']({}))",
+            entry.id.as_str(),
+            call_args.join(", ")
+        ),
+        ResolvedType::Bool => format!(
+            "(api.functions['{}']({}) ? 1 : 0)",
+            entry.id.as_str(),
+            call_args.join(", ")
+        ),
+        _ => return Err(invariant("wasm_executor.decode.result_shape")),
+    };
     let stdout = build_and_drive(program, &[entry.id.as_str().to_owned()], &[call])?;
     let value: i64 = stdout
         .trim()

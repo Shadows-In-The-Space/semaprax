@@ -459,6 +459,7 @@ Audience: all documentation readers.
 
 - [ADR 0001: Graph-first repository navigation](decisions/0001-graphify.md)
 - [ADR 0002: Managed workspace generations](decisions/0002-managed-workspace-generations.md)
+- [ADR 0003: Maintained generated-package support for owned-data-api.v1 (Rust)](decisions/0003-maintained-generated-package-support.md)
 - [Draft string and object-oriented types RFC](RFC-STRING-OO.md)
 - [RFC 0004: Native call settlement](RFC-0004-NATIVE-CALL-SETTLEMENT.md)
 - [RFC 0005: Compute Kernel Profile v1](RFC-0005-COMPUTE-KERNEL-PROFILE.md)

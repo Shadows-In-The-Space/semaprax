@@ -51,12 +51,26 @@
 //! Scope boundary: [`engine::run`] executes Sequential, Conditional, bounded
 //! Loop, ModelCall, HumanGate, and bounded Parallel/Join steps
 //! deterministically, each dispatched through the sealed
-//! [`engine::StepExecutor`] seam. The declared step kinds
-//! (Agent/Tool/Job/SemanticChange/TestBuild/PublicationRequest) remain
-//! schema only — admitted into the graph and refused at execution with
-//! [`engine::ExecError::NotExecutable`], never silently no-opped, and have
-//! no retry or compensation wiring since they have no executor to retry or
-//! compensate in the first place. For `ModelCall`, retry ceiling
+//! [`engine::StepExecutor`] seam. Five of the six declared step kinds —
+//! AgentCall, ToolCall, Job, TestBuild, and PublicationRequest — get a
+//! decide-and-record executor ([`declared_dispatch`]): given an explicit,
+//! caller-supplied [`declared_dispatch::DispatchRequest`] and
+//! [`declared_dispatch::DispatchPolicy`] in [`engine::ExecInputs`], the
+//! engine decides whether the named target is admissible and records that
+//! decision, but never itself invokes an agent, runs a tool, spawns a job,
+//! runs a build, or publishes anything — the physical action, if any, is
+//! entirely the caller's own, separately authorized business. Reaching one
+//! of these five without a declared request and policy is a defined
+//! refusal ([`engine::ExecError::DispatchNotDeclared`]), never a silent
+//! pass. The sixth, SemanticChange, is refused unconditionally
+//! ([`engine::ExecError::SemanticChangeNotGranted`]): the graph schema
+//! carries no target payload for it to decide about, and issue #274 found
+//! the one operation this repository has actually built a preview for,
+//! `rename_display_name`, unsatisfiable for any project with commented
+//! bundled dependencies — see `engine::SemanticChangeExecutor`'s doc
+//! comment. None of the six has retry or compensation wiring, since a
+//! decide-only or unconditionally-refusing executor commits no effect that
+//! would ever need compensating. For `ModelCall`, retry ceiling
 //! enforcement and compensation-commit ordering are now threaded through
 //! [`engine::run`] itself (see [`engine::ExecInputs::attempt_script`],
 //! [`engine::ExecInputs::retry_budgets`], [`engine::ExecInputs::compensable`]);
@@ -72,6 +86,7 @@
 pub mod checkpoint;
 pub mod compensation;
 pub mod compensation_order;
+pub mod declared_dispatch;
 pub mod engine;
 pub mod graph;
 pub mod human_gate;

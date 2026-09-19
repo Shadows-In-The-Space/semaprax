@@ -5,13 +5,17 @@
 //! [`StepKind::Loop`] (bounded), [`StepKind::ModelCall`] (routed through
 //! [`super::model_routing`], with an opt-in retry loop against a scripted
 //! attempt sequence — see [`ExecInputs::attempt_script`] below),
-//! [`StepKind::HumanGate`] (authorized through [`super::human_gate`]) and
+//! [`StepKind::HumanGate`] (authorized through [`super::human_gate`]),
 //! [`StepKind::Parallel`]/[`StepKind::Join`] (as a deterministic sequential
-//! simulation — see [`StepExecutor`] below). Reaching [`StepKind::Declared`]
-//! is a defined refusal (`ExecError::NotExecutable`), never a silent no-op
-//! or a made-up default transition — this repository's completion matrix
-//! must not claim that kind is implemented on the strength of this function
-//! alone.
+//! simulation — see [`StepExecutor`] below), and the five
+//! decide-and-record [`super::graph::DeclaredStepKind`] kinds — AgentCall,
+//! ToolCall, Job, TestBuild, PublicationRequest — routed through
+//! [`DispatchExecutor`] and [`super::declared_dispatch`]. The sixth,
+//! `SemanticChange`, is a defined refusal
+//! (`ExecError::SemanticChangeNotGranted`, see [`SemanticChangeExecutor`]),
+//! never a silent no-op or a made-up default transition — this
+//! repository's completion matrix must not claim more than each executor
+//! actually does.
 //!
 //! `run` always validates the graph first, so a caller can never execute
 //! an unchecked structure. Given the same graph, the same [`ExecInputs`],
@@ -58,7 +62,12 @@
 //! stages.
 
 use super::compensation_order::CommitLog;
-use super::graph::{StepDef, StepId, StepKind, WorkflowGraph, ELSE_PORT, THEN_PORT};
+use super::declared_dispatch::{
+    decide as decide_dispatch, DispatchError, DispatchPolicy, DispatchRequest,
+};
+use super::graph::{
+    DeclaredStepKind, StepDef, StepId, StepKind, WorkflowGraph, ELSE_PORT, THEN_PORT,
+};
 use super::human_gate::{GateDecision, GateError, GateLedger, GateSpec};
 use super::model_routing::{route, DeploymentPolicy, RoutingError};
 use super::retry::{
@@ -139,6 +148,32 @@ pub enum ExecError {
     /// documentation for how a caller recovers the order to compensate them
     /// in.
     StepFailed(StepId, AttemptOutcomeClass),
+    /// A `Declared` step (`AgentCall`, `ToolCall`, `Job`, `TestBuild`, or
+    /// `PublicationRequest`) was reached but the caller supplied neither a
+    /// [`DispatchRequest`] nor a [`DispatchPolicy`] for it in
+    /// [`ExecInputs::declared_dispatch_requests`] /
+    /// [`ExecInputs::declared_dispatch_policies`]. Mirrors
+    /// `GateNotDecided`: reaching a schema-only step never authorizes it on
+    /// its own.
+    DispatchNotDeclared(StepId),
+    /// A `Declared` step's [`DispatchRequest::target`] is not a member of
+    /// the [`DispatchPolicy`] the caller declared for it. [`DispatchExecutor`]
+    /// only ever decides admissibility — it never invokes, spawns, or
+    /// publishes anything itself, admitted or not; see
+    /// [`super::declared_dispatch`].
+    DispatchRefused(StepId, DispatchError),
+    /// A `SemanticChange` step was reached. Refused unconditionally: the
+    /// graph schema carries no target payload for this engine to decide
+    /// about (see [`super::graph::DeclaredStepKind`]), and this engine has
+    /// no filesystem or project authority to rewrite authoritative source
+    /// even if it did. Issue #274 additionally found that the one operation
+    /// this repository has actually built a checked preview for,
+    /// `rename_display_name` in `src/project/semantic_transaction.rs`, is
+    /// unsatisfiable for any project with commented bundled dependencies —
+    /// so a decide-and-record executor here would not have a generally
+    /// trustworthy decision to make even given real project state. See
+    /// [`SemanticChangeExecutor`].
+    SemanticChangeNotGranted(StepId),
 }
 
 /// Caller-supplied values the engine has no way to compute itself: the
@@ -172,6 +207,17 @@ pub struct ExecInputs {
     /// behalf — compensability is a property the workflow's deployment
     /// declares, not one the engine infers from a step kind.
     pub compensable: BTreeSet<StepId>,
+    /// Per-step declared dispatch request for one of the five
+    /// decide-and-record `Declared` kinds (`AgentCall`, `ToolCall`, `Job`,
+    /// `TestBuild`, `PublicationRequest`). Required (together with a
+    /// matching entry in `declared_dispatch_policies`) only for a step of
+    /// one of those kinds; absent for every other step kind and for
+    /// `SemanticChange`, which this engine always refuses regardless of
+    /// what a caller supplies here.
+    pub declared_dispatch_requests: BTreeMap<StepId, DispatchRequest>,
+    /// Per-step declared allow-list a `declared_dispatch_requests` entry is
+    /// checked against. See [`super::declared_dispatch::DispatchPolicy`].
+    pub declared_dispatch_policies: BTreeMap<StepId, DispatchPolicy>,
     /// Identifies this execution for [`super::compensation::CompensationKey`]
     /// / [`super::compensation_order::CommitRecord`] purposes. A caller
     /// resuming the *same* logical run (so that its compensations must not
@@ -183,6 +229,13 @@ pub struct ExecInputs {
 pub struct ExecTrace {
     pub visited: Vec<StepId>,
     pub routed_models: Vec<(StepId, String)>,
+    /// Every `Declared`-kind admission [`DispatchExecutor`] decided during
+    /// this run, in execution order: the step that decided it, which
+    /// [`DeclaredStepKind`] it was, and the admitted target name. Recording
+    /// an entry here is the full extent of what this engine does for that
+    /// step — it never itself invokes, spawns, or publishes the named
+    /// target.
+    pub admitted_dispatches: Vec<(StepId, DeclaredStepKind, String)>,
 }
 
 /// Runs `graph` to completion (or a defined refusal) against `inputs`,
@@ -219,6 +272,7 @@ pub fn run(
     let mut current = graph.entry;
     let mut visited = Vec::new();
     let mut routed_models = Vec::new();
+    let mut admitted_dispatches = Vec::new();
     let mut loop_counts: BTreeMap<StepId, u32> = BTreeMap::new();
 
     loop {
@@ -232,6 +286,7 @@ pub fn run(
             &mut visited,
         )?;
         routed_models.extend(effect.routed_models);
+        admitted_dispatches.extend(effect.admitted_dispatches);
         match effect.next {
             Some(next) => current = next,
             None => break,
@@ -241,6 +296,7 @@ pub fn run(
     Ok(ExecTrace {
         visited,
         routed_models,
+        admitted_dispatches,
     })
 }
 
@@ -313,6 +369,7 @@ pub(crate) struct StepContext<'a> {
 pub(crate) struct StepEffect {
     next: Option<StepId>,
     routed_models: Vec<(StepId, String)>,
+    admitted_dispatches: Vec<(StepId, DeclaredStepKind, String)>,
 }
 
 impl StepEffect {
@@ -320,6 +377,7 @@ impl StepEffect {
         StepEffect {
             next: Some(next),
             routed_models: Vec::new(),
+            admitted_dispatches: Vec::new(),
         }
     }
 
@@ -327,6 +385,7 @@ impl StepEffect {
         StepEffect {
             next: None,
             routed_models: Vec::new(),
+            admitted_dispatches: Vec::new(),
         }
     }
 }
@@ -335,14 +394,16 @@ impl StepEffect {
 ///
 /// Every step kind [`run`] actually executes has exactly one implementor
 /// here: [`SequentialExecutor`], [`ConditionalExecutor`], [`LoopExecutor`],
-/// [`ModelCallExecutor`], [`HumanGateExecutor`], [`ParallelExecutor`], and
-/// [`TerminalExecutor`]. [`NotExecutableExecutor`] backs every kind this
-/// slice deliberately refuses to run ([`StepKind::Join`] reached any way
-/// other than immediately after [`ParallelExecutor`] finishes its branches,
-/// and [`StepKind::Declared`]). `StepExecutor` is `pub(crate)` so its
-/// contract is visible within the crate, but it cannot be *implemented*
-/// from outside this file: the supertrait bound requires `sealed::Sealed`,
-/// and `sealed` is private to this module.
+/// [`ModelCallExecutor`], [`HumanGateExecutor`], [`ParallelExecutor`],
+/// [`TerminalExecutor`], and (one instance per kind) [`DispatchExecutor`]
+/// for the five decide-and-record `Declared` kinds. [`SemanticChangeExecutor`]
+/// unconditionally refuses the sixth, `SemanticChange`.
+/// [`NotExecutableExecutor`] backs the one remaining refusal this slice
+/// has: [`StepKind::Join`] reached any way other than immediately after
+/// [`ParallelExecutor`] finishes its branches. `StepExecutor` is
+/// `pub(crate)` so its contract is visible within the crate, but it cannot
+/// be *implemented* from outside this file: the supertrait bound requires
+/// `sealed::Sealed`, and `sealed` is private to this module.
 pub(crate) trait StepExecutor: sealed::Sealed {
     fn execute(
         &self,
@@ -534,9 +595,8 @@ impl StepExecutor for TerminalExecutor {
     }
 }
 
-/// Refuses unconditionally. Backs [`StepKind::Declared`] (schema-only in
-/// this slice) and any reach of [`StepKind::Join`] that did not go through
-/// [`ParallelExecutor`] finishing its branches.
+/// Refuses unconditionally. Backs any reach of [`StepKind::Join`] that did
+/// not go through [`ParallelExecutor`] finishing its branches.
 struct NotExecutableExecutor;
 impl sealed::Sealed for NotExecutableExecutor {}
 impl StepExecutor for NotExecutableExecutor {
@@ -546,6 +606,86 @@ impl StepExecutor for NotExecutableExecutor {
         ctx: &mut StepContext<'_>,
     ) -> Result<StepEffect, ExecError> {
         Err(ExecError::NotExecutable(ctx.current))
+    }
+}
+
+/// Decides admissibility for one of the five decide-and-record `Declared`
+/// kinds ([`DeclaredStepKind::AgentCall`], `ToolCall`, `Job`, `TestBuild`,
+/// `PublicationRequest`). One instance per kind (its field), constructed
+/// fresh in [`dispatch`]; the field only ever labels which kind is being
+/// recorded and plays no part in the decision itself.
+///
+/// Given a caller-declared [`DispatchRequest`] and [`DispatchPolicy`] for
+/// the current step (both required — see [`ExecError::DispatchNotDeclared`]),
+/// this executor calls [`super::declared_dispatch::decide`], the one pure
+/// admission-decision function, and on success records `(step, kind,
+/// admitted target)` into the effect's `admitted_dispatches`. It never
+/// invokes an agent, runs a tool, spawns a job, runs a build, or publishes
+/// anything: recording the decision is the entire effect. A caller with its
+/// own, separately granted authority is free to act on an admitted
+/// dispatch; this executor only ever decided whether the request was in
+/// scope.
+struct DispatchExecutor(DeclaredStepKind);
+impl sealed::Sealed for DispatchExecutor {}
+impl StepExecutor for DispatchExecutor {
+    fn execute(
+        &self,
+        _authority: StepAuthority,
+        ctx: &mut StepContext<'_>,
+    ) -> Result<StepEffect, ExecError> {
+        let (request, policy) = match (
+            ctx.inputs.declared_dispatch_requests.get(&ctx.current),
+            ctx.inputs.declared_dispatch_policies.get(&ctx.current),
+        ) {
+            (Some(request), Some(policy)) => (request, policy),
+            _ => return Err(ExecError::DispatchNotDeclared(ctx.current)),
+        };
+        let target = decide_dispatch(policy, request)
+            .map_err(|e| ExecError::DispatchRefused(ctx.current, e))?;
+        let mut effect = StepEffect::advance(only_out_edge(ctx.graph, ctx.current));
+        effect
+            .admitted_dispatches
+            .push((ctx.current, self.0, target));
+        Ok(effect)
+    }
+}
+
+/// Refuses `SemanticChange` unconditionally, with
+/// [`ExecError::SemanticChangeNotGranted`] naming why.
+///
+/// `src/project/semantic_transaction.rs` has real machinery for staging a
+/// checked source rewrite (`SemanticTransaction::rename_display_name` and
+/// its siblings) — but two things rule out wiring this schema-only step to
+/// it the way the other five `Declared` kinds are wired to
+/// [`DispatchExecutor`]:
+///
+/// 1. [`StepKind::Declared`] carries no target payload at all (see
+///    [`DeclaredStepKind`]), so there is no project, workspace revision,
+///    rename target, or expected-old-value for this engine to decide
+///    anything about even in principle. Threading real project state in
+///    would mean this graph-and-step-id-only engine reaching outside
+///    itself for a live project handle — exactly the ambient authority
+///    this repository's capabilities invariant rules out for
+///    compiler-adjacent code.
+/// 2. Issue #274 found that the one operation this repository has actually
+///    built a checked preview for, `rename_display_name`, is unsatisfiable
+///    for any project with commented bundled dependencies. Even a caller
+///    that did thread real project state through would not get a
+///    generally trustworthy decision out of it today.
+///
+/// Refusing here, with a distinct error naming the reason, is preferred
+/// over inventing a decision this engine cannot make honestly, or wiring an
+/// executor whose only real-world path is one issue #274 already proved
+/// cannot succeed.
+struct SemanticChangeExecutor;
+impl sealed::Sealed for SemanticChangeExecutor {}
+impl StepExecutor for SemanticChangeExecutor {
+    fn execute(
+        &self,
+        _authority: StepAuthority,
+        ctx: &mut StepContext<'_>,
+    ) -> Result<StepEffect, ExecError> {
+        Err(ExecError::SemanticChangeNotGranted(ctx.current))
     }
 }
 
@@ -590,6 +730,7 @@ impl StepExecutor for ParallelExecutor {
             .collect();
 
         let mut routed_models = Vec::new();
+        let mut admitted_dispatches = Vec::new();
         for branch in branches {
             let effect = dispatch_step(
                 branch,
@@ -601,6 +742,7 @@ impl StepExecutor for ParallelExecutor {
                 ctx.visited,
             )?;
             routed_models.extend(effect.routed_models);
+            admitted_dispatches.extend(effect.admitted_dispatches);
             if effect.next != Some(join_id) {
                 return Err(ExecError::BranchDidNotReachJoin(current, branch));
             }
@@ -611,6 +753,7 @@ impl StepExecutor for ParallelExecutor {
         Ok(StepEffect {
             next: Some(after_join),
             routed_models,
+            admitted_dispatches,
         })
     }
 }
@@ -645,7 +788,21 @@ fn dispatch(kind: &StepKind) -> &'static dyn StepExecutor {
         StepKind::HumanGate => &HumanGateExecutor,
         StepKind::Terminal => &TerminalExecutor,
         StepKind::Parallel => &ParallelExecutor,
-        StepKind::Join { .. } | StepKind::Declared(_) => &NotExecutableExecutor,
+        StepKind::Join { .. } => &NotExecutableExecutor,
+        StepKind::Declared(DeclaredStepKind::AgentCall) => {
+            &DispatchExecutor(DeclaredStepKind::AgentCall)
+        }
+        StepKind::Declared(DeclaredStepKind::ToolCall) => {
+            &DispatchExecutor(DeclaredStepKind::ToolCall)
+        }
+        StepKind::Declared(DeclaredStepKind::Job) => &DispatchExecutor(DeclaredStepKind::Job),
+        StepKind::Declared(DeclaredStepKind::TestBuild) => {
+            &DispatchExecutor(DeclaredStepKind::TestBuild)
+        }
+        StepKind::Declared(DeclaredStepKind::PublicationRequest) => {
+            &DispatchExecutor(DeclaredStepKind::PublicationRequest)
+        }
+        StepKind::Declared(DeclaredStepKind::SemanticChange) => &SemanticChangeExecutor,
     }
 }
 
@@ -682,3 +839,6 @@ fn dispatch_step(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod declared_dispatch_tests;

@@ -661,7 +661,11 @@ fn human_gate_step_is_never_silently_executed() {
 }
 
 #[test]
-fn declared_step_kind_is_never_silently_executed() {
+fn declared_dispatch_step_kind_is_never_silently_executed() {
+    // `Job` is one of the five decide-and-record `Declared` kinds (see
+    // `declared_dispatch_tests` for its actual admission behavior); reached
+    // with no declared request/policy at all, it must still refuse rather
+    // than silently advance.
     let declared = StepDef {
         id: StepId(0),
         kind: StepKind::Declared(DeclaredStepKind::Job),
@@ -680,7 +684,33 @@ fn declared_step_kind_is_never_silently_executed() {
             &mut GateLedger::new(),
             &mut CommitLog::new()
         ),
-        Err(ExecError::NotExecutable(StepId(0)))
+        Err(ExecError::DispatchNotDeclared(StepId(0)))
+    );
+}
+
+#[test]
+fn declared_semantic_change_step_kind_is_never_silently_executed() {
+    // `SemanticChange` is the one `Declared` kind this engine refuses
+    // unconditionally, even with nothing else declared for it.
+    let declared = StepDef {
+        id: StepId(0),
+        kind: StepKind::Declared(DeclaredStepKind::SemanticChange),
+        in_ports: vec![unit_port(0)],
+        out_ports: vec![unit_port(0)],
+    };
+    let graph = WorkflowGraph {
+        steps: vec![declared, terminal(1)],
+        edges: vec![edge(0, 0, 1)],
+        entry: StepId(0),
+    };
+    assert_eq!(
+        run(
+            &graph,
+            &ExecInputs::default(),
+            &mut GateLedger::new(),
+            &mut CommitLog::new()
+        ),
+        Err(ExecError::SemanticChangeNotGranted(StepId(0)))
     );
 }
 

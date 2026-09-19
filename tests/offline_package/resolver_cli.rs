@@ -242,6 +242,19 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
     const RELEASE_VERIFY_LINE: &str = "semaprax release verify <release-dir>\n";
     assert_eq!(current.matches(RELEASE_VERIFY_LINE).count(), 1);
     current = current.replacen(RELEASE_VERIFY_LINE, "", 1);
+    // `semaprax audit inspect|verify|diff` was added by #209 (commit 918fe5b0),
+    // also after these witnesses were pinned, and its three usages are the
+    // 272 bytes that otherwise push the length pin below off by exactly that
+    // much. Normalize them away for the same reason as the release verb above.
+    const AUDIT_LINES: [&str; 3] = [
+        "semaprax audit inspect <capsule.json>\n",
+        "semaprax audit verify <capsule.json> <objects-dir> [--require-role <role>]... [--revoke <identity>]... [--trust-log <log-id>]... [--min-checkpoint-size <n>] [--now <unix-seconds>]\n",
+        "semaprax audit diff <capsule-a.json> <capsule-b.json>\n",
+    ];
+    for line in AUDIT_LINES {
+        assert_eq!(current.matches(line).count(), 1);
+        current = current.replacen(line, "", 1);
+    }
     const CACHE_OPEN_LINES: [&str; 2] = [
         "semaprax semantic-cache-cold-open <manifest>\n",
         "semaprax semantic-cache-warm-open <manifest> <store-root> <entry-digest>\n",

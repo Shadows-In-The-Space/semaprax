@@ -112,10 +112,17 @@ than by advancing the row.
   locally (native: real `clang -O0`/`-O2` builds linked against
   `native::template::render_reference_provider`'s C output; Wasm: a real
   `WebAssembly.Instance` call). Re-run directly for this update: `cargo test
-  --locked --test public_generic_native_adapter_v1` (16 passed, 3 ignored —
-  the ignored cases are `#[ignore]`d sanitizer variants requiring a
-  provisioned toolchain, not failures), `cargo test --locked --test
-  public_generic_wasm_adapter_v1` (15 passed, 0 failed), and
+  --locked --test public_generic_native_adapter_v1` (**55 cases**: 52 runnable
+  plus 3 `#[ignore]`d sanitizer variants requiring a provisioned toolchain; the
+  figure recorded here was 16 and had not been updated as the harness grew).
+  Two runnable cases additionally hard-fail rather than skip without their
+  toolchain — `generated_rust_calling_consumer_builds_and_runs_on_the_declared_msrv_toolchain`
+  needs rustup with 1.88, which the CI job installs explicitly, so on an
+  unprovisioned host it reports one failure by design rather than a false pass.
+  `cargo test --locked --test public_generic_wasm_adapter_v1` (**25 cases**:
+  24 runnable plus 1 ignored; previously recorded as 15), whose
+  `typescript_settlement` case likewise requires Node 22 and refuses with
+  `required-node-22` rather than skipping. And
   `sh tests/public_generic_native_adapter_v1/run_all_four_callers.sh` (issue
   #172's aggregate entry point; exit 0, printing one `AGGREGATE ... PASS`
   line per caller and the same honesty line reproduced above). A shared

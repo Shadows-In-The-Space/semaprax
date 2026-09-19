@@ -44,9 +44,13 @@ satisfied here. In particular:
   way throughout. Nothing here upgrades any of that to hosted, current-head,
   physical-device, or production support.
 - **No test was executed to produce this document.** Every test count cited
-  below (a "13 passed, 0 failed", a "16 passed, 3 ignored", etc.) is a
-  verbatim quotation from an existing, already-committed document, cited by
-  file and line, never a number this session measured.
+  below was a verbatim quotation from an existing, already-committed document,
+  cited by file and line, never a number this document's author measured.
+  Two of those quoted figures were later found stale by measuring them:
+  `public_generic_native_adapter_v1` is **55 cases**, not 16, and
+  `public_generic_wasm_adapter_v1` is **25**, not 15. The source document has
+  been corrected; the lesson is that quoting a figure faithfully does not make
+  the figure true.
 
 ## 1. Section A — Contract inventory
 
@@ -394,10 +398,13 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
    document was checked against."
 2. **No local focused-or-full gate was executed in this session.** Hard
    constraint #3 for this task forbade running `cargo`. Every test count
-   above (`docs/PUBLIC-GENERIC-CONSUMERS-V1.md`'s "13 passed, 0 failed", "16
-   passed, 3 ignored", "15 passed, 0 failed", the CI step commands, etc.) is a
-   **quotation of an existing document**, not a result this session measured.
-   #164's Section C ("Local evidence") is therefore not produced here at all.
+   above was a **quotation of an existing document**, not a result this
+   session measured. #164's Section C ("Local evidence") is therefore not
+   produced here at all. Note that two quoted figures were subsequently
+   measured and found stale — the native adapter harness is 55 cases and the
+   Wasm adapter harness 25, against the quoted 16 and 15 — so a quotation in
+   this document establishes only what another document claimed, never what a
+   run would report.
 3. **No hosted CI run was triggered or newly inspected.** The only hosted run
    in evidence anywhere in this repository's docs remains run `34594793245`
    at commit `2ef043ba1b989f49b256e456f71fb6e89068bf33`, and it predates every

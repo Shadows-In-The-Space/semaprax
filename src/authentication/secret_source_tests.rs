@@ -295,3 +295,88 @@ fn main() -> i64
          property needs restating, not the test relaxing."
     );
 }
+
+/// Issue #191's fourth non-leak property — "not serialisable into a
+/// trace/audit record" — for the half of it that is a real channel rather
+/// than an argument.
+///
+/// A runtime fault is the one place a held scalar could plausibly escape: a
+/// diagnostic that quoted the operand it faulted on would publish the secret
+/// into every log, journal and evidence capsule downstream, and nothing about
+/// the type system would stop it. That is a genuine leak surface, unlike the
+/// graph projection above, so it is worth executing rather than arguing.
+///
+/// This holds a distinctive value in a `Secret<i64>`, divides by a zero taken
+/// from a second secret so the fault is unavoidable and not constant-folded,
+/// and asserts the value appears nowhere in the failure — not in any
+/// diagnostic message, help text, or code.
+#[test]
+fn a_runtime_fault_on_a_held_secret_never_quotes_the_held_value() {
+    const HELD: &str = "987654321";
+    let module = format!(
+        r#"module test.secret_trace;
+
+@id("test.secret")
+record Secret<T> {{
+    @id("test.secret.value")
+    value: T,
+}}
+
+@id("test.secret.fault")
+fn fault() -> i64
+{{
+    let held = Secret<i64> {{ value: {HELD} }};
+    let divisor = Secret<i64> {{ value: 0 }};
+    held.value / divisor.value
+}}
+
+@id("app.main")
+fn main() -> i64
+{{
+    0
+}}
+"#
+    );
+    let program = crate::hir::resolve(
+        &crate::parse(&module, std::path::Path::new("secret-trace.spx"))
+            .expect("the fault fixture parses"),
+    )
+    .expect("the fault fixture resolves");
+    let prepared =
+        crate::interpreter::retained_call::prepare_retained_call(&program, "test.secret.fault")
+            .expect("the faulting entry prepares");
+
+    let outcome =
+        crate::interpreter::retained_call::evaluate_retained_call(&program, &prepared, &[], 10_000);
+
+    // Whether the division surfaces as an Err or as a failing outcome, the
+    // held value must not be anywhere in what the caller can observe.
+    let observed = match outcome {
+        Ok(evaluation) => format!("{evaluation:?}"),
+        Err(diagnostics) => diagnostics
+            .iter()
+            .map(|diagnostic| {
+                format!(
+                    "{} {} {}",
+                    diagnostic.code,
+                    diagnostic.message,
+                    diagnostic.help.clone().unwrap_or_default()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" | "),
+    };
+    // Non-vacuity, and the thing my first attempt at a Secret leak test
+    // lacked: assert the fault ACTUALLY happened. Without this the whole test
+    // passes the moment the division stops faulting for any reason, while
+    // appearing to prove something about leaks.
+    assert!(
+        observed.contains("semaprax.arithmetic.v1"),
+        "the fixture must really fault on division by zero, or the leak \
+         assertion below proves nothing: {observed}"
+    );
+    assert!(
+        !observed.contains(HELD),
+        "a runtime fault published the held secret value: {observed}"
+    );
+}

@@ -1017,6 +1017,310 @@ fn wasm_executor_refuses_source_that_is_not_the_program_it_was_handed() {
     assert_eq!(error[0].code, "SPX-G570");
 }
 
+// ---------------------------------------------------------------------------
+// #143 residual gap: recovery replay, cross-instance/stale carriers, deep
+// runtime-contract settlement, and the structural zero-effect guarantee.
+// ---------------------------------------------------------------------------
+
+/// #143 residual (recovery), and exactly as much of it as this backend can
+/// honestly carry: replaying the same dispatch settles to the identical
+/// decoded value on a FRESH module instance and a FRESH `node` process --
+/// which is what every Wasm dispatch already is, since this executor builds
+/// both from scratch on every call and carries nothing across.
+///
+/// What this does NOT prove, stated here so the name cannot be read as more
+/// than it is: it is not evidence that recovery "reuses trusted observations
+/// without repeating external work", because a Wasm stage body has no
+/// effects to repeat and no observations to reuse. cf8ab366 scoped this
+/// backend to stage bodies alone; budgets, cancellation, effect and model
+/// dispatch still run on the interpreter, where
+/// `native_executor_replays_the_same_dispatch_without_repeating_any_effect`
+/// is the test that does carry that claim. Closing #143's fifth case for
+/// Wasm needs the executor wired into the effect machinery first.
+#[test]
+fn wasm_executor_replays_one_dispatch_identically_on_a_fresh_module_and_process() {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping Wasm executor replay: clang or node unavailable");
+        return;
+    }
+    let compiled = lifecycle();
+    let source = MODULE;
+    let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
+
+    let first = authorization::dispatch_on(
+        authorization::StageBackend::Wasm { source },
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("the first Wasm dispatch evaluates initialize");
+    let second = authorization::dispatch_on(
+        authorization::StageBackend::Wasm { source },
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect(
+        "a replayed Wasm dispatch, on a fresh module instance and a fresh node process, \
+         evaluates initialize identically",
+    );
+    assert_eq!(first.outcome, second.outcome);
+}
+
+/// #143 residual: a carrier (a `RetainedValue` fed in as a stage argument)
+/// is refused rather than silently accepted when it does not genuinely
+/// belong to the dispatch it is handed to -- whether because its own field
+/// shape has drifted from what the target stage declares (a STALE carrier)
+/// or because it was minted by an entirely different compiled instance that
+/// merely happens to reuse the same persistent `@id` for its record (a
+/// CROSS-INSTANCE carrier). Neither leaks a build artifact nor corrupts the
+/// executor for the next, legitimate dispatch.
+#[test]
+fn wasm_executor_refuses_stale_and_cross_instance_carriers_without_leakage_or_corruption() {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping stale/cross-instance carrier refusal: clang or node unavailable");
+        return;
+    }
+    let compiled = lifecycle();
+    let source = MODULE;
+    let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
+    let RetainedCallOutcome::Returned(state) = authorization::dispatch_on(
+        authorization::StageBackend::Interpreter,
+        &compiled.program,
+        compiled.binding.initialize.prepared(),
+        std::slice::from_ref(&task),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("initialize evaluates")
+    .outcome
+    else {
+        panic!("initialize did not return a state");
+    };
+
+    // --- Stale carrier: the same declared record identity, but one field's
+    // RUNTIME value has drifted to a type `State.epoch` no longer declares
+    // (`i64`) -- exactly what a carrier minted by an incompatible, stale
+    // version of the same identity would look like.
+    let RetainedValue::Record(good) = state.clone() else {
+        panic!("initialize did not return a record");
+    };
+    let epoch = hir::DeclarationId::new("fixture.agent.type.state.epoch".to_owned());
+    let mut stale_fields = good.fields.clone();
+    let epoch_position = stale_fields
+        .iter()
+        .position(|field| field.field == epoch)
+        .expect("the state carrier carries an epoch field");
+    stale_fields[epoch_position].value = RetainedValue::Bytes(vec![1, 2, 3]);
+    let stale_state = RetainedValue::Record(RetainedRecord {
+        record: good.record.clone(),
+        fields: stale_fields,
+    });
+    let stale_error = authorization::dispatch_on(
+        authorization::StageBackend::Wasm { source },
+        &compiled.program,
+        compiled.binding.observe.prepared(),
+        std::slice::from_ref(&stale_state),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err("a carrier whose field runtime type has drifted must be refused, not coerced");
+    assert_eq!(stale_error[0].code, "SPX-G570");
+
+    // --- Cross-instance carrier: a value minted by THIS program's own
+    // `initialize`, handed to a dispatch bound to a wholly different,
+    // independently resolved program whose `State` record reuses the same
+    // `@id` but declares an extra field.
+    const OTHER_INSTANCE: &str = r#"module test.wasm_executor_cross_instance;
+
+@id("fixture.agent.type.state")
+record State {
+    @id("fixture.agent.type.state.objective") objective: Bytes,
+    @id("fixture.agent.type.state.budget") budget: i64,
+    @id("fixture.agent.type.state.epoch") epoch: i64,
+    @id("test.wasm_executor_cross_instance.state.extra") extra: i64,
+}
+
+@id("fixture.agent.type.observation")
+record Observation {
+    @id("fixture.agent.type.observation.tag") tag: Bytes,
+}
+
+@id("fixture.agent.fn.observe")
+fn observe(state: borrow State) -> Observation
+{
+    let tag = [79u8, 66u8];
+    Observation { tag: bytes_copy(array_as_slice(tag)) }
+}
+
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let other_program = hir::resolve(
+        &crate::parse(
+            OTHER_INSTANCE,
+            std::path::Path::new("wasm-executor-cross-instance.spx"),
+        )
+        .expect("the other-instance fixture parses"),
+    )
+    .expect("the other-instance fixture resolves");
+    let other_observe = crate::interpreter::retained_call::prepare_retained_call(
+        &other_program,
+        "fixture.agent.fn.observe",
+    )
+    .expect("the other instance's observe prepares");
+    let cross_instance_error = authorization::dispatch_on(
+        authorization::StageBackend::Wasm {
+            source: OTHER_INSTANCE,
+        },
+        &other_program,
+        &other_observe,
+        std::slice::from_ref(&state),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err(
+        "a carrier minted by a different compiled instance must be refused even though its \
+         @id collides",
+    );
+    assert_eq!(cross_instance_error[0].code, "SPX-G570");
+
+    // No leakage or corruption: the SAME original, legitimate carrier still
+    // dispatches correctly against its own instance after both refusals.
+    let healthy = authorization::dispatch_on(
+        authorization::StageBackend::Wasm { source },
+        &compiled.program,
+        compiled.binding.observe.prepared(),
+        std::slice::from_ref(&state),
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("the legitimate carrier still dispatches correctly after the refusals");
+    let RetainedCallOutcome::Returned(_) = healthy.outcome else {
+        panic!("observe did not return an observation after recovery");
+    };
+}
+
+/// #143 residual: a genuine RUNTIME contract failure inside the executed
+/// Wasm module (checked division by zero, matching the interpreter's own
+/// `Fault::DivisionByZero`) settles cleanly. The executor's own temporary
+/// build/probe directory is removed even though the failure surfaces deep
+/// inside the spawned `node` process, and the failure does not corrupt
+/// accounting for a later, unrelated, healthy dispatch.
+#[test]
+fn wasm_executor_settles_its_probe_directory_and_stays_healthy_after_a_deep_runtime_contract_failure(
+) {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping deep stage failure settlement: clang or node unavailable");
+        return;
+    }
+    const DIVISION_MODULE: &str = r#"module test.wasm_executor_division;
+
+@id("test.wasm_executor_division.fn.divide")
+fn divide(a: i64, b: i64) -> i64 { a / b }
+
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let program = hir::resolve(
+        &crate::parse(
+            DIVISION_MODULE,
+            std::path::Path::new("wasm-executor-division.spx"),
+        )
+        .expect("the division fixture parses"),
+    )
+    .expect("the division fixture resolves");
+    let divide = crate::interpreter::retained_call::prepare_retained_call(
+        &program,
+        "test.wasm_executor_division.fn.divide",
+    )
+    .expect("divide prepares");
+
+    let prefix = format!("semaprax-wasm-stage-executor-{}-", std::process::id());
+    let leaked = |prefix: &str| {
+        std::fs::read_dir(std::env::temp_dir())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+            .count()
+    };
+    let before = leaked(&prefix);
+
+    let error = authorization::dispatch_on(
+        authorization::StageBackend::Wasm {
+            source: DIVISION_MODULE,
+        },
+        &program,
+        &divide,
+        &[RetainedValue::I64(10), RetainedValue::I64(0)],
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect_err(
+        "division by zero inside the executed module must fail, not silently trap into a \
+         wrong value",
+    );
+    assert_eq!(error.len(), 1);
+    assert_eq!(error[0].code, "SPX-G570");
+    assert_eq!(
+        leaked(&prefix),
+        before,
+        "the probe directory for the failed dispatch must not be left behind"
+    );
+
+    // Accounting is retained, not corrupted: a healthy dispatch afterward
+    // still evaluates correctly.
+    let healthy = authorization::dispatch_on(
+        authorization::StageBackend::Wasm {
+            source: DIVISION_MODULE,
+        },
+        &program,
+        &divide,
+        &[RetainedValue::I64(10), RetainedValue::I64(2)],
+        DEFAULT_STAGE_STEPS,
+    )
+    .expect("a healthy dispatch after a failure still evaluates correctly");
+    assert_eq!(
+        healthy.outcome,
+        RetainedCallOutcome::Returned(RetainedValue::I64(5))
+    );
+}
+
+/// #143 residual: "denied authorization yields zero effects even if
+/// JavaScript/provider data requests one" is not just a runtime outcome to
+/// re-derive per call -- it is a STRUCTURAL fact about this file, exactly
+/// like `the_authorization_value_has_exactly_one_mint_site_in_the_crate`
+/// establishes for the crate as a whole. The Wasm executor runs a real
+/// Node/V8 process and hands it whatever the compiled module computes, but
+/// it never constructs an `Authorized`, never names `AuthorizedRequest`, and
+/// never calls the crate's single `mint`. So no matter what the executed
+/// JavaScript or the module's own computation "requests", there is no route
+/// from this file to an effect: only `run_authorize_stage`'s own mint --
+/// unreachable from here -- can ever produce an `Authorized`.
+#[test]
+fn the_wasm_executor_has_no_route_to_mint_an_authorization_or_reach_undocumented_process_authority()
+{
+    let wasm_executor = include_str!("authorization/wasm_executor.rs");
+    assert_eq!(wasm_executor.matches("Authorized {").count(), 0);
+    assert_eq!(wasm_executor.matches("AuthorizedRequest").count(), 0);
+    assert_eq!(wasm_executor.matches("mint(").count(), 0);
+    for forbidden in [
+        "std::net::",
+        "TcpStream",
+        "std::env::var",
+        "fs::read(",
+        "fs::read_to_string(",
+    ] {
+        assert!(
+            !wasm_executor.contains(forbidden),
+            "wasm_executor.rs contains {forbidden}"
+        );
+    }
+    // The only process this backend spawns is the one documented,
+    // explicitly provisioned `node` host -- never a second, undocumented
+    // executable a compromised build step could substitute.
+    assert_eq!(wasm_executor.matches("Command::new(").count(), 1);
+    assert!(wasm_executor.contains("Command::new(\"node\")"));
+}
+
 #[test]
 fn public_canonical_retained_value_context_is_the_existing_identity_wire() {
     let value = RetainedValue::Record(RetainedRecord {

@@ -1306,6 +1306,16 @@ impl Expr {
             }
         });
     }
+
+    /// Visit every expression node in this subtree, including `self`, in the
+    /// same left-to-right, stack-bounded order as `visit_calls`. Exists for
+    /// callers that need a full node census -- not only call sites -- so a
+    /// full-tree walk is derived from the one traversal this file already
+    /// maintains rather than a second hand-written `ExprKind` match that
+    /// could silently drift from it.
+    pub(crate) fn visit_all_nodes(&self, visit: &mut impl FnMut(&Expr)) {
+        self.visit_call_nodes(|expression| visit(expression));
+    }
 }
 
 #[cfg(test)]

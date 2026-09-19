@@ -38,6 +38,10 @@ mod snapshot;
 ))]
 pub(crate) use snapshot::{decode_snapshot, encode_snapshot};
 
+/// Read-only replay measuring `FrontendPass::lookup`'s `Program::clone` cost
+/// (SPX-AI-031/#130, SPX-AI-032/#131). See that module's doc comment.
+mod clone_cost_report;
+
 pub const PROJECT_FRONTEND_CACHE_SCHEMA: &str = "semaprax.project-frontend-cache-work.v1";
 pub const PROJECT_FRONTEND_CACHE_COMPATIBILITY: &str = "semaprax.project-frontend-canonical-ast.v1";
 pub const PROJECT_SEMANTIC_CACHE_SCHEMA: &str = "semaprax.project-semantic-cache-work.v1";

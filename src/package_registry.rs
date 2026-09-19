@@ -115,6 +115,7 @@ use crate::diagnostic::{quote_json, Diagnostic, Severity};
 use crate::package_lock_v3;
 use crate::package_range::{self, Version};
 
+pub mod binding;
 pub mod federation;
 
 #[cfg(test)]

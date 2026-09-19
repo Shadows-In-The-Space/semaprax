@@ -134,18 +134,25 @@ container:
    were even reached. This is real interpreter-backend work
    (`src/interpreter.rs`) outside this change's lease and outside a
    single-package change's scope — reported here rather than silently routed
-   around. **Correction from a later tranche**: this ceiling is not
-   generic-specific, as first framed here. `Identity`/`Authorization` (see
+   around. **Confirmed by a later tranche's own hostile test, after that
+   tranche first guessed wrong and was caught by its own suite**: a draft of
+   that tranche claimed this ceiling is not generic-specific, reasoning from
+   a throwaway `Identity`-typed call that also reproduced `SPX-F102`. That
+   claim was checked against the wrong execution seam and was wrong.
+   `crate::interpreter::retained_call` (the retained multi-argument call
+   seam that tranche's test actually exercises — distinct from the plain
+   `admitted_resolved_functions` path `semaprax run`/`semaprax test` use) has
+   its own `copy_records::flat_copy_record` admission extension
+   (`src/interpreter/retained_call/copy_records.rs`) that specifically
+   admits a **non-generic** record (no type parameter at the declaration, no
+   type argument at the use site) whose fields are all closed scalars,
+   across a function boundary. `Identity`/`Authorization` (see
    [Identity and Authorization: distinct nominal types](#identity-and-authorization-distinct-nominal-types))
-   are plain, non-generic `record`s and hit the identical `SPX-F102` calling
-   a function typed over either. The real interpreter condition, read
-   directly from `src/interpreter.rs`: `resolved_data_parameter_is_admitted`
-   admits a by-value nominal parameter only when its declaration
-   `kind == hir::DeclarationKind::Class` (never plain `record`), and
-   `resolved_data_result_is_admitted` has no by-value nominal-return case at
-   all outside the owned-byte-record profile (a `Bytes` field somewhere in
-   the shape). A record or class with no `Bytes` field anywhere in it cannot
-   cross a function boundary by value on the interpreter, generic or not.
+   both qualify and execute cleanly on that seam; `Secret<T>` does not
+   qualify (it is declared generic) and still fails with `SPX-F102` on that
+   same seam. So "generic" is the right word for this ceiling after all, on
+   this seam — see that section for the corrected story in full, including
+   the two tests that pin both directions.
 5. **A second, independent reason no wrap/expose/match function over
    `Secret<T>` ships.** `tests/project/standard_library.rs`'s
    `every_public_declaration_has_a_std_identity_contracts_examples_and_conformance`
@@ -217,24 +224,51 @@ non-leak properties for free: whole-value equality is refused with `SPX-T207`
 and there is still no print/format/reflection facility in the language that
 could serialize either into text.
 
-**The same interpreter ceiling `Secret<T>` reports applies here too, and
-corrects that section's scope.** `Secret<T>`'s doc comment (point 4) framed
-the `SPX-F102` interpreter ceiling as specific to "a user *generic* record".
-Bisection with `Identity`/`Authorization` — plain, non-generic records — found
-that framing too narrow: calling a function typed over either fails with the
-identical `SPX-F102`, on the interpreter only (`semaprax check`'s static phase
-admits the declaration and the call). Read directly from `src/interpreter.rs`:
-`resolved_data_parameter_is_admitted` admits a by-value nominal parameter only
-when its declaration `kind == hir::DeclarationKind::Class` (never plain
-`record`), and `resolved_data_result_is_admitted` has no by-value
-nominal-return case at all outside the owned-byte-record profile (a `Bytes`
-field somewhere in the shape). The real ceiling is "no `Bytes` field anywhere
-in the shape", not "generic" — checked further by declaring `Identity` as
-`class` instead of `record` and repeating the same call: it still fails
-`SPX-F102`. Consequently, exactly like `Secret<T>`, no function whose
-signature mentions `Identity` or `Authorization` ships in `std.auth`:
-`std.auth.tests` imports both types with `use type` (never `use function` for
-a function that does not exist), and
+**A draft of this tranche claimed the `SPX-F102` interpreter ceiling
+`Secret<T>` reports is not generic-specific — that claim was wrong, and this
+package's own hostile test caught it.** `Secret<T>`'s doc comment (point 4)
+framed the ceiling as specific to "a user *generic* record". An early version
+of `identity_authorization_source_tests.rs` generalized that to "any record
+with no `Bytes` field", reasoning from a call typed over `Identity` that also
+reproduced `SPX-F102` — but that call was checked through
+`crate::interpreter::retained_call::evaluate_retained_call`, and when that
+same test was inverted to assert the call actually fails, it panicked: the
+call succeeds. `evaluate_retained_call` genuinely returns `Ok`, running
+`requires_identity` and taking the expected branch — not a test bug.
+
+The corrected mechanism, read from
+`src/interpreter/retained_call/copy_records.rs`: the retained-call seam (used
+by hosted/embedding multi-argument calls, and by this test — distinct from
+the plain `admitted_resolved_functions` path `semaprax run`/`semaprax test`
+use) has its own `flat_copy_record` admission extension that specifically
+admits a **non-generic** record — no type parameter at the declaration
+(`record.type_parameters.is_empty()`), no type argument at the use site
+(`arguments.is_empty()`) — whose fields are all closed scalars, across a
+function boundary. `Identity`/`Authorization` both qualify:
+`calling_a_function_typed_over_identity_executes_on_the_retained_call_interpreter`
+proves it, asserting the actual returned value rather than merely the
+absence of an error. `Secret<T>` does **not** qualify — it is declared with a
+type parameter, so `Secret<i64>` fails `flat_copy_record`'s check regardless
+of which scalar fills `T` — and
+`calling_a_function_typed_over_generic_secret_is_rejected_by_the_retained_call_interpreter`
+confirms `SPX-F102` still fires for `Secret<i64>` on this identical seam
+(during `prepare_retained_call`'s closure scan, before evaluation is even
+reached). So "generic" was the right discriminator for `Secret<T>` all along
+on this seam; the error was generalizing a narrow, correct claim into a
+broader one without first checking a non-generic record against the specific
+seam the claim was about. Whether the plain `semaprax run`/`semaprax test`
+path treats a non-generic record the same way as `retained_call` is a
+separate question this correction does not re-settle: manual CLI probes
+during this correction suggested it still refuses one, but that was not
+re-encoded as a committed test, so it is not asserted here as fact.
+
+Consequently, exactly like `Secret<T>`, no function whose signature mentions
+`Identity` or `Authorization` ships in `std.auth` — not because the
+interpreter cannot execute one (it can, on the retained-call seam), but for
+the independent `SPX-G172` reason stated next, which was separately
+re-checked directly for a non-generic record (not merely for `Secret<T>`) and
+still holds: `std.auth.tests` imports both types with `use type` (never `use
+function` for a function that does not exist), and
 `std.auth.identity_authorization.self_check` constructs and reads both types
 call-locally, exactly like `secret_self_check`.
 

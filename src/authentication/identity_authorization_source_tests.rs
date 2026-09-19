@@ -21,6 +21,30 @@
 //! regression that collapsed the two types back into interchangeable shapes
 //! (or back into a bare `bool`) would flip the negative case from `Err` to
 //! `Ok`, not merely fail to reject.
+//!
+//! **Correction, caught by this file's own suite**: an earlier version of
+//! this module additionally claimed that calling a function typed over
+//! `Identity` fails on the interpreter with `SPX-F102`, generalizing
+//! `auth.spx`'s `Secret<T>` doc comment (point 4) from "a user *generic*
+//! record" to "any record or class with no `Bytes` field". That broader claim
+//! was wrong: `calling_a_function_typed_over_identity_executes_on_the_
+//! retained_call_interpreter` below (the corrected, inverted form of that
+//! same test) shows `crate::interpreter::retained_call::evaluate_retained_call`
+//! returns `Ok` for exactly that call. The mechanism, read from
+//! `src/interpreter/retained_call/copy_records.rs`: the retained-call seam
+//! (used by this test, and distinct from the plain `admitted_resolved_
+//! functions` path `semaprax run`/`semaprax test` use) has a `flat_copy_
+//! record` extension admitting a **non-generic** record with only closed
+//! scalar leaves across a function boundary. `Secret<T>` is declared
+//! generic, so it is excluded by that same extension's `record.type_
+//! parameters.is_empty()` check —
+//! `calling_a_function_typed_over_generic_secret_is_rejected_by_the_
+//! retained_call_interpreter` below confirms `SPX-F102` still fires for
+//! `Secret<i64>` on this identical seam. So "generic" was the right
+//! discriminator for this seam all along; the error was generalizing a
+//! true, narrow, `Secret<T>`-specific claim into a broader one about "any
+//! record" without checking a non-generic record against this specific
+//! execution path first.
 
 fn identity_authorization_fixture() -> &'static str {
     r#"module test.identity_authorization_source;
@@ -165,16 +189,22 @@ fn identity_field_comparison_compiles_but_whole_value_equality_is_rejected() {
 }
 
 /// The interpreter-backend ceiling `auth.spx`'s `Identity`/`Authorization`
-/// doc comment (point 4) reports: calling a function whose parameter or
-/// return type mentions a plain (non-generic) user record fails with
-/// `SPX-F102`, even though `semaprax check`'s static phase admits the
-/// declaration and the call — the same ceiling `Secret<T>` hits, now shown
-/// to be about the *shape* (no `Bytes` field anywhere in it), not about
-/// being generic. `semaprax check` above already proved the call is
-/// statically well-typed; this proves the interpreter specifically, and
-/// separately, refuses to execute it.
+/// doc comment (point 4) claimed this fails with `SPX-F102` for *any* user
+/// record, generic or not — that claim was wrong, caught by this very test
+/// (see the correction note above the module doc and in `auth.spx`).
+/// `src/interpreter/retained_call.rs`'s `copy_records::admitted_functions`
+/// (`src/interpreter/retained_call/copy_records.rs`'s `flat_copy_record`)
+/// is a retained-call-only admission extension for exactly this shape: a
+/// **non-generic** record (`record.type_parameters.is_empty()` at the
+/// declaration, `arguments.is_empty()` at the use site) whose fields are all
+/// closed scalar leaves. `Identity`/`Authorization` both qualify, so a call
+/// across a function boundary typed over either executes cleanly through
+/// `crate::interpreter::retained_call`. `semaprax check` already proved the
+/// call is statically well-typed; this proves the interpreter (this
+/// specific execution seam) actually admits and executes it, not merely
+/// that it type-checks.
 #[test]
-fn calling_a_function_typed_over_identity_is_rejected_by_the_interpreter() {
+fn calling_a_function_typed_over_identity_executes_on_the_retained_call_interpreter() {
     let module = fixture_with_main(
         r#"    let who = Identity { subject_id: 1usize };
     if requires_identity(who) == 1usize { 0 } else { 1 }"#,
@@ -182,20 +212,89 @@ fn calling_a_function_typed_over_identity_is_rejected_by_the_interpreter() {
     let program = crate::hir::resolve(
         &crate::parse(
             &module,
-            std::path::Path::new("identity-interpreter-ceiling.spx"),
+            std::path::Path::new("identity-interpreter-admits.spx"),
         )
         .expect("the fixture parses"),
     )
     .expect("the fixture resolves");
     let prepared = crate::interpreter::retained_call::prepare_retained_call(&program, "app.main")
         .expect("the entry point prepares");
-    let outcome =
-        crate::interpreter::retained_call::evaluate_retained_call(&program, &prepared, &[], 10_000);
-    let diagnostics = outcome.err().expect(
-        "calling a function typed over Identity must currently fail on the interpreter \
-         (SPX-F102) — if this starts succeeding, auth.spx's doc comment (point 4) is \
-         stale and the discovered ceiling has been lifted",
+    let evaluation =
+        crate::interpreter::retained_call::evaluate_retained_call(&program, &prepared, &[], 10_000)
+            .expect(
+                "a call across a function boundary typed over a plain, non-generic record \
+                 (Identity) must execute on the retained-call interpreter seam — if this starts \
+                 failing, `copy_records::flat_copy_record`'s admission has narrowed and this \
+                 test, auth.spx, and AUTHENTICATION-SESSIONS-V1.md all need re-checking together",
+            );
+    // Non-vacuity: the call must have actually run `requires_identity` and
+    // taken the `== 1usize` branch, not merely returned *some* `Ok`.
+    assert_eq!(
+        evaluation.outcome,
+        crate::interpreter::retained_call::RetainedCallOutcome::Returned(
+            crate::interpreter::retained_call::RetainedValue::I64(0)
+        ),
+        "expected main to return 0 (requires_identity(who) == 1usize), got {:?}",
+        evaluation.outcome
     );
+}
+
+/// The mirror-image check issue #191's audit asked for: does `SPX-F102`
+/// still trip for `Secret<T>` on this same retained-call seam, and is the
+/// discriminator really "generic" as `auth.spx`'s original (pre-correction)
+/// doc comment claimed? `copy_records::flat_copy_record` requires both
+/// `arguments.is_empty()` at the use site and `record.type_parameters.is_
+/// empty()` at the declaration — `Secret<i64>` fails both, since `Secret<T>`
+/// is declared with a type parameter and used with one argument filled in.
+/// So on *this* seam, unlike the general claim this test's sibling
+/// disproved, "generic" is exactly the right word: a fixture identical in
+/// shape to the one above, but built from a generic `Secret<T>` record
+/// instead of a plain one, is rejected with `SPX-F102` where `Identity`'s
+/// was admitted.
+#[test]
+fn calling_a_function_typed_over_generic_secret_is_rejected_by_the_retained_call_interpreter() {
+    let module = r#"module test.generic_secret_interpreter_ceiling;
+
+@id("test.secret")
+record Secret<T> {
+    @id("test.secret.value")
+    value: T,
+}
+
+@id("test.requires_secret")
+fn requires_secret(held: Secret<i64>) -> i64
+{
+    held.value
+}
+
+@id("app.main")
+fn main() -> i64
+{
+    let held = Secret<i64> { value: 1 };
+    if requires_secret(held) == 1 { 0 } else { 1 }
+}
+"#;
+    let program = crate::hir::resolve(
+        &crate::parse(
+            module,
+            std::path::Path::new("generic-secret-interpreter-ceiling.spx"),
+        )
+        .expect("the fixture parses"),
+    )
+    .expect("the fixture resolves");
+    // Unlike `Identity` above, this fails during preparation (the closure
+    // scan `prepare_retained_call` runs finds `requires_secret` outside the
+    // admitted set), not during evaluation — `evaluate_retained_call` is
+    // never reached.
+    let diagnostics =
+        crate::interpreter::retained_call::prepare_retained_call(&program, "app.main")
+            .err()
+            .expect(
+                "calling a function typed over Secret<i64> (a generic record) must still fail to \
+             prepare on the retained-call interpreter seam (SPX-F102) — if this starts \
+             succeeding, the copy_records::flat_copy_record generic exclusion has been lifted \
+             and auth.spx's Secret<T> doc comment (point 4) is stale",
+            );
     assert!(
         diagnostics
             .iter()

@@ -68,13 +68,22 @@ module std.auth;
 //    package — `semaprax run`/`semaprax test` hit it identically. Closing
 //    it is `src/interpreter.rs` work outside this change's lease and
 //    outside a single-package change's scope; reported here rather than
-//    silently narrowed around. CORRECTION from a later tranche: this is not
-//    generic-specific after all — `Identity`/`Authorization` below are
-//    plain, non-generic records and hit the identical `SPX-F102` across a
-//    function boundary; see that section's point 4 for the exact interpreter
-//    condition (`resolved_data_parameter_is_admitted`/`resolved_data_result_
-//    is_admitted` in `src/interpreter.rs`) that actually gates this, which
-//    this document originally mis-scoped to "generic".
+//    silently narrowed around. CONFIRMED by a later tranche's own hostile
+//    test, which first mis-guessed the opposite (that this was NOT
+//    generic-specific) and was caught by its own suite: `Identity`/
+//    `Authorization` below are plain, non-generic records, and a call
+//    across a function boundary typed over either DOES execute — on the
+//    specific interpreter seam that later tranche's test actually exercises
+//    (`crate::interpreter::retained_call`, used by hosted/embedding
+//    multi-argument calls). That seam's `copy_records::flat_copy_record`
+//    extension (`src/interpreter/retained_call/copy_records.rs`)
+//    specifically admits a non-generic record with only closed scalar
+//    leaves across a function boundary, while still excluding a generic one
+//    by its `record.type_parameters.is_empty()` check — so `Secret<i64>`
+//    still hits `SPX-F102` on that same seam. "Generic" was the right word
+//    all along for this shape; see that section's point 4 for the full
+//    story, including which seam was actually tested and how the first,
+//    broader guess was found wrong.
 // 5. A second, independent reason no wrap/expose/match function over
 //    `Secret<T>` ships: this package's own conformance-completeness gate
 //    (`tests/project/standard_library.rs`'s
@@ -140,31 +149,40 @@ record Secret<T> {
 //    the language (`src/lexer.rs`) that could serialize either into text.
 //    Both non-leak properties `Secret<T>`'s doc comment states are inherited
 //    for free, not re-implemented.
-// 4. CAPACITY CEILING, checked directly and found to be *broader* than
-//    `Secret<T>`'s doc comment (point 4) stated: the interpreter ceiling
-//    there was framed as "a user *generic* record used across a function
-//    boundary", but bisection for this tranche found it is not generic-
-//    specific. `src/interpreter.rs`'s `resolved_data_parameter_is_admitted`
-//    (around line 2780) admits a by-value nominal parameter only when its
-//    declaration `kind == hir::DeclarationKind::Class` (never plain
-//    `record`), and `resolved_data_result_is_admitted` (around line 2816)
-//    has no by-value nominal-return case at all outside the owned-byte-
-//    record profile (`is_admitted_owned_byte_record`/`is_admitted_owned_
-//    variant`, both requiring a `Bytes` field somewhere in the shape).
-//    `Identity` and `Authorization` carry only `usize`/`bool` fields, so
-//    they hit the same `SPX-F102` ("interpreter admission failed
-//    (unsupported_callee)") calling a plain `record` OR a plain `class`
-//    (checked directly: declaring `Identity` as `class` instead of `record`
-//    and repeating the same call still fails `SPX-F102`, because the
-//    ceiling is really "no `Bytes` field anywhere in the shape", not
-//    "declared `record` instead of `class`") across a function boundary,
-//    on the interpreter, exactly like `Secret<i64>`. `semaprax check`
-//    admits the declarations and every such call statically; only the
-//    reference interpreter refuses to execute one. This is real
-//    interpreter-backend work (`src/interpreter.rs`) outside this change's
-//    lease and outside a single-package change's scope, reported here
-//    rather than routed around — and it corrects, not merely restates, the
-//    scope of the ceiling `Secret<T>`'s doc comment (point 4) already named.
+// 4. CAPACITY CEILING — first mis-stated by this tranche, then caught and
+//    corrected by its own hostile test suite
+//    (`src/authentication/identity_authorization_source_tests.rs`), which is
+//    the honest way to read this point: an early version claimed the
+//    `SPX-F102` interpreter ceiling `Secret<T>`'s doc comment (point 4)
+//    names is not generic-specific, because a throwaway `Identity`-typed
+//    call reproduced `SPX-F102` too. That claim was checked against the
+//    WRONG execution seam. `crate::interpreter::retained_call` (the
+//    retained multi-argument call seam this tranche's test actually
+//    exercises, used for hosted/embedding calls, distinct from the plain
+//    `admitted_resolved_functions` path `semaprax run`/`semaprax test` use)
+//    has its own `copy_records::flat_copy_record` admission extension
+//    (`src/interpreter/retained_call/copy_records.rs`) that specifically
+//    admits a **non-generic** record — `record.type_parameters.is_empty()`
+//    at the declaration, no type argument at the use site — whose fields
+//    are all closed scalars, across a function boundary. `Identity` and
+//    `Authorization` both qualify, so a call typed over either one executes
+//    cleanly through that seam: `calling_a_function_typed_over_identity_
+//    executes_on_the_retained_call_interpreter` proves it, checking the
+//    actual returned value, not merely the absence of an error. `Secret<T>`
+//    does NOT qualify — it is declared with a type parameter, so
+//    `Secret<i64>` fails `flat_copy_record`'s check regardless of which
+//    scalar fills `T` — and `calling_a_function_typed_over_generic_secret_
+//    is_rejected_by_the_retained_call_interpreter` confirms `SPX-F102` still
+//    fires for `Secret<i64>` on this identical seam. So "generic" was the
+//    right discriminator for `Secret<T>` all along, on this seam; this
+//    tranche's error was generalizing a narrow, correct claim into a
+//    broader one ("any record with no `Bytes` field") without first
+//    checking a non-generic record against the specific seam the claim was
+//    about. Whether the plain `semaprax run`/`semaprax test` path (which
+//    this tranche did separately observe refusing a non-generic record too,
+//    via manual CLI probes, not via a committed test) treats non-generic
+//    records the same way as `retained_call` is NOT re-verified here and is
+//    left as an open question, not a second guess.
 // 5. The same conformance-completeness consequence as `Secret<T>` point 5
 //    follows: no function whose signature mentions `Identity` or
 //    `Authorization` ships here, so `std.auth.tests` imports both types with

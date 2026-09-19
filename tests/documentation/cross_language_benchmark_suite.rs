@@ -33,6 +33,8 @@ mod clean_install_calculator;
 mod cold_chain_release_gate;
 #[path = "cross_language_benchmark_suite/owned_byte_sentinel_balance.rs"]
 mod owned_byte_sentinel_balance;
+#[path = "cross_language_benchmark_suite/reproducibility.rs"]
+mod reproducibility;
 #[path = "cross_language_benchmark_suite/stable_dispatch_order.rs"]
 mod stable_dispatch_order;
 #[path = "cross_language_benchmark_suite/stale_edit_preservation.rs"]

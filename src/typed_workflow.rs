@@ -46,7 +46,71 @@
 //!   branch runs on the one calling thread, in ascending step-id order, so
 //!   there is nothing to race and the resulting trace is byte-identical
 //!   across repeated runs of the same graph and inputs; see the
-//!   `parallel_join` tests in [`engine`].
+//!   `parallel_join` tests in [`engine`]. Separately, and for the workflow
+//!   *author* rather than this executor, a graph whose concurrent branches
+//!   declare overlapping [`claims`] is refused by
+//!   [`graph::WorkflowGraph::validate`] before anything runs — a static
+//!   refusal under [`claims::CONFLICT_DIAGNOSTIC_CODE`], in the spirit of
+//!   this repository's invariant that ownership errors are compile-time
+//!   diagnostics and never backend accidents.
+//! - Bounding a run is deterministic and replayable. There is no
+//!   wall-clock timeout anywhere in this module, deliberately: a deadline
+//!   measured in elapsed time would make the same run cut off at a
+//!   different step on a busier machine, producing a different trace and a
+//!   different compensation obligation each replay. A run is bounded
+//!   instead by a declared cost budget charged per step execution and per
+//!   retry attempt ([`run_control::StepBudget`]), whose exhaustion is its
+//!   own refusal ([`engine::ExecError::StepBudgetExhausted`]) — never the
+//!   retry-ceiling refusal, and never an
+//!   [`retry::AttemptOutcomeClass::Uncertain`] outcome.
+//! - Cancellation is cooperative, observed only between steps and between
+//!   parallel branches, and addressed by a deterministic run-internal
+//!   coordinate rather than an ambient flag, so a cancelled run replays to
+//!   the identical trace ([`run_control::CancelSignal`]). It produces a
+//!   terminal state of its own, [`run_control::RunOutcome::Cancelled`] —
+//!   not success, not a permanent failure, not uncertain — and
+//!   [`engine::ExecTrace::completed`] is the one predicate that answers
+//!   "did this workflow finish". A cancelled run keeps every commit record
+//!   it had already made: cancelling does not un-happen an effect, `run`
+//!   never compensates one itself, and at-most-once holds across
+//!   cancellation and replay because compensation is keyed by
+//!   `(step, run_id)`.
+//!
+//! # Scope decision: per-step capability and budget
+//!
+//! The issue's in-scope list names "effects/capabilities and budgets".
+//! These are answered differently on purpose, and the difference is
+//! recorded here so a reviewer reading the list literally does not keep
+//! rediscovering it as a gap:
+//!
+//! - **Budget is universal.** Every step kind, with no exception, is
+//!   charged against the run's declared cost budget at
+//!   `engine::dispatch_step` — the one call point every step this module
+//!   executes passes through, including each branch of a `Parallel` and
+//!   each iteration of a `Loop`. A `Sequential` step costs the minimum and
+//!   a `ModelCall` costs most (see [`run_control::step_cost`]), but none
+//!   costs nothing.
+//! - **Capability is scoped to effect, and that is deliberate.** A step
+//!   kind is authorized where it can actually do something: `ModelCall`
+//!   against a [`model_routing::DeploymentPolicy`], the five dispatchable
+//!   `Declared` kinds against a [`declared_dispatch::DispatchPolicy`],
+//!   `HumanGate` against a separately recorded
+//!   [`human_gate::GateDecision`]. `Sequential`, `Conditional`,
+//!   `Parallel`, `Join`, `Loop` and `Terminal` have **no** capability
+//!   concept, because they perform no effect at all: they choose which
+//!   step runs next and nothing else. There is no filesystem access, no
+//!   process, no network, no model call, and no publication for a
+//!   capability to authorize or refuse.
+//!
+//!   Giving them one anyway would mean minting a token that gates nothing
+//!   — a concept that reads, in a completion matrix or a review, as
+//!   enforcement while enforcing nothing. This repository's rule that
+//!   capabilities are explicit is a rule about *authority over effects*,
+//!   and the honest way to satisfy it for an effect-free step kind is to
+//!   have no authority to grant, not to invent a hollow one. If a future
+//!   step kind performs an effect, it is authorized like the others; that
+//!   is what the sealed `engine::StepExecutor` seam exists to make
+//!   unavoidable.
 //!
 //! Scope boundary: [`engine::run`] executes Sequential, Conditional, bounded
 //! Loop, ModelCall, HumanGate, and bounded Parallel/Join steps
@@ -84,6 +148,7 @@
 //! state — a resumed run starts that log empty.
 
 pub mod checkpoint;
+pub mod claims;
 pub mod compensation;
 pub mod compensation_order;
 pub mod declared_dispatch;
@@ -93,3 +158,4 @@ pub mod graph_wire;
 pub mod human_gate;
 pub mod model_routing;
 pub mod retry;
+pub mod run_control;

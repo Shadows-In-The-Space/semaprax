@@ -1,4 +1,5 @@
 use super::*;
+use crate::typed_workflow::claims::ResourceClaim;
 use crate::typed_workflow::graph::{GraphError, MAX_STEPS};
 
 /// A minimal two-step `sequential -> terminal` graph, the canonical
@@ -289,4 +290,139 @@ fn a_structurally_valid_but_semantically_invalid_graph_still_parses() {
     let graph = parse_graph(document.as_bytes()).unwrap();
     // ...and only fails when the caller separately validates it.
     assert_eq!(graph.validate(), Err(GraphError::UnknownEntry(StepId(99))));
+}
+
+// ---------------------------------------------------------------------------
+// The optional `claims` key.
+// ---------------------------------------------------------------------------
+
+/// The same minimal graph, with a `claims` array declaring what each step
+/// claims exclusive use of.
+fn document_with_claims(claims: &str) -> String {
+    format!(
+        r#"{{
+        "schema": "semaprax.typed-workflow.graph.v1",
+        "entry": 0,
+        "steps": [
+            {{"id": 0, "kind": "sequential", "in_ports": [],
+             "out_ports": [{{"id": 0, "ty": "unit"}}]}},
+            {{"id": 1, "kind": "terminal", "in_ports": [{{"id": 0, "ty": "unit"}}],
+             "out_ports": []}}
+        ],
+        "edges": [
+            {{"id": 0, "from": 0, "from_port": 0, "to": 1, "to_port": 0}}
+        ],
+        "claims": {claims}
+    }}"#
+    )
+}
+
+/// A document written before claims existed declares none, and must keep
+/// decoding byte-for-byte as it did: `claims` is the one optional top-level
+/// key, and its absence is a complete declaration, not a missing field.
+#[test]
+fn a_document_without_claims_decodes_to_a_graph_that_declares_none() {
+    let graph = parse_graph(minimal_document().as_bytes()).unwrap();
+    assert!(graph.claims.is_empty());
+    assert_eq!(graph.first_claim_conflict(), None);
+}
+
+#[test]
+fn an_empty_claims_array_is_admitted_and_declares_nothing() {
+    let graph = parse_graph(document_with_claims("[]").as_bytes()).unwrap();
+    assert!(graph.claims.is_empty());
+    assert_eq!(graph.validate(), Ok(()));
+}
+
+#[test]
+fn both_claim_kinds_decode_to_their_variants() {
+    let graph = parse_graph(
+        document_with_claims(
+            r#"[{"step": 0, "kind": "resource", "name": "workspace/main"},
+                {"step": 1, "kind": "semantic-candidate", "name": "cand-3"}]"#,
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        graph.claims.of(StepId(0)).map(|c| c.iter().next().cloned()),
+        Some(Some(ResourceClaim::resource("workspace/main")))
+    );
+    assert_eq!(
+        graph.claims.of(StepId(1)).map(|c| c.iter().next().cloned()),
+        Some(Some(ResourceClaim::semantic_candidate("cand-3")))
+    );
+    // Declared on two sequential steps, so this is not a conflict.
+    assert_eq!(graph.validate(), Ok(()));
+}
+
+#[test]
+fn decoding_claims_is_deterministic() {
+    let bytes = document_with_claims(
+        r#"[{"step": 1, "kind": "resource", "name": "b"},
+            {"step": 0, "kind": "resource", "name": "a"}]"#,
+    );
+    let first = parse_graph(bytes.as_bytes()).unwrap();
+    let second = parse_graph(bytes.as_bytes()).unwrap();
+    assert_eq!(first, second);
+}
+
+#[test]
+fn an_unknown_claim_kind_is_refused_not_ignored() {
+    let error = parse_graph(
+        document_with_claims(r#"[{"step": 0, "kind": "lock", "name": "x"}]"#).as_bytes(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "SPX-Z921");
+    assert!(error.message.contains("kind"), "{}", error.message);
+}
+
+#[test]
+fn an_unknown_field_inside_a_claim_entry_is_refused() {
+    // Closed-key discipline applies inside `claims` exactly as it does
+    // everywhere else in this format: a typo is told about, never ignored.
+    let error = parse_graph(
+        document_with_claims(
+            r#"[{"step": 0, "kind": "resource", "name": "x", "exclusive": true}]"#,
+        )
+        .as_bytes(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "SPX-Z921");
+}
+
+#[test]
+fn a_misspelled_top_level_claims_key_is_still_refused() {
+    // `claims` being optional must not turn the whole document into an
+    // open map: `claim` remains an unknown key, so an author who typed it
+    // is told rather than silently getting a graph that declares nothing.
+    let document = minimal_document().replace(
+        r#""edges": ["#,
+        r#""claim": [{"step": 0, "kind": "resource", "name": "x"}], "edges": ["#,
+    );
+    let error = parse_graph(document.as_bytes()).unwrap_err();
+    assert_eq!(error.code, "SPX-Z921");
+}
+
+#[test]
+fn a_claim_naming_a_step_the_graph_does_not_have_decodes_and_then_fails_validation() {
+    // The decoder is structural only (see this module's own doc comment):
+    // it does not know which step ids exist. `validate` is what refuses.
+    let graph = parse_graph(
+        document_with_claims(r#"[{"step": 42, "kind": "resource", "name": "x"}]"#).as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(
+        graph.validate(),
+        Err(GraphError::ClaimForUnknownStep(StepId(42)))
+    );
+}
+
+#[test]
+fn an_oversized_claims_array_is_refused_before_validation() {
+    let entry = r#"{"step": 0, "kind": "resource", "name": "x"}"#;
+    let entries = vec![entry; MAX_CLAIM_ENTRIES + 1].join(",");
+    let error = parse_graph(document_with_claims(&format!("[{entries}]")).as_bytes()).unwrap_err();
+    assert_eq!(error.code, "SPX-Z921");
+    assert!(error.message.contains("claims"), "{}", error.message);
 }

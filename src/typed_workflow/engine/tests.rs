@@ -1,5 +1,6 @@
 use super::*;
 use crate::typed_workflow::checkpoint::RevisionId;
+use crate::typed_workflow::claims::ClaimSet;
 use crate::typed_workflow::graph::{
     DeclaredStepKind, EdgeDef, EdgeId, Port, PortId, PortType, StepDef,
 };
@@ -46,6 +47,7 @@ fn sequential_pipeline_runs_to_completion_deterministically() {
         steps: vec![seq(0), seq(1), terminal(2)],
         edges: vec![edge(0, 0, 1), edge(1, 1, 2)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     };
     let inputs = ExecInputs::default();
     let first = run(
@@ -97,6 +99,7 @@ fn conditional_graph() -> WorkflowGraph {
             },
         ],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     }
 }
 
@@ -156,6 +159,7 @@ fn looping_graph(max_iterations: u32) -> WorkflowGraph {
         steps: vec![looper, seq(1)],
         edges: vec![edge(0, 0, 1), edge(1, 1, 0)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     }
 }
 
@@ -187,6 +191,7 @@ fn loop_step_within_its_bound_runs_to_completion() {
         steps: vec![looper, seq(1), terminal(2)],
         edges: vec![edge(0, 0, 1), edge(1, 1, 2)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     };
     let trace = run(
         &graph,
@@ -211,6 +216,7 @@ fn model_call_graph(requested: &str) -> WorkflowGraph {
         steps: vec![call, terminal(1)],
         edges: vec![edge(0, 0, 1)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     }
 }
 
@@ -263,6 +269,7 @@ fn invalid_graph_is_refused_before_any_step_runs() {
         steps: vec![seq(0)],
         edges: vec![],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     };
     assert_eq!(
         run(
@@ -290,6 +297,7 @@ fn gated_graph() -> WorkflowGraph {
         steps: vec![gate, terminal(1)],
         edges: vec![edge(7, 0, 1)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     }
 }
 
@@ -474,6 +482,7 @@ fn parallel_join_graph(branch_count: u32) -> WorkflowGraph {
         steps,
         edges,
         entry: StepId(0),
+        claims: ClaimSet::none(),
     }
 }
 
@@ -639,6 +648,7 @@ fn parallel_with_no_join_referencing_it_is_a_defined_refusal() {
             edge(3, 11, 21),
         ],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     };
     assert_eq!(graph.validate(), Ok(()));
     assert_eq!(
@@ -661,18 +671,15 @@ fn join_step_dispatched_directly_is_refused_not_only_reachable_via_its_parallel(
     // might otherwise try to step onto it — must refuse rather than
     // silently taking its one out edge.
     let graph = parallel_join_graph(2);
-    let mut visited = Vec::new();
-    let mut loop_counts = BTreeMap::new();
+    let inputs = ExecInputs::default();
     let mut ledger = GateLedger::new();
     let mut commits = CommitLog::new();
+    let mut state = RunState::new(&inputs, &mut ledger, &mut commits);
     let err = dispatch_step(
         StepId(1), // the Join step
         &graph,
-        &ExecInputs::default(),
-        &mut ledger,
-        &mut commits,
-        &mut loop_counts,
-        &mut visited,
+        &inputs,
+        &mut state,
     )
     .unwrap_err();
     assert_eq!(err, ExecError::NotExecutable(StepId(1)));
@@ -683,21 +690,12 @@ fn human_gate_step_is_never_silently_executed() {
     // A HumanGate that dispatch never routes to NotExecutableExecutor:
     // confirms the dispatch table itself, not just `run`, treats
     // HumanGate as a real (gated) executor rather than a refusal.
-    let mut visited = Vec::new();
-    let mut loop_counts = BTreeMap::new();
     let mut ledger = GateLedger::new();
     let mut commits = CommitLog::new();
     let graph = gated_graph();
-    let err = dispatch_step(
-        StepId(0),
-        &graph,
-        &ExecInputs::default(),
-        &mut ledger,
-        &mut commits,
-        &mut loop_counts,
-        &mut visited,
-    )
-    .unwrap_err();
+    let inputs = ExecInputs::default();
+    let mut state = RunState::new(&inputs, &mut ledger, &mut commits);
+    let err = dispatch_step(StepId(0), &graph, &inputs, &mut state).unwrap_err();
     assert_eq!(err, ExecError::GateNotDecided(StepId(0)));
 }
 
@@ -717,6 +715,7 @@ fn declared_dispatch_step_kind_is_never_silently_executed() {
         steps: vec![declared, terminal(1)],
         edges: vec![edge(0, 0, 1)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     };
     assert_eq!(
         run(
@@ -743,6 +742,7 @@ fn declared_semantic_change_step_kind_is_never_silently_executed() {
         steps: vec![declared, terminal(1)],
         edges: vec![edge(0, 0, 1)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     };
     assert_eq!(
         run(
@@ -938,6 +938,7 @@ fn compensable_pipeline() -> WorkflowGraph {
         ],
         edges: vec![edge(0, 0, 1), edge(1, 1, 2), edge(2, 2, 3)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     }
 }
 

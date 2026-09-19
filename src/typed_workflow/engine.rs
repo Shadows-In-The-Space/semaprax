@@ -73,6 +73,10 @@ use super::model_routing::{route, DeploymentPolicy, RoutingError};
 use super::retry::{
     decide_retry, AttemptOutcomeClass, RetryBudget, RetryDecision, ScriptedAttempt,
 };
+use super::run_control::{
+    step_cost, BudgetExhausted, CancelSignal, CancelWatch, RunOutcome, StepBudget, TickMeter,
+    RETRY_ATTEMPT_COST,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Hard ceiling on total step executions in one `run`, independent of any
@@ -174,6 +178,28 @@ pub enum ExecError {
     /// trustworthy decision to make even given real project state. See
     /// [`SemanticChangeExecutor`].
     SemanticChangeNotGranted(StepId),
+    /// The run's declared [`ExecInputs::step_budget`] could not cover the
+    /// cost of the named step (or of one more retry attempt inside it), so
+    /// that work never ran.
+    ///
+    /// This is the deterministic stand-in for a timeout, and it is
+    /// deliberately its own refusal, confusable with nothing else this
+    /// engine produces:
+    ///
+    /// - It is **not** `StepFailed`. That one means a step's effect kept
+    ///   failing until its own [`RetryBudget`] ceiling was reached — a
+    ///   statement about one step's attempts. This one means the *run* ran
+    ///   out of declared cost, and it can stop a step whose very first
+    ///   attempt had not yet been made.
+    /// - It is **not** [`AttemptOutcomeClass::Uncertain`], which classifies
+    ///   whether one effect's delivery status is known. Budget exhaustion
+    ///   makes no claim at all about any effect: the charged work is
+    ///   refused *before* it runs, so nothing was dispatched to be
+    ///   uncertain about.
+    ///
+    /// See [`super::run_control`] for why the budget is declared cost
+    /// rather than elapsed wall-clock time.
+    StepBudgetExhausted(StepId, BudgetExhausted),
 }
 
 /// Caller-supplied values the engine has no way to compute itself: the
@@ -223,6 +249,19 @@ pub struct ExecInputs {
     /// resuming the *same* logical run (so that its compensations must not
     /// re-fire) reuses the same `run_id`; a genuinely new run uses a new one.
     pub run_id: u64,
+    /// Optional declared cost ceiling for the whole run — this engine's
+    /// deterministic, replayable stand-in for a timeout. `None` (the
+    /// default) means the run is bounded only by [`MAX_STEP_EXECUTIONS`]
+    /// and each `Loop` step's own bound, exactly as it was before this
+    /// field existed. See [`super::run_control`] for the cost schedule and
+    /// for why it is not wall-clock time.
+    pub step_budget: Option<StepBudget>,
+    /// Optional cancellation request, addressed by a deterministic
+    /// run-internal coordinate rather than an ambient flag, so a cancelled
+    /// run replays to the identical trace. `None` (the default) means the
+    /// run is never cancelled. See [`super::run_control::CancelSignal`] and
+    /// [`ExecTrace::outcome`].
+    pub cancel: Option<CancelSignal>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -236,6 +275,29 @@ pub struct ExecTrace {
     /// step — it never itself invokes, spawns, or publishes the named
     /// target.
     pub admitted_dispatches: Vec<(StepId, DeclaredStepKind, String)>,
+    /// How the run ended. [`RunOutcome::Cancelled`] is a terminal state of
+    /// its own — not success, not a permanent failure, not uncertain — so
+    /// an `Ok(trace)` alone never means the workflow finished. Ask
+    /// [`ExecTrace::completed`].
+    pub outcome: RunOutcome,
+    /// Total declared cost charged by this run (see
+    /// [`super::run_control::step_cost`]). Accumulated whether or not
+    /// [`ExecInputs::step_budget`] was declared, so a caller can size a
+    /// budget from a real run. Deterministic, like every other field here:
+    /// it is a pure function of which steps ran and how often each retried.
+    pub ticks_spent: u64,
+}
+
+impl ExecTrace {
+    /// True only when the run reached a `Terminal` step. The one predicate
+    /// that answers "did this workflow finish": a cancelled run also comes
+    /// back as `Ok`, carrying a valid partial trace and a valid commit
+    /// record, and must never be read as success because the `Result` was
+    /// not an `Err`.
+    #[must_use]
+    pub fn completed(&self) -> bool {
+        self.outcome.completed()
+    }
 }
 
 /// Runs `graph` to completion (or a defined refusal) against `inputs`,
@@ -269,22 +331,20 @@ pub fn run(
 ) -> Result<ExecTrace, ExecError> {
     graph.validate().map_err(|_| ExecError::InvalidGraph)?;
 
+    let mut state = RunState::new(inputs, gates, commits);
     let mut current = graph.entry;
-    let mut visited = Vec::new();
     let mut routed_models = Vec::new();
     let mut admitted_dispatches = Vec::new();
-    let mut loop_counts: BTreeMap<StepId, u32> = BTreeMap::new();
 
     loop {
-        let effect = dispatch_step(
-            current,
-            graph,
-            inputs,
-            gates,
-            commits,
-            &mut loop_counts,
-            &mut visited,
-        )?;
+        // Cancellation boundary: *between* steps, before the next one is
+        // dispatched. A step that has begun never gets interrupted
+        // part-way, so cancellation can never separate an effect from the
+        // engine's record of it.
+        if state.cancel.observe(state.visited.len(), current) {
+            break;
+        }
+        let effect = dispatch_step(current, graph, inputs, &mut state)?;
         routed_models.extend(effect.routed_models);
         admitted_dispatches.extend(effect.admitted_dispatches);
         match effect.next {
@@ -293,10 +353,16 @@ pub fn run(
         }
     }
 
+    let outcome = match state.cancel.observed() {
+        Some(before) => RunOutcome::Cancelled { before },
+        None => RunOutcome::Completed,
+    };
     Ok(ExecTrace {
-        visited,
+        visited: state.visited,
         routed_models,
         admitted_dispatches,
+        outcome,
+        ticks_spent: state.meter.spent(),
     })
 }
 
@@ -346,18 +412,68 @@ impl StepAuthority {
     }
 }
 
+/// The mutable state one `run` threads through every step it dispatches:
+/// the caller's gate ledger and commit log, the per-`Loop` counters, the
+/// visit record, the cost meter, and the cancellation watch.
+///
+/// Bundled into one value rather than passed as seven separate `&mut`
+/// parameters so that adding run-scoped state (the meter and the watch
+/// were exactly that) does not grow every call site's argument list, and so
+/// that [`ParallelExecutor`]'s per-branch dispatch provably threads the
+/// *same* state as the top-level loop — a second, divergent copy of a
+/// counter or a meter is not expressible here.
+pub(crate) struct RunState<'a> {
+    gates: &'a mut GateLedger,
+    commits: &'a mut CommitLog,
+    loop_counts: BTreeMap<StepId, u32>,
+    visited: Vec<StepId>,
+    meter: TickMeter,
+    cancel: CancelWatch,
+}
+
+impl<'a> RunState<'a> {
+    pub(crate) fn new(
+        inputs: &ExecInputs,
+        gates: &'a mut GateLedger,
+        commits: &'a mut CommitLog,
+    ) -> Self {
+        RunState {
+            gates,
+            commits,
+            loop_counts: BTreeMap::new(),
+            visited: Vec::new(),
+            meter: TickMeter::new(inputs.step_budget),
+            cancel: CancelWatch::new(inputs.cancel),
+        }
+    }
+
+    /// Charges declared cost against the run's budget, attributing a
+    /// refusal to `step`. Charged *before* the work it pays for runs, so a
+    /// refused charge means that work did not happen.
+    fn charge(&mut self, step: StepId, ticks: u64) -> Result<(), ExecError> {
+        self.meter
+            .charge(ticks)
+            .map_err(|exhausted| ExecError::StepBudgetExhausted(step, exhausted))
+    }
+
+    fn record_visit(&mut self, id: StepId) -> Result<(), ExecError> {
+        if self.visited.len() >= MAX_STEP_EXECUTIONS {
+            return Err(ExecError::StepLimitExceeded);
+        }
+        self.visited.push(id);
+        Ok(())
+    }
+}
+
 /// The borrowed state one step's dispatch needs. Built fresh by
 /// [`dispatch_step`] for each step (including each branch of a
 /// `Parallel`), so no executor holds state across two steps.
-pub(crate) struct StepContext<'a> {
+pub(crate) struct StepContext<'a, 'r> {
     current: StepId,
     step: &'a StepDef,
     graph: &'a WorkflowGraph,
     inputs: &'a ExecInputs,
-    gates: &'a mut GateLedger,
-    commits: &'a mut CommitLog,
-    loop_counts: &'a mut BTreeMap<StepId, u32>,
-    visited: &'a mut Vec<StepId>,
+    state: &'a mut RunState<'r>,
 }
 
 /// The result of executing exactly one step: which step to visit next (or
@@ -408,7 +524,7 @@ pub(crate) trait StepExecutor: sealed::Sealed {
     fn execute(
         &self,
         authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError>;
 }
 
@@ -418,7 +534,7 @@ impl StepExecutor for SequentialExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         Ok(StepEffect::advance(only_out_edge(ctx.graph, ctx.current)))
     }
@@ -430,7 +546,7 @@ impl StepExecutor for ConditionalExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         let cond = ctx
             .inputs
@@ -456,12 +572,12 @@ impl StepExecutor for LoopExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         let StepKind::Loop { max_iterations } = &ctx.step.kind else {
             unreachable!("dispatch only routes StepKind::Loop here")
         };
-        let count = ctx.loop_counts.entry(ctx.current).or_insert(0);
+        let count = ctx.state.loop_counts.entry(ctx.current).or_insert(0);
         *count += 1;
         if *count > *max_iterations {
             return Err(ExecError::LoopBoundExceeded(ctx.current));
@@ -498,7 +614,7 @@ impl StepExecutor for ModelCallExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         let StepKind::ModelCall { requested_model } = &ctx.step.kind else {
             unreachable!("dispatch only routes StepKind::ModelCall here")
@@ -528,7 +644,15 @@ impl StepExecutor for ModelCallExecutor {
                     break;
                 }
                 match decide_retry(budget, attempts_made, attempt.outcome) {
-                    RetryDecision::Retry => continue,
+                    RetryDecision::Retry => {
+                        // Charged before the retry is made. A step that
+                        // keeps retrying drains the run's budget even
+                        // though the step count never advances — the case
+                        // a wall-clock timeout would otherwise be wanted
+                        // for.
+                        ctx.state.charge(ctx.current, RETRY_ATTEMPT_COST)?;
+                        continue;
+                    }
                     RetryDecision::GiveUp | RetryDecision::ExhaustedButPermitted => {
                         return Err(ExecError::StepFailed(ctx.current, attempt.outcome));
                     }
@@ -537,7 +661,7 @@ impl StepExecutor for ModelCallExecutor {
         }
 
         if ctx.inputs.compensable.contains(&ctx.current) {
-            ctx.commits.record(ctx.current, ctx.inputs.run_id);
+            ctx.state.commits.record(ctx.current, ctx.inputs.run_id);
         }
 
         let mut effect = StepEffect::advance(only_out_edge(ctx.graph, ctx.current));
@@ -556,7 +680,7 @@ impl StepExecutor for HumanGateExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         let spec = ctx
             .inputs
@@ -569,6 +693,7 @@ impl StepExecutor for HumanGateExecutor {
             .get(&ctx.current)
             .ok_or(ExecError::GateNotDecided(ctx.current))?;
         let granted_edge = ctx
+            .state
             .gates
             .evaluate(spec, decision)
             .map_err(|e| ExecError::GateRefused(ctx.current, e))?;
@@ -589,7 +714,7 @@ impl StepExecutor for TerminalExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        _ctx: &mut StepContext<'_>,
+        _ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         Ok(StepEffect::terminal())
     }
@@ -603,7 +728,7 @@ impl StepExecutor for NotExecutableExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         Err(ExecError::NotExecutable(ctx.current))
     }
@@ -631,7 +756,7 @@ impl StepExecutor for DispatchExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         let (request, policy) = match (
             ctx.inputs.declared_dispatch_requests.get(&ctx.current),
@@ -683,7 +808,7 @@ impl StepExecutor for SemanticChangeExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         Err(ExecError::SemanticChangeNotGranted(ctx.current))
     }
@@ -713,7 +838,7 @@ impl StepExecutor for ParallelExecutor {
     fn execute(
         &self,
         _authority: StepAuthority,
-        ctx: &mut StepContext<'_>,
+        ctx: &mut StepContext<'_, '_>,
     ) -> Result<StepEffect, ExecError> {
         let current = ctx.current;
         let join_id = find_unique_join(ctx.graph, current)?;
@@ -732,15 +857,18 @@ impl StepExecutor for ParallelExecutor {
         let mut routed_models = Vec::new();
         let mut admitted_dispatches = Vec::new();
         for branch in branches {
-            let effect = dispatch_step(
-                branch,
-                ctx.graph,
-                ctx.inputs,
-                ctx.gates,
-                ctx.commits,
-                ctx.loop_counts,
-                ctx.visited,
-            )?;
+            // The second cancellation boundary: between branches, never
+            // inside one. A cancelled `Parallel` stops before the next
+            // branch and never reaches its `Join`, so the run ends without
+            // a join having claimed that every branch completed.
+            if ctx.state.cancel.observe(ctx.state.visited.len(), branch) {
+                return Ok(StepEffect {
+                    next: None,
+                    routed_models,
+                    admitted_dispatches,
+                });
+            }
+            let effect = dispatch_step(branch, ctx.graph, ctx.inputs, ctx.state)?;
             routed_models.extend(effect.routed_models);
             admitted_dispatches.extend(effect.admitted_dispatches);
             if effect.next != Some(join_id) {
@@ -748,7 +876,9 @@ impl StepExecutor for ParallelExecutor {
             }
         }
 
-        record_visit(ctx.visited, join_id)?;
+        ctx.state
+            .charge(join_id, step_cost(&StepKind::Join { parallel: current }))?;
+        ctx.state.record_visit(join_id)?;
         let after_join = only_out_edge(ctx.graph, join_id);
         Ok(StepEffect {
             next: Some(after_join),
@@ -769,14 +899,6 @@ fn find_unique_join(graph: &WorkflowGraph, parallel_id: StepId) -> Result<StepId
         (None, _) => Err(ExecError::NoJoinForParallel(parallel_id)),
         (Some(_), Some(_)) => Err(ExecError::AmbiguousJoinForParallel(parallel_id)),
     }
-}
-
-fn record_visit(visited: &mut Vec<StepId>, id: StepId) -> Result<(), ExecError> {
-    if visited.len() >= MAX_STEP_EXECUTIONS {
-        return Err(ExecError::StepLimitExceeded);
-    }
-    visited.push(id);
-    Ok(())
 }
 
 fn dispatch(kind: &StepKind) -> &'static dyn StepExecutor {
@@ -816,23 +938,21 @@ fn dispatch_step(
     current: StepId,
     graph: &WorkflowGraph,
     inputs: &ExecInputs,
-    gates: &mut GateLedger,
-    commits: &mut CommitLog,
-    loop_counts: &mut BTreeMap<StepId, u32>,
-    visited: &mut Vec<StepId>,
+    state: &mut RunState<'_>,
 ) -> Result<StepEffect, ExecError> {
-    record_visit(visited, current)?;
     let step = find_step(graph, current);
+    // Charged before the visit is recorded and before the step runs: a
+    // step the budget cannot cover never executes, and never appears in
+    // `visited` as though it had.
+    state.charge(current, step_cost(&step.kind))?;
+    state.record_visit(current)?;
     let authority = StepAuthority::grant();
     let mut ctx = StepContext {
         current,
         step,
         graph,
         inputs,
-        gates,
-        commits,
-        loop_counts,
-        visited,
+        state,
     };
     dispatch(&step.kind).execute(authority, &mut ctx)
 }
@@ -842,3 +962,6 @@ mod tests;
 
 #[cfg(test)]
 mod declared_dispatch_tests;
+
+#[cfg(test)]
+mod run_control_tests;

@@ -6,6 +6,7 @@
 //! new submodule from the start.
 
 use super::*;
+use crate::typed_workflow::claims::ClaimSet;
 use crate::typed_workflow::declared_dispatch::{DispatchError, DispatchPolicy, DispatchRequest};
 use crate::typed_workflow::graph::{
     DeclaredStepKind, EdgeDef, EdgeId, Port, PortId, PortType, StepDef,
@@ -48,6 +49,7 @@ fn declared_graph(kind: DeclaredStepKind) -> WorkflowGraph {
         steps: vec![declared, terminal(1)],
         edges: vec![edge(0, 0, 1)],
         entry: StepId(0),
+        claims: ClaimSet::none(),
     }
 }
 
@@ -283,6 +285,7 @@ fn admitting_five_different_kinds_in_one_run_records_five_distinct_decisions_and
         steps,
         edges,
         entry: StepId(0),
+        claims: ClaimSet::none(),
     };
 
     let mut inputs = ExecInputs::default();

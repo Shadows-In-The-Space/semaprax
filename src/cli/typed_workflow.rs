@@ -39,6 +39,7 @@ use std::path::{Path, PathBuf};
 
 use semaprax::diagnostic::Diagnostic;
 use semaprax::typed_workflow::checkpoint::Checkpoint;
+use semaprax::typed_workflow::claims::conflict_diagnostic;
 use semaprax::typed_workflow::declared_dispatch::{self, DispatchError};
 use semaprax::typed_workflow::graph::{DeclaredStepKind, StepKind};
 use semaprax::typed_workflow::graph_wire;
@@ -189,12 +190,30 @@ pub(crate) fn run_inspect(path: &Path) -> Result<String, Diagnostic> {
             step.out_ports.len()
         ));
     }
+    // Declared claims, reported but not checked: `inspect` never
+    // validates, so a document whose concurrent branches conflict is shown
+    // here in full and refused only by `validate`.
+    let mut claim_lines: Vec<String> = Vec::new();
+    for step in graph.claims.declaring_steps() {
+        for claim in graph.claims.of(step).into_iter().flatten() {
+            claim_lines.push(format!(
+                "  {} claims {} `{}`\n",
+                step.0,
+                claim.kind.as_str(),
+                claim.name
+            ));
+        }
+    }
     out.push_str(&format!("edges: {}\n", graph.edges.len()));
     for edge in &graph.edges {
         out.push_str(&format!(
             "  {} : {}.{} -> {}.{}\n",
             edge.id.0, edge.from.0, edge.from_port.0, edge.to.0, edge.to_port.0
         ));
+    }
+    out.push_str(&format!("claims: {}\n", claim_lines.len()));
+    for line in &claim_lines {
+        out.push_str(line);
     }
     out.push_str("status: INSPECTED (structural decode only; nothing was validated or run)\n");
     Ok(out)
@@ -208,6 +227,20 @@ pub(crate) fn run_validate(path: &Path) -> Result<String, Diagnostic> {
     let bytes = read_bounded(path, "workflow graph document")?;
     let graph = graph_wire::parse_graph(&bytes)?;
     graph.validate().map_err(|error| {
+        // A claim conflict keeps its own code and its own message. Every
+        // other refusal is a structural rule about the graph's shape;
+        // this one is an authoring error about what two concurrently-run
+        // branches *do*, it names a pair of branches and a claim rather
+        // than one step, and the owning module renders it -- this front
+        // never re-derives the finding, it asks
+        // `WorkflowGraph::first_claim_conflict` for the exact conflict
+        // validation just refused.
+        if let semaprax::typed_workflow::graph::GraphError::ConflictingConcurrentClaims(..) = error
+        {
+            if let Some(conflict) = graph.first_claim_conflict() {
+                return conflict_diagnostic(&conflict);
+            }
+        }
         check_failed(format!("{} does not validate: {error:?}", path.display()))
     })?;
     Ok(format!(

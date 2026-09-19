@@ -25,7 +25,18 @@
 //! admitted into the graph schema and validated structurally, but have no
 //! executor in this slice; running one is a defined refusal, not a silent
 //! no-op.
+//!
+//! A graph may also declare, per step, what that step claims exclusive use
+//! of while it runs ([`WorkflowGraph::claims`]). Declaring nothing is the
+//! default and changes nothing. Declaring claims is what lets
+//! [`WorkflowGraph::validate`] refuse a graph whose *concurrent* branches
+//! claim the same resource or semantic candidate — before anything runs,
+//! and therefore before `engine::run` (which validates first) could
+//! execute it at all. See [`super::claims`] for why that refusal is static
+//! rather than a runtime race detector, and for what a claim explicitly
+//! does not grant.
 
+use super::claims::{first_conflict_among, ClaimSet, Conflict};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Maximum steps admitted in one workflow graph. Bounds validation cost and
@@ -162,6 +173,16 @@ pub struct WorkflowGraph {
     pub steps: Vec<StepDef>,
     pub edges: Vec<EdgeDef>,
     pub entry: StepId,
+    /// What each step claims exclusive use of while it runs. Optional —
+    /// [`ClaimSet::none`] is a complete declaration meaning "this graph
+    /// declares nothing", and a graph that declares nothing validates and
+    /// runs exactly as it did before claims existed.
+    ///
+    /// Declaring them is what lets [`validate`](WorkflowGraph::validate)
+    /// refuse a graph whose concurrent branches claim the same thing,
+    /// before anything runs. See [`super::claims`] for why that refusal is
+    /// static rather than a runtime race detector.
+    pub claims: ClaimSet,
 }
 
 /// Closed validation failure vocabulary. Every variant is a specific,
@@ -192,6 +213,25 @@ pub enum GraphError {
     /// [`super::engine`] executes exactly one edge per non-branching step,
     /// so more than one would be a silent, unvalidated ambiguity.
     AmbiguousOutEdges(StepId),
+    /// [`WorkflowGraph::claims`] declares a claim for a step id this graph
+    /// does not contain. Refused rather than ignored: a claim silently
+    /// dropped because its step was renamed is exactly the claim that stops
+    /// protecting the branch it was written for.
+    ClaimForUnknownStep(StepId),
+    /// One step declares more than [`super::claims::MAX_CLAIMS_PER_STEP`]
+    /// claims.
+    TooManyClaims(StepId),
+    /// Two steps that this graph runs concurrently — two branches of one
+    /// [`StepKind::Parallel`] — declare an overlapping claim. The two step
+    /// ids are the conflicting branches, ascending.
+    ///
+    /// This is the static refusal of the issue's own named failure case,
+    /// "parallel branches can race on shared resources or semantic
+    /// candidates". [`WorkflowGraph::first_claim_conflict`] returns the
+    /// same finding with the claim itself attached, for a caller rendering
+    /// a diagnostic; see [`super::claims::conflict_diagnostic`] and its
+    /// stable code.
+    ConflictingConcurrentClaims(StepId, StepId),
 }
 
 impl WorkflowGraph {
@@ -351,7 +391,52 @@ impl WorkflowGraph {
             }
         }
 
+        self.check_claims()?;
         self.check_bounded_cycles()
+    }
+
+    /// The first conflict between two branches this graph runs
+    /// concurrently, or `None`.
+    ///
+    /// Public because [`validate`](WorkflowGraph::validate)'s `Copy`
+    /// [`GraphError`] can only carry the two step ids, while a caller
+    /// rendering a user-facing refusal needs the claim as well. Both go
+    /// through this one function, so the CLI front can never report a
+    /// different conflict from the one validation refused.
+    ///
+    /// Deterministic: `Parallel` steps are examined in the graph's own step
+    /// order, and each one's branches through
+    /// [`super::claims::first_conflict_among`]'s ascending pair order.
+    #[must_use]
+    pub fn first_claim_conflict(&self) -> Option<Conflict> {
+        if self.claims.is_empty() {
+            return None;
+        }
+        self.steps
+            .iter()
+            .filter(|step| matches!(step.kind, StepKind::Parallel))
+            .find_map(|step| first_conflict_among(&self.claims, step.id, &self.successors(step.id)))
+    }
+
+    /// Declared-claim checks, in a fixed order: every claim names a step
+    /// this graph has, no step declares more than the bound, and no two
+    /// concurrent branches claim the same thing.
+    fn check_claims(&self) -> Result<(), GraphError> {
+        for step in self.claims.declaring_steps() {
+            if self.step(step).is_none() {
+                return Err(GraphError::ClaimForUnknownStep(step));
+            }
+        }
+        if let Some(step) = self.claims.first_over_claim_bound() {
+            return Err(GraphError::TooManyClaims(step));
+        }
+        if let Some(conflict) = self.first_claim_conflict() {
+            return Err(GraphError::ConflictingConcurrentClaims(
+                conflict.left,
+                conflict.right,
+            ));
+        }
+        Ok(())
     }
 
     fn reachable_from(&self, start: StepId) -> BTreeSet<StepId> {
@@ -468,6 +553,7 @@ mod tests {
             ],
             edges: vec![edge(0, 0, 1), edge(1, 1, 2)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Ok(()));
     }
@@ -486,6 +572,7 @@ mod tests {
             ],
             edges: vec![],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -504,6 +591,7 @@ mod tests {
             }],
             edges: vec![],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Err(GraphError::DeadEnd(StepId(0))));
     }
@@ -522,6 +610,7 @@ mod tests {
             ],
             edges: vec![edge(0, 0, 1)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -553,6 +642,7 @@ mod tests {
             steps: vec![bool_out, int_in],
             edges: vec![edge(0, 0, 1)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Err(GraphError::TypeMismatch(EdgeId(0))));
     }
@@ -605,6 +695,7 @@ mod tests {
             steps,
             edges,
             entry: StepId(0),
+            claims: ClaimSet::none(),
         }
     }
 
@@ -697,6 +788,7 @@ mod tests {
             steps,
             edges,
             entry: StepId(0),
+            claims: ClaimSet::none(),
         }
     }
 
@@ -719,6 +811,7 @@ mod tests {
             ],
             edges: vec![edge(0, 0, 1)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -794,6 +887,7 @@ mod tests {
             ],
             edges: vec![edge(0, 0, 1), edge(1, 1, 2)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -820,6 +914,7 @@ mod tests {
             ],
             edges: vec![edge(0, 0, 1)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Err(GraphError::UnboundedLoop(StepId(0))));
     }
@@ -873,6 +968,7 @@ mod tests {
                 },
             ],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Ok(()));
     }
@@ -921,6 +1017,7 @@ mod tests {
                 },
             ],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -934,6 +1031,7 @@ mod tests {
             steps: vec![seq(0), seq(0)],
             edges: vec![],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -947,6 +1045,7 @@ mod tests {
             steps: vec![seq(0)],
             edges: vec![],
             entry: StepId(9),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Err(GraphError::UnknownEntry(StepId(9))));
     }
@@ -957,6 +1056,7 @@ mod tests {
             steps: vec![seq(0)],
             edges: vec![edge(0, 0, 5)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -976,6 +1076,7 @@ mod tests {
                 to_port: PortId(0),
             }],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -990,6 +1091,7 @@ mod tests {
             steps,
             edges: vec![],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Err(GraphError::TooManySteps));
     }
@@ -1021,6 +1123,7 @@ mod tests {
                 },
             ],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(
             graph.validate(),
@@ -1047,6 +1150,7 @@ mod tests {
             ],
             edges: vec![edge(0, 0, 1)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Ok(()));
     }
@@ -1075,6 +1179,7 @@ mod tests {
             ],
             edges: vec![edge(0, 0, 1)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Ok(()));
     }
@@ -1104,7 +1209,11 @@ mod tests {
             ],
             edges: vec![edge(0, 0, 1)],
             entry: StepId(0),
+            claims: ClaimSet::none(),
         };
         assert_eq!(graph.validate(), Ok(()));
     }
 }
+
+#[cfg(test)]
+mod claims_validation_tests;

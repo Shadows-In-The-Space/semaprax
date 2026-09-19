@@ -28,6 +28,7 @@ use serde_json::{Map, Value};
 
 use crate::diagnostic::Diagnostic;
 
+use super::claims::{ClaimKind, ClaimSet, ResourceClaim, MAX_CLAIMS_PER_STEP};
 use super::graph::{
     DeclaredStepKind, EdgeDef, EdgeId, Port, PortId, PortType, StepDef, StepId, StepKind,
     WorkflowGraph, MAX_STEPS,
@@ -48,6 +49,11 @@ const MAX_WIRE_BYTES: usize = 262_144;
 /// branch step), with slack. Checked independently of, and before,
 /// [`super::graph::WorkflowGraph::validate`]'s own structural checks.
 const MAX_EDGES: usize = MAX_STEPS * 4;
+
+/// Bound on the optional `claims` array length: every step may declare up
+/// to [`MAX_CLAIMS_PER_STEP`] claims, checked independently of, and before,
+/// [`super::graph::WorkflowGraph::validate`]'s own per-step bound.
+const MAX_CLAIM_ENTRIES: usize = MAX_STEPS * MAX_CLAIMS_PER_STEP;
 
 /// Bound on one step's `in_ports`/`out_ports` array length. No admitted
 /// [`StepKind`] declares more than two fixed ports ([`super::graph::THEN_PORT`]/
@@ -323,7 +329,20 @@ pub fn parse_graph(bytes: &[u8]) -> Result<WorkflowGraph, Diagnostic> {
     let value: Value = serde_json::from_str(text)
         .map_err(|error| malformed(format!("document is not valid JSON: {error}")))?;
     let map = as_object(&value, "document")?;
-    closed(map, &["schema", "entry", "steps", "edges"], "document")?;
+    // `claims` is the one optional top-level key: a v1 document written
+    // before claims existed declares none, and must keep decoding exactly
+    // as it did. Every other unknown key is still refused -- a document
+    // with `claim` or `claimss` is a typo an author needs told about, not
+    // a graph that silently races.
+    if map.contains_key("claims") {
+        closed(
+            map,
+            &["schema", "entry", "steps", "edges", "claims"],
+            "document",
+        )?;
+    } else {
+        closed(map, &["schema", "entry", "steps", "edges"], "document")?;
+    }
     let schema = as_str(field(map, "schema", "document")?, "document.schema")?;
     if schema != GRAPH_WIRE_SCHEMA {
         return Err(malformed(format!(
@@ -353,11 +372,58 @@ pub fn parse_graph(bytes: &[u8]) -> Result<WorkflowGraph, Diagnostic> {
         .enumerate()
         .map(|(index, entry)| parse_edge(entry, index))
         .collect::<Result<Vec<_>, _>>()?;
+    let claims = match map.get("claims") {
+        Some(value) => parse_claims(value)?,
+        None => ClaimSet::none(),
+    };
     Ok(WorkflowGraph {
         steps,
         edges,
         entry,
+        claims,
     })
+}
+
+/// Decodes the optional `claims` array: a flat list of
+/// `{"step": <id>, "kind": "resource"|"semantic-candidate", "name": "..."}`
+/// entries.
+///
+/// Flat rather than nested per step, so the shape matches `steps` and
+/// `edges` and one entry's refusal names one entry. `name` is an opaque
+/// string to this decoder and to everything downstream of it: it is never
+/// joined to a path, opened, or resolved (see [`super::claims`]).
+fn parse_claims(value: &Value) -> Result<ClaimSet, Diagnostic> {
+    let array = as_array(value, "document.claims")?;
+    if array.len() > MAX_CLAIM_ENTRIES {
+        return Err(malformed(format!(
+            "`document.claims` has more than {MAX_CLAIM_ENTRIES} entries"
+        )));
+    }
+    let mut claims = ClaimSet::none();
+    for (index, entry) in array.iter().enumerate() {
+        let what = format!("document.claims[{index}]");
+        let map = as_object(entry, &what)?;
+        closed(map, &["step", "kind", "name"], &what)?;
+        let step = StepId(as_u32(field(map, "step", &what)?, &format!("{what}.step"))?);
+        let kind = match as_str(field(map, "kind", &what)?, &format!("{what}.kind"))? {
+            "resource" => ClaimKind::Resource,
+            "semantic-candidate" => ClaimKind::SemanticCandidate,
+            other => {
+                return Err(malformed(format!(
+                    "`{what}.kind` must be `resource` or `semantic-candidate`, got `{other}`"
+                )))
+            }
+        };
+        let name = as_str(field(map, "name", &what)?, &format!("{what}.name"))?;
+        claims.declare(
+            step,
+            ResourceClaim {
+                kind,
+                name: name.to_owned(),
+            },
+        );
+    }
+    Ok(claims)
 }
 
 #[cfg(test)]

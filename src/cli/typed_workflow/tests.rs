@@ -319,3 +319,113 @@ fn this_front_spawns_no_process_reaches_no_network_and_writes_nothing() {
     assert!(!source.contains("fs::create_dir"));
     assert!(!source.contains("OpenOptions"));
 }
+
+// ---------------------------------------------------------------------
+// Declared claims: `inspect` reports them, `validate` refuses a conflict
+// under its own stable code.
+// ---------------------------------------------------------------------
+
+/// A bounded `Parallel`/`Join` graph whose two concurrent branches both
+/// claim the same resource. Structurally decodable; refused by `validate`.
+const CONFLICTING_CLAIMS_GRAPH: &str = r#"{
+    "schema": "semaprax.typed-workflow.graph.v1",
+    "entry": 0,
+    "steps": [
+        {"id": 0, "kind": "parallel", "in_ports": [],
+         "out_ports": [{"id": 0, "ty": "unit"}, {"id": 1, "ty": "unit"}]},
+        {"id": 10, "kind": "sequential", "in_ports": [{"id": 0, "ty": "unit"}],
+         "out_ports": [{"id": 0, "ty": "unit"}]},
+        {"id": 11, "kind": "sequential", "in_ports": [{"id": 0, "ty": "unit"}],
+         "out_ports": [{"id": 0, "ty": "unit"}]},
+        {"id": 1, "kind": "join", "parallel": 0,
+         "in_ports": [{"id": 0, "ty": "unit"}, {"id": 1, "ty": "unit"}],
+         "out_ports": [{"id": 0, "ty": "unit"}]},
+        {"id": 2, "kind": "terminal", "in_ports": [{"id": 0, "ty": "unit"}],
+         "out_ports": []}
+    ],
+    "edges": [
+        {"id": 0, "from": 0, "from_port": 0, "to": 10, "to_port": 0},
+        {"id": 1, "from": 0, "from_port": 1, "to": 11, "to_port": 0},
+        {"id": 2, "from": 10, "from_port": 0, "to": 1, "to_port": 0},
+        {"id": 3, "from": 11, "from_port": 0, "to": 1, "to_port": 1},
+        {"id": 4, "from": 1, "from_port": 0, "to": 2, "to_port": 0}
+    ],
+    "claims": [
+        {"step": 10, "kind": "resource", "name": "workspace/main"},
+        {"step": 11, "kind": "resource", "name": "workspace/main"}
+    ]
+}"#;
+
+/// The same graph with the second branch claiming something else: the
+/// negative control proving the refusal below is about the overlap and not
+/// about claims existing at all.
+fn disjoint_claims_graph() -> String {
+    CONFLICTING_CLAIMS_GRAPH.replace(
+        r#"{"step": 11, "kind": "resource", "name": "workspace/main"}"#,
+        r#"{"step": 11, "kind": "resource", "name": "workspace/side"}"#,
+    )
+}
+
+#[test]
+fn validate_refuses_conflicting_concurrent_claims_under_its_own_stable_code() {
+    let dir = scratch_dir("validate-claim-conflict");
+    let path = write(&dir, "graph.json", CONFLICTING_CLAIMS_GRAPH.as_bytes());
+    let error = run_validate(&path).unwrap_err();
+    assert_eq!(error.code, "SPX-Z925");
+    // Distinct from every other validation refusal, which keeps SPX-Z924.
+    assert_ne!(error.code, "SPX-Z924");
+    // And actionable: both branches and the exact claim, not just "invalid".
+    assert!(error.message.contains(" 10 "), "{}", error.message);
+    assert!(error.message.contains(" 11 "), "{}", error.message);
+    assert!(
+        error.message.contains("workspace/main"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn validate_admits_the_same_graph_with_disjoint_claims() {
+    let dir = scratch_dir("validate-claim-disjoint");
+    let path = write(&dir, "graph.json", disjoint_claims_graph().as_bytes());
+    let report = run_validate(&path).unwrap();
+    assert!(report.contains("status: VALID"));
+}
+
+#[test]
+fn inspect_reports_declared_claims_without_checking_them() {
+    // `inspect` never validates, so the conflicting document is shown in
+    // full rather than refused -- the same relationship `inspect` already
+    // has to every other rule `validate` owns.
+    let dir = scratch_dir("inspect-claims");
+    let path = write(&dir, "graph.json", CONFLICTING_CLAIMS_GRAPH.as_bytes());
+    let report = run_inspect(&path).unwrap();
+    assert!(report.contains("claims: 2"), "{report}");
+    assert!(
+        report.contains("10 claims resource `workspace/main`"),
+        "{report}"
+    );
+    assert!(
+        report.contains("11 claims resource `workspace/main`"),
+        "{report}"
+    );
+    assert!(report.contains("status: INSPECTED"));
+}
+
+#[test]
+fn inspect_reports_no_claims_for_a_graph_that_declares_none() {
+    let dir = scratch_dir("inspect-no-claims");
+    let path = write(&dir, "graph.json", VALID_GRAPH.as_bytes());
+    let report = run_inspect(&path).unwrap();
+    assert!(report.contains("claims: 0"), "{report}");
+}
+
+#[test]
+fn the_claim_conflict_refusal_is_deterministic() {
+    let dir = scratch_dir("validate-claim-determinism");
+    let path = write(&dir, "graph.json", CONFLICTING_CLAIMS_GRAPH.as_bytes());
+    let first = run_validate(&path).unwrap_err();
+    let second = run_validate(&path).unwrap_err();
+    assert_eq!(first.code, second.code);
+    assert_eq!(first.message, second.message);
+}

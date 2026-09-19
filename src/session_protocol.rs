@@ -44,14 +44,18 @@
 //! is a different, unrelated existing use of the word "protocol" --
 //! [`crate::protocol_check`] projects `.spx` `protocol` *interface*
 //! declarations, a body-less method-signature construct with no relation
-//! to message order), a parser diagnostic, an HIR node, a verifier rule, a
-//! semantic-graph/architecture/Assurance-Manifest projection, or
+//! to message order), a parser diagnostic, an HIR node, a verifier rule, or
 //! native/Wasm lowering. Wiring a declared `ProtocolSpec` to real checked
-//! HIR locals and projecting it into the graph/architecture/assurance
-//! outputs is exactly the parser/HIR/verifier/graph generalization this
+//! HIR locals is exactly the parser/HIR/verifier generalization this
 //! reference module intentionally leaves open --
 //! [`docs/SESSION-PROTOCOL-TYPES-V1.md`](../../docs/SESSION-PROTOCOL-TYPES-V1.md)
 //! records the full design and this exact scope boundary.
+//!
+//! `src/graph/session_protocol_facet.rs` does project this module's own
+//! fixed catalog (not any `.spx`-declared protocol -- none exists) into the
+//! `graph` command and `context`'s `session_protocol` filter, as explicitly
+//! disclosed reference data. No `architecture`/`Assurance-Manifest`
+//! projection exists.
 //!
 //! # A protocol state is not authority
 //!

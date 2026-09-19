@@ -10,7 +10,7 @@ direction selects v2:
 semaprax context <file|project> <symbol|stable-id>
   --direction forward|reverse|both
   [--depth N] [--max-bytes N] [--max-nodes N]
-  [--filters contracts,ownership,effects,types,targets,diagnostics,tests]
+  [--filters contracts,ownership,effects,types,targets,diagnostics,tests,session_protocol]
 ```
 
 Selecting a Project directory or its `semaprax.toml` authenticates the whole
@@ -112,6 +112,31 @@ No partial ownership inventory or cleanup plan is returned as a complete fact.
 The same graph facts are available through ordinary Graph v34 and through
 ProgramRoot's separately versioned generic-ownership node. The query grants no
 execution, mutation, publication, or generic ABI authority.
+
+## Session-protocol kernel reference (issue #206)
+
+`session_protocol` is a sixth filter, unlike the other five: it is
+envelope-level, not per-function. When selected, the top-level
+`session_protocol_kernel` key carries a bounded summary of this compiler's
+built-in `session_protocol` reference-kernel catalog (`model_stream_protocol`,
+`resource_transaction_protocol`, `project_agent_session_protocol`): each
+spec's name, declared state set, initial/terminal states, transition count,
+and whether `ProtocolSpec::validate`/bounded model-checking accept it. When
+not selected, the key is absent -- matching how `generic_instance_ownership`
+is present on a template fact only when `types` or `ownership` is selected.
+It is listed in `filter_support.included`, since real content is genuinely
+emitted when selected (unlike `targets`/`diagnostics`/`tests`, which stay
+`unavailable`).
+
+This is declaration-independent reference data, not a fact about the queried
+`.spx` program: no declaration in that program is consulted to produce it, no
+declaration is bound to a `ProtocolSpec`, and no runtime subsystem calls into
+that kernel's `SessionTable` -- `project_agent_session_protocol`'s own
+transcription source (`project_transport::session`) still performs its own
+hand-rolled checks. The `session_protocol_kernel.note` field carries this same
+disclosure so an agent reading raw JSON sees it without this document. See
+`src/graph/session_protocol_facet.rs` and
+[Session/protocol types v1](SESSION-PROTOCOL-TYPES-V1.md).
 
 ## Compatibility and evidence boundary
 

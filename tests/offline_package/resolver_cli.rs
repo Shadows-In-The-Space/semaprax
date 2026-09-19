@@ -68,7 +68,7 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
         ),
         ("semaprax add <dir>|semaprax.toml <package> <range>\n", ""),
         ("semaprax fetch <cache-dir> <subject.json>...\n", ""),
-        ("semaprax context <file|project> <symbol|stable-id> [--direction forward|reverse|both] [--depth N] [--max-bytes N] [--max-nodes N] [--filters contracts,ownership,effects,types,targets,diagnostics,tests]\n", "semaprax context <file> <symbol|stable-id> [--direction forward|reverse|both] [--depth N] [--max-bytes N] [--max-nodes N] [--filters contracts,ownership,effects,types,targets,diagnostics,tests]\n"),
+        ("semaprax context <file|project> <symbol|stable-id> [--direction forward|reverse|both] [--depth N] [--max-bytes N] [--max-nodes N] [--filters contracts,ownership,effects,types,targets,diagnostics,tests,session_protocol]\n", "semaprax context <file> <symbol|stable-id> [--direction forward|reverse|both] [--depth N] [--max-bytes N] [--max-nodes N] [--filters contracts,ownership,effects,types,targets,diagnostics,tests,session_protocol]\n"),
         ("semaprax query <project> declarations [--kind <kind>[,<kind>]] [--name <text>] [--id <prefix>] [--effect <effect>] [--calls <stable-id>] [--called-by <stable-id>] [--offset N] [--limit N] [--revision digest]\n", ""),
         ("semaprax query <project> symbol <stable-id> [--revision digest]\n", ""),
         ("semaprax query <project> context <declaration|capability> <target> [--direction forward|reverse|both] [--depth N] [--max-bytes N] [--max-nodes N] [--revision digest]\n", ""),
@@ -149,6 +149,14 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
     const MCP_LINE: &str = "semaprax serve-workspace-mcp <manifest> <host-policy.json>\n";
     assert_eq!(current.matches(MCP_LINE).count(), 1);
     current = current.replacen(MCP_LINE, "", 1);
+    // `context`'s `session_protocol` filter (issue #206) was added after
+    // these witnesses were pinned. Normalize it away here, exactly as every
+    // other intentional usage addition above is, so the historical byte and
+    // digest pins below keep describing the surface they were taken from.
+    const SESSION_PROTOCOL_FILTER_LINE: &str = "semaprax context <file> <symbol|stable-id> [--direction forward|reverse|both] [--depth N] [--max-bytes N] [--max-nodes N] [--filters contracts,ownership,effects,types,targets,diagnostics,tests,session_protocol]\n";
+    const LEGACY_FILTER_LINE: &str = "semaprax context <file> <symbol|stable-id> [--direction forward|reverse|both] [--depth N] [--max-bytes N] [--max-nodes N] [--filters contracts,ownership,effects,types,targets,diagnostics,tests]\n";
+    assert_eq!(current.matches(SESSION_PROTOCOL_FILTER_LINE).count(), 1);
+    current = current.replacen(SESSION_PROTOCOL_FILTER_LINE, LEGACY_FILTER_LINE, 1);
     const CACHE_LINES: [&str; 5] = [
         "semaprax semantic-cache-init <store-root>\n",
         "semaprax semantic-cache-persist <manifest> <store-root>\n",

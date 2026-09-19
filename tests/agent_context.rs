@@ -324,6 +324,81 @@ fn filters_are_exact_and_unsupported_graph_facets_are_honest() {
 }
 
 #[test]
+fn session_protocol_filter_is_envelope_level_declaration_independent_and_opt_in() {
+    // Issue #206: `session_protocol` is unlike every other filter here -- its
+    // content does not depend on the queried declaration at all (it is the
+    // same catalog for `ctx.root` as for `ctx.leaf`), which is exactly the
+    // honest constraint this facet documents in its own `"note"` field.
+    let program = program();
+    let without = options(0, 16 * 1024, 2, &[AgentContextFilter::Effects]);
+    let with = options(
+        0,
+        16 * 1024,
+        2,
+        &[
+            AgentContextFilter::Effects,
+            AgentContextFilter::SessionProtocol,
+        ],
+    );
+
+    let json_without = graph::agent_context_json(&program, "ctx.root", &without)
+        .unwrap()
+        .unwrap();
+    assert!(!json_without.contains("session_protocol_kernel"));
+
+    let json_with = graph::agent_context_json(&program, "ctx.root", &with)
+        .unwrap()
+        .unwrap();
+    assert!(json_with.contains("\"included\":[\"effects\",\"session_protocol\"]"));
+    assert!(json_with.contains("\"session_protocol_kernel\":{\"note\":"));
+    for name in [
+        "model-stream-v1",
+        "resource-transaction-v1",
+        "project-agent-session-v1",
+    ] {
+        assert!(
+            json_with.contains(&format!("\"name\":\"{name}\"")),
+            "{json_with}"
+        );
+    }
+    assert!(!json_with.contains("\"well_formed\":false"), "{json_with}");
+    assert!(
+        !json_with.contains("\"model_checked\":false"),
+        "{json_with}"
+    );
+    // The `context` envelope is bounded: the summary carries no transition
+    // detail (unlike `graph::session_protocol_kernel_json()`'s full catalog).
+    assert!(!json_with.contains("\"transitions\""), "{json_with}");
+    assert!(
+        json_with.contains("not a fact about the queried .spx source"),
+        "{json_with}"
+    );
+    assert!(
+        json_with.contains("no runtime subsystem calls into"),
+        "{json_with}"
+    );
+    assert_independent_json_parse(&json_with);
+
+    // Determinism: identical query, identical bytes, on two independent calls.
+    let replayed = graph::agent_context_json(&program, "ctx.root", &with)
+        .unwrap()
+        .unwrap();
+    assert_eq!(json_with, replayed);
+
+    // Declaration-independence: a wholly different root gets the identical
+    // catalog fragment (only the surrounding per-function fact differs).
+    let json_leaf = graph::agent_context_json(&program, "ctx.leaf", &with)
+        .unwrap()
+        .unwrap();
+    let extract = |json: &str| -> String {
+        let start = json.find("\"session_protocol_kernel\":").unwrap();
+        let end = json[start..].find(",\"frontier\"").unwrap() + start;
+        json[start..end].to_owned()
+    };
+    assert_eq!(extract(&json_with), extract(&json_leaf));
+}
+
+#[test]
 fn supported_facets_close_nominal_references_without_lifecycle_or_import_edges() {
     let source = r#"
 module test.agent_reference_closure;

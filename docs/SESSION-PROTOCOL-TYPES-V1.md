@@ -5,8 +5,11 @@ a bounded session/protocol type model applied to two real subsystems. This
 slice delivers a Rust-level protocol declaration, an affine typed endpoint,
 and a runtime engine (`src/session_protocol/`) proving the message-order,
 ownership and authority properties, plus this design. It adds no `.spx`
-syntax, HIR node, verifier rule, or graph/architecture/Assurance-Manifest
-projection -- see [Scope boundary](#scope-boundary).
+syntax, HIR node, or verifier rule -- see [Scope boundary](#scope-boundary).
+A later session added a `graph`/`context` projection of this module's own
+fixed catalog as declaration-independent reference data (`session_protocol_kernel`,
+[Acceptance criteria](#acceptance-criteria-met-here-versus-open)'s "Protocol
+facts" row); `architecture`/`Assurance-Manifest` projections remain absent.
 
 Audience: compiler contributors implementing the source-syntax/HIR/backend
 generalization this document specifies, and reviewers auditing what this
@@ -425,15 +428,20 @@ requires to be unique) is normalized out of both traces.
 
 Explicitly **not** done in this slice, and why:
 
-- **No `.spx` syntax, HIR node, verifier rule, or graph/architecture/
-  Assurance-Manifest projection.** The repository's change protocol
-  requires parser, canonical formatter, resolver/HIR, verifier, semantic
-  graph, native backend, and Wasm backend to move together once syntax
-  carries runtime meaning; landing a half-wired parser rule with no checked
-  HIR consumer would violate that protocol rather than satisfy it. This is
-  the same scope boundary `resumable_effects` and `live_invocation` already
-  document for their own boundaries, and this document is the design a
-  follow-up parser/HIR/graph tranche implements against.
+- **No `.spx` syntax, HIR node, or verifier rule.** The repository's change
+  protocol requires parser, canonical formatter, resolver/HIR, verifier,
+  semantic graph, native backend, and Wasm backend to move together once
+  syntax carries runtime meaning; landing a half-wired parser rule with no
+  checked HIR consumer would violate that protocol rather than satisfy it.
+  This is the same scope boundary `resumable_effects` and `live_invocation`
+  already document for their own boundaries, and this document is the
+  design a follow-up parser/HIR/graph tranche implements against. (A later
+  session did add a `graph`/`context` projection of this module's own fixed
+  catalog -- `session_protocol_kernel`, declaration-independent reference
+  data, not a projection of any `.spx`-declared protocol, since none exists;
+  see `src/graph/session_protocol_facet.rs` and the "Protocol facts" row of
+  [Acceptance criteria](#acceptance-criteria-met-here-versus-open). No
+  `architecture`/`Assurance-Manifest` projection exists.)
 - **No compiler-checked ownership analysis.** `Endpoint`'s affinity is
   enforced by Rust's own move checker and a runtime drop bomb over a
   reference kernel's own values, not the compiler's alias/uniqueness
@@ -478,7 +486,7 @@ Explicitly **not** done in this slice, and why:
 | Invalid order is rejected before runtime | **Static declaration defects**: at spec-validation time (`SpecError`, before any session opens). **Message-order defects**: at the engine's own runtime check (`IllegalTransition` etc.) -- not before compilation, since the protocol is declared data in this slice, not `.spx` source the compiler itself parses. The one case genuinely caught by `rustc` at compile time is presenting an already-consumed `Endpoint` binding a second time, and presenting a `Grant` for the wrong capability marker type. |
 | Ownership and authority are coupled to protocol state | **Met at the reference-kernel level**: `required_capability` and `OwnershipMove` are per-transition fields the engine checks alongside state/order, and are proven independently failing from state/order correctness (`missing_authority_is_refused_even_in_correct_order`). |
 | Failure/cancellation/uncertainty remain explicit | **Met**: `Cancel`/`Timeout`/`Fail` are ordinary declared transitions with their own cleanup; `Timeout` is routed to a distinct `Uncertain` terminal in both applied protocols. |
-| Protocol facts appear in context, graph, architecture, and assurance outputs | **Open.** No projection into `graph`, `architecture_claims`, or `assurance_manifest` exists in this slice -- each requires the parser/HIR/graph tranche above to have a real `.spx`-declared protocol to project in the first place; projecting a Rust-only reference kernel would be a second, disconnected source of truth. |
+| Protocol facts appear in context, graph, architecture, and assurance outputs | **Half met, deliberately as reference data, not as a real projection.** A later session decided the `graph`/`context` half of this row is buildable now, without waiting for the `.spx`-declared-protocol tranche: `src/graph/session_protocol_facet.rs` projects this module's fixed built-in catalog (name/states/initial/terminal/transition-count/well-formed/model-checked, plus full transitions in `graph`) as `session_protocol_kernel` -- unconditionally in the whole-module `graph` command, and behind the new opt-in `AgentContextFilter::SessionProtocol` (`--filters session_protocol`) at the `context` v1/v2 envelope level. This is exactly the "second, disconnected source of truth" this row named as the reason not to do it: no `.spx` declaration is consulted or bound to a `ProtocolSpec`, and the projection's own `"note"` field says so in the emitted JSON rather than leaving that disclosure only in this document. `architecture_claims` and `assurance_manifest` remain untouched -- assurance's own `model_checking` submodule is an unrelated authorization/handle-model obligation lattice, not a natural home for this kernel's catalog, and wiring either without a real `.spx`-declared protocol would repeat the same disconnected-source-of-truth concern this table already raised once. |
 | Applied subsystem regressions and bounded model-checking integration (required tests/evidence) | **Bounded model-checking: met**, at the graph-shape level -- `model_check::check_bounded` (see [Bounded model-checking](#bounded-model-checking)), exercised against all three applied protocols including the real-subsystem transcription. **Applied subsystem regression: still not fully met** -- `tests/applied_project_session.rs` regresses the *transcribed* topology (happy path, missing-authority, missing-token, illegal-order, the universal `shutdown` escape, and a hostile mutation of the transcription's one unevidenced transition), but that is a regression protecting this module's own copy of the real shape, not a regression that runs against `project_transport::session`'s actual code and would fail if that module's real behavior drifted. |
 
 ## Gate

@@ -27,9 +27,11 @@ mod environment;
 mod expression;
 mod filesystem;
 mod filesystem_outcome;
+mod function_facts;
 mod function_values;
 mod owned_iterator;
 mod process;
+mod session_protocol_facet;
 use expression::expr_json;
 mod generic_instances;
 mod generic_mapping;
@@ -79,6 +81,32 @@ pub fn to_json(program: &Program) -> Result<String, Vec<Diagnostic>> {
     to_hir_json(&resolved, &revision).map_err(|diagnostic| vec![diagnostic])
 }
 
+/// Issue #206: this compiler's built-in `session_protocol` reference-kernel
+/// catalog (`model_stream_protocol`, `resource_transaction_protocol`,
+/// `project_agent_session_protocol`), as deterministic, declaration-
+/// independent reference data -- **not** merged into [`to_json`]'s per-program
+/// output.
+///
+/// This is a fixed value: it does not take a `Program` because it reports
+/// nothing about one. It is deliberately kept out of the whole-module graph
+/// document: `workspace_graph`'s `builder_bytes` forecast (`SPX-G171`,
+/// `MAX_BUILDER_BYTES`) measures per-module cost by literally rendering each
+/// module through this same graph serializer, and that ceiling is already
+/// calibrated within a few percent of a real corpus
+/// (`docs/COMPLETION-MATRIX.md`'s "Whole-project and per-function compiler
+/// capacity ceilings" row) -- adding fixed bytes to every module's graph
+/// output regressed three of its tests when tried in this lane's own
+/// development (two capacity-ceiling assertions and one exact digest pin).
+/// [`crate::graph::AgentContextFilter::SessionProtocol`]'s `context` facet is
+/// this projection's CLI/agent-reachable route; this function is its stable
+/// Rust API for callers that want the same catalog independent of any query.
+/// See `session_protocol_facet`'s module doc for exactly what a "protocol
+/// fact" is here and is not.
+#[must_use]
+pub fn session_protocol_kernel_json() -> String {
+    session_protocol_facet::full_catalog_json()
+}
+
 /// Resolve and return a bounded call-dependency slice.
 ///
 /// `symbol` may be either a function's display name or its persistent
@@ -120,10 +148,16 @@ pub enum AgentContextFilter {
     Targets,
     Diagnostics,
     Tests,
+    /// Issue #206: this repository's built-in `session_protocol` reference
+    /// kernel's catalog, attached at the envelope level (not named
+    /// "protocol" alone -- see `session_protocol_facet`'s module doc for why
+    /// that would collide with the unrelated `.spx` `protocol` interface
+    /// construct `crate::protocol_check` already projects).
+    SessionProtocol,
 }
 
 impl AgentContextFilter {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Contracts,
         Self::Ownership,
         Self::Effects,
@@ -131,6 +165,7 @@ impl AgentContextFilter {
         Self::Targets,
         Self::Diagnostics,
         Self::Tests,
+        Self::SessionProtocol,
     ];
 
     #[must_use]
@@ -143,6 +178,7 @@ impl AgentContextFilter {
             Self::Targets => "targets",
             Self::Diagnostics => "diagnostics",
             Self::Tests => "tests",
+            Self::SessionProtocol => "session_protocol",
         }
     }
 
@@ -155,7 +191,7 @@ impl AgentContextFilter {
     const fn supported_by_graph_v10(self) -> bool {
         matches!(
             self,
-            Self::Contracts | Self::Ownership | Self::Effects | Self::Types
+            Self::Contracts | Self::Ownership | Self::Effects | Self::Types | Self::SessionProtocol
         )
     }
 }
@@ -866,138 +902,7 @@ fn agent_function_calls(
         .collect()
 }
 
-fn agent_function_json(
-    program: &ResolvedProgram,
-    function: &ResolvedFunction,
-    filters: &BTreeSet<AgentContextFilter>,
-) -> Result<String, Diagnostic> {
-    agent_function_json_for_schema(
-        program,
-        function,
-        filters,
-        nested_owned::legacy_graph_schema(program)?,
-    )
-}
-
-fn agent_function_json_for_schema(
-    program: &ResolvedProgram,
-    function: &ResolvedFunction,
-    filters: &BTreeSet<AgentContextFilter>,
-    schema: &str,
-) -> Result<String, Diagnostic> {
-    let calls = agent_function_calls(program, function);
-    let mut propagations = Vec::new();
-    collect_result_propagations(&function.body, &mut propagations);
-    let mut output = format!(
-        "{{\"id\":{},\"kind\":\"function\",\"name\":{},\"calls\":{},\"reference_index\":{}",
-        quote_json(function.id.as_str()),
-        quote_json(&function.name),
-        string_array(
-            &calls
-                .iter()
-                .map(|id| id.as_str().to_owned())
-                .collect::<Vec<_>>(),
-        ),
-        agent_reference_index_json(program, function)?
-    );
-    if schema == "semaprax.graph.v14" || graph_schema_includes_modern_composite_facts(schema) {
-        write!(
-            output,
-            ",\"call_instances\":[{}],\"body\":{}",
-            agent_call_instances_json(function),
-            agent_contract_expr_json(&function.body)?,
-        )
-        .expect("writing to a string cannot fail");
-    }
-    if !propagations.is_empty() {
-        write!(
-            output,
-            ",\"result_propagations\":[{}]",
-            propagations
-                .into_iter()
-                .map(result_propagation_json)
-                .collect::<Vec<_>>()
-                .budgeted_join(",")
-        )
-        .expect("writing to a string cannot fail");
-    }
-    if filters.contains(&AgentContextFilter::Contracts) {
-        write!(
-            output,
-            ",\"contracts\":{{\"requires\":[{}],\"ensures\":[{}]}}",
-            function
-                .requires
-                .iter()
-                .map(agent_contract_expr_json)
-                .collect::<Result<Vec<_>, _>>()?
-                .budgeted_join(","),
-            function
-                .ensures
-                .iter()
-                .map(agent_contract_expr_json)
-                .collect::<Result<Vec<_>, _>>()?
-                .budgeted_join(",")
-        )
-        .expect("writing to a string cannot fail");
-    }
-    if filters.contains(&AgentContextFilter::Ownership) {
-        let result = result_ownership(program, &function.return_type)?;
-        write!(
-            output,
-            ",\"ownership\":{{\"parameters\":[{}],\"result\":{}}}",
-            function
-                .params
-                .iter()
-                .map(|parameter| format!(
-                    "{{\"id\":{},\"mode\":{}}}",
-                    quote_json(parameter.id.as_str()),
-                    quote_json(ownership_text(parameter.ownership))
-                ))
-                .collect::<Vec<_>>()
-                .budgeted_join(","),
-            quote_json(ownership_text(result))
-        )
-        .expect("writing to a string cannot fail");
-    }
-    if filters.contains(&AgentContextFilter::Effects) {
-        write!(output, ",\"effects\":{}", string_array(&function.effects))
-            .expect("writing to a string cannot fail");
-    }
-    if filters.contains(&AgentContextFilter::Types) {
-        let mut selected_types = BTreeSet::new();
-        collect_function_type_declarations(function, &mut selected_types);
-        close_type_declarations(program, &mut selected_types)?;
-        let selected_functions = BTreeSet::from([function.id.clone()]);
-        write!(
-            output,
-            ",\"types\":{{\"parameters\":[{}],\"result\":{},\"facts\":[{}],\"declarations\":[{}]}}",
-            function
-                .params
-                .iter()
-                .map(|parameter| format!(
-                    "{{\"id\":{},\"type_id\":{}}}",
-                    quote_json(parameter.id.as_str()),
-                    quote_json(&parameter.ty.identity_key())
-                ))
-                .collect::<Vec<_>>()
-                .budgeted_join(","),
-            quote_json(&function.return_type.identity_key()),
-            type_facts_array(program, &selected_functions, &selected_types)?,
-            agent_type_declarations_json(program, &selected_types)?
-        )
-        .expect("writing to a string cannot fail");
-    }
-    if graph_schema_includes_loans(schema) {
-        write!(
-            output,
-            ",\"loans\":{}",
-            crate::graph_loan::loan_plan_json(&function.loan_plan)
-        )
-        .expect("writing to a string cannot fail");
-    }
-    output.push('}');
-    Ok(output)
-}
+use function_facts::agent_function_json;
 
 fn agent_call_instances_json(function: &ResolvedFunction) -> String {
     let mut calls = Vec::new();
@@ -3236,9 +3141,27 @@ fn render_agent_context(
         .map(|fact| fact.depth)
         .max()
         .unwrap_or(0);
+    // Issue #206: envelope-level, declaration-independent reference data --
+    // see `session_protocol_facet`'s module doc for exactly what this is and
+    // is not a fact about. Present only when selected (like every other
+    // filter-gated field in this envelope), so an unrelated query's bytes
+    // are unaffected -- following the same optional-leading-comma-fragment
+    // idiom `portable_indexed_byte_data_json` already uses in `graph`'s own
+    // header.
+    let session_protocol_kernel = if options
+        .filters
+        .contains(&AgentContextFilter::SessionProtocol)
+    {
+        format!(
+            ",\"session_protocol_kernel\":{}",
+            session_protocol_facet::summary_catalog_json()
+        )
+    } else {
+        String::new()
+    };
     let render = |used_bytes: usize| {
         format!(
-            "{{\"schema\":\"semaprax.agent-context.v1\",\"source_graph_schema\":{},\"revision\":{},\"prelude\":{{\"schema\":{},\"digest\":{}}},\"module\":{},\"root\":{},\"query\":{{\"depth\":{},\"max_bytes\":{},\"max_nodes\":{},\"filters\":[{}]}},\"filter_support\":{{\"included\":[{}],\"unavailable\":[{}]}},\"budget\":{{\"used_bytes\":{},\"used_nodes\":{},\"max_depth_used\":{}}},\"truncation\":{{\"truncated\":{},\"reasons\":[{}],\"omitted_known_nodes\":{},\"deferred_known_nodes\":{},\"omitted_fact_bytes\":{},\"unavailable_filter_count\":{}}},\"resume_contract\":{{\"depth\":\"query.depth\",\"max_nodes\":\"query.max_nodes\",\"filters\":\"query.filters\",\"max_bytes\":\"frontier.resume.min_bytes\"}},\"frontier\":[{}],\"facts\":[{}]}}",
+            "{{\"schema\":\"semaprax.agent-context.v1\",\"source_graph_schema\":{},\"revision\":{},\"prelude\":{{\"schema\":{},\"digest\":{}}},\"module\":{},\"root\":{},\"query\":{{\"depth\":{},\"max_bytes\":{},\"max_nodes\":{},\"filters\":[{}]}},\"filter_support\":{{\"included\":[{}],\"unavailable\":[{}]}},\"budget\":{{\"used_bytes\":{},\"used_nodes\":{},\"max_depth_used\":{}}},\"truncation\":{{\"truncated\":{},\"reasons\":[{}],\"omitted_known_nodes\":{},\"deferred_known_nodes\":{},\"omitted_fact_bytes\":{},\"unavailable_filter_count\":{}}},\"resume_contract\":{{\"depth\":\"query.depth\",\"max_nodes\":\"query.max_nodes\",\"filters\":\"query.filters\",\"max_bytes\":\"frontier.resume.min_bytes\"}}{},\"frontier\":[{}],\"facts\":[{}]}}",
             quote_json(source_identity.schema),
             quote_json(source_identity.revision),
             quote_json(prelude_binding::schema(program)),
@@ -3260,6 +3183,7 @@ fn render_agent_context(
             omitted_known.len().saturating_sub(frontier.len()),
             omitted_fact_bytes,
             unavailable_count,
+            session_protocol_kernel,
             frontier_json,
             facts_json
         )
@@ -3454,9 +3378,25 @@ fn render_agent_context_v2(
         .max()
         .unwrap_or(0);
     let deferred_traversal = omitted_traversal.len().saturating_sub(frontier.len());
+    // Issue #206: envelope-level, declaration-independent reference data --
+    // see `session_protocol_facet`'s module doc for exactly what this is and
+    // is not a fact about. Present only when selected -- see the matching
+    // v1 comment above for why.
+    let session_protocol_kernel = if options
+        .base
+        .filters
+        .contains(&AgentContextFilter::SessionProtocol)
+    {
+        format!(
+            ",\"session_protocol_kernel\":{}",
+            session_protocol_facet::summary_catalog_json()
+        )
+    } else {
+        String::new()
+    };
     let render = |used_bytes: usize| {
         format!(
-            "{{\"schema\":\"semaprax.agent-context.v2\",\"source_graph_schema\":{},\"revision\":{},\"prelude\":{{\"schema\":{},\"digest\":{}}},\"module\":{},\"root\":{},\"query\":{{\"direction\":{},\"depth\":{},\"max_bytes\":{},\"max_nodes\":{},\"filters\":[{}]}},\"filter_support\":{{\"included\":[{}],\"unavailable\":[{}]}},\"budget\":{{\"used_bytes\":{},\"used_nodes\":{},\"max_depth_used\":{}}},\"truncation\":{{\"truncated\":{},\"reasons\":[{}],\"omitted_known_nodes\":{},\"deferred_known_nodes\":{},\"omitted_fact_bytes\":{},\"unavailable_filter_count\":{}}},\"reference_closure\":{{\"referenced_unselected_nodes\":{}}},\"resume_contract\":{{\"direction\":\"query.direction\",\"depth\":\"query.depth\",\"max_nodes\":\"query.max_nodes\",\"filters\":\"query.filters\",\"max_bytes\":{{\"traversal\":\"frontier.resume.min_bytes\",\"reference\":\"reference_frontier.resume.min_bytes\"}}}},\"frontier\":[{}],\"reference_frontier\":[{}],\"facts\":[{}]}}",
+            "{{\"schema\":\"semaprax.agent-context.v2\",\"source_graph_schema\":{},\"revision\":{},\"prelude\":{{\"schema\":{},\"digest\":{}}},\"module\":{},\"root\":{},\"query\":{{\"direction\":{},\"depth\":{},\"max_bytes\":{},\"max_nodes\":{},\"filters\":[{}]}},\"filter_support\":{{\"included\":[{}],\"unavailable\":[{}]}},\"budget\":{{\"used_bytes\":{},\"used_nodes\":{},\"max_depth_used\":{}}},\"truncation\":{{\"truncated\":{},\"reasons\":[{}],\"omitted_known_nodes\":{},\"deferred_known_nodes\":{},\"omitted_fact_bytes\":{},\"unavailable_filter_count\":{}}},\"reference_closure\":{{\"referenced_unselected_nodes\":{}}},\"resume_contract\":{{\"direction\":\"query.direction\",\"depth\":\"query.depth\",\"max_nodes\":\"query.max_nodes\",\"filters\":\"query.filters\",\"max_bytes\":{{\"traversal\":\"frontier.resume.min_bytes\",\"reference\":\"reference_frontier.resume.min_bytes\"}}}}{},\"frontier\":[{}],\"reference_frontier\":[{}],\"facts\":[{}]}}",
             quote_json(source_identity.schema),
             quote_json(source_identity.revision),
             quote_json(prelude_binding::schema(program)),
@@ -3480,6 +3420,7 @@ fn render_agent_context_v2(
             omitted_fact_bytes,
             unavailable_count,
             reference_frontier.len(),
+            session_protocol_kernel,
             frontier_json,
             reference_frontier_json,
             facts_json

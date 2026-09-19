@@ -12,7 +12,7 @@ from the current Graph v10-v14 lattice.
 ```text
 semaprax context <file> <symbol|stable-id>
   [--depth N] [--max-bytes N] [--max-nodes N]
-  [--filters contracts,ownership,effects,types,targets,diagnostics,tests]
+  [--filters contracts,ownership,effects,types,targets,diagnostics,tests,session_protocol]
 ```
 
 Supplying an explicit `--direction forward|reverse|both` selects the additive
@@ -23,7 +23,8 @@ Options are closed, single-use, and require canonical decimal integers.
 Unknown options and filters, duplicates, missing values, leading-zero numbers,
 empty filters, `max_nodes = 0`, and values outside the published bounds fail
 before semantic output. Defaults are depth 1, 64 KiB, 256 function facts, and
-the four supported filters shared across Graph v10-v14.
+the four per-function facets shared across Graph v10-v14 (`session_protocol`
+is envelope-level and opt-in; it is not in the default set).
 
 ## Envelope and budgets
 
@@ -82,6 +83,20 @@ diagnostic, or test nodes.
 Those names are closed and accepted, but are listed under
 `filter_support.unavailable`; no facts are inferred from filenames, CI, or
 source text.
+
+`session_protocol` (issue #206) is a fifth, envelope-level filter: when
+requested, the top-level `session_protocol_kernel` key carries a bounded
+summary (name/states/initial/terminal/transition-count/well-formed/
+model-checked, no transition detail) of this compiler's built-in
+`session_protocol` reference-kernel catalog; when not requested, the key is
+absent, like every other filter-gated field in this envelope. It is listed
+under `filter_support.included` because content is genuinely emitted, unlike
+`targets`/`diagnostics`/`tests`. This is
+declaration-independent reference data, not a fact about the queried `.spx`
+program: no declaration is bound to a `ProtocolSpec` today, and no runtime
+subsystem calls into that kernel -- see `session_protocol_facet`'s module doc
+(`src/graph/session_protocol_facet.rs`) and
+[Session/protocol types v1](SESSION-PROTOCOL-TYPES-V1.md).
 
 The legacy Rust `graph::context_json` depth-only slice remains compatible. New
 consumers use `graph::agent_context_json` with validated

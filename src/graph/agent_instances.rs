@@ -20,7 +20,7 @@ impl AgentContextV2Index<'_> {
             .ok_or_else(|| graph_reference_error("function", id))?
             .clone();
         let base_json = if let Some(function) = self.functions.get(id) {
-            agent_function_json_for_schema(
+            super::function_facts::agent_function_json_for_schema(
                 self.program,
                 function,
                 filters,

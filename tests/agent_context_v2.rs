@@ -707,3 +707,70 @@ fn generic_instance_ownership_is_exact_filter_selected_and_budgeted() {
         .unwrap();
     assert!(!output.contains("generic_instance_ownership"));
 }
+
+#[test]
+fn session_protocol_kernel_is_envelope_level_in_v2_too_and_matches_the_public_full_catalog() {
+    // Issue #206: unlike `generic_instance_ownership` above (a per-fact
+    // field), `session_protocol_kernel` sits at the envelope, sibling to
+    // `resume_contract` -- verified here via structured JSON rather than
+    // string search, since its position in the object matters for this
+    // claim.
+    let program = program();
+    let with_filter = AgentContextV2Options::new(
+        1,
+        MAX_AGENT_CONTEXT_BYTES,
+        64,
+        [
+            AgentContextFilter::Effects,
+            AgentContextFilter::SessionProtocol,
+        ],
+        AgentContextDirection::Forward,
+    )
+    .unwrap();
+    let output = graph::agent_context_v2_json(&program, "ctx.root", &with_filter)
+        .unwrap()
+        .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert!(parsed.get("session_protocol_kernel").is_some());
+    assert_eq!(
+        parsed["filter_support"]["included"],
+        serde_json::json!(["effects", "session_protocol"])
+    );
+    let specs = parsed["session_protocol_kernel"]["specs"]
+        .as_array()
+        .unwrap();
+    assert_eq!(specs.len(), 3);
+    for fact in parsed["facts"].as_array().unwrap() {
+        assert!(fact.get("session_protocol_kernel").is_none());
+    }
+
+    let without_filter = AgentContextV2Options::new(
+        1,
+        MAX_AGENT_CONTEXT_BYTES,
+        64,
+        [AgentContextFilter::Effects],
+        AgentContextDirection::Forward,
+    )
+    .unwrap();
+    let bare = graph::agent_context_v2_json(&program, "ctx.root", &without_filter)
+        .unwrap()
+        .unwrap();
+    assert!(!bare.contains("session_protocol_kernel"));
+
+    // The bounded v1/v2 summary and the unbounded public full-catalog
+    // function report the same three specs with the same verdicts -- they
+    // are two views of one kernel, not two disconnected catalogs.
+    let full = graph::session_protocol_kernel_json();
+    let full: serde_json::Value = serde_json::from_str(&full).unwrap();
+    let full_specs = full["specs"].as_array().unwrap();
+    assert_eq!(full_specs.len(), 3);
+    for (summary_spec, full_spec) in specs.iter().zip(full_specs) {
+        assert_eq!(summary_spec["name"], full_spec["name"]);
+        assert_eq!(summary_spec["well_formed"], full_spec["well_formed"]);
+        assert_eq!(summary_spec["model_checked"], full_spec["model_checked"]);
+        assert!(summary_spec.get("transitions").is_none());
+        assert!(full_spec["transitions"]
+            .as_array()
+            .is_some_and(|t| !t.is_empty()));
+    }
+}

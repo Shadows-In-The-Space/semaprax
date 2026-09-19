@@ -28,18 +28,25 @@
 //! ## What this module deliberately does not do
 //!
 //! **Signing is unimplemented and `HUMAN_BLOCKED`.** [`SignatureEntry`]
-//! carries `algorithm`/`identity`/`signature` exactly as opaque,
-//! structurally-checked strings the way
-//! [`crate::release_provenance::ParsedSignatureClaim`] does, for the same
-//! reason: no signing key, keyless-signing (Sigstore) identity, or signature
-//! -verification dependency exists in this repository, and generated code
-//! and compiler tooling gain no ambient signing authority (`AGENTS.md`).
-//! [`check_signature_policy`] validates role, expiry, and revocation --
-//! plaintext policy facts that need no cryptography -- and never decodes or
-//! verifies `signature` bytes. A forged signature naming an approved
-//! identity and an unexpired timestamp is **not** rejected by this module;
-//! only pairing this policy check with a real external verifier (the same
-//! `cosign verify-blob`-shaped gap #168 documents) closes it.
+//! carries `algorithm`/`identity`/`signature` as opaque, structurally-checked
+//! strings the way [`crate::release_provenance::ParsedSignatureClaim`] does,
+//! for the same reason: no signing key, keyless-signing (Sigstore) identity,
+//! or signing dependency exists in this repository, and generated code and
+//! compiler tooling gain no ambient signing authority (`AGENTS.md`).
+//! **Verification needs no key of its own to hold**, only one the caller
+//! already trusts, so it is not equally blocked: [`check_signature_policy`]
+//! validates role, expiry, and revocation, then -- only when the caller
+//! opts in by populating [`SignaturePolicyContext::identity_public_keys`]
+//! with a roster of already-trusted Ed25519 verifying keys -- cryptographically
+//! checks every `ed25519-raw-v1` signature against it (see
+//! `signature_verification`). Leaving that roster empty, as every caller did
+//! before this capability existed, preserves the original opaque, policy-only
+//! behavior exactly. `sigstore-cosign-bundle-v0.3` still has no local
+//! verifier -- checking a Sigstore bundle needs Rekor, which needs network
+//! access this module must never use -- so it remains unverifiable and, under
+//! an active roster, fails closed rather than passing silently; that half of
+//! the gap #168 documents (a real `cosign verify-blob`-shaped external
+//! verifier) is unchanged.
 //!
 //! **Transparency-log submission and verification are unimplemented and
 //! `HUMAN_BLOCKED`.** [`check_transparency`] only checks that a
@@ -59,10 +66,12 @@
 //! a socket, or a subprocess handle. A capsule built on one machine verifies
 //! identically on any other: `cargo run --locked -p semaprax` is not even
 //! required, since [`parse_capsule`] and every `check_*`/[`verify_capsule`]
-//! function only need `serde_json` and `sha2`, both ordinary library
-//! dependencies with no ambient authority. See `tests` for the fixtures this
-//! module verifies purely in memory, with no filesystem or network access at
-//! any point in the call graph.
+//! function only need `serde_json`, `sha2`, and (for the opt-in Ed25519 path)
+//! `ed25519-dalek` -- three ordinary library dependencies with no ambient
+//! authority: `ed25519-dalek` verifies a signature against a caller-supplied
+//! key and never touches a filesystem, socket, or clock. See `tests` for the
+//! fixtures this module verifies purely in memory, with no filesystem or
+//! network access at any point in the call graph.
 //!
 //! ## Evidence, not authority
 //!
@@ -83,6 +92,7 @@ use crate::diagnostic::Diagnostic;
 
 pub mod change_replay;
 pub mod nonclaims;
+pub mod signature_verification;
 
 pub const CAPSULE_SCHEMA: &str = "semaprax.audit-capsule.v1";
 
@@ -977,13 +987,22 @@ pub struct SignaturePolicyContext {
     pub verification_time_unix_seconds: u64,
     pub revoked_identities: BTreeSet<String>,
     pub required_roles: Vec<String>,
+    /// Approved Ed25519 verifying keys, keyed by signer identity. Empty
+    /// (the default) preserves the original policy-only behavior exactly:
+    /// no signature is cryptographically checked. A non-empty roster turns
+    /// on strict mode for every signature in the capsule, not only the ones
+    /// named here -- see `signature_verification` for what that then
+    /// requires of each one.
+    pub identity_public_keys: BTreeMap<String, [u8; 32]>,
 }
 
-/// Checks role presence, expiry, and revocation for a capsule's signatures.
-/// Never decodes or cryptographically verifies a [`SignatureEntry::signature`]
-/// -- see the module doc.
+/// Checks role presence, expiry, and revocation for a capsule's signatures,
+/// then -- only when `ctx.identity_public_keys` is non-empty --
+/// cryptographically verifies each signature against that roster; see
+/// `signature_verification` and the module doc.
 pub fn check_signature_policy(
     capsule: &ParsedCapsule,
+    manifest_bytes: &[u8],
     ctx: &SignaturePolicyContext,
 ) -> Result<(), Diagnostic> {
     for required_role in &ctx.required_roles {
@@ -1015,7 +1034,7 @@ pub fn check_signature_policy(
             )));
         }
     }
-    Ok(())
+    signature_verification::verify_against_roster(capsule, ctx, manifest_bytes)
 }
 
 /// Caller-supplied trust context for [`check_transparency`].
@@ -1100,7 +1119,7 @@ pub fn verify_capsule(
     check_subject_bindings(&capsule)?;
     nonclaims::check_nonclaims(&capsule)?;
     let verified_object_ids = check_object_bytes(&capsule, object_bytes)?;
-    check_signature_policy(&capsule, signature_ctx)?;
+    check_signature_policy(&capsule, manifest_bytes, signature_ctx)?;
     check_transparency(&capsule, manifest_bytes, transparency_ctx)?;
     let unavailable_claims = capsule
         .objects

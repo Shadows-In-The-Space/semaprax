@@ -73,6 +73,7 @@ fn empty_signature_ctx() -> SignaturePolicyContext {
         verification_time_unix_seconds: 1_000,
         revoked_identities: Default::default(),
         required_roles: Vec::new(),
+        identity_public_keys: Default::default(),
     }
 }
 

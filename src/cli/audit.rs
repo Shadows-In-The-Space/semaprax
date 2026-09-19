@@ -314,6 +314,12 @@ pub(crate) fn run_verify(options: &VerifyOptions) -> Result<String, Diagnostic> 
             .unwrap_or_else(now_unix_seconds),
         revoked_identities: options.revoked_identities.iter().cloned().collect(),
         required_roles: options.required_roles.clone(),
+        // No CLI flag wires a trust roster in yet (issue #209 residue,
+        // alongside real signing): an empty roster preserves this front's
+        // existing policy-only behavior exactly. See
+        // `audit_capsule::signature_verification` for the opt-in library
+        // capability this leaves unreached from the command line.
+        identity_public_keys: BTreeMap::new(),
     };
     let transparency_ctx = TransparencyContext {
         known_logs: options.trusted_logs.iter().cloned().collect(),

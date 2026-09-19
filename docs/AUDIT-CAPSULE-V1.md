@@ -2,10 +2,12 @@
 
 Status: versioned manifest schema and registries, a canonical builder, a
 structural verifier, a structural diff, machine-readable `nonclaims`,
-independent replay of a `change` capsule against source, and a read-only
-`semaprax audit inspect|verify|diff` CLI front. Cryptographic signing and
-real transparency-log submission are `HUMAN_BLOCKED` -- neither exists here,
-and this document must not be read as claiming otherwise.
+independent replay of a `change` capsule against source, opt-in Ed25519
+signature verification against a caller-supplied trust roster
+(`signature_verification`), and a read-only `semaprax audit inspect|verify|diff`
+CLI front (which does not yet expose that roster). Cryptographic *signing*
+and real transparency-log submission are `HUMAN_BLOCKED` -- neither exists
+here, and this document must not be read as claiming otherwise.
 
 Audience: implementers wiring a capsule producer, reviewers auditing a
 capsule, and anyone extending `src/audit_capsule.rs`.
@@ -18,7 +20,9 @@ transaction, assurance, execution, model/tool, artifact, package, decision,
 and publication evidence. This document and `src/audit_capsule.rs` implement
 the **envelope**: a `semaprax.audit-capsule.v1` manifest, a content-addressed
 object set referenced by plain SHA-256 digest, an association graph, a
-redaction mechanism, a non-cryptographic signature policy, and a
+redaction mechanism, a signature policy that verifies `ed25519-raw-v1`
+cryptographically once a caller supplies a trust roster (opaque otherwise,
+and always opaque for `sigstore-cosign-bundle-v0.3`), and a
 non-cryptographic transparency-inclusion check -- plus the hostile-input
 tests issue #209 names.
 
@@ -160,8 +164,12 @@ required set.
    every redacted object has no bytes supplied (a redaction leak, if it
    does).
 6. [`check_signature_policy`]: required roles present, no revoked identity,
-   no expired signature. Never decodes or verifies `signature` bytes
-   themselves.
+   no expired signature; then, only when the caller opts in by populating
+   [`SignaturePolicyContext::identity_public_keys`] with a roster of
+   already-trusted Ed25519 verifying keys, cryptographically checks every
+   `ed25519-raw-v1` signature against it (`signature_verification`; see
+   "Signatures" below). Leaving that roster empty -- the default -- keeps
+   `signature` bytes opaque exactly as before.
 7. [`check_transparency`]: if a `transparency` entry is present, its
    `leaf_digest` matches [`transparency_leaf_digest`] recomputed from the
    manifest under test, its `log_id` is one of the caller's trusted logs, and
@@ -238,16 +246,25 @@ expired or revoked per caller-supplied policy, and that at most one identity
 claims each role (so a proposer's signature can never be mistaken for an
 approver's).
 
-**Does not prove:** that `signature` bytes are a real cryptographic
-signature produced by the claimed identity's private key. Exactly as
-`src/release_provenance.rs` (#168) documents for release signing, verifying
-that honestly needs a signature-verification implementation (Sigstore/cosign
-bundle verification, or raw Ed25519/ECDSA point arithmetic) that needs a
-cryptography dependency this change is not permitted to add, and no signing
-key, keyless-signing identity, or publish authority exists in this
-repository or session. **`HUMAN_BLOCKED: pairing [`check_signature_policy`]
-with a real external verifier (the same `cosign verify-blob`-shaped gap
-#168 documents) is required before "signed" can be claimed for a capsule.**
+**Does prove, when the caller opts in:** for an `ed25519-raw-v1` signature
+whose identity appears in a caller-supplied
+[`SignaturePolicyContext::identity_public_keys`] roster,
+`signature_verification` cryptographically checks the `signature` bytes
+against that already-trusted public key -- a real Ed25519 verification, not
+a policy heuristic. This needs no signing key, only a verifying key the
+caller already holds, which is why it is not `HUMAN_BLOCKED` the way
+producing a signature is (see `src/release_provenance.rs` #168). Leaving
+the roster empty -- the default, and the only behavior before this
+capability existed -- keeps `signature` bytes fully opaque, and no CLI flag
+wires a roster in yet.
+
+**Does not prove, ever:** that a `sigstore-cosign-bundle-v0.3` signature is
+genuine -- checking a Sigstore bundle needs Rekor, which needs network
+access this module must never use. **`HUMAN_BLOCKED: a real Sigstore/cosign
+bundle verifier (the same gap #168 documents) is required before that
+algorithm can be trusted, and producing any signature at all still needs a
+signing key, keyless-signing identity, or publish authority this repository
+does not have.`**
 
 ## Transparency: what is and is not proved
 
@@ -272,8 +289,11 @@ claims, never collapsed into one green summary:
   object's bytes are independently recomputed and compared, never trusted
   from an embedded field.
 - **Authenticity** (were these bytes produced by the claimed signing
-  identity?) is explicitly **not** established by anything in this module --
-  see "Signatures" above. No capsule is cryptographically signed today.
+  identity?) is established only for an `ed25519-raw-v1` signature whose
+  identity a caller-supplied trust roster covers -- see "Signatures" above.
+  With no roster (the default) or for `sigstore-cosign-bundle-v0.3`, it is
+  explicitly **not** established. No capsule is produced by this repository
+  today either way: signing itself remains `HUMAN_BLOCKED`.
 - **Provenance** (what exactly is bound: which objects, which subject, which
   associations) is what a successfully parsed and structurally verified
   capsule records.
@@ -307,7 +327,7 @@ or contents:
 
 | Nonclaim | What it denies |
 | --- | --- |
-| `signatures-not-cryptographically-verified` | No signature was decoded or verified. No signing key, keyless-signing identity, or verification dependency exists in this repository (issue #168 remains open). A forged signature naming an approved identity is not detected. |
+| `signatures-not-cryptographically-verified` | Present on every capsule unconditionally, even one whose signatures a caller did cryptographically check: this repository still has no signing key, keyless-signing identity, or Sigstore bundle verifier (issue #168 remains open), and a `sigstore-cosign-bundle-v0.3` signature is never verifiable regardless of caller configuration. With no trust roster supplied to [`check_signature_policy`] (the default), a forged signature naming an approved identity is not detected at all; see "Signatures" above for what a caller-supplied `ed25519-raw-v1` roster now catches. |
 | `transparency-inclusion-not-independently-confirmed` | No transparency log was contacted. Only a caller-supplied entry's internal consistency was checked. |
 | `evidence-is-not-authorization` | Verification authorizes nothing: not publication, execution, signing, tagging, or deployment. |
 | `local-evidence-only` | Everything referenced was produced on a private developer machine. This is not evidence of a hosted CI run, a physical-device run, or a production deployment. |

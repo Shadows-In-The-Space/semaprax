@@ -81,6 +81,7 @@ fn empty_signature_ctx() -> SignaturePolicyContext {
         verification_time_unix_seconds: 1_000,
         revoked_identities: Default::default(),
         required_roles: Vec::new(),
+        identity_public_keys: Default::default(),
     }
 }
 
@@ -497,8 +498,10 @@ fn distinct_roles_may_each_sign_once_and_are_looked_up_by_their_own_role() {
         verification_time_unix_seconds: 1_000,
         revoked_identities: Default::default(),
         required_roles: vec!["proposer".to_owned(), "approver".to_owned()],
+        identity_public_keys: Default::default(),
     };
-    check_signature_policy(&capsule, &ctx).expect("both required roles are present and unexpired");
+    check_signature_policy(&capsule, manifest.as_bytes(), &ctx)
+        .expect("both required roles are present and unexpired");
 }
 
 #[test]
@@ -528,8 +531,9 @@ fn a_missing_required_signature_role_is_rejected() {
         verification_time_unix_seconds: 1_000,
         revoked_identities: Default::default(),
         required_roles: vec!["publisher".to_owned()],
+        identity_public_keys: Default::default(),
     };
-    let error = check_signature_policy(&capsule, &ctx).unwrap_err();
+    let error = check_signature_policy(&capsule, manifest.as_bytes(), &ctx).unwrap_err();
     assert_eq!(error.code, "SPX-Z905");
     assert!(
         error.message.contains("no signature carries"),
@@ -548,8 +552,9 @@ fn an_expired_signature_is_rejected() {
         verification_time_unix_seconds: 1_000,
         revoked_identities: Default::default(),
         required_roles: Vec::new(),
+        identity_public_keys: Default::default(),
     };
-    let error = check_signature_policy(&capsule, &ctx).unwrap_err();
+    let error = check_signature_policy(&capsule, manifest.as_bytes(), &ctx).unwrap_err();
     assert_eq!(error.code, "SPX-Z905");
     assert!(error.message.contains("expired"), "{}", error.message);
 }
@@ -566,8 +571,9 @@ fn a_revoked_identity_signature_is_rejected() {
         verification_time_unix_seconds: 1_000,
         revoked_identities: revoked,
         required_roles: Vec::new(),
+        identity_public_keys: Default::default(),
     };
-    let error = check_signature_policy(&capsule, &ctx).unwrap_err();
+    let error = check_signature_policy(&capsule, manifest.as_bytes(), &ctx).unwrap_err();
     assert_eq!(error.code, "SPX-Z905");
     assert!(error.message.contains("revoked"), "{}", error.message);
 }
@@ -817,6 +823,7 @@ fn a_release_profile_capsule_with_its_own_required_types_present_verifies() {
         verification_time_unix_seconds: 1_000,
         revoked_identities: Default::default(),
         required_roles: vec!["publisher".to_owned()],
+        identity_public_keys: Default::default(),
     };
     let report = verify_capsule(
         manifest.as_bytes(),
@@ -1222,6 +1229,7 @@ fn a_decision_record_object_stays_distinct_from_technical_evidence_and_from_sign
         verification_time_unix_seconds: 1_000,
         revoked_identities: Default::default(),
         required_roles: vec!["approver".to_owned()],
+        identity_public_keys: Default::default(),
     };
     let report = verify_capsule(
         with_decision.as_bytes(),
@@ -1407,3 +1415,5 @@ fn diffing_capsules_reports_added_and_removed_signature_roles() {
     assert_eq!(diff.removed_signature_roles, vec!["proposer".to_owned()]);
     assert_eq!(diff.added_signature_roles, vec!["approver".to_owned()]);
 }
+
+mod hostile_matrix;

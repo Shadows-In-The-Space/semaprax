@@ -2516,6 +2516,190 @@ fn value_span_is_valid(view: borrow Slice<u8>, start: usize, end: usize) -> bool
 fn assignment_is_valid(view: borrow Slice<u8>) -> bool
 ```
 
+## `std.export.policy`
+
+Package `std/export-policy`, tier `portable`, status partial. Required project profile: `useful-data.v2`. Dependency: `std.export.policy = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
+
+### `std.export.policy.batch_size_admitted`
+
+Issue #193's missing exporter interface. Six observability/notification
+families now ship as `std/` decision layers -- `std.log` (+
+`std.log.redact`), `std.metrics`, `std.tracing`, `std.http`, `std.webhook`,
+`std.email` -- and every one of them can judge an observation. None of
+them can be handed to a sink: nothing in this repository decided a batch
+size, a payload budget, a target identity, a backpressure response, or a
+retry schedule for an actual emission.
+
+An exporter in a language with no ambient filesystem, process, or network
+authority cannot itself export: this package grants no such authority and
+performs no I/O. What it admits instead is the judgement a host adapter
+(one written in a hosting language, wired to a real transport outside
+SEMAPRAX's capability model) consults BEFORE it emits a batch to a sink --
+exactly the shape `std.webhook.attempt_admitted`/`backoff_seconds` already
+established for a single delivery, generalized here to cover a batch of
+observations rather than one webhook attempt, and made available to all
+six families rather than owned by any one of them. It declares no
+`permit`, calls no `uses`-gated operation, and never accepts, retains, or
+returns a payload's or a target's raw bytes beyond the `borrow Slice<u8>`
+this package's own predicates scan.
+
+What this package is NOT: it is not a working exporter. Calling
+`export_admitted` and receiving `true` is a decision, not a delivery --
+nothing here opens a connection, writes a byte, advances a queue's actual
+storage, or retries anything. `try_admit_export` returns the depth a
+caller's own counter should become; it does not enqueue anything itself.
+A settlement or concurrency model is proof data, not permission to perform
+a physical finalizer, exactly per this repository's own invariant, and an
+admitted export decision must not itself be, or imply, one. Nor does this
+package invent a seventh injection-safety vocabulary: target-identity
+safety is `std.http.value_is_header_safe`, the same predicate
+`std.email.value_is_header_safe` already mirrors byte-for-byte, reused
+rather than re-scanned so a target identifier is judged by exactly the
+rule every other family's sink identifier already is.
+
+`attempt_admitted` and `backoff_seconds` below intentionally do NOT import
+`std.webhook`'s functions of the same shape: `std.webhook` is a
+family-specific leaf package for one delivery protocol, and this package
+is meant to sit underneath all six families, so the dependency edge must
+not run from the general layer to one specific family. The two packages
+therefore carry the same retry-admission algorithm on purpose -- a
+deliberate, documented shape-parity, not the kind of duplication this
+repository's own change protocol warns against, which is duplicating a
+*check* inside a single package's control flow, not two packages sharing a
+vocabulary by convention.
+
+Every function is scalar-in/scalar-out or `borrow Slice<u8>`-in/
+scalar-out, so a payload, a target identifier, or a signing/transport
+credential is never copied into or out of this package.
+---------------------------------------------------------------------
+Batch admission
+---------------------------------------------------------------------
+A caller assembling a batch of observations (log events, metric series,
+spans, webhook deliveries, or outbound emails) to hand a sink adapter in
+one call needs two independent, deployment-independent ceilings: how many
+records the batch may carry, and how many serialized bytes it may occupy.
+A host that buffers an unbounded batch before deciding anything about it
+has handed an attacker (or a runaway producer) a memory cost with no
+admission in front of it, exactly the failure `std.webhook.payload_len_admitted`
+already refuses for one inbound delivery. A batch of zero records is not
+an export attempt, so the record count is refused at zero the same way
+`std.webhook.attempt_admitted` refuses an attempt numbered zero; the byte
+ceiling has no such lower bound, since a batch of small or empty-valued
+records can legitimately serialize to very few bytes.
+
+```semaprax
+fn batch_size_admitted(count: usize) -> bool
+```
+
+### `std.export.policy.batch_bytes_admitted`
+
+```semaprax
+fn batch_bytes_admitted(length: usize) -> bool
+```
+
+### `std.export.policy.target_id_len_admitted`
+
+---------------------------------------------------------------------
+Target identity admission
+---------------------------------------------------------------------
+The sink a batch is destined for is named by an opaque identifier this
+package never parses as a URL, a host, or a path -- `std.url` already owns
+that grammar, and reimplementing it here would be exactly the "seventh
+vocabulary" this package's header disclaims. What this package admits
+instead is the identifier's *shape*: bounded length, and free of the bytes
+that let a caller-controlled identifier splice a second header, field, or
+record into whatever text-oriented registry, log line, or label a host
+adapter later renders it into -- `std.http.value_is_header_safe`, reused
+rather than reimplemented. Refused at zero length: an empty target names
+no sink at all.
+
+```semaprax
+fn target_id_len_admitted(length: usize) -> bool
+```
+
+### `std.export.policy.target_id_admitted`
+
+```semaprax
+fn target_id_admitted(target: borrow Slice<u8>) -> bool
+```
+
+### `std.export.policy.queue_depth_max`
+
+---------------------------------------------------------------------
+Backpressure / drop-policy admission
+---------------------------------------------------------------------
+One deployment-independent ceiling on how many batches may be queued for a
+sink at once, and the admission that actually has teeth: once a queue
+already holds `queue_depth_max()` batches, the next attempt returns the
+fixed refusal sentinel -1 (mirroring `std.metrics.try_admit_series`'s own
+-1-for-out-of-range idiom) rather than growing the queue past its bound or
+returning the unchanged depth as if admission had succeeded. The refusal
+signal IS the drop decision this package admits: a host adapter that
+receives -1 drops (or refuses to enqueue) the batch, rather than this
+package choosing between a drop-oldest and a refuse-newest policy itself
+-- that choice is the host's, made from data this package supplies, not an
+authority this package exercises.
+
+```semaprax
+fn queue_depth_max() -> i64
+```
+
+### `std.export.policy.try_admit_export`
+
+```semaprax
+fn try_admit_export(existing_depth: i64) -> i64
+    requires existing_depth >= 0
+    requires existing_depth <= queue_depth_max()
+    ensures result == -1 || result >= 1 && result <= queue_depth_max()
+```
+
+### `std.export.policy.attempt_admitted`
+
+---------------------------------------------------------------------
+Retry / backoff admission
+---------------------------------------------------------------------
+A sink adapter retrying a failed emission without a ceiling turns one
+failing sink into an outbound amplifier, exactly the reasoning
+`std.webhook.attempt_admitted`/`backoff_seconds` already carry for a
+single webhook delivery (see the package header for why this package
+carries its own copy rather than importing theirs). Attempts are counted
+from 1, so 0 is refused rather than treated as "before the first".
+
+```semaprax
+fn attempt_admitted(attempt: i64) -> bool
+```
+
+### `std.export.policy.backoff_seconds`
+
+Exponential backoff with a fixed base and a hard ceiling, defined for
+exactly the admitted attempt numbers so a caller cannot ask about attempt
+9 and receive a plausible delay.
+
+```semaprax
+fn backoff_seconds(attempt: i64) -> i64
+    requires attempt_admitted(attempt)
+    ensures result >= 1
+    ensures result <= 60
+```
+
+### `std.export.policy.export_admitted`
+
+---------------------------------------------------------------------
+Composed export admission
+---------------------------------------------------------------------
+The judgement a host adapter actually calls before it emits one batch to
+one sink: the sink's queue has room for another batch, the batch's record
+count and serialized byte length are both within budget, and the target
+identifier is admitted. Every clause is one of the named predicates (or,
+for the depth check, the same two-sided range `try_admit_export` enforces
+through its own `requires`), so a refusal is always attributable to a
+named rule. This function decides; it never enqueues, sends, or retries
+anything itself.
+
+```semaprax
+fn export_admitted(existing_depth: i64, batch_count: usize, batch_bytes: usize, target: borrow Slice<u8>) -> bool
+```
+
 ## `std.format`
 
 Package `std/format`, tier `portable`, status partial. Required project profile: `useful-data.v2`. Dependency: `std.format = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.

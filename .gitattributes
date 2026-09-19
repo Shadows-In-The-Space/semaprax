@@ -14,5 +14,23 @@ Cargo.lock text eol=lf
 *.yaml text eol=lf
 *.sh text eol=lf
 *.kt text eol=lf
+# Byte-pinned goldens and generated-artifact sources. Without an explicit
+# `eol=lf` these fall to `* text=auto` above, which converts LF to CRLF on
+# checkout under the `core.autocrlf=true` that Windows CI runners default to.
+# A byte comparison against a renderer that emits `\n` then fails on Windows
+# only -- which is exactly how `proof_export::tests::the_rendered_lean_source_
+# matches_the_pinned_golden` broke while passing everywhere else.
+*.golden text eol=lf
+*.lean text eol=lf
+*.jsonl text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.wit text eol=lf
+*.py text eol=lf
+*.swift text eol=lf
+*.java text eol=lf
 platform-tests/component-runtime/** text eol=lf
 docs/evidence/**/*.log text eol=lf whitespace=-blank-at-eof

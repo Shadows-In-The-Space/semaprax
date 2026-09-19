@@ -1,7 +1,9 @@
 # Public Generic WIT Type Projection v1
 
-Status: implemented bounded projection; local evidence only, no hosted CI
-run recorded. It projects types and nothing calls it.
+Status: implemented bounded projection, plus a compatibility/delta report
+over two projections and an opt-in validation of the emitted WIT against a
+real Component Model toolchain. Local evidence only, no hosted CI run
+recorded. It projects types and nothing calls it.
 
 Audience: ABI, WIT/Component, package, and evidence reviewers.
 
@@ -247,15 +249,155 @@ the golden additionally pins layout, record order, and identifier encoding
 across refactors and across machines.
 
 **Evidence class: local, re-runnable.** No hosted run and no Component Model
-runtime is involved in any of this; no `wasm-tools`, `wit-bindgen`, or
-`wasmtime` invocation is part of the gate.
+runtime is involved in the census gate; no `wasm-tools`, `wit-bindgen`, or
+`wasmtime` invocation is part of it. A separate, opt-in `wasm-tools`
+validation of the emitted text is described under [Validation against a real
+Component Model toolchain](#validation-against-a-real-component-model-toolchain);
+it is `#[ignore]`d, so a default `cargo test` still runs no external tool.
+
+## Compatibility and delta reporting
+
+Implementation:
+[`src/public_generic_abi/wit_projection/compat.rs`](../src/public_generic_abi/wit_projection/compat.rs).
+
+Issue #176's seventh implementation step asks for "compatibility checks for
+field/case addition, reordering, ownership change, and identifier-preserving
+display rename". `compare(baseline, candidate)` produces a deterministic
+[`WitCompatibilityReportV1`] over two projections; `require_compatible` is the
+same comparison as a gate.
+
+Comparing two renderings' bytes answers only "did anything change". A reviewer
+needs the *kind*, because the kinds are not interchangeable.
+
+| Delta | Class | Why |
+| --- | --- | --- |
+| `record-added` | compatible | a new declaration; no existing record's field list, order, or ownership moved, so no consumer already bound to the baseline can observe it |
+| `record-removed` | breaking | a consumer may already name that declaration |
+| `field-added`, `field-removed` | breaking | a Component Model record's canonical field sequence is rewritten; a baseline consumer reads later fields at the wrong positions. Adding a field is **not** additive the way adding a declaration is |
+| `field-reordered` | breaking | same ids, same types, same count — only position moved, which is exactly what a set-based or name-sorted comparison would miss |
+| `field-ownership-changed` | breaking | a leaf crossed between a by-value type and `own<spx-owned-bytes>`: *who runs cleanup* moved across the boundary. Its own delta kind, never folded into a type change |
+| `field-type-changed` | breaking | a type change that stays on one side of the ownership boundary |
+| `owned-bytes-resource-added`/`-removed` | breaking | the world's shared `resource` declaration appeared or disappeared |
+| `world-identity-changed` | breaking | `package`, `interface`, `world`, `input-type`, or `result-type`; the identity *is* the contract |
+
+An **identifier-preserving display rename has no row**, because it is not a
+delta. Every WIT identifier is the hex of a persistent identity — a canonical
+grammar term, or a stable field declaration id — and neither carries a display
+name, so two programs differing only in display names render byte-identical
+WIT. The test
+`an_identifier_preserving_display_rename_is_not_a_delta_at_all` renames every
+record, field, and type parameter while holding every `@id` fixed and asserts
+the two renderings are equal byte for byte and the report is empty.
+
+Field *position* is compared among the fields the two records share, so an
+insertion does not report every later field as reordered, and a genuine
+reorder is not masked by an unrelated insertion earlier in the list.
+
+| Code | Refusal |
+| --- | --- |
+| `SPX-PGWIT121` | the two projections do not share one `wit-projection` schema, so no delta between them is meaningful |
+| `SPX-PGWIT122` | more than `MAX_REPORTED_DELTAS` (512) deltas — refused, never truncated, since a partial delta list presented as a complete one would understate a break |
+| `SPX-PGWIT123` | `require_compatible` found at least one breaking delta |
+
+### Evidence
+
+Sixteen tests in
+[`compat/tests.rs`](../src/public_generic_abi/wit_projection/compat/tests.rs).
+Every positive case compares two projections the compiler really produced from
+two real `.spx` fixtures, so the comparator cannot agree with a hand-written
+expectation while disagreeing with the projector. The controls that make them
+mean something:
+
+- a projection compared against itself reports **no** delta, so every "exactly
+  these deltas" assertion is not satisfied by a comparator that flags
+  everything;
+- the reorder fixture changes ids, types, and count not at all, so a
+  set-comparison implementation fails it;
+- a type change that does *not* cross the ownership boundary asserts it is
+  reported as `field-type-changed` and **not** as an ownership change, so
+  `field-ownership-changed` cannot be emitted for every type difference;
+- each refusal has a positive control beside it: the schema-mismatch test
+  re-compares the same pair once the schemas agree, and the capacity test
+  asserts that exactly `MAX_REPORTED_DELTAS` is accepted, so the bound is the
+  documented one and not off by one in the permissive direction.
+
+Every fixture keeps [`BASELINE`]'s line layout, because a canonical grammar
+term carries a declaration coordinate; changing the number of preceding lines
+would manufacture a delta unrelated to the edit under test.
+
+Four cases are deliberately synthetic, built by mutating a real projection
+struct, and each says so at its own site: an admitted export takes its input
+by `own`, so every projection reachable from source today declares the
+resource; no record is reachable without being referenced; only one projection
+schema exists; and no admitted signature reaches 512 records. Building those by
+hand is the only way to prove those classifications are live rather than dead
+code.
+
+## Validation against a real Component Model toolchain
+
+Implementation:
+[`src/public_generic_abi/wit_projection/toolchain_tests.rs`](../src/public_generic_abi/wit_projection/toolchain_tests.rs).
+
+Every other test in this tree checks the emitted WIT against this
+repository's *own* bounded parser, which is exactly as wrong as the renderer
+whenever both share a misreading of the WIT grammar. These tests hand the
+emitted bytes to `wasm-tools` and let it judge.
+
+They are `#[ignore]`d and read an explicitly provisioned
+`SEMAPRAX_WIT_WASM_TOOLS` path, following the convention
+`assurance_manifest::smt_discharge::tests` already uses for a provisioned
+`z3`. An unset variable is a **panic**, never a silent skip: an ignored test
+that quietly returns `Ok` when the tool is absent is a false pass, and
+reporting "validated" on that basis would be a nonclaim violation.
+
+```sh
+SEMAPRAX_WIT_WASM_TOOLS=/opt/homebrew/bin/wasm-tools \
+  cargo test --locked -p semaprax --lib \
+  public_generic_abi::wit_projection::toolchain_tests -- --ignored
+```
+
+Three tests:
+
+1. the projected world is accepted by `wasm-tools component wit`, for a
+   nested-record world with a shared `resource` and for a flat world that
+   emits every primitive row of the mapping table;
+2. deliberately broken WIT — a field naming an undeclared type, and an
+   unbalanced brace — is **rejected** by the same command. Without this
+   negative control the first test would pass against a stub, a wrong
+   subcommand, or a tool that only checks the file exists;
+3. the toolchain's own canonical re-rendering stays valid WIT **and** is still
+   refused by this profile's decoder with `SPX-PGWIT105`.
+
+### The interop boundary this projection has
+
+`wasm-tools` re-renders WIT in its own canonical form: `own<T>` is printed
+bare (in WIT a resource-typed field is owned by default, so this is a notation
+difference, not a semantic one) and blank lines are inserted between
+declarations. That text is still valid WIT, and `parse_wit_projection` still
+refuses it, because that function is a strict canonical-form determinism check
+— "these bytes are exactly what SEMAPRAX emits" — and not a general WIT
+parser. Refusing a re-rendered variant is correct and by design.
+
+The practical consequence is real: **any workflow that passes this WIT through
+standard tooling and feeds the result back is refused.** Test 3 asserts both
+halves, so neither can change silently.
+
+**Evidence class: local, re-runnable, opt-in.** Validated against
+`wasm-tools 1.259.0` on macOS arm64. No hosted run records this. Passing
+`wasm-tools component wit` proves the emitted *types* are a well-formed
+Component Model world; it does not build, link, instantiate, or execute a
+component.
 
 ## Nonclaims
 
 This document and its module admit no `.spx` syntax, define no calling
 convention, emit no Component Model binary, generate no host or guest
 adapter, execute nothing, and grant no filesystem, process, network,
-execution, signing, or publication authority. They do not:
+execution, signing, or publication authority. The one process this tree ever
+starts is the `#[ignore]`d toolchain test's `wasm-tools` invocation, which
+runs only against an operator-supplied absolute path in
+`SEMAPRAX_WIT_WASM_TOOLS` and is never reached by a default `cargo test`; no
+compiler or generated-code path spawns anything. They do not:
 
 - export a callable WIT function — only the record/resource *type* shapes an
   eventual function signature would use;

@@ -66,6 +66,7 @@ use crate::public_generic_type::{
 
 use super::classifier::AdmittedSubject;
 
+pub mod compat;
 pub mod leaf_census;
 
 /// The versioned projection schema. A new mapping row is a new schema.
@@ -510,3 +511,6 @@ pub fn parse_wit_projection(text: &str) -> Result<ParsedWitProjection, Diagnosti
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod toolchain_tests;

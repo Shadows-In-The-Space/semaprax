@@ -300,3 +300,72 @@ fn a_contract_that_reads_a_module_root_also_reads_its_submodules() {
     }
     assert!(failures.is_empty(), "{failures}");
 }
+
+/// Every `#[ignore]` carries a reason.
+///
+/// An ignored test runs in no default profile, so the only thing standing
+/// between it and being forgotten is the note saying why it is ignored and how
+/// to reach it. This repository already observes that without exception — all
+/// 115 ignore attributes are `#[ignore = "..."]` — and this makes the
+/// discipline enforceable rather than habitual.
+///
+/// The cost of losing it is not hypothetical.
+/// `clean_installed_toolchain_walks_the_documented_journey` was `#[ignore]`d
+/// behind a `cargo install`, no shard runner passes `--ignored`, and it went
+/// unexecuted by any hosted run until this was noticed — at which point the
+/// first real run of it found two product defects back to back. Its reason
+/// string is what made that gap findable at all.
+#[test]
+fn every_ignored_test_states_why_it_is_ignored() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut bare = Vec::new();
+    let mut counted = 0usize;
+    for directory in ["src", "tests", "crates"] {
+        let mut stack = vec![root.join(directory)];
+        while let Some(path) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&path) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_dir() {
+                    stack.push(entry_path);
+                    continue;
+                }
+                if entry_path.extension().is_none_or(|ext| ext != "rs") {
+                    continue;
+                }
+                let Ok(source) = std::fs::read_to_string(&entry_path) else {
+                    continue;
+                };
+                for (index, line) in source.lines().enumerate() {
+                    let trimmed = line.trim_start();
+                    if !trimmed.starts_with("#[ignore") {
+                        continue;
+                    }
+                    counted += 1;
+                    if !trimmed.starts_with("#[ignore = ") {
+                        bare.push(format!(
+                            "{}:{}",
+                            entry_path
+                                .strip_prefix(root)
+                                .unwrap_or(&entry_path)
+                                .display(),
+                            index + 1
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        counted > 100,
+        "this gate found only {counted} ignore attributes; it is no longer \
+         scanning what it thinks it is"
+    );
+    assert!(
+        bare.is_empty(),
+        "these tests are ignored without saying why, so nothing records how to \
+         reach them: {bare:?}. Use `#[ignore = \"<reason and how to run it>\"]`."
+    );
+}

@@ -345,14 +345,29 @@ fn complete_syscall_selection_is_default_deny_on_both_native_abis() {
 
 #[test]
 fn readonly_open_checks_architecture_flags_and_every_scalar_bit() {
+    // The admitted read-only open flags, by bit, spelled out independently of
+    // the production mask so this stays an oracle rather than a tautology.
+    // Bits 18 (`O_NOATIME`) and 21 (`O_PATH`) were added to the filter by
+    // e1998b2b for the real Node/Rust loader and were not added here, which is
+    // what made this test fail on Linux while the rest of the suite passed.
+    // Neither widens authority: `O_NOATIME` only suppresses an atime update,
+    // and `O_PATH` yields a descriptor usable for path operations but not for
+    // read or write.
     for (arch, calls, flag_bits) in [
-        (X86_ARCH, &[(2, 1), (257, 2)][..], [19, 11, 16, 17, 15]),
-        (ARM_ARCH, &[(56, 2)][..], [19, 11, 14, 15, 17]),
+        (
+            X86_ARCH,
+            &[(2, 1), (257, 2)][..],
+            [19, 11, 16, 17, 15, 18, 21],
+        ),
+        (ARM_ARCH, &[(56, 2)][..], [19, 11, 14, 15, 17, 18, 21]),
     ] {
         for tool in TOOLS {
             let guard = Guard::for_arch(expected_role(tool), tool, arch).unwrap();
             for (number, argument) in calls {
-                for subset in 0..32 {
+                // Every subset of the admitted bits, derived from the list
+                // rather than hardcoded: at a literal 32 the two bits added
+                // above would never appear in a positive combination.
+                for subset in 0..(1usize << flag_bits.len()) {
                     let flags = flag_bits
                         .iter()
                         .enumerate()

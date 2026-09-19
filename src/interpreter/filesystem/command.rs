@@ -137,6 +137,7 @@ pub(crate) fn evaluate_profile(
         trace_identities: BTreeMap::new(),
         trace_phase: ResolvedTracePhase::Body,
         failure_detail: None,
+        resumption: crate::interpreter::resumable::Resumption::Refused,
     };
     let evaluated = evaluator.call_frame(entry, Vec::new(), 0);
     // Settlement releases invocation transients before the result is

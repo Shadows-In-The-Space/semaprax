@@ -78,6 +78,7 @@ mod owned_try;
 mod owned_vec;
 mod prepared;
 mod resolved_case;
+pub mod resumable;
 pub mod retained_call;
 mod scalar_profile;
 use api_admission::{
@@ -3049,6 +3050,7 @@ pub(crate) fn evaluate_resolved_language_command(
         trace_identities: BTreeMap::new(),
         trace_phase: ResolvedTracePhase::Body,
         failure_detail: None,
+        resumption: resumable::Resumption::Refused,
     };
     let evaluated = evaluator.call_frame(entry, Vec::new(), 0);
     let outcome = match evaluated {
@@ -3503,6 +3505,7 @@ struct Evaluator<'a> {
     trace_identities: BTreeMap<String, Arc<str>>,
     trace_phase: ResolvedTracePhase,
     failure_detail: Option<ContractFailureDetail>,
+    resumption: resumable::Resumption,
 }
 
 use function_values::{evaluate_resolved_entry, evaluate_resolved_entry_with_utf8_budget};
@@ -3537,6 +3540,7 @@ impl Evaluator<'_> {
             trace_identities: BTreeMap::new(),
             trace_phase: ResolvedTracePhase::Body,
             failure_detail: None,
+            resumption: resumable::Resumption::Refused,
         }
     }
 
@@ -3937,16 +3941,13 @@ impl Evaluator<'_> {
     ) -> Result<Value, Flow> {
         self.begin_expression(expression, depth)?;
         match &expression.kind {
-            // Resumable Effects v1 (issue #204): unreachable in practice --
-            // `admission` already refuses any `yields`-declaring function
-            // before its body ever reaches `evaluate` -- but still an
-            // explicit, tested refusal rather than a silent fallthrough.
-            // Interpreter suspend/resume execution is the natural follow-up
-            // this design enables but does not perform; see
-            // `docs/RESUMABLE-EFFECTS-V1.md`.
-            ResolvedExprKind::Yield { .. } => Err(Flow::Guard(
-                "`yield` is not yet evaluated by the interpreter",
-            )),
+            // Resumable Effects v1 (#204): `resumable::settle_yield` owns the
+            // whole yield site -- refusal on every ordinary lane, suspension
+            // on a fresh invocation, drift check + answer on a replayed one.
+            ResolvedExprKind::Yield { request } => {
+                let produced = self.evaluate(request, environment, depth)?;
+                resumable::settle_yield(&mut self.resumption, produced)
+            }
             ResolvedExprKind::Closure { .. }
             | ResolvedExprKind::FunctionReference { .. }
             | ResolvedExprKind::Invoke { .. } => {
@@ -5840,11 +5841,8 @@ fn status_case_from_code(code: u32) -> Option<StatusCase> {
 mod tests {
     use super::*;
 
-    /// Resumable Effects v1 (issue #204): explicit, tested refusal at the
-    /// interpreter's own admission gate, matching native (`SPX-B116`) and
-    /// Wasm (`SPX-W126`). Interpreter suspend/resume execution is the
-    /// natural follow-up this design enables but does not perform -- see
-    /// `docs/RESUMABLE-EFFECTS-V1.md`.
+    /// Resumable Effects v1 (#204): the ordinary lane still refuses a
+    /// suspending function outright; only `interpreter::resumable` runs one.
     #[test]
     fn admission_refuses_a_yields_declaring_function() {
         let source = r#"
@@ -6093,6 +6091,7 @@ fn main() -> i64 { 0 }
                 trace_identities: BTreeMap::new(),
                 trace_phase: ResolvedTracePhase::Body,
                 failure_detail: None,
+                resumption: resumable::Resumption::Refused,
             };
             let outcome = evaluator.call_frame(
                 inspect,
@@ -6179,6 +6178,7 @@ fn inspect(value: borrow Either<Bytes, Bytes>) -> i64 {
                 trace_identities: BTreeMap::new(),
                 trace_phase: ResolvedTracePhase::Body,
                 failure_detail: None,
+                resumption: resumable::Resumption::Refused,
             };
             let outcome = evaluator.call_frame(
                 inspect,

@@ -3,12 +3,21 @@ use function @id("std.tracing.traceparent_shape_admitted") from std.tracing as t
 use function @id("std.tracing.traceparent_sampled") from std.tracing as traceparent_sampled;
 use function @id("std.tracing.tracestate_member_count_admitted") from std.tracing as tracestate_member_count_admitted;
 use function @id("std.tracing.tracestate_combined_length_admitted") from std.tracing as tracestate_combined_length_admitted;
+use function @id("std.tracing.outbound_traceparent_fields_admitted") from std.tracing as outbound_traceparent_fields_admitted;
+use function @id("std.tracing.child_context_admitted") from std.tracing as child_context_admitted;
+use function @id("std.tracing.sampling_decision_consistent") from std.tracing as sampling_decision_consistent;
+use function @id("std.tracing.tracestate_member_admitted") from std.tracing as tracestate_member_admitted;
+use function @id("std.tracing.tracestate_mutation_admitted") from std.tracing as tracestate_mutation_admitted;
 
 // A synthetic inbound-header walk: the checks a receiver would run against an
 // incoming `traceparent` before it ever creates a child span. Nothing here
-// performs I/O.
-@id("std.tracing.examples.main")
-fn main() -> i64
+// performs I/O. Split from the outbound walk below (and combined with it
+// only through `&&` in `main`, never inside one function) because folding
+// both walks' checks into a single function's boolean chain multiplied its
+// terminal control-flow paths past the cleanup-replay skeleton-work budget
+// (SPX-H006).
+@id("std.tracing.examples.inbound_walk_ok")
+fn inbound_walk_ok() -> bool
 {
     // `00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-aaaaaaaaaaaaaaaa-01`: a
     // well-formed, sampled traceparent.
@@ -53,5 +62,42 @@ fn main() -> i64
     let tracestate_member_count_refused = !tracestate_member_count_admitted(33usize);
     let tracestate_length_ok = tracestate_combined_length_admitted(512usize);
     let tracestate_length_refused = !tracestate_combined_length_admitted(513usize);
-    if well_formed && sampled && unsampled && still_well_formed && version_ff_refused && all_zero_trace_id_refused && tracestate_member_count_ok && tracestate_member_count_refused && tracestate_length_ok && tracestate_length_refused { 0 } else { 1 }
+    well_formed && sampled && unsampled && still_well_formed && version_ff_refused && all_zero_trace_id_refused && tracestate_member_count_ok && tracestate_member_count_refused && tracestate_length_ok && tracestate_length_refused
+}
+
+// The outbound half of the same walk: an adapter assembling a header from
+// separate fields, deriving a child context from it, and judging a sampling
+// decision, before ever joining bytes with dashes; then a `tracestate`
+// list-member and a mutation placed correctly at the front of the list with
+// no duplicate sibling.
+@id("std.tracing.examples.outbound_walk_ok")
+fn outbound_walk_ok() -> bool
+{
+    let version = [48u8, 48u8];
+    let outbound_trace_id = [97u8; 32];
+    let outbound_parent_id = [98u8; 16];
+    let outbound_flags = [48u8, 49u8];
+    let trace_id_view = array_as_slice(outbound_trace_id);
+    let parent_id_view = array_as_slice(outbound_parent_id);
+    let flags_view = array_as_slice(outbound_flags);
+    let outbound_admitted = outbound_traceparent_fields_admitted(array_as_slice(version), trace_id_view, parent_id_view, flags_view);
+    let child_span_id = [99u8; 16];
+    let child_span_id_view = array_as_slice(child_span_id);
+    let child_admitted = child_context_admitted(trace_id_view, parent_id_view, flags_view, trace_id_view, child_span_id_view, flags_view);
+    let self_loop_refused = !child_context_admitted(trace_id_view, parent_id_view, flags_view, trace_id_view, parent_id_view, flags_view);
+    let unsampled_flags = [48u8, 48u8];
+    let sampling_upgrade_ok = sampling_decision_consistent(array_as_slice(unsampled_flags), flags_view);
+    let sampling_downgrade_refused = !sampling_decision_consistent(flags_view, array_as_slice(unsampled_flags));
+    let member = [118u8, 101u8, 110u8, 100u8, 111u8, 114u8, 61u8, 49u8];
+    let member_admitted = tracestate_member_admitted(array_as_slice(member));
+    let mutated_key = [118u8, 101u8, 110u8, 100u8, 111u8, 114u8];
+    let sibling_key = [111u8, 116u8, 104u8, 101u8, 114u8];
+    let mutation_admitted = tracestate_mutation_admitted(array_as_slice(mutated_key), array_as_slice(mutated_key), array_as_slice(sibling_key));
+    outbound_admitted && child_admitted && self_loop_refused && sampling_upgrade_ok && sampling_downgrade_refused && member_admitted && mutation_admitted
+}
+
+@id("std.tracing.examples.main")
+fn main() -> i64
+{
+    if inbound_walk_ok() && outbound_walk_ok() { 0 } else { 1 }
 }

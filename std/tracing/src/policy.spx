@@ -2,19 +2,32 @@ module std.tracing;
 use function @id("std.encoding.decode_hex_byte") from std.encoding as decode_hex_byte;
 
 // Issue #193's tracing slice: the pure, effect-free decision layer that
-// admits or refuses a W3C Trace Context `traceparent` header BEFORE a caller
-// creates, propagates, or exports a span. It performs no I/O, declares no
-// `permit`, calls no `uses`-gated operation, and never accepts, retains, or
-// returns anything beyond the header bytes it is asked to judge.
+// admits or refuses a W3C Trace Context `traceparent`/`tracestate` header,
+// derives a child span context from an admitted parent, and judges a
+// sampling decision's consistency, all BEFORE a caller creates, propagates,
+// or exports a span. It performs no I/O, declares no `permit`, calls no
+// `uses`-gated operation, and never accepts, retains, or returns anything
+// beyond the header bytes and scalars it is asked to judge.
 //
-// What this package is NOT: it does not generate a trace-id or a parent-id,
-// does not create, start, or export a span, and does not implement a
-// sampler. It does not parse a `tracestate` header's list-members from raw
-// bytes either — splitting on `,` and `=` while tolerating the header's
-// optional whitespace needs a general delimiter scanner this package does
-// not implement, so only the two aggregate `tracestate` budgets a caller can
-// compute without parsing (list-member count, combined header length) are
-// exposed as predicates.
+// What this package is NOT: it does not generate a trace-id, a parent-id, or
+// a span-id — `child_context_admitted` takes the child's span-id as a
+// caller-supplied argument and only judges it, because generating one needs
+// a randomness capability this package does not have and must not pretend
+// to. It does not create, start, or export a span, and it does not
+// implement a sampler: `sampling_decision_consistent` judges whether an
+// outbound sampled bit is consistent with an inbound one, it does not choose
+// one. Nor does it split a raw `tracestate` header into its comma-separated
+// list-members: that needs a general delimiter scanner tolerant of the
+// header's optional surrounding whitespace, which this package still does
+// not implement, so `tracestate_member_admitted` takes an already-isolated
+// `key=value` member as its own slice rather than a whole header, and only
+// the two aggregate budgets a caller can compute without parsing (list-member
+// count, combined header length) cover the whole `tracestate` value. Key
+// admission covers only the spec's `simple-key` form; a `multi-tenant-key`
+// (`tenant-id "@" system-id`) that would be spec-valid is refused here.
+// `tracestate_mutation_admitted` checks one candidate key against one
+// sibling at a time (front-of-list placement and non-duplication); enforcing
+// it across a full list is the caller's loop, not this package's.
 //
 // It also does not implement the spec's forward-compatibility allowance for
 // a higher-version header carrying additional bytes past position 55 (W3C
@@ -201,4 +214,197 @@ fn tracestate_member_count_admitted(count: usize) -> bool
 fn tracestate_combined_length_admitted(length: usize) -> bool
 {
     length <= 512usize
+}
+
+// ---------------------------------------------------------------------
+// General byte-field comparison
+// ---------------------------------------------------------------------
+// Two views are equal exactly when they are the same length and agree at
+// every index; a length mismatch refuses without reading a single byte.
+// Shared below by child-context consistency (fixed-width trace/parent-id and
+// trace-flags fields) and `tracestate` key comparison (variable-width keys).
+@id("std.tracing.slice_equal")
+fn slice_equal(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(left);
+    let mut index = 0usize;
+    let mut equal = length == byte_len(right);
+    while index < length && equal {
+        equal = byte_at_equals(left, index, byte_at(right, index));
+        index = index + 1usize;
+        index < length && equal
+    }
+    equal
+}
+
+// ---------------------------------------------------------------------
+// Outbound field admission
+// ---------------------------------------------------------------------
+// The trace-id, parent-id, and trace-flags fields of one traceparent context,
+// each supplied as its own slice starting at index zero rather than embedded
+// in a full 55-byte header. `hex_run_admitted` and `field_is_all_zero` are
+// reused unchanged at `start = 0`; the exact-length check comes first for
+// every field, since `hex_run_admitted` alone only scans the first `length`
+// bytes and would silently accept a trailing extra byte it never reads —
+// exactly the "stops one byte early" failure shape this repository has hit
+// before. `version` is excluded here on purpose: it names the wire format of
+// a `traceparent` header, not a property of the trace context these three
+// fields carry, so `child_context_admitted` below reuses this without ever
+// taking a version argument. Factored out of both callers below (rather than
+// inlined at each) specifically because inlining it twice combined enough
+// independent `&&`/`!` branches in one function body to exceed the
+// cleanup-replay skeleton-work budget (SPX-H006); as a named call, each use
+// site is one opaque unit to that replay instead of a dozen more branches.
+@id("std.tracing.trace_context_fields_admitted")
+fn trace_context_fields_admitted(trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>) -> bool
+{
+    let trace_id_ok = byte_len(trace_id) == 32usize && hex_run_admitted(trace_id, 0usize, 32usize) && !field_is_all_zero(trace_id, 0usize, 32usize);
+    let parent_id_ok = byte_len(parent_id) == 16usize && hex_run_admitted(parent_id, 0usize, 16usize) && !field_is_all_zero(parent_id, 0usize, 16usize);
+    let flags_ok = byte_len(trace_flags) == 2usize && hex_run_admitted(trace_flags, 0usize, 2usize);
+    trace_id_ok && parent_id_ok && flags_ok
+}
+
+// The judgement an adapter assembling an outbound header actually calls
+// before joining `version "-" trace_id "-" parent_id "-" trace_flags` with
+// dashes and sending it. `version_field_admitted` is reused unchanged: its
+// two checked positions (0 and 1) are exactly a standalone two-byte version
+// field's only two bytes.
+@id("std.tracing.outbound_traceparent_fields_admitted")
+fn outbound_traceparent_fields_admitted(version: borrow Slice<u8>, trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>) -> bool
+{
+    version_field_admitted(version) && trace_context_fields_admitted(trace_id, parent_id, trace_flags)
+}
+
+// ---------------------------------------------------------------------
+// Child-context derivation
+// ---------------------------------------------------------------------
+// Whether a child span context derived from an admitted parent is itself
+// admitted and consistent with that parent (W3C Trace Context Section 3.2.2,
+// Section 3.3.1.3): the same trace-id throughout, a parent-id that differs
+// from the parent's own (a child cannot be its own parent), and trace-flags
+// carried forward unchanged — this predicate only checks that inheritance
+// held, it never decides a new sampling outcome; `sampling_decision_consistent`
+// below is where a changed flags byte gets judged. The child's span-id is
+// supplied by the caller (an argument, not a return value) because this
+// package has no randomness capability to generate one.
+@id("std.tracing.child_context_admitted")
+fn child_context_admitted(parent_trace_id: borrow Slice<u8>, parent_parent_id: borrow Slice<u8>, parent_trace_flags: borrow Slice<u8>, child_trace_id: borrow Slice<u8>, child_span_id: borrow Slice<u8>, child_trace_flags: borrow Slice<u8>) -> bool
+{
+    let parent_admitted = trace_context_fields_admitted(parent_trace_id, parent_parent_id, parent_trace_flags);
+    let child_admitted = trace_context_fields_admitted(child_trace_id, child_span_id, child_trace_flags);
+    let same_trace = slice_equal(parent_trace_id, child_trace_id);
+    let distinct_span = !slice_equal(parent_parent_id, child_span_id);
+    let flags_carried = slice_equal(parent_trace_flags, child_trace_flags);
+    parent_admitted && child_admitted && same_trace && distinct_span && flags_carried
+}
+
+// ---------------------------------------------------------------------
+// Sampling-decision admission
+// ---------------------------------------------------------------------
+// The sampled bit read from a standalone two-byte trace-flags field, the
+// counterpart to `traceparent_sampled` for a field that has not been
+// embedded in a full 55-byte header. Every other bit of trace-flags is
+// reserved and carries no admission rule (Section 3.2.2.5): any two-hex-digit
+// value is a legal flags byte, so nothing here narrows that further.
+@id("std.tracing.trace_flags_sampled")
+fn trace_flags_sampled(trace_flags: borrow Slice<u8>) -> bool
+    requires byte_len(trace_flags) == 2usize && hex_run_admitted(trace_flags, 0usize, 2usize)
+{
+    decode_hex_byte(byte_at(trace_flags, 0usize), byte_at(trace_flags, 1usize)) % 2 == 1
+}
+
+// Whether an outbound sampling decision is consistent with the inbound one
+// it follows. The spec's one-way rule: a participant may raise an unsampled
+// context to sampled, but must never lower a sampled context back to
+// unsampled downstream, so the only refused transition is
+// sampled-inbound-then-unsampled-outbound. This decides consistency; it
+// never picks a sampling outcome itself.
+@id("std.tracing.sampling_decision_consistent")
+fn sampling_decision_consistent(inbound_trace_flags: borrow Slice<u8>, outbound_trace_flags: borrow Slice<u8>) -> bool
+    requires byte_len(inbound_trace_flags) == 2usize && hex_run_admitted(inbound_trace_flags, 0usize, 2usize) && byte_len(outbound_trace_flags) == 2usize && hex_run_admitted(outbound_trace_flags, 0usize, 2usize)
+{
+    !trace_flags_sampled(inbound_trace_flags) || trace_flags_sampled(outbound_trace_flags)
+}
+
+// ---------------------------------------------------------------------
+// `tracestate` list-member shape
+// ---------------------------------------------------------------------
+// A `simple-key`: 1 to 256 bytes, first byte a lowercase letter only (never a
+// digit), every remaining byte a lowercase letter, a digit, or one of the
+// four punctuation symbols `_ - * /` (Section 3.3.1.1). The `multi-tenant-key`
+// form (`tenant-id "@" system-id`) is out of scope; see the package header.
+@id("std.tracing.tracestate_key_shape_admitted")
+fn tracestate_key_shape_admitted(key: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(key);
+    let mut index = 0usize;
+    let mut admitted = length >= 1usize && length <= 256usize && byte_at(key, 0usize) >= 97u8 && byte_at(key, 0usize) <= 122u8;
+    while index < length && admitted {
+        let value = byte_at(key, index);
+        let is_lower = value >= 97u8 && value <= 122u8;
+        let is_digit = value >= 48u8 && value <= 57u8;
+        let is_symbol = value == 95u8 || value == 45u8 || value == 42u8 || value == 47u8;
+        admitted = is_lower || is_digit || is_symbol;
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// A `value`: 1 to 256 bytes from the `chr` set — printable ASCII 0x20-0x7E
+// excluding the two delimiter bytes `,` and `=` (Section 3.3.1.2) — whose final
+// byte is not a space, per the grammar's trailing `nblk-chr`: a value may
+// carry interior whitespace but may not trail it.
+@id("std.tracing.tracestate_value_shape_admitted")
+fn tracestate_value_shape_admitted(value: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(value);
+    let mut index = 0usize;
+    let mut admitted = length >= 1usize && length <= 256usize;
+    while index < length && admitted {
+        let byte = byte_at(value, index);
+        admitted = byte >= 32u8 && byte <= 126u8 && byte != 44u8 && byte != 61u8;
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted && !byte_at_equals(value, length - 1usize, 32u8)
+}
+
+// The judgement a caller with one already-isolated `key=value` member slice
+// actually calls; splitting the raw `tracestate` header into such slices
+// remains the caller's job (see the package header). Counting `=` and
+// locating its one admitted occurrence share a single pass: counting rather
+// than accepting the first occurrence is deliberate, mirroring
+// `std.email.at_sign_count`, since a stray extra `=` before the intended one
+// would otherwise still look like a plausible split point.
+@id("std.tracing.tracestate_member_admitted")
+fn tracestate_member_admitted(member: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(member);
+    let mut index = 0usize;
+    let mut equals_seen = 0usize;
+    let mut split = length;
+    while index < length {
+        let is_equals = byte_at_equals(member, index, 61u8);
+        equals_seen = if is_equals { equals_seen + 1usize } else { equals_seen };
+        split = if is_equals { index } else { split };
+        index = index + 1usize;
+        index < length
+    }
+    if equals_seen == 1usize { tracestate_key_shape_admitted(byte_range(member, 0usize, split)) && tracestate_value_shape_admitted(byte_range(member, split + 1usize, length)) } else { false }
+}
+
+// ---------------------------------------------------------------------
+// `tracestate` ordering and duplication
+// ---------------------------------------------------------------------
+// A mutating vendor's entry must become the list's first member (Section 3.3.1.3)
+// and its key must not already belong to another member. Checked pairwise —
+// one candidate key against one sibling key at a time, since this package
+// does not walk an unbounded member list (see the package header); a caller
+// enforcing this across N members calls it once per sibling with
+// `first_member_key` held fixed.
+@id("std.tracing.tracestate_mutation_admitted")
+fn tracestate_mutation_admitted(mutated_key: borrow Slice<u8>, first_member_key: borrow Slice<u8>, sibling_key: borrow Slice<u8>) -> bool
+{
+    slice_equal(mutated_key, first_member_key) && !slice_equal(mutated_key, sibling_key)
 }

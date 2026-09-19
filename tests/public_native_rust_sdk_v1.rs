@@ -752,3 +752,168 @@ process.stdout.write(value+"\n");
     );
     assert_eq!(wasm.stdout, rust.stdout);
 }
+
+/// Issue #145 step 3 asks for "independent clean external Rust/npm consumers
+/// of packaged artifacts. Use the package tarball/archive route, not a path
+/// dependency into the checkout; provision any registry inputs explicitly
+/// and preserve lockfiles." The sibling test above depends on the raw
+/// generated directory tree directly, which is a path dependency into
+/// generated output, but never exercises Cargo's own packaging rules (file
+/// inclusion, `Cargo.toml` normalization/rewrite for publication). This test
+/// runs `cargo package` to produce the exact `.crate` tarball a registry
+/// would hold, extracts it (nothing is fetched from any registry; the
+/// tarball is produced and consumed entirely from this machine's own
+/// output), and builds+runs an external consumer against that EXTRACTED
+/// archive content with its own preserved `Cargo.lock` -- never a path back
+/// into this checkout or the pre-packaging tree.
+///
+/// It also locks in step 4's checksum/source-association gate: a SHA-256 of
+/// the packaged tarball is an integrity value tying the archive to exact
+/// source bytes, never a signature or a trust/publisher attestation (see
+/// docs/RELEASE-PROCESS.md). Two independent generate-and-package runs from
+/// identical `.spx` source must reproduce the identical digest (positive
+/// control), and packaging a materially different program must not collide
+/// onto that digest (negative control).
+#[test]
+fn packaged_tarball_consumer_round_trips_with_preserved_lockfile_and_source_tied_checksum() {
+    if std::env::var_os("SEMAPRAX_REQUIRE_PUBLIC_NATIVE_RUST_SDK").as_deref()
+        != Some(std::ffi::OsStr::new("1"))
+    {
+        return;
+    }
+
+    const PACKAGE_CRATE_FILE: &str = "semaprax-generated-native-rust-sdk-0.1.0.crate";
+    const PACKAGE_CRATE_DIR: &str = "semaprax-generated-native-rust-sdk-0.1.0";
+
+    fn package_calculator_tarball(setup_manifest: &Path, workdir: &Path, mode: &str) -> Vec<u8> {
+        let generated = workdir.join("generated-sdk");
+        run(
+            native_rust_cargo::cargo_command()
+                .args(["run", "--locked", "--offline", "--quiet", "--manifest-path"])
+                .arg(setup_manifest)
+                .arg("--")
+                .arg(mode)
+                .arg(&generated),
+            "generate calculator SDK for packaging",
+        );
+        let package_target_dir = workdir.join("package-target");
+        run(
+            native_rust_cargo::cargo_command()
+                .args(["package", "--offline", "--no-verify", "--manifest-path"])
+                .arg(generated.join("Cargo.toml"))
+                .arg("--target-dir")
+                .arg(&package_target_dir),
+            "package generated calculator SDK",
+        );
+        let crate_file = package_target_dir.join("package").join(PACKAGE_CRATE_FILE);
+        fs::read(&crate_file).unwrap_or_else(|error| {
+            panic!("read packaged tarball {}: {error}", crate_file.display())
+        })
+    }
+
+    let fixture = Fixture::create();
+    let setup_manifest = root().join("examples/calculator-rust/Cargo.toml");
+
+    let first_dir = fixture.0.join("first");
+    fs::create_dir(&first_dir).unwrap();
+    let first_bytes = package_calculator_tarball(&setup_manifest, &first_dir, "calculator");
+
+    let second_dir = fixture.0.join("second");
+    fs::create_dir(&second_dir).unwrap();
+    let second_bytes = package_calculator_tarball(&setup_manifest, &second_dir, "calculator");
+    assert_eq!(
+        sha256_hex(&first_bytes),
+        sha256_hex(&second_bytes),
+        "packaged tarball checksum must tie to exact source content, not build-time entropy",
+    );
+
+    let callback_dir = fixture.0.join("callback");
+    fs::create_dir(&callback_dir).unwrap();
+    let callback_bytes = package_calculator_tarball(&setup_manifest, &callback_dir, "callback");
+    assert_ne!(
+        sha256_hex(&first_bytes),
+        sha256_hex(&callback_bytes),
+        "packaged tarballs for different programs must not share a checksum",
+    );
+
+    // Extract the actual shipped tarball bytes (what a real registry install
+    // would place on disk) and re-check the private-crate/local-path
+    // leakage property (#145's required negative case) against the
+    // packaging-normalized `Cargo.toml`, which Cargo rewrites independently
+    // of the pre-packaging render already covered by
+    // `public_sdk::tests::generated_cargo_package_never_embeds_a_local_checkout_path_or_a_private_crate_name`.
+    let extracted_root = fixture.0.join("extracted");
+    fs::create_dir(&extracted_root).unwrap();
+    run(
+        Command::new("tar")
+            .arg("xzf")
+            .arg(
+                first_dir
+                    .join("package-target/package")
+                    .join(PACKAGE_CRATE_FILE),
+            )
+            .arg("-C")
+            .arg(&extracted_root),
+        "extract packaged tarball",
+    );
+    let extracted_crate_dir = extracted_root.join(PACKAGE_CRATE_DIR);
+    let packaged_cargo_toml = fs::read_to_string(extracted_crate_dir.join("Cargo.toml")).unwrap();
+    let this_checkout = env!("CARGO_MANIFEST_DIR");
+    assert!(!packaged_cargo_toml.contains(this_checkout));
+    for private_crate in [
+        "semaprax-native-rust-interop-builder",
+        "semaprax-native-rust-interop",
+        "semaprax-native-rust-owned-data-package",
+        "semaprax-native-rust-interop-platform",
+        "semaprax-toolchain",
+    ] {
+        assert!(
+            !packaged_cargo_toml.contains(private_crate),
+            "packaged tarball manifest names the private crate `{private_crate}`"
+        );
+    }
+    for separator in ["/Users/", "/home/", r"C:\Users\"] {
+        assert!(
+            !packaged_cargo_toml.contains(separator),
+            "packaged tarball manifest embeds an absolute host path ({separator})"
+        );
+    }
+
+    // Independent clean external consumer, via the tarball/archive route:
+    // a path dependency onto the EXTRACTED packaged content (what a
+    // registry-installed dependency looks like on disk), never onto this
+    // checkout or the pre-packaging generated tree. No registry is
+    // provisioned or contacted; the consumer gets its own preserved
+    // `Cargo.lock`.
+    let consumer = fixture.0.join("packaged-consumer");
+    fs::create_dir_all(consumer.join("src")).unwrap();
+    fs::copy(
+        root().join("examples/calculator-rust/consumer/src/main.rs"),
+        consumer.join("src/main.rs"),
+    )
+    .unwrap();
+    fs::write(
+        consumer.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"semaprax-calculator-rust-packaged-consumer\"\nversion = \"0.0.0\"\nedition = \"2021\"\nrust-version = \"1.85\"\npublish = false\n\n[workspace]\n\n[dependencies]\nsemaprax-generated-native-rust-sdk = {{ path = {extracted_crate_dir:?} }}\n\n[lints.rust]\nunsafe_code = \"forbid\"\n",
+        ),
+    )
+    .unwrap();
+    run(
+        native_rust_cargo::cargo_command()
+            .args(["generate-lockfile", "--offline", "--manifest-path"])
+            .arg(consumer.join("Cargo.toml")),
+        "lock packaged-tarball calculator consumer",
+    );
+    assert!(
+        consumer.join("Cargo.lock").is_file(),
+        "tarball-route consumer must preserve a generated lockfile"
+    );
+    let packaged_run = run(
+        native_rust_cargo::cargo_command()
+            .args(["run", "--locked", "--offline", "--quiet", "--manifest-path"])
+            .arg(consumer.join("Cargo.toml")),
+        "run packaged-tarball calculator consumer",
+    );
+    assert_eq!(packaged_run.stdout, EXPECTED_42_LINE);
+}

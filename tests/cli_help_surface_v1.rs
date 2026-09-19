@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 const SHAPES_CATALOG_PATH: &str = "docs/LANGUAGE-SHAPES-CATALOG.md";
 const BUILD_SOURCE_LINE: &str = "semaprax build <file> [--target native|native-callable|web|wasm] [--profile internal-strings-v1] [--function stable-id] [--export stable-id ...] [-o|--output path] [--json]\n";
-const BUILD_PROJECT_LINE: &str = "semaprax build [<dir>|semaprax.toml|--manifest-path path] [--target native|web|wasm|npm] [-o|--output path] [--json]\n";
+const BUILD_PROJECT_LINE: &str = "semaprax build [<dir>|semaprax.toml|--manifest-path path] [--target native|web|wasm|npm|oci] [-o|--output path] [--json]\n";
 const DOCTOR_LINE: &str = "semaprax doctor [--profile <id>] [--target native|web|all] [--json]\n";
 const NEW_LINE: &str =
     "semaprax new <destination> [--name project-name] [--template calculator|library|service]\n";
@@ -150,7 +150,7 @@ fn standalone_help_is_exact_capability_aware_and_inert() {
     assert!(help.find(NEW_LINE).unwrap() < help.find(PROJECT_SCAFFOLD_LINE).unwrap());
     assert!(help.find(PROJECT_SCAFFOLD_LINE).unwrap() < help.find(BUILD_SOURCE_LINE).unwrap());
     assert_eq!(
-        help.matches("native|native-callable|web|wasm|npm|rust")
+        help.matches("native|native-callable|web|wasm|npm|oci|rust")
             .count(),
         0
     );

@@ -316,7 +316,7 @@ fn standalone_project_target_error_uses_the_project_catalog() {
     assert!(rejected.stdout.is_empty());
     assert_eq!(
         stderr(&rejected),
-        "unsupported target `bogus`; available: native, web, wasm, npm\n\
+        "unsupported target `bogus`; available: native, web, wasm, npm, oci\n\
 hint: run `semaprax build --help` for usage\n"
     );
 }

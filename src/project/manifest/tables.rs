@@ -1151,7 +1151,7 @@ impl ProjectManifest {
             return Ok(());
         };
         let required = match target {
-            "web" | "wasm" | "npm" => PACKAGE_TARGET_WASM32,
+            "web" | "wasm" | "npm" | "oci" => PACKAGE_TARGET_WASM32,
             _ => PACKAGE_TARGET_NATIVE64,
         };
         if matrix.iter().any(|declared| declared == required) {

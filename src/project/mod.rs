@@ -38,6 +38,7 @@ mod native_sdk;
 mod nested_owned_record;
 mod next_construct_query;
 mod npm;
+mod oci;
 mod prepared_interpreter;
 mod process;
 mod profile;
@@ -932,6 +933,24 @@ impl ProjectSnapshot {
             .map_err(|drift| self.publication_uncertainty(drift))
     }
 
+    /// Build and publish the Project v1 scalar profile as one deterministic,
+    /// offline OCI Image Layout carrying the project's Wasm module as its
+    /// sole content artifact. See `docs/OCI-DEPLOYABLE-ARTIFACT-V1.md`.
+    pub fn build_oci(&mut self, output: &Path) -> Result<(), Vec<Diagnostic>> {
+        if self.manifest.project_profile() != ProjectProfile::ScalarV1 {
+            return Err(vec![Diagnostic::io(
+                "SPX-J142",
+                "the oci target requires the Project v1 scalar profile; no other profile is wired to OCI packaging",
+            )]);
+        }
+        let build = self.build_web_inline(MAX_PROJECT_WEB_BUILD_BYTES)?;
+        self.recheck()?;
+        oci::build_and_publish(&build, output).map_err(|error| vec![error])?;
+        self.published_subject = Some(OCI_PUBLICATION_SUBJECT);
+        self.recheck()
+            .map_err(|drift| self.publication_uncertainty(drift))
+    }
+
     /// Prepare an exact owned npm package for an explicitly supplied trusted
     /// publication host. The callback owns filesystem effects, not source or
     /// capsule authority. Errors do not authorize cleanup or promise rollback.
@@ -1386,4 +1405,5 @@ fn load_snapshot_building<T>(
 const WEB_PUBLICATION_SUBJECT: &str = "digest-bound Web package";
 const NPM_PUBLICATION_SUBJECT: &str = "installable npm package";
 const NATIVE_PUBLICATION_SUBJECT: &str = "native executable";
+const OCI_PUBLICATION_SUBJECT: &str = "OCI deployable artifact";
 const AUTHENTICATED_PROJECT_SUBJECT_OPERATION: &str = "authenticated Project subject operation";

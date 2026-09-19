@@ -588,9 +588,9 @@ pub(crate) fn parse_with_capabilities(
         return Err(2);
     }
     if matches!(&input, BuildInput::Project(_)) {
-        if !matches!(target.as_str(), "web" | "wasm" | "native" | "npm" | "rust") {
+        if !matches!(target.as_str(), "web" | "wasm" | "native" | "npm" | "rust" | "oci") {
             eprintln!(
-                "Project manifests publish only explicit web, native, npm, and Project-v8 rust targets; native-callable publication remains held"
+                "Project manifests publish only explicit web, native, npm, oci, and Project-v8 rust targets; native-callable publication remains held"
             );
             return Err(2);
         }
@@ -619,8 +619,8 @@ pub(crate) fn parse_with_capabilities(
 fn target_catalog(input: &BuildInput, private_toolchain: bool) -> &'static [&'static str] {
     match (input, private_toolchain) {
         (BuildInput::Source(_), _) => &["native", "native-callable", "web", "wasm"],
-        (BuildInput::Project(_), false) => &["native", "web", "wasm", "npm"],
-        (BuildInput::Project(_), true) => &["native", "web", "wasm", "npm", "rust"],
+        (BuildInput::Project(_), false) => &["native", "web", "wasm", "npm", "oci"],
+        (BuildInput::Project(_), true) => &["native", "web", "wasm", "npm", "oci", "rust"],
     }
 }
 

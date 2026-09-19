@@ -217,17 +217,22 @@ automation.
 
 `build` has separate target catalogs for its two input classes. A source file
 admits `native`, `native-callable`, `web`, and `wasm`; a project admits
-`native`, `web`, `wasm`, and `npm`, plus `rust` in the full toolchain. An
-unsupported-target diagnostic lists only the catalog the current input and
+`native`, `web`, `wasm`, `npm`, and `oci`, plus `rust` in the full toolchain.
+An unsupported-target diagnostic lists only the catalog the current input and
 toolchain can execute. `wasm` is an exact alias of `web`: both publish the
 same Web package directory, including `app.wasm`, rather than a bare Wasm
-file. `-o` and `--output` are equivalent.
+file. `oci` only accepts the Project v1 scalar profile today and publishes a
+deterministic, offline OCI Image Layout carrying that project's `app.wasm` as
+its sole content artifact -- see
+[OCI Deployable Artifact v1](OCI-DEPLOYABLE-ARTIFACT-V1.md). `-o` and
+`--output` are equivalent.
 
 When omitted, a source target defaults to `native` and its destination to
 `<source-stem>.out` beside the source. A project target defaults to `web`; its
 destination defaults inside the project root to `<name>-web` for `web` or
-`wasm`, `<name>-npm` for `npm`, `<name>-rust` for `rust`, and
-`<name>-out` plus the platform executable suffix for `native`. `build --json`
+`wasm`, `<name>-npm` for `npm`, `<name>-oci` for `oci`, `<name>-rust` for
+`rust`, and `<name>-out` plus the platform executable suffix for `native`.
+`build --json`
 prints one success object with `status`, `target`, `product`, and `output`
 (plus `manifest_sha256` for a native-callable bundle); build diagnostics use
 the ordinary one-diagnostic-per-line JSON form.

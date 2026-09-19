@@ -1,0 +1,15 @@
+[package]
+name = "semaprax-oci-package"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+publish = false
+description = "Deterministic offline OCI Image Layout emitter for a checked SEMAPRAX project's Wasm module"
+license = "Apache-2.0"
+
+[dependencies]
+serde_json = "=1.0.151"
+sha2 = "=0.11.0"
+
+[lints.rust]
+unsafe_code = "forbid"

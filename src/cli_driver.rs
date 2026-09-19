@@ -628,6 +628,7 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
                             let suffix = match options.target.as_str() {
                                 "web" | "wasm" => "web".to_owned(),
                                 "npm" => "npm".to_owned(),
+                                "oci" => "oci".to_owned(),
                                 "rust" => "rust".to_owned(),
                                 _ => format!("out{}", std::env::consts::EXE_SUFFIX),
                             };
@@ -685,6 +686,7 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
                         match options.target.as_str() {
                             "web" | "wasm" => snapshot.build_web(&output)?,
                             "npm" => snapshot.build_npm(&output)?,
+                            "oci" => snapshot.build_oci(&output)?,
                             "native" => snapshot.build_native(&output)?,
                             "rust" => (host.expect("private target admitted above").build_rust)(snapshot, &output)?,
                             _ => unreachable!("validated project target"),

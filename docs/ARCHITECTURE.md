@@ -2084,6 +2084,31 @@ Initialization rejection retains its existing error with no further provider
 operation in that invocation or its cleanup. A later explicit invocation may
 attempt initialization again; only success creates the close obligation.
 
+The `oci` build target (Project v1 scalar profile only) crosses a similar
+dependency-inverted boundary, but its lower crate needs no privileged
+toolchain, so it is a normal dependency of the root crate rather than a
+`PrivateHost`-injected one:
+
+```text
+held Project v1 snapshot + verified ProjectWebBuild envelope
+                    |
+       src/project/oci.rs: envelope replay + field extraction
+                    |
+       semaprax-oci-package: OciPlan
+                    |
+       hostile-input admission + credential-environment refusal
+                    |
+       deterministic OCI Image Layout (no base layer, unsigned, unpublished)
+```
+
+`crates/semaprax-oci-package` knows neither HIR nor Project manifests: it
+receives only the already-verified Wasm bytes and identity strings, recomputes
+and cross-checks their digests itself, and owns the local, no-clobber
+filesystem publish. It has no registry client and no environment read beyond
+the credential-shaped-variable refusal check. See
+[OCI Deployable Artifact v1](OCI-DEPLOYABLE-ARTIFACT-V1.md) for the emitted
+layout and the no-base-layer/no-signing/no-publish decisions.
+
 `platform-tests/owned-data-browser-v1/project` owns a separate fixed direct-Bytes
 browser subject. Its Rust fixture test authenticates the Project and inline
 carrier; its provisioned browser runner imports the actual generated package

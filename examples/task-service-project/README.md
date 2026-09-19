@@ -36,6 +36,12 @@ semaprax run   examples/task-service-project
   `task_service.app.main`), and once as four independent, narrower
   assertions in `task_service.tests` (success path, unauthorized access,
   invalid input, duplicate enqueue).
+- **Three execution lanes, not only the interpreter**:
+  `tests/useful_data/task_service_project.rs::entry_and_conformance_return_zero_on_interpreter_native_and_wasm`
+  runs the entry and conformance closures on the interpreter, on native C11
+  at `-O0`/`-O2`, and on Core Wasm under Node -- the same shape
+  `agent_response_project.rs`/`vector_stats_project.rs` already assert for
+  their own sibling reference projects.
 
 ## Non-claims
 
@@ -89,3 +95,26 @@ so a project that compiles today may still be unable to use the semantic
 cache. See this repository's fast-restart measurement (in the issue #194
 worker report) for the exact reproduction and the calculator-project numbers
 measured in its place.
+
+**A third, independent ceiling blocks the write side of a semantic rename on
+this project.** `tests/useful_data/task_service_project.rs::stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precondition`
+walks issue #194 step 7's inspect/context/impact/preview chain against
+`task_service.core.identifier_byte_ok`: `available_operations` (inspect),
+`semantic_context`, and `semantic_impact` all succeed exactly as designed.
+`preview` -- validating a `rename_display_name` transaction -- fails closed
+with `SPX-G525` ("semantic transaction v1 requires comment-free canonical
+source"). Universal Semantic Transaction v1 requires the *entire* workspace
+comment-free, and that workspace includes every bundled dependency source
+actually reached, not only this project's own three modules
+(`comment_free_canonical_workspace` in `src/project/semantic_transaction.rs`
+iterates `revision.sources()`, which `standard_dependencies::extend_sources`
+populates with bundled package source). `std.auth` carries 253 `//` comment
+lines and `std.jobs` 34. Because bundled dependency source is
+compiler-immutable, no project that declares a `[dependencies]` edge on any
+commented bundled package -- not only this one -- can ever satisfy this
+precondition by editing its own source. This is new evidence, distinct from
+`SPX-G171`/`SPX-G256` above: it is a precondition on an operation, not a
+capacity ceiling, and it means the apply/retest half of step 7's
+demonstration remains open on this project until the precondition is
+narrowed (for example, scoped to only the renamed declaration's own module)
+or a comment-free variant of the bundled package ships.

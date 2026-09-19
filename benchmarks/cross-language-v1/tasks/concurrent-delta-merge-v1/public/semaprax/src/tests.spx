@@ -1,0 +1,7 @@
+module bench.concurrentmerge.tests;
+
+@id("bench.concurrentmerge.tests.main")
+fn main() -> i64
+{
+    0
+}

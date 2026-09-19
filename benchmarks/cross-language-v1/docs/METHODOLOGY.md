@@ -17,6 +17,62 @@ cross-language comparison adds one more failure mode on top of that: an
 unstated difference in what the two languages were actually asked to do.
 That is what "equivalence" below exists to close off.
 
+## Taxonomy mapping: issue #211's eleven task categories
+
+Issue #211 names eleven task categories the corpus should cover: greenfield,
+feature change, cross-file refactor, API evolution, security fix, ownership
+change, requirement preservation, Agent workflow, concurrent change, failure
+recovery, and context-limited maintenance. This corpus's `tasks.json` grew its
+own five-value `category` field (`greenfield`, `repair`, `validation`,
+`diagnosis`, `onboarding`) before that exact eleven-item wording existed, and
+`category` is read by `run.py`'s and `agent/orchestrator.py`'s own result
+records (`tests/documentation/cross_language_benchmark_suite.rs` pins
+`bounded-counter-repair-v1`'s `category` to the literal string `"repair"`),
+so it stays exactly as committed rather than being rewritten to chase a
+label change.
+
+Each task instead carries an additive `issue_211_category` field naming
+which of the eleven categories it demonstrates, decided by what the task's
+own `EQUIVALENCE.md` actually measures rather than by relabeling in place:
+
+| Task | `category` | `issue_211_category` | Why |
+| --- | --- | --- | --- |
+| `sequence-digest-v1` | greenfield | **greenfield** | New pure computation, no existing code to change. |
+| `module-import-refactor-v1` | greenfield | **cross-file refactor** | The measured skill is importing a helper from a separate module, not the arithmetic itself. |
+| `owned-byte-sentinel-balance-v1` | greenfield | **ownership change** | Consumes an owned buffer; the ownership axis is SEMAPRAX-specific and has no analogue in the other five categories. |
+| `stable-dispatch-order-v1` | greenfield | **concurrent change** | Models simultaneously-arriving jobs that must be ordered deterministically, preserving arrival order under equal priority — the same "several updates land at once, order must still be well-defined" property `concurrent-delta-merge-v1` (below) measures with arithmetic instead of ordering. |
+| `concurrent-delta-merge-v1` | greenfield | **concurrent change** | Purpose-built for this category (see below): merges two independently-arriving deltas against one shared bound, catching the bug of letting one delta's clamp affect the other. |
+| `bounded-counter-repair-v1` | repair | **requirement preservation** | The stated requirement — clamp after every step, not just the final sum — is exactly what a plausible repair silently drops. |
+| `booking-window-conflict-v1` | repair | **requirement preservation** | The half-open, exclusive-end requirement ("adjacent handoffs are not overlaps") is what a plausible repair (loosening `<` to `<=`) violates. |
+| `stale-edit-preservation-v1` | repair | **context-limited maintenance** | Measures whether a targeted fix leaves an unrelated, already-correct piece of work untouched — the failure mode of an agent that cannot hold the whole file in view and "cleans up" what it does not need to touch. |
+| `structured-input-error-handling-v1` | validation | **API evolution** | The subject is a versioned record envelope; classifying an unsupported version against a supported one is a compatibility-boundary question, not a pure-arithmetic one. |
+| `cold-chain-release-gate-v1` | validation | **security fix** | The realistic wrong candidate joins two safety predicates with `\|\|` instead of `&&` — a fail-open defect in a release/safety gate, the canonical shape of a security bug that lets unsafe data through. |
+| `telemetry-overflow-diagnosis-v1` | diagnosis | **failure recovery** | The task is precisely about recovering from an arithmetic-overflow failure (saturate) instead of panicking, silently leaving the declared range, or raising a fault, across three runtimes that each fail differently for the same root cause. |
+| `clean-install-calculator-v1` | onboarding | **feature change** | Its own `EQUIVALENCE.md` states the distinguishing skill directly: add one new operation to an existing, tool-generated scaffold without disturbing any of it — ordinary feature addition to an existing project, not greenfield authoring. |
+
+That accounts for ten of the eleven categories through task content. The
+eleventh, **Agent workflow**, is not a content shape a static public/hidden
+fixture can express on its own — it is a claim about *how* a task is solved
+and scored, not what the task's logic does. This corpus demonstrates it
+orthogonally, through the seam `agent/` already implements rather than
+through a twelfth task family: `agent/orchestrator.py`'s
+`evaluate_agent_pair` drives `structured-input-error-handling-v1::rust`
+through the full solver path — prompt construction, budget enforcement,
+retry accounting, a transport-produced candidate, transcript-digest binding,
+and then `run.py`'s own build/test/leak-check/provenance scoring — and
+`agent/tests/test_agent_driver.py::RealToolchainEndToEndTests` exercises
+that path end to end against a real `rustc`, including a wrong-candidate
+control that passes public but fails hidden through the agent path
+specifically (`test_wrong_candidate_from_transport_passes_public_but_fails_hidden`).
+A task's `issue_211_category` therefore names its *content* shape;
+"Agent workflow" is a property of the harness path a task is run through,
+and `structured-input-error-handling-v1` is this corpus's example of both at
+once (content: API evolution; execution path: Agent workflow).
+
+This mapping is deliberately additive and reversible: no `category` value
+changed, no task was deleted or renamed, and a future task can carry its own
+`issue_211_category` without touching this table's existing rows.
+
 ## Equivalence contract (what every task must specify)
 
 Every task's `EQUIVALENCE.md` states, in prose a future reader can check

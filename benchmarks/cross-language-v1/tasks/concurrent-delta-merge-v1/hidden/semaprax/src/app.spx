@@ -1,0 +1,26 @@
+module bench.concurrentmerge.app;
+use function @id("bench.concurrentmerge.merge_concurrent_deltas") from bench.concurrentmerge.candidate as merge_concurrent_deltas;
+
+@id("bench.concurrentmerge.eq")
+fn eq(left: i64, right: i64) -> i64
+{
+    if left == right { 1 } else { 0 }
+}
+
+// Hidden overlay: replaces the public `app.spx` verbatim (same relative
+// path) for the scoring phase only, adding the two boundary vectors a
+// solver never sees. `src/candidate.spx` is copied unchanged from the
+// public tree, so hidden scoring executes the solver-authored candidate.
+//
+// Applying `delta_a` first and clamping there, then adding `delta_b`, is
+// the sequential-application bug this task is built to catch:
+// `clamp(999_990 + 20) = 1_000_000`, then `1_000_000 - 50 = 999_950`.
+// Treating both deltas as arriving concurrently against the same `base`
+// gives `999_990 + 20 - 50 = 999_960` instead, which never needed to touch
+// the ceiling at all. The floor-side vector is the symmetric case.
+@id("bench.concurrentmerge.app.main")
+fn main() -> i64
+{
+    let checks = eq(merge_concurrent_deltas(100, 50, -30), 120) + eq(merge_concurrent_deltas(500000, 100, 100), 500200) + eq(merge_concurrent_deltas(10, -5, -3), 2) + eq(merge_concurrent_deltas(0, 0, 0), 0) + eq(merge_concurrent_deltas(999990, 20, -50), 999960) + eq(merge_concurrent_deltas(10, -20, 15), 5);
+    if checks == 6 { 0 } else { 1 }
+}

@@ -28,7 +28,7 @@ must do to produce real numbers.
 | --- | --- |
 | `run.py` | The toolchain-conformance harness: resolves tasks/adapters, builds and tests each task/language pair against a fixed, human-written source tree, records provenance, scores comparisons. No model involved. |
 | `agent/` | The agent-driver seam: explicit model/sampling/budget contracts, a deterministic offline replay transport, a declared-but-inert live transport, and an orchestrator that scores a transport-produced candidate through `run.py`'s own build/test/leak-check/provenance machinery. See `agent/README.md`. |
-| `tasks.json` | Task inventory (schema `benchmark.cross_language.tasks.v1`). Each task declares a `split` — `development` (the frozen original pilot) or `held_out` (issue #106's contamination-protected extension; see that task's `EQUIVALENCE.md`) |
+| `tasks.json` | Task inventory (schema `benchmark.cross_language.tasks.v1`). Each task declares a `split` — `development` (the frozen original pilot) or `held_out` (issue #106's contamination-protected extension; see that task's `EQUIVALENCE.md`) — and both its pre-existing five-value `category` and an additive `issue_211_category` naming which of issue #211's eleven task categories it demonstrates; see `docs/METHODOLOGY.md`'s "Taxonomy mapping" section for the full table and reasoning, including why `category` itself is never rewritten |
 | `adapters.json` | Per-language adapter inventory (schema `benchmark.cross_language.adapters.v1`): official toolchain invocation, version probe, success signal |
 | `tasks/<task-id>/EQUIVALENCE.md` | That task's fairness contract: inputs, outputs, measured boundary, allowed optimizations |
 | `tasks/<task-id>/public/<language>/` | The source tree a solver (human or Agent) would author against |
@@ -98,6 +98,11 @@ official toolchain is available in a pinned, network-free form (see
   (`bounded-counter-repair-v1`, `split: held_out`) is added alongside it, not
   in place of it — see `tasks/bounded-counter-repair-v1/EQUIVALENCE.md`'s
   "Held-out discipline" section for what that split declaration commits to.
+  `concurrent-delta-merge-v1` is a further held-out addition purpose-built
+  for issue #211's "concurrent change" category (`docs/METHODOLOGY.md`'s
+  "Taxonomy mapping" section); it is evidence the harness's leak check and
+  provenance binding hold for a newly-authored task, not a performance claim
+  either.
 - This is local, single-host evidence for whichever toolchain versions
   happen to be installed on the run host, recorded, not pinned by a lockfile
   or a container image. Containerized/pinned environments are in issue

@@ -1,0 +1,27 @@
+module bench.concurrentmerge.app;
+use function @id("bench.concurrentmerge.merge_concurrent_deltas") from bench.concurrentmerge.candidate as merge_concurrent_deltas;
+
+@id("bench.concurrentmerge.eq")
+fn eq(left: i64, right: i64) -> i64
+{
+    if left == right { 1 } else { 0 }
+}
+
+// Public tests: two concurrent deltas merged against a shared `base`, well
+// inside the shared [0, 1_000_000] bound, so a candidate that (incorrectly)
+// clamps `base + delta_a` before adding `delta_b` happens to agree with the
+// correct single-clamp-at-the-end merge on all four vectors. See
+// EQUIVALENCE.md and the hidden overlay for the boundary vectors only a
+// genuinely concurrent (order-independent) merge passes.
+//
+// Assertions are summed arithmetically (`eq(...)` calls added together)
+// rather than chained with `&&`, matching this suite's other fixtures:
+// stacking `&&` builds one comparison path per short-circuit branch and
+// hits SPX-H006's per-function cleanup replay path budget well before ten
+// `if`/`else` statements would.
+@id("bench.concurrentmerge.app.main")
+fn main() -> i64
+{
+    let checks = eq(merge_concurrent_deltas(100, 50, -30), 120) + eq(merge_concurrent_deltas(500000, 100, 100), 500200) + eq(merge_concurrent_deltas(10, -5, -3), 2) + eq(merge_concurrent_deltas(0, 0, 0), 0);
+    if checks == 4 { 0 } else { 1 }
+}

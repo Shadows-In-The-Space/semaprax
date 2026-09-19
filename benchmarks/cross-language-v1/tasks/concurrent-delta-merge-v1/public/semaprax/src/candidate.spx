@@ -1,0 +1,8 @@
+module bench.concurrentmerge.candidate;
+
+@id("bench.concurrentmerge.merge_concurrent_deltas")
+fn merge_concurrent_deltas(base: i64, delta_a: i64, delta_b: i64) -> i64
+{
+    let total = base + delta_a + delta_b;
+    if total < 0 { 0 } else { if total > 1000000 { 1000000 } else { total } }
+}

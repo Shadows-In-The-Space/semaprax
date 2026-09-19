@@ -1002,7 +1002,7 @@ jobs:
         if: runner.os == 'macOS'
         env:
           SEMAPRAX_REQUIRE_DARWIN_REAL_ARCHIVE: "1"
-        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions -- --exact --nocapture --test-threads=1
+        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::archive_admission::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions -- --exact --nocapture --test-threads=1
       - name: Freeze the focused acceptance workflow contract
         run: cargo test --locked --offline -p semaprax --test project_product_acceptance_ci_contract -- --nocapture
       - name: Require the complete project, daemon, Web, native, Wasm, TypeScript, and Rust cycle
@@ -1127,15 +1127,15 @@ jobs:
         if: runner.os == 'macOS'
         env:
           SEMAPRAX_REQUIRE_DARWIN_REAL_ARCHIVE: "1"
-        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions -- --exact --nocapture --test-threads=1
+        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::archive_admission::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions -- --exact --nocapture --test-threads=1
       - name: Require exact Windows real archive admission before public SDK work
         if: runner.os == 'Windows'
         env:
           SEMAPRAX_REQUIRE_WINDOWS_REAL_ARCHIVE: "1"
-        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_real_brepro_archive_round_trips_through_exact_admission -- --exact --nocapture --test-threads=1
+        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_archive::windows_real_brepro_archive_round_trips_through_exact_admission -- --exact --nocapture --test-threads=1
       - name: Require exact Windows live-descendant publication denial
         if: runner.os == 'Windows'
-        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_live_descendant_authorities_deny_root_publish_without_later_action -- --ignored --exact --nocapture --test-threads=1
+        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_archive::windows_live_descendant_authorities_deny_root_publish_without_later_action -- --ignored --exact --nocapture --test-threads=1
       - name: Require minimal effectful public SDK build on Windows
         if: runner.os == 'Windows'
         env:
@@ -1450,7 +1450,7 @@ jobs:
           SEMAPRAX_REQUIRE_NATIVE_RUST_INTEROP_SANITIZERS: "1"
           ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:abort_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: cargo test --locked -p semaprax-native-rust-interop --lib implementation::tests::linked_bridge_round_trips_rust_to_semaprax_to_rust_and_closes_failures -- --exact --nocapture
+        run: cargo test --locked -p semaprax-native-rust-interop --lib implementation::tests::linked_bundle::linked_bridge_round_trips_rust_to_semaprax_to_rust_and_closes_failures -- --exact --nocapture
 
   verify-build:
     name: Rust build ${{ matrix.os }}

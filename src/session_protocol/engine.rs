@@ -496,6 +496,61 @@ impl<'p> SessionTable<'p> {
         }
     }
 
+    /// Whether the declared protocol admits `label` as a next operation on
+    /// `endpoint` right now, without performing or recording anything.
+    ///
+    /// This is the *ordering* half of [`Self::advance`]'s checks, in the
+    /// same order and with the same [`ProtocolError`] variants: unknown
+    /// session, use after terminal, stale handle, and illegal transition. A
+    /// subsystem that must perform real work before it can name the branch
+    /// its transition took (an RPC session cannot know whether an operation
+    /// invalidated its snapshot until it has run) needs to ask whether the
+    /// message is legal *before* it acts, and then commit the outcome with
+    /// `advance`.
+    ///
+    /// It deliberately does **not** check payload tag, required capability,
+    /// or resource-token consumption: those are properties of the operation
+    /// the caller is about to attempt, not of the order it arrived in, and
+    /// checking them here would let a caller learn a token was still
+    /// unconsumed without consuming it. `advance` remains the only place
+    /// any of the three is decided. `admits` returning `Ok` is therefore
+    /// necessary, never sufficient, for the matching `advance` to succeed --
+    /// which is the same "reaching a state is not authority" rule
+    /// [`ProtocolError::MissingAuthority`] states.
+    pub fn admits(&self, endpoint: &Endpoint, label: Label) -> Result<(), ProtocolError> {
+        let session_id = &endpoint.session_id;
+        let Some(record) = self.records.get(session_id) else {
+            return Err(ProtocolError::UnknownSession {
+                session_id: session_id.clone(),
+            });
+        };
+        if record.closed {
+            return Err(ProtocolError::UseAfterTerminal {
+                session_id: session_id.clone(),
+                state: record.state,
+            });
+        }
+        if record.generation != endpoint.generation {
+            return Err(ProtocolError::StaleHandle {
+                session_id: session_id.clone(),
+                presented_generation: endpoint.generation,
+                current_generation: record.generation,
+            });
+        }
+        if self
+            .spec
+            .transitions_from(record.state)
+            .any(|t| t.label == label)
+        {
+            return Ok(());
+        }
+        Err(ProtocolError::IllegalTransition {
+            session_id: session_id.clone(),
+            state: record.state,
+            label,
+        })
+    }
+
     /// Produce a resumable snapshot of `endpoint`'s current settled state.
     /// Refuses while a `Call` this session issued has not yet been resolved
     /// by its matching `Return`/escape (see [`CheckpointError::InFlightCall`]).

@@ -23,7 +23,7 @@ impl Session {
         if self.profile != ServerProfile::ProjectWorkflowV1 {
             return self.error(id, METHOD_NOT_FOUND, "method not found: rename/derive");
         }
-        if self.state != SessionState::Open {
+        if !self.lifecycle.admits("rename_derive") {
             return self.lifecycle_error(id);
         }
         let mut params = params.unwrap_or_default();
@@ -66,12 +66,12 @@ impl Session {
                     return response;
                 }
                 self.pending_rename = Some(prepared);
-                self.state = SessionState::Derived;
+                self.lifecycle.rename_derived(true);
                 response
             }
             Err(diagnostics) => {
                 if invalidates(&diagnostics) {
-                    self.state = SessionState::Invalidated;
+                    self.lifecycle.rename_derived(false);
                 }
                 self.finish(id, Err(diagnostics))
             }
@@ -86,7 +86,7 @@ impl Session {
         if self.profile != ServerProfile::ProjectWorkflowV1 {
             return self.error(id, METHOD_NOT_FOUND, "method not found: change/preview");
         }
-        if self.state != SessionState::Derived {
+        if !self.lifecycle.admits("change_preview") {
             return self.lifecycle_error(id);
         }
         let mut params = params.unwrap_or_default();
@@ -127,7 +127,7 @@ impl Session {
         let rendered = match rendered {
             Ok(rendered) => rendered,
             Err(diagnostics) => {
-                self.state = SessionState::Invalidated;
+                self.lifecycle.change_previewed(false);
                 return self.finish(id, Err(diagnostics));
             }
         };
@@ -135,7 +135,7 @@ impl Session {
         if codec::is_overflow_response(&response) {
             return response;
         }
-        self.state = SessionState::Prepared;
+        self.lifecycle.change_previewed(true);
         response
     }
 
@@ -168,7 +168,7 @@ impl Session {
                 &format!("method not found: {artifact}"),
             );
         }
-        if self.state != SessionState::Prepared {
+        if !self.lifecycle.admits("change_artifact") {
             return self.lifecycle_error(id);
         }
         let mut params = params.unwrap_or_default();
@@ -212,9 +212,12 @@ impl Session {
             .expect("prepared state retains its authenticated snapshot")
             .with_authenticated_request(|_| Ok(format!("{{\"{artifact}\":{value}}}")));
         match rendered {
-            Ok(rendered) => self.finish(id, Ok(rendered)),
+            Ok(rendered) => {
+                self.lifecycle.change_artifact_rendered(true);
+                self.finish(id, Ok(rendered))
+            }
             Err(diagnostics) => {
-                self.state = SessionState::Invalidated;
+                self.lifecycle.change_artifact_rendered(false);
                 self.finish(id, Err(diagnostics))
             }
         }

@@ -49,7 +49,9 @@ impl Fixture {
         (
             Session {
                 snapshot: Some(snapshot),
-                state: SessionState::Open,
+                // A session that has legally taken the declared `open`
+                // transition, rather than a state field set by hand.
+                lifecycle: super::super::lifecycle::ProjectSessionLifecycle::opened(),
                 limits: crate::project_transport::framing::StdioLimits::default(),
                 profile,
                 manifest_path: self.manifest(),
@@ -257,7 +259,7 @@ fn rejected_commit_reloads_exact_base_and_returns_to_open() {
         .as_str()
         .unwrap()
         .contains("SPX-I204"));
-    assert_eq!(session.state, SessionState::Open);
+    assert_eq!(session.state(), SessionState::Open);
     assert!(session.pending_rename.is_none());
     assert_eq!(
         std::fs::read(fixture.source("src/core.spx")).unwrap(),
@@ -280,7 +282,13 @@ fn post_commit_reload_rejection_is_correlated_terminal_uncertainty() {
         .as_str()
         .unwrap()
         .contains("SPX-J110"));
-    assert_eq!(session.state, SessionState::Uncertain);
+    assert_eq!(session.state(), SessionState::Uncertain);
+    // The terminal state's declared cleanup inventory ran in its canonical
+    // order, front to back, exactly once -- never sorted or repaired.
+    assert_eq!(
+        session.lifecycle.cleanup_trace(),
+        ["release_snapshot", "mark_uncertain_for_reconciliation"]
+    );
     assert!(session.snapshot.is_none());
     assert!(session.terminal_diagnostics.as_ref().is_some_and(|items| {
         items.first().is_some_and(|item| item.code == "SPX-J110")
@@ -306,7 +314,13 @@ fn workflow_reload_uncertainty_is_terminal_and_blocks_every_later_build() {
         .as_str()
         .unwrap()
         .contains("SPX-J110"));
-    assert_eq!(session.state, SessionState::Uncertain);
+    assert_eq!(session.state(), SessionState::Uncertain);
+    // The terminal state's declared cleanup inventory ran in its canonical
+    // order, front to back, exactly once -- never sorted or repaired.
+    assert_eq!(
+        session.lifecycle.cleanup_trace(),
+        ["release_snapshot", "mark_uncertain_for_reconciliation"]
+    );
     assert!(session.snapshot.is_none());
 
     let build = session.build(&RequestId::Number(14), None);
@@ -380,7 +394,7 @@ fn target_and_foreign_identity_drift_stop_across_the_a0_handoff() {
         );
         let response: Value = serde_json::from_slice(&response).unwrap();
         assert_eq!(response["error"]["code"], APPLICATION_ERROR, "{boundary}");
-        assert_eq!(session.state, SessionState::Invalidated, "{boundary}");
+        assert_eq!(session.state(), SessionState::Invalidated, "{boundary}");
         assert!(session.snapshot.is_none(), "{boundary}");
         assert!(session.terminal_diagnostics.is_some(), "{boundary}");
         assert_eq!(

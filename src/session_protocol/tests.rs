@@ -1255,3 +1255,7 @@ mod duality_continuation;
 
 #[cfg(test)]
 mod applied_project_session;
+
+/// `SessionTable::admits`, the read-only ordering gate a migrated
+/// subsystem uses before it can name its branch.
+mod admits;

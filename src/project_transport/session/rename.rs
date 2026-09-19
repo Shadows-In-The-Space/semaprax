@@ -52,7 +52,7 @@ impl Session {
         if self.profile != ServerProfile::ProjectRenameV1 {
             return self.error(id, METHOD_NOT_FOUND, "method not found: rename/preview");
         }
-        if self.state != SessionState::Open {
+        if !self.lifecycle.admits("rename_preview") {
             return self.lifecycle_error(id);
         }
         let mut params = params.unwrap_or_default();
@@ -95,12 +95,12 @@ impl Session {
                     return response;
                 }
                 self.pending_rename = Some(prepared);
-                self.state = SessionState::Prepared;
+                self.lifecycle.rename_previewed(true);
                 response
             }
             Err(diagnostics) => {
                 if invalidates(&diagnostics) {
-                    self.state = SessionState::Invalidated;
+                    self.lifecycle.rename_previewed(false);
                 }
                 self.finish(id, Err(diagnostics))
             }
@@ -158,7 +158,7 @@ impl Session {
         if !allowed {
             return self.error(id, METHOD_NOT_FOUND, &format!("method not found: {method}"));
         }
-        if self.state != SessionState::Prepared {
+        if !self.lifecycle.admits("apply") {
             return self.lifecycle_error(id);
         }
         let mut params = params.unwrap_or_default();
@@ -226,7 +226,10 @@ impl Session {
             .expect("prepared state retains its authenticated snapshot")
             .with_authenticated_request(|_| Ok(()))
         {
-            self.state = SessionState::Invalidated;
+            // The declared `apply` transition requires the
+            // `project.apply` capability, and this re-check is what earns
+            // it. Failing it takes the declared pre-commit refusal instead.
+            self.lifecycle.apply_refused();
             return self.finish(id, Err(diagnostics));
         }
         if let Err(diagnostics) = runtime.before_a0() {
@@ -252,11 +255,17 @@ impl Session {
             .take()
             .expect("prepared state retains its authenticated snapshot");
         if let Err(diagnostics) = old_snapshot.finish_session() {
-            self.state = SessionState::Invalidated;
+            self.lifecycle.apply_refused();
             self.terminal_diagnostics = Some(diagnostics.clone());
             return self.finish(id, Err(diagnostics));
         }
-        self.state = SessionState::Applying;
+        // Cross the declared commit boundary. The capability is presented
+        // because the authenticated re-check above passed, and the resource
+        // token because `acquire_a0` really took the A0 commit lock -- the
+        // kernel refuses this transition without both, so reaching
+        // `Prepared` in legal order is necessary and never sufficient.
+        self.lifecycle
+            .apply_started(Some("project.apply"), prepared.preview_digest());
         let commit_result = runtime.commit(owned);
         let reloaded = runtime.reload(&self.manifest_path);
         match (commit_result, reloaded) {
@@ -265,12 +274,12 @@ impl Session {
                     && snapshot_matches_candidate(&snapshot, &prepared) =>
             {
                 self.snapshot = Some(snapshot);
-                self.state = SessionState::Open;
+                self.lifecycle.apply_resolved("committed");
                 success
             }
             (Err(diagnostics), Ok(snapshot)) if snapshot_matches_base(&snapshot, &prepared) => {
                 self.snapshot = Some(snapshot);
-                self.state = SessionState::Open;
+                self.lifecycle.apply_resolved("rolled_back");
                 self.finish(id, Err(diagnostics))
             }
             (commit, reload) => {
@@ -285,7 +294,7 @@ impl Session {
                     diagnostics.append(&mut reload);
                 }
                 self.snapshot = None;
-                self.state = SessionState::Uncertain;
+                self.lifecycle.apply_resolved("uncertain");
                 self.terminal_diagnostics = Some(diagnostics);
                 uncertainty
             }

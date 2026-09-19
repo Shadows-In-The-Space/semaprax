@@ -28,20 +28,19 @@
 //! illustrative vocabulary (the real session gates on an authenticated
 //! Project snapshot and a digest match, not a [`super::capability::Grant`]),
 //! and is documented as such at each site that is a deliberate abstraction
-//! rather than a literal correspondence. This is still **not** a live
-//! migration: `project_transport::session` performs its own hand-rolled
-//! checks today and does not call into [`super::engine::SessionTable`] --
-//! `Session`'s fields and dispatch methods are private, and rewiring a
-//! live, heavily-tested stdio transport through this kernel is exactly the
-//! "migrate a real subsystem onto the mechanism" step every prior audit of
-//! issue #206 named as the harder, still-open half of "applied to at least
-//! two real interaction lifecycles." What this protocol closes is the
-//! narrower, honest slice available to a single bounded change here: proof
-//! that the general kernel's vocabulary (states, `Send`/`Call`/`Return`,
-//! branching, a universal cancel-style escape, `ConsumesResource` at a
-//! commit boundary, and an `Uncertain` terminal for an indeterminate
-//! outcome) can express a real, already-shipped state machine's exact
-//! topology, not only topologies designed for the kernel from the start.
+//! rather than a literal correspondence. It is **no longer a transcription
+//! only**: `project_transport::session::Session` now stores a
+//! `lifecycle::ProjectSessionLifecycle` instead of a `SessionState` field,
+//! and every lifecycle gate in that transport asks
+//! [`super::engine::SessionTable::admits`] while every state change is a
+//! real [`super::engine::SessionTable::advance`] against this spec. The
+//! session state the transport reports on the wire is rendered back out of
+//! the live endpoint, so there is no second state machine left to drift.
+//!
+//! [`database_transaction_protocol`] is the same kind of thing for
+//! `crate::database_fixture`'s transaction lifecycle. Those two are the
+//! "at least two real interaction lifecycles ... checked by the general
+//! protocol type system" issue #206's first acceptance criterion asks for.
 
 use std::collections::BTreeSet;
 
@@ -326,6 +325,16 @@ pub fn resource_transaction_protocol() -> ProtocolSpec {
 ///   is the one `OwnershipMove::ConsumesResource` in this protocol: it
 ///   models `acquire_a0`'s resource capture, not a
 ///   [`super::engine::ResourceToken`] literally present in the real code.
+/// - `apply_refused`: the two pre-commit failure exits of the same
+///   `apply_with_runtime` -- the authenticated re-check of the bound
+///   snapshot failing (`rename.rs`, `self.state = SessionState::Invalidated`
+///   before `before_a0`), and the consuming final recheck
+///   (`old_snapshot.finish_session()`) failing after A0 was acquired. Both
+///   leave the session `Invalidated` without ever reaching `Applying`. This
+///   transition was missing from the first transcription of this state
+///   machine and was added when the real transport was actually wired onto
+///   this spec: a transcription can omit an edge and stay green, but a
+///   subsystem that runs on the spec cannot.
 /// - `apply_resolved`: the three-way `match (commit_result, reloaded)`
 ///   (`rename.rs:260-289`) resolves the pending `apply` call: `"committed"`
 ///   and `"rolled_back"` both land back on `Open` (`rename.rs:268,273`; the
@@ -493,6 +502,15 @@ pub fn project_agent_session_protocol() -> ProtocolSpec {
             },
             Transition {
                 from: "Prepared",
+                label: "apply_refused",
+                kind: Kind::Fail,
+                payload_type: "Unit",
+                required_capability: None,
+                ownership: OwnershipMove::None,
+                next: Next::Then("Invalidated"),
+            },
+            Transition {
+                from: "Prepared",
                 label: "shutdown",
                 kind: Kind::Cancel,
                 payload_type: "Unit",
@@ -538,6 +556,131 @@ pub fn project_agent_session_protocol() -> ProtocolSpec {
                 vec!["release_snapshot", "mark_uncertain_for_reconciliation"],
             ),
             ("Shutdown", vec!["finish_authority"]),
+        ],
+    }
+}
+
+/// A transcription of `TransactionState` and `DatabaseFixture`'s
+/// `begin`/`commit`/`rollback`/`connection_lost` methods in
+/// `src/database_fixture.rs` -- the in-memory relational engine
+/// `crate::job_fixture`, `crate::job_runtime`, and `crate::job_evidence`
+/// run their ledger writes through, and the "database transactions"
+/// lifecycle issue #206's implementation step 7 names.
+///
+/// Unlike [`model_stream_protocol`] and [`resource_transaction_protocol`],
+/// which were written *for* this kernel, this spec is the declaration
+/// `DatabaseFixture` itself consults at runtime:
+/// `database_fixture::transaction_lifecycle::TransactionLifecycle` owns a
+/// [`super::engine::SessionTable`] over it, and every `begin`/`commit`/
+/// `rollback`/`connection_lost` call asks the table to advance a real
+/// [`super::engine::Endpoint`] before the fixture touches a single row. The
+/// connection's reported `TransactionState` is *derived* from that
+/// endpoint, not tracked beside it -- there is no second state machine to
+/// drift.
+///
+/// One session per transaction attempt. The real connection is reusable
+/// (`begin` succeeds again once a transaction has settled), so a settled
+/// session is terminal here and the lifecycle opens a fresh session for the
+/// next attempt, which is also what makes "no use after terminal" do real
+/// work: a second `commit` cannot reach the already-committed session.
+///
+/// Transition-for-transition sources (method -> real code):
+///
+/// - `begin`: `DatabaseFixture::begin` (`database_fixture.rs`), legal only
+///   from `Idle`. `TransactionState::next_on_begin` mapped `Open -> Failed`
+///   ("a nested begin is refused *and* poisons the connection"); that is
+///   the `nested_begin_refused` escape below, reached because the kernel
+///   refuses `begin` from `Open` with
+///   [`super::engine::ProtocolError::IllegalTransition`] rather than
+///   because the fixture re-derives the rule.
+/// - `commit`: `DatabaseFixture::commit`, `Open -> Committed`. From any
+///   other state the kernel refuses and the fixture takes the `misuse`
+///   escape, reproducing `next_on_commit`'s `_ -> Failed` exactly.
+/// - `rollback`: `DatabaseFixture::rollback`, `Open -> RolledBack`, with
+///   the same `misuse` escape for every other state.
+/// - `connection_lost`: `DatabaseFixture::connection_lost`, an explicit
+///   `Kind::Fail` escape from `Open`. Observed from a settled state it is a
+///   no-op in the real code, which is exactly the kernel refusing it: the
+///   lifecycle discards that refusal without changing state.
+///
+/// `payload_type` tags are this module's own vocabulary (the real methods
+/// take no request value), and no transition declares a
+/// `required_capability` or an `OwnershipMove::ConsumesResource`, because
+/// the real engine requires neither a capability grant nor a resource token
+/// at its commit boundary. Declaring one here would be theatre: the
+/// connection would still commit exactly as it does today.
+///
+/// The three terminal cleanup inventories are canonical runtime order and
+/// are really executed -- `TransactionLifecycle`'s handler performs the
+/// snapshot work named by each op, so `release_snapshot`,
+/// `restore_snapshot`, and `discard_uncertain_snapshot` are the code paths
+/// that drop, restore, and abandon the clone-on-begin snapshot.
+pub fn database_transaction_protocol() -> ProtocolSpec {
+    ProtocolSpec {
+        name: "database-transaction-v1",
+        states: states(&["Idle", "Open", "Committed", "RolledBack", "Failed"]),
+        initial: "Idle",
+        terminal: states(&["Committed", "RolledBack", "Failed"]),
+        transitions: vec![
+            Transition {
+                from: "Idle",
+                label: "begin",
+                kind: Kind::Send,
+                payload_type: "BeginRequest",
+                required_capability: None,
+                ownership: OwnershipMove::None,
+                next: Next::Then("Open"),
+            },
+            Transition {
+                from: "Idle",
+                label: "misuse",
+                kind: Kind::Fail,
+                payload_type: "Unit",
+                required_capability: None,
+                ownership: OwnershipMove::None,
+                next: Next::Then("Failed"),
+            },
+            Transition {
+                from: "Open",
+                label: "commit",
+                kind: Kind::Send,
+                payload_type: "CommitRequest",
+                required_capability: None,
+                ownership: OwnershipMove::None,
+                next: Next::Then("Committed"),
+            },
+            Transition {
+                from: "Open",
+                label: "rollback",
+                kind: Kind::Send,
+                payload_type: "RollbackRequest",
+                required_capability: None,
+                ownership: OwnershipMove::None,
+                next: Next::Then("RolledBack"),
+            },
+            Transition {
+                from: "Open",
+                label: "connection_lost",
+                kind: Kind::Fail,
+                payload_type: "Unit",
+                required_capability: None,
+                ownership: OwnershipMove::None,
+                next: Next::Then("Failed"),
+            },
+            Transition {
+                from: "Open",
+                label: "nested_begin_refused",
+                kind: Kind::Fail,
+                payload_type: "Unit",
+                required_capability: None,
+                ownership: OwnershipMove::None,
+                next: Next::Then("Failed"),
+            },
+        ],
+        cleanup: vec![
+            ("Committed", vec!["release_snapshot"]),
+            ("RolledBack", vec!["restore_snapshot"]),
+            ("Failed", vec!["discard_uncertain_snapshot"]),
         ],
     }
 }

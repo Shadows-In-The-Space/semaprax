@@ -1,11 +1,20 @@
 # Session/protocol types v1
 
+Audience: compiler contributors implementing the source-syntax/HIR/backend
+generalization this document specifies, and reviewers auditing what this
+slice of #206 delivered versus what remains.
+
 Status: **reference validator**, not yet source syntax. Issue #206 asks for
 a bounded session/protocol type model applied to two real subsystems. This
 slice delivers a Rust-level protocol declaration, an affine typed endpoint,
 and a runtime engine (`src/session_protocol/`) proving the message-order,
 ownership and authority properties, plus this design. It adds no `.spx`
 syntax, HIR node, or verifier rule -- see [Scope boundary](#scope-boundary).
+Two real subsystems -- `project_transport::session` and
+`database_fixture`'s transaction -- now hold live `SessionTable`s and take
+every lifecycle decision through this engine at runtime, so it is a
+reference validator that real code actually runs on, not one that only
+models real code.
 A later session added a `context`-envelope projection of this module's own
 fixed catalog as declaration-independent reference data
 (`session_protocol_kernel`, gated on `--filters session_protocol`,
@@ -13,13 +22,11 @@ CLI-reachable today) plus the same catalog's full per-transition detail as a
 standalone Rust API, `graph::session_protocol_kernel_json()`, deliberately
 without a CLI verb of its own. A further session evaluated
 `architecture_claims` and `assurance_manifest` for the same projection and
-closed both as not a fit, with evidence -- see
+argued both are not a fit, with evidence. That argument is a proposed
+*narrowing* of issue #206's architecture/assurance criterion, not
+satisfaction of it, and only the issue's maintainer can accept it -- see
 [Acceptance criteria](#acceptance-criteria-met-here-versus-open)'s "Protocol
 facts" row for the reasoning behind all of the above.
-
-Audience: compiler contributors implementing the source-syntax/HIR/backend
-generalization this document specifies, and reviewers auditing what this
-slice of #206 delivered versus what remains.
 
 ## What already exists on `main`
 
@@ -305,6 +312,11 @@ requires to be unique) is normalized out of both traces.
   JSON-RPC transport, rather than a scenario invented for this kernel --
   the applied subsystems issue #206 requires, at this module's Rust
   reference-kernel layer (see [Scope boundary](#scope-boundary)).
+  `project_agent_session_protocol` and `database_transaction_protocol` are
+  no longer transcriptions only: `project_transport::session` and
+  `database_fixture` now hold live `SessionTable`s over them and take every
+  lifecycle decision through `admits`/`advance`. `shared.rs` hands each
+  subsystem the one validated `&'static ProtocolSpec` it runs on.
 - `tests.rs` and `tests/model_check_and_determinism.rs`: every category
   below (split across two files to stay under this repository's
   1500-line-per-file budget).
@@ -491,12 +503,12 @@ Explicitly **not** done in this slice, and why:
 
 | Criterion (from issue #206) | Status |
 | --- | --- |
-| At least two real interaction lifecycles are checked by the general protocol type system | **Reference-kernel level, one step closer.** `model_stream_protocol` and `resource_transaction_protocol` are invented fixtures. `project_agent_session_protocol` is a cited transcription of `project_transport::session`'s real `SessionState`/`Session` state machine -- evidence, not invention -- but it is still not a *live* migration: the real session performs its own hand-rolled checks and never calls into `SessionTable`. No existing subsystem's own code path has been rewired through this mechanism. |
+| At least two real interaction lifecycles are checked by the general protocol type system | **Met, at this module's Rust layer.** Two real subsystems now run on the kernel rather than beside it. (1) `project_transport::session::Session` no longer has a `SessionState` field: it holds a `lifecycle::ProjectSessionLifecycle` owning a `SessionTable` over `project_agent_session_protocol`, every lifecycle gate calls `SessionTable::admits`, every state change is a `SessionTable::advance`, and the state reported on the wire is rendered back out of the live `Endpoint`. (2) `database_fixture::DatabaseFixture`'s transaction lifecycle is the same shape over `database_transaction_protocol`: `begin`/`commit`/`rollback`/`connection_lost` reach their outcome only through `advance`, the four `TransactionState::next_on_*` helpers that re-derived the rule by hand are deleted, and the terminal cleanup inventories really perform the snapshot work. `model_stream_protocol` and `resource_transaction_protocol` remain invented fixtures and are not counted toward this row. This is local, re-runnable Rust evidence; it is still not `.spx` syntax, and the language-level half stays open (see [Scope boundary](#scope-boundary)). |
 | Invalid order is rejected before runtime | **Static declaration defects**: at spec-validation time (`SpecError`, before any session opens). **Message-order defects**: at the engine's own runtime check (`IllegalTransition` etc.) -- not before compilation, since the protocol is declared data in this slice, not `.spx` source the compiler itself parses. The one case genuinely caught by `rustc` at compile time is presenting an already-consumed `Endpoint` binding a second time, and presenting a `Grant` for the wrong capability marker type. |
 | Ownership and authority are coupled to protocol state | **Met at the reference-kernel level**: `required_capability` and `OwnershipMove` are per-transition fields the engine checks alongside state/order, and are proven independently failing from state/order correctness (`missing_authority_is_refused_even_in_correct_order`). |
 | Failure/cancellation/uncertainty remain explicit | **Met**: `Cancel`/`Timeout`/`Fail` are ordinary declared transitions with their own cleanup; `Timeout` is routed to a distinct `Uncertain` terminal in both applied protocols. |
 | Protocol facts appear in context, graph, architecture, and assurance outputs | **Half met, deliberately as reference data, not as a real projection; the CLI-surface and architecture/assurance halves of this row were evaluated and closed this session, one via proven reachability and one as not applicable.** A prior session decided the `context` half of this row is buildable now, without waiting for the `.spx`-declared-protocol tranche: `src/graph/session_protocol_facet.rs` projects this module's fixed built-in catalog (name/states/initial/terminal/transition-count/well-formed/model-checked) as `session_protocol_kernel` behind the opt-in `AgentContextFilter::SessionProtocol` (`--filters session_protocol`) at the `context` v1/v2 envelope level. This is exactly the "second, disconnected source of truth" this row named as the reason not to do it: no `.spx` declaration is consulted or bound to a `ProtocolSpec`, and the projection's own `"note"` field says so in the emitted JSON rather than leaving that disclosure only in this document. The catalog's full per-transition detail lives separately as a standalone Rust API, `graph::session_protocol_kernel_json()` (`src/graph.rs`) -- **not** merged into `to_json`'s per-program output, and its own doc comment records the three-regression byte-budget measurement that ruled that merge out. **CLI surface for `graph::session_protocol_kernel_json()`:** deliberately none added. The function takes no `Program`, so it reports nothing about the file `semaprax graph <file>` names; `graph`'s single-file grammar is deliberately closed (`src/cli/graph.rs`'s own `graph_grammar_is_closed` test), not an oversight, so widening it for a fact independent of the named file would be the wrong shape even as an added flag. `context --filters session_protocol` already delivers the identical facts (same three specs, same header fields, same in-band `note`) to any CLI/MCP-driven caller; this was proven end to end against a real compiled `semaprax` binary and a real `.spx` file (`semaprax context probe.spx probe.add --filters session_protocol` returns the `session_protocol_kernel` object), and is now pinned as a permanent regression at the CLI-argument-grammar level by `cli_driver::options::tests::context_filters_accepts_session_protocol_at_the_cli_grammar_level` (`src/cli_driver/options/tests.rs`), not only at the Rust-API level `tests/agent_context.rs`/`tests/agent_context_v2.rs` already covered. **`architecture_claims` and `assurance_manifest`:** evaluated and closed as **not applicable**, not merely deferred. `architecture_claims` is closed to one operator, `forbid_reaches(from, to)` (`src/architecture_claims.rs`), evaluated only over direct static-call edges between declarations retained in a `ProjectRevision`'s checked HIR; `docs/ARCHITECTURE-CLAIMS-V1.md`'s own design contract is "no caller-authored edges, no competing graph," and (as this row already states) no `.spx` declaration is bound to any `ProtocolSpec`, so there is no `from`/`to` declaration pair to state a claim about -- injecting the fixed catalog would itself be the caller-authored, disconnected edge that contract refuses to accept. `assurance_manifest` fails for three independent reasons: its `model_checking` submodule is an unrelated authorization/handle-model obligation lattice, as a prior session found; the base `semaprax.assurance-manifest.v1` envelope has a versioned, frozen top-level key list -- `schema, source, limits, counts, obligations, assumptions, nonclaims` (`docs/ASSURANCE-MANIFEST-V1.md`'s "Canonical envelope") -- whose fixed `nonclaims` array unconditionally asserts `"no_model_checker_invoked"` (`NONCLAIMS_JSON` in `src/assurance_manifest/render.rs`), so folding in a catalog whose own header field is a bounded-model-checking verdict would contradict that disclaimer without a deliberate, version-bumping spec revision that is out of this residue's scope; and both the base manifest's `obligations` and its `architecture_claims` field in `src/assurance_manifest/project.rs` are ledgers keyed to declaration ids in one project revision (the latter populated only from evaluating a caller-supplied `ArchitectureClaimSet`, which the `architecture_claims` finding above already rules out), and no declaration exists here to key an entry to. A reasoned no closes this half of the row rather than forcing a misleading or contract-breaking projection in. |
-| Applied subsystem regressions and bounded model-checking integration (required tests/evidence) | **Bounded model-checking: met**, at the graph-shape level -- `model_check::check_bounded` (see [Bounded model-checking](#bounded-model-checking)), exercised against all three applied protocols including the real-subsystem transcription. **Applied subsystem regression: still not fully met** -- `tests/applied_project_session.rs` regresses the *transcribed* topology (happy path, missing-authority, missing-token, illegal-order, the universal `shutdown` escape, and a hostile mutation of the transcription's one unevidenced transition), but that is a regression protecting this module's own copy of the real shape, not a regression that runs against `project_transport::session`'s actual code and would fail if that module's real behavior drifted. |
+| Applied subsystem regressions and bounded model-checking integration (required tests/evidence) | **Bounded model-checking: met**, at the graph-shape level -- `model_check::check_bounded` (see [Bounded model-checking](#bounded-model-checking)), exercised against all three applied protocols including the real-subsystem transcription. **Applied subsystem regression: met.** `tests/applied_project_session.rs` still regresses the declared topology directly, and both applied subsystems' own existing suites (`src/project_transport/session/rename/tests.rs`, `tests/agent_transport*`, `database_fixture`'s transaction tests) now exercise the kernel on every run, because those subsystems have no other state machine left to exercise: breaking a `SessionTable` call in either one turns those suites red. `tests/admits.rs` additionally pins `SessionTable::admits` to `advance` across every state/label pair of both applied specs, so the read-only gate a migrated subsystem depends on cannot drift from the operation that commits. |
 
 ## Gate
 

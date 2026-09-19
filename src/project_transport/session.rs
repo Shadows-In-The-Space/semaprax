@@ -73,11 +73,18 @@ const PROJECT_OWNED_DATA_METHODS: [&str; 12] = [
 ];
 const PROJECT_PUBLIC_API_METHODS: [&str; 12] = PROJECT_OWNED_DATA_METHODS;
 
+mod lifecycle;
 mod owned_data;
 mod public_api;
 mod rename;
 mod workflow;
 
+/// The eight session states the wire protocol reports. This enum is now a
+/// *rendering* of where `lifecycle::ProjectSessionLifecycle`'s live protocol
+/// endpoint is (see `ProjectSessionLifecycle::state`), never a value this
+/// module assigns to: the declared `project-agent-session-v1`
+/// `ProtocolSpec` owns the legal order, and
+/// `session_protocol::engine::SessionTable` is what enforces it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionState {
     Configured,
@@ -136,7 +143,7 @@ pub(super) fn serve<R: BufRead, W: Write>(
     }
     let mut session = Session {
         snapshot: Some(snapshot),
-        state: SessionState::Configured,
+        lifecycle: lifecycle::ProjectSessionLifecycle::new(),
         limits,
         profile: config.profile(),
         manifest_path,
@@ -164,7 +171,7 @@ pub(super) fn serve<R: BufRead, W: Write>(
                 }
             }
             if matches!(
-                session.state,
+                session.state(),
                 SessionState::Shutdown | SessionState::Uncertain
             ) || session.terminal_diagnostics.is_some()
             {
@@ -189,7 +196,7 @@ pub(super) fn serve<R: BufRead, W: Write>(
 
 struct Session {
     snapshot: Option<ProjectSnapshot>,
-    state: SessionState,
+    lifecycle: lifecycle::ProjectSessionLifecycle,
     limits: super::framing::StdioLimits,
     profile: ServerProfile,
     manifest_path: std::path::PathBuf,
@@ -198,6 +205,12 @@ struct Session {
 }
 
 impl Session {
+    /// The state the wire protocol reports, read straight out of the live
+    /// session-protocol endpoint.
+    fn state(&self) -> SessionState {
+        self.lifecycle.state()
+    }
+
     fn handle_frame(&mut self, frame: &[u8]) -> Option<Vec<u8>> {
         let request = match codec::decode_request(frame) {
             Ok(request) => request,
@@ -220,7 +233,7 @@ impl Session {
         } = request;
         let RequestKind::Call(id) = kind else {
             if method == "shutdown" && params.as_ref().is_none_or(Map::is_empty) {
-                self.state = SessionState::Shutdown;
+                self.lifecycle.shutdown();
             }
             return None;
         };
@@ -238,11 +251,11 @@ impl Session {
             "ping" => self.no_params(id, params, |session| {
                 Ok(format!(
                     "{{\"pong\":true,\"state\":{}}}",
-                    quote_json(session.state.text())
+                    quote_json(session.state().text())
                 ))
             }),
             "shutdown" => self.no_params(id, params, |session| {
-                session.state = SessionState::Shutdown;
+                session.lifecycle.shutdown();
                 Ok("{\"ok\":true}".to_owned())
             }),
             "workspace/status" => self.no_params(id, params, |session| session.status()),
@@ -309,7 +322,9 @@ impl Session {
         params: Option<Map<String, Value>>,
         operation: impl FnOnce(&ProjectSnapshot, Map<String, Value>) -> Result<String, Vec<Diagnostic>>,
     ) -> Vec<u8> {
-        if self.state != SessionState::Open {
+        // The declared protocol, not a hand-written state comparison, is
+        // what decides whether this message is legal here.
+        if !self.lifecycle.admits("subject_operation") {
             return self.lifecycle_error(id);
         }
         let mut params = params.unwrap_or_default();
@@ -325,12 +340,10 @@ impl Session {
             .as_mut()
             .expect("an open session retains its authenticated snapshot")
             .with_authenticated_request(|snapshot| operation(snapshot, params));
-        if result
+        let survived = !result
             .as_ref()
-            .is_err_and(|diagnostics| invalidates(diagnostics))
-        {
-            self.state = SessionState::Invalidated;
-        }
+            .is_err_and(|diagnostics| invalidates(diagnostics));
+        self.lifecycle.subject_survived(survived);
         self.finish(id, result)
     }
 
@@ -390,10 +403,10 @@ impl Session {
     }
 
     fn open(&mut self) -> Result<String, Vec<Diagnostic>> {
-        if !matches!(self.state, SessionState::Configured | SessionState::Open) {
+        if !self.lifecycle.admits("open") {
             return Err(lifecycle_diagnostic(&format!(
                 "project session is {}",
-                self.state.text()
+                self.state().text()
             )));
         }
         let result = self
@@ -405,10 +418,12 @@ impl Session {
             .as_ref()
             .is_err_and(|diagnostics| invalidates(diagnostics))
         {
-            self.state = SessionState::Invalidated;
+            self.lifecycle.opened_or_invalidated(false);
         } else if result.is_ok() {
-            self.state = SessionState::Open;
+            self.lifecycle.opened_or_invalidated(true);
         }
+        // A non-invalidating failure takes no transition at all: the
+        // session stays exactly where it was, as it always has.
         result
     }
 
@@ -417,7 +432,7 @@ impl Session {
             .snapshot
             .as_ref()
             .expect("configured and open sessions retain their snapshot");
-        let (project, workspace) = if self.state == SessionState::Configured {
+        let (project, workspace) = if self.state() == SessionState::Configured {
             ("null".to_owned(), "null".to_owned())
         } else {
             (
@@ -427,7 +442,7 @@ impl Session {
         };
         Ok(format!(
             "{{\"state\":{},\"last_successful_project_revision\":{project},\"last_successful_workspace_revision\":{workspace}}}",
-            quote_json(self.state.text()),
+            quote_json(self.state().text()),
         ))
     }
 
@@ -469,7 +484,7 @@ impl Session {
             "{{\"protocol\":{},\"version\":{},\"state\":{},\"methods\":[{}],\"limits\":{{\"max_request_bytes\":{},\"max_response_bytes\":{}}},\"bound_manifest\":{{\"path\":{},\"project_schema\":{}}},\"nonclaims\":{nonclaims}}}",
             quote_json(schema),
             quote_json(env!("CARGO_PKG_VERSION")),
-            quote_json(self.state.text()),
+            quote_json(self.state().text()),
             methods.iter().map(|method| quote_json(method)).collect::<Vec<_>>().join(","),
             self.limits.request_bytes(),
             self.limits.response_bytes(),
@@ -508,7 +523,7 @@ impl Session {
         self.error(
             id,
             APPLICATION_ERROR,
-            &format!("SPX-J104: project session is {}", self.state.text()),
+            &format!("SPX-J104: project session is {}", self.state().text()),
         )
     }
 

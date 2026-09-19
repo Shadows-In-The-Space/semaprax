@@ -26,6 +26,10 @@
 
 use std::collections::BTreeMap;
 
+mod transaction_lifecycle;
+
+use transaction_lifecycle::{ConnectionData, TransactionLifecycle};
+
 /// One typed cell value. The tag ordering matches `std.db`'s type-tag table
 /// exactly (0=I64, 1=U8, 2=Bool, 3=Usize, 4=Bytes) so a row's shape can be
 /// checked against a descriptor with the same comparison the pure package
@@ -87,38 +91,12 @@ pub enum TransactionState {
     Failed,
 }
 
-impl TransactionState {
-    /// `begin` refuses only a nested attempt while already `Open`; a
-    /// connection is reusable, so `begin` succeeds again once a previous
-    /// transaction has settled (`Committed`, `RolledBack`, or `Failed`).
-    fn next_on_begin(self) -> Self {
-        match self {
-            TransactionState::Open => TransactionState::Failed,
-            _ => TransactionState::Open,
-        }
-    }
-
-    fn next_on_commit(self) -> Self {
-        match self {
-            TransactionState::Open => TransactionState::Committed,
-            _ => TransactionState::Failed,
-        }
-    }
-
-    fn next_on_rollback(self) -> Self {
-        match self {
-            TransactionState::Open => TransactionState::RolledBack,
-            _ => TransactionState::Failed,
-        }
-    }
-
-    fn next_on_connection_lost(self) -> Self {
-        match self {
-            TransactionState::Open => TransactionState::Failed,
-            other => other,
-        }
-    }
-}
+// The legality rule these four state codes used to re-derive by hand now
+// lives in one place only: the declared `database-transaction-v1`
+// `ProtocolSpec` (`crate::session_protocol::protocols::database_transaction_protocol`).
+// `transaction_lifecycle::TransactionLifecycle` asks the general session
+// kernel to advance a real endpoint, and this enum is the *rendering* of
+// where that endpoint is -- see `TransactionLifecycle::state`.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FixtureError {
@@ -166,7 +144,11 @@ fn row_matches_schema(columns: &[Column], row: &[Value]) -> bool {
 pub struct DatabaseFixture {
     tables: BTreeMap<String, Table>,
     snapshot: Option<BTreeMap<String, Table>>,
-    transaction: TransactionState,
+    /// The live protocol endpoint this connection's transaction lifecycle
+    /// runs on. Every `begin`/`commit`/`rollback`/`connection_lost` outcome
+    /// below is produced by the general session-protocol kernel advancing
+    /// this endpoint against the declared `database-transaction-v1` spec.
+    transaction: TransactionLifecycle,
     applied_migrations: Vec<(u8, u8)>,
 }
 
@@ -176,7 +158,7 @@ impl DatabaseFixture {
     }
 
     pub fn transaction_state(&self) -> TransactionState {
-        self.transaction
+        self.transaction.state()
     }
 
     pub fn create_table(&mut self, name: &str, columns: Vec<Column>) -> Result<(), FixtureError> {
@@ -194,36 +176,27 @@ impl DatabaseFixture {
     }
 
     pub fn begin(&mut self) -> Result<(), FixtureError> {
-        let next = self.transaction.next_on_begin();
-        if next != TransactionState::Open {
-            self.transaction = next;
-            return Err(FixtureError::TransactionAlreadyOpen);
-        }
-        self.transaction = next;
-        self.snapshot = Some(self.tables.clone());
-        Ok(())
+        self.transaction.begin(&mut ConnectionData {
+            tables: &mut self.tables,
+            snapshot: &mut self.snapshot,
+            uncertain_outcome: false,
+        })
     }
 
     pub fn commit(&mut self) -> Result<(), FixtureError> {
-        let next = self.transaction.next_on_commit();
-        self.transaction = next;
-        if next != TransactionState::Committed {
-            return Err(FixtureError::NoOpenTransaction);
-        }
-        self.snapshot = None;
-        Ok(())
+        self.transaction.commit(&mut ConnectionData {
+            tables: &mut self.tables,
+            snapshot: &mut self.snapshot,
+            uncertain_outcome: false,
+        })
     }
 
     pub fn rollback(&mut self) -> Result<(), FixtureError> {
-        let next = self.transaction.next_on_rollback();
-        self.transaction = next;
-        if next != TransactionState::RolledBack {
-            return Err(FixtureError::NoOpenTransaction);
-        }
-        if let Some(snapshot) = self.snapshot.take() {
-            self.tables = snapshot;
-        }
-        Ok(())
+        self.transaction.rollback(&mut ConnectionData {
+            tables: &mut self.tables,
+            snapshot: &mut self.snapshot,
+            uncertain_outcome: false,
+        })
     }
 
     /// Models an observed connection loss while a transaction may be open.
@@ -231,16 +204,15 @@ impl DatabaseFixture {
     /// `Failed` and discards any in-flight snapshot rather than guessing
     /// whether the last write landed.
     pub fn connection_lost(&mut self) {
-        let was_open = self.transaction == TransactionState::Open;
-        self.transaction = self.transaction.next_on_connection_lost();
-        if was_open {
-            // The outcome of the in-flight transaction is unknown; discard
-            // it back to the pre-transaction snapshot rather than keeping a
-            // write that may or may not have actually landed.
-            if let Some(snapshot) = self.snapshot.take() {
-                self.tables = snapshot;
-            }
-        }
+        // The outcome of an in-flight transaction is unknown, so the
+        // declared `Failed` terminal's `discard_uncertain_snapshot` cleanup
+        // op rolls the tables back to the pre-transaction snapshot rather
+        // than keeping a write that may or may not have actually landed.
+        self.transaction.connection_lost(&mut ConnectionData {
+            tables: &mut self.tables,
+            snapshot: &mut self.snapshot,
+            uncertain_outcome: true,
+        });
     }
 
     fn require_table_mut(&mut self, table: &str) -> Result<&mut Table, FixtureError> {

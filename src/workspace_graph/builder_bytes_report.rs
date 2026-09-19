@@ -702,4 +702,149 @@ mod tests {
         };
         assert_eq!(error[0].code, "SPX-G171");
     }
+
+    /// Issue #191's "Auth middleware integration" gap names a specific
+    /// missing measurement: composing `std.auth`'s session/CSRF/cookie
+    /// predicates with `std.http.request_line_admitted` would require
+    /// `std.auth` to declare `std.http` as a dependency, putting `std.http`
+    /// in the transitive closure of every existing `std.auth` consumer --
+    /// `examples/task-service-project` included, which
+    /// `examples/task-service-project/README.md` already records as unable
+    /// to add a fourth real dependency. That README's byte figures
+    /// (`std.auth` 17,208 B, `std.http` 5,746 B, ...) were measured by a
+    /// cruder method and predate this module: `builder_bytes_breakdown`
+    /// (commit `1ae7f819`) was added the same day, after
+    /// `task-service-project` (commit `dae5037d`). This test replaces the
+    /// estimate with the real instrumented number for the *specific*
+    /// hypothetical the doc names -- `std.auth` gaining one function that
+    /// calls `std.http.request_line_admitted`, `std.http` added to the
+    /// closure as a result -- rather than the four-package/ten-function
+    /// scenario the README measured. Run with `cargo test --lib
+    /// workspace_graph::builder_bytes_report::tests::task_service_project_hypothetical_auth_http_composition_reference
+    /// -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "diagnostic measurement tool, not a regression gate; run with --ignored --nocapture"]
+    fn task_service_project_hypothetical_auth_http_composition_reference() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let read = |relative: &str| std::fs::read_to_string(format!("{root}/{relative}")).unwrap();
+
+        // Baseline: the real, shipped closure `task-service-project` uses
+        // today (`std.auth` + `std.jobs`, plus `std.jobs`'s own `std.bytes`
+        // dependency), completely unmodified.
+        let baseline_programs = programs_from(&[
+            (
+                "examples/task-service-project/src/app.spx",
+                &read("examples/task-service-project/src/app.spx"),
+            ),
+            (
+                "examples/task-service-project/src/core.spx",
+                &read("examples/task-service-project/src/core.spx"),
+            ),
+            (
+                "examples/task-service-project/src/tests.spx",
+                &read("examples/task-service-project/src/tests.spx"),
+            ),
+            ("std/auth/src/auth.spx", &read("std/auth/src/auth.spx")),
+            (
+                "std/auth/src/examples.spx",
+                &read("std/auth/src/examples.spx"),
+            ),
+            ("std/auth/src/tests.spx", &read("std/auth/src/tests.spx")),
+            ("std/jobs/src/jobs.spx", &read("std/jobs/src/jobs.spx")),
+            (
+                "std/jobs/src/examples.spx",
+                &read("std/jobs/src/examples.spx"),
+            ),
+            ("std/jobs/src/tests.spx", &read("std/jobs/src/tests.spx")),
+            ("std/bytes/src/bytes.spx", &read("std/bytes/src/bytes.spx")),
+        ]);
+        let baseline_authored = index_authored(&baseline_programs).unwrap();
+        let baseline_budget =
+            builder_bytes_breakdown(&baseline_programs, &baseline_authored).unwrap();
+        let baseline_total: usize = baseline_budget
+            .iter()
+            .map(|module| module.total_bytes)
+            .sum();
+        eprintln!(
+            "baseline (std.auth + std.jobs, real shipped closure) grand_total={baseline_total} \
+             MAX_BUILDER_BYTES={MAX_BUILDER_BYTES} fits={}",
+            baseline_total <= MAX_BUILDER_BYTES
+        );
+
+        // Hypothetical: `std.auth` gains exactly one function composing its
+        // own `session_is_usable` with `std.http.request_line_admitted` --
+        // the precise composition `docs/AUTHENTICATION-SESSIONS-V1.md`'s
+        // "Auth middleware integration" row names -- making `std.http` a
+        // real transitive dependency of `std.auth`, and therefore of every
+        // existing `std.auth` consumer's closure, without
+        // `task-service-project`'s own source changing at all.
+        let auth_source = read("std/auth/src/auth.spx");
+        let augmented_auth = auth_source.replacen(
+            "module std.auth;\n",
+            "module std.auth;\nuse function @id(\"std.http.request_line_admitted\") from std.http as request_line_admitted;\n",
+            1,
+        ) + "\n@id(\"std.auth.middleware.request_is_admitted_and_session_usable\")\nfn request_is_admitted_and_session_usable(method: borrow Slice<u8>, target: borrow Slice<u8>, state: usize, now_tick: usize, idle_deadline_tick: usize, absolute_deadline_tick: usize) -> bool\n{\n    request_line_admitted(method, target) && session_is_usable(state, now_tick, idle_deadline_tick, absolute_deadline_tick)\n}\n";
+        assert_ne!(
+            augmented_auth, auth_source,
+            "the hypothetical composition must actually add source, or this measurement is vacuous"
+        );
+
+        let hypothetical_programs = programs_from(&[
+            (
+                "examples/task-service-project/src/app.spx",
+                &read("examples/task-service-project/src/app.spx"),
+            ),
+            (
+                "examples/task-service-project/src/core.spx",
+                &read("examples/task-service-project/src/core.spx"),
+            ),
+            (
+                "examples/task-service-project/src/tests.spx",
+                &read("examples/task-service-project/src/tests.spx"),
+            ),
+            ("std/auth/src/auth.spx", &augmented_auth),
+            (
+                "std/auth/src/examples.spx",
+                &read("std/auth/src/examples.spx"),
+            ),
+            ("std/auth/src/tests.spx", &read("std/auth/src/tests.spx")),
+            ("std/jobs/src/jobs.spx", &read("std/jobs/src/jobs.spx")),
+            (
+                "std/jobs/src/examples.spx",
+                &read("std/jobs/src/examples.spx"),
+            ),
+            ("std/jobs/src/tests.spx", &read("std/jobs/src/tests.spx")),
+            ("std/bytes/src/bytes.spx", &read("std/bytes/src/bytes.spx")),
+            ("std/http/src/http.spx", &read("std/http/src/http.spx")),
+        ]);
+        let hypothetical_authored = index_authored(&hypothetical_programs).unwrap();
+        let hypothetical_budget =
+            builder_bytes_breakdown(&hypothetical_programs, &hypothetical_authored).unwrap();
+        let hypothetical_total: usize = hypothetical_budget
+            .iter()
+            .map(|module| module.total_bytes)
+            .sum();
+        for module in &hypothetical_budget {
+            eprintln!(
+                "module={} own_bytes={} total_bytes={} imports={}",
+                module.module,
+                module.own_bytes,
+                module.total_bytes,
+                module.per_import.len()
+            );
+            for import in &module.per_import {
+                eprintln!(
+                    "    import {} <- {} marginal_bytes={}",
+                    import.persistent_id, module.module, import.marginal_bytes
+                );
+            }
+        }
+        eprintln!(
+            "hypothetical (std.auth composing std.http.request_line_admitted, std.http added \
+             to the closure) grand_total={hypothetical_total} MAX_BUILDER_BYTES={MAX_BUILDER_BYTES} \
+             fits={} delta_over_baseline={}",
+            hypothetical_total <= MAX_BUILDER_BYTES,
+            hypothetical_total.saturating_sub(baseline_total)
+        );
+    }
 }

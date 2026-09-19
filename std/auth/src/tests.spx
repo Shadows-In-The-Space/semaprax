@@ -44,6 +44,9 @@ use function @id("std.auth.oauth.authorization_request_is_valid") from std.auth 
 use function @id("std.auth.oauth.callback_is_valid") from std.auth as oauth_callback_is_valid;
 use type @id("std.auth.secret") from std.auth as Secret;
 use function @id("std.auth.secret.self_check") from std.auth as secret_self_check;
+use type @id("std.auth.identity") from std.auth as Identity;
+use type @id("std.auth.authorization") from std.auth as Authorization;
+use function @id("std.auth.identity_authorization.self_check") from std.auth as identity_authorization_self_check;
 
 // `ct_bytes_equal` must return the functionally correct answer regardless of
 // WHERE the first differing byte falls (first, middle, last) or whether the
@@ -315,6 +318,17 @@ fn summary_oauth_policy() -> bool
     oauth_state_and_redirect_policy() && oauth_pkce_policy() && oauth_request_and_callback_composition()
 }
 
+// Positive-control round-trip proof for `Identity`/`Authorization` (the
+// distinct-nominal-type substitution refusal itself is proven at compile
+// time, outside this package — see `auth.spx`'s doc comment for
+// `Identity`/`Authorization` and
+// `src/authentication/identity_authorization_source_tests.rs`).
+@id("std.auth.tests.summary_identity_and_authorization")
+fn summary_identity_and_authorization() -> bool
+{
+    identity_authorization_self_check()
+}
+
 @id("std.auth.tests.main")
 fn main() -> i64
 {
@@ -324,5 +338,6 @@ fn main() -> i64
     failed = failed + if summary_csrf_cookie_and_algorithm_policy() { 0 } else { 4 };
     failed = failed + if summary_claims_password_and_audit() { 0 } else { 8 };
     failed = failed + if summary_oauth_policy() { 0 } else { 16 };
+    failed = failed + if summary_identity_and_authorization() { 0 } else { 32 };
     failed
 }

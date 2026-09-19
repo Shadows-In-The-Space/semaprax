@@ -134,7 +134,18 @@ container:
    were even reached. This is real interpreter-backend work
    (`src/interpreter.rs`) outside this change's lease and outside a
    single-package change's scope — reported here rather than silently routed
-   around.
+   around. **Correction from a later tranche**: this ceiling is not
+   generic-specific, as first framed here. `Identity`/`Authorization` (see
+   [Identity and Authorization: distinct nominal types](#identity-and-authorization-distinct-nominal-types))
+   are plain, non-generic `record`s and hit the identical `SPX-F102` calling
+   a function typed over either. The real interpreter condition, read
+   directly from `src/interpreter.rs`: `resolved_data_parameter_is_admitted`
+   admits a by-value nominal parameter only when its declaration
+   `kind == hir::DeclarationKind::Class` (never plain `record`), and
+   `resolved_data_result_is_admitted` has no by-value nominal-return case at
+   all outside the owned-byte-record profile (a `Bytes` field somewhere in
+   the shape). A record or class with no `Bytes` field anywhere in it cannot
+   cross a function boundary by value on the interpreter, generic or not.
 5. **A second, independent reason no wrap/expose/match function over
    `Secret<T>` ships.** `tests/project/standard_library.rs`'s
    `every_public_declaration_has_a_std_identity_contracts_examples_and_conformance`
@@ -173,6 +184,59 @@ boundary (the compiler work item above), and verifying whether the
 statically-admitted `Secret<Bytes>` executes on any backend — which, if it
 does, would let a future tranche widen `Secret<T>` to real byte-shaped
 secrets without further language work.
+
+## Identity and Authorization: distinct nominal types
+
+[Acceptance-criteria mapping](#acceptance-criteria-mapping) graded
+"Authentication and authorization remain separate typed concepts" as met only
+at the function-signature level (see
+[Authentication is not authorization](#authentication-is-not-authorization))
+and explicitly **not** met "as a distinct nominal type the compiler enforces
+one cannot smuggle past — the language has no such enforcement mechanism to
+attach it to yet." That claim is now checked directly against the compiler,
+exactly like `Secret<T>` above, and found to be closeable without any
+compiler change: `std.auth.identity.Identity` (an authentication outcome —
+"who you are") and `std.auth.authorization.Authorization` (an authorization
+decision — "what you may do") are two distinct, non-generic `record`
+declarations in `std/auth/src/auth.spx`.
+
+**The compiler already refuses to substitute one for the other.** Proven
+directly (not merely cited) in
+`src/authentication/identity_authorization_source_tests.rs`: a function
+parameter typed `Identity` rejects an `Authorization` argument, and a
+function parameter typed `Authorization` rejects an `Identity` argument, both
+with `SPX-T205` ("argument ... expects ... received ..."), the compiler's
+ordinary nominal-type argument check — the same mechanism that already
+refuses e.g. passing a `usize` where an `i64` is expected, not a new check
+this package adds. Each negative case is paired with a positive control
+proving the same fixture compiles when the argument's type actually matches,
+so the negative result is a real type-substitution refusal, not an unrelated
+parse failure. `Identity`/`Authorization` also inherit `Secret<T>`'s other two
+non-leak properties for free: whole-value equality is refused with `SPX-T207`
+(the general `Type::Named` invariant, not a mechanism either type declares),
+and there is still no print/format/reflection facility in the language that
+could serialize either into text.
+
+**The same interpreter ceiling `Secret<T>` reports applies here too, and
+corrects that section's scope.** `Secret<T>`'s doc comment (point 4) framed
+the `SPX-F102` interpreter ceiling as specific to "a user *generic* record".
+Bisection with `Identity`/`Authorization` — plain, non-generic records — found
+that framing too narrow: calling a function typed over either fails with the
+identical `SPX-F102`, on the interpreter only (`semaprax check`'s static phase
+admits the declaration and the call). Read directly from `src/interpreter.rs`:
+`resolved_data_parameter_is_admitted` admits a by-value nominal parameter only
+when its declaration `kind == hir::DeclarationKind::Class` (never plain
+`record`), and `resolved_data_result_is_admitted` has no by-value
+nominal-return case at all outside the owned-byte-record profile (a `Bytes`
+field somewhere in the shape). The real ceiling is "no `Bytes` field anywhere
+in the shape", not "generic" — checked further by declaring `Identity` as
+`class` instead of `record` and repeating the same call: it still fails
+`SPX-F102`. Consequently, exactly like `Secret<T>`, no function whose
+signature mentions `Identity` or `Authorization` ships in `std.auth`:
+`std.auth.tests` imports both types with `use type` (never `use function` for
+a function that does not exist), and
+`std.auth.identity_authorization.self_check` constructs and reads both types
+call-locally, exactly like `secret_self_check`.
 
 ## Constant-time comparison
 
@@ -447,7 +511,7 @@ Restated plainly, matched against issue #191's "In scope" list:
 | Session IDs, storage contract, rotation, expiry, revocation, CSRF policy, secure cookies | **Shipped** as pure decision procedures (this document's session/CSRF/cookie sections). A storage contract (where session records actually live) is not shipped — like `std.db` and `std.jobs`, that is a host/driver concern this pure layer only decides over, never performs. |
 | Signed token verification with algorithm/key policy and claims validation | **Policy shipped**; the signature/MAC computation itself is not (same reason as password hashing). |
 | OAuth/OIDC adapter interface | **Policy shipped**; see [OAuth/OIDC authorization-code callback policy](#oauthoidc-authorization-code-callback-policy). State binding, redirect-uri matching, PKCE method allow-listing, and single-use code freshness are pure decision procedures with their own tests. The `S256` hash computation, an actual token-endpoint/discovery-document client, and the redirect itself are not shipped, for the same reason password hashing and token-signature computation are not (see those sections) — this remains a decision layer, not an HTTP client. |
-| Auth middleware integration | **Still not shipped**, and the reason changed. Issue #189 closed (2026-09-11) but shipped a narrower surface than "wiring" implies: a single-connection request/response lifecycle over `net_*` (`examples/http_app_routing.spx`, `tests/http_app_routing.rs`) with a fixed `health`/`echo`/`not_found` dispatch, no route table, and no middleware slot — #189's own closing comment lists "middleware" itself under "still missing, for a later issue". So there is no router seam in `std.http` today for an auth check to attach to, independent of file ownership. Composing `std.auth`'s session/CSRF/cookie predicates with `std.http`'s separately-shipped `request_line_admitted` (issue #193) into one pure decision function was investigated for this tranche: it would require `std.auth` to declare `std.http` as a package dependency in `semaprax.toml` (mirroring `std.jobs`'s existing `std.bytes` dependency) and would be reachable from every existing `std.auth` consumer's transitive closure — including `examples/task-service-project`, which [the completion matrix](COMPLETION-MATRIX.md) already records as unable to add `std.http` as a *fourth* real dependency alongside its current two without exceeding the Workspace Semantic Graph `builder_bytes` cap (`SPX-G171`, `MAX_BUILDER_BYTES` = 18,874,368). Making `std.http` a *transitive* dependency of `std.auth` risks pushing every current two-package consumer of `std.auth` toward that same three-package closure without their own manifest ever naming `std.http`, which is a correctness surprise as well as a budget one. This was not attempted blind: it needs a measured margin check against `SPX-G171` across `std.auth`'s existing consumers before it can be called safe, which is follow-up work, not a same-tranche fix. `std.auth.examples.main` still only demonstrates the decision procedures composing into a signup/login/protected-route/logout sequence in the abstract (synthetic ticks and byte arrays, no request parsing, no socket); a full reference application is now issue #194's stated scope, not #189's. |
+| Auth middleware integration | **Still not shipped**, and the reason changed. Issue #189 closed (2026-09-11) but shipped a narrower surface than "wiring" implies: a single-connection request/response lifecycle over `net_*` (`examples/http_app_routing.spx`, `tests/http_app_routing.rs`) with a fixed `health`/`echo`/`not_found` dispatch, no route table, and no middleware slot — #189's own closing comment lists "middleware" itself under "still missing, for a later issue". So there is no router seam in `std.http` today for an auth check to attach to, independent of file ownership. Composing `std.auth`'s session/CSRF/cookie predicates with `std.http`'s separately-shipped `request_line_admitted` (issue #193) into one pure decision function was investigated for this tranche: it would require `std.auth` to declare `std.http` as a package dependency in `semaprax.toml` (mirroring `std.jobs`'s existing `std.bytes` dependency) and would be reachable from every existing `std.auth` consumer's transitive closure — including `examples/task-service-project`, which [the completion matrix](COMPLETION-MATRIX.md) already records as unable to add `std.http` as a *fourth* real dependency alongside its current two without exceeding the Workspace Semantic Graph `builder_bytes` cap (`SPX-G171`, `MAX_BUILDER_BYTES` = 18,874,368). Making `std.http` a *transitive* dependency of `std.auth` risks pushing every current two-package consumer of `std.auth` toward that same three-package closure without their own manifest ever naming `std.http`, which is a correctness surprise as well as a budget one. This was not attempted blind: it needs a measured margin check against `SPX-G171` across `std.auth`'s existing consumers before it can be called safe. A measurement tool for exactly this exists as of `1ae7f819` (`builder_bytes_breakdown`, `src/workspace_graph/builder_bytes_report.rs`); this tranche added `task_service_project_hypothetical_auth_http_composition_reference` (same file), a diagnostic (`#[ignore]`d) test that builds the real `std.auth` + `std.jobs` + `std.bytes` closure `task-service-project` ships today, then the same closure with `std.http` added and one new `std.auth` function calling `std.http.request_line_admitted` — the exact composition this row describes — and reports both `grand_total`s against `MAX_BUILDER_BYTES` via `builder_bytes_breakdown`, superseding `examples/task-service-project/README.md`'s pre-`1ae7f819` byte-sum estimate (which predates this instrumentation and used a different, four-package/ten-function scenario). **This tranche could not run it**: a concurrent, unrelated in-repo change (issue #204's Resumable Effects `yields`/`Yield` work, touching `src/ast.rs`/`src/hir/expr_nodes.rs`/`src/workspace_graph.rs` in the same shared checkout) left the whole crate non-compiling for the entire session (10, then 33, then 122 `rustc` errors across three checks), a break outside this tranche's own files. Run `cargo test --lib workspace_graph::builder_bytes_report::tests::task_service_project_hypothetical_auth_http_composition_reference -- --ignored --nocapture` once the crate builds again for the actual number. `std.auth.examples.main` still only demonstrates the decision procedures composing into a signup/login/protected-route/logout sequence in the abstract (synthetic ticks and byte arrays, no request parsing, no socket); a full reference application is now issue #194's stated scope, not #189's. |
 | Audit events without secret leakage | **Shipped** as the closed `audit_event_is_safe`/`_is_complete` predicates. |
 
 ## Acceptance-criteria mapping
@@ -474,12 +538,17 @@ Issue #191's acceptance criteria, matched exactly:
   time. Still not met in the sense of a `Secret<T>` that wraps raw secret
   *bytes* — the type argument is bounded to `i64`/`bool` today — see
   [Secret value semantics](#secret-value-semantics-secrett).
-- "Authentication and authorization remain separate typed concepts" — **met
-  at the function-signature level**: see
-  [Authentication is not authorization](#authentication-is-not-authorization).
-  Not met as a distinct *nominal type* the compiler enforces one cannot
-  smuggle past — the language has no such enforcement mechanism to attach it
-  to yet.
+- "Authentication and authorization remain separate typed concepts" — **met**,
+  including as a distinct *nominal type* the compiler enforces one cannot
+  smuggle past: see
+  [Identity and Authorization: distinct nominal types](#identity-and-authorization-distinct-nominal-types).
+  `std.auth.identity.Identity` and `std.auth.authorization.Authorization` are
+  two distinct `record` types; the compiler refuses to substitute one for the
+  other (`SPX-T205`), checked directly in
+  `src/authentication/identity_authorization_source_tests.rs`, not merely
+  documented. This is in addition to, not instead of, the function-signature-
+  level property [Authentication is not authorization](#authentication-is-not-authorization)
+  already established.
 - "Algorithms and policies are explicit, versioned, and deployment-bound" —
   **met** for every policy this package expresses (algorithm allow-list, key
   allow-list and grace window, leeway bound, password-cost bounds, policy

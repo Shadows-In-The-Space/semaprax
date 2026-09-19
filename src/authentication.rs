@@ -13,6 +13,15 @@ pub mod session;
 #[cfg(test)]
 mod secret_source_tests;
 
+/// Hostile compile-time proof that `std.auth.identity.Identity` and
+/// `std.auth.authorization.Authorization` (declared in
+/// `std/auth/src/auth.spx`) are distinct nominal types the compiler
+/// enforces — issue #191's "authentication and authorization remain
+/// separate typed concepts" acceptance criterion. See that module's own doc
+/// comment for what it does and does not claim.
+#[cfg(test)]
+mod identity_authorization_source_tests;
+
 /// Closed failures never contain credentials or bearer tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AuthError {

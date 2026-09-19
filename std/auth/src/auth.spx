@@ -68,7 +68,13 @@ module std.auth;
 //    package — `semaprax run`/`semaprax test` hit it identically. Closing
 //    it is `src/interpreter.rs` work outside this change's lease and
 //    outside a single-package change's scope; reported here rather than
-//    silently narrowed around.
+//    silently narrowed around. CORRECTION from a later tranche: this is not
+//    generic-specific after all — `Identity`/`Authorization` below are
+//    plain, non-generic records and hit the identical `SPX-F102` across a
+//    function boundary; see that section's point 4 for the exact interpreter
+//    condition (`resolved_data_parameter_is_admitted`/`resolved_data_result_
+//    is_admitted` in `src/interpreter.rs`) that actually gates this, which
+//    this document originally mis-scoped to "generic".
 // 5. A second, independent reason no wrap/expose/match function over
 //    `Secret<T>` ships: this package's own conformance-completeness gate
 //    (`tests/project/standard_library.rs`'s
@@ -86,6 +92,95 @@ module std.auth;
 record Secret<T> {
     @id("std.auth.secret.value")
     value: T,
+}
+
+// ---------------------------------------------------------------------
+// Identity vs. Authorization: distinct nominal types (issue #191)
+// ---------------------------------------------------------------------
+// The module comment above and `docs/AUTHENTICATION-SESSIONS-V1.md`'s
+// "Authentication is not authorization" section already establish this at
+// the *function-signature* level: no function in this module takes a
+// session or token state and returns a capability, role, or permission, and
+// every decision function here is `bool`- or closed-`usize`-typed. Issue
+// #191's acceptance mapping graded that "met at the function-signature
+// level" but explicitly "not met as a distinct nominal type the compiler
+// enforces one cannot smuggle past — the language has no such enforcement
+// mechanism to attach it to yet." That claim is now checked directly against
+// the compiler, exactly like `Secret<T>` above, and found to be fixable
+// without any compiler change:
+//
+// 1. `Identity` names an authentication outcome ("who you are" — a subject
+//    handle a caller obtained by some means this pure layer does not
+//    perform, e.g. `session_is_usable` returning `true`). `Authorization`
+//    names an independent authorization decision ("what you may do"), one a
+//    caller derives from an `Identity` plus a policy input this package does
+//    not and cannot supply (the same posture `token_verification_admits`'s
+//    `has_valid_signature` takes for a signature: an opaque, deployment-
+//    supplied bit). Nothing here lets a caller manufacture an `Authorization`
+//    directly from an `Identity` — both are constructed by the caller from
+//    caller-held scalars, call-local, exactly like `Secret<T>` (see point 4
+//    below for why no function of this package can do the constructing
+//    instead).
+// 2. **The compiler already refuses to substitute one for the other**,
+//    checked directly (not assumed) in
+//    `src/authentication/identity_authorization_source_tests.rs`: a function
+//    parameter typed `Identity` rejects an `Authorization` value, and a
+//    function parameter typed `Authorization` rejects an `Identity` value,
+//    both with `SPX-T205` ("argument ... expects ... received ..."), the
+//    compiler's ordinary nominal-type argument check — not a new mechanism
+//    this package adds, so it cannot be bypassed by this or any other
+//    package once the two types are declared distinctly, exactly like
+//    `SPX-T207`'s aggregate-equality refusal above. A positive control in
+//    the same file proves each type is independently still accepted by a
+//    function that actually wants it, so the negative result is a real
+//    refusal and not an unrelated parse failure.
+// 3. Whole-value equality is refused for `Identity`/`Authorization` exactly
+//    as for `Secret<T>` (`SPX-T207`, the same general `Type::Named`
+//    invariant) and there is still no print/format/reflection facility in
+//    the language (`src/lexer.rs`) that could serialize either into text.
+//    Both non-leak properties `Secret<T>`'s doc comment states are inherited
+//    for free, not re-implemented.
+// 4. CAPACITY CEILING, checked directly and found to be *broader* than
+//    `Secret<T>`'s doc comment (point 4) stated: the interpreter ceiling
+//    there was framed as "a user *generic* record used across a function
+//    boundary", but bisection for this tranche found it is not generic-
+//    specific. `src/interpreter.rs`'s `resolved_data_parameter_is_admitted`
+//    (around line 2780) admits a by-value nominal parameter only when its
+//    declaration `kind == hir::DeclarationKind::Class` (never plain
+//    `record`), and `resolved_data_result_is_admitted` (around line 2816)
+//    has no by-value nominal-return case at all outside the owned-byte-
+//    record profile (`is_admitted_owned_byte_record`/`is_admitted_owned_
+//    variant`, both requiring a `Bytes` field somewhere in the shape).
+//    `Identity` and `Authorization` carry only `usize`/`bool` fields, so
+//    they hit the same `SPX-F102` ("interpreter admission failed
+//    (unsupported_callee)") calling a plain `record` OR a plain `class`
+//    (checked directly: declaring `Identity` as `class` instead of `record`
+//    and repeating the same call still fails `SPX-F102`, because the
+//    ceiling is really "no `Bytes` field anywhere in the shape", not
+//    "declared `record` instead of `class`") across a function boundary,
+//    on the interpreter, exactly like `Secret<i64>`. `semaprax check`
+//    admits the declarations and every such call statically; only the
+//    reference interpreter refuses to execute one. This is real
+//    interpreter-backend work (`src/interpreter.rs`) outside this change's
+//    lease and outside a single-package change's scope, reported here
+//    rather than routed around — and it corrects, not merely restates, the
+//    scope of the ceiling `Secret<T>`'s doc comment (point 4) already named.
+// 5. The same conformance-completeness consequence as `Secret<T>` point 5
+//    follows: no function whose signature mentions `Identity` or
+//    `Authorization` ships here, so `std.auth.tests` imports both types with
+//    `use type` (never `use function` for a function that does not exist)
+//    and `identity_authorization_self_check` below constructs and reads
+//    both types call-locally, exactly like `secret_self_check`.
+@id("std.auth.identity")
+record Identity {
+    @id("std.auth.identity.subject_id")
+    subject_id: usize,
+}
+
+@id("std.auth.authorization")
+record Authorization {
+    @id("std.auth.authorization.permitted")
+    permitted: bool,
 }
 
 // This module is the pure, effect-free decision-procedure layer for issue
@@ -568,4 +663,34 @@ fn secret_self_check() -> bool
     let matching_flags_match = true_flag.value == other_true_flag.value && false_flag.value == other_false_flag.value;
     let differing_flags_do_not_match = true_flag.value != false_flag.value;
     handle_round_trips && zero_handle_round_trips && negative_handle_round_trips && matching_handles_match && differing_handles_do_not_match && true_flag_round_trips && false_flag_round_trips && matching_flags_match && differing_flags_do_not_match
+}
+
+// Positive-control round-trip and distinctness proof, call-local exactly
+// like `secret_self_check`: an `Identity` and an `Authorization` are built
+// from caller-held scalars and read back through `.subject_id`/`.permitted`
+// directly, never through a function typed over either record (see point 5
+// above). The compile-time proof that the two types cannot be substituted
+// for one another lives in
+// `src/authentication/identity_authorization_source_tests.rs`, not here,
+// because a hostile case that must fail to compile cannot live inside a
+// package whose own test suite must build cleanly (the same reason
+// `secret_source_tests.rs` is a standalone Rust fixture and not part of this
+// package).
+@id("std.auth.identity_authorization.self_check")
+fn identity_authorization_self_check() -> bool
+{
+    let who = Identity { subject_id: 42usize };
+    let identity_round_trips = who.subject_id == 42usize;
+    let other_who = Identity { subject_id: 42usize };
+    let matching_identities_match = who.subject_id == other_who.subject_id;
+    let different_who = Identity { subject_id: 7usize };
+    let differing_identities_do_not_match = who.subject_id != different_who.subject_id;
+    let granted = Authorization { permitted: who.subject_id == 42usize };
+    let granted_round_trips = granted.permitted;
+    let denied = Authorization { permitted: false };
+    let denied_round_trips = !denied.permitted;
+    let other_granted = Authorization { permitted: true };
+    let matching_authorizations_match = granted.permitted == other_granted.permitted;
+    let differing_authorizations_do_not_match = granted.permitted != denied.permitted;
+    identity_round_trips && matching_identities_match && differing_identities_do_not_match && granted_round_trips && denied_round_trips && matching_authorizations_match && differing_authorizations_do_not_match
 }

@@ -252,6 +252,102 @@ cached/pinned Lean toolchain image, running `lake build` on `proofs/*/`
 exit or a `sorryAx`/custom-axiom hit in the combined log — the exact check
 demonstrated above, not a new one invented for this document.
 
+### Issue #188 follow-up: seeding real unsoundness, not a dummy theorem
+
+The failing-run demonstration above proves the axiom scan can fail, but its
+seed (`theorem deliberately_broken_for_gate_demo : 1 + 1 = 3 := by sorry`)
+is a trivial, unrelated theorem appended to the file — it shows the
+`sorryAx` check works, not that **Kernel-0's own semantics or typing rules**
+can be broken and have the mechanized Progress/Preservation proof itself
+reject the break. Issue #188's audit of `scripts/kernel0-lean-gate.py`
+called this out by name as the most valuable remaining gap and asked for it
+closed. Two genuine unsoundness seeds were injected directly into
+`HasType`/`Step`, built with `lake build` (`lake` is on this host via
+`~/.elan/bin`, not on the bare `PATH` a plain `which lake` checks), observed
+to fail, then reverted — `git diff` confirms the committed file is
+byte-identical to before each seed:
+
+1. **Typing-rule unsoundness — `if`'s two branches decoupled to different
+   types.** Changed `HasType.ite`'s conclusion from requiring one shared `T`
+   for both branches to allowing independent `T1`/`T2`, concluding `T1`
+   regardless of `e2`'s real type (a classic if-branch-type-unification bug:
+   it lets `if false then 5 else true` type-check as `int`, even though it
+   *steps* to `true`). `lake build` failed with a genuine elaboration error,
+   not merely a `sorryAx` line, inside `preservation`'s own `iteFalse` case
+   — exactly the case this break should hit, and nowhere else that mattered:
+   ```
+   error: Kernel0.lean:735:46: Type mismatch
+     h2
+   has type
+     HasType P Γ e2✝ T2✝
+   but is expected to have type
+     HasType P Γ e2✝ T
+   ```
+   Progress still elaborated (a trichotomy's "steps"/"is a value" outcomes
+   never inspect the two branches' types), confirming precisely which
+   theorem's proof depends on the broken invariant and which does not.
+2. **Operational-semantics unsoundness — an off-by-one `Call`-beta
+   substitution base.** Changed `Step.callBeta`'s conclusion from
+   `substEnvAt 0 args fd.body` to `substEnvAt 1 args fd.body` (a
+   de-Bruijn-index bug of exactly the shape a miscompiled argument-binding
+   pass could introduce: parameter 0 is left free instead of substituted,
+   and every other parameter binds one index too high). `lake build` failed
+   inside `preservation`'s `callBeta` case, the one case that actually
+   invokes the substitution lemma at a fixed base:
+   ```
+   error: Kernel0.lean:764:6: Type mismatch: After simplification, term
+     hsub
+    has type
+     HasType P Γ (substEnvAt 0 args fd'.body) fd'.ret
+   but is expected to have type
+     HasType P Γ (substEnvAt 1 args fd'.body) fd'.ret
+   ```
+
+Both failures are hard `lake build` exit-1 errors at the exact broken proof
+case — a stronger catch than the token scan or the `sorryAx` axiom check,
+neither of which needed to run to already know the mechanization rejected
+these two: `scripts/kernel0-lean-gate.py`'s source-level checks (signature
+pin, `sorry`/`admit` scan) stay green through both seeds, since neither
+touches a pinned theorem's statement text or introduces a real `sorry`
+token — only the build-dependent check catches them, confirming the gate's
+own design note that the build/axiom half and the source-level half are
+independent, complementary layers, not redundant ones.
+
+For contrast, two lighter seeds confirm the *other* two layers independently,
+run both with and without `~/.elan/bin` on `PATH`:
+
+- A real `sorry` swapped in for one `preservation` case's tactic proof
+  (`andFalse`) is caught by the token scan alone with no Lean toolchain on
+  `PATH` (`real (non-comment, non-string) tactic token(s) found: sorry`,
+  gate exit 1), and, with `lake` available, by three independent signals at
+  once: the token scan, `sorryAx` in the combined `lake build` output, and
+  `Kernel0.preservation`'s own axiom set naming `sorryAx` — the weakest
+  seed of the four, correspondingly the easiest to catch.
+- Weakening `progress_scalarIf_closed`'s conclusion from a real trichotomy
+  to a vacuous `... ∨ True`, proved by `Or.inr (Or.inr (Or.inr True.intro))`,
+  **builds cleanly and reports a clean axiom set** (`lake build` OK, 7/7
+  axiom-clean) — a bare `lake build` gate would report this as a pass. Only
+  the byte-exact signature pin (`PINNED_SIGNATURES` in
+  `scripts/kernel0-lean-gate.py`) catches it, exactly the failure mode that
+  script's own module doc names as the reason the pin exists.
+
+**A genuine, real (not seeded) fidelity gap surfaced while choosing where to
+probe next:** `evalArith`'s `mod` case had no `i64::MIN`/`-1` exclusion,
+unlike `div`. The remainder of any integer division is always representable
+(`inRange` never rejects it), but the real system faults there anyway
+(`i64::MIN % -1` traps on real hardware/Rust the same shared `idiv`
+instruction that makes `i64::MIN / -1` trap, confirmed against
+`src/kernel_zero/eval.rs`'s `checked_rem` and an already-passing
+differential-corpus case). This was not a seeded defect — it was already
+in the committed file — so it was fixed rather than reverted: an explicit
+`a = i64Min ∧ b = -1` exclusion mirroring `div`'s, requiring **zero** proof
+changes, since Progress and Preservation are generic over `evalArith`'s
+`Option` shape and never inspect its formula. See `evalArith`'s own doc
+comment in `Kernel0.lean` for the full account.
+
+All four seeds above were reverted before commit; only the `mod` fix and
+this section are new committed content from this pass.
+
 ## Relationship to issue #186
 
 A parallel audit on issue #186 ("Export selected obligations to an external
@@ -336,11 +432,17 @@ same inventory in more detail):
   table (`FunDef`, `Program`).
 - **Partial arithmetic, modeled explicitly** (the corrected form of the
   document's `n1 op n2 = n` gap): `evalArith`/`evalNeg` return `Option Int`,
-  `none` exactly at a zero divisor or `i64`-range overflow (including
-  `i64::MIN / -1`, using `i64Min`/`i64Max` bounds), and `Step`'s
-  `arithVal`/`negVal` rules only fire on `some` — there is **no rule at all**
-  for the `none` case, mirroring the real gap rather than patching around
-  it.
+  `none` exactly at a zero divisor, `i64`-range overflow (including
+  `i64::MIN / -1` for `div`, caught by its quotient's own range check with
+  no special case needed), or -- since issue #188's seeded-defect audit
+  fixed a real, until-then-unnoticed gap here -- the same `i64::MIN`/`-1`
+  pair for `mod` too, named explicitly rather than range-derived (the
+  mathematical remainder is always representable, so no range check ever
+  rejects it, yet the real system faults there anyway: `i64::MIN % -1`
+  traps on real hardware/Rust the same shared `idiv` instruction that makes
+  `i64::MIN / -1` trap). `Step`'s `arithVal`/`negVal` rules only fire on
+  `some` — there is **no rule at all** for the `none` case, mirroring the
+  real gap rather than patching around it.
 - **`FaultRedex`**: the stuck-but-intended points, closed under the same
   left-to-right congruence contexts `Step` itself uses (a base `Fault`
   nested under an otherwise-steppable form, e.g. `1 + (2 / 0)`, is stuck

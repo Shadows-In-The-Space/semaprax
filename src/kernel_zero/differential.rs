@@ -242,6 +242,52 @@ fn int_case(source: &str, entry_id: &str, samples: Vec<Vec<Value>>) -> Case {
     }
 }
 
+/// `depth` nested `let x{n} = x{n-1} + 1;` bindings, each a fresh, distinct
+/// name (real shadowing -- rebinding an already-in-scope name -- is
+/// rejected outright by the resolver with `SPX-T209`, confirmed while
+/// writing this generator: an earlier draft reused one name `x` at every
+/// level and the differential test's own `corpus program must resolve`
+/// panic reported twenty `SPX-T209` diagnostics, one per level, showing the
+/// real admitted grammar is strictly narrower than the task's own suggested
+/// adversarial target here). What *is* exercised, deeply: `depth` nested
+/// lexical scopes and the de-Bruijn index/shift bookkeeping each one adds --
+/// an off-by-one there is far more likely to surface after many nesting
+/// levels than after the generator's typical 1-2 nested `let`s (`gen_let`'s
+/// `depth` budget rarely reaches this deep even by chance). Returns `depth`.
+fn deep_shadow_let_chain(depth: u32) -> String {
+    let mut body = format!("x{depth}");
+    for level in (1..=depth).rev() {
+        let prev_ref = if level == 1 {
+            "0".to_owned()
+        } else {
+            format!("x{}", level - 1)
+        };
+        body = format!("{{ let x{level} = {prev_ref} + 1; {body} }}");
+    }
+    body
+}
+
+/// `depth` nested `if`s alternating which branch is "live" (reduces to the
+/// continued computation) and which is "dead" (a `1 / 0` that must never be
+/// reduced). Kernel-0's `if`'s untaken branch is never evaluated at all
+/// (`AGENTS.md`'s "lazy boolean operands execute only when required" sibling
+/// rule for `if`) -- the single-level hand-written case above already
+/// covers this once; this stresses the same invariant at `depth` nesting so
+/// a backend that only mis-evaluates a dead branch a few congruence steps
+/// removed from the top (rather than at the immediate top level) still gets
+/// caught. Always reduces to `1`, never faults.
+fn deep_if_liveness_chain(depth: u32) -> String {
+    let mut body = "1".to_owned();
+    for i in 0..depth {
+        body = if i % 2 == 0 {
+            format!("(if true {{ {body} }} else {{ (1 / 0) }})")
+        } else {
+            format!("(if false {{ (1 / 0) }} else {{ {body} }})")
+        };
+    }
+    body
+}
+
 /// Hand-written edge cases the task calls out explicitly: overflow,
 /// division/remainder by zero, short-circuit laziness, evaluation order,
 /// and the documented `bool == bool`/`bool != bool` extension (see
@@ -371,6 +417,117 @@ fn hand_written_cases() -> Vec<Case> {
             entry_id: "app.entry".to_owned(),
             samples: vec![vec![]],
         },
+        // Evaluation order determines *which* fault is observed when both
+        // operands of a binary operator would fault: left-to-right means
+        // the left operand's fault always wins, and the right operand is
+        // never even reached (`eval_term`'s `let left_value = ...?;` before
+        // `let right_value = ...?;`) -- not merely "a fault is produced",
+        // which a right-to-left or eager-both-sides evaluator could also
+        // satisfy while still disagreeing on *which* one. Each pair below
+        // swaps which side faults, so a backend that got the direction
+        // backwards would disagree on exactly one of the two, not both.
+        int_case(&module("(1 / 0) + (5 % 0)"), "app.entry", vec![vec![]]),
+        int_case(&module("(5 % 0) + (1 / 0)"), "app.entry", vec![vec![]]),
+        int_case(&module("(1 / 0) - (5 % 0)"), "app.entry", vec![vec![]]),
+        // Same evaluation-order requirement through a comparison operator,
+        // not just `arith` -- `Cmp`'s reduction rule shares the same
+        // left-to-right congruence context, per `Kernel0.lean`'s `Step`.
+        Case {
+            source: "module test.kernel_zero_hand_written;\n\n\
+                     @id(\"app.main\")\nfn main() -> i64 { 0 }\n\n\
+                     @id(\"app.entry\")\nfn entry() -> bool\n\
+                     {\n    (1 / 0) < (5 % 0)\n}\n"
+                .to_owned(),
+            entry_id: "app.entry".to_owned(),
+            samples: vec![vec![]],
+        },
+        // A fault in `&&`/`||`'s *left* operand must propagate regardless
+        // of what the right operand is (or would be) -- distinct from the
+        // `false && <would-fault>` / `true || <would-fault>` lazy-right-
+        // operand cases above, which never exercise a faulting *left*
+        // operand at all. Both sides here would fault differently
+        // (`DivisionByZero` vs `RemainderByZero`), so the observed fault
+        // also pins evaluation order, the same way the arithmetic pairs
+        // above do.
+        Case {
+            source: "module test.kernel_zero_hand_written;\n\n\
+                     @id(\"app.main\")\nfn main() -> i64 { 0 }\n\n\
+                     @id(\"app.entry\")\nfn entry() -> bool\n\
+                     {\n    ((1 / 0) == 0) && ((5 % 0) == 0)\n}\n"
+                .to_owned(),
+            entry_id: "app.entry".to_owned(),
+            samples: vec![vec![]],
+        },
+        Case {
+            source: "module test.kernel_zero_hand_written;\n\n\
+                     @id(\"app.main\")\nfn main() -> i64 { 0 }\n\n\
+                     @id(\"app.entry\")\nfn entry() -> bool\n\
+                     {\n    ((1 / 0) == 0) || ((5 % 0) == 0)\n}\n"
+                .to_owned(),
+            entry_id: "app.entry".to_owned(),
+            samples: vec![vec![]],
+        },
+        // `i64::MIN * -1`: `mul`'s own boundary overflow, distinct from the
+        // `add`/`sub` boundary cases above and from `div`/`mod`'s dedicated
+        // `i64::MIN`/`-1` special case -- `checked_mul` must reject `2^63`
+        // (one past `i64::MAX`) the same ordinary way it rejects any other
+        // out-of-range product.
+        int_case(
+            &module("(-9223372036854775807 - 1) * -1"),
+            "app.entry",
+            vec![vec![]],
+        ),
+        // The boundary that must *not* fault: `i64::MIN` divided or
+        // remaindered by plain `1` (not `-1`) is exactly representable, and
+        // `i64::MAX` remaindered by `-1` is `0`. An implementation that
+        // over-applies the `i64::MIN`/`-1` special case to any negative
+        // divisor, or to `div`/`mod` generically, would wrongly fault here.
+        int_case(
+            &module("(-9223372036854775807 - 1) / 1"),
+            "app.entry",
+            vec![vec![]],
+        ),
+        int_case(
+            &module("9223372036854775807 % -1"),
+            "app.entry",
+            vec![vec![]],
+        ),
+        // A helper's parameter and the caller's own `let` binding reuse the
+        // literal name `x` -- the generator's fresh `gen_vN`/`pN`/`eN` names
+        // never collide, so this exact shape (which a real de-Bruijn-index
+        // or naive name-based substitution bug could confuse) never arises
+        // by chance. `helper`'s `x` must resolve to its own parameter, never
+        // leak into or capture the caller's `x`.
+        Case {
+            source: "module test.kernel_zero_hand_written;\n\n\
+                     @id(\"app.main\")\nfn main() -> i64 { 0 }\n\n\
+                     @id(\"test.helper\")\nfn helper(x: i64) -> i64 { x + 1 }\n\n\
+                     @id(\"app.entry\")\nfn entry() -> i64\n\
+                     {\n    let x = 100;\n    helper(x - 90) + x\n}\n"
+                .to_owned(),
+            entry_id: "app.entry".to_owned(),
+            samples: vec![vec![]],
+        },
+        // 20 nested `let`s, each a fresh distinct name one level deeper --
+        // a de-Bruijn shift/substitution stress case far deeper than
+        // anything the generator's own `depth` budget typically reaches.
+        // See `deep_shadow_let_chain`'s own doc comment: literal shadowing
+        // (reusing an in-scope name) is rejected by the resolver
+        // (`SPX-T209`), confirmed while developing this case.
+        int_case(
+            &module(&deep_shadow_let_chain(20)),
+            "app.entry",
+            vec![vec![]],
+        ),
+        // 20 nested `if`s, alternating which branch is live, where every
+        // dead branch is a `1 / 0` that must never be reduced -- the
+        // single-level "untaken branch never faults" case above stressed
+        // once; this stresses the same invariant at depth.
+        int_case(
+            &module(&deep_if_liveness_chain(20)),
+            "app.entry",
+            vec![vec![]],
+        ),
     ]
 }
 

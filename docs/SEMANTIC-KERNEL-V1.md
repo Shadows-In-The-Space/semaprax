@@ -13,8 +13,9 @@
   document is machine-checked. A later session added a from-scratch Kernel-0
   reference interpreter (`src/kernel_zero/{term,value,eval}.rs`), an HIR
   translator (`src/kernel_zero/reify.rs`), and a differential test against
-  the compiler's own interpreter backend over a deterministic 74-program
-  corpus (`src/kernel_zero/{corpus,differential}.rs`) — see "Reification"
+  the compiler's own interpreter backend over a deterministic corpus
+  (`src/kernel_zero/{corpus,differential}.rs`, 86 programs after issue
+  #188's later corpus-strengthening pass, up from 74) — see "Reification"
   and "Differential testing" below. This closes the reification predicate's
   *faithfulness* gap only against a finite, non-exhaustive corpus and only
   for the interpreter backend; it is evidence, not a proof, and it does not
@@ -77,15 +78,16 @@ Read this section before citing this document elsewhere.
   `src/kernel_zero/differential.rs` now checks a from-scratch reference
   interpreter (`src/kernel_zero/eval.rs`) against the compiler's real
   interpreter backend, driven through its ordinary public
-  `interpreter::interpret` entry point, over a deterministic 74-program
-  corpus (14 hand-written edge cases plus 60 generated programs, 197
+  `interpreter::interpret` entry point, over a deterministic 86-program
+  corpus (26 hand-written edge cases, up from 14 in issue #188's
+  corpus-strengthening pass, plus 60 generated programs, 209
   concrete-argument comparisons total, seed `0x4b65726e656c3021` --
   see "Differential testing" below for exact counts and what was found).
   This is **not** a proof that the interpreter always agrees with Kernel-0's
   operational semantics: the corpus is finite. **A later session extended
   the same comparison to native C11 (`-O0`/`-O2`) and Core Wasm**
   (`src/kernel_zero/differential/cross_backend.rs`) over the identical
-  corpus and seed: 591 comparisons, 0 disagreements. This remains evidence
+  corpus and seed: 627 comparisons, 0 disagreements. This remains evidence
   over one finite seeded corpus, not a proof, and is silent on any program
   outside it. Section "Reification: HIR to Kernel-0, and its
   unproved edge" and "Differential testing" together name what is now
@@ -408,7 +410,7 @@ weak link."* What is closed now, and what remains open:
   testing" below for the corpus, the seed, and the exact result. **Extended
   to native C11 and Core Wasm in a later session**
   (`src/kernel_zero/differential/cross_backend.rs`): the same corpus, same
-  seed, 591 comparisons (197 samples x native `-O0` x native `-O2` x Core
+  seed, 627 comparisons (209 samples x native `-O0` x native `-O2` x Core
   Wasm), 0 disagreements -- see "Differential testing" below. **Still
   open:** the corpus is finite and not exhaustive (a passing differential
   test is evidence a disagreement was not found, not a proof none exists),
@@ -471,8 +473,10 @@ separately below, in "Extension to native C11 and Core Wasm."
 
 **What ran.** `src/kernel_zero/differential/cross_backend.rs`'s
 `native_c11_and_core_wasm_agree_with_the_kernel_zero_reference_interpreter_over_the_corpus`
-runs the identical 74-case, 197-comparison corpus above (same source text,
-same seed, unmodified) through two additional paths per case, each compared
+runs the identical corpus above (same source text, same seed, unmodified;
+86 cases and 209 comparisons after "Corpus strengthened" below grew it from
+the 74-case, 197-comparison corpus this section originally measured)
+through two additional paths per case, each compared
 against the from-scratch reference interpreter side above (not against the
 compiler's interpreter a second time, since the test above already
 establishes that agreement):
@@ -573,6 +577,34 @@ own convention).
    proof sketch to cover it is routine, not attempted here, and not claimed
    as done.
 
+### Corpus strengthened (a later session, issue #188)
+
+12 new hand-written cases were added to `src/kernel_zero/differential.rs`'s
+`hand_written_cases`, targeting boundaries the deterministic generator is
+unlikely to hit by chance rather than growing it randomly: which fault is
+observed (not merely that one is) when both operands of a binary
+operator -- arithmetic, comparison, or `&&`/`||`'s own left operand -- would
+fault differently, pinning left-to-right evaluation order at the
+observable-outcome level; `i64::MIN * -1` (`mul`'s own boundary, distinct
+from `div`/`mod`'s dedicated `i64::MIN`/`-1` case); the boundary that must
+**not** fault (`i64::MIN / 1`, `i64::MAX % -1`); a helper parameter and a
+caller's `let` reusing the identical name `x` across disjoint function
+scopes; and two 20-deep generated-by-a-small-Rust-helper (not the corpus's
+own seeded generator) programs, one nesting `let`s and one nesting `if`s
+with every untaken branch a `1 / 0`. One of these surfaced a real admitted-
+grammar boundary while under construction: an initial draft of the deep-nesting
+`let` case reused one name at every level (literal shadowing) and the
+resolver rejected it outright with twenty `SPX-T209` diagnostics -- SEMAPRAX
+does not admit local shadowing at all, narrower than this task's own
+suggested adversarial target, so the case was rewritten with fresh distinct
+names per level instead, still nesting `let`s 20 deep. The corpus is now 26
+hand-written plus 60 generated (86 programs, seed and determinism
+unchanged), 209 interpreter-vs-reference comparisons and 627 native-C11-
+plus-Core-Wasm-vs-reference comparisons (209 samples x native `-O0` x
+native `-O2` x Core Wasm), **zero disagreements** on both, run locally
+(`cargo test -p semaprax --lib kernel_zero::differential`, cross-backend
+gated on the local `clang`/`node` this exercise confirmed present).
+
 ## What is and is not mechanically checked
 
 | Claim | Mechanically checked today? | Evidence |
@@ -580,8 +612,8 @@ own convention).
 | Kernel-0 syntax/typing/semantics are internally consistent (progress, preservation) | **No.** Paper proof only. | This document, "Paper safety proof" |
 | A given `.spx` source text is admitted or rejected by the real toolchain, with a named diagnostic, at a named boundary | **Yes**, for the three ceilings below | `tests/cleanup_backends/kernel_boundary.rs`, `src/parser/depth/tests.rs` |
 | A real `ResolvedFunction`'s HIR shape matches Kernel-0's grammar (the admission predicate itself) | **Yes.** | `src/kernel_zero.rs`, its `tests` submodule |
-| A reifying function's real evaluation agrees with Kernel-0's operational semantics on it, for the **interpreter backend**, over a finite corpus | **Partially.** 197 comparisons across 74 seeded, deterministic programs, 0 disagreements this session. Not exhaustive; a passing run is evidence, not a proof. | `src/kernel_zero/differential.rs`, "Differential testing" above |
-| The same, for the **native or Wasm backends** | **Partially.** 591 comparisons (197 samples x native `-O0` x native `-O2` x Core Wasm) over the identical corpus, 0 disagreements, in a later session. Not exhaustive; a passing run is evidence, not a proof; and it is silent on any program outside the corpus. | `src/kernel_zero/differential/cross_backend.rs`, "Differential testing" above |
+| A reifying function's real evaluation agrees with Kernel-0's operational semantics on it, for the **interpreter backend**, over a finite corpus | **Partially.** 209 comparisons across 86 seeded, deterministic programs (26 hand-written, up from 14 in issue #188's corpus-strengthening pass; 60 generated), 0 disagreements. Not exhaustive; a passing run is evidence, not a proof. | `src/kernel_zero/differential.rs`, "Differential testing" above |
+| The same, for the **native or Wasm backends** | **Partially.** 627 comparisons (209 samples x native `-O0` x native `-O2` x Core Wasm) over the identical corpus, 0 disagreements. Not exhaustive; a passing run is evidence, not a proof; and it is silent on any program outside the corpus. | `src/kernel_zero/differential/cross_backend.rs`, "Differential testing" above |
 | Interpreter, native, and Wasm backends agree on one concrete Kernel-0-shaped program's observable output | **Partially, for one hand-run example this session**, not as an automated, repeatable gate | "Rung 0 evidence" below |
 | Deterministic stable-ID graph projection | **No new checking added by this session.** Existing coverage is in `tests/workspace/semantic_graph.rs` and `src/workspace_graph/*`; this document does not extend it. | out of scope this session |
 | Semantic-transaction precondition/replay validity | **No new checking added by this session.** Existing coverage is in `src/semantic_workspace_*.rs`. | out of scope this session |
@@ -793,7 +825,10 @@ papering over:
    `crate::wasm::build_web_with_scalar_exports`'s Public Scalar Export
    Profile v1 under Node, each outcome compared against the from-scratch
    reference interpreter -- 591 comparisons (197 samples x native `-O0` x
-   native `-O2` x Core Wasm), zero disagreements. This is evidence over the
+   native `-O2` x Core Wasm), zero disagreements (grown to 86 programs,
+   26 of them hand-written, and 209/627 comparisons by issue #188's later
+   corpus-strengthening pass, "Corpus strengthened" above; still zero
+   disagreements). This is evidence over the
    same finite seeded corpus, not a proof, and it is silent on any program
    outside that corpus. **The admission predicate's own wiring question is
    now closed, not open:** "Reification: HIR to Kernel-0, and its unproved

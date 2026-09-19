@@ -39,6 +39,24 @@ proof left exactly this case as `sorry` for exactly this reason).
 `WellFormedProgram` below names the missing invariant explicitly, threaded
 through `preservation` as a hypothesis, closing the gap honestly rather than
 by construction-order coincidence.
+
+Issue #188's seeded-defect audit of this file (proving the mechanized proof
+can actually reject an injected unsoundness, not only that it currently
+passes) surfaced a third real gap while choosing which real-system boundary
+to probe: `evalArith`'s `mod` case originally had no `i64::MIN`/`-1`
+exclusion, unlike `div`. Mathematically the remainder is always
+representable, so this was not a typo relative to the file's own "range
+overflow" framing -- but the real system faults there anyway
+(`i64::MIN % -1` traps on real hardware/Rust the same one shared `idiv`
+instruction that makes `i64::MIN / -1` trap, confirmed against this repo's
+own `src/kernel_zero/eval.rs::checked_rem` and an already-passing
+differential-corpus case), so the old clause was a genuine, until-now-
+unnoticed fidelity gap against Kernel-0's real fault set -- not merely
+against the source document. Fixed by naming the same `i64::MIN`/`-1` pair
+explicitly for `mod` too (see `evalArith`'s own doc comment); Progress and
+Preservation needed no proof changes at all to accept the fix, since neither
+theorem inspects `evalArith`'s formula, only its `Option` shape -- exactly
+why no existing proof obligation had ever surfaced this gap on its own.
 -/
 
 namespace Kernel0
@@ -121,16 +139,36 @@ def i64Max : Int := 2 ^ 63 - 1
 
 /-- Ordinary `i64` arithmetic, made explicitly partial: `none` for a zero
 divisor (`div`/`mod`) or a result outside `i64`'s representable range
-(covers `add`/`sub`/`mul` overflow and `i64::MIN / -1`, the one `div` case
-that overflows despite a nonzero divisor). -/
+(covers `add`/`sub`/`mul` overflow, and `i64::MIN / -1` for `div`). `mod`
+needs a *separate* explicit exclusion for the same `i64::MIN`/`-1` pair,
+found and fixed by issue #188's seeded-defect audit of this file: unlike
+`div`'s quotient (`2^63`, out of `i64` range -- `inRange` already rejects
+it with no special case needed), the mathematical remainder of any integer
+division is always representable (`|a % b| < |b| ≤ i64Max`), so `inRange`
+never rejects it and a naive `some (a % b)` here is a real, silent fidelity
+gap against the actual system: `i64::MIN % -1` faults as `RemainderOverflow`
+on real hardware/Rust (`checked_rem`'s documented `Self::MIN`/`-1` special
+case, mirroring `checked_div`'s trap on the same one shared `idiv`
+instruction, not a range check) and in this repo's own reference
+evaluator/compiler (`src/kernel_zero/eval.rs`'s `checked_rem`, exercised
+by an already-passing differential-corpus case,
+`src/kernel_zero/differential.rs`'s `(-9223372036854775807 - 1) % -1`).
+Confirmed empirically before this fix: `#eval (i64Min % (-1 : Int))`
+reduces to `0`, which is in `i64` range, so the old `some (a % b)` clause
+made this term step to `0` (a value) instead of naming it a `FaultRedex` --
+Progress/Preservation both stayed provable regardless (neither theorem
+inspects `evalArith`'s formula, only its `Option` shape), so no proof
+obligation ever surfaced this; only comparing this file's modeled fault set
+against the real system's did. -/
 def evalArith (op : ArithOp) (a b : Int) : Option Int :=
   let inRange (r : Int) : Option Int := if i64Min ≤ r ∧ r ≤ i64Max then some r else none
+  let divRemOverflows : Bool := a = i64Min ∧ b = -1
   match op with
   | .add => inRange (a + b)
   | .sub => inRange (a - b)
   | .mul => inRange (a * b)
   | .div => if b = 0 then none else inRange (a / b)
-  | .mod => if b = 0 then none else some (a % b)
+  | .mod => if b = 0 then none else if divRemOverflows then none else some (a % b)
 
 /-- Unary negation, partial at `i64::MIN` (`-i64::MIN` is not representable). -/
 def evalNeg (n : Int) : Option Int :=

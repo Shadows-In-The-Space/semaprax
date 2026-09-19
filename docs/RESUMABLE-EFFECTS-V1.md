@@ -330,11 +330,27 @@ Explicitly **not** done in this slice, and why:
   mechanism.** Both are named in #204's implementation sequence as steps 8
   and "interpreter first, then native/Wasm" — downstream of the
   syntax/HIR/verifier tranche above, not reachable without it.
-- **No checkpoint byte-wire format.** `Journal`/`JournalEntry` are in-memory
-  Rust values in this slice; `Journal::from_entries` is the seam a future
-  canonical-JSON or byte-wire codec (matching
-  `agent_runtime_v2::checkpoint`'s compact-JSON, sorted-key, bounded wire)
-  would decode into, but no such codec exists yet here.
+- **A checkpoint byte-wire codec now exists, at reference level.**
+  `src/resumable_effects/codec.rs` encodes a `Journal` bound to its
+  `EffectScope` into closed, deterministic JSON bytes and back, matching
+  `agent_runtime_v2::checkpoint::codec`'s "closed deterministic JSON,
+  canonical byte equality rejects duplicate keys" discipline: an explicit
+  versioned schema (`RESUMABLE_EFFECTS_CHECKPOINT_SCHEMA`), a size bound
+  (1 MiB) and an entry-count bound (4096) checked before parsing entries,
+  a self-consistency digest, and three-way scope-binding checks
+  (`StaleProgramRoot`/`WrongInvocation`/`WrongPolicyEpoch`) against the
+  caller's independently derived `expected` scope before a single entry is
+  reconstructed. Every caller-chosen `State`/`Request`/`Observation`/
+  `Result` type opts in through a new, narrower `EffectCodec` trait rather
+  than the base `ResumableEffectProgram` bound growing a codec requirement
+  every program pays for. Decoding still performs none of
+  `Journal::validate`'s ordering/turn-sequencing/request-identity checks —
+  a decoded journal is recovered bytes, not a trusted one, and the caller
+  must still call `validate` (and `run`/`resume`) before anything is
+  granted. This remains a reference-level wire format for the Rust-trait
+  driver only: it has no ProgramRoot-derived schema hash and does not bind
+  to a real checked source type, which is downstream of the syntax/HIR
+  tranche below.
 
 ## Acceptance criteria: met here versus open
 
@@ -343,14 +359,14 @@ Explicitly **not** done in this slice, and why:
 | A non-Agent function can yield typed requests and resume safely | **Reference-validator level only.** `ResumableEffectProgram` is a Rust trait any non-Agent Rust type can implement and drive; no `.spx` source can do this yet. "Typed" is now per-effect, not only per-program: `EffectSignatureTable` declares what each effect's request looks like and what resuming it must supply, and a resume that does not match is refused (`SignatureCheckedHandler` before the effect boundary, `validate_journal_signatures` on a recovered journal). |
 | Generated state machines are deterministic semantic projections | Proven at the reference level: `transition` is required to be a pure function and drift from that requirement is caught (`RequestDrift`/`TransitionDrift`). Not yet a compiler-generated projection from source. |
 | Ownership, effects, contracts and authority survive suspension correctly | Ownership: reference-level `'static`/`Clone` gate only (see above). Effects: `EffectHandler` is the sole authority boundary; `CapabilityGatedHandler` checks a declared capability id against a bounded allowlist before that boundary is reached, and `SignatureCheckedHandler` independently checks the declared request and answer shapes, refusing an answer that answers a different effect before it can become an observation. Contracts (pre/postconditions) and real compiler-checked ownership: **open**, need HIR integration. |
-| Checkpoint/recovery never grants effect authority by itself | **Met**, including at the "reminted resume" level: `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. |
+| Checkpoint/recovery never grants effect authority by itself | **Met**, including at the "reminted resume" level: `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. Extends through the byte-wire codec: `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. |
 | Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture onto `resumable_effects` is follow-up work once the syntax/HIR tranche exists for it to lower into. |
 
 ## Gate
 
-`cargo test --locked -p semaprax --lib resumable_effects::` (46 unit tests:
-30 for `core`/`capability`/`migration`, 16 for `signature`) and
-`cargo test --locked -p semaprax --doc resumable_effects` (2 `compile_fail`
-doctests proving the typed-resume and ownership compile-time rejections) are
-this module's focused selectors. All of it is local, offline, re-runnable
-evidence; nothing hosted, native, or Wasm is claimed.
+`cargo test --locked -p semaprax --lib resumable_effects::` (63 unit tests:
+30 for `core`/`capability`/`migration`, 16 for `signature`, 17 for `codec`)
+and `cargo test --locked -p semaprax --doc resumable_effects` (2
+`compile_fail` doctests proving the typed-resume and ownership compile-time
+rejections) are this module's focused selectors. All of it is local,
+offline, re-runnable evidence; nothing hosted, native, or Wasm is claimed.

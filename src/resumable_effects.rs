@@ -90,6 +90,7 @@
 //! ```
 
 pub mod capability;
+pub mod codec;
 pub mod core;
 pub mod migration;
 pub mod signature;
@@ -98,6 +99,10 @@ mod tests;
 
 pub use capability::{
     CapabilityDenial, CapabilityGatedHandler, CapabilityPolicy, CapabilityPolicyError,
+};
+pub use codec::{
+    decode_checkpoint, encode_checkpoint, CodecError, EffectCodec,
+    RESUMABLE_EFFECTS_CHECKPOINT_SCHEMA,
 };
 pub use core::{
     resume, run, CleanupHandler, DriverError, EffectHandler, EffectScope, Journal, JournalEntry,

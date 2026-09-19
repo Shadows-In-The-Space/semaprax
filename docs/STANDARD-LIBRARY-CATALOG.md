@@ -2911,6 +2911,77 @@ fn content_length(response: borrow Slice<u8>) -> i64
     ensures result >= -1
 ```
 
+### `std.http.byte_is_request_separator`
+
+---------------------------------------------------------------------
+Outbound request safety (issue #193)
+---------------------------------------------------------------------
+Everything above judges a response this package received. These judge a
+request a caller is about to assemble, which is the direction that can be
+made to attack someone else.
+
+CR, LF and NUL in a caller-controlled header value or request target are
+the HTTP request-splitting and response-splitting boundary: a value
+carrying CRLF ends the current field and begins a new one, so an attacker
+who controls part of a header can inject headers, a body, or an entire
+second request. This refuses such a value rather than stripping the bytes,
+exactly as `std.email.value_is_header_safe` refuses them for SMTP, so a
+caller can never ship a request whose bytes quietly differ from what it
+assembled.
+
+```semaprax
+fn byte_is_request_separator(byte: u8) -> bool
+```
+
+### `std.http.value_is_header_safe`
+
+```semaprax
+fn value_is_header_safe(field: borrow Slice<u8>) -> bool
+```
+
+### `std.http.byte_is_tchar_symbol`
+
+RFC 9110 field-name is a `token`: one or more of the tchar set. Admitting
+anything outside it is what lets a space or a colon split one field into
+two, so this is a closed allowlist rather than a denylist of separators.
+Split from `byte_is_tchar` rather than written as one chain: the single
+expression exceeded the cleanup-replay skeleton-work budget (SPX-H006).
+The set is RFC 9110's tchar punctuation: ! # $ % & ' * + - . ^ _ ` | ~
+
+```semaprax
+fn byte_is_tchar_symbol(byte: u8) -> bool
+```
+
+### `std.http.byte_is_tchar`
+
+```semaprax
+fn byte_is_tchar(byte: u8) -> bool
+```
+
+### `std.http.header_name_is_token`
+
+```semaprax
+fn header_name_is_token(name: borrow Slice<u8>) -> bool
+```
+
+### `std.http.request_target_is_safe`
+
+An origin-form request target must also carry no space: a space ends the
+target in the request line, so a target containing one shifts the HTTP
+version field and is a request-line injection in its own right.
+
+```semaprax
+fn request_target_is_safe(target: borrow Slice<u8>) -> bool
+```
+
+### `std.http.request_line_admitted`
+
+The composed judgement a caller asks once, before assembling anything.
+
+```semaprax
+fn request_line_admitted(method: borrow Slice<u8>, target: borrow Slice<u8>) -> bool
+```
+
 ## `std.io`
 
 Package `std/io`, tier `portable`, status partial. Required project profile: `owned-data-api.v1`. Dependency: `std.io = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.

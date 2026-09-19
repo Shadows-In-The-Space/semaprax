@@ -165,3 +165,94 @@ fn content_length(response: borrow Slice<u8>) -> i64
     let start = length_start(response);
     if end + 4usize <= byte_len(response) && start + 15usize <= end { decimal_at(response, skip_blanks(response, start + 15usize)) } else { -1 }
 }
+
+// ---------------------------------------------------------------------
+// Outbound request safety (issue #193)
+// ---------------------------------------------------------------------
+// Everything above judges a response this package received. These judge a
+// request a caller is about to assemble, which is the direction that can be
+// made to attack someone else.
+//
+// CR, LF and NUL in a caller-controlled header value or request target are
+// the HTTP request-splitting and response-splitting boundary: a value
+// carrying CRLF ends the current field and begins a new one, so an attacker
+// who controls part of a header can inject headers, a body, or an entire
+// second request. This refuses such a value rather than stripping the bytes,
+// exactly as `std.email.value_is_header_safe` refuses them for SMTP, so a
+// caller can never ship a request whose bytes quietly differ from what it
+// assembled.
+@id("std.http.byte_is_request_separator")
+fn byte_is_request_separator(byte: u8) -> bool
+{
+    byte == 13u8 || byte == 10u8 || byte == 0u8
+}
+
+@id("std.http.value_is_header_safe")
+fn value_is_header_safe(field: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(field);
+    let mut index = 0usize;
+    let mut safe = true;
+    while index < length && safe {
+        safe = match byte_get(field, index) { Option::Some { value } => !byte_is_request_separator(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && safe
+    }
+    safe
+}
+
+// RFC 9110 field-name is a `token`: one or more of the tchar set. Admitting
+// anything outside it is what lets a space or a colon split one field into
+// two, so this is a closed allowlist rather than a denylist of separators.
+// Split from `byte_is_tchar` rather than written as one chain: the single
+// expression exceeded the cleanup-replay skeleton-work budget (SPX-H006).
+// The set is RFC 9110's tchar punctuation: ! # $ % & ' * + - . ^ _ ` | ~
+@id("std.http.byte_is_tchar_symbol")
+fn byte_is_tchar_symbol(byte: u8) -> bool
+{
+    match byte { 33u8 => true, 35u8 => true, 36u8 => true, 37u8 => true, 38u8 => true, 39u8 => true, 42u8 => true, 43u8 => true, 45u8 => true, 46u8 => true, 94u8 => true, 95u8 => true, 96u8 => true, 124u8 => true, 126u8 => true, _ => false, }
+}
+
+@id("std.http.byte_is_tchar")
+fn byte_is_tchar(byte: u8) -> bool
+{
+    byte >= 48u8 && byte <= 57u8 || byte >= 65u8 && byte <= 90u8 || byte >= 97u8 && byte <= 122u8 || byte_is_tchar_symbol(byte)
+}
+
+@id("std.http.header_name_is_token")
+fn header_name_is_token(name: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut valid = length >= 1usize && length <= 64usize;
+    while index < length && valid {
+        valid = match byte_get(name, index) { Option::Some { value } => byte_is_tchar(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && valid
+    }
+    valid
+}
+
+// An origin-form request target must also carry no space: a space ends the
+// target in the request line, so a target containing one shifts the HTTP
+// version field and is a request-line injection in its own right.
+@id("std.http.request_target_is_safe")
+fn request_target_is_safe(target: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(target);
+    let mut index = 0usize;
+    let mut safe = length >= 1usize && length <= 2048usize;
+    while index < length && safe {
+        safe = match byte_get(target, index) { Option::Some { value } => !byte_is_request_separator(value) && value != 32u8, Option::None {} => false, };
+        index = index + 1usize;
+        index < length && safe
+    }
+    safe
+}
+
+// The composed judgement a caller asks once, before assembling anything.
+@id("std.http.request_line_admitted")
+fn request_line_admitted(method: borrow Slice<u8>, target: borrow Slice<u8>) -> bool
+{
+    method_is_valid(method) && request_target_is_safe(target)
+}

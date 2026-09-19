@@ -1,5 +1,12 @@
 module std.http.tests;
 use function @id("std.http.body_len") from std.http as body_len;
+use function @id("std.http.byte_is_request_separator") from std.http as byte_is_request_separator;
+use function @id("std.http.byte_is_tchar") from std.http as byte_is_tchar;
+use function @id("std.http.byte_is_tchar_symbol") from std.http as byte_is_tchar_symbol;
+use function @id("std.http.header_name_is_token") from std.http as header_name_is_token;
+use function @id("std.http.request_line_admitted") from std.http as request_line_admitted;
+use function @id("std.http.request_target_is_safe") from std.http as request_target_is_safe;
+use function @id("std.http.value_is_header_safe") from std.http as value_is_header_safe;
 use function @id("std.http.byte_is") from std.http as byte_is;
 use function @id("std.http.content_length") from std.http as content_length;
 use function @id("std.http.decimal_at") from std.http as decimal_at;
@@ -67,6 +74,58 @@ fn malformed() -> bool
     content_length(view) == -1 && length_start(view) == 37usize && decimal_at(view, 35usize) == -1
 }
 
+// Issue #193: the request-splitting boundary. Each separator is asserted
+// on its own, and in the FINAL position as well as the middle, because a
+// scan that stops one byte early passes every other case in this corpus --
+// the same hole `std.email`'s corpus guards against.
+@id("std.http.tests.header_value_refuses_each_separator")
+fn header_value_refuses_each_separator() -> bool
+{
+    let clean = [97u8, 98u8, 99u8];
+    let cr_middle = [97u8, 13u8, 99u8];
+    let lf_middle = [97u8, 10u8, 99u8];
+    let nul_middle = [97u8, 0u8, 99u8];
+    let cr_final = [97u8, 98u8, 13u8];
+    let lf_final = [97u8, 98u8, 10u8];
+    let nul_final = [97u8, 98u8, 0u8];
+    value_is_header_safe(array_as_slice(clean)) && !value_is_header_safe(array_as_slice(cr_middle)) && !value_is_header_safe(array_as_slice(lf_middle)) && !value_is_header_safe(array_as_slice(nul_middle)) && !value_is_header_safe(array_as_slice(cr_final)) && !value_is_header_safe(array_as_slice(lf_final)) && !value_is_header_safe(array_as_slice(nul_final))
+}
+
+// RFC 9110 field-name is a closed token set. A space and a colon are the two
+// bytes that actually split one field into two, and both are outside it.
+@id("std.http.tests.header_name_admits_only_tchar")
+fn header_name_admits_only_tchar() -> bool
+{
+    let ok = [88u8, 45u8, 65u8, 95u8, 57u8];
+    let with_space = [88u8, 32u8, 65u8];
+    let with_colon = [88u8, 58u8, 65u8];
+    let with_cr = [88u8, 13u8, 65u8];
+    let too_long_marker = [88u8, 32u8];
+    header_name_is_token(array_as_slice(ok)) && !header_name_is_token(array_as_slice(with_space)) && !header_name_is_token(array_as_slice(with_colon)) && !header_name_is_token(array_as_slice(with_cr)) && !header_name_is_token(array_as_slice(too_long_marker))
+}
+
+// A space in the target shifts the HTTP version field, so it is refused
+// alongside the three separators.
+@id("std.http.tests.request_target_refuses_space_and_separators")
+fn request_target_refuses_space_and_separators() -> bool
+{
+    let ok = [47u8, 97u8];
+    let with_space = [47u8, 32u8, 97u8];
+    let with_cr = [47u8, 13u8, 97u8];
+    let with_lf = [47u8, 10u8, 97u8];
+    request_target_is_safe(array_as_slice(ok)) && !request_target_is_safe(array_as_slice(with_space)) && !request_target_is_safe(array_as_slice(with_cr)) && !request_target_is_safe(array_as_slice(with_lf))
+}
+
+@id("std.http.tests.request_line_needs_both_halves")
+fn request_line_needs_both_halves() -> bool
+{
+    let get = [71u8, 69u8, 84u8];
+    let lower_method = [103u8, 101u8, 116u8];
+    let ok_target = [47u8, 97u8];
+    let bad_target = [47u8, 13u8, 97u8];
+    request_line_admitted(array_as_slice(get), array_as_slice(ok_target)) && !request_line_admitted(array_as_slice(lower_method), array_as_slice(ok_target)) && !request_line_admitted(array_as_slice(get), array_as_slice(bad_target))
+}
+
 @id("std.http.tests.main")
 fn main() -> i64
 {
@@ -77,5 +136,9 @@ fn main() -> i64
     failed = failed + if bodiless() { 0 } else { 8 };
     failed = failed + if partial() { 0 } else { 16 };
     failed = failed + if malformed() { 0 } else { 32 };
+    failed = failed + if header_value_refuses_each_separator() { 0 } else { 64 };
+    failed = failed + if header_name_admits_only_tchar() { 0 } else { 128 };
+    failed = failed + if request_target_refuses_space_and_separators() { 0 } else { 256 };
+    failed = failed + if request_line_needs_both_halves() { 0 } else { 512 };
     failed
 }

@@ -22,6 +22,7 @@ Audience: all documentation readers.
 - [Agent operation checkpoint v2](AGENT-OPERATION-CHECKPOINT-V2.md)
 - [Agent state migration v2](AGENT-STATE-MIGRATION-V2.md)
 - [Durable Agent state migration v3](AGENT-STATE-MIGRATION-V3.md)
+- [Everyday Agent validation product v1](EVERYDAY-AGENT-VALIDATION-PRODUCT-V1.md)
 - [Generic authored variants v1](GENERIC-AUTHORED-VARIANTS-V1.md)
 - [Generic argument inference v1](GENERIC-ARGUMENT-INFERENCE-V1.md)
 - [Generic argument inference v2](GENERIC-ARGUMENT-INFERENCE-V2.md)

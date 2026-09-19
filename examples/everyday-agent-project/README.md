@@ -1,7 +1,11 @@
 # Everyday Agent validation product
 
 A bounded, honestly-scoped slice of the "Everyday Agent end-to-end
-validation product" requested by issue ABI-09A.17. It composes two real,
+validation product" requested by issue ABI-09A.17.
+[`docs/EVERYDAY-AGENT-VALIDATION-PRODUCT-V1.md`](../../docs/EVERYDAY-AGENT-VALIDATION-PRODUCT-V1.md)
+is the versioned product-profile specification (`semaprax.everyday-agent-public-generic-validation.v1`)
+pinning the exact schema, bounds, checkpoint rules, evidence shape, and
+nonclaims this README explains in prose. It composes two real,
 already-shipped SEMAPRAX foundations rather than inventing new ones:
 
 1. **`src/manifest_json.spx`** — a real typed-filesystem-and-bounded-JSON

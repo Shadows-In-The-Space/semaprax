@@ -635,6 +635,39 @@ jobs:
           # where README cited v0.4.0's commit for a v0.4.1 claim.
           python3 scripts/release-reconcile.py
 
+  python-test-suites:
+    name: Python harness self-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          fetch-tags: false
+          lfs: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.97.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Run every committed Python test suite
+        shell: bash
+        run: |
+          # These three suites are real, green, and were selected by no
+          # workflow file until now -- the same "a passing local suite no
+          # hosted run executes" defect issue #163 closes for a Rust module.
+          # `test_agent_driver.py` drives the cross-language benchmark agent
+          # seam against a real `rustc`, which is why this job installs the
+          # toolchain; the other two are pure Python. None of them calls a
+          # model or reaches the network: the agent seam's only transports
+          # here are the replay and mock ones.
+          set -euo pipefail
+          python3 -m unittest discover -s benchmarks/cross-language-v1/agent/tests -t . -v
+          python3 scripts/test-agent-task-comparison-runner.py
+          python3 scripts/test-opencode-provider-smoke.py
+
   kernel0-lean-proof-gate:
     name: Kernel-0 Lean proof gate (issue #188)
     # NOT-YET-HOSTED, deliberately: this job is not in `release-gate`'s
@@ -2071,6 +2104,7 @@ jobs:
       - callable-host-sanitizers
       - rust-host-address-sanitizer
       - msrv
+      - python-test-suites
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -2085,7 +2119,7 @@ jobs:
           SEMAPRAX_CI_NEEDS: ${{ toJSON(needs) }}
         run: |
           python3 scripts/ci-required-checks.py \
-            --min-jobs 23 \
+            --min-jobs 24 \
             --sha "${{ github.sha }}" \
             --head-sha "$(git rev-parse HEAD)"
 

@@ -14,6 +14,7 @@ pub(crate) const RELEASE_BLOCKERS: &[&str] = &[
     "public-generic-ownership-milestone",
     "std-library-depth",
     "release-claim-reconcile",
+    "python-test-suites",
     "supply-chain",
     "component-runtime-v3",
     "wasm-scalar-exports-browser-v1",

@@ -156,6 +156,7 @@ gh api repos/wavect/semaprax/commits/main/check-runs \
 | `public-generic-ownership-milestone` | `Public generic ownership milestone (ubuntu-latest \| macos-latest \| windows-latest)` | 3 |
 | `std-library-depth` | `STD-08 bundled library depth` | 1 |
 | `release-claim-reconcile` | `Release claim reconciliation` | 1 |
+| `python-test-suites` | `Python harness self-tests` | 1 |
 | `supply-chain` | `Dependency policy` | 1 |
 | `component-runtime-v3` | `Private Wasmtime Component result runtime` | 1 |
 | `wasm-scalar-exports-browser-v1` | `Public Wasm Scalar Exports v1 Chromium` | 1 |
@@ -202,7 +203,7 @@ An aggregate is only worth requiring if it cannot be satisfied vacuously. The
   environment, and fails unless **every** upstream entry has
   `result == "success"` -- `failure`, `skipped`, and `cancelled` are all
   rejected by name;
-- passes `--min-jobs 23`, so an accidentally emptied or narrowed `needs:` list
+- passes `--min-jobs 24`, so an accidentally emptied or narrowed `needs:` list
   cannot pass vacuously on `{}`;
 - checks out the repository and compares `git rev-parse HEAD` against
   `${{ github.sha }}`, so a verdict cannot be attributed to another commit.

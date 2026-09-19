@@ -15,6 +15,7 @@ pub(crate) const RELEASE_BLOCKERS: &[&str] = &[
     "std-library-depth",
     "release-claim-reconcile",
     "python-test-suites",
+    "installed-journey",
     "supply-chain",
     "component-runtime-v3",
     "wasm-scalar-exports-browser-v1",

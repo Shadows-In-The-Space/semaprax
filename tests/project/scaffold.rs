@@ -15,6 +15,83 @@ use sha2::{Digest, Sha256};
 ///
 /// It asserts the DEFAULT options deliberately. A test that passed an explicit
 /// budget would prove nothing about the experience a user actually gets.
+/// Every shipped template walks the journey `docs/QUICKSTART.md` documents:
+/// check, test, run, and a semantic-graph projection.
+///
+/// `tests/quickstart_v1/installed_journey.rs` walks the same path against a
+/// really `cargo install`ed binary, which is stronger evidence — but it covers
+/// only the `service` template and is `#[ignore]`d behind a full release
+/// build. This runs in-process on every template in seconds, so a
+/// template-specific break is caught on the ordinary path rather than waiting
+/// for the slow gate.
+///
+/// That distinction is not hypothetical: #271 was exactly a template-specific
+/// break, where `calculator` was fine and `service` was refused, and nothing in
+/// the fast suites noticed.
+///
+/// `run` is asserted to succeed rather than to return a particular value —
+/// `calculator` returns 42 and the others 0, which is each template's own
+/// business.
+#[test]
+fn every_shipped_template_walks_the_documented_quickstart_journey() {
+    for template in PROJECT_SCAFFOLD_TEMPLATES {
+        let layout = if template == "service" {
+            ScaffoldLayout::Tables
+        } else {
+            ScaffoldLayout::Frozen
+        };
+        let derived = derive_project_scaffold_v1_with_layout(NAME, template, layout)
+            .unwrap_or_else(|error| panic!("`{template}` derives: {error:?}"));
+
+        // Canonicalized: `std::env::temp_dir()` is `/var/...` on macOS, a
+        // symlink, and the Project route refuses a non-real ancestor.
+        let root = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!(
+                "semaprax-template-quickstart-{template}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        for file in derived.files() {
+            let path = root.join(file.path());
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, file.utf8()).unwrap();
+        }
+
+        let walked = with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
+            snapshot.check()?;
+            let options = semaprax::project::ProjectExecutionOptions::default();
+            let tested = snapshot.execute_test(&options)?;
+            let ran = snapshot.execute_entry(&options)?;
+            let graph_bytes = snapshot.semantic_graph().len();
+            Ok((
+                format!("{:?}", tested.outcome()),
+                ran.outcome().clone(),
+                graph_bytes,
+            ))
+        });
+        std::fs::remove_dir_all(&root).ok();
+
+        let (tested, ran, graph_bytes) = walked
+            .unwrap_or_else(|error| panic!("`{template}` fails the documented journey: {error:?}"));
+        assert!(
+            tested.contains("Returned(0)"),
+            "`{template}` project tests did not pass: {tested}"
+        );
+        assert!(
+            matches!(ran, semaprax::project::ProjectExecutionOutcome::Returned(_)),
+            "`{template}` entry did not run to a value: {ran:?}"
+        );
+        assert!(
+            graph_bytes > 0,
+            "`{template}` projected an empty semantic graph"
+        );
+    }
+}
+
 #[test]
 fn every_shipped_template_fits_the_default_assurance_budget() {
     for template in PROJECT_SCAFFOLD_TEMPLATES {

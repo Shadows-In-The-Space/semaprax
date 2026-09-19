@@ -252,6 +252,43 @@ fn repair_resume_refuses_when_source_drifts_between_preview_and_resume() {
     );
 }
 
+/// Required failure case from issue #116: "The fixture agent repairs using
+/// actual feedback and fails when the required observation is withheld."
+/// This flips `requires_prior_feedback` onto the *first* scripted turn, which
+/// runs before any effect has ever been dispatched, so the real per-request
+/// prompt genuinely carries no `previous_effect_hex` yet. The guard must
+/// inspect the actual prompt bytes the runtime built (not a hand-fed one) and
+/// refuse rather than let the fixture agent proceed on a fabricated
+/// observation. `FeedbackGuardedAdapter::start` is the sole production
+/// enforcement point (`repair.rs`); this test drives it end to end through
+/// the real `run_live_bound_model_durable` path rather than calling it
+/// directly.
+#[test]
+fn repair_run_fails_when_the_required_prior_feedback_observation_is_withheld() {
+    let fixture = Fixture::new();
+    let manifest = write_project(&fixture, APP).canonicalize().unwrap();
+    let digest = schema_digest(APP);
+    let task_path = fixture.0.join("task.txt");
+    fs::write(&task_path, b"repair the checked candidate").unwrap();
+    let mut config_value =
+        repair_config_value(&manifest, &task_path, &digest, "test.repair.withheld.v1");
+    config_value["turns"][0]["requires_prior_feedback"] = serde_json::json!(true);
+    let config = write_config(&fixture, &config_value);
+    let checkpoint = fixture.0.join("checkpoint");
+
+    let result = run_repair("run", &config, &checkpoint);
+    let error = result.expect_err(
+        "a turn withholding its required prior-feedback observation must fail, not silently proceed",
+    );
+    assert!(
+        error
+            .reason
+            .contains("repair checked source execution refused"),
+        "unexpected refusal reason: {}",
+        error.reason
+    );
+}
+
 fn config_manifest(config: &Path) -> String {
     let value: serde_json::Value = serde_json::from_slice(&fs::read(config).unwrap()).unwrap();
     value["manifest"].as_str().unwrap().to_owned()

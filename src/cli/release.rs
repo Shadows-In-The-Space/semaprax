@@ -2,7 +2,7 @@
 //! command over an already-downloaded release directory.
 //!
 //! This front adds **no verification of its own**. It locates the three
-//! documents [`docs/RELEASE-SIGNING-POLICY-V1.md`] names, then hands their
+//! documents `docs/RELEASE-SIGNING-POLICY-V1.md` names, then hands their
 //! exact bytes to `semaprax::release_provenance`, the independent decoder
 //! and binding verifier that owns every rule. Everything is re-derived from
 //! what is on disk: the manifest digest is recomputed from the manifest's

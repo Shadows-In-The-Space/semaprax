@@ -679,6 +679,10 @@ fn everyday_agent_resume_reports_a_display_only_rename_as_source_drift() {
     );
 }
 
+/// Only the `#[cfg(unix)]` module below calls this, so it must carry the same
+/// gate: without it the Windows build of this harness fails with
+/// `function \`scoped_report_fixture\` is never used` under `-D warnings`.
+#[cfg(unix)]
 fn scoped_report_fixture(label: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
         "semaprax-everyday-agent-product-{label}-{}-{}",

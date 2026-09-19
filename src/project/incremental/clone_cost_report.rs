@@ -7,14 +7,20 @@
 //! quiet-host bench found `rebuild-unchanged` at parity with `cold` (no
 //! speedup within 1.4% at every tested scale); #131's prior audit named this
 //! clone as the confirmed root cause at this exact call site
-//! (`src/project/incremental.rs`, `FrontendPass::lookup`) without shipping a
-//! fix, because avoiding it needs `Program` (or a borrow of it) threaded
-//! through every downstream signature that currently takes it by value --
-//! `rg -c 'Vec<Program>|&\[Program\]' src/workspace_graph.rs src/workspace_graph/*.rs
-//! src/static_protocol.rs src/project/candidate/*.rs` counts 89 such
-//! occurrences today, confirming that audit's blast-radius finding is still
-//! current and still outside a single unreviewed lane's safe scope (see
-//! AGENTS.md's ownership-path invariants and #131's own "Review checkpoint").
+//! (`src/project/incremental.rs`, `FrontendPass::lookup`).
+//!
+//! #130/#131 then narrowed the invalidation this module measures: `build` no
+//! longer marks an unrelated consumer invalidated merely because a provider
+//! it imports from changed (see `build`'s own doc comment for the soundness
+//! argument -- parsing one file is a pure function of that file's own bytes,
+//! and every cross-module check independently reruns on the current build's
+//! `Program` values regardless of cache provenance). The clone this module
+//! measures still happens on every remaining cache hit; what changed is only
+//! which modules count as hits when a provider, not the module itself, is
+//! what changed. This is why `provider_edit_clones_unaffected_consumers_and_reparses_only_the_provider`
+//! below now agrees with `local_body_edit_reparses_one_module_and_clones_the_rest`
+//! instead of being its opposite -- that reversal, measured in real AST-node
+//! counts, is the change #130/#131 shipped.
 //!
 //! This module does not change `lookup`, `build`, or any admitted result.
 //! It replays the exact same cache through an ordinary two-build cold/warm
@@ -52,8 +58,10 @@ pub(crate) struct CloneCostReport {
     /// Modules the warm build satisfied from cache: `lookup` ran a full
     /// `Program::clone` on each of these.
     pub(crate) cloned: Vec<ModuleCloneCost>,
-    /// Modules the warm build reparsed instead: new, changed, or caught by
-    /// the conservative reverse-import invalidation closure.
+    /// Modules the warm build reparsed instead: new, changed, or removed
+    /// since the baseline build (own-text invalidation only; see `build`'s
+    /// doc comment in `src/project/incremental.rs` for why an unaffected
+    /// consumer of a changed provider is no longer counted here).
     pub(crate) reparsed: Vec<ModuleCloneCost>,
 }
 
@@ -173,12 +181,10 @@ mod tests {
     use super::*;
 
     fn calculator_project() -> (ProjectManifest, Vec<ProjectFrontendSource>) {
-        let root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/calculator-project");
-        let manifest = ProjectManifest::parse(
-            &std::fs::read_to_string(root.join("semaprax.toml")).unwrap(),
-        )
-        .unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/calculator-project");
+        let manifest =
+            ProjectManifest::parse(&std::fs::read_to_string(root.join("semaprax.toml")).unwrap())
+                .unwrap();
         let sources = manifest
             .sources()
             .iter()
@@ -204,11 +210,10 @@ mod tests {
             .map(|source| {
                 if source.path() == path {
                     let changed = source.source().replace(from, to);
-                    let canonical = crate::format::canonical(
-                        &crate::parse(&changed, path).unwrap_or_else(|error| {
-                            panic!("fixture edit must stay parseable: {error:?}")
-                        }),
-                    );
+                    let canonical =
+                        crate::format::canonical(&crate::parse(&changed, path).unwrap_or_else(
+                            |error| panic!("fixture edit must stay parseable: {error:?}"),
+                        ));
                     ProjectFrontendSource::new(path, &canonical).unwrap()
                 } else {
                     ProjectFrontendSource::new(source.path(), source.source()).unwrap()
@@ -286,26 +291,77 @@ mod tests {
         );
     }
 
-    /// Editing the shared provider seeds the conservative reverse-import
-    /// inventory (matching
-    /// `warm_open_after_provider_edit_invalidates_the_reverse_import_closure`):
-    /// every consumer is invalidated even though only the provider's body
-    /// changed. Here the clone buys nothing at all for this build: 0 modules
-    /// cloned, the full project reparsed, exactly the opposite side of the
-    /// same tradeoff from the body-edit case above.
+    /// #130/#131: the reverse-import transitive closure that used to seed
+    /// `invalidated` in `FrontendPass::build` (see that function's doc
+    /// comment) is gone. Editing the shared provider's body now invalidates
+    /// only the provider's own AST-cache entry; `src/app.spx` and
+    /// `src/tests.spx` import `add` from `src/core.spx` but their own text
+    /// is untouched, so their cached `Program` is reused. This is the exact
+    /// scenario #130/#131's audit measured as the expensive one (0 cloned,
+    /// every module reparsed); it is now the cheap one, symmetric with the
+    /// local-body-edit case above instead of its opposite.
     #[test]
-    fn provider_edit_reparses_the_whole_reverse_import_closure() {
+    fn provider_edit_clones_unaffected_consumers_and_reparses_only_the_provider() {
         let (manifest, sources) = calculator_project();
         let edited = with_replacement(&sources, "src/core.spx", "left + right", "right + left");
         let report = measure_warm_open(&manifest, &sources, &edited).unwrap();
-        assert!(report.cloned.is_empty());
-        assert_eq!(report.reparsed.len(), sources.len());
+        let reparsed_paths: BTreeSet<&str> = report
+            .reparsed
+            .iter()
+            .map(|module| module.path.as_str())
+            .collect();
+        assert_eq!(reparsed_paths, BTreeSet::from(["src/core.spx"]));
+        assert_eq!(report.cloned.len(), sources.len() - 1);
+        assert!(report.total_cloned_nodes() > 0);
+        assert!(report.total_reparsed_nodes() > 0);
         eprintln!(
-            "provider edit: {} modules cloned, {} modules reparsed ({} AST nodes)",
+            "provider edit: {} modules cloned ({} AST nodes), {} module reparsed ({} AST nodes)",
             report.cloned.len(),
+            report.total_cloned_nodes(),
             report.reparsed.len(),
             report.total_reparsed_nodes()
         );
+    }
+
+    /// Fault-injected negative control (the repo's fault-injection testing
+    /// standard, and #131's own mandated review checkpoint for a narrowing
+    /// like this): a change that actually invalidates a module -- its own
+    /// text -- must still be caught even with the reverse-import closure
+    /// gone. This mutates the provider's *signature* (not just its body),
+    /// which every consumer's exact-generated call site depends on, and
+    /// checks the same source through the real, unbypassed admission path
+    /// (`measure_warm_open` never recomputes invalidation itself -- see its
+    /// doc comment). If this test were made to pass by reintroducing a bug
+    /// that stops evicting a changed file's *own* AST-cache entry, the
+    /// warm build would keep silently admitting the stale pre-edit `add`,
+    /// and this diagnostic assertion would go red.
+    #[test]
+    fn provider_signature_change_still_invalidates_and_fails_the_same_way_cold_does() {
+        let (manifest, sources) = calculator_project();
+        let edited = with_replacement(
+            &sources,
+            "src/core.spx",
+            "fn add(left: i64, right: i64)",
+            "fn add(left: i64, right: i64, extra: i64)",
+        );
+        let mut cache = ProjectFrontendCache::new_with_semantic_cache();
+        cache.build(&manifest, &sources).unwrap();
+        let warm_errors = match cache.build(&manifest, &edited) {
+            Ok(build) => panic!(
+                "expected the arity mismatch to be rejected, got {:?}",
+                build.to_json()
+            ),
+            Err(errors) => errors,
+        };
+        let mut cold_cache = ProjectFrontendCache::new_with_semantic_cache();
+        let cold_errors = match cold_cache.build(&manifest, &edited) {
+            Ok(build) => panic!(
+                "expected the arity mismatch to be rejected, got {:?}",
+                build.to_json()
+            ),
+            Err(errors) => errors,
+        };
+        assert_eq!(format!("{warm_errors:?}"), format!("{cold_errors:?}"));
     }
 
     /// Negative control: this module is read-only replay of the real
@@ -322,7 +378,8 @@ mod tests {
             .iter()
             .map(|source| ProjectFrontendSource::new(source.path(), source.source()).unwrap())
             .collect();
-        duplicated.push(ProjectFrontendSource::new(sources[0].path(), sources[0].source()).unwrap());
+        duplicated
+            .push(ProjectFrontendSource::new(sources[0].path(), sources[0].source()).unwrap());
         let result = measure_warm_open(&manifest, &sources, &duplicated);
         let error = match result {
             Ok(report) => panic!("expected duplicate-path input to be refused, got {report:?}"),

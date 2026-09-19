@@ -229,9 +229,15 @@ fn a_controlled_edit_invalidates_exactly_its_consumers() {
         .iter()
         .map(|value| value.as_str().unwrap().to_owned())
         .collect::<Vec<_>>();
+    // #130/#131: parsing one file is a pure function of that file's own
+    // bytes, so a provider edit invalidates only the provider's own
+    // AST-cache entry here -- every consumer's unchanged text still reuses
+    // its cached `Program` (checked separately, and independently, by the
+    // checked-HIR cache's own exact `synthetic`-equality gate, which this
+    // non-semantic `ProjectFrontendCache::new()` cache does not even use).
     assert_eq!(
-        invalidated.len(),
-        fixture.sources.len(),
-        "a provider edit reaches every consumer: {invalidated:?}"
+        invalidated,
+        vec!["src/core.spx".to_owned()],
+        "a provider body edit invalidates only the provider's own AST-cache entry: {invalidated:?}"
     );
 }

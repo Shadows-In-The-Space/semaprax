@@ -25,13 +25,16 @@ not bypass hardlink/symlink checks or held-input rechecks.
 
 Cache keys and accounting follow [Project Frontend Cache v1](PROJECT-FRONTEND-CACHE-V1.md):
 exact source bytes plus canonical manifest and compiler compatibility facts.
-Changed modules and the old reverse import dependency closure invalidate ASTs.
-Unaffected ASTs are cloned rather than parsed and canonicalized again. On the
-AST-only route every module still passes resolution and checked HIR is rebuilt.
-The semantic-cache route retains previously checked module HIR only when the
-complete compiler-created synthetic AST, including imported stubs, matches
-exactly and the source/dependency/context invalidation rules permit reuse.
-Changed modules and their invalidated reverse import closure are resolved again.
+Only changed, newly present, and removed modules invalidate ASTs (#130/#131);
+an unaffected consumer of a changed module is cloned rather than parsed and
+canonicalized again, because parsing one file is a pure function of that
+file's own bytes. On the AST-only route every module still passes resolution
+and checked HIR is rebuilt. The semantic-cache route retains previously
+checked module HIR only when the complete compiler-created synthetic AST,
+including imported stubs, matches exactly and the source/dependency/context
+invalidation rules permit reuse. Modules whose own source changed, and every
+importer whose synthetic AST no longer matches because an import's signature
+or span moved, are resolved again.
 Both routes still authenticate fresh source bytes and perform HIR validation,
 full cross-file checks, linking, and complete Project profile admission. See
 [Project Semantic Cache v1](PROJECT-SEMANTIC-CACHE-V1.md) for the checked-module

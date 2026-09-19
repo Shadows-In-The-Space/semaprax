@@ -484,12 +484,20 @@ fn warm_open_after_local_body_edit_reuses_unaffected_modules() {
     );
 }
 
-/// Editing the shared provider seeds the conservative reverse-import
-/// inventory: every consumer is marked invalidated and reparsed, even though
-/// only the provider's own body changed and consumers keep exact function
-/// identity where the checked module still matches.
+/// Editing the shared provider invalidates exactly the provider's own
+/// AST-cache entry (#130/#131). `src/app.spx` and `src/tests.spx` import
+/// `add` from `src/core.spx` but their own source bytes are untouched, so
+/// their cached `Program` is reused instead of reparsed -- parsing a file is
+/// a pure function of that file's own bytes, so a reused AST here is
+/// bit-identical to a fresh reparse regardless of what the provider did.
+/// Whether their checked HIR is *also* reused is a separate, independently
+/// exact question (the checked-module cache's own `synthetic` equality
+/// gate, unaffected by this AST-level narrowing); this test does not assume
+/// an answer there, only that the AST-level reuse is exactly this narrow and
+/// that the admitted product still matches an independent cold build on the
+/// exact edited source.
 #[test]
-fn warm_open_after_provider_edit_invalidates_the_reverse_import_closure() {
+fn warm_open_after_provider_edit_reuses_unaffected_consumers_ast() {
     let fixture = Fixture::new();
     fixture.initialize();
     let receipt = fixture.persist();
@@ -504,22 +512,18 @@ fn warm_open_after_provider_edit_invalidates_the_reverse_import_closure() {
     std::fs::write(&path, &canonical).unwrap();
 
     let warm_report = value(fixture.warm_open(digest));
-    let mut invalidated: Vec<&str> = warm_report["frontend_work"]["invalidated_sources"]
+    let invalidated: Vec<&str> = warm_report["frontend_work"]["invalidated_sources"]
         .as_array()
         .unwrap()
         .iter()
         .map(|value| value.as_str().unwrap())
         .collect();
-    invalidated.sort_unstable();
-    assert_eq!(
-        invalidated,
-        ["src/app.spx", "src/core.spx", "src/tests.spx"]
-    );
-    assert_eq!(warm_report["frontend_work"]["work"]["modules_parsed"], 3);
-    // The reverse-import closure is reparsed, but app.spx/tests.spx keep
-    // function-level reuse for every call whose exact monomorphic
-    // environment is unchanged, so this stays strictly cheaper than a cold
-    // open on the same edited source.
+    assert_eq!(invalidated, ["src/core.spx"]);
+    assert_eq!(warm_report["frontend_work"]["work"]["modules_parsed"], 1);
+    assert_eq!(warm_report["frontend_work"]["work"]["modules_reused"], 2);
+    // Function-level reuse for every call whose exact monomorphic
+    // environment is unchanged still holds, so this stays strictly cheaper
+    // than a cold open on the same edited source.
     assert!(
         warm_report["frontend_work"]["work"]["monomorphic_function_HIR_reused"]
             .as_u64()
@@ -527,10 +531,13 @@ fn warm_open_after_provider_edit_invalidates_the_reverse_import_closure() {
             > 0
     );
     let cold_report = value(fixture.cold_open());
+    // The two builds must land on the identical admitted identity: the
+    // reused ASTs for app.spx/tests.spx did not hide the provider's change.
     assert_eq!(
         cold_report["project_revision"],
         warm_report["project_revision"]
     );
+    assert_eq!(cold_report["image_revision"], warm_report["image_revision"]);
     assert_eq!(cold_report["frontend_work"]["work"]["modules_resolved"], 3);
     assert_eq!(
         cold_report["frontend_work"]["work"]["checked_HIR_reused"],

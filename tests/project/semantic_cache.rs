@@ -92,21 +92,38 @@ fn same(cached: &Arc<ProjectRevision>, cold: Arc<ProjectRevision>) {
     assert_eq!(left.image_digest(), right.image_digest());
     assert_eq!(left.to_json(), right.to_json());
 }
-fn work(build: &ProjectFrontendBuild, parsed: usize, reused: usize) -> Value {
+/// #130/#131 narrowed the AST-level frontend cache (`modules_parsed`/
+/// `modules_reused`) to depend only on each file's own text, while the
+/// checked-HIR cache (`modules_resolved`/`checked_HIR_reused`) keeps its own,
+/// separately exact `synthetic`-equality gate. The two counts coincide for
+/// every edit in this file except the provider-body edit below, where a
+/// consumer's own text is untouched (an AST-cache hit) but its imported
+/// function's byte span still shifted (a checked-HIR-cache miss) --
+/// `work_split` states both counts explicitly for that case.
+fn work_split(
+    build: &ProjectFrontendBuild,
+    ast_parsed: usize,
+    ast_reused: usize,
+    hir_resolved: usize,
+    hir_reused: usize,
+) -> Value {
     let report: Value = serde_json::from_str(build.to_json()).unwrap();
     assert_eq!(report["schema"], "semaprax.project-semantic-cache-work.v1");
     assert_eq!(
         report["compiler"]["compatibility"],
         "semaprax.project-checked-module-hir.v1"
     );
-    assert_eq!(report["work"]["modules_parsed"], parsed);
-    assert_eq!(report["work"]["canonicalizer_calls"], parsed);
-    assert_eq!(report["work"]["modules_reused"], reused);
-    assert_eq!(report["work"]["modules_resolved"], parsed);
-    assert_eq!(report["work"]["checked_HIR_reused"], reused);
+    assert_eq!(report["work"]["modules_parsed"], ast_parsed);
+    assert_eq!(report["work"]["canonicalizer_calls"], ast_parsed);
+    assert_eq!(report["work"]["modules_reused"], ast_reused);
+    assert_eq!(report["work"]["modules_resolved"], hir_resolved);
+    assert_eq!(report["work"]["checked_HIR_reused"], hir_reused);
     assert_eq!(report["work"]["full_cross_file_checks"], true);
     assert_eq!(report["work"]["full_link_and_profile_admission"], true);
     report
+}
+fn work(build: &ProjectFrontendBuild, parsed: usize, reused: usize) -> Value {
+    work_split(build, parsed, reused, parsed, reused)
 }
 fn errors<T>(result: Result<T, Vec<Diagnostic>>) -> Vec<Diagnostic> {
     match result {
@@ -156,11 +173,20 @@ fn leaf_provider_and_private_body_edits_invalidate_their_checked_modules() {
         json!(["src/app.spx"])
     );
     same(leaf.revision(), fixture.cold().unwrap());
+    // #130/#131: `src/app.spx` and `src/tests.spx` import `add` from
+    // `src/core.spx`, but their own text is untouched by this edit, so the
+    // AST-level frontend cache reuses their `Program` (1 parsed, 3 reused)
+    // instead of the whole-project reparse this used to force. The edit
+    // lengthens `add`'s body, which still shifts `add`'s byte span and so
+    // still misses the checked-HIR cache's own `synthetic`-equality gate for
+    // its importers (3 resolved, 1 reused) exactly as before -- this
+    // narrowing changed only which cache layer pays for the edit, not
+    // whether the change was caught.
     fixture.replace("src/core.spx", "left + right", "left + right + 1");
     let provider = cache.build(&manifest, &fixture.sources()).unwrap();
     assert_eq!(
-        work(&provider, 3, 1)["invalidated_sources"],
-        json!(["src/app.spx", "src/core.spx", "src/tests.spx"])
+        work_split(&provider, 1, 3, 3, 1)["invalidated_sources"],
+        json!(["src/core.spx"])
     );
     same(provider.revision(), fixture.cold().unwrap());
     fixture.replace("src/spare.spx", "    3", "    4");

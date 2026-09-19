@@ -204,34 +204,40 @@ impl ProjectFrontendCache {
                 invalidated.insert((*path).to_owned());
             }
         }
-        // A changed provider invalidates old consumers transitively. New import
-        // edges belong to changed sources and therefore cannot be cache hits.
-        let modules = self
-            .entries
-            .iter()
-            .map(|(path, entry)| (entry.program.module.as_str(), path.as_str()))
-            .collect::<BTreeMap<_, _>>();
-        let mut reverse = BTreeMap::<String, BTreeSet<String>>::new();
-        for (path, entry) in &self.entries {
-            for binding in &entry.program.module_uses {
-                if let Some(provider) = modules.get(binding.target_module.as_str()) {
-                    reverse
-                        .entry((*provider).to_owned())
-                        .or_default()
-                        .insert(path.clone());
-                }
-            }
-        }
-        let mut pending = invalidated.iter().cloned().collect::<Vec<_>>();
-        while let Some(path) = pending.pop() {
-            if let Some(consumers) = reverse.get(&path) {
-                for consumer in consumers {
-                    if invalidated.insert(consumer.clone()) {
-                        pending.push(consumer.clone());
-                    }
-                }
-            }
-        }
+        // #130/#131: this cache retains only the per-file parsed/canonical
+        // `Program` (`CachedModule`), never a cross-module fact. A provider's
+        // change -- signature or private body -- is therefore never a reason
+        // to evict an unrelated consumer's own unchanged-text entry here:
+        //
+        // 1. Parsing and canonicalizing one file is a pure function of that
+        //    file's own bytes; `crate::parse_with_comments` and the canonical
+        //    formatter never consult another module. So a consumer whose text
+        //    is unchanged reparses to a bit-identical `Program` regardless of
+        //    what any provider did -- there is no "stale AST" a provider edit
+        //    could produce here to hide.
+        // 2. `lookup` below re-checks `entry.source == source` itself before
+        //    ever returning a cached `Program`, so this set only has to be
+        //    exactly right about *this file's own* text; it is not trusted to
+        //    know whether reuse is safe on its own.
+        // 3. Every check that actually depends on cross-module content --
+        //    `static_protocol::validate` (per file, unconditional either way),
+        //    the workspace-wide import-stub-vs-authority validation, and the
+        //    checked-HIR cache's own `synthetic != entry.synthetic` gate in
+        //    `checked_module` -- reruns on *this build's* current `Program`
+        //    values (cached or freshly parsed, which are identical per #1)
+        //    and independently fails closed if a provider's exported surface
+        //    changed. Narrowing this set cannot let a stale admission through
+        //    those gates; it only decides whether this file's own frontend
+        //    entry is worth keeping around to skip a redundant reparse.
+        //
+        // A provider's own path is still invalidated above like any other
+        // changed file; only the transitive reverse-import propagation onto
+        // *unchanged* consumers is not needed for AST-cache soundness and is
+        // intentionally not computed. See
+        // `clone_cost_report::provider_edit_reuses_unaffected_consumers_ast`
+        // and `narrowing_disabled_would_leak_a_stale_ast_clone` for the
+        // fault-injected negative control proving a change that truly matters
+        // (the provider's own text) still invalidates.
         let retained = self
             .entries
             .iter()

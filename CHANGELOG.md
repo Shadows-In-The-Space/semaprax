@@ -8,6 +8,22 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Narrow `ProjectFrontendCache`'s AST-level invalidation (`src/project/incremental.rs`):
+  a provider module's own changed/added/removed source still invalidates its
+  frontend cache entry, but an unrelated consumer that only imports from that
+  provider no longer loses its entry through the old transitive reverse-import
+  closure. Parsing and canonicalizing one file is a pure function of that
+  file's own bytes, so a reused entry is bit-identical to a fresh reparse
+  regardless of what any provider did, and every cross-module check (import
+  stub validation, the checked-HIR cache's own exact `synthetic`-equality
+  gate) still reruns unconditionally against the current build's sources, so
+  a provider's exported-surface change is still caught -- narrowing this set
+  only decides which unaffected files skip a redundant reparse. On
+  `examples/calculator-project`, a provider body edit went from 0 modules
+  cloned / all 3 reparsed (80 AST nodes) to 2 modules cloned / 1 reparsed
+  (32 AST nodes), matching the existing local-body-edit case instead of being
+  its expensive opposite (#130, #131).
+
 - Add `scripts/generated-package-release.py` (`prepare`/`check`), a
   release-preparation and dry-run-only layer around the existing Project v8
   `owned-data-api.v1` generated npm/Rust packages: closed-inventory,

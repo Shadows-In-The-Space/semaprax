@@ -72,7 +72,7 @@ use cached parsing to independently rebuild a changed supplied revision, but
 the caller may already have spent cold-build work obtaining that revision.
 The owned-source API is the route that avoids that redundant preliminary work.
 
-## Exact keys and conservative invalidation
+## Exact keys and narrow invalidation
 
 One cache retains a single successful Project context. The context binds the
 compiler package name/version, explicit compatibility identity
@@ -83,12 +83,22 @@ compiler-binary identity. A different context invalidates all entries.
 Within a context, a hit requires an identical path and **exact canonical source
 bytes**, including the source module identity and span-producing spelling. A
 hash alone cannot admit a hit. Changed, newly present, and removed paths seed
-invalidation. The transitive reverse closure of old authenticated module imports
-also invalidates consumers. A newly introduced import necessarily belongs to a
-changed source and cannot evade this rule. Unaffected modules may reuse their
-ASTs. All new imports, signatures, effects, named types, cycles, identity
-collisions, and profile constraints are independently validated afterward by
-the unchanged full pipeline; the invalidation set is never semantic authority.
+invalidation; a newly introduced import necessarily belongs to a changed
+source and cannot evade this rule. As of #130/#131, an *unaffected* module --
+including a consumer whose only change is that a module it imports from
+changed elsewhere -- is not additionally invalidated here: parsing and
+canonicalizing one file is a pure function of that file's own bytes, so its
+cached AST is bit-identical to a fresh reparse regardless of what any other
+module did. All new imports, signatures, effects, named types, cycles,
+identity collisions, and profile constraints are independently validated
+afterward by the unchanged full pipeline against the sources actually present
+in this build -- cached or freshly parsed alike -- so this invalidation set is
+never semantic authority and narrowing it cannot let a provider's exported
+change go unnoticed; it can only decide which unaffected files skip a
+redundant reparse. The separate checked-module semantic cache (see
+[Project Semantic Cache v1](PROJECT-SEMANTIC-CACHE-V1.md)) is unaffected by
+this: its own exact per-module synthetic-AST equality check independently
+embeds each import's current signature.
 
 Cache entries become reusable only after the complete Project and its work
 report succeed. A parser success followed by type, link, profile, graph, or

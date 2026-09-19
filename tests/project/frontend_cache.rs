@@ -128,7 +128,7 @@ fn warm_sources_skip_actual_parsing_and_formatting_without_changing_cold_bytes()
 }
 
 #[test]
-fn leaf_and_provider_changes_invalidate_exact_old_reverse_import_closure() {
+fn leaf_and_provider_edits_each_invalidate_exactly_their_own_unchanged_ast_text() {
     let fixture = Fixture::new();
     let manifest = fixture.manifest();
     let mut cache = ProjectFrontendCache::new();
@@ -138,13 +138,20 @@ fn leaf_and_provider_changes_invalidate_exact_old_reverse_import_closure() {
     let report = work(&leaf, 1, 3);
     assert_eq!(report["invalidated_sources"], json!(["src/app.spx"]));
     same(leaf.revision(), fixture.revision().unwrap());
+    // #130/#131: a provider's own body edit invalidates only the provider's
+    // AST-cache entry. `src/app.spx` and `src/tests.spx` import `add` from
+    // `src/core.spx` but their own source bytes are untouched, so their
+    // cached `Program` is bit-identical to a fresh reparse (parsing is a
+    // pure function of a file's own text) and is reused here instead of
+    // being reparsed. This is still fully checked: `same` below compares the
+    // complete admitted revision and semantic graph against an independent
+    // cold build on the exact same edited sources, so a reused AST that
+    // somehow disagreed with the provider's new signature would fail this
+    // assertion, not silently pass.
     fixture.replace("src/core.spx", "left + right", "left + right + 1");
     let provider = cache.build(&manifest, &fixture.sources()).unwrap();
-    let report = work(&provider, 3, 1);
-    assert_eq!(
-        report["invalidated_sources"],
-        json!(["src/app.spx", "src/core.spx", "src/tests.spx"])
-    );
+    let report = work(&provider, 1, 3);
+    assert_eq!(report["invalidated_sources"], json!(["src/core.spx"]));
     same(provider.revision(), fixture.revision().unwrap());
 }
 

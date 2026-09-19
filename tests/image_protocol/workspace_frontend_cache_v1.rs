@@ -136,7 +136,7 @@ fn preview_and_wrong_expectation_do_not_prime_cache_or_revive_drift() {
 }
 
 #[test]
-fn provider_changes_invalidate_consumers_and_failed_semantics_preserve_cache() {
+fn provider_body_edit_reuses_consumer_ast_and_failed_semantics_preserve_cache() {
     let fixture = Fixture::new();
     let mut session = fixture.cached();
     let original = std::fs::read_to_string(fixture.0.join("src/core.spx")).unwrap();
@@ -152,10 +152,14 @@ fn provider_changes_invalidate_consumers_and_failed_semantics_preserve_cache() {
     work(&refresh(&mut session, &fixture.revision()), 0, 3);
     fixture.replace("src/core.spx", "left + right", "left + right + 1");
     let report = refresh(&mut session, &fixture.revision());
-    work(&report, 3, 0);
+    // #130/#131: app.spx/tests.spx import from core.spx, but their own text
+    // is untouched, so the AST-level frontend cache reuses their `Program`
+    // instead of reparsing the whole project (see
+    // src/project/incremental.rs's `build`).
+    work(&report, 1, 2);
     assert_eq!(
         report["frontend_work"]["invalidated_sources"],
-        json!(["src/app.spx", "src/core.spx", "src/tests.spx"])
+        json!(["src/core.spx"])
     );
     let cold = VNextSession::open(&fixture.manifest(), VNextPolicy::default()).unwrap();
     assert_eq!(session.image_revision(), cold.image_revision());

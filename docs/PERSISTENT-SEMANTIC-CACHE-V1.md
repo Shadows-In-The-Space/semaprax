@@ -178,9 +178,12 @@ between one fresh `cold-open` and one fresh `warm-open` process, with the warm
 side landing on the existing three-hit/zero-resolve work profile; a body-only
 edit to a module nothing imports (`src/app.spx`) invalidates exactly that
 module while its two unedited siblings stay a whole-module checked-HIR hit;
-editing the shared provider (`src/core.spx`) seeds the conservative
-reverse-import inventory so every consumer is reparsed, while unaffected
-functions still reuse exact monomorphic HIR; and a `warm-open` against an
+editing the shared provider (`src/core.spx`) invalidates only its own
+AST-cache entry (#130/#131: parsing is a pure function of a file's own bytes),
+while its importers' checked HIR is still rebuilt because the edit shifts the
+imported function's byte span, which their compiler-created synthetic AST
+embeds; unaffected functions elsewhere still reuse exact monomorphic HIR; and
+a `warm-open` against an
 evicted digest fails closed with `SPX-G308` and a following `cold-open`
 reproduces the original cold product exactly.
 

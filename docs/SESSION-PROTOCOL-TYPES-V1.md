@@ -286,11 +286,16 @@ requires to be unique) is normalized out of both traces.
   whole-graph bounded BFS, distinct from `ProtocolSpec::validate`'s
   per-transition checks (see [Bounded model-checking](#bounded-model-checking)).
 - `protocols.rs`: `model_stream_protocol` (a model/tool streaming session:
-  `Send`/`Receive`/`Branch`/`Cancel`/`Timeout`/`Fail`) and
+  `Send`/`Receive`/`Branch`/`Cancel`/`Timeout`/`Fail`),
   `resource_transaction_protocol` (a bounded database transaction:
   `Call`/`Return` with pending tracking, and `ConsumesResource` ownership on
-  `commit`) -- the two applied subsystems issue #206 requires, at this
-  module's Rust reference-kernel layer (see [Scope boundary](#scope-boundary)).
+  `commit`), and `project_agent_session_protocol` -- a state-for-state,
+  transition-for-transition transcription (cited against exact file:line
+  spans in its own doc comment) of `SessionState`/`Session` in
+  `src/project_transport/session.rs`, the already-shipped Agent-to-tool
+  JSON-RPC transport, rather than a scenario invented for this kernel --
+  the applied subsystems issue #206 requires, at this module's Rust
+  reference-kernel layer (see [Scope boundary](#scope-boundary)).
 - `tests.rs` and `tests/model_check_and_determinism.rs`: every category
   below (split across two files to stay under this repository's
   1500-line-per-file budget).
@@ -411,8 +416,10 @@ requires to be unique) is normalized out of both traces.
   message but not on where it leaves them -- see
   [Continuation duality](#continuation-duality).
 - **Timeout may leave the remote side in an uncertain state.** Addressed by
-  routing every declared `Timeout` transition in both applied protocols to
-  a distinct `Uncertain` terminal, never conflated with a clean `Cancel`.
+  routing every declared `Timeout` transition in all three applied
+  protocols (including `project_agent_session_protocol`'s `apply_timeout`)
+  to a distinct `Uncertain` terminal, never conflated with a clean
+  `Cancel`.
 
 ## Scope boundary
 
@@ -441,9 +448,19 @@ Explicitly **not** done in this slice, and why:
   endpoints can recreate authority" discussion above -- the risk is named
   and the *replay-time* check is proven, but no codec exists here to be
   hostile-input-tested).
-- **No native/Wasm lowering, no migration of an existing subsystem (Agent
-  lifecycle, network streams, publication workflows) onto this
-  mechanism.** Both are downstream of the syntax/HIR tranche above.
+- **No native/Wasm lowering, no *live* migration of an existing subsystem
+  onto this mechanism.** `protocols::project_agent_session_protocol` is a
+  transcription of the real `project_transport::session` state machine's
+  states and topology, evidenced against exact file:line spans -- a
+  meaningfully harder bar than the two invented fixtures, since a
+  hand-written transcription can misreport the source it claims to model
+  in a way a fixture designed for the kernel cannot. It is **not** the
+  live migration: `project_transport::session`'s fields and dispatch
+  methods stay private and it still performs its own hand-rolled checks,
+  never calling into `SessionTable`. Rewiring that stdio transport's
+  request loop through this kernel is downstream of a maintainer decision
+  plus a live, heavily-tested transport's own regression surface, not a
+  single bounded change here.
 - **`model_check::check_bounded` explores the declared graph only, not a
   live `SessionTable`'s runtime behavior.** It is a design-time property
   check over `ProtocolSpec` (are all states reachable, can every reachable
@@ -457,16 +474,17 @@ Explicitly **not** done in this slice, and why:
 
 | Criterion (from issue #206) | Status |
 | --- | --- |
-| At least two real interaction lifecycles are checked by the general protocol type system | **Reference-kernel level only.** `model_stream_protocol` and `resource_transaction_protocol` are both checked by the same `ProtocolSpec`/`SessionTable` machinery; no existing subsystem's own code (Agent lifecycle, network streams, a real transaction backend) was migrated onto it. |
+| At least two real interaction lifecycles are checked by the general protocol type system | **Reference-kernel level, one step closer.** `model_stream_protocol` and `resource_transaction_protocol` are invented fixtures. `project_agent_session_protocol` is a cited transcription of `project_transport::session`'s real `SessionState`/`Session` state machine -- evidence, not invention -- but it is still not a *live* migration: the real session performs its own hand-rolled checks and never calls into `SessionTable`. No existing subsystem's own code path has been rewired through this mechanism. |
 | Invalid order is rejected before runtime | **Static declaration defects**: at spec-validation time (`SpecError`, before any session opens). **Message-order defects**: at the engine's own runtime check (`IllegalTransition` etc.) -- not before compilation, since the protocol is declared data in this slice, not `.spx` source the compiler itself parses. The one case genuinely caught by `rustc` at compile time is presenting an already-consumed `Endpoint` binding a second time, and presenting a `Grant` for the wrong capability marker type. |
 | Ownership and authority are coupled to protocol state | **Met at the reference-kernel level**: `required_capability` and `OwnershipMove` are per-transition fields the engine checks alongside state/order, and are proven independently failing from state/order correctness (`missing_authority_is_refused_even_in_correct_order`). |
 | Failure/cancellation/uncertainty remain explicit | **Met**: `Cancel`/`Timeout`/`Fail` are ordinary declared transitions with their own cleanup; `Timeout` is routed to a distinct `Uncertain` terminal in both applied protocols. |
 | Protocol facts appear in context, graph, architecture, and assurance outputs | **Open.** No projection into `graph`, `architecture_claims`, or `assurance_manifest` exists in this slice -- each requires the parser/HIR/graph tranche above to have a real `.spx`-declared protocol to project in the first place; projecting a Rust-only reference kernel would be a second, disconnected source of truth. |
-| Applied subsystem regressions and bounded model-checking integration (required tests/evidence) | **Bounded model-checking: met**, at the graph-shape level -- `model_check::check_bounded` (see [Bounded model-checking](#bounded-model-checking)). **Applied subsystem regression: not met** -- there is no real subsystem migrated onto this kernel for a regression to protect; the two example protocols are this module's own fixtures, not another module's code. |
+| Applied subsystem regressions and bounded model-checking integration (required tests/evidence) | **Bounded model-checking: met**, at the graph-shape level -- `model_check::check_bounded` (see [Bounded model-checking](#bounded-model-checking)), exercised against all three applied protocols including the real-subsystem transcription. **Applied subsystem regression: still not fully met** -- `tests/applied_project_session.rs` regresses the *transcribed* topology (happy path, missing-authority, missing-token, illegal-order, the universal `shutdown` escape, and a hostile mutation of the transcription's one unevidenced transition), but that is a regression protecting this module's own copy of the real shape, not a regression that runs against `project_transport::session`'s actual code and would fail if that module's real behavior drifted. |
 
 ## Gate
 
-`cargo test --locked -p semaprax --lib session_protocol::` (44 unit tests)
+`cargo test --locked -p semaprax --lib session_protocol::` (53 unit tests;
+was 45 before `tests/applied_project_session.rs` added its 8)
 and `cargo test --locked -p semaprax --doc session_protocol` (3
 `compile_fail` doctests: grant-for-wrong-capability, double-use of a
 consumed `Endpoint`, and the capability module's own copy of the

@@ -1252,3 +1252,6 @@ mod model_check_and_determinism;
 
 #[cfg(test)]
 mod duality_continuation;
+
+#[cfg(test)]
+mod applied_project_session;

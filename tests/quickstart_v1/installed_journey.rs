@@ -18,6 +18,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use serde_json::Value;
+
 /// A private target directory under *this* checkout's own `target/`, never
 /// the shared `target/debug` / `target/release` that concurrent `cargo
 /// build`/`cargo test` invocations elsewhere use. See
@@ -216,7 +218,22 @@ fn clean_installed_toolchain_walks_the_documented_journey() {
     // Check.
     let check = run(&project, &["check", "."]);
     assert!(check.status.success(), "{}", stderr(&check));
-    assert!(stdout(&check).starts_with("verified project clean-install-service (sha256:"));
+    let check_stdout = stdout(&check);
+    assert!(check_stdout.starts_with("verified project clean-install-service (sha256:"));
+    // `check` prints the project revision digest in parentheses. Assert its
+    // exact shape rather than only the prefix: this is the value a caller
+    // feeds back as a base revision, so a malformed or absent digest here is
+    // a real defect even though nothing in this test consumes it today (the
+    // step that did is removed below, see issue #272).
+    let revision = check_stdout
+        .trim_end()
+        .strip_prefix("verified project clean-install-service (")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .expect("check output must carry the project revision digest in parentheses");
+    assert!(
+        revision.starts_with("sha256:") && revision.len() == 71,
+        "the printed project revision is not a sha256 digest: {revision}"
+    );
 
     // Test.
     let tested = run(&project, &["test", "."]);
@@ -252,6 +269,96 @@ fn clean_installed_toolchain_walks_the_documented_journey() {
             "the installed toolchain's web package must contain {artifact}"
         );
     }
+
+    // Inspect evidence. `project-assurance-manifest` is a public command of
+    // the same installed binary, over the same manifest `check` just
+    // verified; assert it reports real, source-derived facts (this project's
+    // own three `.spx` sources and at least one per-declaration obligation),
+    // not an empty or stubbed envelope.
+    //
+    // ISSUE #271, pinned here rather than worked around silently: at the
+    // DEFAULT budget this command REFUSES on a project the toolchain itself
+    // just generated. `DEFAULT_MAX_BYTES` is 262,144 and the `service`
+    // template's manifest is 317,698 bytes. That refusal is asserted first,
+    // so a fix for #271 flips this test loudly instead of leaving a stale
+    // workaround behind; when the default is raised, delete this block and
+    // the `--max-bytes` argument below together.
+    let refused = run(&project, &["project-assurance-manifest", "semaprax.toml"]);
+    assert!(
+        !refused.status.success(),
+        "issue #271 appears fixed: the default budget now admits the service \
+         template. Drop this negative assertion and the explicit --max-bytes below."
+    );
+    assert!(
+        stderr(&refused).contains("SPX-Z102"),
+        "expected the budget refusal of issue #271, got: {}",
+        stderr(&refused)
+    );
+    let assurance = run(
+        &project,
+        &[
+            "project-assurance-manifest",
+            "semaprax.toml",
+            "--max-bytes",
+            "1048576",
+        ],
+    );
+    assert!(assurance.status.success(), "{}", stderr(&assurance));
+    let assurance_stdout = stdout(&assurance);
+    let assurance_json: Value =
+        serde_json::from_str(assurance_stdout.trim_end()).unwrap_or_else(|error| {
+            panic!("project-assurance-manifest did not print JSON: {error}\n{assurance_stdout}")
+        });
+    assert_eq!(
+        assurance_json["schema"], "semaprax.project-assurance-manifest.v1",
+        "{assurance_json}"
+    );
+    let sources = assurance_json["payload"]["sources"]
+        .as_array()
+        .unwrap_or_else(|| {
+            panic!("assurance manifest must list the project's sources: {assurance_json}")
+        })
+        .iter()
+        .map(|source| source["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    // The manifest covers the whole checked closure, not just the project's
+    // own files: the three bundled dependency sources the `service` template
+    // composes are in it too, and `std.bytes` is there transitively. That is
+    // the right scope for an assurance manifest -- obligations arise from
+    // every checked declaration, including the ones a dependency contributes
+    // -- so this asserts the exact six rather than the three a reader might
+    // expect. A dependency silently dropping out of the closure is precisely
+    // what this would catch.
+    assert_eq!(
+        sources,
+        vec![
+            "dependencies/std.auth/0.1.0/auth.spx",
+            "dependencies/std.bytes/0.1.0/bytes.spx",
+            "dependencies/std.jobs/0.1.0/jobs.spx",
+            "src/app.spx",
+            "src/core.spx",
+            "src/tests.spx",
+        ]
+    );
+    let obligations = assurance_json["payload"]["obligations"]
+        .as_array()
+        .unwrap_or_else(|| panic!("assurance manifest must carry obligations: {assurance_json}"));
+    assert!(
+        !obligations.is_empty(),
+        "the installed toolchain's assurance manifest must carry real per-declaration \
+         obligations, not an empty stub: {assurance_json}"
+    );
+
+    // A semantic-repair preview step belonged here and is deliberately absent.
+    // `project-candidate-preview` refuses this project with
+    // `error[SPX-G174]: Semantic Workspace path-set values are not canonical`,
+    // as does `semantic-cache-persist`; the `calculator` template gets past the
+    // same point and the `service` template does not. Which of the six
+    // path-set conditions actually fires cannot be determined, because
+    // `normalize_parser_diagnostics` flattens all but one of them into that
+    // single message. Filed as issue #272. Re-add the step once the diagnostic
+    // says which condition failed and the route's admissibility for a
+    // bundled-dependency project is decided.
 
     // No command's output ever names this checkout: nothing fell back to a
     // compiled-in or ambient path rooted here.

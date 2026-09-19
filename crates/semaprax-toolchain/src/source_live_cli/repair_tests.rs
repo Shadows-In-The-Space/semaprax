@@ -148,7 +148,7 @@ fn repair_run_generalizes_candidate_preview_for_a_host_selected_project() {
 
     let rendered = run_repair("run", &config, &checkpoint).unwrap();
     let report: serde_json::Value = serde_json::from_str(&rendered).unwrap();
-    assert_eq!(report["schema"], RECEIPT_SCHEMA);
+    assert_eq!(report["schema"], RECEIPT_SCHEMA_V1);
     assert_eq!(report["target"], "fixture.repair.value");
     assert_eq!(report["status"], "complete");
     assert_eq!(report["model_dispatches"], 2);
@@ -160,6 +160,32 @@ fn repair_run_generalizes_candidate_preview_for_a_host_selected_project() {
     assert!(report["source_review"].is_object());
     assert!(report["semantic_delta"].is_object());
     assert!(report["impact_summary"].is_object());
+    let mut keys = report
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "candidate_digest",
+            "effect_dispatches",
+            "generation",
+            "impact_summary",
+            "model_dispatches",
+            "publication_authority",
+            "rejected_candidates",
+            "schema",
+            "semantic_delta",
+            "source_mutation",
+            "source_review",
+            "status",
+            "target",
+        ],
+        "the V1 scripted receipt remains a frozen projection; new repair evidence belongs only in V2",
+    );
 }
 
 /// Ordering property: replay happens before staging or candidate creation.
@@ -305,6 +331,44 @@ fn command_grammar_requires_run_or_resume_and_absolute_operands() {
     assert!(Command::parse(&args(&[])).is_err());
     assert!(Command::parse(&args(&["run", "relative.json", "/checkpoint"])).is_err());
     assert!(Command::parse(&args(&["migrate", "/config.json", "/checkpoint"])).is_err());
+    assert!(Command::parse(&args(&[
+        "run",
+        "/config.json",
+        "/checkpoint",
+        "--opencode",
+        "/bin/opencode",
+        "--scratch",
+        "/scratch"
+    ]))
+    .is_ok());
+    assert!(Command::parse(&args(&[
+        "run",
+        "/config.json",
+        "/checkpoint",
+        "--scratch",
+        "/scratch",
+        "--opencode",
+        "/bin/opencode"
+    ]))
+    .is_err());
     assert!(Command::parse(&args(&["run", "/config.json", "/checkpoint"])).is_ok());
     assert!(Command::parse(&args(&["resume", "/config.json", "/checkpoint"])).is_ok());
+}
+
+#[test]
+fn opencode_repair_configuration_requires_explicit_host_provider_operands() {
+    let fixture = Fixture::new();
+    let (config, checkpoint) = setup(&fixture, "test.repair.opencode-denial.v1");
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    value["schema"] = serde_json::json!("semaprax.source-live-cli.repair-config.v2");
+    value.as_object_mut().unwrap().remove("turns");
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+
+    let error = run_repair("run", &config, &checkpoint)
+        .expect_err("the production repair configuration must not select an implicit provider");
+    assert!(error.reason.contains("requires --opencode"));
+    assert!(
+        !checkpoint.exists(),
+        "provider authority refusal must happen before a checkpoint exists"
+    );
 }

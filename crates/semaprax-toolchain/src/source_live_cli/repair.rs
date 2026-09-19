@@ -6,16 +6,18 @@
 //! host-selected Project, target declaration and effect contract, driven
 //! through the durable, checkpoint-capable `AgentRuntimeV2` route
 //! (`run_live_bound_model_durable`) so the run is resumable like the general
-//! `source-live run|resume` verbs. The provider stays a bounded, scripted,
-//! credential-free fixture (no live network call): this command produces
-//! reviewable evidence for an *ephemeral* candidate only. It performs no
-//! publication or source mutation; a separately authorized, exact-digest-bound
-//! session (`project-candidate-git-publish`) is the only route that can commit.
+//! `source-live run|resume` verbs. V1 retains a bounded, credential-free
+//! scripted fixture for tests; V2 binds the same explicit OpenCode process
+//! provider boundary as `source-live run`. Both modes produce reviewable
+//! evidence for an *ephemeral* candidate only. They perform no publication or
+//! source mutation; a separately authorized, exact-digest-bound session
+//! (`project-candidate-git-publish`) is the only route that can commit.
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use semaprax::agent_deployment::migrate_agent_definition_v1;
 use semaprax::agent_lifecycle::iterative::compile_source_agent_lifecycle_v2;
@@ -40,16 +42,25 @@ use semaprax::provider_adapter_sdk::{
 };
 use serde_json::{json, Map, Value};
 
+use crate::opencode_host::repair_adapter::{source_model_identity, OpenCodeRepairAdapter};
+use crate::opencode_host::{
+    OpenCodeGrammar, OpenCodeHostConfig, OpenCodeRunner, ProcessOpenCodeRunner,
+};
+
 use super::checkpoint::{bounded_read, CheckpointDir};
 use super::CliError;
 
-const CLOCK_DOMAIN: &str = "semaprax.source-live-cli.repair.v1";
+const FIXTURE_CLOCK_DOMAIN: &str = "semaprax.source-live-cli.repair.v1";
+const UNIX_CLOCK_DOMAIN: &str = "unix_epoch_millis.v1";
 const MAX_CONFIG_BYTES: usize = 16384;
 const MAX_TOKEN_BYTES: usize = 240;
 const MAX_TASK_BYTES: usize = 4096;
 const MAX_PROPOSAL_BYTES: usize = 8192;
-const RECEIPT_SCHEMA: &str = "semaprax.source-live-cli.repair-receipt.v1";
-const CONFIG_SCHEMA: &str = "semaprax.source-live-cli.repair-config.v1";
+const RECEIPT_SCHEMA_V1: &str = "semaprax.source-live-cli.repair-receipt.v1";
+const RECEIPT_SCHEMA_V2: &str = "semaprax.source-live-cli.repair-receipt.v2";
+const CONFIG_SCHEMA_V1: &str = "semaprax.source-live-cli.repair-config.v1";
+const CONFIG_SCHEMA_V2: &str = "semaprax.source-live-cli.repair-config.v2";
+const MAX_ONE_PROVIDER_CALL_MS: i64 = 30_000;
 
 fn is_absolute_like(path: &Path) -> bool {
     path.is_absolute() || path.to_string_lossy().starts_with('/')
@@ -63,7 +74,23 @@ impl InvocationClock for FixedClock {
 }
 impl SourceInvocationClock for FixedClock {
     fn clock_domain(&self) -> &str {
-        CLOCK_DOMAIN
+        FIXTURE_CLOCK_DOMAIN
+    }
+}
+
+struct UnixClock;
+impl InvocationClock for UnixClock {
+    fn now_millis(&self) -> i64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+            .unwrap_or(i64::MIN)
+    }
+}
+impl SourceInvocationClock for UnixClock {
+    fn clock_domain(&self) -> &str {
+        UNIX_CLOCK_DOMAIN
     }
 }
 
@@ -75,6 +102,14 @@ impl SourceInvocationClock for FixedClock {
 struct RepairTurn {
     document: String,
     requires_prior_feedback: bool,
+}
+
+/// V1 is a deliberate local test seam. V2 is selected only by the explicit
+/// OpenCode executable and empty scratch-directory operands; source/config
+/// text cannot select a provider, endpoint, credential or publication route.
+enum RepairProvider {
+    Scripted([RepairTurn; 2]),
+    OpenCode,
 }
 
 /// Host-selected, config-driven repair session. Every identity below is a
@@ -107,7 +142,7 @@ struct RepairConfig {
     max_total_bytes: usize,
     malformed_replacement: i64,
     malformed_bool_literal: bool,
-    turns: [RepairTurn; 2],
+    provider: RepairProvider,
 }
 
 impl RepairConfig {
@@ -128,7 +163,7 @@ impl RepairConfig {
         let map = value
             .as_object()
             .ok_or(CliError::refused("configuration must be an object"))?;
-        const KEYS: [&str; 24] = [
+        const V1_KEYS: [&str; 24] = [
             "schema",
             "manifest",
             "source_path",
@@ -154,10 +189,39 @@ impl RepairConfig {
             "malformed_bool_literal",
             "turns",
         ];
-        if text(map, "schema")? != CONFIG_SCHEMA
-            || map.len() != KEYS.len()
-            || !KEYS.iter().all(|key| map.contains_key(*key))
-        {
+        const V2_KEYS: [&str; 23] = [
+            "schema",
+            "manifest",
+            "source_path",
+            "agent_id",
+            "step_id",
+            "selector_field_id",
+            "deployment_migration_id",
+            "target",
+            "malformed_operation_id",
+            "corrected_operation_id",
+            "effect_id",
+            "argument_id",
+            "proposal_field_id",
+            "result_id",
+            "task_path",
+            "task_budget",
+            "deadline_millis",
+            "ceiling",
+            "reservation_units",
+            "max_total_steps",
+            "effect_budget",
+            "malformed_replacement",
+            "malformed_bool_literal",
+        ];
+        let schema = text(map, "schema")?;
+        let v1 = schema == CONFIG_SCHEMA_V1
+            && map.len() == V1_KEYS.len()
+            && V1_KEYS.iter().all(|key| map.contains_key(*key));
+        let v2 = schema == CONFIG_SCHEMA_V2
+            && map.len() == V2_KEYS.len()
+            && V2_KEYS.iter().all(|key| map.contains_key(*key));
+        if !v1 && !v2 {
             return Err(CliError::refused(
                 "repair configuration has missing or unknown keys",
             ));
@@ -197,35 +261,40 @@ impl RepairConfig {
                 "effect_budget has missing or unknown keys",
             ));
         }
-        let turns = map
-            .get("turns")
-            .and_then(Value::as_array)
-            .ok_or(CliError::refused("turns must be an array"))?;
-        let [first, second] = turns.as_slice() else {
-            return Err(CliError::refused("turns must have exactly two entries"));
-        };
-        let turn = |value: &Value| -> Result<RepairTurn, CliError> {
-            let object = value
-                .as_object()
-                .ok_or(CliError::refused("turn must be an object"))?;
-            const TURN_KEYS: [&str; 2] = ["document", "requires_prior_feedback"];
-            if object.len() != TURN_KEYS.len()
-                || !TURN_KEYS.iter().all(|key| object.contains_key(*key))
-            {
-                return Err(CliError::refused("turn has missing or unknown keys"));
-            }
-            let document = text(object, "document")?.to_owned();
-            if document.is_empty() || document.len() > MAX_PROPOSAL_BYTES {
-                return Err(CliError::refused("turn document exceeds bounds"));
-            }
-            let requires_prior_feedback = object
-                .get("requires_prior_feedback")
-                .and_then(Value::as_bool)
-                .ok_or(CliError::refused("requires_prior_feedback must be boolean"))?;
-            Ok(RepairTurn {
-                document,
-                requires_prior_feedback,
-            })
+        let provider = if v1 {
+            let turns = map
+                .get("turns")
+                .and_then(Value::as_array)
+                .ok_or(CliError::refused("turns must be an array"))?;
+            let [first, second] = turns.as_slice() else {
+                return Err(CliError::refused("turns must have exactly two entries"));
+            };
+            let turn = |value: &Value| -> Result<RepairTurn, CliError> {
+                let object = value
+                    .as_object()
+                    .ok_or(CliError::refused("turn must be an object"))?;
+                const TURN_KEYS: [&str; 2] = ["document", "requires_prior_feedback"];
+                if object.len() != TURN_KEYS.len()
+                    || !TURN_KEYS.iter().all(|key| object.contains_key(*key))
+                {
+                    return Err(CliError::refused("turn has missing or unknown keys"));
+                }
+                let document = text(object, "document")?.to_owned();
+                if document.is_empty() || document.len() > MAX_PROPOSAL_BYTES {
+                    return Err(CliError::refused("turn document exceeds bounds"));
+                }
+                let requires_prior_feedback = object
+                    .get("requires_prior_feedback")
+                    .and_then(Value::as_bool)
+                    .ok_or(CliError::refused("requires_prior_feedback must be boolean"))?;
+                Ok(RepairTurn {
+                    document,
+                    requires_prior_feedback,
+                })
+            };
+            RepairProvider::Scripted([turn(first)?, turn(second)?])
+        } else {
+            RepairProvider::OpenCode
         };
         Ok(Self {
             manifest,
@@ -256,7 +325,7 @@ impl RepairConfig {
                 .get("malformed_bool_literal")
                 .and_then(Value::as_bool)
                 .ok_or(CliError::refused("malformed_bool_literal must be boolean"))?,
-            turns: [turn(first)?, turn(second)?],
+            provider,
         })
     }
 }
@@ -327,25 +396,56 @@ pub(super) enum Command {
     Run {
         config: PathBuf,
         checkpoint: PathBuf,
+        provider: Option<OpenCodeOperands>,
     },
     Resume {
         config: PathBuf,
         checkpoint: PathBuf,
+        provider: Option<OpenCodeOperands>,
     },
+}
+
+pub(super) struct OpenCodeOperands {
+    executable: PathBuf,
+    scratch: PathBuf,
 }
 
 impl Command {
     pub(super) fn parse(arguments: &[String]) -> Result<Self, CliError> {
-        let [verb, config, checkpoint] = arguments else {
-            return Err(CliError::usage(
-                "repair requires exactly run|resume <config.json> <checkpoint-dir>",
-            ));
+        let (verb, config, checkpoint, provider) = match arguments {
+            [verb, config, checkpoint] => (verb, config, checkpoint, None),
+            [verb, config, checkpoint, executable_flag, executable, scratch_flag, scratch]
+                if executable_flag == "--opencode" && scratch_flag == "--scratch" =>
+            {
+                (
+                    verb,
+                    config,
+                    checkpoint,
+                    Some(OpenCodeOperands {
+                        executable: absolute_operand(executable)?,
+                        scratch: absolute_operand(scratch)?,
+                    }),
+                )
+            }
+            _ => {
+                return Err(CliError::usage(
+                    "repair requires run|resume <config.json> <checkpoint-dir> [--opencode ABS --scratch EMPTY_ABS]",
+                ));
+            }
         };
         let config = absolute_operand(config)?;
         let checkpoint = absolute_operand(checkpoint)?;
         match verb.as_str() {
-            "run" => Ok(Self::Run { config, checkpoint }),
-            "resume" => Ok(Self::Resume { config, checkpoint }),
+            "run" => Ok(Self::Run {
+                config,
+                checkpoint,
+                provider,
+            }),
+            "resume" => Ok(Self::Resume {
+                config,
+                checkpoint,
+                provider,
+            }),
             _ => Err(CliError::usage("repair expected run or resume")),
         }
     }
@@ -367,7 +467,7 @@ fn checked_value(document: &str, field: &'static str) -> Result<Value, CliError>
     serde_json::from_str(document).map_err(|_| CliError::refused(field))
 }
 
-fn identity() -> SourceModelAdapterIdentity {
+fn scripted_identity() -> SourceModelAdapterIdentity {
     SourceModelAdapterIdentity {
         provider_id: "fake.local".to_owned(),
         model_id: "fake-basic".to_owned(),
@@ -403,6 +503,7 @@ fn policy(
     config: &RepairConfig,
     deployment_binding: &str,
     response_limit: usize,
+    clock_domain: &str,
 ) -> SourceLivePolicy {
     SourceLivePolicy {
         deployment_binding: deployment_binding.to_owned(),
@@ -410,7 +511,7 @@ fn policy(
         ceiling: config.ceiling,
         reservation_units: config.reservation_units,
         unit: "semaprax.source-live-cli.repair-unit.v1".to_owned(),
-        clock_domain: CLOCK_DOMAIN.to_owned(),
+        clock_domain: clock_domain.to_owned(),
         initial_millis: 0,
         deadline_millis: config.deadline_millis,
         max_total_steps: config.max_total_steps,
@@ -496,14 +597,53 @@ impl ProviderAdapter for FeedbackGuardedAdapter {
     }
 }
 
-pub(super) fn run(arguments: &[String]) -> Result<String, CliError> {
-    execute(Command::parse(arguments)?)
+/// One runner instance can serve successive fresh adapter instances while the
+/// SDK preserves the one-start-per-adapter rule. The shared cell is private to
+/// one CLI traversal and is never checkpointed; the journal, not this handle,
+/// decides whether recovery may dispatch again.
+struct SharedRunner<R>(Rc<RefCell<R>>);
+
+impl<R: OpenCodeRunner> OpenCodeRunner for SharedRunner<R> {
+    fn run(
+        &mut self,
+        config: &OpenCodeHostConfig,
+        prompt: &str,
+    ) -> Result<Vec<u8>, crate::opencode_host::OpenCodeRunnerFailure> {
+        self.0.borrow_mut().run(config, prompt)
+    }
+
+    fn export(
+        &mut self,
+        config: &OpenCodeHostConfig,
+        session: &str,
+    ) -> Result<Vec<u8>, crate::opencode_host::OpenCodeRunnerFailure> {
+        self.0.borrow_mut().export(config, session)
+    }
+
+    fn cancelled(&self, config: &OpenCodeHostConfig) -> bool {
+        self.0.borrow().cancelled(config)
+    }
 }
 
-fn execute(command: Command) -> Result<String, CliError> {
-    let (config_path, checkpoint_path, fresh) = match command {
-        Command::Run { config, checkpoint } => (config, checkpoint, true),
-        Command::Resume { config, checkpoint } => (config, checkpoint, false),
+pub(super) fn run(arguments: &[String]) -> Result<String, CliError> {
+    execute_with_runner(Command::parse(arguments)?, ProcessOpenCodeRunner)
+}
+
+fn execute_with_runner<R: OpenCodeRunner + 'static>(
+    command: Command,
+    runner: R,
+) -> Result<String, CliError> {
+    let (config_path, checkpoint_path, fresh, provider_operands) = match command {
+        Command::Run {
+            config,
+            checkpoint,
+            provider,
+        } => (config, checkpoint, true, provider),
+        Command::Resume {
+            config,
+            checkpoint,
+            provider,
+        } => (config, checkpoint, false, provider),
     };
     let config = RepairConfig::load(&config_path)?;
 
@@ -574,8 +714,36 @@ fn execute(command: Command) -> Result<String, CliError> {
         effect_budget,
     )
     .map_err(|diagnostics| diagnostic_error("repair runtime binding refused", diagnostics))?;
+    let (adapter_identity, clock): (_, Box<dyn SourceInvocationClock>) = match &config.provider {
+        RepairProvider::Scripted(_) if provider_operands.is_none() => {
+            (scripted_identity(), Box::new(FixedClock))
+        }
+        RepairProvider::Scripted(_) => {
+            return Err(CliError::usage(
+                "repair fixture configuration does not accept OpenCode operands",
+            ));
+        }
+        RepairProvider::OpenCode if provider_operands.is_some() => {
+            let operands = provider_operands
+                .as_ref()
+                .expect("provider operands were checked");
+            let scratch = operands
+                .scratch
+                .canonicalize()
+                .map_err(|_| CliError::refused("repair OpenCode scratch is unavailable"))?;
+            (
+                source_model_identity(&operands.executable, &scratch),
+                Box::new(UnixClock),
+            )
+        }
+        RepairProvider::OpenCode => {
+            return Err(CliError::usage(
+                "repair OpenCode configuration requires --opencode ABS --scratch EMPTY_ABS",
+            ));
+        }
+    };
     let model_binding = runtime
-        .source_model_binding(identity())
+        .source_model_binding(adapter_identity)
         .map_err(|diagnostics| {
             diagnostic_error("repair source model binding refused", diagnostics)
         })?;
@@ -583,19 +751,17 @@ fn execute(command: Command) -> Result<String, CliError> {
         &config,
         model_binding.digest(),
         model_binding.max_response_bytes(),
+        clock.clock_domain(),
     );
 
-    // --- Any existing evidence is replayed before staging or candidate
-    // creation can occur. `run_live_bound_model_durable` below recovers the
-    // retained checkpoint against its own checked binding (program root,
-    // lifecycle digest and effect contract) before it can dispatch anything;
-    // a terminal generation is never redispatched, and a binding mismatch
-    // (including source drift) is refused rather than silently replayed
-    // against stale evidence -- see the hostile
-    // `repair_resume_refuses_when_source_drifts_between_preview_and_resume`
-    // regression. This route intentionally reuses that single checked
-    // recovery rather than duplicating an independent pre-check with a
-    // different (and therefore inevitably divergent) binding derivation. ---
+    // --- Acquire and validate the ordinary journal store before constructing
+    // the ephemeral repair handler. `run_live_bound_model_durable` below owns
+    // exact binding recovery (program root, lifecycle, effect contract and
+    // host-bound model adapter) before it can dispatch provider/effect work.
+    // OpenCode mode performs no candidate preview while preparing the handler;
+    // the V1 fixture alone derives its expected deterministic diagnostic here.
+    // A terminal generation is never redispatched and a binding mismatch is
+    // refused rather than silently replayed against stale evidence. ---
     let mut store = if fresh {
         CheckpointDir::fresh(&checkpoint_path, &project_root)?
     } else {
@@ -612,13 +778,17 @@ fn execute(command: Command) -> Result<String, CliError> {
     // candidate it may create is ephemeral and is never committed here. ---
     let envelope = OfflineRepairEnvelope::new(Arc::clone(&project), config.target.clone())
         .map_err(|diagnostics| diagnostic_error("repair target envelope refused", diagnostics))?;
-    let malformed = envelope
-        .preview(config.malformed_replacement, config.malformed_bool_literal)
-        .err()
-        .ok_or(CliError::refused(
-            "repair malformed replacement unexpectedly admitted",
-        ))?;
-    let expected_feedback = feedback_hex(feedback_code(&malformed), &config.result_id);
+    let expected_feedback = if matches!(&config.provider, RepairProvider::Scripted(_)) {
+        let malformed = envelope
+            .preview(config.malformed_replacement, config.malformed_bool_literal)
+            .err()
+            .ok_or(CliError::refused(
+                "repair malformed replacement unexpectedly admitted",
+            ))?;
+        Some(feedback_hex(feedback_code(&malformed), &config.result_id))
+    } else {
+        None
+    };
     let mut handler = OfflineRepairHandler::new(
         envelope,
         config.malformed_operation_id.clone(),
@@ -629,39 +799,69 @@ fn execute(command: Command) -> Result<String, CliError> {
     )
     .map_err(|diagnostics| diagnostic_error("repair effect contract refused", diagnostics))?;
 
-    let scripts = RefCell::new(VecDeque::from(config.turns.clone().map(|turn| {
-        (
-            turn.document,
-            turn.requires_prior_feedback
-                .then(|| expected_feedback.clone()),
-        )
-    })));
-    let starts = Rc::new(Cell::new(0));
-    let factory_starts = Rc::clone(&starts);
-    let mut factory = move || -> Box<dyn ProviderAdapter> {
-        let next = scripts.borrow_mut().pop_front();
-        let refuse_start = next.is_none();
-        let (document, required_feedback) = next.unwrap_or_else(|| (String::new(), None));
-        Box::new(FeedbackGuardedAdapter {
-            inner: ScriptedStreamingAdapter::new(
-                document
-                    .as_bytes()
-                    .chunks(3)
-                    .map(ToOwned::to_owned)
-                    .collect(),
-                document.into_bytes(),
-                usage(1, 1, 0),
-                true,
-            ),
-            starts: Rc::clone(&factory_starts),
-            required_feedback,
-            refuse_start,
-        })
+    let mut scripted_starts = None;
+    let mut factory: Box<dyn FnMut() -> Box<dyn ProviderAdapter>> = match &config.provider {
+        RepairProvider::Scripted(turns) => {
+            let scripts = RefCell::new(VecDeque::from(turns.clone().map(|turn| {
+                (
+                    turn.document,
+                    turn.requires_prior_feedback.then(|| {
+                        expected_feedback
+                            .as_ref()
+                            .expect("scripted repair has checked feedback")
+                            .clone()
+                    }),
+                )
+            })));
+            let starts = Rc::new(Cell::new(0));
+            scripted_starts = Some((Rc::clone(&starts), turns.len()));
+            Box::new(move || -> Box<dyn ProviderAdapter> {
+                let next = scripts.borrow_mut().pop_front();
+                let refuse_start = next.is_none();
+                let (document, required_feedback) = next.unwrap_or_else(|| (String::new(), None));
+                Box::new(FeedbackGuardedAdapter {
+                    inner: ScriptedStreamingAdapter::new(
+                        document
+                            .as_bytes()
+                            .chunks(3)
+                            .map(ToOwned::to_owned)
+                            .collect(),
+                        document.into_bytes(),
+                        usage(1, 1, 0),
+                        true,
+                    ),
+                    starts: Rc::clone(&starts),
+                    required_feedback,
+                    refuse_start,
+                })
+            })
+        }
+        RepairProvider::OpenCode => {
+            let operands = provider_operands.expect("OpenCode operands were checked above");
+            let grammar = OpenCodeGrammar::from_proposal(compiled.proposal_schema())
+                .map_err(|_| CliError::refused("repair OpenCode grammar admission refused"))?;
+            let remaining = config.deadline_millis.saturating_sub(clock.now_millis());
+            let call_millis = remaining.clamp(1, MAX_ONE_PROVIDER_CALL_MS) as u64;
+            let host = OpenCodeHostConfig::new(
+                operands.executable,
+                operands.scratch,
+                Duration::from_millis(call_millis),
+                grammar,
+            )
+            .map_err(|_| CliError::refused("repair OpenCode host configuration refused"))?;
+            let runner = Rc::new(RefCell::new(runner));
+            Box::new(move || -> Box<dyn ProviderAdapter> {
+                Box::new(OpenCodeRepairAdapter::new(
+                    host.clone(),
+                    SharedRunner(Rc::clone(&runner)),
+                ))
+            })
+        }
     };
     let cancellation = AgentCancellation::new();
     let mut source = StreamingSourceProposalAdapter::new_bound_checkpointed(
         &mut factory,
-        AdapterInvocationCapability::grant("source-live repair preview fixed free provider"),
+        AdapterInvocationCapability::grant("source-live repair host-selected provider"),
         compiled.proposal_schema(),
         model_binding.clone(),
         model_binding.invocation_capability(),
@@ -678,7 +878,7 @@ fn execute(command: Command) -> Result<String, CliError> {
             &mut source,
             &mut handler,
             source_policy,
-            &FixedClock,
+            clock.as_ref(),
             &cancellation,
             retained_checkpoint,
             &mut store,
@@ -693,13 +893,15 @@ fn execute(command: Command) -> Result<String, CliError> {
 
     let model_dispatches = complete.run().model_dispatches;
     let effect_dispatches = complete.run().effect_dispatches;
-    // A pure terminal-checkpoint replay dispatches nothing and therefore
-    // never starts the scripted provider; only a fresh (redispatching)
-    // attempt must consume its exact scripted turn sequence.
-    if model_dispatches > 0 && starts.get() != config.turns.len() {
-        return Err(CliError::refused(
-            "repair preview did not consume its exact scripted turn sequence",
-        ));
+    // A pure terminal-checkpoint replay dispatches nothing. Fixture mode also
+    // proves its complete fixed sequence was consumed; OpenCode mode instead
+    // relies on the retained journal's acknowledged intent/settlement chain.
+    if let Some((starts, turns)) = scripted_starts {
+        if model_dispatches > 0 && starts.get() != turns {
+            return Err(CliError::refused(
+                "repair preview did not consume its exact scripted turn sequence",
+            ));
+        }
     }
     if std::fs::read(&source_disk_path)
         .map_err(|_| CliError::refused("repair source cannot be reread"))?
@@ -731,7 +933,7 @@ fn receipt(
         "repair checkpoint has no terminal snapshot",
     ))?;
     let mut report = json!({
-        "schema": RECEIPT_SCHEMA,
+        "schema": RECEIPT_SCHEMA_V1,
         "target": config.target,
         "status": terminal.status().as_str(),
         "generation": checkpoint.generation(),
@@ -740,6 +942,18 @@ fn receipt(
         "source_mutation": false,
         "publication_authority": false,
     });
+    if matches!(&config.provider, RepairProvider::OpenCode) {
+        report["schema"] = json!(RECEIPT_SCHEMA_V2);
+        report["journal_binding"] = json!({
+            "invocation": checkpoint.invocation(),
+            "chain": checkpoint.chain(),
+            "generation": checkpoint.generation(),
+        });
+        report["candidate_test_execution"] = json!({
+            "status": "not_run",
+            "reason": "this repair host has no candidate test-execution authority",
+        });
+    }
     if let Some(preview) = preview {
         report["candidate_digest"] = json!(preview.candidate().candidate_digest());
         report["source_review"] =
@@ -748,11 +962,41 @@ fn receipt(
             checked_value(preview.semantic_delta(), "repair semantic delta refused")?;
         report["impact_summary"] =
             checked_value(preview.impact_summary(), "repair impact summary refused")?;
+        if matches!(&config.provider, RepairProvider::OpenCode) {
+            report["analysis"] = json!({
+                "coverage": {
+                    "source_review": true,
+                    "semantic_delta": true,
+                    "impact_summary": true,
+                    "candidate_test_execution": false,
+                },
+                "blind_spots": [
+                    "candidate tests were not executed: this host has no test-execution authority",
+                    "no publication, Git mutation, or physical delivery is authorized by this receipt",
+                    "provider usage is an observation, not cost or delivery proof",
+                ],
+            });
+        }
     } else {
         report["candidate_digest"] = Value::Null;
         report["source_review"] = Value::Null;
         report["semantic_delta"] = Value::Null;
         report["impact_summary"] = Value::Null;
+        if matches!(&config.provider, RepairProvider::OpenCode) {
+            report["analysis"] = json!({
+                "coverage": {
+                    "source_review": false,
+                    "semantic_delta": false,
+                    "impact_summary": false,
+                    "candidate_test_execution": false,
+                },
+                "blind_spots": [
+                    "terminal checkpoint replay did not create or revalidate a candidate",
+                    "candidate tests were not executed: this host has no test-execution authority",
+                    "no publication, Git mutation, or physical delivery is authorized by this receipt",
+                ],
+            });
+        }
     }
     serde_json::to_string(&report)
         .map(|report| format!("{report}\n"))

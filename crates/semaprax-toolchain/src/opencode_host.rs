@@ -421,6 +421,7 @@ pub mod accounting;
 mod environment;
 pub mod provider_error;
 mod receipt;
+pub mod repair_adapter;
 pub mod source;
 use receipt::{event_text, validate_export};
 

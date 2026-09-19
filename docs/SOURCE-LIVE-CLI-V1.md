@@ -17,6 +17,10 @@ semaprax-full source-live run CONFIG CHECKPOINT --opencode ABS --scratch EMPTY_A
 semaprax-full source-live resume CONFIG CHECKPOINT --opencode ABS --scratch EMPTY_ABS
 semaprax-full source-live migrate OLD_CONFIG OLD_CHECKPOINT NEW_CONFIG NEW_CHECKPOINT FUNCTION STEPS --opencode ABS --scratch EMPTY_ABS
 semaprax-full source-live offline-repair
+semaprax-full source-live repair run REPAIR_CONFIG REPAIR_CHECKPOINT
+semaprax-full source-live repair resume REPAIR_CONFIG REPAIR_CHECKPOINT
+semaprax-full source-live repair run REPAIR_CONFIG REPAIR_CHECKPOINT --opencode ABS --scratch EMPTY_ABS
+semaprax-full source-live repair resume REPAIR_CONFIG REPAIR_CHECKPOINT --opencode ABS --scratch EMPTY_ABS
 ```
 
 All operands are absolute except the stable migration function identity and
@@ -44,6 +48,58 @@ The command neither writes source nor persists a checkpoint, publishes a
 candidate, selects a network provider, accepts a target/path/model operand, or
 claims physical recovery. It is local demonstration evidence for the checked
 repair path, not a general offline repair interface.
+
+`repair` is the durable, host-selected candidate-preview route for issue #116.
+Its canonical JSON configuration selects the retained Project, source Agent,
+target declaration, bounded typed effect contract and task; it never supplies
+a provider endpoint, credential, source-edit path, test command, publication
+grant, or Git authority. Version 1 (`semaprax.source-live-cli.repair-config.v1`)
+also contains exactly two bounded scripted fixture documents and accepts no
+OpenCode operands. It exists as the credential-free test seam: the second
+fixture turn can require the actual first rejection's checked effect-feedback
+bytes, proving that the correction did not proceed blind. Version 2
+(`semaprax.source-live-cli.repair-config.v2`) has the same fields except
+`turns`, and requires the explicit `--opencode ABS --scratch EMPTY_ABS`
+operands. `ABS` names the operator-selected executable; `EMPTY_ABS` is a new,
+empty, non-symlink scratch directory for that one invocation. The only v2
+provider profile is the fixed free `opencode/muse-spark-1.3-contributor-free`
+profile. There is no fallback model and no provider selection in source or
+configuration. The selected source Agent deployment must already admit that
+exact provider/model row; a V2 host binding against a source deployment that
+only admits another model fails before checkpoint or provider work.
+
+V2 interprets `deadline_millis` in the restart-stable Unix-epoch-millisecond
+clock domain. The process timeout is the smaller of 30 seconds and the time
+remaining when the host is constructed, while the runtime checks the same
+absolute deadline around every attempt and settlement. V1 keeps its fixed-zero
+fixture clock so its committed credential-free examples remain deterministic.
+
+V2 adapts that same bounded `ProcessOpenCodeRunner` through the Provider Adapter
+SDK boundary used by Direct Runtime v2. The OpenCode process receives the
+runtime's compiler-derived canonical source-proposal request and schema, runs
+with the deny-all tool policy, and must pass the existing run/export receipt
+validation before its raw text reaches the compiler proposal decoder. A fresh
+adapter instance is created only after the checked journal acknowledges an
+attempt intent. Resume first rebinds and recovers that journal; a terminal
+checkpoint dispatches neither provider nor typed effect again, a changed source
+or executable/scratch host binding refuses, and an unresolved acknowledged delivery remains
+uncertain rather than being sent again. These facts make interruption/resume
+observable in the journal, not an exactly-once claim about an external service.
+
+The repair receipt is always source-immutable and publication-authority-free.
+V1 retains the frozen `semaprax.source-live-cli.repair-receipt.v1` projection:
+candidate digest, source review, semantic delta, impact summary, rejected-
+candidate count, checkpoint generation and dispatch counters. V2 emits the
+additive `semaprax.source-live-cli.repair-receipt.v2` projection. On the
+invocation that produces a candidate it additionally carries `journal_binding`
+(invocation, chain, generation) and `analysis.coverage` / `analysis.blind_spots`
+for those review artifacts. V2's
+`candidate_test_execution.status: "not_run"` is deliberate: no candidate test
+execution capability is available on this route, so it cannot claim a failed
+test observation or manufacture feedback from one. A terminal replay carries
+no newly fabricated candidate evidence. Neither receipt is a cost proof,
+provider-delivery proof, test result, source/Git mutation, or approval to
+publish the candidate.
 
 Priced migration requires both predecessor and destination config v2 pricing
 with exactly matching work unit, currency, minor-unit exponent and integer

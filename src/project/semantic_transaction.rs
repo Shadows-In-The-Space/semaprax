@@ -1213,6 +1213,24 @@ fn require_source_preserving_block_replacement(
 
 /// Shared, read-only classifier used by transaction validation and installed
 /// operation discovery. It advertises eligibility, never a particular new name.
+///
+/// # `comment_free_canonical_workspace` is permanent, and narrower than it sounds
+///
+/// The field is **workspace**-scoped by name but **rewrite-domain**-scoped by
+/// behaviour: since #274 it reports whether the sources this operation would
+/// actually rewrite are comment-free canonical, not whether the whole
+/// workspace is. Byte-identical source is exempt, so a project whose bundled
+/// `std.auth`/`std.jobs` closure carries comments (253 and 34 `//` lines) is
+/// still eligible — under the old whole-workspace reading it never could be.
+///
+/// The name is kept deliberately: it is an `available-operations` wire key,
+/// and renaming it would break agents that read it. Recorded here as
+/// permanent rather than as pending work, per #277. Read it as
+/// "comment-free canonical *over what this operation rewrites*"; the
+/// authority on the rule itself is
+/// `canonical_sources::comment_free_canonical_rewrite_domain` (not linked:
+/// the module is private, and a doc link to it trips
+/// `rustdoc::private_intra_doc_links`).
 pub(super) struct RenameDisplayNameEligibility {
     pub(super) expected_old_value: Option<String>,
     pub(super) comment_free_canonical_workspace: bool,

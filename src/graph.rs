@@ -100,8 +100,17 @@ pub fn to_json(program: &Program) -> Result<String, Vec<Diagnostic>> {
 /// [`crate::graph::AgentContextFilter::SessionProtocol`]'s `context` facet is
 /// this projection's CLI/agent-reachable route; this function is its stable
 /// Rust API for callers that want the same catalog independent of any query.
-/// See `session_protocol_facet`'s module doc for exactly what a "protocol
-/// fact" is here and is not.
+/// This function deliberately has no CLI verb of its own: it takes no
+/// `Program`, so it reports nothing about the file `semaprax graph <file>`
+/// names, and that command's single-file grammar is deliberately closed
+/// (`src/cli/graph.rs`'s own `graph_grammar_is_closed` test), not an
+/// oversight, so a flag naming a file-independent fact would be the wrong
+/// shape there even before counting the `context` route above as already
+/// sufficient. See `session_protocol_facet`'s module doc for exactly what a
+/// "protocol fact" is here and is not, and
+/// `docs/SESSION-PROTOCOL-TYPES-V1.md`'s "Protocol facts" acceptance-
+/// criteria row for the full CLI-surface and architecture/assurance
+/// evaluation.
 #[must_use]
 pub fn session_protocol_kernel_json() -> String {
     session_protocol_facet::full_catalog_json()

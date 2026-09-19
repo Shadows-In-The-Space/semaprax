@@ -376,6 +376,31 @@ fn context_filters_reject_empty_unknown_and_repeated_names() {
     );
 }
 
+/// Issue #206 residue: `AgentContextFilter::SessionProtocol` is reachable
+/// from a real `argv` slice through this exact grammar -- the same
+/// `context_options` function `cli_driver.rs`'s `CommandId::Context` arm
+/// calls before handing the parsed filters to
+/// `graph::agent_context_json`/`agent_context_v2_json` -- not merely
+/// constructible as a Rust-API `AgentContextFilter` value in a unit test
+/// that never goes through argument parsing.
+#[test]
+fn context_filters_accepts_session_protocol_at_the_cli_grammar_level() {
+    let parsed = context(&["--filters", "session_protocol"]).unwrap();
+    let ParsedContextOptions::V1(options) = parsed else {
+        panic!("no --direction was supplied");
+    };
+    assert_eq!(
+        options,
+        graph::AgentContextOptions::new(
+            1,
+            64 * 1024,
+            256,
+            [graph::AgentContextFilter::SessionProtocol]
+        )
+        .unwrap()
+    );
+}
+
 #[test]
 fn context_rejects_duplicates_unknown_options_and_missing_trailing_values() {
     assert_eq!(

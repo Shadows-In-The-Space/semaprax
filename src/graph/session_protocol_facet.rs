@@ -1,9 +1,15 @@
 //! Issue #206 projection: this repository's built-in session-protocol
 //! reference kernel (`crate::session_protocol`) surfaced as deterministic,
-//! declaration-independent reference data in the semantic graph
-//! (`session_protocol_kernel`, unconditional) and in `context`'s v1/v2
-//! envelope (`session_protocol_kernel`, gated on the new
-//! `AgentContextFilter::SessionProtocol` / `--filters session_protocol`).
+//! declaration-independent reference data through two routes: the
+//! standalone `graph::session_protocol_kernel_json()` Rust API
+//! (`session_protocol_kernel`, unconditional -- it takes no `Program`, so
+//! there is nothing to gate on, and it is **not** part of `to_json`'s
+//! per-program graph document; see that function's own doc comment) and
+//! `context`'s v1/v2 envelope (`session_protocol_kernel`, gated on the
+//! `AgentContextFilter::SessionProtocol` / `--filters session_protocol`
+//! opt-in filter, and CLI-reachable there today -- see
+//! `docs/SESSION-PROTOCOL-TYPES-V1.md`'s "Protocol facts" acceptance-
+//! criteria row for why no additional CLI verb was added for the former).
 //!
 //! # What a "protocol fact" is here, and what it deliberately is not
 //!

@@ -149,12 +149,6 @@ convention and the cases that must stay standalone.
 <!-- graft:start -->
 ## Graft — repo context graph
 
-The graph in `graft/` is a per-developer local cache and is NOT committed --
-run `graft build --only-dir src` (legacy: `graft build src` then move `src/graft` to `./graft`), before your first
-query. It covers `src/` only; use `rg` for `tests/`, `docs/`, `std/`,
-`examples/` and `scripts/`, and treat it as a snapshot, not authority.
-For a full-repo graph (2816 files) use `NODE_OPTIONS=--max-old-space-size=8192 graft build` — the default heap OOMs.
-
 This repo is indexed in `graft/`: small linked markdown nodes that explain each
 system and carry exact file:line spans, kept in sync with the code through git.
 

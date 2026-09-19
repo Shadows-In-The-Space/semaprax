@@ -3,6 +3,28 @@
 use crate::diagnostic::Diagnostic;
 
 use super::reserve_builder_structure;
+use super::{hir, WorkspaceResolvedModule};
+use std::collections::BTreeMap;
+
+pub(super) fn reserve_workspace_module_carrier(count: usize) -> Result<(), Vec<Diagnostic>> {
+    reserve_builder_structure(
+        count
+            // Empty private signature and Agent facts must not change frozen
+            // scalar graph accounting. Nonempty carriers are charged separately.
+            .checked_mul(
+                std::mem::size_of::<WorkspaceResolvedModule>()
+                    - std::mem::size_of::<BTreeMap<String, (hir::DeclarationKind, hir::TypeFacts)>>(
+                    )
+                    - std::mem::size_of::<Vec<hir::ResolvedAgentDeclaration>>(),
+            )
+            .ok_or_else(|| {
+                vec![super::limit_error(
+                    "builder_bytes",
+                    super::active_builder_limit(),
+                )]
+            })?,
+    )
+}
 
 fn limit_error() -> Vec<Diagnostic> {
     vec![super::limit_error(

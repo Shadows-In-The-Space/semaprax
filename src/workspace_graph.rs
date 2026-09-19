@@ -9,6 +9,7 @@
     reason = "sealed validation and test-only replay seams remain non-public"
 )]
 mod builder_bytes_report;
+mod dependency_pruning;
 pub(crate) mod diagnostics;
 mod expected_projection;
 mod generic_type_import;
@@ -43,7 +44,9 @@ use project_render::render_project_graph_json;
 #[cfg(test)]
 use retained_validation::validate_effect_and_capability_edges;
 use retained_validation::validate_retained_facts;
-use retained_vectors::{filter_owned_vec, filter_owned_vec_accounted};
+use retained_vectors::{
+    filter_owned_vec, filter_owned_vec_accounted, reserve_workspace_module_carrier,
+};
 use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -3913,6 +3916,13 @@ fn build_owned_inner(
         programs.push(program);
     }
     crate::static_protocol::validate_workspace(&programs).map_err(|error| vec![error])?;
+    // Every module's own source is parsed, canonical-checked and
+    // static-protocol validated above. Only after that does a bundled
+    // dependency's unreachable surface stop being built into HIR: the
+    // builder charges whole translation units, so a standard-library package
+    // costs its entire declaration set however little of it a consumer can
+    // reach. See `dependency_pruning` for the soundness argument.
+    let pruned_dependency_functions = dependency_pruning::prune(&mut programs, &sources);
     let module_paths = index_modules(&programs)?;
     let authored = index_authored(&programs)?;
     validate_synthetic_main_id_collisions(&programs, &authored)?;
@@ -4065,6 +4075,10 @@ fn build_owned_inner(
         operation_builder_bytes,
     };
     if let Some(frontend) = frontend {
+        // The frontend cache keys a parsed program on that one file's bytes,
+        // but the retained set is a whole-workspace property, so the cache
+        // must only ever see the complete program.
+        pruned_dependency_functions.restore(&mut programs);
         frontend.retain(&sources, programs, resolve_builder_bytes)?;
     }
     Ok((build, sources))
@@ -4301,21 +4315,6 @@ fn build_resolved_core(
         declarations,
         expected_edges,
     ))
-}
-
-fn reserve_workspace_module_carrier(count: usize) -> Result<(), Vec<Diagnostic>> {
-    reserve_builder_structure(
-        count
-            // Empty private signature and Agent facts must not change frozen
-            // scalar graph accounting. Nonempty carriers are charged separately.
-            .checked_mul(
-                std::mem::size_of::<WorkspaceResolvedModule>()
-                    - std::mem::size_of::<BTreeMap<String, (hir::DeclarationKind, hir::TypeFacts)>>(
-                    )
-                    - std::mem::size_of::<Vec<hir::ResolvedAgentDeclaration>>(),
-            )
-            .ok_or_else(|| vec![limit_error("builder_bytes", active_builder_limit())])?,
-    )
 }
 
 fn retain_workspace_module(

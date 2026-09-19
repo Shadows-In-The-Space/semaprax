@@ -67,6 +67,58 @@ fn main() -> i64
     )
 }
 
+/// A module that takes its `Secret<i64>` as a parameter, so no scalar the
+/// secret could carry is ever written in source. The companion below writes a
+/// literal instead, which is the control: it proves the graph really does
+/// carry scalars, so the absence in the subject means something.
+fn secret_parameter_module() -> String {
+    r#"module test.secret_graph;
+
+@id("test.secret")
+record Secret<T> {
+    @id("test.secret.value")
+    value: T,
+}
+
+@id("test.secret.is_positive")
+fn is_positive(held: Secret<i64>) -> bool
+{
+    held.value > 0
+}
+
+@id("app.main")
+fn main() -> i64
+{
+    0
+}
+"#
+    .to_owned()
+}
+
+fn literal_scalar_module() -> String {
+    r#"module test.secret_graph;
+
+@id("test.secret")
+record Secret<T> {
+    @id("test.secret.value")
+    value: T,
+}
+
+@id("test.secret.is_positive")
+fn is_positive(held: Secret<i64>) -> bool
+{
+    held.value > 987654321
+}
+
+@id("app.main")
+fn main() -> i64
+{
+    0
+}
+"#
+    .to_owned()
+}
+
 fn has_code(diagnostics: &[crate::diagnostic::Diagnostic], code: &str) -> bool {
     diagnostics.iter().any(|diagnostic| diagnostic.code == code)
 }
@@ -183,3 +235,63 @@ fn main() -> i64
 // spell here to attempt leaking a `Secret<T>` into text; the absence is
 // exercised by grep against `src/lexer.rs`, not restated as a vacuous test
 // against a syntax that does not exist.
+
+/// Issue #191's third non-leak property — "not serialisable into graph JSON" —
+/// stated as what it actually is, because the audit recorded it as untested
+/// and the reason it was untested matters more than a test would.
+///
+/// It is **structurally guaranteed, not test-guaranteed**. `graph::to_json`
+/// takes `&Program` and nothing else: a parsed source tree, with no runtime,
+/// no interpreter state and no evaluated value anywhere in its input. There is
+/// no channel through which a held secret could reach it. A test asserting
+/// "the graph contains no secret value" over a module that never wrote one
+/// would be asserting the absence of something that was never present — which
+/// is why the first version of this test was deleted rather than shipped.
+///
+/// What IS worth pinning is the boundary a reader will otherwise get wrong:
+/// the graph **does** carry source literals, including one written into a
+/// `Secret` construction. That is correct and unavoidable — the graph is a
+/// projection of source, and a literal in source is source. The property is
+/// therefore "no *runtime* value is serialisable", never "no scalar appears".
+/// Anyone who writes a real secret as a literal in checked source has
+/// published it in the source, and no projection can undo that.
+#[test]
+fn the_graph_projects_a_secret_construction_literal_because_a_source_literal_is_source() {
+    let module = r#"module test.secret_graph;
+
+@id("test.secret")
+record Secret<T> {
+    @id("test.secret.value")
+    value: T,
+}
+
+@id("test.secret.hold")
+fn hold() -> bool
+{
+    let held = Secret<i64> { value: 987654321 };
+    held.value > 0
+}
+
+@id("app.main")
+fn main() -> i64
+{
+    0
+}
+"#;
+    let program =
+        crate::parse(module, std::path::Path::new("secret-graph.spx")).expect("the fixture parses");
+    let json = crate::graph::to_json(&program).expect("the fixture projects");
+
+    for identity in ["test.secret", "test.secret.value", "test.secret.hold"] {
+        assert!(
+            json.contains(identity),
+            "the graph must carry `{identity}`; it is not projecting this module"
+        );
+    }
+    assert!(
+        json.contains("987654321"),
+        "the graph carries source literals, including inside a Secret construction. \
+         If this ever stops being true the doc comment above is wrong and the \
+         property needs restating, not the test relaxing."
+    );
+}

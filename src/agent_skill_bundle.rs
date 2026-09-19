@@ -265,7 +265,15 @@ pub fn generate_agent_skill_bundle() -> Result<String, Vec<Diagnostic>> {
     let operations = semantic_discovery::render_operations_catalog(
         query_capabilities.schema(),
         query_capabilities.digest(),
-        diagnostic_catalog.digest(),
+        // Issue #269: the bundle used to embed the catalog's WHOLE-DOCUMENT
+        // digest, which carries per-occurrence `(path, line)` provenance, so a
+        // pure refactor that moved a line near any `SPX-` token invalidated
+        // this pinned bundle with no diagnostic added or removed. What a skill
+        // bundle needs to pin is which diagnostics the compiler has, not where
+        // they were written; `code_count` beside it already says so. The
+        // line-insensitive identity is that, and the catalog document keeps
+        // its own whole-document digest for consumers who want provenance.
+        &installed_diagnostics::installed_diagnostic_catalog_identity(),
         diagnostic_catalog.code_count(),
     );
     let public_workflow = render_public_workflow();

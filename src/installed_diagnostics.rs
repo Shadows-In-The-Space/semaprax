@@ -14,6 +14,10 @@ pub const MAX_INSTALLED_DIAGNOSTIC_EXPLANATION_BYTES: usize = 1024 * 1024;
 
 const CATALOG_DOMAIN: &[u8] = b"semaprax.installed-diagnostic-catalog.payload.digest.v1\0";
 const EXPLANATION_DOMAIN: &[u8] = b"semaprax.installed-diagnostic-explanation.payload.digest.v1\0";
+/// Domain for the line-insensitive catalog identity. Separate from
+/// [`CATALOG_DOMAIN`] on purpose: they digest different things and must never
+/// be mistaken for one another.
+const IDENTITY_DOMAIN: &[u8] = b"semaprax.installed-diagnostic-catalog.identity.v1\0";
 
 const GENERATED_CODES: &[(&str, &[(&str, u32)])] =
     include!(concat!(env!("OUT_DIR"), "/installed_diagnostic_codes.rs"));
@@ -139,6 +143,56 @@ pub fn installed_diagnostic_catalog() -> Result<InstalledDiagnosticCatalog> {
         digest,
         code_count: GENERATED_CODES.len(),
     })
+}
+
+/// A catalog identity that answers "which diagnostics does this compiler
+/// have", without answering "at which source lines were they written".
+///
+/// Issue #269: the catalog document deliberately carries build-source
+/// provenance — every occurrence and every unresolved dynamic constructor site
+/// records a `(path, line)` pair, and a nonclaim says so in terms. That is
+/// useful in the document. It is wrong in the *skill bundle*, which embedded
+/// the whole-document digest and so changed whenever any line moved near any
+/// `SPX-` token anywhere in `src/` or `crates/`. A submodule split or a
+/// two-line deletion invalidated the pinned bundle with `code_count`
+/// unchanged, costing a full rebuild to detect and telling the reader nothing
+/// about what changed.
+///
+/// This digests the code set, each code's namespace, its occurrence *paths*
+/// (sorted and deduplicated, never its lines), and the dynamic-site paths. So:
+/// adding, removing or renaming a diagnostic changes it; moving one to another
+/// file changes it; moving lines within a file does not.
+///
+/// The catalog document and [`InstalledDiagnosticCatalog::digest`] are
+/// unchanged — provenance still ships, and a consumer that wants the exact
+/// bytes still gets them.
+pub fn installed_diagnostic_catalog_identity() -> String {
+    let mut entries = Vec::with_capacity(GENERATED_CODES.len());
+    for (code, occurrences) in GENERATED_CODES {
+        let mut paths = occurrences
+            .iter()
+            .map(|(path, _line)| *path)
+            .collect::<Vec<_>>();
+        paths.sort_unstable();
+        paths.dedup();
+        entries.push(json!({
+            "code": code,
+            "namespace": namespace(code),
+            "paths": paths,
+        }));
+    }
+    let mut dynamic_paths = GENERATED_DYNAMIC_SITES
+        .iter()
+        .map(|(path, _line)| *path)
+        .collect::<Vec<_>>();
+    dynamic_paths.sort_unstable();
+    dynamic_paths.dedup();
+    let payload = json!({
+        "diagnostics": entries,
+        "dynamic_constructor_paths": dynamic_paths,
+        "static_code_count": GENERATED_CODES.len(),
+    });
+    hash(IDENTITY_DOMAIN, payload.to_string().as_bytes())
 }
 
 /// Explain one exact installed code using the same generated inventory. The

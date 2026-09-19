@@ -25,6 +25,118 @@ fn generation_is_byte_identical_on_repetition() {
     assert_eq!(first, second, "repeated generation must be byte-identical");
 }
 
+/// Issue #269: the bundle embedded the diagnostic catalog's whole-document
+/// digest, which carries a `(path, line)` pair per occurrence and per dynamic
+/// constructor site. A pure refactor that moved lines therefore invalidated
+/// the pinned bundle with `code_count` unchanged — it happened twice in one
+/// session, each time costing a full `--lib` build to detect and producing a
+/// one-hex-string diff that said nothing about what changed.
+///
+/// Both halves are pinned here, because a fix that made the identity
+/// insensitive to everything would be worse than the bug:
+///
+/// - moving a line must NOT change the identity;
+/// - adding, removing or renaming a diagnostic, or moving one to a different
+///   file, MUST change it.
+///
+/// The real `GENERATED_CODES` is compile-time, so this exercises the identity
+/// rule over synthetic inventories shaped exactly like it.
+#[test]
+fn the_catalog_identity_ignores_line_moves_and_notices_real_changes() {
+    use serde_json::json;
+    use sha2::{Digest, Sha256};
+
+    // The fixture codes are deliberately NOT `SPX-`-shaped. `build.rs` scans
+    // `src/` for `SPX-` tokens to generate the real installed catalog, so a
+    // test fixture spelling a code with the real prefix silently adds it to
+    // the compiler's published diagnostic inventory -- `code_count` went
+    // 1008 -> 1011 on the first draft of this test, and 1008 -> 1009 when the
+    // literals were gone but this comment still named one. `build.rs`'s
+    // scanner matches the bare token anywhere in a source file, comments
+    // included. The identity rule under test does not care what the code text
+    // is, so the fixture uses a prefix the scanner ignores.
+    //
+    // Mirrors `installed_diagnostic_catalog_identity`: paths are digested,
+    // lines are not.
+    fn identity(codes: &[(&str, &[(&str, u32)])], dynamic: &[(&str, u32)]) -> String {
+        let entries = codes
+            .iter()
+            .map(|(code, occurrences)| {
+                let mut paths = occurrences
+                    .iter()
+                    .map(|(path, _line)| *path)
+                    .collect::<Vec<_>>();
+                paths.sort_unstable();
+                paths.dedup();
+                json!({"code": code, "namespace": "spx", "paths": paths})
+            })
+            .collect::<Vec<_>>();
+        let mut dynamic_paths = dynamic
+            .iter()
+            .map(|(path, _line)| *path)
+            .collect::<Vec<_>>();
+        dynamic_paths.sort_unstable();
+        dynamic_paths.dedup();
+        let payload = json!({
+            "diagnostics": entries,
+            "dynamic_constructor_paths": dynamic_paths,
+            "static_code_count": codes.len(),
+        });
+        let mut hasher = Sha256::new();
+        hasher.update(payload.to_string().as_bytes());
+        format!("{:x}", crate::digest_hex::LowerHex(hasher.finalize()))
+    }
+
+    let base: &[(&str, &[(&str, u32)])] = &[
+        ("TST-A001", &[("src/a.rs", 10)]),
+        ("TST-B002", &[("src/b.rs", 20)]),
+    ];
+    let base_dynamic: &[(&str, u32)] = &[("src/a.rs", 99)];
+
+    // Every line moved; nothing else.
+    let moved: &[(&str, &[(&str, u32)])] = &[
+        ("TST-A001", &[("src/a.rs", 4111)]),
+        ("TST-B002", &[("src/b.rs", 7)]),
+    ];
+    let moved_dynamic: &[(&str, u32)] = &[("src/a.rs", 1234)];
+    assert_eq!(
+        identity(base, base_dynamic),
+        identity(moved, moved_dynamic),
+        "a line move must not change the catalog identity"
+    );
+
+    // A diagnostic added.
+    let added: &[(&str, &[(&str, u32)])] = &[
+        ("TST-A001", &[("src/a.rs", 10)]),
+        ("TST-B002", &[("src/b.rs", 20)]),
+        ("TST-C003", &[("src/c.rs", 30)]),
+    ];
+    assert_ne!(
+        identity(base, base_dynamic),
+        identity(added, base_dynamic),
+        "an added diagnostic must change the catalog identity"
+    );
+
+    // A diagnostic moved to a different FILE, same line.
+    let relocated: &[(&str, &[(&str, u32)])] = &[
+        ("TST-A001", &[("src/moved.rs", 10)]),
+        ("TST-B002", &[("src/b.rs", 20)]),
+    ];
+    assert_ne!(
+        identity(base, base_dynamic),
+        identity(relocated, base_dynamic),
+        "a diagnostic moving to another file must change the catalog identity"
+    );
+
+    // A dynamic constructor site added in a new file.
+    let extra_dynamic: &[(&str, u32)] = &[("src/a.rs", 99), ("src/new.rs", 1)];
+    assert_ne!(
+        identity(base, base_dynamic),
+        identity(base, extra_dynamic),
+        "a new dynamic constructor site file must change the catalog identity"
+    );
+}
+
 #[test]
 fn committed_bundle_is_pinned_and_regenerates_byte_identical() {
     let generated = generate_agent_skill_bundle().expect("bundle generates");

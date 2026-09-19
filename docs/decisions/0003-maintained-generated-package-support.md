@@ -3,11 +3,18 @@
 Audience: maintainers deciding GitHub issue #145's scoped publication
 decision; compiler and release-tooling contributors.
 
-- Status: **Proposed.** This ADR records a proposal, not an approval. Issue
-  #145's review checkpoint says explicitly: "this issue changes a
-  semantic/authority/support contract... Do not self-approve." No implementing
-  agent may change this Status line to "Accepted"; only a maintainer's own
-  edit, naming themselves and the date, does that.
+- Status: **Accepted for scope only, on 2026-09-19, by the repository
+  maintainer (Kevin, `kevin.riedl@wavect.io`, `wavect/semaprax` owner).** The
+  maintainer approved this ADR's scope decision in session and delegated the
+  eight open questions below to the implementing agent's judgment under one
+  stated constraint: decide whatever is best for the language long term. The
+  answers recorded in "Maintainer decision" below are that delegation
+  exercised, written down by the agent as scribe rather than self-approved.
+- **What is accepted is the scope, not a live support claim.** Questions 5 and
+  7 are answered "evidence first", and that evidence does not exist today, so
+  no package is described as maintained or supported yet. Accepting a scope
+  decision does not manufacture the evidence the claim would need. See
+  "Maintainer decision".
 - Date: 2026-09-19
 
 ## Context
@@ -236,6 +243,62 @@ running. That is a real gap between "the tests exist and are wired in" and
 8. Should npm support for the same profile be folded into this ADR once its
    `#[ignore]`d tests are unblocked, or should it get its own separate ADR
    with its own evidence table? (extend-this-adr / separate-adr)
+
+## Maintainer decision
+
+Recorded 2026-09-19. The maintainer approved the scope and delegated the eight
+questions above with the instruction to decide by what is best for the language
+long term. That constraint does most of the work below: in four of the eight, it
+argues *against* claiming more than the evidence supports.
+
+1. **Yes — Rust only, npm deferred.** A narrow route that is fully evidenced is
+   worth more than a wide one that is half evidenced. A support claim is very
+   cheap to make and very expensive to withdraw: once consumers depend on it,
+   retracting it breaks them, so the first maintained route should be the one we
+   are most certain of.
+2. **require-real-semver, before any publish** (not before this ADR stands). The
+   descriptor digest is the real compatibility signal *inside* this project, but
+   no registry consumer can see it: Cargo's resolver, lockfiles and downstream
+   automation all assume the version string orders releases and carries
+   compatibility meaning. A fixed `0.1.0` tells every one of those tools
+   something false. It is also self-defeating in practice — registries make
+   versions immutable, so a second publish at `0.1.0` is simply refused. Keep
+   the digest, and record it in metadata *alongside* a real version.
+3. **require-1.85.0-build.** An unverified MSRV is a support claim with no
+   evidence, which is the exact thing this repository's documentation invariant
+   forbids. MSRV is load-bearing for consumers who pin toolchains, it is cheap
+   to verify and expensive to be wrong about. Note this cannot be discharged on
+   the current dev host (Homebrew Rust, no `rustup`), so it is a gate, not a box
+   to tick today.
+4. **Not yet.** No publish is proposed, and naming a registry identity now would
+   imply an intent to publish that this ADR explicitly does not carry. This must
+   be answered before any publish, and by a human.
+5. **Yes — a specific, recent, confirmed-green hosted run is required before any
+   support claim.** This is the load-bearing answer. The harness is genuinely
+   wired into `verify-tests` across three operating systems and has still never
+   been observed to pass. Treating wiring as evidence would set the worst
+   available precedent for a language whose entire pitch is "meaning in,
+   verified machine code out". Credibility here is the product.
+6. **Yes — change the shard so one target's failure does not stop its siblings
+   from running and reporting.** This is the highest-leverage answer in the
+   list and its value extends well past this issue. Today a failure in an
+   unrelated subsystem prevents this harness from *ever* reporting, which is
+   precisely why question 5 has no evidence to point at. Fail-fast inside a
+   shard destroys information: it converts "we do not know" into something
+   easily misread as "it failed". Per-target reporting is how the project
+   learns what actually passes.
+7. **require-ci-gate.** A manual, `#[ignore]`-gated check run by a human before
+   each release is the kind of gate that silently stops happening, and nothing
+   detects that it stopped. This repository already holds the stronger line
+   elsewhere — no feature is implemented without the completion matrix's
+   executable gate — and box 3 should not be the exception.
+8. **separate-adr.** Each support claim stays bound to its own evidence table.
+   Folding npm into this document later would let it inherit Rust's evidence by
+   adjacency, which is the same conflation this ADR exists to prevent.
+
+**Consequence for issue #145.** Box 1 has its *decision* half. Its *gate* half,
+and boxes 2 and 3, remain open on evidence rather than on judgment, and answer 6
+names the concrete change that unblocks collecting it.
 
 ## Rejected alternatives
 

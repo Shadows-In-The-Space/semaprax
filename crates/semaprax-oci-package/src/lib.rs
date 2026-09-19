@@ -26,7 +26,7 @@
 //! path of any kind: [`build_and_publish`] writes one local directory and
 //! nothing else. It also refuses to run at all if a container-registry
 //! credential-shaped environment variable is present -- see
-//! [`validation::refuse_if_credential_environment_present`].
+//! `validation::refuse_if_credential_environment_present`.
 #![forbid(unsafe_code)]
 
 mod publish;

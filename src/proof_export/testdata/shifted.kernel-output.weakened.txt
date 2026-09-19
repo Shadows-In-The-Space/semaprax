@@ -1,0 +1,62 @@
+Export.lean:45:5: warning: Variable name `h_lo_0` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_lo_0
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:46:5: warning: Variable name `h_hi_0` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_hi_0
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:47:5: warning: Variable name `h_lo_1` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_lo_1
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:48:5: warning: Variable name `h_hi_1` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_hi_1
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:49:5: warning: Variable name `h_req_0` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_req_0
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:50:5: warning: Variable name `h_req_1` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_req_1
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:51:5: warning: Variable name `h_req_2` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_req_2
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:52:5: warning: Variable name `h_req_3` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_req_3
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:54:5: warning: Variable name `h_def_0` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_def_0
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Export.lean:56:5: warning: Variable name `h_result` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _h_result
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+'SemapraxExport.spx_app_2et_2eshifted_range_0' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SemapraxExport.spx_app_2et_2eshifted_ensures_0' does not depend on any axioms

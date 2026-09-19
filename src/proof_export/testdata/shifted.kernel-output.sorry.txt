@@ -1,0 +1,3 @@
+Export.lean:42:8: warning: declaration uses `sorry`
+'SemapraxExport.spx_app_2et_2eshifted_range_0' depends on axioms: [propext, Classical.choice, Quot.sound]
+'SemapraxExport.spx_app_2et_2eshifted_ensures_0' depends on axioms: [sorryAx]

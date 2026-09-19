@@ -17,21 +17,46 @@ the certificate schema. Where it and the code disagree, the code's tests
 
 ## What has and has not been executed
 
-**No Lean toolchain has ever been run against this export.** `lean`, `lake`
-and `elan` are absent from the machine this tranche was written on. Every
-test replays recorded kernel output through a fixture implementation of the
-[`LeanKernel`](#running-the-kernel) capability. Therefore:
+The pinned Lean 4.34.0 toolchain **has now been run** against the committed
+golden export, on a developer host that has it installed. Read the scope
+sentence before quoting this: it is **local-host evidence only**. Hosted CI
+provisions no Lean toolchain (see [quality gates](QUALITY-GATES.md)), so
+`scripts/lean-export-gate.py` is not in `scripts/quality.sh` and is not in
+`release-gate`'s blocker set. Nothing in this document, the generated Lean,
+or a certificate may be described as hosted, production, current-head CI, or
+physical-device evidence.
 
+What is now evidenced, and by what:
+
+- **Lean accepts the generated proofs.** `omega` discharged both the
+  checked-range obligation and the postcondition of the golden document,
+  with axiom sets `[propext, Classical.choice, Quot.sound]` and
+  `[propext, Quot.sound]`. Three consecutive runs were byte-identical.
+  Evidence: `src/proof_export/testdata/shifted.kernel-output.txt`, recorded
+  verbatim, re-checked against the parser by ordinary `cargo test` and
+  re-derived from the live kernel by `scripts/lean-export-gate.py`.
+- **A real `sorry` is refused.** Seeded into the postcondition proof,
+  the kernel reports it and `parse` returns `admitted_hole`. Evidence:
+  `testdata/shifted.kernel-output.sorry.txt`.
+- **A vacuously weakened theorem is genuinely accepted by the kernel**, with
+  an axiom set *cleaner* than the honest proof's (`does not depend on any
+  axioms`) and exit 0. This is recorded as data, not argued as prose:
+  `testdata/shifted.kernel-output.weakened.txt`. It is why a certificate
+  binds `lean_source_sha256` and embeds the document, and why
+  `verify_certificate_against_source` re-renders from source rather than
+  trusting the embedded bytes. Kernel output alone can never catch it.
 - Deterministic rendering, total coverage accounting, refusal of every
-  non-proof output shape, and fail-closed certificate replay are **local
+  non-proof output shape, and fail-closed certificate replay remain **local
   test evidence**, verified by running them.
-- Whether Lean 4 actually accepts the generated proofs is **not evidenced at
-  all**. The `omega` tactic each theorem carries is a commitment, not a
-  result: if it fails, `lake build` fails, the parser reports
-  `build_error`, and no certificate is produced.
 
-Nothing in this document, the generated Lean, or a certificate may be
-described as hosted, production, or physical-device evidence.
+One real defect surfaced only by running the kernel: Lean 4.34.0 prints
+``declaration uses `sorry` `` with **backticks**, so the two single-quoted
+spellings `kernel_report::parse` was written against (from synthesized
+fixtures) never matched, and the warning half of the admitted-hole check was
+dead against the very toolchain this module pins. Only the `sorryAx`
+axiom-line clause was load-bearing. `parse` now normalizes the quoting; the
+regression is
+`a_real_sorry_in_the_golden_document_is_refused_as_an_admitted_hole`.
 
 ## Relationship to what already existed
 
@@ -187,8 +212,19 @@ pub trait LeanKernel {
 ```
 
 **No implementation ships in this crate.** The compiler gains no ambient
-process or filesystem authority because a proof export exists, and an
-implementation that was never executed here could not be honestly tested.
+process or filesystem authority because a proof export exists.
+
+The implementation lives in `scripts/lean-export-gate.py`, deliberately
+outside the crate: running an external kernel is process authority, and
+AGENTS.md's "compiler and generated code gain no ambient filesystem,
+process, network... authority" invariant is exactly why the crate expresses
+the kernel as a capability rather than calling one. That script confirms the
+host's toolchain is the pin, checks the golden document and two seeded
+variants, and compares each result byte-for-byte against the committed
+transcripts so recorded evidence cannot silently go stale. With no Lean
+installed it prints a `SKIP` naming what was not checked and exits 0; it
+never fetches a toolchain, and an unpinned or absent kernel is a skip, never
+a substitution.
 
 ## Result grammar
 
@@ -204,7 +240,7 @@ Refusals, in evaluation order:
 | --- | --- |
 | `toolchain_drift` | the reported toolchain is not `leanprover/lean4:v4.34.0` |
 | `timeout` | `(deterministic) timeout`, `maximum recursion depth has been reached`, `deep recursion was detected` |
-| `admitted_hole` | `declaration uses 'sorry'`, `uses sorry`, or `sorryAx` anywhere in the output |
+| `admitted_hole` | `declaration uses \`sorry\`` or `'sorry'` (quoting is normalized; 4.34.0 uses backticks), `uses sorry`, or `sorryAx` anywhere in the output |
 | `build_error` | any line containing `error:` |
 | `unrecognized_output` | no `#print axioms` line at all |
 | `missing_theorem` | an expected theorem has no line |
@@ -284,12 +320,20 @@ written about this module:
 - Not merged into the Assurance Manifest obligation lattice. A certificate
   is proof data, not authority: it grants no execution, publication,
   signing, or merge permission.
+- **Kernel evidence is local-host only.** Hosted CI provisions no Lean
+  toolchain, so a certificate records a result obtained on whichever host
+  ran the kernel. It is not hosted, production, or current-head CI
+  evidence.
 
 ## Not done in this tranche
 
-- No Lean toolchain execution, and therefore no evidence that any generated
-  proof is accepted.
-- No `LeanKernel` implementation (no `lake build` runner).
+- **No hosted evidence.** Every kernel result here was produced on one
+  developer host. No CI job runs Lean, and none is proposed here.
+- **No `LeanKernel` implementation inside the crate**, by design; the runner
+  is `scripts/lean-export-gate.py`, and it is not wired into
+  `scripts/quality.sh` or `release-gate`.
+- The kernel has been run over exactly one module, the committed golden. No
+  corpus, and no generated-source mutation ladder beyond the two seeds.
 - No CLI surface; the module is library-only.
 - No Assurance Manifest merge, and no `ObligationKind` for checked-range
   obligations — they carry their own

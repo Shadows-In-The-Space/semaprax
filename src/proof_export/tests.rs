@@ -1,15 +1,20 @@
 //! Tests for the Lean obligation export, its coverage accounting, the
 //! pinned-kernel result parser, and certificate replay.
 //!
-//! **No Lean toolchain is executed by any test here, and none was executed
-//! when they were written.** The kernel is a capability
-//! ([`super::LeanKernel`]); every test supplies a fixture implementation
-//! that replays recorded output in Lean's real `#print axioms` format. So
-//! these tests establish, honestly: the export is deterministic, the
+//! **No test here executes a Lean toolchain.** The kernel is a capability
+//! ([`super::LeanKernel`]); every test supplies a fixture implementation.
+//! So these tests establish, honestly: the export is deterministic, the
 //! coverage accounting is total, the result parser refuses every shape of
-//! non-proof, and a certificate fails closed on drift. They establish
-//! nothing at all about whether Lean accepts the generated proofs — that
-//! claim requires a real `lake build`, which has not been run here.
+//! non-proof, and a certificate fails closed on drift.
+//!
+//! Most fixtures replay *synthesized* output. The "Real pinned-kernel
+//! transcripts" section at the end of this file instead replays output
+//! recorded verbatim from the pinned Lean 4.34.0 running over the committed
+//! golden document (`testdata/shifted.kernel-output*.txt`), produced and
+//! re-derived by `scripts/lean-export-gate.py`. That is **local-host
+//! evidence**: hosted CI provisions no Lean toolchain, so what runs
+//! everywhere is the parser re-checked against recorded real bytes, not a
+//! live kernel.
 
 use std::path::{Path, PathBuf};
 
@@ -768,4 +773,161 @@ fn verify_certificate_against_artifact_rejects_a_prior_heads_artifact() {
     assert_eq!(error.code, "SPX-Z112");
 
     std::fs::remove_file(&path).ok();
+}
+
+// ---------------------------------------------------------------------
+// Real pinned-kernel transcripts
+//
+// Everything above this line replays *synthesized* kernel output. The
+// three transcripts below were produced by running the pinned Lean 4.34.0
+// toolchain (`proofs/kernel0-lean/lean-toolchain`) over the committed
+// golden document on a developer host, and copied here verbatim. They are
+// **local-host evidence only**: hosted CI provisions no Lean toolchain
+// (`docs/QUALITY-GATES.md`), so these tests re-check the parser against
+// recorded real bytes rather than running a kernel themselves.
+//
+// `scripts/lean-export-gate.py` is the runner that produced them and
+// re-derives them on a host that has the toolchain.
+// ---------------------------------------------------------------------
+
+fn transcript(name: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/proof_export/testdata")
+        .join(name);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("recorded kernel transcript {}: {error}", path.display()))
+}
+
+/// The two theorems the committed golden document exports, in the order
+/// its `#print axioms` commands appear.
+fn golden_theorem_names() -> Vec<String> {
+    vec![
+        format!("{NAMESPACE}.spx_app_2et_2eshifted_range_0"),
+        format!("{NAMESPACE}.spx_app_2et_2eshifted_ensures_0"),
+    ]
+}
+
+#[test]
+fn the_golden_document_declares_exactly_the_theorems_the_transcripts_name() {
+    // Binds the transcripts to the golden: re-pinning the export without
+    // re-recording the transcripts fails here rather than silently leaving
+    // the tests below checking a document that no longer exists.
+    assert_eq!(fixture_module().theorem_names(), golden_theorem_names());
+}
+
+#[test]
+fn a_real_pinned_kernel_run_over_the_golden_document_is_accepted() {
+    // The claim `docs/LEAN-OBLIGATION-EXPORT-V1.md` could not make when the
+    // export was written: Lean actually accepts these generated proofs.
+    // `omega` discharged both the checked-range obligation and the
+    // postcondition.
+    match parse(
+        &golden_theorem_names(),
+        PINNED_TOOLCHAIN,
+        &transcript("shifted.kernel-output.txt"),
+    ) {
+        KernelVerdict::Checked { axioms } => {
+            assert_eq!(
+                axioms,
+                vec![
+                    (
+                        golden_theorem_names()[0].clone(),
+                        vec![
+                            "Classical.choice".to_owned(),
+                            "Quot.sound".to_owned(),
+                            "propext".to_owned(),
+                        ],
+                    ),
+                    (
+                        golden_theorem_names()[1].clone(),
+                        vec!["Quot.sound".to_owned(), "propext".to_owned()],
+                    ),
+                ]
+            );
+        }
+        other => panic!("expected Checked, got {other:?}"),
+    }
+}
+
+#[test]
+fn real_kernel_noise_is_not_mistaken_for_an_axiom_report() {
+    // The real transcript interleaves nine lines of unused-variable linter
+    // output, multi-line hints and backtick-quoted identifiers with the two
+    // axiom lines. No synthesized fixture above contains any of that, and a
+    // parser that scanned loosely for quoted names would pick the linter's
+    // hints up as theorems.
+    let output = transcript("shifted.kernel-output.txt");
+    assert!(output.contains("warning: Variable name `h_lo_0`"));
+    assert!(output.contains("[apply] _h_lo_0"));
+    assert!(matches!(
+        parse(&golden_theorem_names(), PINNED_TOOLCHAIN, &output),
+        KernelVerdict::Checked { .. }
+    ));
+}
+
+#[test]
+fn a_real_sorry_in_the_golden_document_is_refused_as_an_admitted_hole() {
+    // Seeded by replacing the postcondition proof's `omega` with `sorry`
+    // and re-running the pinned kernel. Note what the toolchain actually
+    // prints: ``declaration uses `sorry` `` with BACKTICKS. The
+    // single-quoted spellings this parser was first written against never
+    // occur, so before the transcript existed the warning half of the
+    // admitted-hole check was dead against the very toolchain this module
+    // pins, and only the `sorryAx` axiom-line clause was load-bearing.
+    let output = transcript("shifted.kernel-output.sorry.txt");
+    assert!(
+        output.contains("declaration uses `sorry`"),
+        "the recorded warning must keep its real backtick quoting"
+    );
+    assert!(
+        !output.contains("declaration uses 'sorry'"),
+        "the pinned toolchain does not use the single-quoted spelling"
+    );
+    match parse(&golden_theorem_names(), PINNED_TOOLCHAIN, &output) {
+        KernelVerdict::Rejected(rejection) => assert_eq!(rejection.code(), "admitted_hole"),
+        other => panic!("expected a rejection, got {other:?}"),
+    }
+
+    // The warning line alone, with every axiom line removed, must still be
+    // refused: a `sorry` in a helper that carries no `#print axioms`
+    // command of its own is exactly the case the axiom-line clause cannot
+    // see.
+    let warning_only = output
+        .lines()
+        .filter(|line| !line.contains("depends on axioms"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!warning_only.contains("sorryAx"));
+    match parse(&golden_theorem_names(), PINNED_TOOLCHAIN, &warning_only) {
+        KernelVerdict::Rejected(rejection) => assert_eq!(rejection.code(), "admitted_hole"),
+        other => panic!("expected a rejection from the warning alone, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_vacuously_weakened_theorem_really_does_pass_the_kernel_and_only_the_byte_binding_catches_it() {
+    // The honest limit of kernel output as evidence, demonstrated rather
+    // than argued. The golden's postcondition conclusion was weakened from
+    // `(result ≥ v_a)` to `(result ≥ v_a) ∨ True` and proved by
+    // `Or.inr True.intro`. The pinned kernel exits 0 and reports an axiom
+    // set that is *cleaner* than the honest proof's — `does not depend on
+    // any axioms`. `parse` therefore accepts it, and must: nothing in the
+    // output is wrong.
+    //
+    // What refuses it is `verify_certificate_against_source`, which
+    // re-renders the Lean document from the bound source and compares
+    // bytes; see
+    // `a_certificate_whose_embedded_lean_document_was_weakened_is_refused_by_re_derivation`.
+    // This is why a certificate binds `lean_source_sha256` and embeds the
+    // document, instead of recording that a build succeeded.
+    let output = transcript("shifted.kernel-output.weakened.txt");
+    assert!(output.contains("does not depend on any axioms"));
+    assert!(
+        matches!(
+            parse(&golden_theorem_names(), PINNED_TOOLCHAIN, &output),
+            KernelVerdict::Checked { .. }
+        ),
+        "a weakened-but-true theorem is genuinely kernel-checked; the \
+         statement binding, not the verdict, is what makes it useless"
+    );
 }

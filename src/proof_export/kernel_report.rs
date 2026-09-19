@@ -176,9 +176,19 @@ pub fn parse(expected: &[String], toolchain: &str, output: &str) -> KernelVerdic
                 excerpt: excerpt(line),
             });
         }
-        if lower.contains("declaration uses 'sorry'")
-            || lower.contains("uses sorry")
-            || lower.contains("sorryax")
+        // Lean quotes the token in its admitted-hole warning differently
+        // across releases: the pinned 4.34.0 prints ``declaration uses
+        // `sorry` `` with backticks, while the single-quoted spelling this
+        // check was first written against never appears. Normalizing both
+        // to one form is deliberate -- listing each spelling is how the
+        // single-quoted patterns became dead against the very toolchain
+        // this module pins, which only running a real kernel revealed. The
+        // recorded transcript is `testdata/shifted.kernel-output.sorry.txt`.
+        let normalized = lower.replace('`', "'");
+        if normalized.contains("declaration uses 'sorry'")
+            || normalized.contains("declaration uses 'admit'")
+            || normalized.contains("uses sorry")
+            || normalized.contains("sorryax")
         {
             return KernelVerdict::Rejected(Rejection::AdmittedHole {
                 excerpt: excerpt(line),

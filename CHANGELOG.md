@@ -8,6 +8,31 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Run a real Lean kernel against the `proof_export` obligation export for the
+  first time (#186). The module shipped with no `LeanKernel` implementation and
+  no evidence Lean accepts its generated proofs -- every test replayed
+  synthesized output. `scripts/lean-export-gate.py` is that implementation,
+  deliberately outside the crate so the compiler gains no ambient process
+  authority: it confirms the host runs the pinned `leanprover/lean4:v4.34.0`
+  (the same pin `proofs/kernel0-lean` uses), checks the committed golden
+  document plus two seeded variants, and compares each result byte-for-byte
+  against transcripts committed under `src/proof_export/testdata/`, so recorded
+  evidence cannot silently go stale. Results: `omega` discharges both the
+  checked-range obligation and the postcondition, axiom-clean and
+  byte-reproducible across runs; a seeded `sorry` is refused; and a vacuously
+  weakened conclusion is *accepted* by the kernel with an axiom set cleaner
+  than the honest proof's -- recorded as data, because it is precisely why a
+  certificate binds `lean_source_sha256` and `verify_certificate_against_source`
+  re-renders the document from source instead of trusting the embedded bytes.
+  Fixes one real fail-open the real kernel exposed: Lean 4.34.0 prints
+  ``declaration uses `sorry` `` with backticks, so both single-quoted spellings
+  `kernel_report::parse` was written against (from synthesized fixtures) were
+  dead against the very toolchain the module pins, leaving only the `sorryAx`
+  clause load-bearing; quoting is now normalized. All kernel evidence is
+  **local-host only** -- hosted CI provisions no Lean toolchain, the gate is not
+  in `scripts/quality.sh` and not in `release-gate`'s blocker set, and every
+  certificate now carries that as an explicit nonclaim.
+
 - Narrow `ProjectFrontendCache`'s AST-level invalidation (`src/project/incremental.rs`):
   a provider module's own changed/added/removed source still invalidates its
   frontend cache entry, but an unrelated consumer that only imports from that

@@ -47,6 +47,7 @@ const NONCLAIMS_JSON: &str = "\"kernel_checked_covers_only_the_listed_obligation
 \"no_target_execution_and_no_project_test_discovery\",\
 \"not_human_approval_or_policy\",\
 \"not_signature_or_publication_authority\",\
+\"kernel_evidence_is_local_host_only_hosted_ci_provisions_no_lean_toolchain\",\
 \"read_only_no_source_changes\"";
 
 pub fn domain_digest(domain: &[u8], bytes: &[u8]) -> String {

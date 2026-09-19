@@ -183,8 +183,10 @@ fn external_consumers_share_one_bounded_nested_cargo_linker_path_binder() {
         consumers
             .matches("native_rust_cargo::cargo_command()")
             .count(),
-        10,
-        "nine effectful setup/lock/consumer commands plus the command-inspection test must use the binder"
+        14,
+        "thirteen effectful setup/lock/consumer commands (nine original plus the four \
+         tarball-packaging consumer commands added for the packaged-tarball round trip) \
+         plus the command-inspection test must use the binder"
     );
     for required in [
         ".env(\"LINK\", \".obj\")",
@@ -281,19 +283,45 @@ fn quality_gate_and_example_are_promotion_evidence_not_a_private_claim() {
 
 #[test]
 fn root_package_does_not_create_a_dependency_cycle_to_the_builder() {
+    // A private normal dependency of the root `semaprax` package is only a
+    // cycle risk if it reaches back into `semaprax` itself or into the
+    // builder crate (which itself depends on `semaprax`, see below). Rather
+    // than banning every `semaprax-*` normal dependency outright, check the
+    // actual property the test's name promises: no such dependency's own
+    // manifest names `semaprax` or the builder crate as one of its own
+    // dependencies.
     let root_manifest = read("Cargo.toml");
     let mut normal_dependencies = false;
+    let mut private_dependencies = Vec::new();
     for line in root_manifest.lines() {
         let line = line.trim();
         if line.starts_with('[') {
             normal_dependencies = line == "[dependencies]" || line.ends_with(".dependencies]");
-        } else if normal_dependencies {
-            assert!(
-                !line.starts_with("semaprax-"),
-                "private normal dependency: {line}"
-            );
+        } else if normal_dependencies && line.starts_with("semaprax-") {
+            let name = line
+                .split(['=', ' '])
+                .next()
+                .expect("dependency line has a name");
+            let manifest_path = line
+                .split("path = \"")
+                .nth(1)
+                .and_then(|tail| tail.split('"').next())
+                .unwrap_or_else(|| {
+                    panic!("private normal dependency without a workspace path: {line}")
+                });
+            private_dependencies.push((name.to_string(), manifest_path.to_string()));
         }
     }
     let builder_manifest = read("crates/semaprax-native-rust-interop-builder/Cargo.toml");
     assert!(builder_manifest.contains("semaprax = {"));
+
+    for (name, manifest_path) in private_dependencies {
+        let dependency_manifest = read(&format!("{manifest_path}/Cargo.toml"));
+        assert!(
+            !dependency_manifest.contains("semaprax = {")
+                && !dependency_manifest.contains("semaprax-native-rust-interop-builder"),
+            "private normal dependency `{name}` at `{manifest_path}` names `semaprax` or the \
+             builder crate as one of its own dependencies, which would create a cycle"
+        );
+    }
 }

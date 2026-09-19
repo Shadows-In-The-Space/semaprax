@@ -412,7 +412,7 @@ pub(super) fn validate_contract_replacement(
     // counts alone cannot prove that another predicate/body/signature survived.
     let mut programs = parse_revision(before)?;
     apply_contract(before, &mut programs, request)?;
-    let sources = super::materialize(&programs)?;
+    let sources = super::materialize(before, &programs)?;
     if sources.len() != after.sources().len()
         || sources
             .iter()

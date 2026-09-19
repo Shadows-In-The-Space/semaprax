@@ -240,6 +240,11 @@ fn stale_old_value_base_and_reminted_evidence_fail_closed() {
     );
 }
 
+/// `src/core.spx` owns `calculator.add`, so this rename *rewrites* it. A
+/// comment there is still refused: the rewrite goes through the
+/// comment-dropping canonical formatter, so admitting it would silently
+/// discard the comment. Narrowing the precondition to the rewrite domain
+/// (issue #274) must not weaken this.
 #[test]
 fn comment_bearing_source_is_outside_the_bounded_v1_rewrite_domain() {
     let fixture = Fixture::new();
@@ -249,6 +254,76 @@ fn comment_bearing_source_is_outside_the_bounded_v1_rewrite_domain() {
     let revision = fixture.revision();
     let transaction = transaction(&revision);
     assert_code(transaction.validate(revision), "SPX-G525");
+}
+
+/// Issue #274: a comment in a source the operation never rewrites must not
+/// refuse the transaction, and the candidate must carry that source's exact
+/// base bytes rather than a re-derived, comment-stripped projection.
+///
+/// `src/app.spx` imports `calculator.add` by `@id` under a local alias, so a
+/// display-name rename of that function changes `src/core.spx` only. Before
+/// this fix `ProjectCandidate::apply`'s `materialize` step re-derived
+/// *every* source through the canonical formatter, which is why the
+/// precondition had to span the whole workspace -- and why it was
+/// unsatisfiable for any project depending on a commented compiler-bundled
+/// package, whose source no project can edit.
+#[test]
+fn a_comment_outside_the_rewritten_source_is_admitted_and_preserved_verbatim() {
+    let fixture = Fixture::new();
+    let app = fixture.0.join("src/app.spx");
+    let commented = format!(
+        "// retained human note\n{}",
+        std::fs::read_to_string(&app).unwrap()
+    );
+    std::fs::write(&app, &commented).unwrap();
+    let revision = fixture.revision();
+    let base_app = revision
+        .sources()
+        .iter()
+        .find(|source| source.path().ends_with("app.spx"))
+        .expect("the fixture carries app.spx")
+        .source()
+        .to_owned();
+    assert!(
+        base_app.contains("// retained human note"),
+        "the fixture must really carry a comment outside the rewritten source"
+    );
+
+    transaction(&revision)
+        .validate(Arc::clone(&revision))
+        .expect("a comment outside the rewritten source must not refuse the rename");
+
+    let open = ProjectCandidate::open(Arc::clone(&revision), revision.project_revision()).unwrap();
+    let change = SemanticChange::new(
+        revision.project_revision(),
+        &json!({"kind":"rename_declaration", "name":"sum", "target":"calculator.add"}),
+    )
+    .unwrap();
+    let candidate = open.apply(open.candidate_digest(), &change).unwrap();
+    let candidate_app = candidate
+        .revision()
+        .sources()
+        .iter()
+        .find(|source| source.path().ends_with("app.spx"))
+        .expect("the candidate carries app.spx")
+        .source()
+        .to_owned();
+    assert_eq!(
+        candidate_app, base_app,
+        "an untouched source must keep its exact base bytes, comments included"
+    );
+    let candidate_core = candidate
+        .revision()
+        .sources()
+        .iter()
+        .find(|source| source.path().ends_with("core.spx"))
+        .expect("the candidate carries core.spx")
+        .source()
+        .to_owned();
+    assert!(
+        candidate_core.contains("fn sum("),
+        "the rewritten source must still carry the rename"
+    );
 }
 
 fn replacement_block() -> Value {

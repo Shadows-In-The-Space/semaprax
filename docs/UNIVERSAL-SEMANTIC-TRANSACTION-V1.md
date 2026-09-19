@@ -59,23 +59,31 @@ revision or old name fails closed.
 Project Candidate's `rename_declaration` implementation performs the actual
 typed rewrite, caller migration, canonical-source rebuild, ownership and
 cleanup replay, and native/Wasm admission. V1 additionally requires every base
-and candidate source to be comment-free canonical source. This bounded rule
-prevents the reused candidate formatter from silently erasing comments or
-normalizing unrelated trivia. Comment-bearing and noncanonical projects are not
-admitted by this first slice.
+and candidate source **that the operation rewrites** to be comment-free
+canonical source. This bounded rule prevents the reused candidate formatter
+from silently erasing comments or normalizing unrelated trivia. A
+comment-bearing or noncanonical *rewritten* source is not admitted by this
+first slice.
 
-"Every ... source" means the complete revision `ProjectCandidate::apply`
-rebuilds from, which is every compiler-bundled dependency source the project's
-manifest reaches as well as its own modules -- not only the module owning the
-renamed declaration. This is deliberate, not an overbroad bound narrower work
-happened to miss: `apply`'s candidate-materialization step re-derives every
-program in the revision through this same comment-dropping canonical
-formatter for every v1 operation, whether or not that operation's own rewrite
-touches it, so a source outside the rewrite still needs the comment-free
-requirement to guarantee the reformat is a no-op for it. A project depending
-on a commented bundled package (for example `std.auth` or `std.jobs`) cannot
-satisfy this precondition by editing its own source; `SPX-G525`'s message
-says so rather than reading as caller-actionable (issue #274).
+Sources the operation does not rewrite carry no such requirement (issue
+#274). `ProjectCandidate::apply`'s candidate-materialization step preserves
+an untouched program's **exact base bytes** rather than re-deriving them
+through the canonical formatter, so nothing in those sources can be lost and
+nothing about them needs proving. The requirement is enforced differentially,
+after the candidate exists: a candidate source byte-identical to its base is
+exempt; every source the candidate rewrote or dropped must have been
+comment-free canonical on both sides.
+
+Until issue #274 this requirement spanned the complete revision
+`ProjectCandidate::apply` rebuilds from -- every compiler-bundled dependency
+source the manifest reaches as well as the project's own modules -- because
+`materialize` re-derived every program unconditionally. That made the
+precondition unsatisfiable by construction for any project depending on a
+commented bundled package (`std.auth` carries 253 comment lines, `std.jobs`
+34), since bundled dependency source is compiler-immutable and no project can
+edit it. Preserving untouched bytes re-establishes the same guarantee
+structurally, and the refusal is now caller-actionable: it names a source the
+caller's own operation rewrites.
 
 ## ReplaceBlock
 

@@ -4,6 +4,7 @@
 //! workspace revision. Validation derives a Project candidate and deterministic
 //! evidence; it never writes source or grants publication authority.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -17,6 +18,7 @@ use super::{
 };
 
 mod add_declaration;
+mod canonical_sources;
 mod exact;
 pub(super) use add_declaration::add_declaration_eligibility;
 pub use add_declaration::SemanticTransactionAddDeclaration;
@@ -498,7 +500,6 @@ impl SemanticTransaction {
                 "semantic transaction expected workspace revision is stale",
             ));
         }
-        require_canonical_comment_free_sources(&base)?;
         let initial = ProjectCandidate::open(Arc::clone(&base), base.project_revision())?;
         let change = match &self.operation {
             SemanticTransactionOperation::RenameDisplayName(operation) => {
@@ -548,7 +549,7 @@ impl SemanticTransaction {
             }
         };
         let candidate = initial.apply(initial.candidate_digest(), &change)?;
-        require_canonical_comment_free_sources(candidate.revision())?;
+        canonical_sources::require_comment_free_canonical_rewrites(&base, candidate.revision())?;
         let candidate_workspace = candidate.revision().canonical_workspace_revision()?;
         let candidate_program_root = candidate_workspace.program_root()?;
         let source_review_text = candidate.source_review(candidate.candidate_digest())?;
@@ -1279,6 +1280,7 @@ pub(super) fn rename_display_name_eligibility(
     let mut explicit_identity = false;
     let mut monomorphic = false;
     let mut non_main = false;
+    let mut owner = None;
     for source in revision.sources() {
         let program =
             crate::parse(source.source(), Path::new(source.path())).map_err(|error| vec![error])?;
@@ -1288,16 +1290,12 @@ pub(super) fn rename_display_name_eligibility(
                 explicit_identity = function.explicit_id;
                 monomorphic = function.type_parameters.is_empty();
                 non_main = function.name != "main";
+                owner = Some(source.path().to_owned());
             }
         }
     }
-    let comment_free_canonical_workspace = revision.sources().iter().all(|source| {
-        crate::parse_with_comments(source.source(), Path::new(source.path())).is_ok_and(
-            |(program, comments)| {
-                comments.items.is_empty() && crate::format::canonical(&program) == source.source()
-            },
-        )
-    });
+    let comment_free_canonical_workspace =
+        canonical_sources::comment_free_canonical_rewrite_domain(revision, owner.as_deref());
     Ok(RenameDisplayNameEligibility {
         expected_old_value,
         comment_free_canonical_workspace,
@@ -1317,6 +1315,7 @@ pub(super) fn replace_block_eligibility(
     let mut explicit_identity = false;
     let mut monomorphic = false;
     let mut non_main = false;
+    let mut owner = None;
     for source in revision.sources() {
         let program =
             crate::parse(source.source(), Path::new(source.path())).map_err(|error| vec![error])?;
@@ -1332,11 +1331,15 @@ pub(super) fn replace_block_eligibility(
             explicit_identity = function.explicit_id;
             monomorphic = function.type_parameters.is_empty();
             non_main = function.name != "main";
+            owner = Some(source.path().to_owned());
         }
     }
     Ok(ReplaceBlockEligibility {
         expected_old_block,
-        comment_free_canonical_workspace: comment_free_canonical_workspace(revision),
+        comment_free_canonical_workspace: canonical_sources::comment_free_canonical_rewrite_domain(
+            revision,
+            owner.as_deref(),
+        ),
         explicit_identity,
         monomorphic,
         non_main,
@@ -1354,6 +1357,7 @@ pub(super) fn add_contract_eligibility(
     let mut monomorphic = false;
     let mut non_main = false;
     let mut inventory_below_capacity = false;
+    let mut owner = None;
     for source in revision.sources() {
         let program =
             crate::parse(source.source(), Path::new(source.path())).map_err(|error| vec![error])?;
@@ -1371,58 +1375,21 @@ pub(super) fn add_contract_eligibility(
                 .len()
                 .saturating_add(function.ensures.len())
                 < 1024;
+            owner = Some(source.path().to_owned());
         }
     }
     Ok(AddContractEligibility {
         expected_old_contract,
-        comment_free_canonical_workspace: comment_free_canonical_workspace(revision),
+        comment_free_canonical_workspace: canonical_sources::comment_free_canonical_rewrite_domain(
+            revision,
+            owner.as_deref(),
+        ),
         explicit_identity,
         monomorphic,
         non_main,
         inventory_below_capacity,
         unique_function: matches == 1,
     })
-}
-
-fn comment_free_canonical_workspace(revision: &ProjectRevision) -> bool {
-    revision.sources().iter().all(|source| {
-        crate::parse_with_comments(source.source(), Path::new(source.path())).is_ok_and(
-            |(program, comments)| {
-                comments.items.is_empty() && crate::format::canonical(&program) == source.source()
-            },
-        )
-    })
-}
-
-// This check spans every source `ProjectCandidate::apply`'s `materialize`
-// step will re-derive through the comment-dropping canonical formatter,
-// which is the complete revision `revision.sources()` returns -- the
-// project's own modules *and* every compiler-bundled dependency source
-// `standard_dependencies::extend_sources` reached (issue #274). That is not
-// an overbroad scope choice layered on a narrower rewrite: `materialize`
-// unconditionally reformats every program in the revision for every v1
-// operation, so this precondition is the only thing standing between an
-// already-canonical, comment-free base and a candidate that silently drops
-// comments from a source the operation never intended to touch. A project
-// cannot satisfy it by editing its own source when a bundled dependency
-// (e.g. `std.auth`, `std.jobs`) carries comments; the message says so rather
-// than reading as caller-actionable.
-fn require_canonical_comment_free_sources(
-    revision: &ProjectRevision,
-) -> Result<(), Vec<Diagnostic>> {
-    for source in revision.sources() {
-        let (program, comments) =
-            crate::parse_with_comments(source.source(), Path::new(source.path()))
-                .map_err(|error| vec![error])?;
-        if !comments.items.is_empty() || crate::format::canonical(&program) != source.source() {
-            return Err(invalid(
-                "semantic transaction v1 requires comment-free canonical source across the \
-                 complete workspace, including compiler-bundled dependency source; this is not \
-                 fixable by editing the project's own source",
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn parse_value(source: &str) -> Result<Value, Vec<Diagnostic>> {

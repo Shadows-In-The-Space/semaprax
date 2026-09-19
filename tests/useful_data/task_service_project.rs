@@ -245,55 +245,40 @@ assert.equal(linked.instance.exports.semaprax_main(), 0n);
 /// pins that too, rather than routing around it or asserting only the parts
 /// that pass.
 ///
-/// **New evidence, not previously documented**: Universal Semantic
-/// Transaction v1's `rename_display_name` requires the *entire* workspace --
-/// this project's own three modules **and every bundled dependency source
-/// reached**, per `comment_free_canonical_workspace` in
-/// `src/project/semantic_transaction.rs` iterating `revision.sources()`,
-/// which `src/project/build.rs::build_owned` populates from the same vector
-/// `standard_dependencies::extend_sources` appends bundled package source
-/// into -- to be entirely comment-free. `std.auth` carries 253 `//` comment
-/// lines and `std.jobs` 34 (`rg -c '//' std/auth/src/auth.spx
-/// std/jobs/src/jobs.spx`), so `preview` below fails closed with
-/// `SPX-G525` on first use, before any candidate is derived. Because that
-/// dependency source is compiler-bundled and immutable
-/// (`src/project/standard_dependencies.rs`), no project consuming
-/// `std.auth`/`std.jobs`/`std.log`/any other commented bundled package can
-/// ever satisfy this precondition by editing its own source -- this is not a
-/// gap in this project's authoring, it is a standing architectural
-/// intersection between the comment-free-source requirement and having any
-/// commented bundled dependency at all. `SPX-G525` and `SPX-G171` (this
-/// project's README) are two independent capacity/precondition ceilings that
-/// both happen to bite the same two-dependency reference application.
+/// **Issue #274 narrowed the precondition, and this project still refuses --
+/// for a different, caller-actionable reason.** Universal Semantic
+/// Transaction v1 used to require the *entire* workspace, every bundled
+/// dependency source included, to be comment-free canonical, because
+/// `ProjectCandidate::apply`'s `materialize` step re-derived every source
+/// through the comment-dropping canonical formatter. `std.auth` carries 253
+/// `//` lines and `std.jobs` 34, and that source is compiler-bundled and
+/// immutable (`src/project/standard_dependencies.rs`), so the precondition
+/// was unsatisfiable by construction for any consumer of a commented bundled
+/// package. `materialize` now preserves an untouched source's exact base
+/// bytes, and `semantic_transaction/canonical_sources.rs` requires
+/// comment-free canonical source only of the sources a transaction actually
+/// rewrites. Verified directly: with this project's own three modules copied
+/// out and stripped of comments, `semaprax change preview <copy>
+/// rename-display-name task_service.core.identifier_byte_ok
+/// identifier_char_is_safe` now succeeds against the same commented
+/// `std.auth` + `std.jobs` closure.
 ///
-/// **Issue #274 investigated narrowing this to only the renamed function's
-/// own module and concluded it would not be safe.** `ProjectCandidate::apply`
-/// (`src/project/candidate/mod.rs::materialize`) unconditionally re-derives
-/// *every* source in `revision.sources()` through the comment-dropping
-/// canonical formatter for every v1 operation, dependency sources included --
-/// not only the module an operation's own rewrite touches. The whole-workspace
-/// comment-free requirement is what lets that blind reformat be proven a
-/// no-op for every source the operation does not intend to change (a
-/// comment-free canonical formatter round-trips its own output exactly); an
-/// untouched but commented dependency source has no such guarantee and would
-/// have its comments silently dropped from the candidate the moment the
-/// requirement no longer covered it. `semantic_transaction_v2.rs`'s own
-/// `ReplaceExpression`, which *does* admit comments in the one file it edits,
-/// confirms this reading: it needed dedicated splice/round-trip machinery to
-/// do so for that single path and still requires every other source,
-/// dependency included, to remain comment-free canonical
-/// (`require_canonical_comment_free_sources_except`). Extending that to every
-/// untouched source in a v1 operation is future work on `materialize`, not a
-/// bounded fix to this one precondition. Issue #274 therefore only reworded
-/// the `SPX-G525` message so it no longer reads as fixable by editing this
-/// project's own source; the precondition and this test's outcome are
-/// unchanged.
+/// What still refuses here is this project's **own** source: `src/core.spx`,
+/// which owns `task_service.core.identifier_byte_ok` and is therefore the
+/// source the rename rewrites, carries 29 comment lines of its own (issue
+/// #274's summary asserted the project's three modules were comment-free;
+/// they are not). A rewritten source's comments would be dropped by the
+/// canonical formatter, so refusing is correct -- and now fixable by editing
+/// this project, which the old whole-workspace scope never was.
 ///
-/// This assertion is a stable regression, not a shrug: if a future change to
-/// `materialize` ever lets the precondition be narrowed safely, this test
-/// starts failing on the `Err` match and must be revisited to demonstrate the
-/// full apply/retest steps this issue's acceptance criterion actually asks
-/// for.
+/// `SPX-G525` and `SPX-G171` (this project's README) remain two independent
+/// ceilings that both happen to bite the same two-dependency reference
+/// application.
+///
+/// This assertion is a stable regression, not a shrug: if this project's own
+/// `src/core.spx` is ever authored comment-free, this test starts failing on
+/// the `Err` match and must be revisited to demonstrate the full apply/retest
+/// steps issue #194 step 7's acceptance criterion actually asks for.
 #[test]
 fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precondition() {
     project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
@@ -354,8 +339,9 @@ fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precond
 
         // 4. Preview: this is where the walk stops. Validating the exact
         // rename transaction against the selected workspace revision fails
-        // closed on the bundled dependency source's comments, not on
-        // anything this project's own three files contain.
+        // closed on the comments in this project's own `src/core.spx` -- the
+        // source the rename rewrites -- no longer on the immutable bundled
+        // dependency source the project cannot edit (issue #274).
         let transaction = SemanticTransaction::rename_display_name(
             &workspace_revision,
             SemanticTransactionRenameDisplayName::new(

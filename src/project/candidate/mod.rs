@@ -562,7 +562,7 @@ impl ProjectCandidate {
                 "intent changed permits, effects, or contract inventory",
             ));
         }
-        let sources = materialize(&programs)?;
+        let sources = materialize(&self.revision, &programs)?;
         // Candidate meaning must re-enter through canonical human source, never
         // through mutated HIR/graph fields. build_owned performs real Phase A,
         // ownership/cleanup replay, linkage and manifest-profile admission.
@@ -926,31 +926,64 @@ fn parse_revision(revision: &ProjectRevision) -> Result<Vec<Program>, Vec<Diagno
         .collect()
 }
 
-fn materialize(programs: &[Program]) -> Result<Vec<SemanticWorkspaceSource>, Vec<Diagnostic>> {
+/// Project the (possibly mutated) programs back to owned source bytes.
+///
+/// A source an intent never touched keeps its **exact base bytes** rather
+/// than being re-derived through the canonical formatter (issue #274).
+/// Re-deriving every source unconditionally was not merely wasted work: the
+/// canonical formatter drops comments, so a candidate silently lost every
+/// comment in every untouched source -- including compiler-bundled
+/// dependency source, which `standard_dependencies::extend_sources` keeps
+/// verbatim for an ordinary build and which no project can edit. That is
+/// what forced the comment-free precondition to span the complete workspace,
+/// making it unsatisfiable for any project depending on a commented bundled
+/// package.
+///
+/// The preservation test is textual and exact: a program is "untouched" when
+/// its canonical projection equals the canonical projection of the base
+/// source at the same path. That holds for every source an intent did not
+/// mutate, and it fails closed -- any intent that changes what canonical
+/// source a program renders to falls through to the re-derived bytes and
+/// their round-trip check, exactly as before.
+fn materialize(
+    base: &ProjectRevision,
+    programs: &[Program],
+) -> Result<Vec<SemanticWorkspaceSource>, Vec<Diagnostic>> {
+    let base_sources = base
+        .sources()
+        .iter()
+        .map(|source| (source.path(), source.source()))
+        .collect::<BTreeMap<_, _>>();
     let mut total = 0usize;
     let mut sources = Vec::new();
     for program in programs {
-        let (source, overflow) = crate::bounded_output::with_limit(MAX_TOTAL_SOURCE_BYTES, || {
+        let (derived, overflow) = crate::bounded_output::with_limit(MAX_TOTAL_SOURCE_BYTES, || {
             crate::format::canonical(program)
         });
         if overflow {
             return Err(capacity("candidate canonical source exceeds its bound"));
         }
+        let source = match preserved_base_source(&base_sources, &program.path, &derived)? {
+            Some(pristine) => pristine,
+            None => {
+                let reparsed = crate::parse(&derived, &program.path).map_err(|d| vec![d])?;
+                let (roundtrip, overflow) =
+                    crate::bounded_output::with_limit(MAX_TOTAL_SOURCE_BYTES, || {
+                        crate::format::canonical(&reparsed)
+                    });
+                if overflow || roundtrip != derived {
+                    return Err(stale(
+                        "candidate source is not an exact canonical round trip",
+                    ));
+                }
+                derived
+            }
+        };
         total = total
             .checked_add(source.len())
             .ok_or_else(|| capacity("candidate source size overflow"))?;
         if total > MAX_TOTAL_SOURCE_BYTES {
             return Err(capacity("candidate sources exceed the Project bound"));
-        }
-        let reparsed = crate::parse(&source, &program.path).map_err(|d| vec![d])?;
-        let (roundtrip, overflow) =
-            crate::bounded_output::with_limit(MAX_TOTAL_SOURCE_BYTES, || {
-                crate::format::canonical(&reparsed)
-            });
-        if overflow || roundtrip != source {
-            return Err(stale(
-                "candidate source is not an exact canonical round trip",
-            ));
         }
         sources.push(SemanticWorkspaceSource {
             path: program.path.clone(),
@@ -958,6 +991,33 @@ fn materialize(programs: &[Program]) -> Result<Vec<SemanticWorkspaceSource>, Vec
         });
     }
     Ok(sources)
+}
+
+/// The base bytes at `path` when this intent left that program's canonical
+/// projection exactly as the base source already projected to, otherwise
+/// `None`. Returning `Some` is what lets an untouched commented source
+/// survive a candidate unchanged; the cheap `derived == base` case covers an
+/// already-canonical, comment-free base without a second parse.
+fn preserved_base_source(
+    base_sources: &BTreeMap<&str, &str>,
+    path: &str,
+    derived: &str,
+) -> Result<Option<String>, Vec<Diagnostic>> {
+    let Some(base_source) = base_sources.get(path).copied() else {
+        return Ok(None);
+    };
+    if base_source == derived {
+        return Ok(Some(base_source.to_owned()));
+    }
+    let base_program = crate::parse(base_source, path).map_err(|d| vec![d])?;
+    let (base_canonical, overflow) =
+        crate::bounded_output::with_limit(MAX_TOTAL_SOURCE_BYTES, || {
+            crate::format::canonical(&base_program)
+        });
+    if overflow {
+        return Err(capacity("candidate canonical source exceeds its bound"));
+    }
+    Ok((base_canonical == derived).then(|| base_source.to_owned()))
 }
 
 fn invariant_facts(programs: &[Program]) -> Value {

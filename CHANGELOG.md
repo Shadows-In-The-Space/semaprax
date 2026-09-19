@@ -8,6 +8,20 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Stop Universal Semantic Transaction v1 from refusing every project with a
+  commented bundled dependency (#274). `ProjectCandidate::apply`'s
+  `materialize` step re-derived *every* source in the revision through the
+  comment-dropping canonical formatter, so the comment-free precondition had
+  to span the complete workspace -- including compiler-bundled dependency
+  source (`std.auth` carries 253 comment lines, `std.jobs` 34) that no project
+  can edit, making `SPX-G525` unsatisfiable by construction rather than by
+  authoring. `materialize` now preserves an untouched program's exact base
+  bytes, and the new `src/project/semantic_transaction/canonical_sources.rs`
+  enforces comment-free canonical source differentially, of exactly the
+  sources a transaction rewrites or drops. A comment in a rewritten source is
+  still refused with `SPX-G525`, and the `SPX-G525` regression that proves it
+  is unchanged.
+
 - Run a real Lean kernel against the `proof_export` obligation export for the
   first time (#186). The module shipped with no `LeanKernel` implementation and
   no evidence Lean accepts its generated proofs -- every test replayed

@@ -91,6 +91,7 @@ pub(in crate::project) fn add_declaration_eligibility(
     let mut explicit_identity = false;
     let mut monomorphic = false;
     let mut matches = 0usize;
+    let mut owner = None;
     for source in revision.sources() {
         let program =
             crate::parse(source.source(), Path::new(source.path())).map_err(|error| vec![error])?;
@@ -102,11 +103,16 @@ pub(in crate::project) fn add_declaration_eligibility(
             explicit_identity = function.explicit_id;
             monomorphic = function.type_parameters.is_empty();
             expected_old_module = Some(module_snapshot(source.path(), source.source(), &program)?);
+            owner = Some(source.path().to_owned());
         }
     }
     Ok(AddDeclarationEligibility {
         expected_old_module,
-        comment_free_canonical_workspace: super::comment_free_canonical_workspace(revision),
+        comment_free_canonical_workspace:
+            super::canonical_sources::comment_free_canonical_rewrite_domain(
+                revision,
+                owner.as_deref(),
+            ),
         explicit_identity,
         monomorphic,
         unique_function: matches == 1,

@@ -102,34 +102,36 @@ walks issue #194 step 7's inspect/context/impact/preview chain against
 `task_service.core.identifier_byte_ok`: `available_operations` (inspect),
 `semantic_context`, and `semantic_impact` all succeed exactly as designed.
 `preview` -- validating a `rename_display_name` transaction -- fails closed
-with `SPX-G525`. Universal Semantic Transaction v1 requires the *entire*
-workspace comment-free, and that workspace includes every bundled dependency
-source actually reached, not only this project's own three modules
-(`comment_free_canonical_workspace` in `src/project/semantic_transaction.rs`
-iterates `revision.sources()`, which `standard_dependencies::extend_sources`
-populates with bundled package source). `std.auth` carries 253 `//` comment
-lines and `std.jobs` 34. Because bundled dependency source is
-compiler-immutable, no project that declares a `[dependencies]` edge on any
-commented bundled package -- not only this one -- can ever satisfy this
-precondition by editing its own source. This is new evidence, distinct from
-`SPX-G171`/`SPX-G256` above: it is a precondition on an operation, not a
-capacity ceiling.
+with `SPX-G525` -- but no longer for the reason first recorded here.
 
-Issue #274 investigated narrowing this precondition to only the renamed
-declaration's own module and concluded that would not be safe: every v1
-operation rebuilds its candidate by re-deriving *all* of `revision.sources()`
-through the comment-dropping canonical formatter
-(`ProjectCandidate::apply`'s `materialize`), not only the source(s) an
-operation's own rewrite touches. Requiring the whole workspace to already be
-comment-free canonical is what proves that blind reformat is a no-op for
-every source an operation does not intend to change; narrowing the check
-without first teaching `materialize` to preserve untouched sources' exact
-bytes would let it silently drop comments from `std.auth`/`std.jobs` instead
-of refusing. That is future work on the shared candidate-rebuild path across
-every v1/v2 operation, not a bounded fix to one precondition, so the write
-side of this demonstration remains open on this project. `SPX-G525`'s message
-was reworded so it no longer reads as fixable by editing this project's own
-source.
+Universal Semantic Transaction v1 used to require the *entire* workspace to
+be comment-free canonical, and that workspace included every bundled
+dependency source actually reached, not only this project's own three
+modules. `std.auth` carries 253 `//` comment lines and `std.jobs` 34, and
+bundled dependency source is compiler-immutable, so no project declaring a
+`[dependencies]` edge on a commented bundled package could ever satisfy the
+precondition by editing its own source.
+
+Issue #274 fixed that at the structural cause. `ProjectCandidate::apply`'s
+`materialize` step now preserves an untouched program's exact base bytes
+instead of re-deriving every source through the comment-dropping canonical
+formatter, and `src/project/semantic_transaction/canonical_sources.rs`
+requires comment-free canonical source only of the sources a transaction
+actually rewrites. Checked directly: with this project's own three modules
+copied out and stripped of comments, `semaprax change preview <copy>
+rename-display-name task_service.core.identifier_byte_ok
+identifier_char_is_safe` succeeds against the same commented `std.auth` +
+`std.jobs` closure.
+
+What still refuses on the checked-in project is this project's **own**
+source. `src/core.spx` owns `task_service.core.identifier_byte_ok` and is
+therefore the source the rename rewrites, and it carries 29 comment lines.
+A rewritten source's comments would be dropped by the canonical formatter, so
+refusing is correct -- and, unlike the old whole-workspace scope, it is
+fixable here. Authoring `src/core.spx` comment-free would complete issue
+\#194 step 7's apply/retest half; the comments are kept deliberately because
+this file is reference documentation as much as it is code, so the write side
+of that demonstration stays open by choice rather than by construction.
 
 **Neither `std.log` nor `std.tracing` can be added to this project's
 dependency closure.** Both packages are wired into the compiler's bundled

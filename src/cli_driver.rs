@@ -399,6 +399,13 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
             print!("{output}");
             Ok(())
         }
+        CommandId::Workflow => {
+            let command = cli::typed_workflow::parse(&args[1..])?;
+            let output =
+                cli::typed_workflow::run(&command).map_err(|error| report(&[error], false))?;
+            print!("{output}");
+            Ok(())
+        }
         CommandId::Add => {
             let options = cli::add::parse(&args[1..])?;
             cli::add::run(&options, |errors| report(errors, false))

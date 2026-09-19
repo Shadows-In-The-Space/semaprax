@@ -34,6 +34,7 @@ pub(crate) mod review;
 pub(crate) mod semantic_cache;
 pub(crate) mod service;
 pub(crate) mod skills;
+pub(crate) mod typed_workflow;
 pub(crate) mod verify;
 pub(crate) mod version;
 pub(crate) mod workspace_session;

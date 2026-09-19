@@ -263,6 +263,21 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
         assert_eq!(current.matches(line).count(), 1);
         current = current.replacen(line, "", 1);
     }
+    // `semaprax workflow inspect|validate|checkpoint|dispatch` was added by
+    // issue #208's CLI/API surface, also after these witnesses were pinned.
+    // Normalize it away here, exactly as every other intentional usage
+    // addition above is, so the historical byte and digest pins below keep
+    // describing the surface they were taken from.
+    const WORKFLOW_LINES: [&str; 4] = [
+        "semaprax workflow inspect <workflow.json>\n",
+        "semaprax workflow validate <workflow.json>\n",
+        "semaprax workflow checkpoint <checkpoint.json>\n",
+        "semaprax workflow dispatch <policy.json> <request.json>\n",
+    ];
+    for line in WORKFLOW_LINES {
+        assert_eq!(current.matches(line).count(), 1);
+        current = current.replacen(line, "", 1);
+    }
     const CACHE_OPEN_LINES: [&str; 2] = [
         "semaprax semantic-cache-cold-open <manifest>\n",
         "semaprax semantic-cache-warm-open <manifest> <store-root> <entry-digest>\n",

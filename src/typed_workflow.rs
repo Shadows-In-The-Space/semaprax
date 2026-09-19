@@ -89,6 +89,7 @@ pub mod compensation_order;
 pub mod declared_dispatch;
 pub mod engine;
 pub mod graph;
+pub mod graph_wire;
 pub mod human_gate;
 pub mod model_routing;
 pub mod retry;

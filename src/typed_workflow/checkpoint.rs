@@ -147,6 +147,16 @@ impl Checkpoint {
         self.sequence
     }
 
+    /// The recorded `(step, run)` compensation-ledger snapshot, in the
+    /// strictly ascending order [`CompensationLedger::snapshot`] always
+    /// produces. Read-only: nothing here lets a caller mutate or replay a
+    /// compensation from this value, matching [`Checkpoint`]'s own
+    /// non-authority (see the module docs above).
+    #[must_use]
+    pub fn ledger_snapshot(&self) -> &[(u32, u64)] {
+        &self.ledger_snapshot
+    }
+
     fn is_intact(&self) -> bool {
         self.digest
             == digest_of(

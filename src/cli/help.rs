@@ -128,6 +128,7 @@ pub(crate) enum CommandId {
     Repairs,
     Repair,
     Audit,
+    Workflow,
     Version,
     VersionFlag,
     // Keep this final: the closed-catalog test uses its ordinal as the count.
@@ -165,6 +166,7 @@ static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: CommandId::Package, canonical: "package", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax package report <file> [--max-bytes N]", "semaprax package lock <subject.json>... [--max-bytes N]", "semaprax package resolve <subject.json>... --require <package>:<range> [--require ...] --target <native64|wasm32> [--allow-capability <capability>]... [--max-bytes N]"] },
     CommandSpec { id: CommandId::Release, canonical: "release", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax release verify <release-dir>"] },
     CommandSpec { id: CommandId::Audit, canonical: "audit", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax audit inspect <capsule.json>", "semaprax audit verify <capsule.json> <objects-dir> [--require-role <role>]... [--revoke <identity>]... [--trust-log <log-id>]... [--min-checkpoint-size <n>] [--now <unix-seconds>]", "semaprax audit diff <capsule-a.json> <capsule-b.json>"] },
+    CommandSpec { id: CommandId::Workflow, canonical: "workflow", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax workflow inspect <workflow.json>", "semaprax workflow validate <workflow.json>", "semaprax workflow checkpoint <checkpoint.json>", "semaprax workflow dispatch <policy.json> <request.json>"] },
     CommandSpec { id: CommandId::Add, canonical: "add", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax add <dir>|semaprax.toml <package> <range>"] },
     CommandSpec { id: CommandId::Fetch, canonical: "fetch", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax fetch <cache-dir> <subject.json>..."] },
     CommandSpec { id: CommandId::ProjectImage, canonical: "project-image", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax project-image <manifest>"] },
@@ -1010,6 +1012,7 @@ mod tests {
         "package",
         "release",
         "audit",
+        "workflow",
         "add",
         "assurance-policy",
         "assurance-diff",

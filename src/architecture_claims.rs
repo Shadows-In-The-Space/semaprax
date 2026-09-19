@@ -490,7 +490,8 @@ fn walk_for_edges(root: &ResolvedExpr, walked: &mut usize, node: &mut NodeFacts)
             }
             ResolvedExprKind::Unary { value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push(value),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push(left);
                 pending.push(right);

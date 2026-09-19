@@ -17,7 +17,8 @@ pub(super) fn child_expressions(expression: &ResolvedExpr) -> Vec<&ResolvedExpr>
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => vec![value.as_ref()],
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => vec![value.as_ref()],
         ResolvedExprKind::Binary { left, right, .. } => vec![left.as_ref(), right.as_ref()],
         ResolvedExprKind::ByteRange {
             source, start, end, ..

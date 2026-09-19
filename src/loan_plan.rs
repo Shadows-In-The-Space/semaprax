@@ -980,7 +980,8 @@ fn evaluation_children(expression: &ResolvedExpr) -> Vec<&ResolvedExpr> {
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => vec![value],
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => vec![value],
         ResolvedExprKind::Binary { left, right, .. } => vec![left, right],
         ResolvedExprKind::ConstructRecord { fields, .. }
         | ResolvedExprKind::ConstructVariant { fields, .. } => {
@@ -1354,7 +1355,8 @@ fn push_children<'a>(expression: &'a ResolvedExpr, pending: &mut Vec<&'a Resolve
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => pending.push(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             pending.push(right);
             pending.push(left);

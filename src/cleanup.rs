@@ -1182,7 +1182,8 @@ impl InventoryBuilder<'_> {
                         | ResolvedExprKind::Project { base: value, .. }
                         | ResolvedExprKind::Try { operand: value, .. }
                         | ResolvedExprKind::TryOption { operand: value, .. }
-                        | ResolvedExprKind::Upcast { source: value } => {
+                        | ResolvedExprKind::Upcast { source: value }
+                        | ResolvedExprKind::Yield { request: value } => {
                             enter = (index == 0).then_some(value.as_ref());
                         }
                         ResolvedExprKind::Binary { left, right, .. } => {

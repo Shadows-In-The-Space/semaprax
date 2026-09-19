@@ -40,6 +40,7 @@ const REASON_RECORD_UPDATE: &str = "record_update";
 const REASON_RECORD_PROJECTION: &str = "record_projection";
 const REASON_MATCH_EXPRESSION: &str = "match_expression";
 const REASON_TRY_EXPRESSION: &str = "try_expression";
+const REASON_YIELD_EXPRESSION: &str = "yield_expression";
 const REASON_ASSIGNMENT: &str = "assignment_statement";
 const REASON_GENERIC_CALL: &str = "generic_call";
 const REASON_UNRESOLVED_CALL: &str = "unresolved_call";
@@ -638,6 +639,7 @@ impl<'a> Analyzer<'a> {
             ExprKind::MethodCall { .. } | ExprKind::SuperMethod { .. } => Some(REASON_METHOD_CALL),
             ExprKind::Match { .. } => Some(REASON_MATCH_EXPRESSION),
             ExprKind::Try { .. } => Some(REASON_TRY_EXPRESSION),
+            ExprKind::Yield { .. } => Some(REASON_YIELD_EXPRESSION),
         }
     }
 
@@ -895,6 +897,7 @@ impl<'a> Analyzer<'a> {
             ExprKind::Project { .. } => Outcome::Unsupported(REASON_RECORD_PROJECTION),
             ExprKind::Match { .. } => Outcome::Unsupported(REASON_MATCH_EXPRESSION),
             ExprKind::Try { .. } => Outcome::Unsupported(REASON_TRY_EXPRESSION),
+            ExprKind::Yield { .. } => Outcome::Unsupported(REASON_YIELD_EXPRESSION),
         }
     }
 

@@ -47,6 +47,7 @@ pub fn closure_function(
         result_id: ValueId::result(&execution),
         return_type: *result.clone(),
         effects: Vec::new(),
+        yields: None,
         requires: Vec::new(),
         ensures: Vec::new(),
         body: *body.clone(),

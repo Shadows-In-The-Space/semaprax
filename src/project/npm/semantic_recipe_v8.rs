@@ -654,6 +654,7 @@ fn render_expr(
             names.field_name(field)?
         )),
         ResolvedExprKind::Upcast { .. }
+        | ResolvedExprKind::Yield { .. }
         | ResolvedExprKind::ByteRange { .. }
         | ResolvedExprKind::Call { .. } => Err(package_error(
             "owned-data semantic recipe expression is unsupported",

@@ -153,6 +153,16 @@ pub enum ResolvedExprKind {
     Upcast {
         source: Box<ResolvedExpr>,
     },
+    /// Resumable Effects v1 (issue #204): `yield <request>`. `request`'s
+    /// type is the enclosing function's declared `yields` request type; the
+    /// whole node's own `ResolvedExpr::ty` is the declared response type.
+    /// Admitted only as a direct top-level statement or tail expression of
+    /// a `yields`-declaring function's own body block, exactly once --
+    /// `hir::validation::yields` enforces both. See
+    /// `docs/RESUMABLE-EFFECTS-V1.md`.
+    Yield {
+        request: Box<ResolvedExpr>,
+    },
 }
 
 impl ResolvedMatchArm {

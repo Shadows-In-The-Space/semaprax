@@ -270,6 +270,10 @@ pub(super) fn materialize_function_template(
         result_id,
         return_type,
         effects: template.effects.clone(),
+        // Resumable Effects v1 (issue #204): `hir::resolve_yield` refuses
+        // `yields` on any generic function, so a template never carries
+        // one to substitute here.
+        yields: None,
         requires,
         ensures,
         body,
@@ -842,10 +846,14 @@ pub(super) fn materialize_template_expr(
             err_field: err_field.clone(),
             residual_type: substitute_type(residual_type, &template.id, arguments)?,
         },
+        // Resumable Effects v1 (issue #204): unreachable in practice --
+        // `hir::resolve_yield` refuses `yields` on any generic function
+        // before a template is ever built.
         ResolvedExprKind::ConstructVariant { .. }
         | ResolvedExprKind::Try { .. }
         | ResolvedExprKind::TryOption { .. }
-        | ResolvedExprKind::Upcast { .. } => {
+        | ResolvedExprKind::Upcast { .. }
+        | ResolvedExprKind::Yield { .. } => {
             return Err(hir_error(
                 "generic template uses an expression outside the direct-scalar slice",
             ));

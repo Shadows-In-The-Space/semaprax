@@ -2330,7 +2330,8 @@ fn resolved_function_imports(function: &hir::ResolvedFunction) -> BTreeSet<hir::
             | hir::ResolvedExprKind::Try { operand: value, .. }
             | hir::ResolvedExprKind::TryOption { operand: value, .. }
             | hir::ResolvedExprKind::Project { base: value, .. }
-            | hir::ResolvedExprKind::Upcast { source: value } => visit(value, imports),
+            | hir::ResolvedExprKind::Upcast { source: value }
+            | hir::ResolvedExprKind::Yield { request: value } => visit(value, imports),
             hir::ResolvedExprKind::Binary { left, right, .. } => {
                 visit(left, imports);
                 visit(right, imports);
@@ -4526,7 +4527,8 @@ impl<'a> CheckedValueNode<'a> {
                 E::HostCommandCall(call) => call.args.get(index).map(Self::Expression),
                 E::Unary { value, .. }
                 | E::Project { base: value, .. }
-                | E::Upcast { source: value } => (index == 0).then_some(Self::Expression(value)),
+                | E::Upcast { source: value }
+                | E::Yield { request: value } => (index == 0).then_some(Self::Expression(value)),
                 E::Try {
                     operand,
                     residual_type,

@@ -167,7 +167,8 @@ pub(super) fn expression_has_try(expression: &ResolvedExpr) -> bool {
         } => expression_has_try(source) || expression_has_try(start) || expression_has_try(end),
         ResolvedExprKind::Unary { value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_has_try(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_has_try(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_has_try(left) || expression_has_try(right)
         }

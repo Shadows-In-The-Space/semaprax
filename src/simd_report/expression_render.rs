@@ -235,6 +235,11 @@ pub(super) fn render_expr(
         ResolvedExprKind::Upcast { source } => {
             output.push_str(&render_child(walker, source, 7));
         }
+        ResolvedExprKind::Yield { request } => {
+            output.push_str("yield(");
+            output.push_str(&render_child(walker, request, 0));
+            output.push(')');
+        }
     }
 }
 

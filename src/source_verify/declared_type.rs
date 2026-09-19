@@ -701,6 +701,7 @@ fn generic_function_expression_is_admitted(
             ExprKind::ConstructVariant { .. }
             | ExprKind::Project { .. }
             | ExprKind::Try { .. }
+            | ExprKind::Yield { .. }
             | ExprKind::MethodCall { .. }
             | ExprKind::SuperMethod { .. } => return false,
         }
@@ -814,6 +815,7 @@ fn substitute_forwarded_call_arguments(
         }
         ExprKind::Unary { value, .. }
         | ExprKind::Try { operand: value }
+        | ExprKind::Yield { request: value }
         | ExprKind::Project { base: value, .. } => {
             substitute_forwarded_call_arguments(function, arguments, value)?;
         }

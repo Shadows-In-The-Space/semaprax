@@ -837,6 +837,18 @@ impl<'a, 'p> IterativeVerifier<'a, 'p> {
                     });
                 }
             }
+            // Resumable Effects v1 (issue #204). See
+            // `iterative::calls::frame_resume_yield`.
+            ExprKind::Yield { request } => {
+                self.frames.push(VerifierFrame::ResumeYield {
+                    expression,
+                    request,
+                });
+                self.frames.push(VerifierFrame::Enter {
+                    expression: request,
+                    scope,
+                });
+            }
             ExprKind::Try { operand } => {
                 self.frames.push(VerifierFrame::ResumeTry {
                     expression,

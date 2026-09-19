@@ -327,6 +327,11 @@ pub(super) enum Frame<'expr> {
         span: Span,
         path: String,
     },
+    /// Resumable Effects v1 (issue #204). See `hir::resolve_yield`.
+    FinishYield {
+        span: Span,
+        path: String,
+    },
     AfterUpdateBase {
         span: Span,
         path: String,
@@ -446,6 +451,7 @@ pub(super) fn frame_owned_capacity(
         | Frame::ScalarMatchNext { path, .. }
         | Frame::ScalarMatchAfterArm { path, .. }
         | Frame::FinishTry { path, .. }
+        | Frame::FinishYield { path, .. }
         | Frame::AfterUpdateBase { path, .. }
         | Frame::UpdateNext { path, .. }
         | Frame::UpdateAfterField { path, .. }

@@ -193,7 +193,9 @@ pub(super) fn resolved_expr_owned_capacity(expression: &ResolvedExpr) -> usize {
         }
         ResolvedExprKind::ArrayU8(values) => bytes += values.capacity(),
         ResolvedExprKind::Unary { value: operand, .. } => bytes += child(operand),
-        ResolvedExprKind::Upcast { source } => bytes += child(source),
+        ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
+            bytes += child(source)
+        }
         ResolvedExprKind::Project { base, field } => {
             bytes += child(base) + field.as_str().len();
         }

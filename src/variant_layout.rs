@@ -568,7 +568,8 @@ fn collect_expr_variant_types(
             }
             ResolvedExprKind::Unary { value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => {
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => {
                 pending.push(Work::Expression(value));
             }
             ResolvedExprKind::Try {

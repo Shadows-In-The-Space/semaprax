@@ -515,6 +515,7 @@ pub(crate) fn precheck_program(program: &Program) -> Result<(), Vec<Diagnostic>>
                 expressions.extend(arms.iter().map(|arm| &arm.value));
             }
             ExprKind::Try { operand }
+            | ExprKind::Yield { request: operand }
             | ExprKind::UpdateRecord { base: operand, .. }
             | ExprKind::Project { base: operand, .. } => expressions.push(operand),
             ExprKind::MethodCall { receiver, args, .. } => {
@@ -639,6 +640,7 @@ fn scalar_expr(expression: &Expr) -> bool {
         | ExprKind::ConstructVariant { .. }
         | ExprKind::Match { .. }
         | ExprKind::Try { .. }
+        | ExprKind::Yield { .. }
         | ExprKind::UpdateRecord { .. }
         | ExprKind::Project { .. }
         | ExprKind::MethodCall { .. }

@@ -93,6 +93,7 @@ fn fixed_expression_identity_slots(kind: &ExprKind) -> usize {
     const BASE: usize = 3;
     match kind {
         ExprKind::Try { .. } => BASE + 5,
+        ExprKind::Yield { .. } => BASE,
         ExprKind::ConstructVariant { .. } => BASE + 2,
         ExprKind::Call { .. }
         | ExprKind::MethodCall { .. }
@@ -212,7 +213,7 @@ fn ast_expr_identity_slots(expression: &Expr) -> Result<usize, Vec<Diagnostic>> 
                 slots = checked_builder_sum(slots, ast_expr_identity_slots(&arm.value)?)?;
             }
         }
-        ExprKind::Try { operand } => {
+        ExprKind::Try { operand } | ExprKind::Yield { request: operand } => {
             slots = checked_builder_sum(slots, ast_expr_identity_slots(operand)?)?;
         }
         ExprKind::UpdateRecord { base, fields } => {

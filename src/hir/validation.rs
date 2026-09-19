@@ -1491,7 +1491,13 @@ impl<'a> HirValidator<'a> {
                 .validate_template_result_expression(
                     template, execution, expression, values, path,
                 )?,
-            ResolvedExprKind::TryOption { .. } | ResolvedExprKind::Upcast { .. } => {
+            // Resumable Effects v1 (issue #204): unreachable in practice --
+            // `hir::resolve_yield` refuses `yields` on any generic function
+            // before a template is ever built -- but still outside this
+            // slice's direct-scalar admission if it were ever reached.
+            ResolvedExprKind::TryOption { .. }
+            | ResolvedExprKind::Upcast { .. }
+            | ResolvedExprKind::Yield { .. } => {
                 return Err(hir_error(
                     "generic template expression is outside the direct-scalar slice",
                 ));
@@ -2181,6 +2187,10 @@ impl<'a> HirValidator<'a> {
                 field: &'e DeclarationId,
             },
             Upcast {
+                expression: &'e ResolvedExpr,
+            },
+            /// Resumable Effects v1 (issue #204). See `hir::resolve_yield`.
+            Yield {
                 expression: &'e ResolvedExpr,
             },
             Try {
@@ -3514,6 +3524,19 @@ impl<'a> HirValidator<'a> {
                                 expression: source,
                                 scope,
                                 path: format!("{path}.source"),
+                            });
+                        }
+                        // Resumable Effects v1 (issue #204): the request
+                        // resolves like any other child expression; its
+                        // own type and the whole node's ownership are
+                        // independently re-derived on the way back up,
+                        // matching every other node here.
+                        ResolvedExprKind::Yield { request } => {
+                            frames.push(Frame::Yield { expression });
+                            frames.push(Frame::Enter {
+                                expression: request,
+                                scope,
+                                path: format!("{path}.request"),
                             });
                         }
                         ResolvedExprKind::Try { operand, .. } => {
@@ -5635,6 +5658,25 @@ impl<'a> HirValidator<'a> {
                     };
                     self.validate_upcast(expression, source)?;
                     let ownership = self.expected_ownership(&expression.ty, OwnershipMode::Own)?;
+                    self.finish_expr(expression, &expression.ty, ownership)?;
+                    scopes.push(scope);
+                }
+                Frame::Yield { expression } => {
+                    let scope = scopes.pop().expect("yield scope retained");
+                    if !matches!(expression.kind, ResolvedExprKind::Yield { .. }) {
+                        unreachable!()
+                    }
+                    // `hir::resolve_yield` already fixed `expression.ty` up
+                    // to the declared response type and checked it is an
+                    // admitted Copy scalar; re-derive that fact rather than
+                    // trusting it silently.
+                    if !crate::hir::is_scalar_resolved_type(&expression.ty) {
+                        return Err(hir_error(
+                            "resolved `yield` expression type is not an admitted Copy scalar",
+                        ));
+                    }
+                    let ownership =
+                        self.expected_ownership(&expression.ty, OwnershipMode::Value)?;
                     self.finish_expr(expression, &expression.ty, ownership)?;
                     scopes.push(scope);
                 }
@@ -7862,6 +7904,23 @@ impl<'a> HirValidator<'a> {
                 let ownership = self.expected_ownership(&expression.ty, OwnershipMode::Own)?;
                 (expression.ty.clone(), ownership)
             }
+            // Resumable Effects v1 (issue #204): mirrors `Frame::Yield` in
+            // the iterative validator above -- the request is an ordinary
+            // child, and the whole node's type/ownership were already
+            // fixed up to the declared response type by
+            // `hir::resolve_yield`.
+            ResolvedExprKind::Yield { request } => {
+                self.validate_expr_recursive_reference(
+                    function,
+                    request,
+                    scope,
+                    &format!("{path}.request"),
+                    allow_moves,
+                    allowed_effects,
+                )?;
+                let ownership = self.expected_ownership(&expression.ty, OwnershipMode::Value)?;
+                (expression.ty.clone(), ownership)
+            }
         };
 
         self.require_type(&expression.ty, &ty, "expression")?;
@@ -8157,6 +8216,7 @@ impl<'a> HirValidator<'a> {
                     | ResolvedExprKind::ConstructVariant { .. }
                     | ResolvedExprKind::Try { .. }
                     | ResolvedExprKind::TryOption { .. }
+                    | ResolvedExprKind::Yield { .. }
                     | ResolvedExprKind::UpdateRecord { .. } => {}
                 },
                 Frame::AfterThen {

@@ -716,7 +716,7 @@ impl FunctionPlan {
             ResolvedExprKind::Project { base, .. } => {
                 self.collect_expr(program, variant_layouts, base, parameter_count, frame)?;
             }
-            ResolvedExprKind::Upcast { source } => {
+            ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
                 self.collect_expr(program, variant_layouts, source, parameter_count, frame)?;
             }
             ResolvedExprKind::UpdateRecord { base, fields, .. } => {
@@ -911,7 +911,8 @@ fn expression_uses_str_ops(expression: &ResolvedExpr) -> bool {
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_uses_str_ops(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_uses_str_ops(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_uses_str_ops(left) || expression_uses_str_ops(right)
         }
@@ -5232,6 +5233,16 @@ impl Emitter<'_> {
                 let base = self.emit_expr(base)?;
                 let projected = self.project_value(&base, field)?;
                 self.materialize(expr, &projected)
+            }
+            // Resumable Effects v1 (issue #204): explicit, tested refusal,
+            // matching the Core Wasm scalar lane's -- see
+            // `docs/RESUMABLE-EFFECTS-V1.md`.
+            ResolvedExprKind::Yield { .. } => {
+                return Err(Diagnostic::io(
+                    "SPX-W126",
+                    "`yield` is not yet lowered by the WebAssembly backend; a `yields`-declaring \
+                     function is not admitted for this target",
+                ));
             }
             ResolvedExprKind::Upcast { source } => {
                 // Class Inheritance v1: copy the ancestor prefix fields from

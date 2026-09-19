@@ -873,7 +873,8 @@ impl<'a> Node<'a> {
                 E::HostCommandCall(c) => c.args.get(index).map(Self::Expression),
                 E::Unary { value, .. }
                 | E::Project { base: value, .. }
-                | E::Upcast { source: value } => (index == 0).then_some(Self::Expression(value)),
+                | E::Upcast { source: value }
+                | E::Yield { request: value } => (index == 0).then_some(Self::Expression(value)),
                 E::Try {
                     operand,
                     residual_type,

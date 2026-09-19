@@ -380,7 +380,8 @@ fn push_children<'a>(expression: &'a ResolvedExpr, pending: &mut Vec<&'a Resolve
         }
         ResolvedExprKind::Unary { value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => pending.push(value),
         ResolvedExprKind::Binary { left, right, .. } => pending.extend([right.as_ref(), left]),
         ResolvedExprKind::Block { statements, tail } => {
             pending.push(tail);
@@ -736,5 +737,6 @@ fn expression_kind(kind: &ResolvedExprKind) -> &'static str {
         ResolvedExprKind::UpdateRecord { .. } => "record_update",
         ResolvedExprKind::Project { .. } => "project",
         ResolvedExprKind::Upcast { .. } => "upcast",
+        ResolvedExprKind::Yield { .. } => "yield",
     }
 }

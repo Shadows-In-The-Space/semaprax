@@ -208,7 +208,8 @@ fn functions_use_strings<'a>(
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push(value),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push(left);
                 pending.push(right);
@@ -325,7 +326,8 @@ fn program_uses_byte_data(program: &ResolvedProgram) -> bool {
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push(value),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push(left);
                 pending.push(right);
@@ -419,7 +421,8 @@ fn program_uses_string_ops(program: &ResolvedProgram) -> bool {
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push(value),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push(left);
                 pending.push(right);
@@ -515,7 +518,8 @@ fn program_uses_string_ops_v2(program: &ResolvedProgram) -> bool {
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push(value),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push(left);
                 pending.push(right);
@@ -644,7 +648,8 @@ fn collect_string_data(program: &ResolvedProgram) -> StringData {
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push(value),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push(right);
                 pending.push(left);
@@ -4211,6 +4216,19 @@ fn emit_expr(
             return Err(Diagnostic::io(
                 "SPX-W110",
                 "aggregate expressions require WebAssembly aggregate lowering",
+            ));
+        }
+        // Resumable Effects v1 (issue #204): explicit, tested refusal. A
+        // `yield` suspends the whole function and hands control back to a
+        // caller outside the module; the Core Wasm scalar/aggregate lanes
+        // have no such control-transfer mechanism, so a `yields`-declaring
+        // function is not admitted for this target at all -- see
+        // `docs/RESUMABLE-EFFECTS-V1.md`.
+        ResolvedExprKind::Yield { .. } => {
+            return Err(Diagnostic::io(
+                "SPX-W126",
+                "`yield` is not yet lowered by the WebAssembly backend; a `yields`-declaring \
+                 function is not admitted for this target",
             ));
         }
     }

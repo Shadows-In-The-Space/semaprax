@@ -302,7 +302,7 @@ pub(super) fn visit_ast_call_sites(
                 )?;
             }
         }
-        ExprKind::Try { operand } => {
+        ExprKind::Try { operand } | ExprKind::Yield { request: operand } => {
             visit_ast_call_sites(
                 operand,
                 &crate::bounded_output::budgeted_format(format_args!("{path}.operand")),

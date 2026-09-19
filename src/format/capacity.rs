@@ -279,6 +279,10 @@ pub(super) fn legacy_expr_temporary_bytes(root: &Expr, root_precedence: u8) -> u
                 total = total.saturating_add(rendered);
                 stack.push((value, 7));
             }
+            ExprKind::Yield { request } => {
+                total = total.saturating_add(rendered);
+                stack.push((request, 0));
+            }
             ExprKind::Binary {
                 op, left, right, ..
             } => {

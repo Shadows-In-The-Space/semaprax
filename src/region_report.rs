@@ -566,7 +566,7 @@ fn collect_expr(
         ResolvedExprKind::Project { base, .. } => {
             collect_expr(base, scope_end, resolved, facts);
         }
-        ResolvedExprKind::Upcast { source } => {
+        ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
             collect_expr(source, scope_end, resolved, facts);
         }
         ResolvedExprKind::Int(_)

@@ -168,9 +168,15 @@ mod ast {
         params,
         return_type,
         effects,
+        yields,
         requires,
         ensures,
         body,
+        span
+    });
+    codec_struct!(YieldsClause {
+        request_type,
+        response_type,
         span
     });
     codec_struct!(Param {
@@ -196,7 +202,8 @@ mod ast {
         20 => ConstructVariant { type_name, type_span, type_arguments, case_name, case_span, fields },
         21 => Match { mode, scrutinee, arms }, 22 => Try { operand },
         23 => UpdateRecord { base, fields }, 24 => Project { base, field, field_span },
-        25 => Closure { params, return_type, body, owning }
+        25 => Closure { params, return_type, body, owning },
+        26 => Yield { request }
     });
     codec_struct!(MatchArm {
         pattern,

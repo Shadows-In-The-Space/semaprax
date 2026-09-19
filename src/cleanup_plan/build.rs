@@ -2588,6 +2588,20 @@ impl<'a> PlanBuilder<'a> {
                             state,
                         });
                     }
+                    // Resumable Effects v1 (issue #204): `yield`'s request
+                    // is an admitted Copy scalar (`hir::resolve_yield`
+                    // enforces this), so it contributes no liveness of its
+                    // own -- transparent in exactly the same way an upcast
+                    // is, reusing the same passthrough frame rather than
+                    // adding a second one.
+                    ResolvedExprKind::Yield { request } => {
+                        frames.push(Frame::UpcastAfterSource);
+                        frames.push(Frame::Enter {
+                            expression: request,
+                            block,
+                            state,
+                        });
+                    }
                     ResolvedExprKind::NativeRustImportCall(call) => {
                         frames.push(Frame::NativeNext {
                             args: &call.args,
@@ -4984,6 +4998,11 @@ impl<'a> PlanBuilder<'a> {
             // consumed source remains the surrounding transfer's source.
             ResolvedExprKind::Upcast { source } => {
                 self.lower_expr_recursive_reference(source, block, state, region)
+            }
+            // Resumable Effects v1 (issue #204): transparent, matching the
+            // iterative lowering path above.
+            ResolvedExprKind::Yield { request } => {
+                self.lower_expr_recursive_reference(request, block, state, region)
             }
         }
     }

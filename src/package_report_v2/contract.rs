@@ -207,7 +207,8 @@ fn expression_json(
         | ResolvedExprKind::Block { .. }
         | ResolvedExprKind::Match { .. }
         | ResolvedExprKind::Try { .. }
-        | ResolvedExprKind::TryOption { .. } => {
+        | ResolvedExprKind::TryOption { .. }
+        | ResolvedExprKind::Yield { .. } => {
             return Err(projection_error(
                 "contract requires a revision-local or unsupported identity",
             ));

@@ -276,7 +276,9 @@ fn audit_resolved_expression(root: &ResolvedExpr) -> Result<(), Diagnostic> {
                 reject_nul_identity("resolved call target", callee.as_str())?;
                 pending.extend(args);
             }
-            ResolvedExprKind::Upcast { source } => pending.push(source),
+            ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
+                pending.push(source)
+            }
             ResolvedExprKind::NativeRustImportCall(call) => {
                 reject_nul_identity("resolved native Rust import target", call.import.as_str())?;
                 if call.expression != expression.id {
@@ -923,7 +925,8 @@ pub(crate) fn visit_resolved_calls(
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => visit_resolved_calls(value, visit),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => visit_resolved_calls(value, visit),
         ResolvedExprKind::Binary { left, right, .. } => {
             visit_resolved_calls(left, visit);
             visit_resolved_calls(right, visit);
@@ -1078,7 +1081,8 @@ pub(crate) fn workspace_call_sites(
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => walk(owner, value, sites),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => walk(owner, value, sites),
             ResolvedExprKind::Binary { left, right, .. } => {
                 walk(owner, left, sites);
                 walk(owner, right, sites);

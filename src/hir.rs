@@ -107,6 +107,7 @@ mod resolve_pattern;
 mod resolve_program;
 mod resolve_statement;
 mod resolve_vec_call;
+mod resolve_yield;
 mod type_reachability;
 pub(crate) use type_reachability::is_admitted_copy_aggregate_variant_field;
 pub(crate) use type_reachability::{
@@ -347,7 +348,8 @@ pub use nodes::{
     ResolvedImportResult, ResolvedImportResultKind, ResolvedInterface, ResolvedMatchMode,
     ResolvedNativeRustImportCall, ResolvedParam, ResolvedProgram, ResolvedResourceDrop,
     ResolvedResourceDropKind, ResolvedType, ResolvedTypeDeclaration, ResolvedTypeDeclarationKind,
-    ResolvedTypeParameterDeclaration, ResolvedVariantCaseDeclaration, TypeFacts,
+    ResolvedTypeParameterDeclaration, ResolvedVariantCaseDeclaration, ResolvedYieldsClause,
+    TypeFacts,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -890,6 +890,7 @@ impl Resolver<'_> {
             ));
         }
         let result_id = ValueId::result(function_scope);
+        let yields = self.resolve_yields_clause(function, &params)?;
 
         let requires = function
             .requires
@@ -904,7 +905,10 @@ impl Resolver<'_> {
                 )
             })
             .collect::<Result<_, _>>()?;
-        let body = self.resolve_expr(function_scope, &function.body, &bindings, "body")?;
+        let mut body = self.resolve_expr(function_scope, &function.body, &bindings, "body")?;
+        if let Some(yields_clause) = &yields {
+            self.finish_yields_admission(&function.name, yields_clause, &mut body)?;
+        }
 
         let mut ensures_bindings = bindings;
         ensures_bindings.insert(
@@ -941,6 +945,7 @@ impl Resolver<'_> {
             result_id,
             return_type,
             effects: function.effects.clone(),
+            yields,
             requires,
             ensures,
             body,

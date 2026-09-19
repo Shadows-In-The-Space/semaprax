@@ -441,6 +441,18 @@ impl<'a, 'p> IterativeVerifier<'a, 'p> {
                     ));
                     results.push(Err(()));
                 }
+                // Resumable Effects v1 (issue #204): unreachable in
+                // practice -- `parser::yields` already refuses `yield`
+                // anywhere inside a `while` body.
+                ExprKind::Yield { .. } => {
+                    self.diagnostics.push(error(
+                        self.program,
+                        "SPX-T252",
+                        "`yield` is not admitted in while bodies",
+                        expression.span,
+                    ));
+                    results.push(Err(()));
+                }
             }
         }
         results.pop().unwrap_or(Err(()))

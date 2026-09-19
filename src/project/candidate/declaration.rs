@@ -157,6 +157,7 @@ pub(super) fn apply(
             params,
             return_type,
             effects,
+            yields: None,
             requires,
             ensures,
             body,

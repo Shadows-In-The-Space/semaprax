@@ -654,6 +654,7 @@ fn precheck_program(program: &Program) -> Result<AstUsage, Vec<Diagnostic>> {
             }
             ExprKind::Unary { value, .. }
             | ExprKind::Try { operand: value }
+            | ExprKind::Yield { request: value }
             | ExprKind::Project { base: value, .. } => stack.push(value),
             ExprKind::Binary { left, right, .. } => {
                 stack.push(right);

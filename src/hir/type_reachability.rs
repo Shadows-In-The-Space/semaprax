@@ -169,7 +169,9 @@ fn collect_expression(expression: &ResolvedExpr, declarations: &mut BTreeSet<Dec
                 collect_expression(argument, declarations);
             }
         }
-        ResolvedExprKind::Unary { value, .. } | ResolvedExprKind::Upcast { source: value } => {
+        ResolvedExprKind::Unary { value, .. }
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => {
             collect_expression(value, declarations);
         }
         ResolvedExprKind::Binary { left, right, .. } => {

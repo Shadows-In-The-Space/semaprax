@@ -453,7 +453,8 @@ fn visit_resolved_calls(
             }
         }
         hir::ResolvedExprKind::Project { base, .. } => visit_resolved_calls(base, visit),
-        hir::ResolvedExprKind::Upcast { source } => visit_resolved_calls(source, visit),
+        hir::ResolvedExprKind::Upcast { source }
+        | hir::ResolvedExprKind::Yield { request: source } => visit_resolved_calls(source, visit),
         hir::ResolvedExprKind::Int(_)
         | hir::ResolvedExprKind::Int32(_)
         | hir::ResolvedExprKind::Char(_)
@@ -1103,13 +1104,16 @@ fn collect_resolved_expression_type_sites(
             imported,
             out,
         )?,
-        hir::ResolvedExprKind::Upcast { source } => collect_resolved_expression_type_sites(
-            owner,
-            source,
-            &crate::bounded_output::budgeted_format(format_args!("{path}.source")),
-            imported,
-            out,
-        )?,
+        hir::ResolvedExprKind::Upcast { source }
+        | hir::ResolvedExprKind::Yield { request: source } => {
+            collect_resolved_expression_type_sites(
+                owner,
+                source,
+                &crate::bounded_output::budgeted_format(format_args!("{path}.source")),
+                imported,
+                out,
+            )?
+        }
         hir::ResolvedExprKind::Int(_)
         | hir::ResolvedExprKind::Int32(_)
         | hir::ResolvedExprKind::Char(_)

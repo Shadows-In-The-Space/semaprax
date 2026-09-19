@@ -220,6 +220,7 @@ impl Rename<'_> {
             }
             ExprKind::Unary { value, .. }
             | ExprKind::Try { operand: value }
+            | ExprKind::Yield { request: value }
             | ExprKind::Project { base: value, .. } => self.expression(value, scope, next)?,
             ExprKind::Binary { left, right, .. } => {
                 self.expression(left, scope, next)?;

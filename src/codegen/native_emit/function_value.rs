@@ -202,7 +202,8 @@ pub(super) fn resolved_expr_children<'a>(
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => Box::new(std::iter::once(value.as_ref())),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => Box::new(std::iter::once(value.as_ref())),
         ResolvedExprKind::Block { statements, tail } => Box::new(
             statements
                 .iter()

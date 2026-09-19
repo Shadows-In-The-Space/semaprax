@@ -352,7 +352,8 @@ pub(super) fn derive_byte_slice_provenance(
                 | ResolvedExprKind::Try { operand: value, .. }
                 | ResolvedExprKind::TryOption { operand: value, .. }
                 | ResolvedExprKind::Project { base: value, .. }
-                | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+                | ResolvedExprKind::Upcast { source: value }
+                | ResolvedExprKind::Yield { request: value } => pending.push(value),
                 ResolvedExprKind::Binary { left, right, .. } => {
                     pending.push(left);
                     pending.push(right);

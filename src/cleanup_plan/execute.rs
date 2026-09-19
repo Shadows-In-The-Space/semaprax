@@ -279,7 +279,8 @@ fn collect_variant_domains(
             }
             hir::ResolvedExprKind::Unary { value, .. }
             | hir::ResolvedExprKind::Project { base: value, .. }
-            | hir::ResolvedExprKind::Upcast { source: value } => {
+            | hir::ResolvedExprKind::Upcast { source: value }
+            | hir::ResolvedExprKind::Yield { request: value } => {
                 visit(program, value, domains)?;
             }
             hir::ResolvedExprKind::Binary { left, right, .. } => {

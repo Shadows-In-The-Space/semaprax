@@ -8,6 +8,7 @@ pub(super) fn contains_record_construction(value: &Expr) -> bool {
             ExprKind::Call { args, .. } => args.get(index),
             ExprKind::Unary { value, .. }
             | ExprKind::Try { operand: value }
+            | ExprKind::Yield { request: value }
             | ExprKind::Project { base: value, .. } => (index == 0).then_some(value),
             ExprKind::UpdateRecord { base, fields } => {
                 if index == 0 {

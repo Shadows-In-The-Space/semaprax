@@ -4,7 +4,7 @@ use crate::ast::{
     ModuleUseKind, Param, ParamMode, Program, ProtocolDeclaration, ProtocolImplementation,
     ProtocolImplementationMember, ProtocolMethod, ResourceLifecycleDeclaration,
     ResourceLifecycleKind, Span, Statement, TypeDeclaration, TypeDeclarationKind, UnaryOp,
-    VariantCaseDeclaration,
+    VariantCaseDeclaration, YieldsClause,
 };
 use crate::diagnostic::Diagnostic;
 use crate::lexer::{Token, TokenKind};
@@ -23,6 +23,7 @@ mod lookahead;
 mod patterns;
 mod signed_minimum;
 mod types;
+mod yields;
 pub struct Parser {
     tokens: Vec<Token>,
     cursor: usize,
@@ -765,7 +766,22 @@ impl Parser {
             }
             let member_id = self.stable_id_attribute()?;
             if self.at_keyword("fn") {
-                methods.push(self.function(module, member_id)?);
+                let method = self.function(module, member_id)?;
+                if let Some(yields) = &method.yields {
+                    // Resumable Effects v1 (issue #204): deferred scope --
+                    // a class method's `yields` clause would also need
+                    // canonical-formatter and inheritance-dispatch support
+                    // this slice does not add. Free top-level functions
+                    // only; see `docs/RESUMABLE-EFFECTS-V1.md`.
+                    return Err(Diagnostic::error(
+                        "SPX-T304",
+                        "class methods cannot declare `yields`; only free top-level functions \
+                         can",
+                        yields.span,
+                    )
+                    .at_path(&self.path));
+                }
+                methods.push(method);
             } else {
                 let (field_name, field_name_span) = self.ident("class field name")?;
                 self.expect(&TokenKind::Colon, "`:` after class field name")?;
@@ -853,6 +869,23 @@ impl Parser {
         } else {
             Vec::new()
         };
+        let yields = if self.at_keyword("yields") {
+            let yields_start = self.current().span;
+            self.bump();
+            let request_type = self.ty()?;
+            self.expect(
+                &TokenKind::Arrow,
+                "`->` between `yields` request and response types",
+            )?;
+            let response_type = self.ty()?;
+            Some(YieldsClause {
+                request_type,
+                response_type,
+                span: yields_start.merge(self.previous_span()),
+            })
+        } else {
+            None
+        };
         let mut requires = Vec::new();
         let mut ensures = Vec::new();
         loop {
@@ -868,7 +901,7 @@ impl Parser {
         }
         let body = self.block("function body")?;
         let end = body.span;
-        Ok(Function {
+        let function = Function {
             stable_id,
             explicit_id,
             name,
@@ -877,11 +910,14 @@ impl Parser {
             params,
             return_type,
             effects,
+            yields,
             requires,
             ensures,
             body,
             span: start.merge(end),
-        })
+        };
+        yields::check_function_yield_placement(&function, &self.path)?;
+        Ok(function)
     }
 
     fn expression(&mut self, minimum_precedence: u8) -> Result<Expr, Diagnostic> {
@@ -965,6 +1001,9 @@ impl Parser {
             TokenKind::Ident(value) if value == "fn" => self.closure_expression(token.span)?,
             TokenKind::Ident(value) if value == "if" => self.if_expression(token.span)?,
             TokenKind::Ident(value) if value == "match" => self.match_expression(token.span)?,
+            TokenKind::Ident(value) if value == "yield" => {
+                self.yield_expression(token.span, allow_record_literals)?
+            }
             TokenKind::Ident(value) => self.ident_or_own_closure(value, token.span)?,
             TokenKind::Minus | TokenKind::Bang => {
                 let mut ops: Vec<(UnaryOp, crate::ast::Span)> = Vec::new();
@@ -1501,6 +1540,28 @@ impl Parser {
             audit,
             audit_span: attribute_span.merge(audit_end),
             body: Box::new(body),
+            span,
+        })
+    }
+
+    /// Resumable Effects v1 (issue #204): `yield <expr>`. The operand parses
+    /// at the lowest precedence (record literals admitted) so `yield Prompt
+    /// { seed }` parses the whole construction, matching how a `let` value
+    /// or tail expression is parsed. Whether this appears in a `yields`-
+    /// declaring function, at most once, and only at statement/tail
+    /// position, is a resolver/verifier concern (`SPX-T297`/`SPX-T298`), not
+    /// a parse-time one -- see `docs/RESUMABLE-EFFECTS-V1.md`.
+    fn yield_expression(
+        &mut self,
+        start: Span,
+        allow_record_literals: bool,
+    ) -> Result<Expr, Diagnostic> {
+        let request = self.expression_with_record_literals(0, allow_record_literals)?;
+        let span = start.merge(request.span);
+        Ok(Expr {
+            kind: ExprKind::Yield {
+                request: Box::new(request),
+            },
             span,
         })
     }

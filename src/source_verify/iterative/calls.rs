@@ -541,6 +541,29 @@ impl<'a, 'p> IterativeVerifier<'a, 'p> {
         Ok(())
     }
 
+    /// Resumable Effects v1 (issue #204): the request's own verified value
+    /// is discarded (its type was already checked against the declared
+    /// request type by `hir::resolve_yield`); the whole `yield` expression
+    /// verifies as the enclosing function's declared response type. Falls
+    /// back to `None` (unverified) rather than a wrong or asserted type if
+    /// this function turns out not to declare `yields` at all -- a case
+    /// `parser::yields`/`hir::resolve_yield` already refuse, so this is
+    /// defensive only.
+    pub(super) fn frame_resume_yield(
+        &mut self,
+        _expression: &'p Expr,
+        _request: &'p Expr,
+    ) -> Result<(), Diagnostic> {
+        self.values.pop();
+        let value = self
+            .current
+            .yields
+            .as_ref()
+            .map(|yields| CheckedValue::value(yields.response_type.clone()));
+        self.values.push(value);
+        Ok(())
+    }
+
     pub(super) fn frame_resume_project(
         &mut self,
         expression: &'p Expr,

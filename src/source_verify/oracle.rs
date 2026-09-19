@@ -715,6 +715,27 @@ pub(super) fn check_expr(
             allow_moves,
             diagnostics,
         ),
+        // Resumable Effects v1 (issue #204): mirrors
+        // `iterative::calls::frame_resume_yield` -- the request's own
+        // verified value is discarded, and the whole `yield` expression
+        // verifies as the enclosing function's declared response type.
+        ExprKind::Yield { request } => {
+            let _ = check_expr(
+                program,
+                current,
+                request,
+                variables,
+                functions,
+                types,
+                result_type,
+                allow_moves,
+                diagnostics,
+            );
+            return current
+                .yields
+                .as_ref()
+                .map(|yields| CheckedValue::value(yields.response_type.clone()));
+        }
         ExprKind::Try { operand } => {
             let operand_value = check_expr(
                 program,

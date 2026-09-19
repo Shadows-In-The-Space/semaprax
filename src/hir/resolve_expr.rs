@@ -648,6 +648,23 @@ impl Resolver<'_> {
                             path: format!("{path}.operand"),
                         });
                     }
+                    // Resumable Effects v1 (issue #204): the request
+                    // resolves as an ordinary sub-expression; the whole
+                    // node's placeholder type (the request's own type) is
+                    // fixed up to the declared response type once the
+                    // enclosing function's `yields` clause is known --
+                    // `hir::resolve_yield::finish_yields_admission`.
+                    ExprKind::Yield { request } => {
+                        frames.push(Frame::FinishYield {
+                            span: expr.span,
+                            path: path.clone(),
+                        });
+                        frames.push(Frame::Enter {
+                            expr: request,
+                            bindings,
+                            path: format!("{path}.request"),
+                        });
+                    }
                     ExprKind::UpdateRecord { base, fields } => {
                         frames.push(Frame::AfterUpdateBase {
                             span: expr.span,
@@ -2535,6 +2552,27 @@ impl Resolver<'_> {
                         ty,
                         ownership,
                         kind,
+                        span,
+                    });
+                }
+                // Resumable Effects v1 (issue #204): `ty` is a placeholder
+                // (the request's own type) fixed up to the enclosing
+                // function's declared response type once resolution
+                // finishes -- see `hir::resolve_yield`, which also checks
+                // the request's type against the declared request type.
+                // Neither check has enough context here: this frame runs
+                // before the caller (`resolve_function_in_scope`) has
+                // resolved `function.yields` at all.
+                Frame::FinishYield { span, path } => {
+                    let request = results.pop().expect("yield request retained");
+                    let ty = request.ty.clone();
+                    results.push(ResolvedExpr {
+                        id: ExpressionId::new(function, &path),
+                        ty,
+                        ownership: OwnershipMode::Value,
+                        kind: ResolvedExprKind::Yield {
+                            request: Box::new(request),
+                        },
                         span,
                     });
                 }

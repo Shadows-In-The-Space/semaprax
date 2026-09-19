@@ -750,6 +750,7 @@ fn check_omitted_generic_mappings(
         }
         ExprKind::Unary { value, .. }
         | ExprKind::Try { operand: value }
+        | ExprKind::Yield { request: value }
         | ExprKind::Project { base: value, .. } => check_omitted_generic_mappings(
             program,
             current,

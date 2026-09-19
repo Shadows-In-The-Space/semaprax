@@ -321,6 +321,7 @@ pub(super) fn source_capacity_expr_type(
         ExprKind::MethodCall { .. }
         | ExprKind::Unary { .. }
         | ExprKind::Try { .. }
+        | ExprKind::Yield { .. }
         | ExprKind::Binary { .. }
         | ExprKind::If { .. }
         | ExprKind::UpdateRecord { .. }
@@ -357,7 +358,9 @@ pub(super) fn source_capacity_expr_type(
                 current = receiver;
                 continue;
             }
-            ExprKind::Unary { value, .. } | ExprKind::Try { operand: value } => {
+            ExprKind::Unary { value, .. }
+            | ExprKind::Try { operand: value }
+            | ExprKind::Yield { request: value } => {
                 current = value;
                 continue;
             }
@@ -1171,7 +1174,9 @@ fn source_capacity_expr(
                             });
                         }
                     }
-                    ExprKind::Unary { value, .. } | ExprKind::Try { operand: value } => {
+                    ExprKind::Unary { value, .. }
+                    | ExprKind::Try { operand: value }
+                    | ExprKind::Yield { request: value } => {
                         frames.push(Frame::Visit {
                             expression: value,
                             path: format!("{path}.operand"),

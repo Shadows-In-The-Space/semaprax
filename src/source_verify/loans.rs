@@ -116,6 +116,7 @@ pub(super) fn expression_uses_name(expression: &Expr, name: &str) -> bool {
             }
             ExprKind::Unary { value, .. }
             | ExprKind::Try { operand: value }
+            | ExprKind::Yield { request: value }
             | ExprKind::Project { base: value, .. } => pending.push(value),
             ExprKind::Binary { left, right, .. } => {
                 pending.push(left);

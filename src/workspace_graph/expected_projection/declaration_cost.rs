@@ -237,7 +237,9 @@ pub(super) fn ast_expr_cost(
                 ast_expr_cost(&arm.value, cost)?;
             }
         }
-        ExprKind::Try { operand } => ast_expr_cost(operand, cost)?,
+        ExprKind::Try { operand } | ExprKind::Yield { request: operand } => {
+            ast_expr_cost(operand, cost)?
+        }
         ExprKind::UpdateRecord { base, fields } => {
             ast_expr_cost(base, cost)?;
             for field in fields {

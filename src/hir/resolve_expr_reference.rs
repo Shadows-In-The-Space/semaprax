@@ -1681,6 +1681,28 @@ impl Resolver<'_> {
                     }
                 }
             }
+            // Resumable Effects v1 (issue #204): mirrors
+            // `Frame::FinishYield` in the iterative resolver -- `ty` is a
+            // placeholder (the request's own type) fixed up to the
+            // enclosing function's declared response type once resolution
+            // finishes, by `hir::resolve_yield`, which neither resolver has
+            // enough context to do here.
+            ExprKind::Yield { request } => {
+                let request = self.resolve_expr_recursive_reference(
+                    function,
+                    request,
+                    bindings,
+                    &format!("{path}.request"),
+                )?;
+                let ty = request.ty.clone();
+                (
+                    ResolvedExprKind::Yield {
+                        request: Box::new(request),
+                    },
+                    ty,
+                    OwnershipMode::Value,
+                )
+            }
             ExprKind::UpdateRecord { base, fields } => {
                 let base = self.resolve_expr_recursive_reference(
                     function,

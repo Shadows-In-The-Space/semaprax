@@ -764,6 +764,13 @@ impl Walker<'_> {
                 self.push_ineligible(expr, REASON_AGGREGATE_OPERATION);
                 self.scan_expr(source);
             }
+            // Resumable Effects v1 (issue #204): a `yield` suspends the
+            // whole function, which is control flow SIMD kernels cannot
+            // express.
+            ResolvedExprKind::Yield { request } => {
+                self.push_ineligible(expr, REASON_CONTROL_FLOW);
+                self.scan_expr(request);
+            }
         }
     }
 

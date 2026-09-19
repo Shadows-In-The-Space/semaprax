@@ -173,6 +173,11 @@ codec_struct!(ResolvedFieldDeclaration {
     ty,
     span
 });
+codec_struct!(ResolvedYieldsClause {
+    request_type,
+    response_type,
+    span
+});
 codec_struct!(ResolvedFunction {
     id,
     name,
@@ -180,6 +185,7 @@ codec_struct!(ResolvedFunction {
     result_id,
     return_type,
     effects,
+    yields,
     requires,
     ensures,
     body,
@@ -238,7 +244,8 @@ codec_enum!(ResolvedExprKind {
     21=>ConstructRecord{record,fields},22=>ConstructVariant{variant,case,fields},23=>Match{mode,scrutinee,arms},
     24=>Try{operand,result,ok_case,ok_field,err_case,err_field,residual_type},
     25=>TryOption{operand,option,some_case,some_field,none_case,residual_type},
-    26=>UpdateRecord{base,record,fields},27=>Project{base,field},28=>Upcast{source},29=>FunctionReference{target},30=>Invoke{callable,args},31=>Closure{parameters,captures,body}
+    26=>UpdateRecord{base,record,fields},27=>Project{base,field},28=>Upcast{source},29=>FunctionReference{target},30=>Invoke{callable,args},31=>Closure{parameters,captures,body},
+    32=>Yield{request}
 });
 codec_struct!(ResolvedMatchArm {
     pattern,

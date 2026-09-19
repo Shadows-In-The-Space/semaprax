@@ -150,6 +150,11 @@ const PAYLOAD_DIGEST_DOMAIN: &[u8] = b"semaprax.interpret.payload.v1\0";
 const REASON_AUTOMATIC_IDENTITY: &str = "automatic_identity";
 const REASON_GENERIC_FUNCTION: &str = "generic_function";
 const REASON_DECLARED_EFFECTS: &str = "declared_effects";
+/// Resumable Effects v1 (issue #204): explicit, tested refusal, matching
+/// native and Wasm. Interpreter suspend/resume execution is the natural
+/// follow-up this design enables but does not perform -- see
+/// `docs/RESUMABLE-EFFECTS-V1.md`.
+const REASON_DECLARES_YIELDS: &str = "declares_yields";
 const REASON_UNSUPPORTED_PARAMETER_MODE: &str = "unsupported_parameter_mode";
 const REASON_UNSUPPORTED_PARAMETER_TYPE: &str = "unsupported_parameter_type";
 const REASON_UNSUPPORTED_RESULT_TYPE: &str = "unsupported_result_type";
@@ -2154,6 +2159,9 @@ fn admission(function: &Function) -> Option<&'static str> {
     if !function.effects.is_empty() {
         return Some(REASON_DECLARED_EFFECTS);
     }
+    if function.yields.is_some() {
+        return Some(REASON_DECLARES_YIELDS);
+    }
     for param in &function.params {
         let admitted = (param.mode == ParamMode::Value && is_admitted_scalar(&param.ty))
             || (param.mode == ParamMode::Borrow && matches!(param.ty, Type::Str | Type::SliceU8));
@@ -3929,6 +3937,16 @@ impl Evaluator<'_> {
     ) -> Result<Value, Flow> {
         self.begin_expression(expression, depth)?;
         match &expression.kind {
+            // Resumable Effects v1 (issue #204): unreachable in practice --
+            // `admission` already refuses any `yields`-declaring function
+            // before its body ever reaches `evaluate` -- but still an
+            // explicit, tested refusal rather than a silent fallthrough.
+            // Interpreter suspend/resume execution is the natural follow-up
+            // this design enables but does not perform; see
+            // `docs/RESUMABLE-EFFECTS-V1.md`.
+            ResolvedExprKind::Yield { .. } => Err(Flow::Guard(
+                "`yield` is not yet evaluated by the interpreter",
+            )),
             ResolvedExprKind::Closure { .. }
             | ResolvedExprKind::FunctionReference { .. }
             | ResolvedExprKind::Invoke { .. } => {
@@ -5821,6 +5839,38 @@ fn status_case_from_code(code: u32) -> Option<StatusCase> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Resumable Effects v1 (issue #204): explicit, tested refusal at the
+    /// interpreter's own admission gate, matching native (`SPX-B116`) and
+    /// Wasm (`SPX-W126`). Interpreter suspend/resume execution is the
+    /// natural follow-up this design enables but does not perform -- see
+    /// `docs/RESUMABLE-EFFECTS-V1.md`.
+    #[test]
+    fn admission_refuses_a_yields_declaring_function() {
+        let source = r#"
+module test.interpreter_admission_yield;
+@id("app.ask")
+fn ask(seed: i64) -> i64
+    yields i64 -> i64
+{
+    let answer = yield seed + 1;
+    answer * 2
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+        let program = crate::parse(
+            source,
+            std::path::Path::new("interpreter-admission-yield.spx"),
+        )
+        .unwrap();
+        let ask = program
+            .functions
+            .iter()
+            .find(|function| function.name == "ask")
+            .unwrap();
+        assert_eq!(admission(ask), Some(REASON_DECLARES_YIELDS));
+    }
 
     #[test]
     fn projected_owned_move_tombstones_only_the_exact_field_without_cloning() {

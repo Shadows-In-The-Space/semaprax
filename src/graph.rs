@@ -1152,7 +1152,8 @@ fn collect_result_propagations<'a>(
         }
         ResolvedExprKind::Unary { value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => {
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => {
             collect_result_propagations(value, propagations);
         }
         ResolvedExprKind::Binary { left, right, .. } => {
@@ -1379,7 +1380,8 @@ fn expression_has_byte_range(expression: &ResolvedExpr) -> bool {
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push(value),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push(left);
                 pending.push(right);
@@ -1488,7 +1490,8 @@ fn expression_has_explicit_match_mode(expression: &ResolvedExpr) -> bool {
         | ResolvedExprKind::Project { base: value, .. }
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_has_explicit_match_mode(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_has_explicit_match_mode(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_has_explicit_match_mode(left) || expression_has_explicit_match_mode(right)
         }
@@ -1813,7 +1816,8 @@ fn expression_has_usize(expression: &ResolvedExpr) -> bool {
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_has_usize(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_has_usize(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_has_usize(left) || expression_has_usize(right)
         }
@@ -1893,7 +1897,8 @@ fn expression_has_while(expression: &ResolvedExpr) -> bool {
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_has_while(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_has_while(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_has_while(left) || expression_has_while(right)
         }
@@ -1954,7 +1959,8 @@ fn expression_has_stdout_write(expression: &ResolvedExpr) -> bool {
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_has_stdout_write(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_has_stdout_write(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_has_stdout_write(left) || expression_has_stdout_write(right)
         }
@@ -2029,7 +2035,8 @@ fn expression_has_command_io(expression: &ResolvedExpr) -> bool {
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_has_command_io(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_has_command_io(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_has_command_io(left) || expression_has_command_io(right)
         }
@@ -2136,7 +2143,8 @@ fn expression_has_record_pattern(expression: &ResolvedExpr) -> bool {
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_has_record_pattern(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_has_record_pattern(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_has_record_pattern(left) || expression_has_record_pattern(right)
         }
@@ -2240,7 +2248,8 @@ fn expression_has_refutable_match(expression: &ResolvedExpr) -> bool {
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => expression_has_refutable_match(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => expression_has_refutable_match(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             expression_has_refutable_match(left) || expression_has_refutable_match(right)
         }
@@ -2475,7 +2484,9 @@ fn collect_agent_contract_values(expression: &ResolvedExpr, values: &mut BTreeSe
             }
         }
         ResolvedExprKind::Project { base, .. } => collect_agent_contract_values(base, values),
-        ResolvedExprKind::Upcast { source } => collect_agent_contract_values(source, values),
+        ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
+            collect_agent_contract_values(source, values)
+        }
     }
 }
 
@@ -2766,7 +2777,7 @@ pub(crate) fn agent_contract_expr_json(expression: &ResolvedExpr) -> Result<Stri
             agent_contract_expr_json(base)?,
             quote_json(field.as_str())
         ),
-        ResolvedExprKind::Upcast { source } => format!(
+        ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => format!(
             "{{\"kind\":\"upcast\",\"source\":{}}}",
             agent_contract_expr_json(source)?
         ),
@@ -4822,7 +4833,7 @@ fn visit_expr_call_instances(
         ResolvedExprKind::Unary { value, .. } | ResolvedExprKind::Project { base: value, .. } => {
             visit_expr_call_instances(value, visit);
         }
-        ResolvedExprKind::Upcast { source: value } => {
+        ResolvedExprKind::Upcast { source: value } | ResolvedExprKind::Yield { request: value } => {
             visit_expr_call_instances(value, visit);
         }
         ResolvedExprKind::Binary { left, right, .. } => {
@@ -4925,7 +4936,9 @@ fn visit_expr_calls(expression: &ResolvedExpr, visit: &mut impl FnMut(&Declarati
             }
         }
         ResolvedExprKind::Unary { value, .. } => visit_expr_calls(value, visit),
-        ResolvedExprKind::Upcast { source: value } => visit_expr_calls(value, visit),
+        ResolvedExprKind::Upcast { source: value } | ResolvedExprKind::Yield { request: value } => {
+            visit_expr_calls(value, visit)
+        }
         ResolvedExprKind::Binary { left, right, .. } => {
             visit_expr_calls(left, visit);
             visit_expr_calls(right, visit);
@@ -5054,7 +5067,7 @@ fn collect_expr_type_declarations(
         ResolvedExprKind::Unary { value, .. } => {
             collect_expr_type_declarations(value, declarations);
         }
-        ResolvedExprKind::Upcast { source: value } => {
+        ResolvedExprKind::Upcast { source: value } | ResolvedExprKind::Yield { request: value } => {
             collect_expr_type_declarations(value, declarations);
         }
         ResolvedExprKind::Binary { left, right, .. } => {
@@ -5335,7 +5348,9 @@ fn collect_expr_types(expression: &ResolvedExpr, types: &mut BTreeMap<String, Re
             }
         }
         ResolvedExprKind::Unary { value, .. } => collect_expr_types(value, types),
-        ResolvedExprKind::Upcast { source: value } => collect_expr_types(value, types),
+        ResolvedExprKind::Upcast { source: value } | ResolvedExprKind::Yield { request: value } => {
+            collect_expr_types(value, types)
+        }
         ResolvedExprKind::Binary { left, right, .. } => {
             collect_expr_types(left, types);
             collect_expr_types(right, types);

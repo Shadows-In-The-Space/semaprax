@@ -153,6 +153,11 @@ pub(super) enum VerifierFrame<'a> {
         operand: &'a Expr,
         scope: usize,
     },
+    /// Resumable Effects v1 (issue #204). See `iterative::calls::frame_resume_yield`.
+    ResumeYield {
+        expression: &'a Expr,
+        request: &'a Expr,
+    },
     ResumeProject {
         expression: &'a Expr,
         base: &'a Expr,

@@ -190,7 +190,9 @@ fn collect_calls(
             }
         }
         ResolvedExprKind::Project { base, .. } => collect_calls(base, known, calls, call_sites),
-        ResolvedExprKind::Upcast { source } => collect_calls(source, known, calls, call_sites),
+        ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
+            collect_calls(source, known, calls, call_sites)
+        }
     }
 }
 

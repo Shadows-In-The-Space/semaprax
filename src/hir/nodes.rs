@@ -636,6 +636,16 @@ pub struct ResolvedFieldDeclaration {
     pub span: Span,
 }
 
+/// Resumable Effects v1 (issue #204): the resolved, checked form of a
+/// function's `yields Request -> Response` clause. See
+/// `docs/RESUMABLE-EFFECTS-V1.md`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedYieldsClause {
+    pub request_type: ResolvedType,
+    pub response_type: ResolvedType,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedFunction {
     pub id: DeclarationId,
@@ -644,6 +654,10 @@ pub struct ResolvedFunction {
     pub result_id: ValueId,
     pub return_type: ResolvedType,
     pub effects: Vec<String>,
+    /// `None` for every ordinary function. `resolve_function_in_scope`
+    /// checks this signature exists on at most one admitted non-generic
+    /// function shape; see `hir::validation::yields`.
+    pub yields: Option<ResolvedYieldsClause>,
     pub requires: Vec<ResolvedExpr>,
     pub ensures: Vec<ResolvedExpr>,
     pub body: ResolvedExpr,

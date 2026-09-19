@@ -943,6 +943,7 @@ fn ast_children(expression: &Expr) -> Vec<&Expr> {
         }
         ExprKind::Unary { value, .. }
         | ExprKind::Try { operand: value }
+        | ExprKind::Yield { request: value }
         | ExprKind::Project { base: value, .. } => vec![value],
         ExprKind::Binary { left, right, .. } => vec![left, right],
         ExprKind::Block { statements, tail } => {
@@ -1004,6 +1005,7 @@ fn ast_children_mut(expression: &mut Expr) -> Vec<&mut Expr> {
         }
         ExprKind::Unary { value, .. }
         | ExprKind::Try { operand: value }
+        | ExprKind::Yield { request: value }
         | ExprKind::Project { base: value, .. } => vec![value],
         ExprKind::Binary { left, right, .. } => vec![left, right],
         ExprKind::Block { statements, tail } => {
@@ -1096,6 +1098,7 @@ fn ast_kind(kind: &ExprKind) -> &'static str {
         ExprKind::Try { .. } => "try",
         ExprKind::UpdateRecord { .. } => "record_update",
         ExprKind::Project { .. } => "project",
+        ExprKind::Yield { .. } => "yield",
     }
 }
 
@@ -1132,6 +1135,7 @@ fn hir_kind(kind: &ResolvedExprKind) -> &'static str {
         ResolvedExprKind::UpdateRecord { .. } => "record_update",
         ResolvedExprKind::Project { .. } => "project",
         ResolvedExprKind::Upcast { .. } => "upcast",
+        ResolvedExprKind::Yield { .. } => "yield",
     }
 }
 

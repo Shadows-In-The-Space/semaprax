@@ -558,7 +558,9 @@ fn validate_function(
                 pending.extend(fields.iter().map(|field| &field.value));
             }
             ResolvedExprKind::Project { base, .. } => pending.push(base),
-            ResolvedExprKind::Upcast { source } => pending.push(source),
+            ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
+                pending.push(source)
+            }
             ResolvedExprKind::ByteRange {
                 source, start, end, ..
             } => pending.extend([source.as_ref(), start.as_ref(), end.as_ref()]),

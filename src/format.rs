@@ -616,6 +616,13 @@ pub(crate) fn write_canonical_commented(
             write_joined(output, &function.effects, ", ");
             writeln!(output, " }}").unwrap();
         }
+        if let Some(yields) = &function.yields {
+            write!(output, "    yields ").unwrap();
+            write_type(output, &yields.request_type);
+            write!(output, " -> ").unwrap();
+            write_type(output, &yields.response_type);
+            writeln!(output).unwrap();
+        }
         for contract in &function.requires {
             write!(output, "    requires ").unwrap();
             write_record_literal_delimited_expr(output, contract);
@@ -888,6 +895,14 @@ fn write_expr_measured(
                         }
                         frames.push(Frame::TryEnd(delimited));
                         frames.push(Frame::Expr(operand, if delimited { 0 } else { 8 }));
+                    }
+                    // Resumable Effects v1 (issue #204): `yield` is a
+                    // prefix keyword, like `if`/`match`; its operand prints
+                    // at the same top-level precedence a scrutinee or
+                    // condition does, with no closing frame needed.
+                    ExprKind::Yield { request } => {
+                        output.write_str("yield ").unwrap();
+                        frames.push(Frame::Expr(request, 0));
                     }
                     ExprKind::UpdateRecord { base, fields } => {
                         let delimited = matches!(

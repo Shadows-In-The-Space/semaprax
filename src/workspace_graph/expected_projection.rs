@@ -877,6 +877,7 @@ pub(super) fn synthetic_program(
             params: Vec::new(),
             return_type: Type::I64,
             effects: Vec::new(),
+            yields: None,
             requires: Vec::new(),
             ensures: Vec::new(),
             body: Expr {
@@ -1657,16 +1658,18 @@ fn collect_expression_type_edges(
                 )?;
             }
         }
-        ExprKind::Try { operand } => collect_expression_type_edges(
-            program,
-            owner,
-            operand,
-            &crate::bounded_output::budgeted_format(format_args!("{path}.operand")),
-            type_uses,
-            module_paths,
-            authored,
-            edges,
-        )?,
+        ExprKind::Try { operand } | ExprKind::Yield { request: operand } => {
+            collect_expression_type_edges(
+                program,
+                owner,
+                operand,
+                &crate::bounded_output::budgeted_format(format_args!("{path}.operand")),
+                type_uses,
+                module_paths,
+                authored,
+                edges,
+            )?
+        }
         ExprKind::UpdateRecord { base, fields } => {
             collect_expression_type_edges(
                 program,

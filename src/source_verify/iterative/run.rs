@@ -256,6 +256,10 @@ impl<'a, 'p> IterativeVerifier<'a, 'p> {
                     operand,
                     scope,
                 } => self.frame_resume_try(expression, operand, scope)?,
+                VerifierFrame::ResumeYield {
+                    expression,
+                    request,
+                } => self.frame_resume_yield(expression, request)?,
                 VerifierFrame::ResumeProject {
                     expression,
                     base,

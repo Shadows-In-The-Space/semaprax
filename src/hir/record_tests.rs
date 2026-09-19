@@ -666,3 +666,62 @@ fn main() -> i64 { 0 }
         .message
         .contains("byte-slice alias lacks a canonical symbolic parameter root"));
 }
+
+/// Resumable Effects v1 (issue #204). One admitted function declares
+/// `yields i64 -> i64` and contains exactly one top-level `yield`. This pins,
+/// in one place, that: the function resolves and validates; the canonical
+/// formatter round-trips it (format is idempotent on its own output); the
+/// semantic graph carries the new `"kind":"yield"` node; and both codegen
+/// backends refuse it with their own dedicated, explicit diagnostic rather
+/// than silently disagreeing. See `docs/RESUMABLE-EFFECTS-V1.md`.
+#[test]
+fn native_and_wasm_refuse_yield_and_the_graph_and_formatter_carry_it() {
+    let source = r#"
+module test.resumable_effects_yield;
+@id("app.ask")
+fn ask(seed: i64) -> i64
+    yields i64 -> i64
+{
+    let answer = yield seed + 1;
+    answer * 2
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let program = parse(source, Path::new("resumable-effects-yield.spx")).unwrap();
+    let resolved = hir::resolve(&program).unwrap();
+    validate(&resolved).unwrap();
+
+    let ask = resolved
+        .functions
+        .iter()
+        .find(|function| function.id.as_str() == "app.ask")
+        .expect("app.ask resolves");
+    let yields = ask.yields.as_ref().expect("app.ask declares yields");
+    assert_eq!(yields.request_type, ResolvedType::I64);
+    assert_eq!(yields.response_type, ResolvedType::I64);
+
+    // Canonical formatter round-trip: formatting is idempotent, and the
+    // `yields` clause plus the `yield` expression both survive it.
+    let once = crate::format::canonical(&program);
+    assert!(once.contains("yields i64 -> i64"));
+    assert!(once.contains("yield "));
+    let reparsed = parse(&once, Path::new("resumable-effects-yield.spx")).unwrap();
+    let twice = crate::format::canonical(&reparsed);
+    assert_eq!(once, twice, "canonical formatting must be idempotent");
+
+    // Semantic graph carries the new construct.
+    let graph_json = crate::graph::to_json(&program).expect("graph projection succeeds");
+    assert!(graph_json.contains("\"kind\":\"yield\""));
+    assert!(graph_json.contains("\"request_type_id\""));
+
+    // Both codegen backends refuse explicitly, with a dedicated diagnostic
+    // naming what is unimplemented -- never a silent divergence between them.
+    let native = crate::codegen::emit_hir_c(&resolved).unwrap_err();
+    assert_eq!(native.code, "SPX-B116");
+    assert!(native.message.contains("yield"));
+
+    let wasm = crate::wasm::emit_resolved_module(&resolved).unwrap_err();
+    assert_eq!(wasm.code, "SPX-W126");
+    assert!(wasm.message.contains("yield"));
+}

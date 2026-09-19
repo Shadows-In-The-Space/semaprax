@@ -319,6 +319,17 @@ pub(super) fn expr_json(
             "{{{header},\"kind\":\"upcast\",\"source\":{}}}",
             expr_json(program, source)?
         ),
+        // Resumable Effects v1 (issue #204): the request's own type is the
+        // enclosing function's declared `yields` request type; this node's
+        // own `type_id`/`ownership_mode` (in `header`) already carry the
+        // declared response type, so only the request needs restating here.
+        // See `docs/RESUMABLE-EFFECTS-V1.md`.
+        ResolvedExprKind::Yield { request } => format!(
+            "{{{header},\"kind\":\"yield\",\"request\":{},\"request_type_id\":{},\"request_type\":{}}}",
+            expr_json(program, request)?,
+            quote_json(&request.ty.identity_key()),
+            type_json(&request.ty)
+        ),
     };
     Ok(output)
 }

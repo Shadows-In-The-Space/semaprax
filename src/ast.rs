@@ -250,6 +250,10 @@ impl Drop for Program {
         for function in functions {
             types.extend(function.params.into_iter().map(|param| param.ty));
             types.push(function.return_type);
+            if let Some(yields) = function.yields {
+                types.push(yields.request_type);
+                types.push(yields.response_type);
+            }
             expressions.extend(function.requires);
             expressions.extend(function.ensures);
             expressions.push(function.body);
@@ -288,7 +292,8 @@ impl Drop for Program {
                 }
                 ExprKind::Unary { value, .. }
                 | ExprKind::Try { operand: value }
-                | ExprKind::Project { base: value, .. } => expressions.push(*value),
+                | ExprKind::Project { base: value, .. }
+                | ExprKind::Yield { request: value } => expressions.push(*value),
                 ExprKind::Binary { left, right, .. } => {
                     expressions.push(*left);
                     expressions.push(*right);
@@ -708,9 +713,24 @@ pub struct Function {
     pub params: Vec<Param>,
     pub return_type: Type,
     pub effects: Vec<String>,
+    /// Resumable Effects v1 (issue #204): `yields Request -> Response`.
+    /// `None` for every ordinary function. See [`YieldsClause`].
+    pub yields: Option<YieldsClause>,
     pub requires: Vec<Expr>,
     pub ensures: Vec<Expr>,
     pub body: Expr,
+    pub span: Span,
+}
+
+/// Resumable Effects v1 (issue #204): a function's `yields Request ->
+/// Response` clause. `request_type` is what a `yield <expr>` inside the
+/// function's body must produce; `response_type` is what resuming that
+/// suspension supplies, and is the type of the `yield <expr>` expression
+/// itself. See `docs/RESUMABLE-EFFECTS-V1.md`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct YieldsClause {
+    pub request_type: Type,
+    pub response_type: Type,
     pub span: Span,
 }
 
@@ -841,6 +861,13 @@ pub enum ExprKind {
         base: Box<Expr>,
         field: String,
         field_span: Span,
+    },
+    /// Resumable Effects v1 (issue #204): `yield <expr>`. Admitted only as a
+    /// direct top-level statement or tail expression of a function's own
+    /// body block that declares a `yields` clause; see
+    /// `docs/RESUMABLE-EFFECTS-V1.md`.
+    Yield {
+        request: Box<Expr>,
     },
 }
 
@@ -1233,7 +1260,8 @@ impl Expr {
             ExprKind::SuperMethod { args, .. } => args.get(index),
             ExprKind::Unary { value, .. }
             | ExprKind::Try { operand: value }
-            | ExprKind::Project { base: value, .. } => (index == 0).then_some(value),
+            | ExprKind::Project { base: value, .. }
+            | ExprKind::Yield { request: value } => (index == 0).then_some(value),
             ExprKind::Binary { left, right, .. } => {
                 [left.as_ref(), right.as_ref()].get(index).copied()
             }

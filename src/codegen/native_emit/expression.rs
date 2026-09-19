@@ -791,6 +791,17 @@ impl<'a, O: COutput> CEmitter<'a, O> {
             ResolvedExprKind::Project { .. } => self.emit_project_expr(expr),
             ResolvedExprKind::Upcast { .. } => self.emit_upcast_expr(expr),
             ResolvedExprKind::UpdateRecord { .. } => self.emit_update_record_expr(expr),
+            // Resumable Effects v1 (issue #204): explicit, tested refusal.
+            // A `yield` suspends the whole function and hands control back
+            // to a caller outside this translation unit; the native C11
+            // backend has no such control-transfer mechanism, so a
+            // `yields`-declaring function is not admitted for this target
+            // at all -- see `docs/RESUMABLE-EFFECTS-V1.md`.
+            ResolvedExprKind::Yield { .. } => Err(Diagnostic::io(
+                "SPX-B116",
+                "`yield` is not yet lowered by the native backend; a `yields`-declaring \
+                 function is not admitted for this target",
+            )),
         }
     }
 

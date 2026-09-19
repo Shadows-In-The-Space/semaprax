@@ -214,6 +214,7 @@ fn carrier(body: Expr, original: &[Param]) -> Function {
         params: original.to_vec(),
         return_type: Type::I64,
         effects: Vec::new(),
+        yields: None,
         requires: Vec::new(),
         ensures: Vec::new(),
         body,

@@ -60,7 +60,9 @@ pub(super) fn collect_locals(
         ResolvedExprKind::Unary { value, .. } => {
             collect_locals(value, parameter_count, layout)?;
         }
-        ResolvedExprKind::Try { operand, .. } | ResolvedExprKind::TryOption { operand, .. } => {
+        ResolvedExprKind::Try { operand, .. }
+        | ResolvedExprKind::TryOption { operand, .. }
+        | ResolvedExprKind::Yield { request: operand } => {
             collect_locals(operand, parameter_count, layout)?;
         }
         ResolvedExprKind::Binary { left, right, .. } => {

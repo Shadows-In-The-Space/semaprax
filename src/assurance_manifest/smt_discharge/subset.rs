@@ -198,6 +198,7 @@ pub fn expr_reason(expr: &Expr) -> Option<UnsupportedReason> {
         ExprKind::ConstructVariant { .. } => "variant construction",
         ExprKind::Match { .. } => "match",
         ExprKind::Try { .. } => "try",
+        ExprKind::Yield { .. } => "yield",
         ExprKind::UpdateRecord { .. } => "record update",
         ExprKind::Project { .. } => "field projection",
         ExprKind::Int(_)

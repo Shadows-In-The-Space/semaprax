@@ -628,6 +628,7 @@ fn expression_path_counts_with_while(
             | ResolvedExprKind::BorrowPlace { .. } => None,
             ResolvedExprKind::Unary { value, .. }
             | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value }
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. } => {
@@ -767,9 +768,9 @@ fn expression_path_counts_with_while(
                             inner
                         }
                     }
-                    ResolvedExprKind::Upcast { .. } | ResolvedExprKind::Project { .. } => {
-                        children[0]
-                    }
+                    ResolvedExprKind::Upcast { .. }
+                    | ResolvedExprKind::Yield { .. }
+                    | ResolvedExprKind::Project { .. } => children[0],
                     ResolvedExprKind::Binary { op, .. } => {
                         let left = children[0];
                         let right = children[1];
@@ -1117,6 +1118,7 @@ fn expression_skeleton_work_upper(
                 )?,
                 ResolvedExprKind::Try { .. } | ResolvedExprKind::TryOption { .. } => 10,
                 ResolvedExprKind::Project { .. } | ResolvedExprKind::Upcast { .. } => 6,
+                ResolvedExprKind::Yield { .. } => 6,
                 ResolvedExprKind::If { .. } => 10,
                 ResolvedExprKind::Match { arms, .. } => {
                     // Guards recurse as separate sub-skeletons, so each arm
@@ -1929,6 +1931,7 @@ fn collect_expression_statuses(
             | ResolvedExprKind::UpdateRecord { .. }
             | ResolvedExprKind::Project { .. }
             | ResolvedExprKind::Upcast { .. }
+            | ResolvedExprKind::Yield { .. }
             | ResolvedExprKind::Int(_)
             | ResolvedExprKind::Int32(_)
             | ResolvedExprKind::Char(_)
@@ -3581,6 +3584,15 @@ fn expression_skeleton(
                     ResolvedExprKind::Upcast { source } => {
                         push_frame!(frames, Frame::UpcastPassthrough);
                         push_frame!(frames, Frame::Eval(source));
+                    }
+                    // Resumable Effects v1 (issue #204): `yield`'s request
+                    // is an admitted Copy scalar (`hir::resolve_yield`
+                    // enforces this), so it is transparent to the skeleton
+                    // in exactly the same way an upcast is -- reusing the
+                    // same no-op marker rather than adding a second one.
+                    ResolvedExprKind::Yield { request } => {
+                        push_frame!(frames, Frame::UpcastPassthrough);
+                        push_frame!(frames, Frame::Eval(request));
                     }
                     ResolvedExprKind::Binary { op, left, right } => {
                         push_frame!(

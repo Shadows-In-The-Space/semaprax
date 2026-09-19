@@ -221,7 +221,8 @@ pub(super) fn validate_expression(
             | ResolvedExprKind::TryOption { .. }
             | ResolvedExprKind::UpdateRecord { .. }
             | ResolvedExprKind::Project { .. }
-            | ResolvedExprKind::Upcast { .. } => return Err(body_error(function_id)),
+            | ResolvedExprKind::Upcast { .. }
+            | ResolvedExprKind::Yield { .. } => return Err(body_error(function_id)),
             ResolvedExprKind::Call {
                 type_arguments,
                 instance,

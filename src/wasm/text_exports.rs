@@ -578,7 +578,7 @@ fn validate_function(
                 }
                 pending.push(base);
             }
-            ResolvedExprKind::Upcast { source } => {
+            ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
                 if strictness == Strictness::Full {
                     return Err(admission(format!(
                         "Public Borrowed Text Export Profile v1 function `{}` reaches an aggregate or variant expression",

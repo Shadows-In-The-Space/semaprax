@@ -83,7 +83,9 @@ pub(super) fn needs_i32_wide_scratch(expression: &ResolvedExpr) -> bool {
                 pending.push(operand);
             }
             ResolvedExprKind::Project { base, .. } => pending.push(base),
-            ResolvedExprKind::Upcast { source } => pending.push(source),
+            ResolvedExprKind::Upcast { source } | ResolvedExprKind::Yield { request: source } => {
+                pending.push(source)
+            }
             ResolvedExprKind::Int(_)
             | ResolvedExprKind::Int32(_)
             | ResolvedExprKind::Char(_)
@@ -131,7 +133,8 @@ fn contains_checked_arithmetic(expression: &ResolvedExpr, target: &ResolvedType)
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => contains_checked_arithmetic(value, target),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => contains_checked_arithmetic(value, target),
         ResolvedExprKind::Call { args, .. } => args
             .iter()
             .any(|argument| contains_checked_arithmetic(argument, target)),

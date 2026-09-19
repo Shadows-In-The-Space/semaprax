@@ -298,7 +298,8 @@ pub(crate) fn push_resolved_expression_children_in_authored_order<'a>(
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => pending.push(value),
         ResolvedExprKind::Binary { left, right, .. } => {
             pending.push(right);
             pending.push(left);
@@ -653,7 +654,8 @@ pub(super) fn byte_capacity_expression(
                     | ResolvedExprKind::Try { operand: value, .. }
                     | ResolvedExprKind::TryOption { operand: value, .. }
                     | ResolvedExprKind::Project { base: value, .. }
-                    | ResolvedExprKind::Upcast { source: value } => {
+                    | ResolvedExprKind::Upcast { source: value }
+                    | ResolvedExprKind::Yield { request: value } => {
                         frames.push(Frame::Visit(value, false));
                     }
                     ResolvedExprKind::Binary { left, right, .. } => {

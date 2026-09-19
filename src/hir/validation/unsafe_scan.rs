@@ -45,7 +45,8 @@ pub(super) fn contains_unsafe_boundary(expression: &ResolvedExpr) -> bool {
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push(value),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push(value),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push(right);
                 pending.push(left);

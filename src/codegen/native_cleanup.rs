@@ -924,11 +924,12 @@ fn validate_expression(
         }
         ResolvedExprKind::ConstructRecord { .. }
         | ResolvedExprKind::Project { .. }
-        | ResolvedExprKind::Upcast { .. } => {
+        | ResolvedExprKind::Upcast { .. }
+        | ResolvedExprKind::Yield { .. } => {
             return Err(unsupported(
                 function,
                 format!(
-                    "uses projected or constructed expression `{}`",
+                    "uses projected, constructed, or yielding expression `{}`",
                     expression.id
                 ),
             ));

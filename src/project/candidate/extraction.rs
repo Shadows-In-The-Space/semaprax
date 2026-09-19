@@ -125,6 +125,7 @@ pub(super) fn apply(
             .collect(),
         return_type,
         effects,
+        yields: None,
         requires: Vec::new(),
         ensures: Vec::new(),
         body,

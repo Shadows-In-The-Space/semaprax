@@ -68,6 +68,7 @@ fn expression(
         }
         ExprKind::Unary { value, .. }
         | ExprKind::Try { operand: value }
+        | ExprKind::Yield { request: value }
         | ExprKind::Project { base: value, .. } => self::expression(value, next, nodes, visit)?,
         ExprKind::Binary { left, right, .. } => {
             self::expression(left, next, nodes, visit)?;

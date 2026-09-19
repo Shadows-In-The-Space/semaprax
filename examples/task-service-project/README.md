@@ -130,3 +130,53 @@ every v1/v2 operation, not a bounded fix to one precondition, so the write
 side of this demonstration remains open on this project. `SPX-G525`'s message
 was reworded so it no longer reads as fixable by editing this project's own
 source.
+
+**Neither `std.log` nor `std.tracing` can be added to this project's
+dependency closure.** Both packages are wired into the compiler's bundled
+dependency registry, and both were tried against a scratch copy of this
+project's manifest in this session. `std.tracing` is the lighter of the two
+candidates -- `std.encoding` is its only transitive dependency, versus
+`std.log`'s four (`std.data.json.utf8`, `std.data.json.write`, `std.io`,
+`std.log.redact`) -- and it is refused too: `semaprax check` reports
+`SPX-G171`'s static admission pre-charge already reaching 19,160,008 bytes
+against the 18,874,368-byte cap (**101.5%**) from `std.auth` + `std.bytes` +
+`std.encoding` + `std.jobs` + `std.tracing` alone, in canonical path order --
+before this project's own three source files are resolved at all. Adding
+`std.log` instead is refused the same way, and by a wider margin before its
+full five-package closure is even completely counted: the pre-charge already
+reaches 19,080,680 bytes (**101.1%**) from only the first five
+alphabetically-ordered dependency modules, before `std.jobs`, `std.log`, or
+`std.log.redact` are reached. Adding both together reaches 19,922,880 bytes
+(**105.6%**). Because this pre-charge sums whole reachable *modules*
+regardless of which functions this project's own source calls (the same
+"whole-file, not whole-project" charge shape this README's `std.auth`/
+`std.jobs` measurement above already documents), no reduction of this
+project's own three files can close the gap -- the checked-in baseline
+(`std.auth` + `std.jobs` + `std.bytes`) alone already sits at roughly 92.7%
+of the cap by the estimate above, and at 88.2% (16,656,400 bytes) measured
+freshly in this session via the real build's own fallback-mode accounting
+(`checked_retention_prebound_with_uncached_peak`, the same ladder
+`semaprax check` actually walks); either way, the remaining headroom is
+under 12%, and even the lighter candidate's whole-file charge exceeds it
+outright.
+`tests/useful_data/task_service_project.rs::adding_std_tracing_to_the_dependency_closure_exceeds_the_builder_bytes_cap`
+pins this as a regression: it patches a scratch copy of this project to add
+`std.tracing` and one trivial probe function, and asserts `semaprax check`
+refuses with `SPX-G171`. This is the same `SPX-G171` ceiling named above and
+in issue #241, not a new one.
+
+**This project's manifest does not qualify for `semaprax build --target
+oci`.** [OCI Deployable Artifact v1](OCI-DEPLOYABLE-ARTIFACT-V1.md) is
+implemented only for a Project manifest carrying the frozen
+`semaprax.project.v1` schema under the `ScalarV1` profile. This project uses
+`schema = "semaprax.manifest.v1"` (the extensible Useful Data Export v1
+table-format manifest, required by its `[dependencies]`/`[exports]` sections)
+under the `useful-data.v1` profile -- a different schema and profile
+entirely. Running `semaprax build --target oci examples/task-service-project`
+refuses closed with `SPX-J142` ("the oci target requires the Project v1
+scalar profile; no other profile is wired to OCI packaging"), exactly as
+documented. Qualifying would mean rewriting this project onto the older
+flat `semaprax.project.v1` schema, which has no `[dependencies]` table and
+therefore cannot express this project's `std.auth`/`std.jobs` composition at
+all -- the two are mutually exclusive today, not a gap in this project's
+authoring.

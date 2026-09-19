@@ -26,6 +26,56 @@ use function @id("std.tracing.tracestate_value_shape_admitted") from std.tracing
 use function @id("std.tracing.tracestate_member_admitted") from std.tracing as tracestate_member_admitted;
 use function @id("std.tracing.tracestate_mutation_admitted") from std.tracing as tracestate_mutation_admitted;
 
+// Shared buffer-construction helpers for the cases below. `bytes_zeroed`
+// only admits a literal capacity at its own call site (`SPX-T271`), so a
+// single length-parameterized filler cannot exist; only the two shapes that
+// are each duplicated by more than one case below are worth the cost of a
+// named helper (a new call site costs the same order as a declaration, so
+// factoring out a body used only once is a net loss, not a win).
+//
+// `zero_ascii_range` consumes the one live `Bytes` buffer and returns it,
+// matching the loop-carried fill shape (`buffer = bytes_set(buffer, ...)`)
+// each case already used inline; a caller cannot reassign its own binding
+// through this call (`SPX-U105`: explicit mutation only republishes a
+// binding through a direct `bytes_zeroed`/`bytes_set` chain, never through
+// another function), so every call site below binds the result to a fresh
+// name instead.
+@id("std.tracing.tests.zero_ascii_range")
+fn zero_ascii_range(source: own Bytes, start: usize, end: usize) -> Bytes
+{
+    let mut buffer = source;
+    let mut index = start;
+    while index < end {
+        buffer = bytes_set(buffer, index, 48u8);
+        index = index + 1usize;
+        index < end
+    }
+    buffer
+}
+
+// A well-formed 55-byte `traceparent`: filler `a` bytes, version `00`, the
+// three dashes in place, and trace-flags `0<last_flag_digit>`. Shared by
+// every case that needs a header admitted before it mutates one field.
+@id("std.tracing.tests.header_with_sampled_bit")
+fn header_with_sampled_bit(last_flag_digit: u8) -> Bytes
+{
+    let mut header = bytes_zeroed(55usize);
+    let mut fill_index = 0usize;
+    while fill_index < 55usize {
+        header = bytes_set(header, fill_index, 97u8);
+        fill_index = fill_index + 1usize;
+        fill_index < 55usize
+    }
+    header = bytes_set(header, 0usize, 48u8);
+    header = bytes_set(header, 1usize, 48u8);
+    header = bytes_set(header, 2usize, 45u8);
+    header = bytes_set(header, 35usize, 45u8);
+    header = bytes_set(header, 52usize, 45u8);
+    header = bytes_set(header, 53usize, 48u8);
+    header = bytes_set(header, 54usize, last_flag_digit);
+    header
+}
+
 // The hex alphabet boundary bytes, asserted at the predicate the scanners
 // are built from rather than only through them. An uppercase hex digit is a
 // well-formed hex character in general but is refused here.
@@ -115,16 +165,7 @@ fn version_field_cases() -> bool
 @id("std.tracing.tests.dash_positions_cases")
 fn dash_positions_cases() -> bool
 {
-    let mut header = bytes_zeroed(55usize);
-    let mut index = 0usize;
-    while index < 55usize {
-        header = bytes_set(header, index, 97u8);
-        index = index + 1usize;
-        index < 55usize
-    }
-    header = bytes_set(header, 2usize, 45u8);
-    header = bytes_set(header, 35usize, 45u8);
-    header = bytes_set(header, 52usize, 45u8);
+    let mut header = header_with_sampled_bit(49u8);
     let admitted = dash_positions_admitted(bytes_as_slice(header));
     header = bytes_set(header, 35usize, 97u8);
     let middle_dash_wrong_refused = !dash_positions_admitted(bytes_as_slice(header));
@@ -145,13 +186,8 @@ fn trace_id_all_zero_refused() -> bool
         index < 35usize
     }
     let nonzero_admitted = trace_id_admitted(bytes_as_slice(field));
-    let mut zero_index = 3usize;
-    while zero_index < 35usize {
-        field = bytes_set(field, zero_index, 48u8);
-        zero_index = zero_index + 1usize;
-        zero_index < 35usize
-    }
-    let all_zero_refused = !trace_id_admitted(bytes_as_slice(field));
+    let zeroed = zero_ascii_range(field, 3usize, 35usize);
+    let all_zero_refused = !trace_id_admitted(bytes_as_slice(zeroed));
     nonzero_admitted && all_zero_refused
 }
 
@@ -169,13 +205,8 @@ fn parent_id_all_zero_refused() -> bool
         index < 52usize
     }
     let nonzero_admitted = parent_id_admitted(bytes_as_slice(field));
-    let mut zero_index = 36usize;
-    while zero_index < 52usize {
-        field = bytes_set(field, zero_index, 48u8);
-        zero_index = zero_index + 1usize;
-        zero_index < 52usize
-    }
-    let all_zero_refused = !parent_id_admitted(bytes_as_slice(field));
+    let zeroed = zero_ascii_range(field, 36usize, 52usize);
+    let all_zero_refused = !parent_id_admitted(bytes_as_slice(zeroed));
     nonzero_admitted && all_zero_refused
 }
 
@@ -199,20 +230,7 @@ fn trace_flags_field_cases() -> bool
 @id("std.tracing.tests.sampled_bit_extraction")
 fn sampled_bit_extraction() -> bool
 {
-    let mut header = bytes_zeroed(55usize);
-    let mut index = 0usize;
-    while index < 55usize {
-        header = bytes_set(header, index, 97u8);
-        index = index + 1usize;
-        index < 55usize
-    }
-    header = bytes_set(header, 0usize, 48u8);
-    header = bytes_set(header, 1usize, 48u8);
-    header = bytes_set(header, 2usize, 45u8);
-    header = bytes_set(header, 35usize, 45u8);
-    header = bytes_set(header, 52usize, 45u8);
-    header = bytes_set(header, 53usize, 48u8);
-    header = bytes_set(header, 54usize, 49u8);
+    let mut header = header_with_sampled_bit(49u8);
     let shape_holds = traceparent_shape_admitted(bytes_as_slice(header));
     let sampled = traceparent_sampled(bytes_as_slice(header));
     header = bytes_set(header, 54usize, 48u8);
@@ -227,14 +245,10 @@ fn sampled_bit_extraction() -> bool
 @id("std.tracing.tests.wrong_length_refused")
 fn wrong_length_refused() -> bool
 {
-    let mut short = bytes_zeroed(54usize);
-    let mut index = 0usize;
-    while index < 54usize {
-        short = bytes_set(short, index, 97u8);
-        index = index + 1usize;
-        index < 54usize
-    }
-    !traceparent_shape_admitted(bytes_as_slice(short))
+    let header = header_with_sampled_bit(49u8);
+    let header_view = bytes_as_slice(header);
+    let short = byte_range(header_view, 0usize, 54usize);
+    !traceparent_shape_admitted(short)
 }
 
 // The `tracestate` budgets are inclusive at their ceiling and refuse one

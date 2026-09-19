@@ -828,8 +828,8 @@ fn public_sdk_windows_runs_exact_blocking_archive_publication_and_consumer_gates
         .nth(1)
         .and_then(|tail| tail.split("\n  verify:\n").next())
         .expect("Public Native Rust SDK workflow job");
-    let archive_command = "run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_real_brepro_archive_round_trips_through_exact_admission -- --exact --nocapture --test-threads=1";
-    let inventory_command = "run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_live_descendant_authorities_deny_root_publish_without_later_action -- --ignored --exact --nocapture --test-threads=1";
+    let archive_command = "run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_archive::windows_real_brepro_archive_round_trips_through_exact_admission -- --exact --nocapture --test-threads=1";
+    let inventory_command = "run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_archive::windows_live_descendant_authorities_deny_root_publish_without_later_action -- --ignored --exact --nocapture --test-threads=1";
     let minimal_command = "run: cargo test --locked --offline -p semaprax-native-rust-interop --lib public_sdk::tests::effectful_no_import_sdk_builds_the_exact_public_inventory -- --exact --nocapture --test-threads=1";
     let long_command = "cargo test --locked --offline -p semaprax --test public_native_rust_sdk_v1 -- --test-threads=1 --nocapture";
     assert_eq!(public_job.matches(archive_command).count(), 1);
@@ -1052,7 +1052,7 @@ fn hosted_workflow_names_all_private_interop_evidence_boundaries() {
         "if not exist \"%SEMAPRAX_VCTOOLS%\" exit /b 1",
         "if not exist \"%SEMAPRAX_LINKER%\" exit /b 1",
         "SEMAPRAX_REQUIRE_NATIVE_RUST_INTEROP_SANITIZERS: \"1\"",
-        "implementation::tests::linked_bridge_round_trips_rust_to_semaprax_to_rust_and_closes_failures -- --exact --nocapture",
+        "implementation::tests::linked_bundle::linked_bridge_round_trips_rust_to_semaprax_to_rust_and_closes_failures -- --exact --nocapture",
     ] {
         assert!(workflow.contains(required), "workflow is missing `{required}`");
     }

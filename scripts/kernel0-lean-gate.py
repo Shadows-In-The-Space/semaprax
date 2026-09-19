@@ -66,10 +66,18 @@ applicable check (source-level, always; build-level, when possible) passed.
 No network access is attempted; if Lean is not installed, install it
 yourself (e.g. via https://leanprover-community.github.io/get_started.html)
 -- this script will not fetch it.
+
+`--require-kernel` removes the skip half: an absent `lake` becomes a hard
+failure, and `PASS-PARTIAL` stops being an accepted outcome. Skip-on-absence
+is right on a developer machine that may have no Lean, and wrong on a runner
+that has just provisioned one -- there, a silently skipped build is a green
+check over an unbuilt proof, which is precisely the hole this gate was
+written to close. Hosted CI passes the flag; `scripts/quality.sh` does not.
 """
 
 from __future__ import annotations
 
+import argparse
 import re
 import shutil
 import subprocess
@@ -305,12 +313,24 @@ def check_source_level(source_text: str, lines: list[str]) -> list[str]:
     return failures
 
 
-def check_build_level() -> tuple[list[str], bool]:
+def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
     """Runs `lake build` and audits its output. Returns (failures, ran) --
     `ran` is False when no toolchain was available at all, in which case
-    `failures` is always empty (a skip is not a failure)."""
+    `failures` is empty unless `require_kernel` was asked for, which turns
+    the absence itself into the failure."""
     lake = shutil.which("lake")
     if lake is None:
+        if require_kernel:
+            return (
+                [
+                    "`lake` not found on PATH and --require-kernel was "
+                    "passed: the proof was NOT rebuilt and its axiom set "
+                    "was NOT re-audited. A caller that promises a "
+                    "provisioned kernel and then finds none has a "
+                    "provisioning failure, not a skippable check."
+                ],
+                False,
+            )
         print(
             f"{TAG}: SKIP: `lake` not found on PATH -- the proof was NOT "
             "rebuilt and its axiom set was NOT re-audited this run. This is "
@@ -395,6 +415,17 @@ def check_build_level() -> tuple[list[str], bool]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--require-kernel",
+        action="store_true",
+        help=(
+            "treat a missing Lean toolchain as a failure rather than a "
+            "skip, so PASS-PARTIAL can never be reported as a pass"
+        ),
+    )
+    arguments = parser.parse_args()
+
     if not SOURCE.is_file():
         fail(f"expected proof source not found at {SOURCE}")
         return 1
@@ -403,7 +434,7 @@ def main() -> int:
     lines = source_text.split("\n")
 
     source_failures = check_source_level(source_text, lines)
-    build_failures, build_ran = check_build_level()
+    build_failures, build_ran = check_build_level(arguments.require_kernel)
 
     all_failures = source_failures + build_failures
     if all_failures:

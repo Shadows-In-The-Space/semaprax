@@ -63,10 +63,18 @@ no network access is attempted, and an uninstalled pin is a skip rather than
 a download, because a gate that installs a gigabyte of toolchain is not a
 gate. Otherwise every check above must pass for exit 0.
 
+`--require-kernel` inverts that default: every skip becomes a failure. A
+skip-on-absence gate is the correct shape on a developer machine that may
+not have Lean, and exactly the wrong shape on a runner that is supposed to
+have provisioned it -- there, a silently skipped kernel is a green check
+covering nothing, which is the failure mode this whole gate exists to
+prevent. Hosted CI passes the flag; `scripts/quality.sh` does not.
+
 Usage
 -----
-    scripts/lean-export-gate.py             # check
-    scripts/lean-export-gate.py --record    # deliberately re-record transcripts
+    scripts/lean-export-gate.py                    # check, skip if absent
+    scripts/lean-export-gate.py --require-kernel   # absence is a failure
+    scripts/lean-export-gate.py --record           # re-record transcripts
 """
 
 from __future__ import annotations
@@ -275,19 +283,44 @@ def main() -> int:
         action="store_true",
         help="rewrite the committed transcripts from this host's kernel",
     )
+    parser.add_argument(
+        "--require-kernel",
+        action="store_true",
+        help=(
+            "treat every skip as a failure: the pinned kernel must be "
+            "present and must actually run"
+        ),
+    )
     args = parser.parse_args()
+
+    def unavailable(reason: str) -> int:
+        """Report a kernel that did not run.
+
+        The wording is identical either way -- only the verdict and the exit
+        code change -- so a hosted run can never present a check it did not
+        perform as a pass, and a developer without Lean is never blocked.
+        """
+        if args.require_kernel:
+            print(f"{TAG}: FAIL: {reason}", file=sys.stderr)
+            print(
+                f"{TAG}: RESULT: FAIL -- --require-kernel was passed, so a "
+                f"kernel that did not run is a failure, not a skip",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"{TAG}: SKIP: {reason}")
+        return 0
 
     pin = TOOLCHAIN_FILE.read_text(encoding="utf-8").strip()
     want = pinned_version(pin)
 
     lean = find_lean()
     if lean is None:
-        print(
-            f"{TAG}: SKIP: no `lean` on PATH or in ~/.elan/bin -- the generated "
-            f"Lean was NOT checked by any kernel. Install the pinned {pin} to "
-            f"run this gate; this script will not fetch it."
+        return unavailable(
+            f"no `lean` on PATH or in ~/.elan/bin -- the generated Lean was "
+            f"NOT checked by any kernel. Install the pinned {pin} to run this "
+            f"gate; this script will not fetch it."
         )
-        return 0
 
     # `lean` here is usually elan's shim, which resolves a version from the
     # nearest `lean-toolchain` file and refuses to run outside a project when
@@ -295,12 +328,11 @@ def main() -> int:
     # on the working directory -- getting this wrong turns every run into a
     # SKIP that exits 0, which is a false pass wearing a skip's clothes.
     if not installed(pin):
-        print(
-            f"{TAG}: SKIP: the pinned toolchain {pin} is not installed on this "
-            f"host -- the generated Lean was NOT checked by any kernel. Install "
-            f"it yourself; this gate does not fetch toolchains."
+        return unavailable(
+            f"the pinned toolchain {pin} is not installed on this host -- the "
+            f"generated Lean was NOT checked by any kernel. Install it "
+            f"yourself; this gate does not fetch toolchains."
         )
-        return 0
 
     try:
         probe = subprocess.run(
@@ -312,18 +344,16 @@ def main() -> int:
         )
         version = (probe.stdout + probe.stderr).strip()
     except OSError as error:  # pragma: no cover - environment dependent
-        print(f"{TAG}: SKIP: cannot run `{lean} --version`: {error}")
-        return 0
+        return unavailable(f"cannot run `{lean} --version`: {error}")
 
     if want not in version:
-        print(
-            f"{TAG}: SKIP: this host's Lean reports `{version or '(nothing)'}`, "
-            f"which does not contain the pinned {want} from "
+        return unavailable(
+            f"this host's Lean reports `{version or '(nothing)'}`, which does "
+            f"not contain the pinned {want} from "
             f"{TOOLCHAIN_FILE.relative_to(REPO)}. A kernel that is not the "
-            f"pinned one proves nothing about the pinned one, so this is a "
-            f"skip, not a pass and not a silent substitution."
+            f"pinned one proves nothing about the pinned one, so this is "
+            f"never a pass and never a silent substitution."
         )
-        return 0
 
     print(f"{TAG}: pinned toolchain {pin} confirmed ({version})")
 
@@ -377,11 +407,17 @@ def main() -> int:
         print(f"{TAG}: RESULT: RECORDED (review the diff before committing)")
         return 0
 
-    print(
+    result = (
         f"{TAG}: RESULT: PASS -- the committed Lean export is accepted by the "
         f"pinned kernel, a seeded `sorry` is refused, and every transcript is "
-        f"current. LOCAL-HOST EVIDENCE ONLY: hosted CI runs no Lean toolchain."
+        f"current."
     )
+    if not args.require_kernel:
+        # Without the flag this run may have been a developer machine, so the
+        # standing caveat stays. With it, the caller provisioned the kernel
+        # and is entitled to describe the run as whatever it actually is.
+        result += " LOCAL-HOST EVIDENCE unless a provisioned runner ran it."
+    print(result)
     return 0
 
 

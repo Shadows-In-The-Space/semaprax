@@ -18,13 +18,21 @@ the certificate schema. Where it and the code disagree, the code's tests
 ## What has and has not been executed
 
 The pinned Lean 4.34.0 toolchain **has now been run** against the committed
-golden export, on a developer host that has it installed. Read the scope
-sentence before quoting this: it is **local-host evidence only**. Hosted CI
-provisions no Lean toolchain (see [quality gates](QUALITY-GATES.md)), so
-`scripts/lean-export-gate.py` is not in `scripts/quality.sh` and is not in
-`release-gate`'s blocker set. Nothing in this document, the generated Lean,
-or a certificate may be described as hosted, production, current-head CI, or
-physical-device evidence.
+golden export. `scripts/lean-export-gate.py --require-kernel` is a step of
+the `kernel0-lean-proof-gate` job in `.github/workflows/ci.yml`, which
+provisions a sha256-pinned `elan` and the exact toolchain named by
+`proofs/kernel0-lean/lean-toolchain`, and which **is** in `release-gate`'s
+blocker set; see [quality gates](QUALITY-GATES.md). `--require-kernel` makes
+an absent or mismatched kernel a failure rather than a skip, so the job
+cannot go green having checked nothing.
+
+**What that does and does not license.** Once a hosted run of that job has
+completed, its result is hosted evidence for the commit it ran on, and
+nothing more. Until then, every kernel result quoted in this document was
+produced on one developer host and is local evidence. Nothing here, in the
+generated Lean, or in a certificate may be described as production,
+physical-device, or current-head evidence on the strength of a wired job:
+wiring a gate is not the same as having run it.
 
 What is now evidenced, and by what:
 
@@ -224,7 +232,10 @@ variants, and compares each result byte-for-byte against the committed
 transcripts so recorded evidence cannot silently go stale. With no Lean
 installed it prints a `SKIP` naming what was not checked and exits 0; it
 never fetches a toolchain, and an unpinned or absent kernel is a skip, never
-a substitution.
+a substitution. `--require-kernel` turns every one of those skips into a
+failure, which is how CI runs it: a skip is the right default for a
+developer machine that may have no Lean, and the wrong one for a runner
+that has just provisioned it.
 
 ## Result grammar
 
@@ -327,11 +338,13 @@ written about this module:
 
 ## Not done in this tranche
 
-- **No hosted evidence.** Every kernel result here was produced on one
-  developer host. No CI job runs Lean, and none is proposed here.
+- **No hosted result is quoted here yet.** The gate is wired into the
+  `kernel0-lean-proof-gate` release blocker, but every kernel result
+  transcribed in this document was produced on one developer host. A hosted
+  run's verdict becomes quotable when one exists, per commit.
 - **No `LeanKernel` implementation inside the crate**, by design; the runner
-  is `scripts/lean-export-gate.py`, and it is not wired into
-  `scripts/quality.sh` or `release-gate`.
+  is `scripts/lean-export-gate.py`. It is not in `scripts/quality.sh`,
+  which stays toolchain-free; CI runs it directly.
 - The kernel has been run over exactly one module, the committed golden. No
   corpus, and no generated-source mutation ladder beyond the two seeds.
 - No CLI surface; the module is library-only.

@@ -16,11 +16,13 @@ pub(crate) const RELEASE_BLOCKERS: &[&str] = &[
     "release-claim-reconcile",
     "python-test-suites",
     "installed-journey",
+    "kernel0-lean-proof-gate",
     "supply-chain",
     "component-runtime-v3",
     "wasm-scalar-exports-browser-v1",
     "project-product-acceptance-v1",
     "project-v1",
+    "native-rust-owned-data-sdk-v1",
     "native-rust-sdk-v1",
     "verify",
     "verify-build",
@@ -43,19 +45,22 @@ const TAG_ONLY: [&str; 3] = ["release-gate", "release-artifacts", "publish-relea
 /// runner cannot yet execute the thing they gate, so requiring them would
 /// require a check that only ever takes its own skip path.
 ///
-/// `kernel0-lean-proof-gate` is the standing case: GitHub-hosted runners ship
-/// no Lean toolchain, and AGENTS.md forbids the build-time network fetch that
-/// installing one needs, so every hosted run takes the explicit-skip half of
-/// `scripts/kernel0-lean-gate.py`'s build check. Its source-level half (pinned
-/// signatures, headline theorems, the comment-aware sorry/admit/axiom scan)
-/// does run on every push; that is worth having, and is not worth calling a
-/// proof-build release blocker. Wiring it in is future work, gated on a
-/// hermetic or pre-baked Lean toolchain.
+/// **Empty, and kept empty deliberately.** `kernel0-lean-proof-gate` was the
+/// standing entry, on the stated grounds that hosted runners ship no Lean
+/// toolchain and that AGENTS.md's no-build-time-network invariant forbade
+/// fetching one. That reading conflated two different acts: the invariant
+/// bans a *build* reaching the network, not a setup step provisioning a
+/// pinned toolchain -- which this very workflow already does for Rust, Node
+/// and TypeScript. The job now installs a sha256-pinned elan, builds the
+/// proof for real, and runs both Lean gates with `--require-kernel` so a
+/// provisioning regression fails instead of skipping. It is a blocker above.
 ///
 /// This list is not a parking space. `a_not_yet_hosted_job_declares_that_status_in_the_workflow`
 /// requires each entry to say so in its own job body, and forbids an entry
-/// that is simultaneously listed as a blocker.
-const NOT_YET_HOSTED: [&str; 1] = ["kernel0-lean-proof-gate"];
+/// that is simultaneously listed as a blocker. An entry added here needs a
+/// reason that survives the question asked above: is the thing genuinely
+/// unrunnable hosted, or merely unwired?
+const NOT_YET_HOSTED: [&str; 0] = [];
 
 fn workflow() -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/ci.yml"))
@@ -373,6 +378,74 @@ fn a_not_yet_hosted_job_declares_that_status_in_the_workflow() {
             "`{exempt}` claims not-yet-hosted status but *is* listed in \
              `release-gate`'s `needs:`; a job cannot be both exempt and a \
              blocker -- drop it from NOT_YET_HOSTED once it is wired in"
+        );
+    }
+}
+
+/// The Lean job is only worth being a release blocker while it actually
+/// runs a kernel. Both gate scripts exit 0 with a `SKIP` when no toolchain
+/// is present -- the correct default for a developer machine, and a silent
+/// no-op on a runner. `--require-kernel` converts that skip into a failure,
+/// so dropping the flag would turn a green required check into a check of
+/// nothing while every other assertion in this file still passed.
+///
+/// The provisioning half is pinned for the same reason: an unpinned
+/// installer, or an archive unpacked without a digest check, would make the
+/// kernel whatever the network served that morning, and a proof re-checked
+/// by an unknown kernel is not re-checked.
+#[test]
+fn the_lean_gates_run_a_real_kernel_rather_than_taking_their_skip_path() {
+    let workflow = workflow();
+    let gate = job(&workflow, "kernel0-lean-proof-gate");
+
+    for exact in [
+        "python3 scripts/kernel0-lean-gate.py --require-kernel",
+        "python3 scripts/lean-export-gate.py --require-kernel",
+    ] {
+        assert!(
+            gate.contains(exact),
+            "the Lean job must run `{exact}`; without `--require-kernel` a \
+             missing toolchain is a skip that exits 0, so the job would \
+             report success having checked no proof at all"
+        );
+    }
+
+    // Single-sourced pin: the job reads the same `lean-toolchain` file that
+    // `scripts/lean-export-gate.py` and `proof_export`'s PINNED_TOOLCHAIN
+    // read, so a bump cannot land in one place and not the others.
+    assert!(
+        gate.contains("$(cat proofs/kernel0-lean/lean-toolchain)"),
+        "the provisioned toolchain must come from the repository's own pin \
+         file, not a version literal in the workflow"
+    );
+    assert!(
+        gate.contains("sha256sum --check --strict"),
+        "the elan archive must be verified against a recorded digest before \
+         it is unpacked; a tag alone is mutable"
+    );
+    // Not a `curl | sh` installer. Pinned positively rather than by
+    // forbidding the literal `| sh`, which this job's own `| sha256sum`
+    // pipe contains -- a negative pin that matches the safe construct is a
+    // test that fails for the wrong reason and gets "fixed" by deleting it.
+    assert!(
+        gate.contains("--output \"$archive\"") && gate.contains("tar -xzf \"$archive\""),
+        "the elan archive must be downloaded to a file, digest-checked, and \
+         unpacked from that file -- never piped straight into a shell"
+    );
+
+    // The corpus lane this job also arms is the other half of the same
+    // failure mode -- a test that returns early is as blind as no test.
+    assert!(
+        gate.contains("SEMAPRAX_REQUIRE_KERNEL_ZERO_CROSS_BACKEND: \"1\""),
+        "the Kernel-0 cross-backend differential lane must be armed here; \
+         unarmed it skips on every runner while its step reports success"
+    );
+
+    for forbidden in ["continue-on-error", "# NOT-YET-HOSTED, deliberately:"] {
+        assert!(
+            !gate.contains(forbidden),
+            "the Lean job is a release blocker and must fail closed, found \
+             `{forbidden}`"
         );
     }
 }

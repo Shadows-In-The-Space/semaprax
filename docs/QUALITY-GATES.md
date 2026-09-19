@@ -184,17 +184,32 @@ doc comment is the source of truth for its exact behavior. Summary:
   on a headline theorem producing no `#print axioms` line at all. When
   `lake` is absent, the script prints an explicit, unambiguous `SKIP` line
   naming exactly what was not checked and exits 0 for that half only -- it
-  never reports a build it did not run as a pass.
+  never reports a build it did not run as a pass. Under `--require-kernel`
+  that absence is itself the failure: a caller that promised a provisioned
+  kernel and then finds none has a provisioning defect, not a skippable
+  check.
 - **Invoked from `scripts/quality.sh full`** (after the validated
   `semaprax.quality-route.v2` gate list, not part of its schema) and from
-  the standalone `kernel0-lean-proof-gate` CI job in `.github/workflows/ci.yml`.
-  The CI job is **not** wired into `release-gate`'s blocker set: GitHub-hosted
-  runners ship no Lean toolchain, and AGENTS.md forbids introducing
-  build-time network access to fetch one, so every hosted run of that job
-  today takes the source-level-only path above. This is a known,
-  intentional, and documented gap, not a silent pass -- promote it to a
-  release-gate blocker only once a hermetic, pre-baked or cached Lean
-  toolchain is available in that job without a build-time fetch.
+  the `kernel0-lean-proof-gate` CI job in `.github/workflows/ci.yml`, which
+  **is** in `release-gate`'s blocker set.
+
+  That job provisions the pinned toolchain itself: a sha256-pinned `elan`
+  release archive, then the exact `leanprover/lean4` version named by
+  `proofs/kernel0-lean/lean-toolchain`. The earlier reading -- that
+  AGENTS.md's no-build-time-network invariant forbade this -- conflated a
+  *setup step* provisioning a pinned toolchain, which the same workflow
+  already does for Rust, Node and TypeScript, with a *build* reaching the
+  network, which nothing here does:
+  `proofs/kernel0-lean/lake-manifest.json` declares `"packages": []`, so
+  `lake build` resolves no dependency and contacts nothing.
+
+  Both Lean gates run there under `--require-kernel`, which converts the
+  skip-when-absent path above into a hard failure. That flag is the whole
+  reason the job is admissible as a blocker: without it a provisioning
+  regression would leave the job green while checking nothing, which is a
+  strictly worse outcome than the honest not-hosted gap it replaces. On a
+  developer machine, without the flag, a missing toolchain remains a visible
+  skip and blocks nobody.
 - **Local evidence** (this repository's own dev host has a working Lean
   4.34.0 toolchain via `elan`, not on `PATH` by default -- run
   `export PATH="$HOME/.elan/bin:$PATH"` first): a cold `lake build` run

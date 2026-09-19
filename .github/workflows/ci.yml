@@ -714,23 +714,39 @@ jobs:
           scripts/run-installed-journey-test.sh
 
   kernel0-lean-proof-gate:
-    name: Kernel-0 Lean proof gate (issue #188)
-    # NOT-YET-HOSTED, deliberately: this job is not in `release-gate`'s
-    # `needs:` list below. GitHub-hosted runners ship no Lean toolchain, and
-    # AGENTS.md forbids introducing build-time network access to fetch one
-    # (elan's own installer needs a one-time network fetch, which is exactly
-    # that). Every run here therefore takes the explicit-skip half of
-    # scripts/kernel0-lean-gate.py's build check -- it still re-checks
-    # headline-theorem presence, pinned signatures, and a comment-aware
-    # sorry/admit/axiom scan against `proofs/kernel0-lean/Kernel0.lean`
-    # unconditionally (no toolchain needed for those), but it does not
-    # rebuild the proof or re-audit `#print axioms` here. Wiring this into
-    # `release-gate` is future work, once a hermetic, pre-baked or cached
-    # Lean toolchain is available without a build-time fetch; see
-    # docs/QUALITY-GATES.md's "Kernel-0 Lean proof gate" section, which owns
-    # the exact catch/skip inventory this comment summarizes.
+    # Quoted: an unquoted `#` after a space starts a YAML comment, which
+    # silently truncated this job's predecessor name at `(issue `.
+    name: "Lean proof and obligation-export kernel gate (issues #186, #188)"
+    # Hosted, and a release blocker. Both Lean artifacts are re-checked here
+    # by the pinned kernel itself, not merely by their toolchain-free source
+    # scans: `proofs/kernel0-lean/Kernel0.lean` (issue #188) is rebuilt cold
+    # and its `#print axioms` sets re-audited, and the generated obligation
+    # export under `src/proof_export` (issue #186) is fed to the same kernel
+    # with a seeded `sorry` that must be refused.
+    #
+    # On AGENTS.md's "no build-time network access": provisioning a pinned
+    # toolchain in a setup step is the same act this workflow already
+    # performs for Rust (`rustup toolchain install "1.88"`), Node
+    # (`actions/setup-node`) and TypeScript (`npm install -g
+    # typescript@5.8.3`). What the invariant forbids is a *build* reaching
+    # the network, and no build here does:
+    # `proofs/kernel0-lean/lake-manifest.json` declares `"packages": []`, so
+    # `lake build` resolves no dependency and contacts nothing. The elan
+    # archive is pinned by release tag and checked against a recorded sha256
+    # before it is unpacked; an unpinned `curl | sh` installer would not be
+    # admissible here.
+    #
+    # Both gates run with `--require-kernel`, which converts their
+    # skip-when-absent path into a hard failure. Without it, a provisioning
+    # regression would leave this job green while checking nothing -- a
+    # skipped kernel reported as a pass is exactly the false green that kept
+    # this evidence local until now, and it is the reason the flag exists.
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 60
+    env:
+      # Pinned by tag *and* by content digest. The tag alone is mutable.
+      ELAN_RELEASE: v4.2.4
+      ELAN_SHA256: 42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -738,8 +754,56 @@ jobs:
           filter: blob:none
           fetch-tags: false
           lfs: false
-      - name: Re-check the Kernel-0 Lean proof (source-level always; build and axiom audit only if a Lean toolchain happens to be present)
-        run: python3 scripts/kernel0-lean-gate.py
+      - name: Provision the pinned Lean toolchain
+        run: |
+          set -euo pipefail
+          # `proofs/kernel0-lean/lean-toolchain` is the single source of the
+          # Lean pin: this step, `scripts/lean-export-gate.py`, and
+          # `proof_export`'s own PINNED_TOOLCHAIN constant all read it, so a
+          # toolchain bump cannot land in one place and not the others.
+          toolchain="$(cat proofs/kernel0-lean/lean-toolchain)"
+          archive="$RUNNER_TEMP/elan.tar.gz"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+            --location --output "$archive" \
+            "https://github.com/leanprover/elan/releases/download/$ELAN_RELEASE/elan-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$ELAN_SHA256  $archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/elan-unpack"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/elan-unpack"
+          "$RUNNER_TEMP/elan-unpack/elan-init" --yes --no-modify-path \
+            --default-toolchain "$toolchain"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Confirm the provisioned kernel is the pinned one
+        run: |
+          set -euo pipefail
+          # Fail here, loudly, rather than let either gate discover a version
+          # mismatch and describe it in its own words. The gates check this
+          # too; a provisioning step that silently installed something else
+          # should not reach them.
+          want="$(cut -d: -f2 proofs/kernel0-lean/lean-toolchain)"
+          lean --version
+          lake --version
+          lean --version | grep -F "${want#v}"
+      - name: "Re-check the Kernel-0 Lean proof, build and axiom audit included (issue #188)"
+        run: python3 scripts/kernel0-lean-gate.py --require-kernel
+      - name: "Re-check the generated obligation export against the pinned kernel (issue #186)"
+        run: python3 scripts/lean-export-gate.py --require-kernel
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.97.1
+      - name: "Run the Kernel-0 cross-backend differential corpus for real (issue #188)"
+        env:
+          # Without this the lane gates itself on a local clang/node and
+          # skips quietly. Nothing set it on any workflow, so since it
+          # landed it had never run on a runner while its step still
+          # reported success -- a lane that passes by returning early is
+          # the same blackout as no CI selector at all. ubuntu-24.04 ships
+          # both tools, so demanding the real run costs nothing but time.
+          SEMAPRAX_REQUIRE_KERNEL_ZERO_CROSS_BACKEND: "1"
+        run: |
+          set -euo pipefail
+          clang --version
+          node --version
+          cargo test --locked -p semaprax --lib kernel_zero::differential -- --nocapture
 
   supply-chain:
     name: Dependency policy
@@ -2212,6 +2276,7 @@ jobs:
       - public-generic-ownership-milestone
       - std-library-depth
       - agent-proposal-clients
+      - kernel0-lean-proof-gate
       - supply-chain
       - component-runtime-v3
       - wasm-scalar-exports-browser-v1
@@ -2247,7 +2312,7 @@ jobs:
           SEMAPRAX_CI_NEEDS: ${{ toJSON(needs) }}
         run: |
           python3 scripts/ci-required-checks.py \
-            --min-jobs 25 \
+            --min-jobs 27 \
             --sha "${{ github.sha }}" \
             --head-sha "$(git rev-parse HEAD)"
 

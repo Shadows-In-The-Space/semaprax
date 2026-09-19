@@ -158,11 +158,13 @@ gh api repos/wavect/semaprax/commits/main/check-runs \
 | `release-claim-reconcile` | `Release claim reconciliation` | 1 |
 | `python-test-suites` | `Python harness self-tests` | 1 |
 | `installed-journey` | `Installed toolchain journey` | 1 |
+| `kernel0-lean-proof-gate` | `Lean proof and obligation-export kernel gate (issues #186, #188)` | 1 |
 | `supply-chain` | `Dependency policy` | 1 |
 | `component-runtime-v3` | `Private Wasmtime Component result runtime` | 1 |
 | `wasm-scalar-exports-browser-v1` | `Public Wasm Scalar Exports v1 Chromium` | 1 |
 | `project-product-acceptance-v1` | `Project Product Acceptance v1 (ubuntu-24.04 \| macos-15 \| windows-2025)` | 3 |
 | `project-v1` | `Project Manifest v1 (ubuntu-24.04 \| macos-15 \| windows-2025)` | 3 |
+| `native-rust-owned-data-sdk-v1` | `Public Native Rust Owned-Data SDK v1 (ubuntu-latest \| macos-latest \| windows-latest)` | 3 |
 | `native-rust-sdk-v1` | `Public Native Rust SDK v1 (ubuntu-latest \| macos-latest \| windows-latest)` | 3 |
 | `verify` | `Rust ubuntu-latest`, `Rust macos-latest`, `Rust windows-latest` | 3 |
 | `verify-build` | `Rust build ubuntu-latest`, `Rust build macos-latest`, `Rust build windows-latest` | 3 |
@@ -208,7 +210,7 @@ An aggregate is only worth requiring if it cannot be satisfied vacuously. The
   environment, and fails unless **every** upstream entry has
   `result == "success"` -- `failure`, `skipped`, and `cancelled` are all
   rejected by name;
-- passes `--min-jobs 25`, so an accidentally emptied or narrowed `needs:` list
+- passes `--min-jobs 27`, so an accidentally emptied or narrowed `needs:` list
   cannot pass vacuously on `{}`;
 - checks out the repository and compares `git rev-parse HEAD` against
   `${{ github.sha }}`, so a verdict cannot be attributed to another commit.

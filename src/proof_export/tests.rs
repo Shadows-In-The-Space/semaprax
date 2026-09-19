@@ -11,10 +11,14 @@
 //! transcripts" section at the end of this file instead replays output
 //! recorded verbatim from the pinned Lean 4.34.0 running over the committed
 //! golden document (`testdata/shifted.kernel-output*.txt`), produced and
-//! re-derived by `scripts/lean-export-gate.py`. That is **local-host
-//! evidence**: hosted CI provisions no Lean toolchain, so what runs
-//! everywhere is the parser re-checked against recorded real bytes, not a
-//! live kernel.
+//! re-derived by `scripts/lean-export-gate.py`. What runs *here*, on every
+//! host and in every Rust lane, is the parser re-checked against recorded
+//! real bytes -- not a live kernel; this harness never spawns one. The live
+//! kernel runs in the `kernel0-lean-proof-gate` CI job, which provisions
+//! the pinned toolchain and calls that script with `--require-kernel` so a
+//! missing kernel fails instead of skipping. These transcripts are the
+//! recorded half of the same evidence, and they go stale silently unless
+//! that job re-derives them, which is why it is a release blocker.
 
 use std::path::{Path, PathBuf};
 

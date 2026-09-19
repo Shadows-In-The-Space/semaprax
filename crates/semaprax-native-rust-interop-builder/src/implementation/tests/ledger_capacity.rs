@@ -218,13 +218,27 @@ fn hir_complete_reservation_is_exact_and_one_less_prevents_resolution() {
     let canonical = crate::format::canonical(&program);
     let mut stack = [None; MAX_SEMANTIC_EXPRESSION_DEPTH + 1];
     let capacity = hir_pre_resolve_capacity(&program, canonical.len(), &mut stack).unwrap();
-    assert_eq!(capacity.retained_upper, 50_035);
+    // `retained_upper` and `complete()` moved by exactly 256 bytes when
+    // 24c1d166 ("admit a minimal `yield` slice") added `yields:
+    // Option<ResolvedYieldsClause>` to `ResolvedFunction`
+    // (src/hir/nodes.rs). `ResolvedYieldsClause` is two `ResolvedType`
+    // (48 bytes each) plus a `Span` (32 bytes) = 128 bytes, and the
+    // `Option` wrapper finds a spare niche and costs nothing extra, so
+    // `size_of::<ResolvedFunction>()` grew from 952 to 1080 bytes (+128).
+    // `hir_pre_resolve.rs`'s `resolved_function_headers` term multiplies
+    // that size by `program.functions.len() + reachable_generic_calls`;
+    // this fixture has exactly 2 top-level functions (`add`, `main`) and
+    // no generics, so `retained_upper` grew by `2 * 128 == 256`
+    // (50_035 -> 50_291). `scratch_upper` and `phase_peaks()` are
+    // unaffected: none of the pre-resolve phases read
+    // `size_of::<ResolvedFunction>()`.
+    assert_eq!(capacity.retained_upper, 50_291);
     assert_eq!(capacity.scratch_upper, 16_170);
     assert_eq!(
         capacity.phase_peaks(),
         [5_028, 15_620, 4_900, 3_488, 5_792, 3_456, 16_170, 1_032]
     );
-    assert_eq!(capacity.complete().unwrap(), 66_205);
+    assert_eq!(capacity.complete().unwrap(), 66_461);
     assert_eq!(
         capacity.scratch_upper,
         capacity.phase_peaks().into_iter().max().unwrap(),

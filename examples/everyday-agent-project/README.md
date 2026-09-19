@@ -60,7 +60,13 @@ That harness:
   `AfterSettlement` / `BeforeDelivery`), asserting that a resume never
   re-reads the real fixture and that an uncertain delivery
   (`AfterIntent`/`AfterEffect`) stays `DurableStatus::Unknown` until an
-  explicit host reconciliation settles it — never a blind retry.
+  explicit host reconciliation settles it — never a blind retry;
+- proves the checkpoint document's self-verifying codec rejects a
+  truncated, reordered, or byte-injected checkpoint, that `resume()`
+  refuses a revoked policy epoch and reports a display-only source rename
+  as `source_drift` (ProgramRoot drift), and that a self-consistent remint
+  of a non-chain-covered budget field decodes anyway — the checkpoint
+  module's own documented boundary, proven rather than assumed.
 
 ## The bounded manifest and report
 
@@ -105,7 +111,26 @@ This product delivers, for real and verified by the commands above:
   happened;
 - replayable evidence (`DurableRun::evidence()`) that binds identities,
   digests, and counts and is asserted not to carry the fixture bytes, the
-  authorization seal, or the task payload.
+  authorization seal, or the task payload;
+- checkpoint tamper detection: `AgentCheckpoint::decode` rejects a
+  truncated, reordered, or byte-injected (structurally valid but
+  non-canonical) checkpoint document
+  (`everyday_agent_checkpoint_decode_rejects_truncation_reorder_and_injected_bytes`),
+  and `resume()` refuses a revoked policy epoch
+  (`everyday_agent_resume_refuses_a_revoked_policy_epoch`, reason
+  `policy_epoch_revoked`) and a display-only source rename as ProgramRoot
+  drift (`everyday_agent_resume_reports_a_display_only_rename_as_source_drift`,
+  reason `source_drift` — the *last*-checked `CheckpointBinding` field, so
+  this proves the comment-only edit is not silently absorbed by an earlier,
+  broader drift check). The checkpoint codec's own honest boundary is
+  proven too, not glossed over: a self-consistent remint of a
+  non-chain-covered field (`budgets.effect_grants_remaining`) decodes
+  successfully
+  (`everyday_agent_checkpoint_decode_does_not_authenticate_a_self_consistent_budget_remint`),
+  exactly matching the checkpoint module's own documented nonclaim ("no
+  checkpoint integrity or authenticity without the caller's storage
+  contract") — this is a real gap this product does not claim to close, not
+  an oversight.
 
 It does **not** deliver, and does not claim to deliver:
 
@@ -138,10 +163,14 @@ It does **not** deliver, and does not claim to deliver:
   five-boundary crash-injection contract; extending to the iterative V2
   profile is future work, not something this product's language admits and
   leaves undone.
-- ProgramRoot drift, policy-epoch revocation, or state migration across a
-  retained ProgramRoot revision. `AGENT-STATE-MIGRATION-V3` exists and is
-  exercised elsewhere in this repository's own test suite; wiring it to
-  *this* product is future work.
+- State migration across a retained ProgramRoot revision.
+  `AGENT-STATE-MIGRATION-V3` is an iterative-lifecycle (V2) facility
+  (`src/agent_lifecycle/iterative/source_live/migration.rs`); this product
+  uses the non-iterative Lifecycle v1 durable machine (see the V2 scope cut
+  above), so migrating *this* product's checkpoints across a ProgramRoot
+  revision would mean adopting V2, which is future work, not something this
+  slice's own machine can exercise as an incremental addition. (ProgramRoot
+  drift and policy-epoch revocation themselves are delivered — see above.)
 - Hostile cross-paired-provider rejection, since there is no real provider
   pairing here to cross.
 - The Agent's own `.spx` operations reading real JSON. They receive the

@@ -57,9 +57,8 @@ fn fixture_input_bytes() -> Vec<u8> {
         .expect("examples/everyday-agent-project/fixtures/input.json is checked in")
 }
 
-fn durable_agent(policy_epoch: u64) -> DurableAgent {
-    let source = agent_module_source();
-    let checked = semaprax::check(&source, "agent.spx").unwrap();
+fn durable_agent_from_source(source: &str, policy_epoch: u64) -> DurableAgent {
+    let checked = semaprax::check(source, "agent.spx").unwrap();
     let declaration = checked
         .agents
         .iter()
@@ -72,7 +71,11 @@ fn durable_agent(policy_epoch: u64) -> DurableAgent {
     )
     .unwrap();
     let bound = bind_agent_deployment(&definition_v2, &deployment).unwrap();
-    bind_durable_agent(&source, "agent.spx", &bound, policy_epoch).unwrap()
+    bind_durable_agent(source, "agent.spx", &bound, policy_epoch).unwrap()
+}
+
+fn durable_agent(policy_epoch: u64) -> DurableAgent {
+    durable_agent_from_source(&agent_module_source(), policy_epoch)
 }
 
 fn task() -> LifecycleTask {
@@ -420,6 +423,260 @@ fn everyday_agent_crash_injection_never_duplicates_the_real_read() {
             read.calls
         );
     }
+}
+
+/// The checkpoint document is self-verifying by construction
+/// (`src/agent_lifecycle/durable/checkpoint.rs`'s module doc): decoding
+/// requires the closed key set, a journal whose embedded `seq`/rank stays
+/// consistent with array order, a recomputed chain link equal to the stored
+/// one, and an exact canonical re-render of the supplied bytes. This proves
+/// three of the four hostile shapes the issue's "Agent lifecycle" and
+/// "Output/evidence" required-tests bullets name
+/// ("checkpoint mutation/truncation/reorder/reminting") are rejected before
+/// `resume()` is ever reached, using only the existing checkpoint codec —
+/// no new host operation or ABI surface.
+#[test]
+fn everyday_agent_checkpoint_decode_rejects_truncation_reorder_and_injected_bytes() {
+    let agent = durable_agent(7);
+    let mut read = Read::new();
+    let mut store = Memory::default();
+    let run = agent
+        .start(
+            &task(),
+            &document(&agent),
+            &mut read,
+            DurableBudget::default(),
+            Retention::ObservationBytes,
+            &AgentCancellation::new(),
+            &mut store,
+            CrashPoint::Never,
+        )
+        .unwrap();
+    assert_eq!(run.status(), DurableStatus::Completed);
+    let canonical = store.active().document().to_owned();
+    assert!(
+        AgentCheckpoint::decode(&canonical).is_ok(),
+        "the untouched document must decode"
+    );
+
+    // Truncation: a checkpoint store that tore mid-write leaves a prefix of
+    // the canonical bytes, which no longer ends in the required terminal LF.
+    let truncated = &canonical[..canonical.len() - 2];
+    assert!(
+        AgentCheckpoint::decode(truncated).is_err(),
+        "a truncated checkpoint must not decode"
+    );
+
+    // Reordering: swap the first two journal entries' raw bytes in place
+    // (not a JSON-value round trip, which would also alphabetize every
+    // other key and confound what is actually being tested). Each entry's
+    // embedded `seq` travels with it, so after the swap position 0 carries
+    // `"seq":"1"`: array position and embedded rank now disagree, which
+    // breaks decode before the recomputed chain link is even compared.
+    let (start0, end0) = journal_entry_span(&canonical, 0);
+    let (start1, end1) = journal_entry_span(&canonical, 1);
+    assert!(end0 <= start1, "entry 0 must precede entry 1 in the array");
+    let mut reordered = String::new();
+    reordered.push_str(&canonical[..start0]);
+    reordered.push_str(&canonical[start1..end1]);
+    reordered.push_str(&canonical[end0..start1]);
+    reordered.push_str(&canonical[start0..end0]);
+    reordered.push_str(&canonical[end1..]);
+    assert_ne!(reordered, canonical);
+    assert!(
+        AgentCheckpoint::decode(&reordered).is_err(),
+        "a reordered journal must not decode"
+    );
+
+    // Byte injection: one extra, structurally-valid-JSON space is not
+    // something the canonical renderer ever produces, so the exact
+    // re-render check refuses it even though `serde_json` parses it fine.
+    let injected = canonical.replacen("\"schema\":", "\"schema\": ", 1);
+    assert_ne!(injected, canonical);
+    assert!(
+        AgentCheckpoint::decode(&injected).is_err(),
+        "a byte-for-byte non-canonical (but JSON-valid) document must not decode"
+    );
+}
+
+/// The fourth hostile shape the same bullet names, "reminting", is a real,
+/// documented boundary this product does **not** claim to cross: the
+/// checkpoint's own `NONCLAIMS` state "no checkpoint integrity or
+/// authenticity without the caller's storage contract". Only the journal's
+/// chain link and the digests `resume()` separately re-derives (state,
+/// proposal, operation identity) or compares against the *live* agent
+/// (`CheckpointBinding::drift`) are actually authenticated.
+/// `budgets.effect_grants_remaining` is neither, so a store an adversary can
+/// rewrite can mint a self-consistent higher grant and `decode()` alone
+/// accepts it — proving the gap is real rather than asserting it away.
+#[test]
+fn everyday_agent_checkpoint_decode_does_not_authenticate_a_self_consistent_budget_remint() {
+    let agent = durable_agent(7);
+    let mut read = Read::new();
+    let mut store = Memory::default();
+    agent
+        .start(
+            &task(),
+            &document(&agent),
+            &mut read,
+            DurableBudget::default(),
+            Retention::ObservationBytes,
+            &AgentCancellation::new(),
+            &mut store,
+            CrashPoint::BeforeIntent,
+        )
+        .unwrap();
+    let canonical = store.active().document().to_owned();
+    let original_grants = AgentCheckpoint::decode(&canonical)
+        .unwrap()
+        .effect_grants_remaining();
+
+    // A single targeted field mutation, done as raw-byte substitution (not
+    // a JSON-value round trip) so nothing else about the canonical bytes
+    // changes.
+    let marker = format!("\"effect_grants_remaining\":\"{original_grants}\"");
+    assert!(canonical.contains(&marker), "grants field must be present");
+    let reminted_grants = original_grants + 1000;
+    let reminted = canonical.replacen(
+        &marker,
+        &format!("\"effect_grants_remaining\":\"{reminted_grants}\""),
+        1,
+    );
+    assert_ne!(reminted, canonical);
+
+    let decoded = AgentCheckpoint::decode(&reminted)
+        .expect("a self-consistent budget remint is not a codec-detectable corruption");
+    assert_eq!(decoded.effect_grants_remaining(), reminted_grants);
+}
+
+/// Locates journal entry `seq`'s exact byte span (its opening `{` through
+/// its closing `}`, inclusive) inside a rendered checkpoint document.
+/// Journal entries are flat objects (every field is a string or a
+/// JSON-quoted scalar; see `JournalEntry::encode`), so the first `}` after
+/// the entry's start marker is always that entry's own close.
+fn journal_entry_span(document: &str, seq: usize) -> (usize, usize) {
+    let marker = format!("{{\"seq\":\"{seq}\",\"kind\":");
+    let start = document
+        .find(&marker)
+        .unwrap_or_else(|| panic!("journal entry {seq} not found in {document}"));
+    let close = document[start..]
+        .find('}')
+        .unwrap_or_else(|| panic!("journal entry {seq} has no closing brace"));
+    (start, start + close + 1)
+}
+
+/// A revoked policy epoch (the live agent now bound to a different epoch
+/// than the one a checkpoint durably recorded) is caught by
+/// `CheckpointBinding::drift`, the same mechanism `resume()` uses for every
+/// other binding field, before any further stage runs and before the
+/// external boundary is ever reconsidered.
+#[test]
+fn everyday_agent_resume_refuses_a_revoked_policy_epoch() {
+    let agent = durable_agent(7);
+    let proposal_source = document(&agent);
+    let mut read = Read::new();
+    let mut store = Memory::default();
+    agent
+        .start(
+            &task(),
+            &proposal_source,
+            &mut read,
+            DurableBudget::default(),
+            Retention::ObservationBytes,
+            &AgentCancellation::new(),
+            &mut store,
+            CrashPoint::BeforeIntent,
+        )
+        .unwrap();
+    let stuck = store.active();
+    let calls_before_resume = read.calls;
+
+    // Same source, same compiled definition/deployment, a different policy
+    // epoch: models a live authority revoking the epoch this checkpoint was
+    // durably bound under.
+    let rebound = durable_agent(8);
+    let mut store2 = Memory::default();
+    let resumed = rebound
+        .resume(
+            &stuck,
+            &task(),
+            &proposal_source,
+            &mut read,
+            Reconciliation::None,
+            &AgentCancellation::new(),
+            &mut store2,
+        )
+        .unwrap();
+    assert_eq!(resumed.status(), DurableStatus::Stale);
+    assert_eq!(resumed.reason(), "policy_epoch_revoked");
+    assert_eq!(
+        read.calls, calls_before_resume,
+        "a checkpoint refused for a revoked epoch never re-crosses the external boundary"
+    );
+}
+
+/// ProgramRoot drift, in its narrowest honest form: a pure display rename
+/// (a trailing comment appended to `agent.spx`, no identity, signature,
+/// type, decision shape, or stage-graph change) changes the raw module
+/// bytes `bind_durable_agent`'s `source_digest` hashes directly, while
+/// every other `CheckpointBinding` field is recompiled from resolved,
+/// `@id`-keyed semantic content (`compile_agent_lifecycle`'s
+/// `render_lifecycle`, `compile_source_agent_declaration`'s canonical
+/// definition) and so does not move. `CheckpointBinding::drift` checks
+/// `source_digest` last, precisely so a display-only rename is
+/// distinguishable from every other kind of drift it names.
+#[test]
+fn everyday_agent_resume_reports_a_display_only_rename_as_source_drift() {
+    let original_source = agent_module_source();
+    let agent = durable_agent_from_source(&original_source, 7);
+    let proposal_source = document(&agent);
+    let mut read = Read::new();
+    let mut store = Memory::default();
+    agent
+        .start(
+            &task(),
+            &proposal_source,
+            &mut read,
+            DurableBudget::default(),
+            Retention::ObservationBytes,
+            &AgentCancellation::new(),
+            &mut store,
+            CrashPoint::BeforeIntent,
+        )
+        .unwrap();
+    let stuck = store.active();
+    let calls_before_resume = read.calls;
+
+    // Comment-only edit: no `@id`, signature, type, or stage-graph byte
+    // changes, only a trailing line a canonical formatter would keep as a
+    // display-only rename.
+    let renamed_source =
+        format!("{original_source}// display-only rename evidence for ABI-09A.17\n");
+    assert_ne!(renamed_source, original_source);
+    let renamed = durable_agent_from_source(&renamed_source, 7);
+
+    let mut store2 = Memory::default();
+    let resumed = renamed
+        .resume(
+            &stuck,
+            &task(),
+            &proposal_source,
+            &mut read,
+            Reconciliation::None,
+            &AgentCancellation::new(),
+            &mut store2,
+        )
+        .unwrap();
+    assert_eq!(resumed.status(), DurableStatus::Stale);
+    assert_eq!(
+        resumed.reason(),
+        "source_drift",
+        "a comment-only edit must be the *last*-checked drift, not an earlier one"
+    );
+    assert_eq!(
+        read.calls, calls_before_resume,
+        "a checkpoint refused for source drift never re-crosses the external boundary"
+    );
 }
 
 fn scoped_report_fixture(label: &str) -> PathBuf {

@@ -279,14 +279,32 @@ argues *against* claiming more than the evidence supports.
    been observed to pass. Treating wiring as evidence would set the worst
    available precedent for a language whose entire pitch is "meaning in,
    verified machine code out". Credibility here is the product.
-6. **Yes — change the shard so one target's failure does not stop its siblings
-   from running and reporting.** This is the highest-leverage answer in the
-   list and its value extends well past this issue. Today a failure in an
-   unrelated subsystem prevents this harness from *ever* reporting, which is
-   precisely why question 5 has no evidence to point at. Fail-fast inside a
-   shard destroys information: it converts "we do not know" into something
-   easily misread as "it failed". Per-target reporting is how the project
-   learns what actually passes.
+6. **Yes in goal, but NOT by `--no-fail-fast` — isolate the harness into its
+   own job instead.** The diagnosis holds: `cargo test` stops at the first
+   failing test binary, so every later target in the shard never runs, and that
+   is precisely why question 5 has no evidence to point at. Fail-fast inside a
+   shard destroys information — it converts "we do not know" into something
+   easily misread as "it failed".
+
+   **The obvious remedy is the wrong one, and this ADR initially reached for
+   it.** `tests/ci_msrv_sharding_contract.rs` forbids `--no-fail-fast` twice, as
+   an "MSRV coverage bypass" (line 170) and a "Rust shard bypass" (line 216).
+   That ban is deliberate and, on inspection, correct: `scripts/ci-msrv.py`
+   already forces `--test-threads=1` for the Project/npm shards because those
+   fixtures "share process/filesystem resources". In a suite with shared global
+   state, continuing past a failure produces a cascade of *misattributed*
+   failures — noise that reads like signal and is worse than a single honest
+   stop.
+
+   Note also that the flag lives in `scripts/ci-msrv.py` while the ban is
+   enforced against the workflow YAML text, so adding it there would have
+   slipped past the guard while violating its intent — the same silent-contract-
+   weakening this repository's prohibited-shortcuts list names.
+
+   The correct change is **isolation by job, not by flag**: give
+   `public_native_rust_owned_data_sdk_v1` its own CI job so its result is
+   independent of unrelated subsystems, leaving fail-fast intact within each
+   shard. Same goal, no cascade, no contract reversal.
 7. **require-ci-gate.** A manual, `#[ignore]`-gated check run by a human before
    each release is the kind of gate that silently stops happening, and nothing
    detects that it stopped. This repository already holds the stronger line

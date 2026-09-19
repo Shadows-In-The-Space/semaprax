@@ -81,7 +81,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         .filter(|function| function.name.starts_with("test_"))
         .count();
     assert_eq!(
-        named_cases, 8,
+        named_cases, 10,
         "catalog-normalizer application case inventory drifted"
     );
     #[cfg(windows)]
@@ -194,5 +194,76 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         Ok(())
     })
     .unwrap();
+
+    // CNORM-005 is not covered by the terminal-LF control. Deliberately
+    // accepting every line must make the raw malformed-sequence case fail.
+    let utf8_mutant = scratch.join("utf8-mutant");
+    std::fs::create_dir_all(utf8_mutant.join("src")).unwrap();
+    std::fs::copy(
+        root.join("semaprax.toml"),
+        utf8_mutant.join("semaprax.toml"),
+    )
+    .unwrap();
+    for source in ["app.spx", "batch.spx", "limits.spx", "tests.spx"] {
+        std::fs::copy(
+            root.join("src").join(source),
+            utf8_mutant.join("src").join(source),
+        )
+        .unwrap();
+    }
+    let batch_path = utf8_mutant.join("src/batch.spx");
+    let batch = std::fs::read_to_string(&batch_path).unwrap();
+    let broken = batch.replace("line_utf8_end(body, record) == end - start", "true");
+    assert_ne!(
+        broken, batch,
+        "UTF-8 negative-control mutation must be applied"
+    );
+    std::fs::write(&batch_path, broken).unwrap();
+    project::with_authenticated_project(&utf8_mutant.join("semaprax.toml"), |snapshot| {
+        snapshot.check()?;
+        let result = snapshot.execute_test(&project::ProjectExecutionOptions::default())?;
+        assert_ne!(
+            result.outcome(),
+            &project::ProjectExecutionOutcome::Returned(0)
+        );
+        Ok(())
+    })
+    .unwrap();
+
+    // CNORM-015's boundary is likewise independent of record splitting: a
+    // checked-total predicate that never reports overflow must be caught.
+    let total_mutant = scratch.join("total-mutant");
+    std::fs::create_dir_all(total_mutant.join("src")).unwrap();
+    std::fs::copy(
+        root.join("semaprax.toml"),
+        total_mutant.join("semaprax.toml"),
+    )
+    .unwrap();
+    for source in ["app.spx", "batch.spx", "limits.spx", "tests.spx"] {
+        std::fs::copy(
+            root.join("src").join(source),
+            total_mutant.join("src").join(source),
+        )
+        .unwrap();
+    }
+    let batch_path = total_mutant.join("src/batch.spx");
+    let batch = std::fs::read_to_string(&batch_path).unwrap();
+    let broken = batch.replace("total > 9223372036854775807 - quantity", "false");
+    assert_ne!(
+        broken, batch,
+        "total negative-control mutation must be applied"
+    );
+    std::fs::write(&batch_path, broken).unwrap();
+    project::with_authenticated_project(&total_mutant.join("semaprax.toml"), |snapshot| {
+        snapshot.check()?;
+        let result = snapshot.execute_test(&project::ProjectExecutionOptions::default())?;
+        assert_ne!(
+            result.outcome(),
+            &project::ProjectExecutionOutcome::Returned(0)
+        );
+        Ok(())
+    })
+    .unwrap();
+
     let _ = std::fs::remove_dir_all(scratch);
 }

@@ -1,4 +1,5 @@
 module catalog_normalizer.batch;
+use function @id("std.data.json.dec.at_in") from std.data.json.dec as byte_in;
 
 // A terminal LF closes the last record; it never creates an additional one.
 // The one-byte LF body therefore contains zero records.
@@ -76,4 +77,77 @@ fn line_empty(body: borrow Slice<u8>, record: usize) -> bool
 {
     let start = line_start(body, record);
     line_end(body, start) == start
+}
+
+// CNORM-005: scan the complete record range as UTF-8 before any JSON token
+// parser sees it. The returned sentinel is exactly `line_length + 1 + fault`,
+// matching the existing JSON decoder's bounded failure convention.
+@id("catalog_normalizer.batch.continuations")
+fn continuations(line: borrow Slice<u8>, start: usize, count: usize) -> bool
+{
+    let mut offset = 0usize;
+    let mut valid = true;
+    let mut scanning = offset < count;
+    while scanning {
+        valid = byte_in(line, start + offset, 128u8, 191u8);
+        offset = if valid { offset + 1usize } else { offset };
+        scanning = valid && offset < count;
+        scanning
+    }
+    valid
+}
+
+@id("catalog_normalizer.batch.line-utf8-end")
+fn line_utf8_end(body: borrow Slice<u8>, record: usize) -> usize
+{
+    let start = line_start(body, record);
+    let stop = line_end(body, start);
+    let line = byte_range(body, start, stop);
+    let length = byte_len(line);
+    let mut index = 0usize;
+    let mut valid = true;
+    let mut scanning = index < length;
+    while scanning {
+        let width = if byte_in(line, index, 0u8, 127u8) { 1usize } else { if byte_in(line, index, 194u8, 223u8) { if continuations(line, index + 1usize, 1usize) { 2usize } else { 0usize } } else { if byte_in(line, index, 224u8, 224u8) { if byte_in(line, index + 1usize, 160u8, 191u8) && continuations(line, index + 2usize, 1usize) { 3usize } else { 0usize } } else { if byte_in(line, index, 225u8, 236u8) { if continuations(line, index + 1usize, 2usize) { 3usize } else { 0usize } } else { if byte_in(line, index, 237u8, 237u8) { if byte_in(line, index + 1usize, 128u8, 159u8) && continuations(line, index + 2usize, 1usize) { 3usize } else { 0usize } } else { if byte_in(line, index, 238u8, 239u8) { if continuations(line, index + 1usize, 2usize) { 3usize } else { 0usize } } else { if byte_in(line, index, 240u8, 240u8) { if byte_in(line, index + 1usize, 144u8, 191u8) && continuations(line, index + 2usize, 2usize) { 4usize } else { 0usize } } else { if byte_in(line, index, 241u8, 243u8) { if continuations(line, index + 1usize, 3usize) { 4usize } else { 0usize } } else { if byte_in(line, index, 244u8, 244u8) { if byte_in(line, index + 1usize, 128u8, 143u8) && continuations(line, index + 2usize, 2usize) { 4usize } else { 0usize } } else { 0usize } } } } } } } } };
+        valid = width > 0usize;
+        index = if valid { index + width } else { index };
+        scanning = valid && index < length;
+        scanning
+    }
+    if valid { index } else { length + 1usize + index }
+}
+
+@id("catalog_normalizer.batch.line-utf8-valid")
+fn line_utf8_valid(body: borrow Slice<u8>, record: usize) -> bool
+{
+    let start = line_start(body, record);
+    let end = line_end(body, start);
+    line_utf8_end(body, record) == end - start
+}
+
+// CNORM-020/CNORM-005: valid lines map to zero; callers report this value
+// only after `line_utf8_valid` fails, so a real offset zero remains unambiguous.
+@id("catalog_normalizer.batch.line-utf8-fault")
+fn line_utf8_fault(body: borrow Slice<u8>, record: usize) -> usize
+{
+    let start = line_start(body, record);
+    let end = line_end(body, start);
+    let length = end - start;
+    let marker = line_utf8_end(body, record);
+    if marker > length { marker - length - 1usize } else { 0usize }
+}
+
+// CNORM-015: quantities are schema-validated nonnegative i64 values before
+// reaching this helper. Test before adding, so no wraparound, saturation, or
+// wider intermediate can choose the response category.
+@id("catalog_normalizer.batch.total-would-overflow")
+fn total_would_overflow(total: i64, quantity: i64) -> bool
+{
+    if total < 0 || quantity < 0 { true } else { total > 9223372036854775807 - quantity }
+}
+
+@id("catalog_normalizer.batch.total-after")
+fn total_after(total: i64, quantity: i64) -> i64
+{
+    if total_would_overflow(total, quantity) { total } else { total + quantity }
 }

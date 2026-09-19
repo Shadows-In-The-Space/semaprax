@@ -11,6 +11,10 @@ use function @id("catalog_normalizer.batch.body-too-long") from catalog_normaliz
 use function @id("catalog_normalizer.batch.too-many-records") from catalog_normalizer.batch as too_many_records;
 use function @id("catalog_normalizer.batch.line-too-long") from catalog_normalizer.batch as line_too_long;
 use function @id("catalog_normalizer.batch.line-empty") from catalog_normalizer.batch as line_empty;
+use function @id("catalog_normalizer.batch.line-utf8-valid") from catalog_normalizer.batch as line_utf8_valid;
+use function @id("catalog_normalizer.batch.line-utf8-fault") from catalog_normalizer.batch as line_utf8_fault;
+use function @id("catalog_normalizer.batch.total-would-overflow") from catalog_normalizer.batch as total_would_overflow;
+use function @id("catalog_normalizer.batch.total-after") from catalog_normalizer.batch as total_after;
 
 // `owned-data-api.v1` requires every function reachable from `[exports]
 // web` to be contract-free; `std.data.json.dec` uses `ensures` throughout
@@ -101,6 +105,8 @@ fn main() -> i64
     failed = failed + if test_batch_boundaries() == 0 { 0 } else { 32 };
     failed = failed + if test_batch_limits() == 0 { 0 } else { 64 };
     failed = failed + if test_decoded_id_rules() == 0 { 0 } else { 128 };
+    failed = failed + if test_batch_utf8() == 0 { 0 } else { 256 };
+    failed = failed + if test_checked_total() == 0 { 0 } else { 512 };
     failed
 }
 
@@ -162,4 +168,26 @@ fn test_batch_limits() -> i64
     }
     let records_view = bytes_as_slice(records);
     if length_ok && record_count(records_view) == 257usize && too_many_records(records_view) { 0 } else { 1 }
+}
+
+// CNORM-005/020: the position is the leading byte of an invalid sequence,
+// following the frozen Unicode decode-error convention, not a character count.
+@id("catalog_normalizer.tests.test-batch-utf8")
+fn test_batch_utf8() -> i64
+{
+    let valid = [123u8, 195u8, 169u8, 125u8];
+    let invalid_lead = [123u8, 195u8, 40u8, 125u8];
+    let overlong = [91u8, 224u8, 128u8, 128u8, 93u8];
+    let surrogate = [91u8, 237u8, 160u8, 128u8, 93u8];
+    let too_large = [91u8, 244u8, 144u8, 128u8, 128u8, 93u8];
+    if line_utf8_valid(array_as_slice(valid), 0usize) && !line_utf8_valid(array_as_slice(invalid_lead), 0usize) && line_utf8_fault(array_as_slice(invalid_lead), 0usize) == 1usize && !line_utf8_valid(array_as_slice(overlong), 0usize) && line_utf8_fault(array_as_slice(overlong), 0usize) == 1usize && !line_utf8_valid(array_as_slice(surrogate), 0usize) && line_utf8_fault(array_as_slice(surrogate), 0usize) == 1usize && !line_utf8_valid(array_as_slice(too_large), 0usize) && line_utf8_fault(array_as_slice(too_large), 0usize) == 1usize { 0 } else { 1 }
+}
+
+// CNORM-015: the second record in the frozen overflow example is rejected
+// before addition; the retained total proves this helper cannot wrap.
+@id("catalog_normalizer.tests.test-checked-total")
+fn test_checked_total() -> i64
+{
+    let maximum = 9223372036854775807;
+    if !total_would_overflow(0, maximum) && total_after(0, maximum) == maximum && !total_would_overflow(maximum - 1, 1) && total_after(maximum - 1, 1) == maximum && total_would_overflow(maximum, 1) && total_after(maximum, 1) == maximum && total_would_overflow(maximum - 1, 2) && total_after(maximum - 1, 2) == maximum - 1 && !total_would_overflow(40, 2) && total_after(40, 2) == 42 { 0 } else { 1 }
 }

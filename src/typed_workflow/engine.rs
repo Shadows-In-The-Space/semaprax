@@ -3,13 +3,15 @@
 //!
 //! [`run`] executes [`StepKind::Sequential`], [`StepKind::Conditional`],
 //! [`StepKind::Loop`] (bounded), [`StepKind::ModelCall`] (routed through
-//! [`super::model_routing`]), [`StepKind::HumanGate`] (authorized through
-//! [`super::human_gate`]) and [`StepKind::Parallel`]/[`StepKind::Join`] (as
-//! a deterministic sequential simulation — see [`StepExecutor`] below).
-//! Reaching [`StepKind::Declared`] is a defined refusal
-//! (`ExecError::NotExecutable`), never a silent no-op or a made-up default
-//! transition — this repository's completion matrix must not claim that
-//! kind is implemented on the strength of this function alone.
+//! [`super::model_routing`], with an opt-in retry loop against a scripted
+//! attempt sequence — see [`ExecInputs::attempt_script`] below),
+//! [`StepKind::HumanGate`] (authorized through [`super::human_gate`]) and
+//! [`StepKind::Parallel`]/[`StepKind::Join`] (as a deterministic sequential
+//! simulation — see [`StepExecutor`] below). Reaching [`StepKind::Declared`]
+//! is a defined refusal (`ExecError::NotExecutable`), never a silent no-op
+//! or a made-up default transition — this repository's completion matrix
+//! must not claim that kind is implemented on the strength of this function
+//! alone.
 //!
 //! `run` always validates the graph first, so a caller can never execute
 //! an unchecked structure. Given the same graph, the same [`ExecInputs`],
@@ -18,6 +20,27 @@
 //! time: it makes no use of wall-clock time, randomness, thread spawning,
 //! or map/set iteration order beyond `BTreeMap`/`BTreeSet`'s own key
 //! order, which is itself a deterministic total order over [`StepId`].
+//!
+//! # Retry ceiling and compensation commit order
+//!
+//! A `ModelCall` step with an [`ExecInputs::attempt_script`] entry retries
+//! its effect by consuming that script's entries in order, deciding after
+//! each failed attempt with [`super::retry::decide_retry`] against the
+//! step's declared [`ExecInputs::retry_budgets`] ceiling — the same
+//! function [`super::retry`]'s own unit tests exercise standalone, now
+//! actually stopping the loop rather than only classifying one outcome in
+//! isolation. A step with no script entry is unaffected: it routes and
+//! succeeds exactly as it did before this existed.
+//!
+//! Every step named in [`ExecInputs::compensable`] that succeeds is
+//! recorded, in execution order, into the [`super::compensation_order::CommitLog`]
+//! the caller threads through `run` — the same log
+//! [`super::compensation_order::CommitLog::compensation_order`] derives a
+//! replay proof from. `run` never runs a compensation itself: on any
+//! failure (a `StepFailed` from an exhausted retry budget or any other
+//! `ExecError`), the caller reads back whatever committed before the error
+//! and drives its own [`super::compensation::CompensationLedger`] against
+//! the derived order.
 //!
 //! # The step-executor seam
 //!
@@ -34,9 +57,13 @@
 //! seam, applied here to workflow step kinds instead of Agent lifecycle
 //! stages.
 
+use super::compensation_order::CommitLog;
 use super::graph::{StepDef, StepId, StepKind, WorkflowGraph, ELSE_PORT, THEN_PORT};
 use super::human_gate::{GateDecision, GateError, GateLedger, GateSpec};
 use super::model_routing::{route, DeploymentPolicy, RoutingError};
+use super::retry::{
+    decide_retry, AttemptOutcomeClass, RetryBudget, RetryDecision, ScriptedAttempt,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Hard ceiling on total step executions in one `run`, independent of any
@@ -92,18 +119,64 @@ pub enum ExecError {
     /// join. Kept as a checked refusal rather than a panic or a silently
     /// accepted wrong continuation.
     BranchDidNotReachJoin(StepId, StepId),
+    /// A `ModelCall` step has a scripted [`ScriptedAttempt`] sequence in
+    /// [`ExecInputs::attempt_script`] but no matching entry in
+    /// [`ExecInputs::retry_budgets`]. A step that can fail must have an
+    /// explicit retry ceiling; there is no implicit unlimited or
+    /// zero-attempt default.
+    MissingRetryBudget(StepId),
+    /// A `ModelCall` step's [`ScriptedAttempt`] sequence ran out before any
+    /// attempt resolved (succeeded, or was classified `GiveUp`/exhausted).
+    /// This is a caller-scripting error, not a runtime retry failure: it
+    /// means the script under-specifies what should happen, and the engine
+    /// refuses rather than guessing a default outcome for the missing entry.
+    AttemptScriptExhausted(StepId),
+    /// A `ModelCall` step exhausted its retry budget, or hit an outcome
+    /// class [`super::retry::retry_is_permitted`] never allows to retry,
+    /// without ever succeeding. This is the one failure this module raises
+    /// after some prior steps may already have committed compensable
+    /// effects — see [`ExecInputs::compensable`] and [`run`]'s own
+    /// documentation for how a caller recovers the order to compensate them
+    /// in.
+    StepFailed(StepId, AttemptOutcomeClass),
 }
 
 /// Caller-supplied values the engine has no way to compute itself: the
 /// boolean at each `Conditional` step's condition port, the deployment
-/// policy in force for each `ModelCall` step, and the declared spec plus
-/// the out-of-band decision for each `HumanGate` step.
+/// policy in force for each `ModelCall` step, the declared spec plus the
+/// out-of-band decision for each `HumanGate` step, and — for a `ModelCall`
+/// step whose effect can genuinely fail — its retry budget, its scripted
+/// attempt outcomes, and whether it commits an effect that needs
+/// compensating.
+///
+/// `attempt_script`/`retry_budgets` are opt in per step: a `ModelCall` step
+/// with no entry in `attempt_script` behaves exactly as before this field
+/// existed — it routes and succeeds on the strength of [`super::model_routing::route`]
+/// alone, with no retry loop and nothing recorded into a [`CommitLog`].
 #[derive(Default, Debug, Clone)]
 pub struct ExecInputs {
     pub conditions: BTreeMap<StepId, bool>,
     pub model_policies: BTreeMap<StepId, DeploymentPolicy>,
     pub gate_specs: BTreeMap<StepId, GateSpec>,
     pub gate_decisions: BTreeMap<StepId, GateDecision>,
+    /// Per-step retry ceiling. Required (and consulted) only for a step
+    /// that also has an entry in `attempt_script`.
+    pub retry_budgets: BTreeMap<StepId, RetryBudget>,
+    /// Per-step scripted sequence of attempt outcomes, consumed in order as
+    /// the engine (re)attempts that step's effect. Presence of an entry
+    /// here is what turns on the retry loop for that step at all.
+    pub attempt_script: BTreeMap<StepId, Vec<ScriptedAttempt>>,
+    /// Steps whose successful effect must be recorded into the [`CommitLog`]
+    /// `run` is given, because it needs compensating if a later step in the
+    /// same run fails. A step's own success never decides this on its
+    /// behalf — compensability is a property the workflow's deployment
+    /// declares, not one the engine infers from a step kind.
+    pub compensable: BTreeSet<StepId>,
+    /// Identifies this execution for [`super::compensation::CompensationKey`]
+    /// / [`super::compensation_order::CommitRecord`] purposes. A caller
+    /// resuming the *same* logical run (so that its compensations must not
+    /// re-fire) reuses the same `run_id`; a genuinely new run uses a new one.
+    pub run_id: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -122,10 +195,24 @@ pub struct ExecTrace {
 /// [`GateLedger`] (the same way [`super::checkpoint::Checkpoint`] threads a
 /// [`super::compensation::CompensationLedger`] rather than owning one
 /// itself).
+///
+/// `commits` is threaded the same way, and is what closes the "compensation
+/// ledger not threaded through `run`" gap: every step named in
+/// [`ExecInputs::compensable`] that succeeds is recorded into it, in
+/// execution order, using [`ExecInputs::run_id`]. `run` never calls
+/// [`super::compensation::CompensationLedger::apply`] itself and never
+/// decides what a compensation *does* — per the repository invariant that a
+/// settlement or concurrency model is proof data, not permission to perform
+/// a physical finalizer, `run` only produces the ordered record; a caller
+/// that catches an `Err` here (or any other, since `commits` reflects
+/// whatever committed before the error regardless of its kind) recovers the
+/// required replay order with `commits.compensation_order()` and drives its
+/// own [`super::compensation::CompensationLedger`] against it.
 pub fn run(
     graph: &WorkflowGraph,
     inputs: &ExecInputs,
     gates: &mut GateLedger,
+    commits: &mut CommitLog,
 ) -> Result<ExecTrace, ExecError> {
     graph.validate().map_err(|_| ExecError::InvalidGraph)?;
 
@@ -140,6 +227,7 @@ pub fn run(
             graph,
             inputs,
             gates,
+            commits,
             &mut loop_counts,
             &mut visited,
         )?;
@@ -211,6 +299,7 @@ pub(crate) struct StepContext<'a> {
     graph: &'a WorkflowGraph,
     inputs: &'a ExecInputs,
     gates: &'a mut GateLedger,
+    commits: &'a mut CommitLog,
     loop_counts: &'a mut BTreeMap<StepId, u32>,
     visited: &'a mut Vec<StepId>,
 }
@@ -320,6 +409,28 @@ impl StepExecutor for LoopExecutor {
     }
 }
 
+/// Executes a `ModelCall` step, retrying its effect against a scripted
+/// attempt sequence when the caller supplied one.
+///
+/// Routing (whether `requested_model` is in policy) is checked once, before
+/// any attempt: a request outside the deployment policy is a configuration
+/// refusal, never something a retry could fix, so it is never itself an
+/// [`AttemptOutcomeClass`] and never consumes retry budget.
+///
+/// With no [`ExecInputs::attempt_script`] entry for this step, behavior is
+/// exactly what it was before this executor could retry at all: route, then
+/// succeed. With an entry, each attempt is consumed from the script in
+/// order; [`decide_retry`] — the same function [`super::retry`]'s own tests
+/// exercise standalone — decides, from the *real* [`RetryBudget`] threaded
+/// in through [`ExecInputs::retry_budgets`], whether to consume another
+/// scripted attempt or stop. A budget of `max_attempts: 2` genuinely stops
+/// the loop after two attempts even if the script has a third, succeeding,
+/// entry still unconsumed — proven by
+/// `retry_ceiling_stops_before_a_later_scripted_success` below — and an
+/// [`AttemptOutcomeClass`] retry never permits (`Uncertain`,
+/// `CompletedWithResponse`) stops the loop on its very first failed attempt
+/// regardless of remaining budget, proven by
+/// `uncertain_outcome_stops_before_a_later_scripted_success`.
 struct ModelCallExecutor;
 impl sealed::Sealed for ModelCallExecutor {}
 impl StepExecutor for ModelCallExecutor {
@@ -338,6 +449,36 @@ impl StepExecutor for ModelCallExecutor {
             .ok_or(ExecError::MissingModelPolicy(ctx.current))?;
         let routed = route(policy, requested_model)
             .map_err(|e| ExecError::RoutingRefused(ctx.current, e))?;
+
+        if let Some(script) = ctx.inputs.attempt_script.get(&ctx.current) {
+            let budget = ctx
+                .inputs
+                .retry_budgets
+                .get(&ctx.current)
+                .copied()
+                .ok_or(ExecError::MissingRetryBudget(ctx.current))?;
+            let mut attempts_made: u32 = 0;
+            loop {
+                let attempt = script
+                    .get(attempts_made as usize)
+                    .ok_or(ExecError::AttemptScriptExhausted(ctx.current))?;
+                attempts_made += 1;
+                if attempt.succeeded {
+                    break;
+                }
+                match decide_retry(budget, attempts_made, attempt.outcome) {
+                    RetryDecision::Retry => continue,
+                    RetryDecision::GiveUp | RetryDecision::ExhaustedButPermitted => {
+                        return Err(ExecError::StepFailed(ctx.current, attempt.outcome));
+                    }
+                }
+            }
+        }
+
+        if ctx.inputs.compensable.contains(&ctx.current) {
+            ctx.commits.record(ctx.current, ctx.inputs.run_id);
+        }
+
         let mut effect = StepEffect::advance(only_out_edge(ctx.graph, ctx.current));
         effect.routed_models.push((ctx.current, routed));
         Ok(effect)
@@ -455,6 +596,7 @@ impl StepExecutor for ParallelExecutor {
                 ctx.graph,
                 ctx.inputs,
                 ctx.gates,
+                ctx.commits,
                 ctx.loop_counts,
                 ctx.visited,
             )?;
@@ -518,6 +660,7 @@ fn dispatch_step(
     graph: &WorkflowGraph,
     inputs: &ExecInputs,
     gates: &mut GateLedger,
+    commits: &mut CommitLog,
     loop_counts: &mut BTreeMap<StepId, u32>,
     visited: &mut Vec<StepId>,
 ) -> Result<StepEffect, ExecError> {
@@ -530,6 +673,7 @@ fn dispatch_step(
         graph,
         inputs,
         gates,
+        commits,
         loop_counts,
         visited,
     };
@@ -537,562 +681,4 @@ fn dispatch_step(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::typed_workflow::checkpoint::RevisionId;
-    use crate::typed_workflow::graph::{
-        DeclaredStepKind, EdgeDef, EdgeId, Port, PortId, PortType, StepDef,
-    };
-    use crate::typed_workflow::human_gate::Role;
-
-    fn unit_port(id: u32) -> Port {
-        Port {
-            id: PortId(id),
-            ty: PortType::Unit,
-        }
-    }
-
-    fn seq(id: u32) -> StepDef {
-        StepDef {
-            id: StepId(id),
-            kind: StepKind::Sequential,
-            in_ports: vec![unit_port(0)],
-            out_ports: vec![unit_port(0)],
-        }
-    }
-
-    fn edge(id: u32, from: u32, to: u32) -> EdgeDef {
-        EdgeDef {
-            id: EdgeId(id),
-            from: StepId(from),
-            from_port: PortId(0),
-            to: StepId(to),
-            to_port: PortId(0),
-        }
-    }
-
-    fn terminal(id: u32) -> StepDef {
-        StepDef {
-            id: StepId(id),
-            kind: StepKind::Terminal,
-            in_ports: vec![unit_port(0)],
-            out_ports: vec![],
-        }
-    }
-
-    #[test]
-    fn sequential_pipeline_runs_to_completion_deterministically() {
-        let graph = WorkflowGraph {
-            steps: vec![seq(0), seq(1), terminal(2)],
-            edges: vec![edge(0, 0, 1), edge(1, 1, 2)],
-            entry: StepId(0),
-        };
-        let inputs = ExecInputs::default();
-        let first = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        let second = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        assert_eq!(first, second);
-        assert_eq!(first.visited, vec![StepId(0), StepId(1), StepId(2)]);
-    }
-
-    fn conditional_graph() -> WorkflowGraph {
-        let cond = StepDef {
-            id: StepId(0),
-            kind: StepKind::Conditional {
-                condition_port: PortId(0),
-            },
-            in_ports: vec![Port {
-                id: PortId(0),
-                ty: PortType::Bool,
-            }],
-            out_ports: vec![unit_port(0), unit_port(1)],
-        };
-        WorkflowGraph {
-            steps: vec![cond, terminal(1), terminal(2)],
-            edges: vec![
-                EdgeDef {
-                    id: EdgeId(0),
-                    from: StepId(0),
-                    from_port: THEN_PORT,
-                    to: StepId(1),
-                    to_port: PortId(0),
-                },
-                EdgeDef {
-                    id: EdgeId(1),
-                    from: StepId(0),
-                    from_port: ELSE_PORT,
-                    to: StepId(2),
-                    to_port: PortId(0),
-                },
-            ],
-            entry: StepId(0),
-        }
-    }
-
-    #[test]
-    fn conditional_true_follows_then_branch() {
-        let graph = conditional_graph();
-        let mut inputs = ExecInputs::default();
-        inputs.conditions.insert(StepId(0), true);
-        let trace = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        assert_eq!(trace.visited, vec![StepId(0), StepId(1)]);
-    }
-
-    #[test]
-    fn conditional_false_follows_else_branch() {
-        let graph = conditional_graph();
-        let mut inputs = ExecInputs::default();
-        inputs.conditions.insert(StepId(0), false);
-        let trace = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        assert_eq!(trace.visited, vec![StepId(0), StepId(2)]);
-    }
-
-    #[test]
-    fn missing_condition_input_is_a_defined_refusal_not_a_default_branch() {
-        let graph = conditional_graph();
-        let inputs = ExecInputs::default();
-        assert_eq!(
-            run(&graph, &inputs, &mut GateLedger::new()),
-            Err(ExecError::MissingConditionInput(StepId(0)))
-        );
-    }
-
-    fn looping_graph(max_iterations: u32) -> WorkflowGraph {
-        let looper = StepDef {
-            id: StepId(0),
-            kind: StepKind::Loop { max_iterations },
-            in_ports: vec![unit_port(0)],
-            out_ports: vec![unit_port(0)],
-        };
-        WorkflowGraph {
-            steps: vec![looper, seq(1)],
-            edges: vec![edge(0, 0, 1), edge(1, 1, 0)],
-            entry: StepId(0),
-        }
-    }
-
-    #[test]
-    fn loop_runs_up_to_its_bound_then_refuses() {
-        let graph = looping_graph(2);
-        let inputs = ExecInputs::default();
-        let err = run(&graph, &inputs, &mut GateLedger::new()).unwrap_err();
-        assert_eq!(err, ExecError::LoopBoundExceeded(StepId(0)));
-    }
-
-    #[test]
-    fn loop_step_within_its_bound_runs_to_completion() {
-        // A `Loop` step that is only ever entered once (no back edge here)
-        // never approaches its bound, and the workflow completes normally.
-        let looper = StepDef {
-            id: StepId(0),
-            kind: StepKind::Loop { max_iterations: 1 },
-            in_ports: vec![unit_port(0)],
-            out_ports: vec![unit_port(0)],
-        };
-        let graph = WorkflowGraph {
-            steps: vec![looper, seq(1), terminal(2)],
-            edges: vec![edge(0, 0, 1), edge(1, 1, 2)],
-            entry: StepId(0),
-        };
-        let trace = run(&graph, &ExecInputs::default(), &mut GateLedger::new()).unwrap();
-        assert_eq!(trace.visited, vec![StepId(0), StepId(1), StepId(2)]);
-    }
-
-    fn model_call_graph(requested: &str) -> WorkflowGraph {
-        let call = StepDef {
-            id: StepId(0),
-            kind: StepKind::ModelCall {
-                requested_model: requested.to_string(),
-            },
-            in_ports: vec![unit_port(0)],
-            out_ports: vec![unit_port(0)],
-        };
-        WorkflowGraph {
-            steps: vec![call, terminal(1)],
-            edges: vec![edge(0, 0, 1)],
-            entry: StepId(0),
-        }
-    }
-
-    #[test]
-    fn model_call_routes_within_policy_and_records_it() {
-        let graph = model_call_graph("checked-small-1");
-        let mut inputs = ExecInputs::default();
-        inputs.model_policies.insert(
-            StepId(0),
-            DeploymentPolicy::new(["checked-small-1".to_string()]),
-        );
-        let trace = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        assert_eq!(
-            trace.routed_models,
-            vec![(StepId(0), "checked-small-1".to_string())]
-        );
-    }
-
-    #[test]
-    fn model_call_outside_policy_is_refused_not_substituted() {
-        let graph = model_call_graph("unlisted-model");
-        let mut inputs = ExecInputs::default();
-        inputs.model_policies.insert(
-            StepId(0),
-            DeploymentPolicy::new(["checked-small-1".to_string()]),
-        );
-        assert_eq!(
-            run(&graph, &inputs, &mut GateLedger::new()),
-            Err(ExecError::RoutingRefused(
-                StepId(0),
-                RoutingError::NotInPolicy
-            ))
-        );
-    }
-
-    #[test]
-    fn invalid_graph_is_refused_before_any_step_runs() {
-        let graph = WorkflowGraph {
-            steps: vec![seq(0)],
-            edges: vec![],
-            entry: StepId(0),
-        };
-        assert_eq!(
-            run(&graph, &ExecInputs::default(), &mut GateLedger::new()),
-            Err(ExecError::InvalidGraph)
-        );
-    }
-
-    // -----------------------------------------------------------------
-    // Human gate wiring: reaching the gate must never itself authorize it.
-    // -----------------------------------------------------------------
-
-    fn gated_graph() -> WorkflowGraph {
-        let gate = StepDef {
-            id: StepId(0),
-            kind: StepKind::HumanGate,
-            in_ports: vec![unit_port(0)],
-            out_ports: vec![unit_port(0)],
-        };
-        WorkflowGraph {
-            steps: vec![gate, terminal(1)],
-            edges: vec![edge(7, 0, 1)],
-            entry: StepId(0),
-        }
-    }
-
-    fn gate_spec() -> GateSpec {
-        GateSpec {
-            revision: RevisionId(1),
-            candidate_digest: [3u8; 32],
-            required_role: Role("release-manager".to_string()),
-            expires_at: 1_000,
-            grants_edge: EdgeId(7),
-        }
-    }
-
-    fn gate_decision(id: u64) -> GateDecision {
-        GateDecision {
-            decision_id: id,
-            revision: RevisionId(1),
-            candidate_digest: [3u8; 32],
-            role: Role("release-manager".to_string()),
-            decided_at: 500,
-            approve: true,
-        }
-    }
-
-    /// The property item 1 exists to prove: a gated step's downstream edge
-    /// is never taken before its gate resolves. With no spec and no
-    /// decision supplied at all, the engine must stop *at* the gate with a
-    /// defined error — the terminal step immediately past it must never be
-    /// reported as visited.
-    #[test]
-    fn human_gate_step_cannot_execute_before_its_gate_resolves() {
-        let graph = gated_graph();
-        let err = run(&graph, &ExecInputs::default(), &mut GateLedger::new()).unwrap_err();
-        assert_eq!(err, ExecError::GateNotDecided(StepId(0)));
-        // `run` returns `Err`, not a partial `ExecTrace` — there is no
-        // route to inspect a `visited` list that snuck past the gate. The
-        // absence of any such list *is* the proof: nothing past the gate
-        // ever ran.
-    }
-
-    #[test]
-    fn human_gate_with_a_spec_but_no_decision_still_cannot_execute() {
-        let graph = gated_graph();
-        let mut inputs = ExecInputs::default();
-        inputs.gate_specs.insert(StepId(0), gate_spec());
-        // Deliberately no `gate_decisions` entry: reaching the gate and a
-        // spec existing for it are still not permission.
-        assert_eq!(
-            run(&graph, &inputs, &mut GateLedger::new()),
-            Err(ExecError::GateNotDecided(StepId(0)))
-        );
-    }
-
-    #[test]
-    fn human_gate_with_an_approved_decision_proceeds_to_the_named_edge() {
-        let graph = gated_graph();
-        let mut inputs = ExecInputs::default();
-        inputs.gate_specs.insert(StepId(0), gate_spec());
-        inputs.gate_decisions.insert(StepId(0), gate_decision(1));
-        let trace = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        assert_eq!(trace.visited, vec![StepId(0), StepId(1)]);
-    }
-
-    #[test]
-    fn human_gate_wrong_role_decision_is_refused_not_substituted() {
-        let graph = gated_graph();
-        let mut inputs = ExecInputs::default();
-        inputs.gate_specs.insert(StepId(0), gate_spec());
-        let mut wrong_role = gate_decision(1);
-        wrong_role.role = Role("intern".to_string());
-        inputs.gate_decisions.insert(StepId(0), wrong_role);
-        assert_eq!(
-            run(&graph, &inputs, &mut GateLedger::new()),
-            Err(ExecError::GateRefused(StepId(0), GateError::WrongRole))
-        );
-    }
-
-    #[test]
-    fn human_gate_replayed_decision_id_is_refused_even_on_a_fresh_run() {
-        let graph = gated_graph();
-        let mut inputs = ExecInputs::default();
-        inputs.gate_specs.insert(StepId(0), gate_spec());
-        inputs.gate_decisions.insert(StepId(0), gate_decision(9));
-
-        let mut ledger = GateLedger::new();
-        assert!(run(&graph, &inputs, &mut ledger).is_ok());
-        // Same ledger, same decision id, a second run of the same graph:
-        // the second run must not re-spend the same human decision.
-        assert_eq!(
-            run(&graph, &inputs, &mut ledger),
-            Err(ExecError::GateRefused(StepId(0), GateError::Replayed))
-        );
-    }
-
-    #[test]
-    fn human_gate_spec_naming_a_foreign_edge_is_refused() {
-        let graph = gated_graph();
-        let mut inputs = ExecInputs::default();
-        let mut mismatched = gate_spec();
-        mismatched.grants_edge = EdgeId(999); // does not leave StepId(0)
-        inputs.gate_specs.insert(StepId(0), mismatched);
-        inputs.gate_decisions.insert(StepId(0), gate_decision(1));
-        assert_eq!(
-            run(&graph, &inputs, &mut GateLedger::new()),
-            Err(ExecError::GateEdgeMismatch(StepId(0)))
-        );
-    }
-
-    // -----------------------------------------------------------------
-    // Parallel / Join: deterministic sequential simulation.
-    // -----------------------------------------------------------------
-
-    /// `branch_count` single-step branches, each `Sequential`, fanning out
-    /// from a `Parallel` and back into one `Join`, then a shared
-    /// `Terminal`. Edge ids are declared in descending branch order on
-    /// purpose, so a test relying on ascending edge-declaration order
-    /// (instead of ascending `StepId`) would fail.
-    fn parallel_join_graph(branch_count: u32) -> WorkflowGraph {
-        let mut steps = vec![StepDef {
-            id: StepId(0),
-            kind: StepKind::Parallel,
-            in_ports: vec![],
-            out_ports: (0..branch_count).map(unit_port).collect(),
-        }];
-        let mut edges = Vec::new();
-        for i in (0..branch_count).rev() {
-            let branch_id = 10 + i;
-            steps.push(seq(branch_id));
-            edges.push(EdgeDef {
-                id: EdgeId(i),
-                from: StepId(0),
-                from_port: PortId(i),
-                to: StepId(branch_id),
-                to_port: PortId(0),
-            });
-            edges.push(EdgeDef {
-                id: EdgeId(100 + i),
-                from: StepId(branch_id),
-                from_port: PortId(0),
-                to: StepId(1),
-                to_port: PortId(i),
-            });
-        }
-        steps.push(StepDef {
-            id: StepId(1),
-            kind: StepKind::Join {
-                parallel: StepId(0),
-            },
-            in_ports: (0..branch_count).map(unit_port).collect(),
-            out_ports: vec![unit_port(0)],
-        });
-        steps.push(terminal(2));
-        edges.push(edge(999, 1, 2));
-        WorkflowGraph {
-            steps,
-            edges,
-            entry: StepId(0),
-        }
-    }
-
-    #[test]
-    fn parallel_join_runs_every_branch_and_continues_past_the_join() {
-        let graph = parallel_join_graph(3);
-        let trace = run(&graph, &ExecInputs::default(), &mut GateLedger::new()).unwrap();
-        assert_eq!(
-            trace.visited,
-            vec![
-                StepId(0),
-                StepId(10),
-                StepId(11),
-                StepId(12),
-                StepId(1),
-                StepId(2),
-            ],
-            "branches must run in ascending StepId order, not edge-declaration order"
-        );
-    }
-
-    #[test]
-    fn parallel_join_execution_is_deterministic_across_repeated_runs() {
-        let graph = parallel_join_graph(4);
-        let inputs = ExecInputs::default();
-        let first = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        let second = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        let third = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        assert_eq!(first, second);
-        assert_eq!(second, third);
-    }
-
-    #[test]
-    fn parallel_join_routes_a_model_call_branch_and_records_it_in_branch_order() {
-        let mut graph = parallel_join_graph(2);
-        // Replace branch StepId(11) with a ModelCall step so a branch can
-        // perform a routed effect, not just a bare Sequential pass-through.
-        for step in &mut graph.steps {
-            if step.id == StepId(11) {
-                step.kind = StepKind::ModelCall {
-                    requested_model: "checked-small-1".to_string(),
-                };
-            }
-        }
-        let mut inputs = ExecInputs::default();
-        inputs.model_policies.insert(
-            StepId(11),
-            DeploymentPolicy::new(["checked-small-1".to_string()]),
-        );
-        let trace = run(&graph, &inputs, &mut GateLedger::new()).unwrap();
-        assert_eq!(
-            trace.routed_models,
-            vec![(StepId(11), "checked-small-1".to_string())]
-        );
-    }
-
-    #[test]
-    fn parallel_with_no_join_referencing_it_is_a_defined_refusal() {
-        // Two branches, each wired straight to its own Terminal instead of
-        // a shared Join: structurally valid per `WorkflowGraph::validate`
-        // (nothing requires a Parallel to recombine), but this engine only
-        // knows how to run a Parallel a Join is waiting on.
-        let graph = WorkflowGraph {
-            steps: vec![
-                StepDef {
-                    id: StepId(0),
-                    kind: StepKind::Parallel,
-                    in_ports: vec![],
-                    out_ports: vec![unit_port(0), unit_port(1)],
-                },
-                seq(10),
-                seq(11),
-                terminal(20),
-                terminal(21),
-            ],
-            edges: vec![
-                EdgeDef {
-                    id: EdgeId(0),
-                    from: StepId(0),
-                    from_port: PortId(0),
-                    to: StepId(10),
-                    to_port: PortId(0),
-                },
-                EdgeDef {
-                    id: EdgeId(1),
-                    from: StepId(0),
-                    from_port: PortId(1),
-                    to: StepId(11),
-                    to_port: PortId(0),
-                },
-                edge(2, 10, 20),
-                edge(3, 11, 21),
-            ],
-            entry: StepId(0),
-        };
-        assert_eq!(graph.validate(), Ok(()));
-        assert_eq!(
-            run(&graph, &ExecInputs::default(), &mut GateLedger::new()),
-            Err(ExecError::NoJoinForParallel(StepId(0)))
-        );
-    }
-
-    #[test]
-    fn join_step_dispatched_directly_is_refused_not_only_reachable_via_its_parallel() {
-        // `ParallelExecutor` is the only code path that ever legitimately
-        // advances past a `Join` step, immediately after it has itself run
-        // every one of that `Join`'s branches. Dispatching the `Join` step
-        // directly — simulating any other, uncoordinated call site that
-        // might otherwise try to step onto it — must refuse rather than
-        // silently taking its one out edge.
-        let graph = parallel_join_graph(2);
-        let mut visited = Vec::new();
-        let mut loop_counts = BTreeMap::new();
-        let mut ledger = GateLedger::new();
-        let err = dispatch_step(
-            StepId(1), // the Join step
-            &graph,
-            &ExecInputs::default(),
-            &mut ledger,
-            &mut loop_counts,
-            &mut visited,
-        )
-        .unwrap_err();
-        assert_eq!(err, ExecError::NotExecutable(StepId(1)));
-    }
-
-    #[test]
-    fn human_gate_step_is_never_silently_executed() {
-        // A HumanGate that dispatch never routes to NotExecutableExecutor:
-        // confirms the dispatch table itself, not just `run`, treats
-        // HumanGate as a real (gated) executor rather than a refusal.
-        let mut visited = Vec::new();
-        let mut loop_counts = BTreeMap::new();
-        let mut ledger = GateLedger::new();
-        let graph = gated_graph();
-        let err = dispatch_step(
-            StepId(0),
-            &graph,
-            &ExecInputs::default(),
-            &mut ledger,
-            &mut loop_counts,
-            &mut visited,
-        )
-        .unwrap_err();
-        assert_eq!(err, ExecError::GateNotDecided(StepId(0)));
-    }
-
-    #[test]
-    fn declared_step_kind_is_never_silently_executed() {
-        let declared = StepDef {
-            id: StepId(0),
-            kind: StepKind::Declared(DeclaredStepKind::Job),
-            in_ports: vec![unit_port(0)],
-            out_ports: vec![unit_port(0)],
-        };
-        let graph = WorkflowGraph {
-            steps: vec![declared, terminal(1)],
-            edges: vec![edge(0, 0, 1)],
-            entry: StepId(0),
-        };
-        assert_eq!(
-            run(&graph, &ExecInputs::default(), &mut GateLedger::new()),
-            Err(ExecError::NotExecutable(StepId(0)))
-        );
-    }
-}
+mod tests;

@@ -54,6 +54,45 @@ pub fn decide_retry(
     RetryDecision::Retry
 }
 
+/// One scripted attempt of a step's effect, for callers (currently
+/// [`super::engine::run`]) that need to drive [`decide_retry`] against a
+/// sequence of outcomes rather than a single one.
+///
+/// `succeeded` is deliberately a separate field from `outcome` rather than a
+/// sixth [`AttemptOutcomeClass`] variant: the classification answers "is
+/// retrying this outcome provably safe", which is orthogonal to whether the
+/// attempt actually produced the effect the step wanted (an attempt can be
+/// [`AttemptOutcomeClass::CompletedWithResponse`] and still have failed the
+/// caller's request). A successful attempt's `outcome` is never consulted by
+/// [`decide_retry`] — there is nothing left to decide once the step got what
+/// it needed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScriptedAttempt {
+    pub outcome: AttemptOutcomeClass,
+    pub succeeded: bool,
+}
+
+impl ScriptedAttempt {
+    #[must_use]
+    pub fn success() -> Self {
+        ScriptedAttempt {
+            // Never consulted: `succeeded` short-circuits before `outcome`
+            // is read. Named honestly rather than left to an arbitrary
+            // default so a reader never mistakes it for a real classification.
+            outcome: AttemptOutcomeClass::CompletedWithResponse,
+            succeeded: true,
+        }
+    }
+
+    #[must_use]
+    pub fn failed(outcome: AttemptOutcomeClass) -> Self {
+        ScriptedAttempt {
+            outcome,
+            succeeded: false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

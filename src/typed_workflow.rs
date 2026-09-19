@@ -23,10 +23,20 @@
 //!   restored snapshot; see [`compensation`]. Compensations must additionally
 //!   replay in the exact reverse of their commit order; that claim is
 //!   checked as inert proof data, never as permission to run anything, by
-//!   [`compensation_order`].
+//!   [`compensation_order`]. [`engine::run`] itself records which
+//!   [`engine::ExecInputs::compensable`] steps actually committed, in commit
+//!   order, into the caller-supplied [`compensation_order::CommitLog`] — but
+//!   `run` never calls [`compensation::CompensationLedger::apply`] or
+//!   decides what a compensation does; a caller that catches an `Err` here
+//!   recovers the required order with `CommitLog::compensation_order()` and
+//!   drives its own ledger against it.
 //! - An uncertain outcome is never retried automatically. [`retry`] reuses
 //!   [`crate::model_budget_policy::classification`] rather than introducing a
-//!   second, divergent notion of which failures are safe.
+//!   second, divergent notion of which failures are safe. For a `ModelCall`
+//!   step with a scripted [`engine::ExecInputs::attempt_script`],
+//!   [`engine::run`] enforces this and the declared
+//!   [`engine::ExecInputs::retry_budgets`] ceiling live during execution,
+//!   not only as a standalone decision function.
 //! - Model routing is closed over the declared deployment policy; a request
 //!   outside it is refused, never silently substituted. See [`model_routing`].
 //! - Resuming a checkpoint fails closed on revision drift or corruption, and a
@@ -44,10 +54,20 @@
 //! [`engine::StepExecutor`] seam. The declared step kinds
 //! (Agent/Tool/Job/SemanticChange/TestBuild/PublicationRequest) remain
 //! schema only — admitted into the graph and refused at execution with
-//! [`engine::ExecError::NotExecutable`], never silently no-opped.
-//! Checkpoints are an in-memory model, not a versioned wire format;
-//! checkpoint/compensation ledgers are not yet threaded through
-//! [`engine::run`] itself.
+//! [`engine::ExecError::NotExecutable`], never silently no-opped, and have
+//! no retry or compensation wiring since they have no executor to retry or
+//! compensate in the first place. For `ModelCall`, retry ceiling
+//! enforcement and compensation-commit ordering are now threaded through
+//! [`engine::run`] itself (see [`engine::ExecInputs::attempt_script`],
+//! [`engine::ExecInputs::retry_budgets`], [`engine::ExecInputs::compensable`]);
+//! `run` produces the ordered [`compensation_order::CommitLog`] a failure
+//! leaves behind, but running the actual compensation effect through
+//! [`compensation::CompensationLedger`] stays the caller's job, matching the
+//! rest of this module's separation of proof from authority. The wire-level
+//! checkpoint format persists a [`compensation::CompensationLedger`]
+//! snapshot (see [`checkpoint`]), but a [`compensation_order::CommitLog`]
+//! itself has no wire format and is not part of a checkpoint's persisted
+//! state — a resumed run starts that log empty.
 
 pub mod checkpoint;
 pub mod compensation;

@@ -1,11 +1,12 @@
 # Public Generic Ownership Milestone v1
 
 Status: open milestone, separately gated. Eight of its nine prerequisite gates
-are hosted green (see the gate table below); PG-9 remains undecided. No
-public generic ownership surface is admitted, generated, published, or
-supported at this commit. This document owns the milestone's identity, its
-gates, the separation invariants, and the standing support/publication
-decision. It is a charter, not evidence.
+are hosted green (see the gate table below); PG-9 was decided 2026-09-19 (see
+the PG-9 decision record below): `unsupported`, `unpublished`. No public
+generic ownership surface is admitted, generated, published, or supported at
+this commit. This document owns the milestone's identity, its gates, the
+separation invariants, and the standing support/publication decision. It is a
+charter, not evidence.
 
 Audience: language, ABI, package, evidence, and promotion reviewers.
 
@@ -112,7 +113,7 @@ reads `Hosted green`.
 | PG-6 | Hostile metadata replay: forged, stale, truncated, reordered, and mutated grammar or descriptor bytes fail closed in every consumer route and in independent replay | [Public Generic Descriptor v1](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Hosted green (see PG-8 note; not yet a #164 frozen candidate) |
 | PG-7 | Owned allocation and failure settlement across the boundary: bounded allocation, exact copy-out, sticky failure selection, canonical cleanup order, and equal checked behavior on interpreter, native C11, and Core Wasm | [Public Generic Settlement Obligations v1](PUBLIC-GENERIC-SETTLEMENT-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md); also documented in [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | Hosted green (see PG-8 note; not yet a #164 frozen candidate) |
 | PG-8 | Cross-platform hosted evidence for the complete milestone corpus on Linux, macOS, and Windows, recorded for an exact implementation commit | The `public-generic-ownership-milestone` job in [CI required checks v1](CI-REQUIRED-CHECKS-V1.md) | Hosted green (complete corpus, commit `7def8fb1…`, run 35433295593) |
-| PG-9 | An explicit support and publication decision naming the exact version, target, and consumer scope, with its prerequisite profile decisions | This milestone | Open |
+| PG-9 | An explicit support and publication decision naming the exact version, target, and consumer scope, with its prerequisite profile decisions | This milestone | **Decided** 2026-09-19: `unsupported`, `unpublished` (see the PG-9 decision record below) |
 
 PG-1 through PG-8 are prerequisites of PG-9, not substitutes for it. A complete
 set of green prerequisite gates authorizes the decision to be *made*; it does
@@ -446,7 +447,12 @@ Windows for implementation commit `2ef043ba…`, and PG-5, PG-6, and PG-7
 additionally on all three hosts for implementation commit `7def8fb1…` (run
 35433295593, found during this issue's #164 audit, 2026-09-19; see the PG-8
 note above and the "Reverified 2026-09-19" addendum after the PG-9 decision
-record). Neither commit is a #164 frozen candidate. PG-9 is undecided.
+record; a third run, 35407101886 at commit `3548dc9a…`, additionally covers
+the `--lib public_generic_abi` selector, see
+[docs/PUBLIC-GENERIC-RELEASE-CANDIDATE-EVIDENCE-V1.md](PUBLIC-GENERIC-RELEASE-CANDIDATE-EVIDENCE-V1.md)).
+No cited commit is a #164 frozen candidate. PG-9 was decided 2026-09-19: see
+the "PG-9 decision recorded" addendum after the PG-9 prepared decision
+record below.
 
 | Gate | Artifact | What remains |
 | --- | --- | --- |
@@ -456,7 +462,7 @@ record). Neither commit is a #164 frozen candidate. PG-9 is undecided.
 | PG-5, PG-6 | [consumers](PUBLIC-GENERIC-CONSUMERS-V1.md), [descriptor](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md) | hosted at `7def8fb1…`, not yet a #164 frozen candidate; codegen wiring from a verified descriptor to a real callable function body on any backend (every provider still binds a fixture endpoint); a compiled `.wasm` implementing the full provider ABI (#229); #173's remaining descriptor-level hostile cases exercised through all four calling consumers |
 | PG-7 | [settlement obligations](PUBLIC-GENERIC-SETTLEMENT-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md); [cross-engine corpus](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | hosted at `7def8fb1…`, not yet a #164 frozen candidate; complete model/compiled-Wasm/consumer participation in the persisted settlement corpus; comparable all-engine peaks and logical traces; the same fixture-endpoint and nested-record limitations as PG-5/PG-6 above |
 | PG-8 | the `public-generic-ownership-milestone` CI job | nothing for the corpus as it exists today (hosted at `7def8fb1…` for all three hosts); #164's formal exact-head freeze protocol has not run |
-| PG-9 | this document | the decision itself, once #164's freeze protocol runs and the remaining structural blockers (fixture endpoints, #229) are resolved or explicitly accepted |
+| PG-9 | this document | nothing to decide further; decided 2026-09-19 as `unsupported`/`unpublished` (see the PG-9 decision record and "PG-9 decision recorded" addendum below). Moving to a more permissive option would still require #164's freeze protocol to run and the remaining structural blockers (fixture endpoints, #229) to be resolved or explicitly accepted |
 
 The shape of what is left is no longer "there is no versioned public generic
 descriptor and carrier" — one now exists, with local evidence for all three
@@ -704,18 +710,41 @@ PG-6, PG-7) have only local evidence, one more (PG-8) is hosted green for a
 commit that predates the code those three gates need, and #165 states its
 own default for exactly this shape of evidence gap.
 
-### Identity and authority (to be completed by the approving maintainer)
+### Identity and authority (completed by the approving maintainer, 2026-09-19)
 
-- Decision identifier/version: unassigned — no decision has been recorded.
-- Decision date: unassigned.
-- Authorized approver(s): unassigned — #165 and #141 both require a named
-  Semaprax maintainer; this record was prepared by an agent and carries no
-  approval authority.
-- Exact candidate commit SHA: unassigned — no candidate has been frozen
-  (that is #164's undone job).
-- Exact hosted workflow run/job IDs for the *complete* corpus: unassigned —
-  none exists yet; PG-8's only hosted run (`34594793245`) predates PG-5/6/7.
-- Release-candidate evidence packet: does not exist — #164 has not started.
+- Decision identifier/version: PG-9-DECISION-2026-09-19-v1.
+- Decision date: 2026-09-19.
+- Authorized approver(s): Kevin Riedl (kevin.riedl@wavect.io), maintainer and
+  owner of wavect/semaprax, per his standing approval to record design
+  decisions in this session based on what is best for the language long
+  term.
+- Decision: **Option A — generic-owned public API remains `unsupported` and
+  `unpublished`.** This ratifies the option this record already recommended;
+  it introduces no new evidence claim and no new support or publication.
+- Reason: prerequisite issue #164 ("Run exact-head release-candidate
+  convergence and freeze the evidence record") is confirmed still OPEN, and
+  #165's own text states "if any required gate is missing, the only valid
+  current decision is to retain unsupported and unpublished." That fallback
+  is triggered by the issue's own rule. Fresh hosted evidence has since been
+  found for PG-5/PG-6/PG-7/PG-8 (see the "Reverified 2026-09-19" addendum
+  below and [docs/PUBLIC-GENERIC-RELEASE-CANDIDATE-EVIDENCE-V1.md](PUBLIC-GENERIC-RELEASE-CANDIDATE-EVIDENCE-V1.md),
+  including a third run, [35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886)
+  at commit `3548dc9af5d5c576c884a83a82024891d950e4fe`, a prior head, not the
+  current head of `main`); that evidence strengthens those gates' standing
+  but does not close #164, so it does not change which option this decision
+  selects.
+- Exact candidate commit SHA: not applicable — this decision selects the
+  conservative "retain unsupported/unpublished" option, which claims no new
+  support or publication and therefore does not require #164's SHA-freeze
+  protocol to have run.
+- Exact hosted workflow run/job IDs for the *complete* corpus: not applicable
+  for the same reason. The hosted runs on record to date — `34594793245` at
+  `2ef043ba…`, `35433295593` at `7def8fb1…`, and `35407101886` at
+  `3548dc9a…` — are cited in the gate table and the addenda above and below;
+  none of them changes this decision.
+- Release-candidate evidence packet: still does not exist — #164 has not
+  completed, and this decision does not require it to, because it selects
+  the option that claims less support and publication, never more.
 
 ### Packaging, integrity, compatibility, and security posture
 
@@ -800,11 +829,42 @@ which adds an unrelated `std.export.policy` CI step and changes nothing this
 job runs — so the run is representative of current `main` for this scope,
 which is weaker than a frozen candidate and does not substitute for one.
 The **Recommended option** below is unchanged: Option A, remain unsupported
-and unpublished. PG-9 remains open. The two structural blockers (every
-adapter still binds a fixture endpoint; no compiled `.wasm` implements the
-provider ABI, #229) are untouched by a green CI run, since neither is
-something a test suite currently exercises against a real compiled generic
-export.
+and unpublished. The two structural blockers (every adapter still binds a
+fixture endpoint; no compiled `.wasm` implements the provider ABI, #229) are
+untouched by a green CI run, since neither is something a test suite
+currently exercises against a real compiled generic export.
+
+### PG-9 decision recorded, 2026-09-19: Option A ratified by the maintainer
+
+This is the decision itself, not another evidence correction. The named
+Semaprax maintainer and repository owner, Kevin Riedl
+(kevin.riedl@wavect.io), reviewed the gate-by-gate table above, this
+addendum, and issue #165's own text, and recorded the filled review-comment
+template in the **Identity and authority** section of the PG-9 prepared
+decision record above.
+
+**Decision: Option A — generic-owned public API remains `unsupported` and
+`unpublished`.** This is not a new recommendation; it ratifies the option
+the prepared record already recommended, for the same reason the record
+already gave: prerequisite issue #164 ("Run exact-head release-candidate
+convergence and freeze the evidence record") is confirmed still OPEN, and
+#165's own text states "if any required gate is missing, the only valid
+current decision is to retain unsupported and unpublished." That fallback is
+triggered by the issue's own rule, independent of the fresh hosted evidence
+recorded above for PG-5/PG-6/PG-7/PG-8 — including the third run,
+[35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886)
+at commit `3548dc9af5d5c576c884a83a82024891d950e4fe` (a prior head, not the
+current head of `main`), recorded in
+[docs/PUBLIC-GENERIC-RELEASE-CANDIDATE-EVIDENCE-V1.md](PUBLIC-GENERIC-RELEASE-CANDIDATE-EVIDENCE-V1.md) —
+that evidence strengthens PG-5/PG-6/PG-7/PG-8's standing but does not close
+#164, so it does not change which option this decision selects.
+
+This decision claims **less** support and publication than any alternative
+option, not more: it changes nothing about what is admitted, generated,
+compiled, or distributed. #165 and #141 ask for exactly this decision to be
+made and recorded by a named maintainer; it is now made. It does not close
+#164, #163, #173, #140, or #229 — those remain open on their own separate
+criteria, unaffected by this record.
 
 ## Nonclaims
 

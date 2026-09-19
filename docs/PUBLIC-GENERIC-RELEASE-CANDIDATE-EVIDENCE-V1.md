@@ -15,6 +15,23 @@ conclusions rather than only aggregate run conclusions. This is real hosted
 evidence, not a frozen #164 candidate: see the corrected §2.16 and §3 below.
 Section 3 lists every #164 requirement that remains open.
 
+**Second revision, 2026-09-19 (same-day follow-up, documentation-only
+pass):** a third hosted run has since been found, at a **different, earlier**
+prior head: [run 35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886)
+(workflow `CI`), at commit `3548dc9af5d5c576c884a83a82024891d950e4fe` — itself
+an ancestor of `7def8fb1a727787f989428d77eea603ffd0513cf` above, and **not**
+the current head of `main`. Its "Public generic ownership milestone" job
+concluded `success` on all three of ubuntu-latest, macos-latest, and
+windows-latest, while the run's own **aggregate** conclusion is `cancelled`
+(an unrelated superseded job) — a different failure mode than run
+35433295593's aggregate `failure`, and one that is even easier to misread as
+"nothing ran," which is why this run had been missed until now. This run is
+the first hosted execution anywhere in this repository's history of the
+`--lib public_generic_abi` selector (307 passed) — the exact library-module
+selector issue #140's own audit found missing from every workflow file before
+commit `3548dc9a` added it. See the corrected §2.16 and the new §3 item 4 for
+the full citation, including every test count.
+
 ## What this document is, and is not
 
 This document assembles the two evidence sections of #164 that are
@@ -39,7 +56,7 @@ satisfied here. In particular:
   never as a frozen release candidate.
 - **No hosted CI evidence is claimed here beyond what
   [PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md)
-  now records, as of its own 2026-09-19 correction.** When this document was
+  now records, as of its own 2026-09-19 corrections.** When this document was
   first assembled, those two documents recorded exactly one hosted run,
   [run 34594793245](https://github.com/wavect/semaprax/actions/runs/34594793245)
   at implementation commit `2ef043ba1b989f49b256e456f71fb6e89068bf33`, which
@@ -48,12 +65,20 @@ satisfied here. In particular:
   issue's own audit found [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
   at commit `7def8fb1a727787f989428d77eea603ffd0513cf`, whose three
   `public-generic-ownership-milestone` jobs (105871581195, 105871581214,
-  105871581165) are all `success` and cover the complete widened corpus —
-  see the milestone document's own "Reverified 2026-09-19" addendum and its
-  corrected PG-8 section for the full citation. This is real hosted
-  evidence, but `7def8fb1` is not a frozen #164 candidate (see §3, revised).
+  105871581165) are all `success` and cover the complete widened corpus, and
+  a same-day follow-up pass found a **third** hosted run,
+  [run 35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886)
+  at commit `3548dc9af5d5c576c884a83a82024891d950e4fe` (an ancestor of
+  `7def8fb1`, not the current head), whose "Public generic ownership
+  milestone" job is `success` on all three of ubuntu-latest, macos-latest,
+  and windows-latest (ubuntu-latest job id `105799024571`), while that run's
+  own **aggregate** conclusion is `cancelled` — see the milestone document's
+  own "Reverified 2026-09-19" addendum and this document's corrected §2.16
+  for the full citation of both runs. This is real hosted evidence, but
+  neither `7def8fb1` nor `3548dc9a` is a frozen #164 candidate (see §3,
+  revised).
   Every other identifier, status, and test count below not tied to one of
-  these two runs is **local, proof-only, or source-inspection evidence**,
+  these three runs is **local, proof-only, or source-inspection evidence**,
   and is labelled that way throughout. Nothing here upgrades any of that to
   current-head, physical-device, or production support.
 - **No test was executed to produce this document.** Every test count cited
@@ -399,6 +424,7 @@ diagnostic/reason range, CI job/step, and support/publication standing.
 - **Owning workflow file**: `.github/workflows/ci.yml`, job definition starting at line 253 (`public-generic-ownership-milestone:`), matrix `[ubuntu-latest, macos-latest, windows-latest]`, `timeout-minutes: 240`
 - **Steps, as they exist in source at the commit named in §3** (quoted, not executed): "Allow Windows to check out long evidence paths"; a candidate-delta/frozen-descriptor-rejection step; "Four-language metadata consumers and hostile replay" (`public_generic_consumers`); "Public generic ABI carrier, settlement corpus and WIT projection" (`--lib public_generic_abi`); "Callable-boundary corpus, generated consumers, settlement and hostile replay" (`public_generic_native_adapter_v1`, `public_generic_wasm_adapter_v1`, `public_generic_descriptor_carrier_hostile_replay`); "Native settlement sanitizer evidence and independent replay" (Linux-only); "Compiled C11-reference provider inside Core Wasm (not public generic admission)" (Linux-only)
 - **Support/publication standing (revised 2026-09-19)**: two hosted runs are now on record for this job. Run `34594793245` at commit `2ef043ba…` exercised only the "Four-language metadata consumers and hostile replay" step (that step is, as of the commit below, still unchanged and still invokes only `cargo test --locked -p semaprax --test projections public_generic_consumers`). **This issue's own audit found [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593) at commit `7def8fb1a727787f989428d77eea603ffd0513cf`**, whose three `public-generic-ownership-milestone` jobs (105871581195 ubuntu-latest, 105871581214 macos-latest, 105871581165 windows-latest) are all `success`, with every step listed above — including the two Linux-only sanitizer/compiled-Wasm steps — passing on the ubuntu-latest leg. The workflow run's own aggregate conclusion is `failure`, from unrelated jobs (verified by name: `Rust tests macos-latest`, `STD-08 bundled library depth`, `Public Native Rust SDK v1`, `Rust 1.88 minimum`), which is why no prior document had surfaced it — job-level conclusions were not checked, only run-level ones. `7def8fb1` is 18 commits behind the head this finding was made against (`e0c268b378ecf9279f1968ee706ea990b0da18d1`); that range was diffed against every public-generic path and contains exactly one touching commit (`11f07087`, an unrelated `std.export.policy` CI addition), so the result is representative of current `main` but is **not** a #164 frozen candidate.
+- **Second revision, 2026-09-19 (same-day follow-up pass)**: a third hosted run is now on record, [run 35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886) (workflow `CI`), at commit `3548dc9af5d5c576c884a83a82024891d950e4fe` — an **ancestor** of `7def8fb1a727787f989428d77eea603ffd0513cf` above, and **not** the current head of `main`; state this as "at commit `3548dc9a`," never as "current head" or "hosted at head." The run's own **aggregate** conclusion is `cancelled` (an unrelated superseded job, not this milestone job); its "Public generic ownership milestone" job concluded `success` on all three of ubuntu-latest, macos-latest, and windows-latest — the ubuntu-latest job's database id is `105799024571`. That job genuinely executed real, non-zero-count test selectors, not an empty-filter false pass: `cargo test --locked -p semaprax --test public_generic_native_adapter_v1` → **52 passed, 0 failed, 3 ignored, 0 filtered out**; `cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1` → **24 passed, 0 failed, 1 ignored, 0 filtered out**; `cargo test --locked -p semaprax --test projections public_generic_descriptor_carrier_hostile_replay` → **6 passed, 0 failed** — the six named tests `carrier_binding_decode_rejects_invalid_utf8_in_the_runtime_identity_field`, `carrier_frame_parse_bounded_rejects_an_unrecognized_leaf_kind_variant_tag`, `carrier_frame_parse_bounded_rejects_invalid_utf8_in_a_leaf_path`, `descriptor_decode_rejects_invalid_utf8_in_the_export_id_field`, `native_provider_binding_decode_rejects_invalid_utf8_in_the_exported_endpoint_symbol_field`, `wasm_provider_binding_decode_rejects_invalid_utf8_in_the_exported_endpoint_export_name_field`; `cargo test --locked -p semaprax --test projections public_generic_ownership_milestone` → **19 passed**; and `cargo test --locked -p semaprax --lib public_generic_abi` → **307 passed** — the first hosted execution anywhere on record of that library selector, exactly the gap issue #140's own audit found (`grep public_generic_abi .github/workflows/*.yml` returned only unrelated hits before `3548dc9a` added it). `git merge-base --is-ancestor` confirms commit `6d1289b9` (issue #173's descriptor-envelope work) and commit `8802d013` (issue #140's max-bounds work) are both ancestors of `3548dc9a`, so this run's success covers the corpus both issues added. This is the same generalizable lesson the first revision above already recorded, in the mirror-image direction: a `cancelled` aggregate, like a `failure` aggregate, says nothing about whether the milestone job inside it completed and passed — only job-level conclusions do. This does not change #164's open status: no SHA-freeze protocol ran around `3548dc9a` either, and it sits well behind the current head of `main` just as `7def8fb1` does.
 
 ### 2.17 Completion matrix cross-reference
 
@@ -452,21 +478,50 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
    for this scope; it is simply not yet the exact-head frozen candidate
    Section D requires. See §2.16 (revised) and the milestone document's own
    "Reverified 2026-09-19" addendum for the full citation.
-4. **No artifact inventory (Section E) was built.** No descriptor bytes,
+4. **A second, same-day follow-up pass (still this #164 audit) found a
+   third hosted run, at a different, earlier prior head.**
+   [Run 35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886)
+   (workflow `CI`) executed at commit
+   `3548dc9af5d5c576c884a83a82024891d950e4fe` — an ancestor of
+   `7def8fb1a727787f989428d77eea603ffd0513cf` (item 3 above), and **not** the
+   current head of `main`. The run's aggregate conclusion is `cancelled` (an
+   unrelated superseded job, not this milestone job); its "Public generic
+   ownership milestone" job concluded `success` on all three of
+   ubuntu-latest, macos-latest, and windows-latest (ubuntu-latest job
+   database id `105799024571`), executing real non-zero-count selectors:
+   `--test public_generic_native_adapter_v1` → 52 passed/0 failed/3 ignored;
+   `--test public_generic_wasm_adapter_v1` → 24 passed/0 failed/1 ignored;
+   `--test projections public_generic_descriptor_carrier_hostile_replay` → 6
+   passed/0 failed; `--test projections public_generic_ownership_milestone`
+   → 19 passed; and `--lib public_generic_abi` → 307 passed — the first
+   hosted execution on record of that selector, closing the exact gap issue
+   #140's own audit named ("no workflow file in the repository selected the
+   `public_generic_abi` library module on any host"). `git merge-base
+   --is-ancestor` also confirms commits `6d1289b9` (#173) and `8802d013`
+   (#140) are both ancestors of `3548dc9a`, so this run's success covers the
+   corpus both issues added. This does **not** change #164's open status:
+   no SHA-freeze protocol ran around `3548dc9a` either, and it sits well
+   behind the current head of `main` just as `7def8fb1` does. See the
+   corrected §2.16 for the full citation.
+5. **No artifact inventory (Section E) was built.** No descriptor bytes,
    provider bindings, native/Wasm artifacts, or generated-package outputs
    were built, hashed, or sized in this session (that would require running
    the generators/compilers, which requires `cargo`/`clang`/`tsc`, none of
    which this session was permitted to invoke).
-5. **No compatibility audit (Section F) or security/trust-boundary audit
+6. **No compatibility audit (Section F) or security/trust-boundary audit
    (Section G) was freshly executed.** Both would require running the
    relevant test suites; this session only read the specifications and
    existing test *names* cited in §2.
-6. **PG-9 remains open**, as it must: nothing in this document is a support
-   or publication decision, and nothing here advances PG-5, PG-6, PG-7, or
-   PG-8 beyond their currently-recorded "Implemented, local evidence" /
-   "Hosted, but scope-stale" states in
-   `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:452-462`.
-7. **The two structural blockers under PG-5/PG-6/PG-7 are unresolved and
+7. **Nothing in this document is itself a support or publication decision.**
+   PG-9 was later decided (2026-09-19, in
+   `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md`'s PG-9 decision record and
+   its "PG-9 decision recorded" addendum, by the named maintainer) as
+   `unsupported`/`unpublished` — the same conservative option this document's
+   evidence already pointed to. Nothing here advances PG-5, PG-6, PG-7, or
+   PG-8 beyond their currently-recorded hosted/local evidence states, and
+   nothing here was an input the maintainer needed beyond what the milestone
+   document itself already cited.
+8. **The two structural blockers under PG-5/PG-6/PG-7 are unresolved and
    unaddressed by this document**: (a) every physical adapter (interpreter,
    native, Wasm) still binds a fixture endpoint, not a function body
    codegenned from a real admitted public-generic `.spx` export
@@ -475,7 +530,7 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
    `native/provider_body.c:18-26`, all confirmed live in §2.6.1-2.6.3); (b) no
    compiled `.wasm` artifact implements the Core Wasm provider ABI (issue
    #229, open).
-8. **A genuine drift was found (2026-09-18) and is recorded here rather than
+9. **A genuine drift was found (2026-09-18) and is recorded here rather than
    silently corrected — and then partly resolved by hosted evidence
    (2026-09-19).** The milestone document's PG-8 note (as it read on
    2026-09-18, since reworded) stated the CI job's calling-consumer step is
@@ -499,7 +554,7 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
    public-generic scope except one unrelated commit, `11f07087`). See the
    milestone document's own "Reverified 2026-09-19" addendum for the full
    citation.
-9. **The release-candidate decision packet template** (`Candidate SHA:`,
+10. **The release-candidate decision packet template** (`Candidate SHA:`,
    `Contracts/versions:`, `Hosted run/jobs:`, …) that #164 asks maintainers be
    handed is not filled in here — filling it now, with an unfrozen SHA and no
    fresh hosted run, would be exactly the "invent or imply a hosted run"
@@ -512,7 +567,7 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
 | A single versioned "hostile corpus" schema identifier | No `semaprax.public-generic-hostile-corpus.v*` (or similar) constant exists anywhere in `src/` or `docs/`; the corpus exists as three separately-scoped, unversioned case tables (§1.5) |
 | MSRV 1.88 pin for the generated Rust consumer building on a provisioned 1.88 toolchain *in a hosted run* | The workflow does provision it: `.github/workflows/ci.yml`'s "Install the generated Rust consumer's declared MSRV toolchain" step runs `rustup toolchain install "1.88"` so that `generated_rust_calling_consumer_builds_and_runs_on_the_declared_msrv_toolchain` resolves it through `rustup which cargo --toolchain 1.88`. What is unverified is only that a *hosted run has executed that step*, which is the same open item as every other row in §3 |
 | `HEAD` as a stable subject | This is a shared checkout; `HEAD` moved during this session's own reads (§3, item 1). Any single SHA cited elsewhere in this document names only what a specific fact was checked against, never a frozen candidate |
-| PG-8's hosted run job IDs mapping to the *current* job definition | **Resolved 2026-09-19**, no longer unverified: jobs 103248047092/103248046648/103248046983 map to the job as it existed at commit `2ef043ba…` (the narrower grammar/metadata scope), but jobs 105871581195/105871581214/105871581165 (run 35433295593, commit `7def8fb1…`) map to the widened job as it exists in source today, and all three are `success` (§2.16, §3 item 3, revised) |
+| PG-8's hosted run job IDs mapping to the *current* job definition | **Resolved 2026-09-19**, no longer unverified: jobs 103248047092/103248046648/103248046983 map to the job as it existed at commit `2ef043ba…` (the narrower grammar/metadata scope), but jobs 105871581195/105871581214/105871581165 (run 35433295593, commit `7def8fb1…`) map to the widened job as it exists in source today, and all three are `success` (§2.16, §3 item 3, revised). A third run, 35407101886 at commit `3548dc9a…` (ubuntu-latest job `105799024571`), is likewise `success` on all three hosts and additionally exercises the `--lib public_generic_abi` selector (§2.16, §3 item 4) |
 
 ## 5. Nonclaims
 

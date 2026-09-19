@@ -1,5 +1,9 @@
 # Resumable effects v1
 
+Audience: compiler contributors implementing the source-syntax/HIR/backend
+generalization this document specifies, and reviewers auditing what #204
+delivered versus what remains.
+
 Status: **a minimal `.spx` slice, executed by exactly one engine**, on top of
 a Rust reference validator. Issue #204 asks the compiler to let an ordinary,
 non-Agent function declare typed resumable effects with the same generality
@@ -19,10 +23,6 @@ deliberately different in kind:
   [Interpreter execution](#interpreter-execution).
 
 What is still open is in [Scope boundary](#scope-boundary).
-
-Audience: compiler contributors implementing the source-syntax/HIR/backend
-generalization this document specifies, and reviewers auditing what #204
-delivered versus what remains.
 
 ## What already exists on `main`
 

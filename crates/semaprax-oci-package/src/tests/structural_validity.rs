@@ -61,8 +61,12 @@ fn every_digest_relationship_holds_against_bytes_on_disk() {
 
     let blobs_dir = out.join("blobs").join("sha256");
     let manifest_blob_path = blobs_dir.join(manifest_digest.trim_start_matches("sha256:"));
-    let manifest_bytes = fs::read(&manifest_blob_path).expect("manifest blob present at its own digest name");
-    assert_eq!(format!("sha256:{}", hex_sha256(&manifest_bytes)), manifest_digest);
+    let manifest_bytes =
+        fs::read(&manifest_blob_path).expect("manifest blob present at its own digest name");
+    assert_eq!(
+        format!("sha256:{}", hex_sha256(&manifest_bytes)),
+        manifest_digest
+    );
     assert_eq!(
         manifest_entry["size"].as_u64(),
         Some(manifest_bytes.len() as u64)
@@ -77,7 +81,10 @@ fn every_digest_relationship_holds_against_bytes_on_disk() {
     assert_eq!(config_digest, bundle.config_digest());
     let config_bytes = fs::read(blobs_dir.join(config_digest.trim_start_matches("sha256:")))
         .expect("config blob present at its own digest name");
-    assert_eq!(format!("sha256:{}", hex_sha256(&config_bytes)), config_digest);
+    assert_eq!(
+        format!("sha256:{}", hex_sha256(&config_bytes)),
+        config_digest
+    );
     assert_eq!(config["size"].as_u64(), Some(config_bytes.len() as u64));
 
     let layers = manifest["layers"].as_array().expect("layers array");

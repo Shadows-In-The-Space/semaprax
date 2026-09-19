@@ -32,7 +32,10 @@ fn project_name_with_path_separator_is_refused() {
 
 #[test]
 fn project_name_with_traversal_sequence_is_refused() {
-    assert_refused(|plan| plan.project_name = "../etc".to_owned(), "name-traversal");
+    assert_refused(
+        |plan| plan.project_name = "../etc".to_owned(),
+        "name-traversal",
+    );
 }
 
 #[test]
@@ -42,10 +45,7 @@ fn project_name_with_nul_byte_is_refused() {
 
 #[test]
 fn project_name_over_long_is_refused() {
-    assert_refused(
-        |plan| plan.project_name = "a".repeat(65),
-        "name-overlong",
-    );
+    assert_refused(|plan| plan.project_name = "a".repeat(65), "name-overlong");
 }
 
 #[test]
@@ -62,7 +62,10 @@ fn entry_module_with_traversal_sequence_is_refused() {
 
 #[test]
 fn entry_module_with_separator_is_refused() {
-    assert_refused(|plan| plan.entry_module = "a/b".to_owned(), "entry-separator");
+    assert_refused(
+        |plan| plan.entry_module = "a/b".to_owned(),
+        "entry-separator",
+    );
 }
 
 #[test]
@@ -72,10 +75,7 @@ fn entry_module_with_nul_byte_is_refused() {
 
 #[test]
 fn entry_module_over_long_is_refused() {
-    assert_refused(
-        |plan| plan.entry_module = "a".repeat(129),
-        "entry-overlong",
-    );
+    assert_refused(|plan| plan.entry_module = "a".repeat(129), "entry-overlong");
 }
 
 #[test]
@@ -137,7 +137,8 @@ fn output_path_with_nul_byte_is_refused() {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
-        let out = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/semaprax-oci\0hostile"));
+        let out =
+            std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b"/tmp/semaprax-oci\0hostile"));
         let error = build_and_publish(fixture_plan(), &out).expect_err("nul byte output path");
         assert_eq!(error.kind(), OciErrorKind::Identity);
     }

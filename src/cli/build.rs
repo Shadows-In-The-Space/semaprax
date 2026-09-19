@@ -588,7 +588,10 @@ pub(crate) fn parse_with_capabilities(
         return Err(2);
     }
     if matches!(&input, BuildInput::Project(_)) {
-        if !matches!(target.as_str(), "web" | "wasm" | "native" | "npm" | "rust" | "oci") {
+        if !matches!(
+            target.as_str(),
+            "web" | "wasm" | "native" | "npm" | "rust" | "oci"
+        ) {
             eprintln!(
                 "Project manifests publish only explicit web, native, npm, oci, and Project-v8 rust targets; native-callable publication remains held"
             );

@@ -131,9 +131,6 @@ mod tests {
         assert!(valid_digest_fact(&format!("sha256:{hex}")));
         assert!(!valid_digest_fact(&hex));
         assert!(!valid_digest_fact("sha256:short"));
-        assert!(!valid_digest_fact(&format!(
-            "sha256:{}",
-            "F".repeat(64)
-        )));
+        assert!(!valid_digest_fact(&format!("sha256:{}", "F".repeat(64))));
     }
 }

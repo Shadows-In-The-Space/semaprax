@@ -34,9 +34,12 @@ pub(super) fn build_and_publish(
     })?;
     let envelope: Value = serde_json::from_str(build.envelope())
         .map_err(|_| error("SPX-J143", "OCI packaging input envelope is not valid JSON"))?;
-    let object = envelope
-        .as_object()
-        .ok_or_else(|| error("SPX-J143", "OCI packaging input envelope is not one JSON object"))?;
+    let object = envelope.as_object().ok_or_else(|| {
+        error(
+            "SPX-J143",
+            "OCI packaging input envelope is not one JSON object",
+        )
+    })?;
 
     let text = |key: &str| -> Result<String, Diagnostic> {
         object
@@ -59,7 +62,12 @@ pub(super) fn build_and_publish(
     let artifacts = object
         .get("artifacts")
         .and_then(Value::as_array)
-        .ok_or_else(|| error("SPX-J143", "OCI packaging input envelope is missing `artifacts`"))?;
+        .ok_or_else(|| {
+            error(
+                "SPX-J143",
+                "OCI packaging input envelope is missing `artifacts`",
+            )
+        })?;
     let wasm_artifact = artifacts
         .first()
         .and_then(Value::as_object)
@@ -214,11 +222,7 @@ mod tests {
         .unwrap();
         let app_source = "module ocinonscalar.app;\n@id(\"api.value\") fn value(input: borrow Slice<u8>) -> Bytes { bytes_copy(input) }\n@id(\"app.main\") fn main() -> i64 { 0 }\n";
         let parsed = crate::parse(app_source, root.join("src/app.spx")).unwrap();
-        std::fs::write(
-            root.join("src/app.spx"),
-            crate::format::canonical(&parsed),
-        )
-        .unwrap();
+        std::fs::write(root.join("src/app.spx"), crate::format::canonical(&parsed)).unwrap();
         let output = root.join("oci-out");
         let errors = with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
             snapshot.build_oci(&output)

@@ -39,7 +39,9 @@ mod validation;
 /// a hostile or corrupted caller, not the compiler's exact limit.
 pub const MAX_WASM_BYTES: usize = 16 * 1024 * 1024;
 
-pub use render::{ARTIFACT_TYPE, MEDIA_TYPE_CONFIG, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST, MEDIA_TYPE_WASM_LAYER};
+pub use render::{
+    ARTIFACT_TYPE, MEDIA_TYPE_CONFIG, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST, MEDIA_TYPE_WASM_LAYER,
+};
 
 /// Everything [`build_and_publish`] needs, already extracted and owned by
 /// the caller. Every field is validated again inside this crate; a caller
@@ -155,8 +157,7 @@ impl OciError {
     fn publication_verification() -> Self {
         Self {
             kind: OciErrorKind::Publication,
-            message: "OCI layout publication read-back disagreed with what was written"
-                .to_owned(),
+            message: "OCI layout publication read-back disagreed with what was written".to_owned(),
         }
     }
 }
@@ -171,7 +172,9 @@ impl std::error::Error for OciError {}
 
 fn validate_plan(plan: &OciPlan) -> Result<(), OciError> {
     if !validation::valid_identity_component(&plan.project_name) {
-        return Err(OciError::identity("project name is not an admitted identity"));
+        return Err(OciError::identity(
+            "project name is not an admitted identity",
+        ));
     }
     if !validation::valid_stable_component(&plan.entry_module) {
         return Err(OciError::identity(

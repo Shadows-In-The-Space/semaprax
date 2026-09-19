@@ -992,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "semaprax"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "argon2",
  "fs2",
@@ -1004,6 +1004,7 @@ dependencies = [
  "rustix",
  "rustls",
  "same-file",
+ "semaprax-oci-package",
  "serde_json",
  "sha2",
  "wasmparser",
@@ -1017,6 +1018,14 @@ name = "semaprax-embedding-api-consumer"
 version = "0.0.0"
 dependencies = [
  "semaprax",
+]
+
+[[package]]
+name = "semaprax-oci-package"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

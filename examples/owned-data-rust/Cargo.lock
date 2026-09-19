@@ -1090,6 +1090,7 @@ dependencies = [
  "rustix",
  "rustls",
  "same-file",
+ "semaprax-oci-package",
  "serde_json",
  "sha2 0.11.0",
  "wasmparser",
@@ -1138,6 +1139,14 @@ name = "semaprax-native-rust-owned-data-package"
 version = "0.1.0"
 dependencies = [
  "semaprax-native-rust-interop-platform",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
+name = "semaprax-oci-package"
+version = "0.1.0"
+dependencies = [
  "serde_json",
  "sha2 0.11.0",
 ]

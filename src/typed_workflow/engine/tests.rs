@@ -560,6 +560,47 @@ fn parallel_join_routes_a_model_call_branch_and_records_it_in_branch_order() {
     );
 }
 
+/// Issue #208's own required-tests list asks for bounded parallel/join
+/// "failure", not only success: one branch's effect exhausting its retry
+/// budget must fail the whole `run`, attributed to exactly that branch's
+/// step id, and must never let the join or terminal be reached. Branches
+/// run in ascending `StepId` order (see [`ParallelExecutor`]'s own doc
+/// comment), so with `StepId(10)` failing, `StepId(11)` and `StepId(12)`
+/// never run at all -- this is fail-fast, not fail-late.
+#[test]
+fn a_failing_branch_fails_the_whole_parallel_join_and_never_reaches_the_join() {
+    let mut graph = parallel_join_graph(3);
+    for step in &mut graph.steps {
+        if step.id == StepId(10) {
+            step.kind = StepKind::ModelCall {
+                requested_model: "checked-small-1".to_string(),
+            };
+        }
+    }
+    let mut inputs = ExecInputs::default();
+    inputs.model_policies.insert(
+        StepId(10),
+        DeploymentPolicy::new(["checked-small-1".to_string()]),
+    );
+    inputs
+        .retry_budgets
+        .insert(StepId(10), RetryBudget { max_attempts: 1 });
+    inputs.attempt_script.insert(
+        StepId(10),
+        vec![ScriptedAttempt::failed(AttemptOutcomeClass::Uncertain)],
+    );
+
+    let mut commits = CommitLog::new();
+    let err = run(&graph, &inputs, &mut GateLedger::new(), &mut commits).unwrap_err();
+    assert_eq!(
+        err,
+        ExecError::StepFailed(StepId(10), AttemptOutcomeClass::Uncertain)
+    );
+    // Nothing committed (branch 10 never marked compensable and never
+    // succeeded), and neither the join nor the terminal was ever reached.
+    assert!(commits.commits().is_empty());
+}
+
 #[test]
 fn parallel_with_no_join_referencing_it_is_a_defined_refusal() {
     // Two branches, each wired straight to its own Terminal instead of
@@ -962,8 +1003,9 @@ fn compensation_replays_in_exact_reverse_of_commit_order_after_a_mid_workflow_fa
                 step: record.step,
                 run: record.run,
             },
-            || {},
-        );
+            || Ok(()),
+        )
+        .unwrap();
         actually_compensated.push(*record);
     }
     assert!(proof.verify_complete(&actually_compensated).is_ok());
@@ -1026,4 +1068,161 @@ fn a_step_not_marked_compensable_records_no_commit() {
     let mut commits = CommitLog::new();
     run(&graph, &inputs, &mut GateLedger::new(), &mut commits).unwrap();
     assert!(commits.commits().is_empty());
+}
+
+/// Acceptance criterion 1: "A nontrivial coding/application workflow can be
+/// authored as checked Semaprax semantics." This is a realistic
+/// build-test-approve-publish release pipeline, authored the same way an
+/// external caller would author one -- as a
+/// `semaprax.typed-workflow.graph.v1` JSON document decoded by
+/// [`crate::typed_workflow::graph_wire::parse_graph`], the exact function
+/// `semaprax workflow inspect`/`validate` call -- not as a `StepDef`/`EdgeDef`
+/// literal built only for a Rust unit test. It exercises a `Sequential`
+/// build step, a `Declared(TestBuild)` decide-and-record test-suite gate, a
+/// `HumanGate` release approval bound to an exact revision/candidate/role,
+/// a `Declared(PublicationRequest)` decide-and-record publish decision, and
+/// a `Terminal`, and drives every one of them through the real
+/// `engine::run` end to end -- proving the pipeline is not just
+/// structurally valid but actually executable and, run twice with the same
+/// inputs, byte-identically replayable.
+#[test]
+fn a_nontrivial_build_test_approve_publish_pipeline_authors_and_runs_end_to_end() {
+    use crate::typed_workflow::declared_dispatch::{DispatchPolicy, DispatchRequest};
+    use crate::typed_workflow::graph_wire;
+
+    const RELEASE_PIPELINE_JSON: &str = r#"{
+        "schema": "semaprax.typed-workflow.graph.v1",
+        "entry": 0,
+        "steps": [
+            {"id": 0, "kind": "sequential", "in_ports": [],
+             "out_ports": [{"id": 0, "ty": "unit"}]},
+            {"id": 1, "kind": "declared", "declared_kind": "test_build",
+             "in_ports": [{"id": 0, "ty": "unit"}],
+             "out_ports": [{"id": 0, "ty": "unit"}]},
+            {"id": 2, "kind": "human_gate",
+             "in_ports": [{"id": 0, "ty": "unit"}],
+             "out_ports": [{"id": 0, "ty": "unit"}]},
+            {"id": 3, "kind": "declared", "declared_kind": "publication_request",
+             "in_ports": [{"id": 0, "ty": "unit"}],
+             "out_ports": [{"id": 0, "ty": "unit"}]},
+            {"id": 4, "kind": "terminal",
+             "in_ports": [{"id": 0, "ty": "unit"}], "out_ports": []}
+        ],
+        "edges": [
+            {"id": 0, "from": 0, "from_port": 0, "to": 1, "to_port": 0},
+            {"id": 1, "from": 1, "from_port": 0, "to": 2, "to_port": 0},
+            {"id": 2, "from": 2, "from_port": 0, "to": 3, "to_port": 0},
+            {"id": 3, "from": 3, "from_port": 0, "to": 4, "to_port": 0}
+        ]
+    }"#;
+
+    // Authored and decoded exactly as `semaprax workflow inspect/validate`
+    // decodes a caller-supplied document -- never a `StepDef`/`EdgeDef`
+    // literal.
+    let graph = graph_wire::parse_graph(RELEASE_PIPELINE_JSON.as_bytes()).unwrap();
+    assert_eq!(graph.validate(), Ok(()));
+
+    let build = |gate_decision_id: u64| {
+        let mut inputs = ExecInputs::default();
+        inputs.declared_dispatch_policies.insert(
+            StepId(1),
+            DispatchPolicy::new(["full-test-suite".to_string()]),
+        );
+        inputs.declared_dispatch_requests.insert(
+            StepId(1),
+            DispatchRequest {
+                target: "full-test-suite".to_string(),
+            },
+        );
+        inputs.gate_specs.insert(
+            StepId(2),
+            GateSpec {
+                revision: RevisionId(1),
+                candidate_digest: [7u8; 32],
+                required_role: Role("release-manager".to_string()),
+                expires_at: 1_000,
+                grants_edge: EdgeId(2),
+            },
+        );
+        inputs.gate_decisions.insert(
+            StepId(2),
+            GateDecision {
+                decision_id: gate_decision_id,
+                revision: RevisionId(1),
+                candidate_digest: [7u8; 32],
+                role: Role("release-manager".to_string()),
+                decided_at: 500,
+                approve: true,
+            },
+        );
+        inputs.declared_dispatch_policies.insert(
+            StepId(3),
+            DispatchPolicy::new(["npm-registry".to_string()]),
+        );
+        inputs.declared_dispatch_requests.insert(
+            StepId(3),
+            DispatchRequest {
+                target: "npm-registry".to_string(),
+            },
+        );
+        inputs
+    };
+
+    let first = run(
+        &graph,
+        &build(1),
+        &mut GateLedger::new(),
+        &mut CommitLog::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        first.visited,
+        vec![StepId(0), StepId(1), StepId(2), StepId(3), StepId(4)]
+    );
+    assert_eq!(
+        first.admitted_dispatches,
+        vec![
+            (
+                StepId(1),
+                DeclaredStepKind::TestBuild,
+                "full-test-suite".to_string()
+            ),
+            (
+                StepId(3),
+                DeclaredStepKind::PublicationRequest,
+                "npm-registry".to_string()
+            ),
+        ]
+    );
+
+    // Replayed with a fresh ledger and a distinct decision id (the same
+    // decision id would be a replay, refused by `GateLedger`, not a fresh
+    // run): the trace is byte-identical except for nothing at all, since
+    // nothing in this graph or these inputs is decision-id-dependent.
+    let second = run(
+        &graph,
+        &build(2),
+        &mut GateLedger::new(),
+        &mut CommitLog::new(),
+    )
+    .unwrap();
+    assert_eq!(first, second);
+
+    // A gate decision naming the wrong role never proceeds -- reaching the
+    // gate step never authorizes it, even on this realistic a pipeline.
+    let mut wrong_role_inputs = build(3);
+    wrong_role_inputs
+        .gate_decisions
+        .get_mut(&StepId(2))
+        .unwrap()
+        .role = Role("intern".to_string());
+    assert_eq!(
+        run(
+            &graph,
+            &wrong_role_inputs,
+            &mut GateLedger::new(),
+            &mut CommitLog::new()
+        ),
+        Err(ExecError::GateRefused(StepId(2), GateError::WrongRole))
+    );
 }

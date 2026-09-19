@@ -398,8 +398,9 @@ mod tests {
                 step: StepId(2),
                 run: 1,
             },
-            || {},
-        );
+            || Ok(()),
+        )
+        .unwrap();
         let checkpoint = Checkpoint::new(RevisionId(1), StepId(4), 3, &ledger);
 
         let (step, sequence, restored) = checkpoint
@@ -475,8 +476,9 @@ mod tests {
                 step: StepId(2),
                 run: 7,
             },
-            || {},
-        );
+            || Ok(()),
+        )
+        .unwrap();
         let checkpoint = Checkpoint::new(RevisionId(3), StepId(5), 11, &ledger);
         let document = checkpoint.encode();
         assert!(document.starts_with(&format!(
@@ -534,15 +536,17 @@ mod tests {
                 step: StepId(1),
                 run: 1,
             },
-            || {},
-        );
+            || Ok(()),
+        )
+        .unwrap();
         ledger.apply(
             CompensationKey {
                 step: StepId(9),
                 run: 9,
             },
-            || {},
-        );
+            || Ok(()),
+        )
+        .unwrap();
         let checkpoint = Checkpoint::new(RevisionId(1), StepId(1), 1, &ledger);
         let document = checkpoint.encode();
 

@@ -28,6 +28,20 @@ pub enum CompensationOutcome {
     AlreadyApplied,
 }
 
+/// The physical compensation effect itself did not succeed. Per issue
+/// #208's own failure list ("Compensation can fail or be non-equivalent to
+/// rollback"), this is a distinct, named outcome from
+/// [`CompensationOutcome`] rather than a panic, a silently swallowed error,
+/// or a bare `()` return that could never report it. `reason` is a bare
+/// description for a human or log to read; this type carries no retry
+/// authority and decides nothing about what happens next -- that is
+/// [`CompensationLedger::apply`]'s caller's job, exactly as this module's
+/// other outcomes never decide anything either.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompensationFailure {
+    pub reason: String,
+}
+
 /// Durable-enough-to-snapshot record of which compensations have already
 /// run. Not a wire format: [`CompensationLedger::snapshot`] returns a
 /// plain in-memory `Vec` for a caller (e.g. [`super::checkpoint`]) to fold
@@ -66,16 +80,39 @@ impl CompensationLedger {
         self.applied.contains(&key)
     }
 
-    /// Runs `effect` exactly once for `key`. If `key` was already applied
-    /// (in this ledger, including one restored from a checkpoint
+    /// Attempts `effect` exactly once for `key`. If `key` was already
+    /// attempted (in this ledger, including one restored from a checkpoint
     /// snapshot), `effect` is not called at all and
-    /// `CompensationOutcome::AlreadyApplied` is returned.
-    pub fn apply(&mut self, key: CompensationKey, effect: impl FnOnce()) -> CompensationOutcome {
+    /// `Ok(CompensationOutcome::AlreadyApplied)` is returned -- regardless
+    /// of whether the earlier attempt succeeded or failed.
+    ///
+    /// `key` is marked attempted *before* `effect` runs, not only on
+    /// success: this module never automatically retries a compensation
+    /// under the same key, even one whose effect reported
+    /// [`CompensationFailure`]. That is the same choice this repository's
+    /// retry policy makes for an [`super::retry::AttemptOutcomeClass::Uncertain`]
+    /// step outcome -- an effect whose result is unknown or unsuccessful is
+    /// never silently retried, because retrying could double-apply an
+    /// effect that actually went through. A caller that wants to retry a
+    /// failed compensation must do so deliberately, under a new key (for
+    /// example a new logical retry count folded into `run`), never by
+    /// calling `apply` again with the same one.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(CompensationFailure)` if `effect` itself reports
+    /// failure. This never leaves the ledger in a state where the failed
+    /// attempt could be silently re-run: see above.
+    pub fn apply(
+        &mut self,
+        key: CompensationKey,
+        effect: impl FnOnce() -> Result<(), CompensationFailure>,
+    ) -> Result<CompensationOutcome, CompensationFailure> {
         if !self.applied.insert(key) {
-            return CompensationOutcome::AlreadyApplied;
+            return Ok(CompensationOutcome::AlreadyApplied);
         }
-        effect();
-        CompensationOutcome::Applied
+        effect()?;
+        Ok(CompensationOutcome::Applied)
     }
 }
 
@@ -93,9 +130,12 @@ mod tests {
                 step: StepId(1),
                 run: 1,
             },
-            || calls.set(calls.get() + 1),
+            || {
+                calls.set(calls.get() + 1);
+                Ok(())
+            },
         );
-        assert_eq!(outcome, CompensationOutcome::Applied);
+        assert_eq!(outcome, Ok(CompensationOutcome::Applied));
         assert_eq!(calls.get(), 1);
     }
 
@@ -107,9 +147,17 @@ mod tests {
             step: StepId(1),
             run: 1,
         };
-        ledger.apply(key, || calls.set(calls.get() + 1));
-        let second = ledger.apply(key, || calls.set(calls.get() + 1));
-        assert_eq!(second, CompensationOutcome::AlreadyApplied);
+        ledger
+            .apply(key, || {
+                calls.set(calls.get() + 1);
+                Ok(())
+            })
+            .unwrap();
+        let second = ledger.apply(key, || {
+            calls.set(calls.get() + 1);
+            Ok(())
+        });
+        assert_eq!(second, Ok(CompensationOutcome::AlreadyApplied));
         assert_eq!(
             calls.get(),
             1,
@@ -125,7 +173,12 @@ mod tests {
             run: 9,
         };
         let calls = Cell::new(0);
-        ledger.apply(key, || calls.set(calls.get() + 1));
+        ledger
+            .apply(key, || {
+                calls.set(calls.get() + 1);
+                Ok(())
+            })
+            .unwrap();
 
         // Simulate a crash-and-resume: only the snapshot survives, a fresh
         // ledger is built from it, and the workflow re-drives the same
@@ -133,9 +186,12 @@ mod tests {
         // it.
         let snapshot = ledger.snapshot();
         let mut resumed = CompensationLedger::restore(&snapshot);
-        let outcome = resumed.apply(key, || calls.set(calls.get() + 1));
+        let outcome = resumed.apply(key, || {
+            calls.set(calls.get() + 1);
+            Ok(())
+        });
 
-        assert_eq!(outcome, CompensationOutcome::AlreadyApplied);
+        assert_eq!(outcome, Ok(CompensationOutcome::AlreadyApplied));
         assert_eq!(
             calls.get(),
             1,
@@ -147,20 +203,30 @@ mod tests {
     fn a_distinct_run_of_the_same_step_may_compensate_again() {
         let mut ledger = CompensationLedger::new();
         let calls = Cell::new(0);
-        ledger.apply(
-            CompensationKey {
-                step: StepId(1),
-                run: 1,
-            },
-            || calls.set(calls.get() + 1),
-        );
-        ledger.apply(
-            CompensationKey {
-                step: StepId(1),
-                run: 2,
-            },
-            || calls.set(calls.get() + 1),
-        );
+        ledger
+            .apply(
+                CompensationKey {
+                    step: StepId(1),
+                    run: 1,
+                },
+                || {
+                    calls.set(calls.get() + 1);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        ledger
+            .apply(
+                CompensationKey {
+                    step: StepId(1),
+                    run: 2,
+                },
+                || {
+                    calls.set(calls.get() + 1);
+                    Ok(())
+                },
+            )
+            .unwrap();
         assert_eq!(calls.get(), 2);
     }
 
@@ -172,7 +238,69 @@ mod tests {
             run: 1,
         };
         assert!(!ledger.is_applied(key));
-        ledger.apply(key, || {});
+        ledger.apply(key, || Ok(())).unwrap();
         assert!(ledger.is_applied(key));
+    }
+
+    /// Issue #208's own failure list: "Compensation can fail or be
+    /// non-equivalent to rollback." A failing compensation effect is
+    /// reported as `Err(CompensationFailure)`, never silently swallowed
+    /// into `Applied`, and never panics or loses the reason.
+    #[test]
+    fn a_failing_compensation_effect_is_reported_not_swallowed() {
+        let mut ledger = CompensationLedger::new();
+        let key = CompensationKey {
+            step: StepId(6),
+            run: 1,
+        };
+        let outcome = ledger.apply(key, || {
+            Err(CompensationFailure {
+                reason: "downstream refund API returned 503".to_owned(),
+            })
+        });
+        assert_eq!(
+            outcome,
+            Err(CompensationFailure {
+                reason: "downstream refund API returned 503".to_owned()
+            })
+        );
+    }
+
+    /// A failed attempt still marks the key attempted: this module never
+    /// automatically re-runs a compensation under the same key just
+    /// because its one attempt failed, matching how an `Uncertain` step
+    /// outcome is never automatically retried elsewhere in this module
+    /// ([`super::retry`]). `is_applied` reports the key as attempted even
+    /// though the attempt did not succeed -- callers must not read
+    /// `is_applied` as "and it worked."
+    #[test]
+    fn a_failed_attempt_is_never_silently_retried_under_the_same_key() {
+        let mut ledger = CompensationLedger::new();
+        let key = CompensationKey {
+            step: StepId(7),
+            run: 1,
+        };
+        let calls = Cell::new(0);
+        let first = ledger.apply(key, || {
+            calls.set(calls.get() + 1);
+            Err(CompensationFailure {
+                reason: "refund declined".to_owned(),
+            })
+        });
+        assert!(first.is_err());
+        assert!(ledger.is_applied(key));
+
+        // A second call under the exact same key never re-invokes the
+        // effect, even though the first attempt failed.
+        let second = ledger.apply(key, || {
+            calls.set(calls.get() + 1);
+            Ok(())
+        });
+        assert_eq!(second, Ok(CompensationOutcome::AlreadyApplied));
+        assert_eq!(
+            calls.get(),
+            1,
+            "a failed compensation attempt must not be silently retried under the same key"
+        );
     }
 }

@@ -1050,4 +1050,61 @@ mod tests {
         };
         assert_eq!(graph.validate(), Ok(()));
     }
+
+    /// `HumanGate` shares the generic "exactly one out edge" rule with
+    /// `Sequential`/`ModelCall`/`Declared`, but every other kind's own
+    /// dedicated test above never actually instantiates a `HumanGate`
+    /// step. Issue #208's "every step/edge kind" requirement is exercised
+    /// directly here rather than only by inference from a shared code path.
+    #[test]
+    fn human_gate_step_kind_validates_structurally() {
+        let graph = WorkflowGraph {
+            steps: vec![
+                StepDef {
+                    id: StepId(0),
+                    kind: StepKind::HumanGate,
+                    in_ports: vec![],
+                    out_ports: vec![unit_port(0)],
+                },
+                StepDef {
+                    id: StepId(1),
+                    kind: StepKind::Terminal,
+                    in_ports: vec![unit_port(0)],
+                    out_ports: vec![],
+                },
+            ],
+            edges: vec![edge(0, 0, 1)],
+            entry: StepId(0),
+        };
+        assert_eq!(graph.validate(), Ok(()));
+    }
+
+    /// Same reasoning as `human_gate_step_kind_validates_structurally`,
+    /// for `ModelCall`. A `HumanGate` or `ModelCall` step with more than
+    /// one out edge is rejected exactly like the `sequential_step_...`
+    /// negative control above, via the identical shared match arm.
+    #[test]
+    fn model_call_step_kind_validates_structurally() {
+        let graph = WorkflowGraph {
+            steps: vec![
+                StepDef {
+                    id: StepId(0),
+                    kind: StepKind::ModelCall {
+                        requested_model: "checked-small-1".to_owned(),
+                    },
+                    in_ports: vec![],
+                    out_ports: vec![unit_port(0)],
+                },
+                StepDef {
+                    id: StepId(1),
+                    kind: StepKind::Terminal,
+                    in_ports: vec![unit_port(0)],
+                    out_ports: vec![],
+                },
+            ],
+            edges: vec![edge(0, 0, 1)],
+            entry: StepId(0),
+        };
+        assert_eq!(graph.validate(), Ok(()));
+    }
 }

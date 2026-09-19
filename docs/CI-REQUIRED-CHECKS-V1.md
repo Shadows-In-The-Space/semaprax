@@ -180,8 +180,12 @@ gh api repos/wavect/semaprax/commits/main/check-runs \
 
 The authored workflow additionally includes the three AGENT-06 client contexts
 and the GEN-05B closure context. With `verify-build`, it declares 53 blocking
-contexts plus the aggregate; the new build, library-depth, and public generic
-ownership milestone contexts await hosted execution.
+contexts plus the aggregate; the new build and library-depth contexts await
+hosted execution. The public generic ownership milestone context has since
+run hosted (three-host `success`, commit `7def8fb1…`, run
+[35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593));
+that commit is not a `#164`-frozen candidate, so it does not by itself
+authorize a support/publication claim.
 `release-artifacts`
 (`Release artifact (<target>)`) and `publish-release` (`Publish tag release`)
 run only on `refs/tags/v*` and are not candidates for a branch rule. The `Docs`

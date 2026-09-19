@@ -108,14 +108,21 @@ general constraints, owning captures and public generic ABI remain separate.
 Public generic ownership is a separate milestone with its own nine prerequisite
 gates and its own standing support decision, not an outcome of that internal
 work; the [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md)
-owns it and its executable separation gate. Five of those gates are hosted green
-on Linux, macOS and Windows for one exact implementation commit - the
-target-neutral type grammar with template and ordered argument identities, the
-semantic compatibility rules, the candidate delta, and the cross-platform
-milestone job itself, alongside four-language metadata consumers that close the
-grammar half of two more. No public generic signature, descriptor, carrier,
-calling convention, or support claim follows from any of them, and no public support follows from the versioned descriptor/carrier code that
-now exists. The [runtime settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
+owns it and its executable separation gate. All eight prerequisite gates
+(PG-1 through PG-8 - grammar, template/argument identities, compatibility
+rules, candidate delta, generated Rust/TypeScript/C/C++ consumers, hostile
+descriptor/carrier replay, cross-engine settlement, and the cross-platform
+milestone job itself) are hosted green together on Linux, macOS and Windows
+for one exact implementation commit (`7def8fb1…`, run
+[35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)),
+and PG-9 was decided 2026-09-19: `unsupported`, `unpublished`. That commit
+predates the current head and is not a frozen candidate under issue #164; no
+public generic signature, descriptor, carrier, calling convention, or support
+claim follows from any of it, and no public support follows from the
+versioned descriptor/carrier code that now exists. Every physical adapter
+still calls a fixture endpoint rather than a compiler-derived generic export,
+and no compiled Wasm artifact implements the admitted provider ABI (#229).
+The [runtime settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
 records the implemented native fixture subset, including bounded non-recycled
 identity/recreation, sibling settlement, explicit release-status propagation and
 real result-phase/export-failure gates, the C/C++ consumer propagation matrix

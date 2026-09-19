@@ -52,7 +52,8 @@ pub(super) fn require_for_selector(
     assert_eq!(
         observation.status.code(),
         Some(status),
-        "{}",
+        "checks [{}]; {}",
+        checks_summary(&observation.stdout, tools),
         observation.describe()
     );
     assert!(observation.stderr.is_empty(), "{:?}", observation.stderr);
@@ -62,6 +63,66 @@ pub(super) fn require_for_selector(
         "{:?}",
         observation.stdout
     );
+}
+
+/// A one-line `id=status:detail` summary of every check the contracted
+/// `semaprax.doctor.v1` report carries, so a status-code mismatch names which
+/// check(s) actually failed instead of only the numeric exit code. This reads
+/// nothing beyond `observation.stdout` -- the same contracted report bytes
+/// `describe()` already dumps in full -- it only makes them legible without a
+/// manual read of the raw JSON. It cannot say *why* a check failed beyond the
+/// fixed, contracted detail string: that finer cause (exited-with-code vs
+/// killed-by-signal) is only observable one layer down, in the confined
+/// worker's own wire reply, which this outer collector-process observation
+/// never sees.
+fn checks_summary(stdout: &[u8], tools: &[(&str, &str, &str)]) -> String {
+    const PREAMBLE: [&str; 5] = ["semaprax", "os", "arch", "release", "profile"];
+    PREAMBLE
+        .into_iter()
+        .chain(tools.iter().map(|(id, _, _)| *id))
+        .map(|id| match observed_check(stdout, id) {
+            Some((status, detail)) => format!("{id}={status}:{detail}"),
+            None => format!("{id}=<missing>"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Best-effort extraction of one check's `status`/`detail` from the canonical
+/// report's flat, single-line JSON. Diagnostic-only: a parse miss just omits
+/// that check from the summary rather than panicking, so this can never turn
+/// an unrelated report shape into a spurious test failure of its own.
+fn observed_check(stdout: &[u8], id: &str) -> Option<(String, String)> {
+    let text = std::str::from_utf8(stdout).ok()?;
+    let marker = format!("\"id\":\"{id}\",\"required\":true,\"status\":\"");
+    let after_status = &text[text.find(&marker)? + marker.len()..];
+    let status_end = after_status.find('"')?;
+    let status = &after_status[..status_end];
+    let detail_marker = format!("{status}\",\"detail\":\"");
+    let after_detail = &after_status[after_status.find(&detail_marker)? + detail_marker.len()..];
+    let detail_end = unescaped_quote(after_detail)?;
+    Some((status.to_string(), after_detail[..detail_end].to_string()))
+}
+
+/// Byte offset of the first `"` in `text` not escaped by a preceding
+/// odd-length run of backslashes, matching this report's own JSON escaping.
+fn unescaped_quote(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            let backslashes = bytes[..index]
+                .iter()
+                .rev()
+                .take_while(|b| **b == b'\\')
+                .count();
+            if backslashes % 2 == 0 {
+                return Some(index);
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 #[test]

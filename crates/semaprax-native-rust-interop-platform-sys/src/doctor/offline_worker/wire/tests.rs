@@ -130,7 +130,7 @@ fn reply_canonical_bytes_and_every_error_are_round_tripped() {
         (2, Err(ProbeError::Timeout)),
         (4, Ok(Vec::new())),
     ];
-    let reply = encode_reply(&request, &rows).unwrap();
+    let reply = encode_reply(&request, &rows, &[]).unwrap();
     let mut expected = b"SPXDWR1\0".to_vec();
     expected.extend_from_slice(&request.digest);
     expected.extend_from_slice(&[0x31; 32]);
@@ -151,7 +151,7 @@ fn reply_canonical_bytes_and_every_error_are_round_tripped() {
         (7, ProbeError::Io),
     ] {
         let rows = vec![(1, Err(error))];
-        let bytes = encode_reply(&request, &rows).unwrap();
+        let bytes = encode_reply(&request, &rows, &[]).unwrap();
         assert_eq!(bytes[78], status);
         assert_eq!(&bytes[79..], &[0, 0, 0, 0]);
         assert_eq!(validate_reply(&request, &bytes).unwrap(), rows);
@@ -162,7 +162,7 @@ fn reply_canonical_bytes_and_every_error_are_round_tripped() {
 fn reply_rejects_binding_mutations_truncation_and_trailing_bytes() {
     let request = request();
     let rows = vec![(1, Ok(vec![1])), (2, Ok(vec![2])), (4, Ok(vec![3]))];
-    let bytes = encode_reply(&request, &rows).unwrap();
+    let bytes = encode_reply(&request, &rows, &[]).unwrap();
     for end in 0..bytes.len() {
         assert!(
             validate_reply(&request, &bytes[..end]).is_err(),
@@ -215,19 +215,22 @@ fn reply_requires_exact_role_order_status_and_empty_failure_payloads() {
         (4, Ok(Vec::new())),
     ];
     assert_eq!(
-        encode_reply(&request, &rows[..2]).unwrap_err(),
+        encode_reply(&request, &rows[..2], &[]).unwrap_err(),
         Error::Invalid
     );
     let mut extra = rows.clone();
     extra.push((4, Ok(Vec::new())));
-    assert_eq!(encode_reply(&request, &extra).unwrap_err(), Error::Invalid);
+    assert_eq!(
+        encode_reply(&request, &extra, &[]).unwrap_err(),
+        Error::Invalid
+    );
     for roles in [[2, 1, 4], [1, 1, 4], [1, 2, 2], [1, 2, 8]] {
         let changed = roles.map(|role| (role, Ok(Vec::new())));
         assert_eq!(
-            encode_reply(&request, &changed).unwrap_err(),
+            encode_reply(&request, &changed, &[]).unwrap_err(),
             Error::Invalid
         );
-        let mut corrupt = encode_reply(&request, &rows).unwrap();
+        let mut corrupt = encode_reply(&request, &rows, &[]).unwrap();
         for (offset, role) in [77, 83, 89].into_iter().zip(roles) {
             corrupt[offset] = role;
         }
@@ -236,14 +239,14 @@ fn reply_requires_exact_role_order_status_and_empty_failure_payloads() {
             Error::Invalid
         );
     }
-    let mut unknown = encode_reply(&request, &rows).unwrap();
+    let mut unknown = encode_reply(&request, &rows, &[]).unwrap();
     unknown[78] = 8;
     assert_eq!(
         validate_reply(&request, &unknown).unwrap_err(),
         Error::Invalid
     );
     let single = Request::parse(&request_bytes(1, 1, b"p")).unwrap();
-    let mut failure = encode_reply(&single, &[(1, Ok(vec![0x55]))]).unwrap();
+    let mut failure = encode_reply(&single, &[(1, Ok(vec![0x55]))], &[]).unwrap();
     failure[78] = 1;
     assert_eq!(
         validate_reply(&single, &failure).unwrap_err(),
@@ -256,19 +259,19 @@ fn reply_payload_and_total_bounds_reject_before_payload_copy() {
     let request = request();
     for length in [65_535, 65_536] {
         let rows = [1, 2, 4].map(|role| (role, Ok(vec![role; length])));
-        let reply = encode_reply(&request, &rows).unwrap();
+        let reply = encode_reply(&request, &rows, &[]).unwrap();
         assert_eq!(reply.len(), 77 + 3 * (6 + length));
         assert!(reply.len() <= MAX_REPLY_BYTES);
         assert_eq!(validate_reply(&request, &reply).unwrap(), rows);
     }
     let oversized = [1, 2, 4].map(|role| (role, Ok(vec![role; 65_537])));
     assert_eq!(
-        encode_reply(&request, &oversized).unwrap_err(),
+        encode_reply(&request, &oversized, &[]).unwrap_err(),
         Error::Limit
     );
     let rows = [1, 2, 4].map(|role| (role, Ok(Vec::new())));
     for length in [65_537u32, u32::MAX] {
-        let mut corrupt = encode_reply(&request, &rows).unwrap();
+        let mut corrupt = encode_reply(&request, &rows, &[]).unwrap();
         corrupt[79..83].copy_from_slice(&length.to_le_bytes());
         assert_eq!(
             validate_reply(&request, &corrupt).unwrap_err(),
@@ -279,4 +282,71 @@ fn reply_payload_and_total_bounds_reject_before_payload_copy() {
         validate_reply(&request, &vec![0; MAX_REPLY_BYTES + 1]).unwrap_err(),
         Error::Limit
     );
+}
+
+#[test]
+fn exit_trailer_round_trips_and_never_appears_outside_an_exit_row() {
+    let request = request();
+    let rows = vec![
+        (1, Ok(vec![9])),
+        (2, Err(ProbeError::Exit)),
+        (4, Err(ProbeError::Exit)),
+    ];
+    for (exit_detail, expected) in [
+        (
+            vec![(2, Termination::Exited(17)), (4, Termination::Signaled(31))],
+            [
+                Some(Termination::Exited(17)),
+                Some(Termination::Signaled(31)),
+            ],
+        ),
+        // A role absent from `exit_detail` gets the same zero-length trailer
+        // as before this diagnostic existed; `ReplyRow`'s value is identical
+        // either way, and `decode_exit_detail` reports it as `None`.
+        (
+            vec![(2, Termination::Exited(0))],
+            [Some(Termination::Exited(0)), None],
+        ),
+        (Vec::new(), [None, None]),
+    ] {
+        let reply = encode_reply(&request, &rows, &exit_detail).unwrap();
+        assert_eq!(validate_reply(&request, &reply).unwrap(), rows);
+        assert_eq!(decode_exit_detail(&reply, 2), expected[0]);
+        assert_eq!(decode_exit_detail(&reply, 4), expected[1]);
+        // No role outside this reply's set, and no non-Exit row, ever decodes.
+        assert_eq!(decode_exit_detail(&reply, 1), None);
+        assert_eq!(decode_exit_detail(&reply, 9), None);
+    }
+    // A trailer is accepted only on the exact `Exit` status; every other
+    // status keeps its original, unconditional zero-length rule.
+    let single = Request::parse(&request_bytes(1, 1, b"p")).unwrap();
+    for (status, error) in [
+        (1, ProbeError::Invalid),
+        (2, ProbeError::Unsupported),
+        (3, ProbeError::Spawn),
+        (5, ProbeError::OutputLimit),
+        (6, ProbeError::Timeout),
+        (7, ProbeError::Io),
+    ] {
+        let rows = vec![(1, Err(error))];
+        let mut bytes = encode_reply(&single, &rows, &[(1, Termination::Exited(3))]).unwrap();
+        assert_eq!(
+            bytes[78], status,
+            "encode_reply must ignore a mismatched exit_detail role"
+        );
+        assert_eq!(&bytes[79..], &[0, 0, 0, 0]);
+        // Forge a 2-byte trailer onto this non-Exit row; validate_reply must
+        // still reject it even though EXIT_DETAIL_BYTES alone would fit.
+        bytes[79] = 2;
+        bytes.extend_from_slice(&[0, 3]);
+        assert_eq!(validate_reply(&single, &bytes).unwrap_err(), Error::Invalid);
+    }
+    // An Exit row's trailer length must be exactly 0 or EXIT_DETAIL_BYTES.
+    let rows = vec![(1, Err(ProbeError::Exit))];
+    let mut bytes = encode_reply(&single, &rows, &[(1, Termination::Exited(3))]).unwrap();
+    assert_eq!(bytes[78], 4);
+    assert_eq!(&bytes[79..83], &2u32.to_le_bytes());
+    bytes[79] = 1;
+    bytes.truncate(bytes.len() - 1);
+    assert_eq!(validate_reply(&single, &bytes).unwrap_err(), Error::Invalid);
 }

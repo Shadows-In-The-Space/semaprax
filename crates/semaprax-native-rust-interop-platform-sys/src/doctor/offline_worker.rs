@@ -81,14 +81,28 @@ fn execute() -> Result<(), Error> {
     }
     let mut rows = Vec::new();
     rows.try_reserve_exact(3).map_err(|_| Error::Allocation)?;
+    // Diagnostic-only, purely additive: how each `Exit` row's tool actually
+    // terminated. Never read back by this function; carried solely so the
+    // wire reply's `Exit` trailer can attach it for `wire::decode_exit_detail`.
+    let mut exit_detail = Vec::new();
+    exit_detail
+        .try_reserve_exact(3)
+        .map_err(|_| Error::Allocation)?;
     // No input descriptors enter a tool. Snapshot storage stays immutable.
     close_owned(3);
     close_owned(4);
     for (role, guard, path, mut output) in tools {
-        let outcome = capture::run(&root, &guard, &path, &mut output);
-        rows.push((role, outcome.map(|()| output)));
+        match capture::run(&root, &guard, &path, &mut output) {
+            Ok(()) => rows.push((role, Ok(output))),
+            Err(failure) => {
+                if let Some(termination) = failure.termination {
+                    exit_detail.push((role, termination));
+                }
+                rows.push((role, Err(failure.error)));
+            }
+        }
     }
-    let reply = wire::encode_reply(&request, &rows)?;
+    let reply = wire::encode_reply(&request, &rows, &exit_detail)?;
     // Independently require exact framing before touching the report sink.
     wire::validate_reply(&request, &reply)?;
     write_reply(&reply)?;

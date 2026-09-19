@@ -401,7 +401,13 @@ fn provisioned_real_clang_node_rust_distributions() {
     let rows = wire::validate_reply(&wire::Request::parse(&request).unwrap(), &output).unwrap();
     for ((role, value), expected) in rows.into_iter().zip([1, 2, 4]) {
         assert_eq!(role, expected);
-        let bytes = value.expect("real selected tool must complete under confinement");
+        let bytes = match value {
+            Ok(bytes) => bytes,
+            Err(error) => panic!(
+                "real selected tool must complete under confinement (role {role}): {}",
+                describe_probe_failure(error, &output, role)
+            ),
+        };
         assert!(!bytes.is_empty());
         let text = std::str::from_utf8(&bytes).unwrap();
         assert!(match role {
@@ -410,5 +416,62 @@ fn provisioned_real_clang_node_rust_distributions() {
             4 => text.starts_with("rustc "),
             _ => false,
         });
+    }
+}
+
+/// Turns the collapsed, contract-fixed `ProbeError` into the specific reason
+/// a role's confined tool child actually died, using only this reply's own
+/// `Exit` trailer (`wire::decode_exit_detail`). This never reaches the
+/// contracted `semaprax.doctor.v1` report -- it exists purely so a hosted
+/// panic names its cause instead of only the bare `ProbeError` variant.
+fn describe_probe_failure(error: ProbeError, output: &[u8], role: u8) -> String {
+    if error != ProbeError::Exit {
+        // Every non-Exit ProbeError is already unambiguous on its own: Spawn
+        // is a clone3/pipe2 failure, Timeout is the fixed 10s run budget,
+        // OutputLimit is the fixed 64KiB cap, Io is a read/observe failure.
+        // None of these carries a wire trailer to decode.
+        return format!("{error:?} (see ProbeError's doc comment for what this variant means)");
+    }
+    match wire::decode_exit_detail(output, role) {
+        Some(wire::Termination::Exited(code)) if (10..=23).contains(&code) => format!(
+            "Exit: the worker's own pre-execve setup failed at child.rs's \
+             fail_stop_with({code}) marker, before the tool ever ran"
+        ),
+        Some(wire::Termination::Exited(code)) => {
+            format!("Exit: the tool's own process exited with status {code}")
+        }
+        Some(wire::Termination::Signaled(signal)) if signal == libc::SIGSYS => format!(
+            "Exit: the tool was killed by signal {signal} (SIGSYS). This worker's seccomp \
+             filter (guard.rs) raises SIGSYS only from its architecture/bitness guard -- a \
+             wrong ELF class, the x32 syscall-number bit, or a foreign audit arch value -- \
+             never from a specific denied syscall: an ordinary denied syscall returns -EPERM \
+             and the tool keeps running. So this means the tool executed under the wrong \
+             instruction-set personality, not that one named syscall was denied. No si_syscall \
+             is obtainable here: this filter's architecture guard uses SECCOMP_RET_KILL_PROCESS, \
+             which force-exits the process without ever delivering a catchable signal (unlike \
+             SECCOMP_RET_TRAP), so no siginfo carrying si_syscall/si_arch reaches any handler."
+        ),
+        Some(wire::Termination::Signaled(signal)) => {
+            format!(
+                "Exit: the tool was killed by signal {signal} ({})",
+                signal_name(signal)
+            )
+        }
+        None => "Exit: no termination detail attached to this reply's trailer".to_string(),
+    }
+}
+
+fn signal_name(signal: i32) -> &'static str {
+    match signal {
+        libc::SIGABRT => "SIGABRT",
+        libc::SIGSEGV => "SIGSEGV",
+        libc::SIGBUS => "SIGBUS",
+        libc::SIGILL => "SIGILL",
+        libc::SIGFPE => "SIGFPE",
+        libc::SIGSYS => "SIGSYS",
+        libc::SIGPIPE => "SIGPIPE",
+        libc::SIGTRAP => "SIGTRAP",
+        libc::SIGKILL => "SIGKILL",
+        _ => "unrecognized signal",
     }
 }

@@ -72,6 +72,11 @@ impl Operations for Script {
         self.stopped = true;
         panic!("scripted fail-stop; no physical process exists")
     }
+    fn last_termination(&mut self) -> Option<wire::Termination> {
+        // Scripted evidence proves drive()'s control flow, never a physical
+        // wait status; the diagnostic trailer stays absent in every case here.
+        None
+    }
 }
 fn time(seconds: u64) -> Step {
     Time(Duration::from_secs(seconds))
@@ -87,7 +92,9 @@ fn complete(steps: Vec<Step>, expected: Result<Vec<u8>, ProbeError>) {
     let mut script = Script::new(steps);
     let mut output = Vec::with_capacity(65_536);
     let allocation = (output.as_ptr(), output.capacity());
-    let result = drive(&mut script, &mut output);
+    // `Failure`'s extra diagnostic termination is exercised by wire.rs's own
+    // tests; scripted evidence here proves drive()'s ProbeError selection.
+    let result = drive(&mut script, &mut output).map_err(|failure| failure.error);
     assert!(!script.stopped);
     assert!(
         script.steps.is_empty(),

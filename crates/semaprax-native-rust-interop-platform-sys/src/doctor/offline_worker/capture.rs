@@ -1,5 +1,7 @@
 //! PID-namespace ownership and fair, bounded capture for one prepared tool.
-use super::{child, fail_stop, guard::Guard, nonblocking, offline_root, pipe, Fd, ProbeError};
+use super::{
+    child, fail_stop, guard::Guard, nonblocking, offline_root, pipe, wire, Fd, ProbeError,
+};
 use std::ffi::CStr;
 use std::time::{Duration, Instant};
 
@@ -7,6 +9,26 @@ mod operations;
 use operations::{Native, Operations};
 #[cfg(test)]
 mod tests;
+
+/// `ProbeError::Exit` alone cannot say why the confined child died; `wire`'s
+/// `Termination` (exited-with-code vs killed-by-signal) is strictly richer.
+/// It travels only through an `Exit` row's optional wire trailer, decoded by
+/// `wire::decode_exit_detail` -- never through `ReplyRow`, `SettledDoctorTool`,
+/// or the contracted `semaprax.doctor.v1` report, whose mapping in
+/// `settled_report.rs` still keys on `error` alone and is unchanged.
+pub(super) struct Failure {
+    pub(super) error: ProbeError,
+    pub(super) termination: Option<wire::Termination>,
+}
+
+impl From<ProbeError> for Failure {
+    fn from(error: ProbeError) -> Self {
+        Self {
+            error,
+            termination: None,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Default)]
@@ -29,7 +51,7 @@ pub(super) fn run(
     guard: &Guard,
     path: &CStr,
     output: &mut Vec<u8>,
-) -> Result<(), ProbeError> {
+) -> Result<(), Failure> {
     let (stdin, empty) = pipe()?;
     drop(empty);
     let (stdout, stdout_writer) = pipe()?;
@@ -38,7 +60,7 @@ pub(super) fn run(
     nonblocking(stderr.0).map_err(|_| ProbeError::Io)?;
     let supervisor = unsafe { libc::syscall(libc::SYS_pidfd_open, libc::getpid(), 0_u32) };
     if supervisor < 0 {
-        return Err(ProbeError::Spawn);
+        return Err(ProbeError::Spawn.into());
     }
     let supervisor = Fd(supervisor as i32);
     let mut pidfd = -1_i32;
@@ -70,7 +92,7 @@ pub(super) fn run(
         }
     }
     if pid < 0 {
-        return Err(ProbeError::Spawn);
+        return Err(ProbeError::Spawn.into());
     }
     if pidfd < 0 || pid > i32::MAX as libc::c_long {
         fail_stop();
@@ -82,7 +104,7 @@ pub(super) fn run(
 
 /// The real supervisor and authority-free scripts use this identical state
 /// machine. Scripted outcomes prove control flow, never physical settlement.
-fn drive(operations: &mut impl Operations, output: &mut Vec<u8>) -> Result<(), ProbeError> {
+fn drive(operations: &mut impl Operations, output: &mut Vec<u8>) -> Result<(), Failure> {
     let mut selected = None;
     let mut total = 0;
     let mut ended = [false; 2];
@@ -151,12 +173,18 @@ fn drive(operations: &mut impl Operations, output: &mut Vec<u8>) -> Result<(), P
             }
         }
     }
-    if !success {
-        selected.get_or_insert(ProbeError::Exit);
+    // Attach the observed termination only when it is the reason `selected`
+    // ends up `Exit`: a prior I/O/timeout/output-limit cause always takes
+    // precedence and carries no trailer, exactly as `ProbeError::Exit` alone
+    // could not distinguish these before this diagnostic existed.
+    let mut termination = None;
+    if selected.is_none() && !success {
+        selected = Some(ProbeError::Exit);
+        termination = operations.last_termination();
     }
     if let Some(error) = selected {
         output.clear();
-        Err(error)
+        Err(Failure { error, termination })
     } else {
         Ok(())
     }

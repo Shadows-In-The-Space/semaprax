@@ -1,4 +1,5 @@
 //! Private syscall boundary. Only Native owns OS resources; scripts own none.
+use super::super::wire::Termination;
 use super::super::{errno, fail_stop, Fd};
 use std::time::{Duration, Instant};
 
@@ -11,6 +12,11 @@ pub(super) trait Operations {
     fn now(&mut self) -> Duration;
     fn pause(&mut self);
     fn fail_stop(&mut self) -> !;
+    /// The exact `waitpid` status decoded from the last successful
+    /// `reap_owned`, retained purely for diagnostics; `drive` only consults
+    /// this after `reap_owned` has already determined pass/fail. A scripted
+    /// implementation with no physical process may always return `None`.
+    fn last_termination(&mut self) -> Option<Termination>;
 }
 
 pub(super) struct Native {
@@ -27,6 +33,7 @@ impl Native {
                 pid,
                 pidfd: Fd(pidfd),
                 reaped: false,
+                last: None,
             },
             streams: [stdout, stderr],
             origin,
@@ -83,12 +90,19 @@ impl Operations for Native {
     fn fail_stop(&mut self) -> ! {
         fail_stop()
     }
+    fn last_termination(&mut self) -> Option<Termination> {
+        self.child.last
+    }
 }
 
 struct Child {
     pid: i32,
     pidfd: Fd,
     reaped: bool,
+    // Diagnostic-only: the exact `waitpid` status decoded from the reap that
+    // set `reaped`. Never consulted to decide success/failure -- `reap()`'s
+    // returned `bool` remains the sole authority for that, exactly as before.
+    last: Option<Termination>,
 }
 impl Child {
     fn kill(&mut self) -> Result<(), ()> {
@@ -119,9 +133,13 @@ impl Child {
         let waited = unsafe { libc::waitpid(self.pid, &mut status, libc::WNOHANG) };
         if waited == self.pid {
             self.reaped = true;
-            Ok(Some(
-                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
-            ))
+            let termination = if libc::WIFEXITED(status) {
+                Termination::Exited(libc::WEXITSTATUS(status) as u8)
+            } else {
+                Termination::Signaled(libc::WTERMSIG(status))
+            };
+            self.last = Some(termination);
+            Ok(Some(termination.success()))
         } else if waited == 0 {
             Ok(None)
         } else {

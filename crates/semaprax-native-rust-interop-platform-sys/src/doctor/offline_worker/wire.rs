@@ -10,6 +10,81 @@ pub(in crate::doctor) const MAX_REPLY_BYTES: usize = 3 * 65_536 + 128;
 const REQUEST_MAGIC: &[u8; 8] = b"SPXDWK1\0";
 const REPLY_MAGIC: &[u8; 8] = b"SPXDWR1\0";
 const REPLY_HEADER: usize = 77;
+// The wire status byte an `Exit` row carries, and the fixed trailer size a
+// worker may attach to that one status. No other status may carry a trailer;
+// `validate_reply` enforces that below. This is diagnostic-only: `ReplyRow`'s
+// `Err` arm stays the bare `ProbeError` it always was, so nothing here changes
+// what a collector or the contracted `semaprax.doctor.v1` report can observe.
+const EXIT_STATUS_CODE: u8 = 4;
+const EXIT_DETAIL_BYTES: usize = 2;
+
+/// How the confined tool child actually terminated, observed by the worker's
+/// own `waitpid` on its exact owned PID. This is strictly richer than the
+/// `ProbeError::Exit` it accompanies; it never travels through `ReplyRow`,
+/// `SettledDoctorTool::output`, or the settled report -- only through the
+/// `Exit` row's optional trailer, decoded solely by `decode_exit_detail` for
+/// diagnostic callers (tests, hostile fixtures).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::doctor) enum Termination {
+    /// The child called `_exit`/`exit` (or ran off the end of `main`) with
+    /// this `WEXITSTATUS` code. Codes 10..=23 are this worker's own
+    /// pre-`execve` `fail_stop_with` markers (see `child.rs`); any other
+    /// value is the real tool's own exit code.
+    Exited(u8),
+    /// The child was killed by this `WTERMSIG` signal before it could exit.
+    Signaled(i32),
+}
+
+impl Termination {
+    pub(in crate::doctor) fn success(self) -> bool {
+        matches!(self, Termination::Exited(0))
+    }
+}
+
+fn encode_termination(value: Termination) -> [u8; EXIT_DETAIL_BYTES] {
+    match value {
+        Termination::Exited(code) => [0, code],
+        Termination::Signaled(signal) => [1, signal.clamp(0, i32::from(u8::MAX)) as u8],
+    }
+}
+
+#[cfg(test)]
+fn decode_termination(bytes: &[u8]) -> Option<Termination> {
+    match *bytes {
+        [0, code] => Some(Termination::Exited(code)),
+        [1, signal] => Some(Termination::Signaled(i32::from(signal))),
+        _ => None,
+    }
+}
+
+/// Diagnostic-only companion to `validate_reply`, for a reply already known to
+/// be well-formed. Recovers the fixed `Termination` an `Exit` row's trailer
+/// carries, if the worker attached one. Never consulted by `ReplyRow`, the
+/// production collector, or anything reaching the contracted
+/// `semaprax.doctor.v1` report -- exclusively for tests and hostile fixtures
+/// composing a richer panic message than the bare `ProbeError` variant. Its
+/// only callers are `#[cfg(test)]` code (this crate's own wire tests and the
+/// hostile `offline_worker::tests`), so it is compiled only for `cfg(test)`.
+#[cfg(test)]
+pub(in crate::doctor) fn decode_exit_detail(bytes: &[u8], role: u8) -> Option<Termination> {
+    let mut cursor = REPLY_HEADER;
+    loop {
+        let current_role = *bytes.get(cursor)?;
+        let status = *bytes.get(cursor + 1)?;
+        let length = usize::try_from(u32::from_le_bytes(
+            bytes.get(cursor + 2..cursor + 6)?.try_into().ok()?,
+        ))
+        .ok()?;
+        let payload_start = cursor + 6;
+        let payload = bytes.get(payload_start..payload_start.checked_add(length)?)?;
+        if current_role == role {
+            return (status == EXIT_STATUS_CODE)
+                .then(|| decode_termination(payload))
+                .flatten();
+        }
+        cursor = payload_start + length;
+    }
+}
 
 #[derive(Debug)]
 pub(in crate::doctor) struct Request {
@@ -114,10 +189,30 @@ impl Request {
 
 pub(in crate::doctor) type ReplyRow = (u8, Result<Vec<u8>, ProbeError>);
 
-pub(super) fn encode_reply(request: &Request, rows: &[ReplyRow]) -> Result<Vec<u8>, Error> {
+// `exit_detail` is a diagnostic-only, purely additive supplement: a role/
+// termination pair for a role whose row is `Err(ProbeError::Exit)`. A role
+// with no matching entry (or whose row is not `Exit`) gets the exact zero-
+// length trailer this function always emitted; an empty slice reproduces
+// prior byte-for-byte output.
+pub(super) fn encode_reply(
+    request: &Request,
+    rows: &[ReplyRow],
+    exit_detail: &[(u8, Termination)],
+) -> Result<Vec<u8>, Error> {
     if rows.len() != request.roles().count() {
         return Err(Error::Invalid);
     }
+    let trailer_for = |role: u8, value: &Result<Vec<u8>, ProbeError>| -> Vec<u8> {
+        if !matches!(value, Err(ProbeError::Exit)) {
+            return Vec::new();
+        }
+        exit_detail
+            .iter()
+            .find(|(candidate, _)| *candidate == role)
+            .map_or_else(Vec::new, |(_, termination)| {
+                encode_termination(*termination).to_vec()
+            })
+    };
     let mut length = REPLY_HEADER;
     for ((role, value), (expected, _)) in rows.iter().zip(request.roles()) {
         if *role != expected {
@@ -127,8 +222,9 @@ pub(super) fn encode_reply(request: &Request, rows: &[ReplyRow]) -> Result<Vec<u
         if payload_len > 65_536 {
             return Err(Error::Limit);
         }
+        let trailer_len = trailer_for(*role, value).len();
         length = length
-            .checked_add(6 + payload_len)
+            .checked_add(6 + payload_len + trailer_len)
             .filter(|length| *length <= MAX_REPLY_BYTES)
             .ok_or(Error::Limit)?;
     }
@@ -151,7 +247,9 @@ pub(super) fn encode_reply(request: &Request, rows: &[ReplyRow]) -> Result<Vec<u
             }
             Err(error) => {
                 output.push(encode_error(*error));
-                output.extend_from_slice(&0u32.to_le_bytes());
+                let trailer = trailer_for(*role, value);
+                output.extend_from_slice(&(trailer.len() as u32).to_le_bytes());
+                output.extend_from_slice(&trailer);
             }
         }
     }
@@ -188,7 +286,14 @@ pub(in crate::doctor) fn validate_reply(
         if length > 65_536 {
             return Err(Error::Limit);
         }
-        if status > 7 || (status != 0 && length != 0) {
+        // Every status keeps its prior exact-zero-length rule except `Exit`,
+        // which may additionally carry the fixed diagnostic trailer decoded
+        // by `decode_exit_detail`. `ReplyRow`'s value is unaffected either
+        // way: the trailer bytes are consumed below and never returned.
+        if status > 7
+            || (status != 0 && status != EXIT_STATUS_CODE && length != 0)
+            || (status == EXIT_STATUS_CODE && length != 0 && length != EXIT_DETAIL_BYTES)
+        {
             return Err(Error::Invalid);
         }
         take(bytes, &mut cursor, length)?;
@@ -226,7 +331,7 @@ fn encode_error(error: ProbeError) -> u8 {
         ProbeError::Invalid => 1,
         ProbeError::Unsupported => 2,
         ProbeError::Spawn => 3,
-        ProbeError::Exit => 4,
+        ProbeError::Exit => EXIT_STATUS_CODE,
         ProbeError::OutputLimit => 5,
         ProbeError::Timeout => 6,
         ProbeError::Io => 7,
@@ -238,7 +343,7 @@ fn decode_error(status: u8) -> Result<ProbeError, Error> {
         1 => Ok(ProbeError::Invalid),
         2 => Ok(ProbeError::Unsupported),
         3 => Ok(ProbeError::Spawn),
-        4 => Ok(ProbeError::Exit),
+        EXIT_STATUS_CODE => Ok(ProbeError::Exit),
         5 => Ok(ProbeError::OutputLimit),
         6 => Ok(ProbeError::Timeout),
         7 => Ok(ProbeError::Io),

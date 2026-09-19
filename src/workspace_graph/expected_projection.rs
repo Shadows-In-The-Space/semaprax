@@ -69,7 +69,7 @@ pub(super) fn synthetic_builder_bytes(
     synthetic_builder_bytes_scoped(program, authored, programs, None, 0, true)
 }
 
-fn synthetic_builder_bytes_scoped(
+pub(super) fn synthetic_builder_bytes_scoped(
     program: &Program,
     authored: &BTreeMap<&str, AuthoredDeclaration<'_>>,
     programs: &[Program],

@@ -8,6 +8,7 @@
     dead_code,
     reason = "sealed validation and test-only replay seams remain non-public"
 )]
+mod builder_bytes_report;
 pub(crate) mod diagnostics;
 mod expected_projection;
 mod generic_type_import;

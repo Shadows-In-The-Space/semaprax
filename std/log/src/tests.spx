@@ -61,8 +61,60 @@ fn test_filtered() -> i64
     if position == 0usize && head == 0u8 && byte_len(bytes_as_slice(bytes)) == 64usize { 0 } else { 1 }
 }
 
+// ---------------------------------------------------------------------
+// Redaction guard (issue #193)
+// ---------------------------------------------------------------------
+// `append-event-guarded` was declared but never exercised by any test in
+// this package until this tranche: `use function` imported it (above) and
+// nothing ever called it. Pinned here: the safe path writes through exactly
+// like the unguarded `append_event`, and a secret-bearing flag discards the
+// WHOLE event rather than writing it -- the writer comes back at the
+// position it started at, none of the event's bytes appended. This is a
+// REFUSAL, not the "visible redacted marker" step 2 also asks for: this
+// package's `Event` has no separate labeled-field structure to redact one
+// field of (see `append-event-guarded`'s own doc comment in `log.spx`), so
+// `std.log.redact.marker_byte`'s fixed marker is never written by this
+// function -- discarding the event is a real, sound mitigation, but it does
+// not by itself satisfy step 2's marker requirement.
+//
+// One representative secret-bearing flag is enough to pin the writer-level
+// behaviour here: `std.log.redact.tests.event_safety` already exhaustively
+// asserts, at the pure decision layer, that EACH of the six flags on its own
+// (and combinations) makes `event_is_safe` false. Asserting all six again
+// through this writer, each with its own freshly-built `Event` (two
+// `bytes_copy` sites apiece), would add no coverage `event_safety` does not
+// already give while multiplying this package's bytes-copy call-path budget
+// (`SPX-T267`) -- which this tranche found is shared, non-additively, with
+// `append-event-if`'s own reachable path once both are exercised from the
+// same entry point.
+@id("std.log.tests.guarded-writes-through-when-safe")
+fn guarded_writes_through_when_safe() -> bool
+{
+    let name = [97u8];
+    let message = [98u8];
+    let event = Event { level: 2u8, sequence: 1usize, name: bytes_copy(array_as_slice(name)), message: bytes_copy(array_as_slice(message)) };
+    let output = writer_from_bytes(bytes_zeroed(64usize));
+    let written = append_event_guarded(event, false, false, false, false, false, false, output);
+    writer_position(written) > 0usize
+}
+
+@id("std.log.tests.guarded-discards-when-unsafe")
+fn guarded_discards_when_unsafe() -> bool
+{
+    let name = [97u8];
+    let message = [98u8];
+    let event = Event { level: 2u8, sequence: 1usize, name: bytes_copy(array_as_slice(name)), message: bytes_copy(array_as_slice(message)) };
+    let output = writer_from_bytes(bytes_zeroed(64usize));
+    let written = append_event_guarded(event, true, false, false, false, false, false, output);
+    writer_position(written) == 0usize
+}
+
 @id("std.log.tests.main")
 fn main() -> i64
 {
-    test_line()
+    let mut failed = 0;
+    failed = failed + if test_line() == 0 { 0 } else { 1 };
+    failed = failed + if guarded_writes_through_when_safe() { 0 } else { 2 };
+    failed = failed + if guarded_discards_when_unsafe() { 0 } else { 4 };
+    failed
 }

@@ -10,6 +10,7 @@ use function @id("std.email.envelope_is_complete") from std.email as envelope_is
 use function @id("std.email.byte_is_header_separator") from std.email as byte_is_header_separator;
 use function @id("std.email.at_sign_index") from std.email as at_sign_index;
 use function @id("std.email.domain_shape_admitted") from std.email as domain_shape_admitted;
+use function @id("std.email.value_is_header_safe_guarded") from std.email as value_is_header_safe_guarded;
 
 // Each header-separator byte is asserted individually, never combined, so a
 // regression that stops checking any one of the three fails here rather than
@@ -187,6 +188,41 @@ fn domain_shape_cases() -> bool
     dotted_admitted && dotless_refused && leading_dot_refused && trailing_dot_refused
 }
 
+// Issue #193: `value_is_header_safe` alone refuses only CR/LF/NUL, so a
+// header value that echoes back a session token (ordinary, separator-free
+// text) is admitted -- this is the leak surface, pinned directly.
+@id("std.email.tests.header_value_admits_a_secret_without_the_guard")
+fn header_value_admits_a_secret_without_the_guard() -> bool
+{
+    let value = [66u8, 101u8, 97u8, 114u8, 101u8, 114u8, 32u8, 120u8, 121u8, 122u8];
+    value_is_header_safe(array_as_slice(value))
+}
+
+// Each of the six flags is asserted individually against the same
+// secret-shaped value, and the all-false case proves the guard admits an
+// ordinary header value it should.
+@id("std.email.tests.header_value_guarded_refuses_each_secret_flag")
+fn header_value_guarded_refuses_each_secret_flag() -> bool
+{
+    let value = [66u8, 101u8, 97u8, 114u8, 101u8, 114u8, 32u8, 120u8, 121u8, 122u8];
+    let view = array_as_slice(value);
+    let safe = value_is_header_safe_guarded(view, false, false, false, false, false, false);
+    let password_refused = !value_is_header_safe_guarded(view, true, false, false, false, false, false);
+    let api_key_refused = !value_is_header_safe_guarded(view, false, true, false, false, false, false);
+    let bearer_token_refused = !value_is_header_safe_guarded(view, false, false, true, false, false, false);
+    let session_token_refused = !value_is_header_safe_guarded(view, false, false, false, true, false, false);
+    let webhook_secret_refused = !value_is_header_safe_guarded(view, false, false, false, false, true, false);
+    let smtp_credential_refused = !value_is_header_safe_guarded(view, false, false, false, false, false, true);
+    safe && password_refused && api_key_refused && bearer_token_refused && session_token_refused && webhook_secret_refused && smtp_credential_refused
+}
+
+@id("std.email.tests.header_value_guarded_keeps_separator_refusal")
+fn header_value_guarded_keeps_separator_refusal() -> bool
+{
+    let injected = [65u8, 66u8, 10u8];
+    !value_is_header_safe_guarded(array_as_slice(injected), false, false, false, false, false, false)
+}
+
 @id("std.email.tests.main")
 fn main() -> i64
 {
@@ -203,5 +239,17 @@ fn main() -> i64
     failed = failed + if separator_predicate() { 0 } else { 256 };
     failed = failed + if at_sign_index_positions() { 0 } else { 512 };
     failed = failed + if domain_shape_cases() { 0 } else { 1024 };
+    failed + main_redaction_guard()
+}
+
+// Split from `main` so the aggregator never combines more than a handful of
+// independent `if`/`else` branches in one function (SPX-H006).
+@id("std.email.tests.main_redaction_guard")
+fn main_redaction_guard() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if header_value_admits_a_secret_without_the_guard() { 0 } else { 4096 };
+    failed = failed + if header_value_guarded_refuses_each_secret_flag() { 0 } else { 8192 };
+    failed = failed + if header_value_guarded_keeps_separator_refusal() { 0 } else { 16384 };
     failed
 }

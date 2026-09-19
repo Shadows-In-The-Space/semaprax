@@ -17,6 +17,8 @@ use function @id("std.metrics.label-count-max") from std.metrics as label_count_
 use function @id("std.metrics.label-count-admitted") from std.metrics as label_count_admitted;
 use function @id("std.metrics.label-admitted") from std.metrics as label_admitted;
 use function @id("std.metrics.try-admit-labeled-series") from std.metrics as try_admit_labeled_series;
+use function @id("std.metrics.label-admitted-guarded") from std.metrics as label_admitted_guarded;
+use function @id("std.metrics.try-admit-labeled-series-guarded") from std.metrics as try_admit_labeled_series_guarded;
 
 @id("std.metrics.tests.counter_increment_accumulates")
 fn counter_increment_accumulates() -> bool
@@ -183,6 +185,59 @@ fn try_admit_labeled_series_sees_the_label() -> bool
     try_admit_labeled_series(0, array_as_slice(ok_name), array_as_slice(ok_value)) == 1 && try_admit_labeled_series(0, array_as_slice(bad_name), array_as_slice(ok_value)) == -1 && try_admit_labeled_series(cardinality_limit() - 1, array_as_slice(ok_name), array_as_slice(ok_value)) == cardinality_limit() && try_admit_labeled_series(cardinality_limit(), array_as_slice(ok_name), array_as_slice(ok_value)) == -1
 }
 
+// ---------------------------------------------------------------------
+// Redaction guard (issue #193)
+// ---------------------------------------------------------------------
+// Issue #193's hole in this package, pinned directly: a password shaped like
+// "hunter2" carries none of `value_is_label_safe`'s five refused bytes, so
+// the shape-only `label_admitted` ADMITS it -- this is the leak surface, not
+// a hypothetical. Only the guarded entry point, which also consults the
+// caller's `carries_password` classification, refuses it.
+@id("std.metrics.tests.shape_valid_label_admits_a_password_without_the_guard")
+fn shape_valid_label_admits_a_password_without_the_guard() -> bool
+{
+    let name = [114u8, 111u8, 117u8, 116u8, 101u8];
+    let password_shaped_value = [104u8, 117u8, 110u8, 116u8, 101u8, 114u8, 50u8];
+    label_admitted(array_as_slice(name), array_as_slice(password_shaped_value))
+}
+
+// Each of the six flags is asserted individually against the same
+// shape-valid value, so a regression that stops consulting any one of them
+// fails here rather than hiding behind the other five; the all-false case
+// proves the guard does not refuse an ordinary label it should admit.
+@id("std.metrics.tests.label_admitted_guarded_refuses_each_secret_flag")
+fn label_admitted_guarded_refuses_each_secret_flag() -> bool
+{
+    let name = [114u8, 111u8, 117u8, 116u8, 101u8];
+    let value = [104u8, 117u8, 110u8, 116u8, 101u8, 114u8, 50u8];
+    let clean = array_as_slice(name);
+    let secret = array_as_slice(value);
+    let safe = label_admitted_guarded(clean, secret, false, false, false, false, false, false);
+    let password_refused = !label_admitted_guarded(clean, secret, true, false, false, false, false, false);
+    let api_key_refused = !label_admitted_guarded(clean, secret, false, true, false, false, false, false);
+    let bearer_token_refused = !label_admitted_guarded(clean, secret, false, false, true, false, false, false);
+    let session_token_refused = !label_admitted_guarded(clean, secret, false, false, false, true, false, false);
+    let webhook_secret_refused = !label_admitted_guarded(clean, secret, false, false, false, false, true, false);
+    let smtp_credential_refused = !label_admitted_guarded(clean, secret, false, false, false, false, false, true);
+    safe && password_refused && api_key_refused && bearer_token_refused && session_token_refused && webhook_secret_refused && smtp_credential_refused
+}
+
+// The registry-facing entry point: a secret-classified label never grows the
+// series count (the fixed `-1` sentinel), even with a full cardinality
+// budget available, and an ordinary label under the guard behaves exactly
+// like the unguarded admission path.
+@id("std.metrics.tests.try_admit_labeled_series_guarded_refuses_secret_labels")
+fn try_admit_labeled_series_guarded_refuses_secret_labels() -> bool
+{
+    let name = [114u8, 111u8, 117u8, 116u8, 101u8];
+    let value = [104u8, 117u8, 110u8, 116u8, 101u8, 114u8, 50u8];
+    let clean = array_as_slice(name);
+    let secret = array_as_slice(value);
+    let admits_clean = try_admit_labeled_series_guarded(0, clean, secret, false, false, false, false, false, false) == 1;
+    let refuses_secret = try_admit_labeled_series_guarded(0, clean, secret, true, false, false, false, false, false) == -1;
+    admits_clean && refuses_secret
+}
+
 // Split from `main` into three smaller aggregators, each summing a disjoint
 // subset of unique failure bits, and combined by addition in `main` below.
 // A single 17-branch aggregator exceeded the cleanup-replay skeleton-work
@@ -227,8 +282,18 @@ fn main_label_admission() -> i64
     failed
 }
 
+@id("std.metrics.tests.main_redaction_guard")
+fn main_redaction_guard() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if shape_valid_label_admits_a_password_without_the_guard() { 0 } else { 1 };
+    failed = failed + if label_admitted_guarded_refuses_each_secret_flag() { 0 } else { 2 };
+    failed = failed + if try_admit_labeled_series_guarded_refuses_secret_labels() { 0 } else { 4 };
+    failed
+}
+
 @id("std.metrics.tests.main")
 fn main() -> i64
 {
-    main_scalars() + main_label_bytes() + main_label_admission()
+    main_scalars() + main_label_bytes() + main_label_admission() + main_redaction_guard() * 131072
 }

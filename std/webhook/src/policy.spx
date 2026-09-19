@@ -1,4 +1,5 @@
 module std.webhook;
+use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 
 // Issue #193's webhook slice: the pure, effect-free decision layer an
 // inbound-webhook receiver consults BEFORE it parses a payload or acts on
@@ -127,4 +128,22 @@ fn backoff_seconds(attempt: i64) -> i64
 fn delivery_admitted(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64) -> bool
 {
     signature_shape_admitted(signature) && payload_len_admitted(payload_len) && timestamp_within_window(signed_at, now)
+}
+
+// ---------------------------------------------------------------------
+// Redaction guard (issue #193)
+// ---------------------------------------------------------------------
+// Everything above judges signature shape, payload budget, and replay
+// window -- none of it has any notion of a payload's own content. A payload
+// that accidentally embeds the webhook's own signing secret in cleartext (a
+// caller-assembled body that echoes its configuration back, say) passes
+// every check above unchanged. This composes the existing admission with
+// `std.log.redact.event_is_safe`'s six caller-declared flags, exactly like
+// `std.log.append-event-guarded` gates a log event, so a delivery the caller
+// has classified as carrying a secret in its payload is refused before an
+// attempt is ever made, independent of signature, size, or timestamp.
+@id("std.webhook.delivery_admitted_guarded")
+fn delivery_admitted_guarded(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+{
+    delivery_admitted(signature, payload_len, signed_at, now) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
 }

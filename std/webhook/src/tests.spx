@@ -8,6 +8,7 @@ use function @id("std.webhook.timestamp_within_window") from std.webhook as time
 use function @id("std.webhook.replay_window_seconds") from std.webhook as replay_window_seconds;
 use function @id("std.webhook.attempt_admitted") from std.webhook as attempt_admitted;
 use function @id("std.webhook.backoff_seconds") from std.webhook as backoff_seconds;
+use function @id("std.webhook.delivery_admitted_guarded") from std.webhook as delivery_admitted_guarded;
 
 // A full-length signature of all `a` is admitted; one byte short, one byte
 // long, one uppercase digit and one non-hex byte are each refused
@@ -119,6 +120,34 @@ fn composed_admission_is_attributable() -> bool
     all_hold && stale_only && oversized_only && malformed_only
 }
 
+// Issue #193: none of `delivery_admitted`'s three clauses (signature shape,
+// payload budget, replay window) has any notion of the payload's own
+// content, so a delivery whose body embeds the webhook's own signing secret
+// in cleartext passes it unchanged. Each of the six flags is asserted
+// individually against an otherwise fully-admitted delivery, and the
+// all-false case proves the guard does not refuse a delivery it should
+// admit.
+@id("std.webhook.tests.delivery_admitted_guarded_refuses_each_secret_flag")
+fn delivery_admitted_guarded_refuses_each_secret_flag() -> bool
+{
+    let mut signature = bytes_zeroed(64usize);
+    let mut index = 0usize;
+    while index < 64usize {
+        signature = bytes_set(signature, index, 97u8);
+        index = index + 1usize;
+        index < 64usize
+    }
+    let view = bytes_as_slice(signature);
+    let safe = delivery_admitted_guarded(view, 1024usize, 1000, 1100, false, false, false, false, false, false);
+    let password_refused = !delivery_admitted_guarded(view, 1024usize, 1000, 1100, true, false, false, false, false, false);
+    let api_key_refused = !delivery_admitted_guarded(view, 1024usize, 1000, 1100, false, true, false, false, false, false);
+    let bearer_token_refused = !delivery_admitted_guarded(view, 1024usize, 1000, 1100, false, false, true, false, false, false);
+    let session_token_refused = !delivery_admitted_guarded(view, 1024usize, 1000, 1100, false, false, false, true, false, false);
+    let webhook_secret_refused = !delivery_admitted_guarded(view, 1024usize, 1000, 1100, false, false, false, false, true, false);
+    let smtp_credential_refused = !delivery_admitted_guarded(view, 1024usize, 1000, 1100, false, false, false, false, false, true);
+    safe && password_refused && api_key_refused && bearer_token_refused && session_token_refused && webhook_secret_refused && smtp_credential_refused
+}
+
 @id("std.webhook.tests.main")
 fn main() -> i64
 {
@@ -131,5 +160,6 @@ fn main() -> i64
     failed = failed + if attempt_budget_boundary() { 0 } else { 16 };
     failed = failed + if backoff_doubles_then_saturates() { 0 } else { 32 };
     failed = failed + if composed_admission_is_attributable() { 0 } else { 64 };
+    failed = failed + if delivery_admitted_guarded_refuses_each_secret_flag() { 0 } else { 256 };
     failed
 }

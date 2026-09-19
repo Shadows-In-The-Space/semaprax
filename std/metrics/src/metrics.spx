@@ -1,5 +1,6 @@
 module std.metrics;
 use function @id("std.num.overflow.add_overflows") from std.num.overflow as add_overflows;
+use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 
 // Counters, gauges, and histograms are modeled as plain scalar state the
 // caller threads itself: a checked update takes the previous value and
@@ -206,4 +207,37 @@ fn try_admit_labeled_series(existing_count: i64, name: borrow Slice<u8>, value: 
     ensures result == -1 || result >= 1 && result <= cardinality_limit()
 {
     if label_admitted(name, value) { try_admit_series(existing_count) } else { -1 }
+}
+
+// ---------------------------------------------------------------------
+// Redaction guard (issue #193)
+// ---------------------------------------------------------------------
+// Everything above judges a label's SHAPE: a name grammar and a value
+// denylist keep a series out of a Prometheus-style exposition format's own
+// injection boundary, but neither one has any notion of a label's
+// caller-classified secret content. A password or API key that carries no
+// CR/LF/NUL/quote/backslash is a perfectly shape-valid label value and would
+// be admitted and exported by `label_admitted`/`try_admit_labeled_series`
+// alone -- this closes exactly that gap, composing the shape check with
+// `std.log.redact.event_is_safe`'s six caller-declared flags exactly like
+// `std.log.append-event-guarded` gates a log event.
+@id("std.metrics.label-admitted-guarded")
+fn label_admitted_guarded(name: borrow Slice<u8>, value: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+{
+    label_admitted(name, value) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
+}
+
+// The registration entry point a real exporter would actually call: a
+// secret-classified label never grows the registered series count, refused
+// with the same fixed `-1` sentinel a shape-invalid label or an exhausted
+// budget already returns, so a caller cannot tell the three refusal reasons
+// apart from the return value alone but can never register a series keyed by
+// a label this package refused for any of them.
+@id("std.metrics.try-admit-labeled-series-guarded")
+fn try_admit_labeled_series_guarded(existing_count: i64, name: borrow Slice<u8>, value: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> i64
+    requires existing_count >= 0
+    requires existing_count <= cardinality_limit()
+    ensures result == -1 || result >= 1 && result <= cardinality_limit()
+{
+    if label_admitted_guarded(name, value, carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential) { try_admit_series(existing_count) } else { -1 }
 }

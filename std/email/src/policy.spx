@@ -1,4 +1,5 @@
 module std.email;
+use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 
 // Issue #193's outbound-email slice: the pure, effect-free decision layer an
 // email adapter consults BEFORE it opens a connection, assembles a message,
@@ -169,4 +170,23 @@ fn recipient_count_admitted(count: usize) -> bool
 fn envelope_is_complete(has_sender: bool, has_recipient: bool, has_subject: bool) -> bool
 {
     has_sender && has_recipient && has_subject
+}
+
+// ---------------------------------------------------------------------
+// Redaction guard (issue #193)
+// ---------------------------------------------------------------------
+// `value_is_header_safe` above refuses only CR/LF/NUL -- the header
+// injection boundary. It has no notion of a header's own secret-classified
+// content: a Reply-To, a Subject, or a display name that echoes back an SMTP
+// credential or a session token used to authenticate the send is ordinary
+// header-safe text and passes unchanged. This composes that byte-safety
+// check with `std.log.redact.event_is_safe`'s six caller-declared flags,
+// exactly like `std.log.append-event-guarded` gates a log event and
+// `std.http.value_is_header_safe_guarded` gates an outbound HTTP header, so
+// a header value the caller has classified as a secret is refused before it
+// is ever assembled into a message.
+@id("std.email.value_is_header_safe_guarded")
+fn value_is_header_safe_guarded(field: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+{
+    value_is_header_safe(field) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
 }

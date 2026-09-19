@@ -12,3 +12,6 @@ tests = ["std.email.tests"]
 
 [exports]
 web = []
+
+[dependencies]
+std.log.redact = "=0.1.0"

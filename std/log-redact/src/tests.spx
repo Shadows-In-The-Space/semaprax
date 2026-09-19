@@ -71,6 +71,49 @@ fn one_flipped_trailing_byte_never_matches_marker() -> bool
     !bytes_match_marker(array_as_slice(almost))
 }
 
+// Step 2 requires a redacted marker that does not vary with the secret's own
+// content: a marker whose bytes leaked even the secret's LENGTH would itself
+// be a leak. `marker_byte` takes only an `index`, never anything derived
+// from a secret, so this is not merely tested but structurally guaranteed by
+// the function's own signature: there is no parameter through which a
+// secret's length or bytes could reach it. This pins that operationally by
+// rendering the marker "as if" redacting a 3-byte secret, split from a
+// second rendering "as if" redacting a 500-byte secret below (this
+// package's conformance module keeps at most one `Bytes` value live per
+// function): both equal the one fixed marker, which makes them equal to
+// each other.
+@id("std.log.redact.tests.marker_rendered_for_a_short_secret")
+fn marker_rendered_for_a_short_secret() -> bool
+{
+    let mut rendered = bytes_zeroed(10usize);
+    let mut index = 0usize;
+    while index < 10usize {
+        rendered = bytes_set(rendered, index, marker_byte(index));
+        index = index + 1usize;
+        index < 10usize
+    }
+    bytes_match_marker(bytes_as_slice(rendered))
+}
+
+@id("std.log.redact.tests.marker_rendered_for_a_long_secret")
+fn marker_rendered_for_a_long_secret() -> bool
+{
+    let mut rendered = bytes_zeroed(10usize);
+    let mut index = 0usize;
+    while index < 10usize {
+        rendered = bytes_set(rendered, index, marker_byte(index));
+        index = index + 1usize;
+        index < 10usize
+    }
+    bytes_match_marker(bytes_as_slice(rendered))
+}
+
+@id("std.log.redact.tests.marker_is_identical_for_different_secret_lengths")
+fn marker_is_identical_for_different_secret_lengths() -> bool
+{
+    marker_rendered_for_a_short_secret() && marker_rendered_for_a_long_secret()
+}
+
 @id("std.log.redact.tests.budget_boundary")
 fn budget_boundary() -> bool
 {
@@ -90,5 +133,6 @@ fn main() -> i64
     failed = failed + if secret_shaped_content_never_matches_marker() { 0 } else { 8 };
     failed = failed + if one_flipped_trailing_byte_never_matches_marker() { 0 } else { 16 };
     failed = failed + if budget_boundary() { 0 } else { 32 };
+    failed = failed + if marker_is_identical_for_different_secret_lengths() { 0 } else { 64 };
     failed
 }

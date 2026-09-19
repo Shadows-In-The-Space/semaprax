@@ -1,12 +1,17 @@
 module std.http.tests;
 use function @id("std.http.body_len") from std.http as body_len;
+use function @id("std.http.byte_is_at_sign") from std.http as byte_is_at_sign;
 use function @id("std.http.byte_is_request_separator") from std.http as byte_is_request_separator;
 use function @id("std.http.byte_is_tchar") from std.http as byte_is_tchar;
 use function @id("std.http.byte_is_tchar_symbol") from std.http as byte_is_tchar_symbol;
 use function @id("std.http.header_name_is_token") from std.http as header_name_is_token;
+use function @id("std.http.non_origin_target_admits_no_userinfo") from std.http as non_origin_target_admits_no_userinfo;
 use function @id("std.http.request_line_admitted") from std.http as request_line_admitted;
+use function @id("std.http.request_target_admits_no_userinfo") from std.http as request_target_admits_no_userinfo;
 use function @id("std.http.request_target_is_safe") from std.http as request_target_is_safe;
+use function @id("std.http.target_is_origin_form") from std.http as target_is_origin_form;
 use function @id("std.http.value_is_header_safe") from std.http as value_is_header_safe;
+use function @id("std.http.value_is_header_safe_guarded") from std.http as value_is_header_safe_guarded;
 use function @id("std.http.byte_is") from std.http as byte_is;
 use function @id("std.http.content_length") from std.http as content_length;
 use function @id("std.http.decimal_at") from std.http as decimal_at;
@@ -126,6 +131,97 @@ fn request_line_needs_both_halves() -> bool
     request_line_admitted(array_as_slice(get), array_as_slice(ok_target)) && !request_line_admitted(array_as_slice(lower_method), array_as_slice(ok_target)) && !request_line_admitted(array_as_slice(get), array_as_slice(bad_target))
 }
 
+// Issue #193's URL case: a userinfo component (`user:pass@host`) is the
+// classic way a credential leaks through a URL. `request_target_is_safe`
+// alone has no notion of it -- it refuses only the request-splitting bytes
+// -- so an absolute-form target carrying live credentials passes it
+// untouched. Both facts are pinned together: the old predicate's blind spot
+// on the exact same bytes, and the new composed check that actually catches
+// it.
+@id("std.http.tests.request_target_is_safe_does_not_see_userinfo")
+fn request_target_is_safe_does_not_see_userinfo() -> bool
+{
+    let with_credentials = [104u8, 116u8, 116u8, 112u8, 58u8, 47u8, 47u8, 117u8, 115u8, 101u8, 114u8, 58u8, 112u8, 97u8, 115u8, 115u8, 64u8, 104u8, 111u8, 115u8, 116u8];
+    request_target_is_safe(array_as_slice(with_credentials)) && !request_target_admits_no_userinfo(array_as_slice(with_credentials))
+}
+
+// Origin-form (starts with `/`) never carries an authority component, so an
+// `@` inside one (an email address in a query value, say) is ordinary
+// content and stays admitted. Authority-form and absolute-form targets carry
+// an authority, and RFC 7230 Section 5.3.3 says a sender must never generate
+// userinfo in either: `@` there is refused, in the MIDDLE of the target and
+// in its FINAL byte, since a scan that stops one byte early would pass the
+// final-position case while catching every other one here.
+@id("std.http.tests.request_target_admits_no_userinfo_cases")
+fn request_target_admits_no_userinfo_cases() -> bool
+{
+    let origin_form_with_at = [47u8, 63u8, 101u8, 64u8, 98u8];
+    let authority_form = [104u8, 111u8, 115u8, 116u8, 58u8, 56u8, 48u8];
+    let authority_form_with_userinfo = [117u8, 64u8, 104u8, 111u8, 115u8, 116u8];
+    let authority_form_userinfo_final = [104u8, 111u8, 115u8, 116u8, 64u8];
+    let origin_admitted = target_is_origin_form(array_as_slice(origin_form_with_at)) && request_target_admits_no_userinfo(array_as_slice(origin_form_with_at));
+    let authority_admitted = !target_is_origin_form(array_as_slice(authority_form)) && request_target_admits_no_userinfo(array_as_slice(authority_form));
+    let userinfo_middle_refused = !request_target_admits_no_userinfo(array_as_slice(authority_form_with_userinfo));
+    let userinfo_final_refused = !request_target_admits_no_userinfo(array_as_slice(authority_form_userinfo_final));
+    origin_admitted && authority_admitted && userinfo_middle_refused && userinfo_final_refused
+}
+
+@id("std.http.tests.request_line_refuses_userinfo_in_target")
+fn request_line_refuses_userinfo_in_target() -> bool
+{
+    let get = [71u8, 69u8, 84u8];
+    let ok_target = [47u8, 97u8];
+    let userinfo_target = [117u8, 64u8, 104u8, 111u8, 115u8, 116u8];
+    request_line_admitted(array_as_slice(get), array_as_slice(ok_target)) && !request_line_admitted(array_as_slice(get), array_as_slice(userinfo_target))
+}
+
+// A bearer token in an outbound header is admitted by the byte-safety scan
+// alone -- it carries no CR/LF/NUL -- so only the redaction guard catches it.
+// Each of the six flags is asserted individually, and the byte-safety
+// refusal is proven to still hold under the guard rather than being masked
+// by it.
+@id("std.http.tests.value_is_header_safe_guarded_refuses_each_secret_flag")
+fn value_is_header_safe_guarded_refuses_each_secret_flag() -> bool
+{
+    let bearer = [66u8, 101u8, 97u8, 114u8, 101u8, 114u8, 32u8, 120u8, 121u8, 122u8];
+    let safe = value_is_header_safe_guarded(array_as_slice(bearer), false, false, false, false, false, false);
+    let password_refused = !value_is_header_safe_guarded(array_as_slice(bearer), true, false, false, false, false, false);
+    let api_key_refused = !value_is_header_safe_guarded(array_as_slice(bearer), false, true, false, false, false, false);
+    let bearer_token_refused = !value_is_header_safe_guarded(array_as_slice(bearer), false, false, true, false, false, false);
+    let session_token_refused = !value_is_header_safe_guarded(array_as_slice(bearer), false, false, false, true, false, false);
+    let webhook_secret_refused = !value_is_header_safe_guarded(array_as_slice(bearer), false, false, false, false, true, false);
+    let smtp_credential_refused = !value_is_header_safe_guarded(array_as_slice(bearer), false, false, false, false, false, true);
+    safe && password_refused && api_key_refused && bearer_token_refused && session_token_refused && webhook_secret_refused && smtp_credential_refused
+}
+
+@id("std.http.tests.value_is_header_safe_guarded_keeps_separator_refusal")
+fn value_is_header_safe_guarded_keeps_separator_refusal() -> bool
+{
+    let injected = [97u8, 98u8, 13u8];
+    !value_is_header_safe_guarded(array_as_slice(injected), false, false, false, false, false, false)
+}
+
+@id("std.http.tests.byte_is_at_sign_flags_only_at")
+fn byte_is_at_sign_flags_only_at() -> bool
+{
+    byte_is_at_sign(64u8) && !byte_is_at_sign(63u8) && !byte_is_at_sign(65u8)
+}
+
+// Split from the URL/userinfo cases so a single aggregator never combines
+// more than a handful of independent `if`/`else` branches (SPX-H006).
+@id("std.http.tests.main_userinfo_and_guard")
+fn main_userinfo_and_guard() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if byte_is_at_sign_flags_only_at() { 0 } else { 1024 };
+    failed = failed + if request_target_is_safe_does_not_see_userinfo() { 0 } else { 2048 };
+    failed = failed + if request_target_admits_no_userinfo_cases() { 0 } else { 4096 };
+    failed = failed + if request_line_refuses_userinfo_in_target() { 0 } else { 8192 };
+    failed = failed + if value_is_header_safe_guarded_refuses_each_secret_flag() { 0 } else { 16384 };
+    failed = failed + if value_is_header_safe_guarded_keeps_separator_refusal() { 0 } else { 32768 };
+    failed
+}
+
 @id("std.http.tests.main")
 fn main() -> i64
 {
@@ -140,5 +236,5 @@ fn main() -> i64
     failed = failed + if header_name_admits_only_tchar() { 0 } else { 128 };
     failed = failed + if request_target_refuses_space_and_separators() { 0 } else { 256 };
     failed = failed + if request_line_needs_both_halves() { 0 } else { 512 };
-    failed
+    failed + main_userinfo_and_guard()
 }

@@ -146,6 +146,8 @@ never described as hosted, current-head, or production support.
 | 9 | A packaged-**tarball** (not path-dependency) Rust consumer round trip, per issue #145 step 3's explicit requirement | `packaged_tarball_consumer_round_trips_with_preserved_lockfile_and_source_tied_checksum` (`tests/public_native_rust_sdk_v1.rs:778`) | Exists only for the **general native-rust-interop-v1 profile**, not owned-data-api.v1; gated behind `SEMAPRAX_REQUIRE_PUBLIC_NATIVE_RUST_SDK=1` (returns immediately otherwise -- a 0.01s "pass" without the guard is a false pass); the issue comment for `e0c7f192` reports it passed locally in 9.94s with the guard armed. **Local evidence at a prior commit, for a different profile than the one recommended here. No equivalent test exists yet for owned-data-api.v1.** |
 | 10 | A packaged-tarball npm consumer round trip for this or any profile | `tests/frame_payload_product_v1/npm_installation.rs:60`, `tests/image_packaged_typescript_workflow_v1.rs:715` | Both `#[ignore]`d pending provisioned Node/npm/TypeScript. **No evidence, hosted or local, was found.** |
 | 11 | Manual validation against a genuinely compiler-built package | Issue comment for `2ae8a968`: "validated by hand against a genuinely compiler-built package (`examples/frame-payload-project` via `target/debug/semaprax-full`)" | **Local, one-off, prior commit, by hand.** Not re-run this session; not a repeatable gate. |
+| 12 | Row 7's exact `left: 14, right: 10` failure, re-run against current HEAD | Reproduced locally, then fixed in commit `7ef1ada2`: `public_native_rust_sdk_ci_contract` had drifted on two checks -- a pinned Cargo-invocation count stale since `e0c7f192` added four more calls, and an overbroad private-dependency ban that flagged the acyclic `semaprax-oci-package` leaf crate added by `f4d9eba4`. Before the fix (this session, this checkout): 5 passed, 2 failed, matching row 7's cited failure exactly. After: `cargo check --manifest-path examples/calculator-rust/Cargo.toml` exit 0; `public_native_rust_sdk_ci_contract` 7 passed, 0 failed; `public_native_rust_sdk_v1` (env guard armed) 10 passed, 0 failed in 395.40s -- not the 0.01s degraded no-op a missing guard would produce | **Local, current session, this host, current HEAD.** Removes one concrete, previously-hosted-observed cause of red on the *native-rust-sdk-v1* job's ubuntu-latest/macos-latest legs -- a different profile than the one this ADR recommends -- but has not itself been observed green in hosted CI yet (see row 13). Does not touch owned-data-api.v1's own harness or evidence. |
+| 13 | Whether `public_native_rust_owned_data_sdk_v1` -- this ADR's actually-recommended profile's own harness -- has a hosted run at or after this session's fix | Checked via `gh run list --workflow=ci.yml` during this session: recent runs are queued, in-progress, or cancelled by a subsequent push before completing; none observed to reach a `success` conclusion at or after `7ef1ada2` during this session | **No hosted evidence for this profile, this session, consistent with row 6.** Per this ADR's own Maintainer decision (answer 5), a local pass -- even a real one, not a degraded no-op -- is explicitly **not sufficient** for any support claim here; a specific, recent, confirmed-green hosted run is the stated bar, and it remains unmet. Answer 6 (isolate the harness into its own CI job so an unrelated failure cannot hide its result) also remains unimplemented. |
 
 Row 6 is the one this ADR most wants a maintainer to weigh: the tool that
 would gate publication is solid (rows 1-2), but the profile's own generated
@@ -317,6 +319,20 @@ argues *against* claiming more than the evidence supports.
 **Consequence for issue #145.** Box 1 has its *decision* half. Its *gate* half,
 and boxes 2 and 3, remain open on evidence rather than on judgment, and answer 6
 names the concrete change that unblocks collecting it.
+
+**Follow-up session, same date.** Rows 12-13 above record a second pass: the
+specific hosted-CI failure row 7 pointed at was reproduced locally and fixed
+(commit `7ef1ada2`), removing one concrete cause of red for the *general*
+native-rust-interop-v1 profile's CI job. That fix does not touch
+owned-data-api.v1 or advance answer 5's bar for it. This session also
+confirmed live that this repository's CI queue was, at the time, cycling
+through queued/cancelled runs from concurrent pushes without a completed run
+at or after the fix commit -- direct, current confirmation of row 6's
+"rapid pushes from concurrent lanes" finding, not merely a historical one.
+Boxes 1's gate half, 2, and 3 remain open: they need (a) answer 6's job
+isolation implemented, and (b) a resulting hosted, confirmed-green run of
+`public_native_rust_owned_data_sdk_v1` specifically -- neither of which a
+local session can supply on its own.
 
 ## Rejected alternatives
 

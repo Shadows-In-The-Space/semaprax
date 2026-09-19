@@ -284,44 +284,87 @@ fn quality_gate_and_example_are_promotion_evidence_not_a_private_claim() {
 #[test]
 fn root_package_does_not_create_a_dependency_cycle_to_the_builder() {
     // A private normal dependency of the root `semaprax` package is only a
-    // cycle risk if it reaches back into `semaprax` itself or into the
-    // builder crate (which itself depends on `semaprax`, see below). Rather
-    // than banning every `semaprax-*` normal dependency outright, check the
-    // actual property the test's name promises: no such dependency's own
-    // manifest names `semaprax` or the builder crate as one of its own
-    // dependencies.
+    // cycle risk if it reaches back into `semaprax`. Banning every
+    // `semaprax-*` normal dependency outright is a proxy for that, and it
+    // refused `semaprax-oci-package`, a genuine leaf.
+    //
+    // Check the real property instead, and check it TRANSITIVELY: a
+    // dependency two hops away reaches back just as effectively as a direct
+    // one, so a single-level check would pass a graph that still cycles.
+    // Dependency keys are matched by name rather than by substring, so
+    // `semaprax = { .. }`, `semaprax.workspace = true` and `semaprax = "0.5"`
+    // are all caught; a substring check misses the last two.
+    fn dependency_keys(manifest: &str) -> Vec<String> {
+        let mut in_dependencies = false;
+        let mut keys = Vec::new();
+        for line in manifest.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                in_dependencies = line == "[dependencies]" || line.ends_with(".dependencies]");
+            } else if in_dependencies && !line.is_empty() && !line.starts_with('#') {
+                let key = line
+                    .split(['=', '.', ' '])
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned();
+                if !key.is_empty() {
+                    keys.push(key);
+                }
+            }
+        }
+        keys
+    }
+
+    fn path_of(manifest: &str, dependency: &str) -> Option<String> {
+        manifest
+            .lines()
+            .find(|line| line.trim_start().starts_with(dependency))
+            .and_then(|line| line.split("path = \"").nth(1))
+            .and_then(|tail| tail.split('"').next())
+            .map(str::to_owned)
+    }
+
+    // The builder really does depend on `semaprax`; that is the edge which
+    // makes any path back to the builder a cycle, so pin it rather than
+    // assume it.
+    let builder_manifest = read("crates/semaprax-native-rust-interop-builder/Cargo.toml");
+    assert!(
+        dependency_keys(&builder_manifest)
+            .iter()
+            .any(|key| key == "semaprax"),
+        "the builder must still depend on `semaprax` for this contract to mean anything"
+    );
+
     let root_manifest = read("Cargo.toml");
-    let mut normal_dependencies = false;
-    let mut private_dependencies = Vec::new();
-    for line in root_manifest.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            normal_dependencies = line == "[dependencies]" || line.ends_with(".dependencies]");
-        } else if normal_dependencies && line.starts_with("semaprax-") {
-            let name = line
-                .split(['=', ' '])
-                .next()
-                .expect("dependency line has a name");
-            let manifest_path = line
-                .split("path = \"")
-                .nth(1)
-                .and_then(|tail| tail.split('"').next())
-                .unwrap_or_else(|| {
-                    panic!("private normal dependency without a workspace path: {line}")
-                });
-            private_dependencies.push((name.to_string(), manifest_path.to_string()));
+    let mut queue: Vec<(String, String)> = Vec::new();
+    for key in dependency_keys(&root_manifest) {
+        if let Some(rest) = key.strip_prefix("semaprax-") {
+            let directory = path_of(&root_manifest, &key).unwrap_or_else(|| {
+                panic!("private normal dependency `semaprax-{rest}` without a workspace path")
+            });
+            queue.push((key, directory));
         }
     }
-    let builder_manifest = read("crates/semaprax-native-rust-interop-builder/Cargo.toml");
-    assert!(builder_manifest.contains("semaprax = {"));
 
-    for (name, manifest_path) in private_dependencies {
-        let dependency_manifest = read(&format!("{manifest_path}/Cargo.toml"));
-        assert!(
-            !dependency_manifest.contains("semaprax = {")
-                && !dependency_manifest.contains("semaprax-native-rust-interop-builder"),
-            "private normal dependency `{name}` at `{manifest_path}` names `semaprax` or the \
-             builder crate as one of its own dependencies, which would create a cycle"
-        );
+    let mut visited: Vec<String> = Vec::new();
+    while let Some((name, directory)) = queue.pop() {
+        if visited.contains(&directory) {
+            continue;
+        }
+        visited.push(directory.clone());
+        let manifest = read(&format!("{directory}/Cargo.toml"));
+        for key in dependency_keys(&manifest) {
+            assert_ne!(
+                key, "semaprax",
+                "private normal dependency `{name}` at `{directory}` reaches back to `semaprax`, \
+                 which is the dependency cycle this contract exists to refuse"
+            );
+            if key.starts_with("semaprax-") {
+                if let Some(relative) = path_of(&manifest, &key) {
+                    queue.push((key, format!("{directory}/{relative}")));
+                }
+            }
+        }
     }
 }

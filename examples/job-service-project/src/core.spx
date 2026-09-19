@@ -1,0 +1,65 @@
+module job_service.core;
+use function @id("std.jobs.claim.is_legal") from std.jobs as claim_is_legal;
+use function @id("std.jobs.idempotency.enqueue_outcome") from std.jobs as idempotency_enqueue_outcome;
+use function @id("std.jobs.retry.next_state_after_outcome") from std.jobs as retry_next_state_after_outcome;
+use function @id("std.jobs.retry.should_dead_letter") from std.jobs as retry_should_dead_letter;
+use function @id("std.jobs.schedule.is_due") from std.jobs as schedule_is_due;
+use function @id("std.jobs.state.is_terminal") from std.jobs as state_is_terminal;
+
+// A pending job is claimable once its schedule is due -- the same admission
+// `JobRuntime::drive_once` enforces natively before it will claim a lease.
+@id("job_service.core.enqueue_is_legal")
+fn enqueue_is_legal(pending_state: usize, now_tick: usize, next_run_tick: usize) -> bool
+{
+    claim_is_legal(pending_state, schedule_is_due(now_tick, next_run_tick))
+}
+
+// A caller-supplied idempotency key decides whether a retried enqueue
+// request is fresh (0), a harmless duplicate (1), or a conflicting reuse of
+// the same key for different work (2).
+@id("job_service.core.enqueue_outcome")
+fn enqueue_outcome(key_exists: bool, existing_descriptor: borrow Slice<u8>, candidate_descriptor: borrow Slice<u8>) -> usize
+{
+    idempotency_enqueue_outcome(key_exists, existing_descriptor, candidate_descriptor)
+}
+
+@id("job_service.core.next_state_after_outcome")
+fn next_state_after_outcome(outcome_kind: usize, attempt: u8, max_attempts: u8) -> usize
+{
+    retry_next_state_after_outcome(outcome_kind, attempt, max_attempts)
+}
+
+@id("job_service.core.job_status_is_complete")
+fn job_status_is_complete(state: usize) -> bool
+{
+    state_is_terminal(state)
+}
+
+@id("job_service.core.dead_letter_is_reached")
+fn dead_letter_is_reached(attempt: u8, max_attempts: u8) -> bool
+{
+    retry_should_dead_letter(attempt, max_attempts)
+}
+
+// The acceptance scenario: a fresh enqueue is legal and admitted, a retried
+// enqueue with the same key is a harmless duplicate, a conflicting reuse of
+// the key is refused, a job that succeeds reaches a terminal state, and a
+// job that fails retryably is retried once within its ceiling and then
+// dead-lettered rather than retried forever. Returns 0 on success, 1
+// otherwise.
+@id("job_service.core.run_scenario")
+fn run_scenario() -> i64
+{
+    let now_tick = 100usize;
+    let enqueue_legal = enqueue_is_legal(0usize, now_tick, now_tick);
+    let job_key = [7u8, 2u8, 9u8];
+    let fresh_outcome = enqueue_outcome(false, array_as_slice(job_key), array_as_slice(job_key));
+    let duplicate_outcome = enqueue_outcome(true, array_as_slice(job_key), array_as_slice(job_key));
+    let conflicting_key = [1u8];
+    let conflict_outcome = enqueue_outcome(true, array_as_slice(job_key), array_as_slice(conflicting_key));
+    let succeeded_state = next_state_after_outcome(0usize, 0u8, 3u8);
+    let first_retry_state = next_state_after_outcome(1usize, 1u8, 2u8);
+    let final_retry_state = next_state_after_outcome(1usize, 2u8, 2u8);
+    let dead_lettered = dead_letter_is_reached(2u8, 2u8);
+    if enqueue_legal && fresh_outcome == 0usize && duplicate_outcome == 1usize && conflict_outcome == 2usize && job_status_is_complete(succeeded_state) && first_retry_state == 5usize && !job_status_is_complete(first_retry_state) && dead_lettered && job_status_is_complete(final_retry_state) { 0 } else { 1 }
+}

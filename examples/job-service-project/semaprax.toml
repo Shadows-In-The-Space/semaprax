@@ -1,0 +1,17 @@
+schema = "semaprax.manifest.v1"
+
+[package]
+name = "job-service"
+version = "1.0.0"
+profile = "nested-owned-record-api.v1"
+
+[modules]
+entry = "job_service.app"
+sources = ["src/app.spx", "src/core.spx", "src/tests.spx"]
+tests = ["job_service.tests"]
+
+[exports]
+web = ["job_service.app.export_report_payload"]
+
+[dependencies]
+std.jobs = "=0.1.0"

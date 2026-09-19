@@ -1,0 +1,31 @@
+module job_service.app;
+
+@id("job_service.app.payload")
+record ReportJob {
+    @id("job_service.app.payload.outcome_code")
+    outcome_code: i64,
+}
+
+@id("job_service.app.export_payload")
+record ExportPayload {
+    @id("job_service.app.export_payload.bytes")
+    bytes: Bytes,
+}
+
+@id("job_service.app.handle_report_job")
+fn handle_report_job(payload: ReportJob) -> i64
+{
+    payload.outcome_code
+}
+
+@id("job_service.app.export_report_payload")
+fn export_report_payload(input: borrow Slice<u8>) -> ExportPayload
+{
+    ExportPayload { bytes: bytes_copy(input) }
+}
+
+@id("job_service.app.main")
+fn main() -> i64
+{
+    0
+}

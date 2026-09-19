@@ -212,6 +212,24 @@ than by advancing the row.
     beyond those two content-reordering cases, which were already provably
     equivalent by construction (any content mutation changes the trusted
     pairing bytes).
+  - `6d1289b9` closed a distinct gap in the *malformed-trusted* family (the
+    bytes a consumer is itself configured with, where byte-exact pairing
+    cannot discriminate anything): all six documents in
+    `malformed_trusted_descriptor_cases()` — truncation, unknown schema, the
+    two frozen version literals, invalid UTF-8, and trailing bytes — are now
+    driven through real Rust, C11, C++17, and TypeScript/Wasm consumers
+    (`tests/public_generic_native_adapter_v1/malformed_trusted_descriptor.rs`,
+    `tests/public_generic_wasm_adapter_v1/shared_hostile_corpus.rs::malformed_trusted_descriptor_is_rejected_before_wasm_instantiation`),
+    hosted at `7def8fb1…`. Per #173's own 2026-09-19 audit, two things this
+    does not yet close: only one of the six branches
+    (`stale_boundary_profile_version`) has a non-vacuity proof (the C11
+    codec's own branch was temporarily neutered and only that case failed,
+    then reverted); and carrier-side hostility — handle generation,
+    ownership flag, field path, variant tag, length, and cleanup-plan
+    substitution — is exercised only at the reference-decoder layer
+    (`tests/projections/public_generic_descriptor_carrier_hostile_replay.rs`),
+    since the four calling consumers have no uniform way to express those
+    refusals today.
   - Bounded, deterministic property/fuzz coverage now exists for both wire
     codecs: `descriptor::fuzz` and `carrier::fuzz`
     (`src/public_generic_abi/descriptor/fuzz.rs`,
@@ -459,7 +477,7 @@ record below.
 | PG-1, PG-2 | [type grammar](PUBLIC-GENERIC-TYPE-GRAMMAR-V1.md) | nothing; hosted green on three hosts |
 | PG-3 | [compatibility rules](PUBLIC-GENERIC-COMPATIBILITY-V1.md) | nothing; hosted green on three hosts |
 | PG-4 | [candidate delta](PUBLIC-GENERIC-CANDIDATE-DELTA-V1.md) | nothing; hosted green on three hosts. It describes a genuine public-generic signature only when one is named explicitly via `public_generic_delta_with_boundary_subjects` (#139, #161); no manifest-profile route admits one on its own |
-| PG-5, PG-6 | [consumers](PUBLIC-GENERIC-CONSUMERS-V1.md), [descriptor](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md) | hosted at `7def8fb1…`, not yet a #164 frozen candidate; codegen wiring from a verified descriptor to a real callable function body on any backend (every provider still binds a fixture endpoint); a compiled `.wasm` implementing the full provider ABI (#229); #173's remaining descriptor-level hostile cases exercised through all four calling consumers |
+| PG-5, PG-6 | [consumers](PUBLIC-GENERIC-CONSUMERS-V1.md), [descriptor](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md) | hosted at `7def8fb1…`, not yet a #164 frozen candidate; codegen wiring from a verified descriptor to a real callable function body on any backend (every provider still binds a fixture endpoint); a compiled `.wasm` implementing the full provider ABI (#229); per #173's own 2026-09-19 audit (superseding the phrase this row previously used, "remaining descriptor-level hostile cases exercised through all four calling consumers" — that part is done, by `6d1289b9`/`5ac1331d`, and is hosted at `7def8fb1…`), two residual items: a non-vacuity mutation proof for five of the six `malformed_trusted_descriptor_cases` branches (only `stale_boundary_profile_version` has one, via a C11-codec neutering that was reverted after confirming the case alone failed); and carrier-side hostility — handle generation, ownership flag, field path, variant tag, cleanup-plan substitution — exercised only at the reference-decoder layer (`tests/projections/public_generic_descriptor_carrier_hostile_replay.rs`), not through the four generated calling consumers |
 | PG-7 | [settlement obligations](PUBLIC-GENERIC-SETTLEMENT-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md); [cross-engine corpus](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | hosted at `7def8fb1…`, not yet a #164 frozen candidate; complete model/compiled-Wasm/consumer participation in the persisted settlement corpus; comparable all-engine peaks and logical traces; the same fixture-endpoint and nested-record limitations as PG-5/PG-6 above |
 | PG-8 | the `public-generic-ownership-milestone` CI job | nothing for the corpus as it exists today (hosted at `7def8fb1…` for all three hosts); #164's formal exact-head freeze protocol has not run |
 | PG-9 | this document | nothing to decide further; decided 2026-09-19 as `unsupported`/`unpublished` (see the PG-9 decision record and "PG-9 decision recorded" addendum below). Moving to a more permissive option would still require #164's freeze protocol to run and the remaining structural blockers (fixture endpoints, #229) to be resolved or explicitly accepted |

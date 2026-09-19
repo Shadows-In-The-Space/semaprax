@@ -656,18 +656,23 @@ jobs:
       - name: Run every committed Python test suite
         shell: bash
         run: |
-          # These three suites are real, green, and were selected by no
-          # workflow file until now -- the same "a passing local suite no
-          # hosted run executes" defect issue #163 closes for a Rust module.
+          # These suites are real, green, and were selected by no workflow
+          # file until now -- the same "a passing local suite no hosted run
+          # executes" defect issue #163 closes for a Rust module.
           # `test_agent_driver.py` drives the cross-language benchmark agent
           # seam against a real `rustc`, which is why this job installs the
-          # toolchain; the other two are pure Python. None of them calls a
+          # toolchain; `test-generated-package-release.py` (issue #145) uses
+          # that same toolchain plus this job's Node 22 for its real (not
+          # merely structural) `cargo publish --dry-run` / `npm pack
+          # --dry-run` checks; the rest are pure Python. None of them calls a
           # model or reaches the network: the agent seam's only transports
-          # here are the replay and mock ones.
+          # here are the replay and mock ones, and the package-release dry
+          # runs never contact a registry either.
           set -euo pipefail
           python3 -m unittest discover -s benchmarks/cross-language-v1/agent/tests -t . -v
           python3 scripts/test-agent-task-comparison-runner.py
           python3 scripts/test-opencode-provider-smoke.py
+          python3 scripts/test-generated-package-release.py
 
   installed-journey:
     name: Installed toolchain journey

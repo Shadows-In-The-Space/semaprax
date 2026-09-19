@@ -8,6 +8,17 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add `scripts/generated-package-release.py` (`prepare`/`check`), a
+  release-preparation and dry-run-only layer around the existing Project v8
+  `owned-data-api.v1` generated npm/Rust packages: closed-inventory,
+  secret/local-path, and no-private-dependency admission; deterministic
+  README/LICENSE/checksum-manifest wrapping; and a `check` step that only
+  ever runs `npm pack --dry-run`/`cargo publish --dry-run` (never
+  `--publish`, never near a live registry credential). Prepares (but does not
+  make) the maintainer publication decision drafted in
+  `docs/GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md`; nothing is
+  published by this change (#145).
+
 - Refuse a bundled dependency member that names an authored type at the Useful
   Data workspace linker boundary, by name, rather than admitting it into a
   declaration set that deliberately holds no authored type and letting it

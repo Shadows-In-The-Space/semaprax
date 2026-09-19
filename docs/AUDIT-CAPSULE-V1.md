@@ -5,9 +5,10 @@ structural verifier, a structural diff, machine-readable `nonclaims`,
 independent replay of a `change` capsule against source, opt-in Ed25519
 signature verification against a caller-supplied trust roster
 (`signature_verification`), and a read-only `semaprax audit inspect|verify|diff`
-CLI front (which does not yet expose that roster). Cryptographic *signing*
-and real transparency-log submission are `HUMAN_BLOCKED` -- neither exists
-here, and this document must not be read as claiming otherwise.
+CLI front whose `verify` verb now exposes that roster as `--trust-roster
+<path.json>`. Cryptographic *signing* and real transparency-log submission
+are `HUMAN_BLOCKED` -- neither exists here, and this document must not be
+read as claiming otherwise.
 
 Audience: implementers wiring a capsule producer, reviewers auditing a
 capsule, and anyone extending `src/audit_capsule.rs`.
@@ -96,11 +97,20 @@ the referenced object's exact bytes -- the same digest an independent
   the results. No rule lives in the CLI front -- every check is
   `audit_capsule`'s own, and the front's own diagnostic code (`SPX-Z920`) is
   used only for "this document could not be read at all," never for a
-  decode or verification failure. **`audit verify`'s success line and every
-  capsule's own required `nonclaims` are printed together**, so a green
-  `audit verify` run cannot be mistaken for a cryptographic signature check.
-  Profile composition (below) remains unimplemented, so there is nothing for
-  a composed-capsule CLI verb to do yet.
+  decode or verification failure. `verify` also accepts an optional
+  `--trust-roster <path.json>`: a JSON object mapping signer identity to a
+  64-lowercase-hex-character Ed25519 public key, loaded into
+  [`SignaturePolicyContext::identity_public_keys`] so `check_signature_policy`
+  cryptographically verifies every signature in the capsule against it (see
+  `signature_verification`). **`audit verify`'s report always states, in one
+  of three plainly distinguishable ways, whether that cryptographic check
+  actually happened: verified against a supplied roster, present but
+  unverified (no roster, or a roster naming zero identities), or rejected**
+  -- together with every capsule's own required `nonclaims`, printed in
+  full, so a green `audit verify` run can never be mistaken for a stronger
+  guarantee than it actually establishes. Profile composition (below)
+  remains unimplemented, so there is nothing for a composed-capsule CLI verb
+  to do yet.
 - **`diff_capsules` compares two already-parsed capsules, not two capsule
   files.** [`diff_capsules`] itself never reads a file and never
   re-verifies either side; `semaprax audit diff` is the thin wrapper that
@@ -255,8 +265,11 @@ a policy heuristic. This needs no signing key, only a verifying key the
 caller already holds, which is why it is not `HUMAN_BLOCKED` the way
 producing a signature is (see `src/release_provenance.rs` #168). Leaving
 the roster empty -- the default, and the only behavior before this
-capability existed -- keeps `signature` bytes fully opaque, and no CLI flag
-wires a roster in yet.
+capability existed -- keeps `signature` bytes fully opaque.
+`semaprax audit verify --trust-roster <path.json>` wires a roster in from
+the command line; omitting the flag, or pointing it at a roster naming zero
+identities, preserves the empty-roster default exactly, and the CLI's own
+report says explicitly which of the two happened (see "CLI surface" above).
 
 **Does not prove, ever:** that a `sigstore-cosign-bundle-v0.3` signature is
 genuine -- checking a Sigstore bundle needs Rekor, which needs network

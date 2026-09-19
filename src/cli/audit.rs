@@ -22,13 +22,27 @@
 //! **Nothing here is signed and no transparency log is contacted.**
 //! `run_verify`'s success line and every capsule's own required `nonclaims`
 //! (`CapsuleVerificationReport::nonclaims`, printed in full) say so
-//! explicitly -- see `docs/AUDIT-CAPSULE-V1.md`. `check_signature_policy`
-//! and `check_transparency` remain plaintext-policy and internal-consistency
-//! checks only, exactly as the owning module documents.
+//! explicitly -- see `docs/AUDIT-CAPSULE-V1.md`. `check_transparency` remains
+//! an internal-consistency check only, exactly as the owning module
+//! documents. `check_signature_policy` is the one exception: since issue
+//! #209's residue, `verify` accepts an optional `--trust-roster <path>`
+//! (a JSON object mapping signer identity to a 64-lowercase-hex-character
+//! Ed25519 public key) and, when supplied, cryptographically verifies every
+//! signature in the capsule against it -- see
+//! `audit_capsule::signature_verification`. Omitting the flag (or supplying
+//! a roster that names zero identities) preserves the original opaque,
+//! policy-only behavior exactly; [`run_verify`]'s report always says, in one
+//! of three plainly distinguishable ways, whether that cryptographic check
+//! actually happened, so a green report can never be mistaken for a stronger
+//! guarantee than it establishes (AGENTS.md: local/absent evidence must
+//! never be described as stronger than it is).
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use ed25519_dalek::VerifyingKey;
+use serde_json::Value;
 
 use semaprax::audit_capsule::{self, ParsedCapsule, SignaturePolicyContext, TransparencyContext};
 use semaprax::diagnostic::Diagnostic;
@@ -36,7 +50,8 @@ use semaprax::diagnostic::Diagnostic;
 const USAGE: &str = "audit accepts `inspect <capsule.json>`, \
                       `verify <capsule.json> <objects-dir> [--require-role <role>]... \
                       [--revoke <identity>]... [--trust-log <log-id>]... \
-                      [--min-checkpoint-size <n>] [--now <unix-seconds>]`, or \
+                      [--trust-roster <path.json>] [--min-checkpoint-size <n>] \
+                      [--now <unix-seconds>]`, or \
                       `diff <capsule-a.json> <capsule-b.json>`; see `semaprax help audit`";
 
 /// Largest capsule manifest file this front reads. `parse_capsule` enforces
@@ -47,6 +62,12 @@ const MAX_MANIFEST_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// directory. `check_object_bytes` enforces its own `MAX_OBJECT_BYTES` bound
 /// independently on the same bytes.
 const MAX_OBJECT_FILE_BYTES: u64 = 64 * 1024 * 1024;
+/// Largest `--trust-roster <path>` document this front reads. A roster is a
+/// flat JSON object of `identity -> 64-lowercase-hex-character Ed25519
+/// public key`; even several thousand entries fit comfortably under this
+/// bound, so it only keeps a hostile file from being read into memory first,
+/// exactly like the two bounds above.
+const MAX_TRUST_ROSTER_FILE_BYTES: u64 = 1024 * 1024;
 
 /// This front's own code, for "the requested document could not be read at
 /// all" -- never used for a decode or verification failure, which always
@@ -67,6 +88,14 @@ pub(crate) struct VerifyOptions {
     required_roles: Vec<String>,
     revoked_identities: Vec<String>,
     trusted_logs: Vec<String>,
+    /// `--trust-roster <path>`: a JSON object mapping signer identity to a
+    /// 64-lowercase-hex-character Ed25519 public key. `None` when the flag
+    /// was not given at all -- kept distinct from `Some` of an empty map
+    /// (an explicitly empty roster file), since [`run_verify`]'s report must
+    /// tell those two apart even though both leave
+    /// `SignaturePolicyContext::identity_public_keys` empty and therefore
+    /// perform the identical (no) cryptographic check. See the module doc.
+    trust_roster: Option<PathBuf>,
     minimum_accepted_checkpoint_size: u64,
     verification_time_unix_seconds: Option<u64>,
 }
@@ -89,6 +118,7 @@ fn parse_verify_flags(
         required_roles: Vec::new(),
         revoked_identities: Vec::new(),
         trusted_logs: Vec::new(),
+        trust_roster: None,
         minimum_accepted_checkpoint_size: 0,
         verification_time_unix_seconds: None,
     };
@@ -110,6 +140,7 @@ fn parse_verify_flags(
             "--require-role" => options.required_roles.push(value.clone()),
             "--revoke" => options.revoked_identities.push(value.clone()),
             "--trust-log" => options.trusted_logs.push(value.clone()),
+            "--trust-roster" => options.trust_roster = Some(PathBuf::from(value)),
             "--min-checkpoint-size" => {
                 options.minimum_accepted_checkpoint_size = value.parse().map_err(|_| {
                     format!("`--min-checkpoint-size` needs a non-negative integer, got `{value}`")
@@ -231,6 +262,158 @@ fn object_bytes_from_directory(
     Ok(object_bytes)
 }
 
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+/// Decodes exactly 64 lowercase hexadecimal characters into a 32-byte
+/// Ed25519 public-key encoding. Uppercase, short, long, or non-hex input is
+/// rejected rather than tolerated -- the same "strict lower hex" discipline
+/// `audit_capsule::signature_verification::decode_lower_hex` already applies
+/// to signatures. Duplicated here in miniature rather than exposed from that
+/// module: this front's only use is decoding roster entries before handing
+/// them to `audit_capsule` as plain bytes, never verifying anything itself.
+fn decode_public_key_hex(text: &str) -> Option<[u8; 32]> {
+    if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    let bytes = text.as_bytes();
+    for (index, slot) in out.iter_mut().enumerate() {
+        let high = hex_nibble(bytes[index * 2])?;
+        let low = hex_nibble(bytes[index * 2 + 1])?;
+        *slot = (high << 4) | low;
+    }
+    Some(out)
+}
+
+/// A short, human-readable name for a JSON value's kind, used only to name
+/// what a hostile roster document actually contained in a diagnostic.
+fn json_shape(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    }
+}
+
+/// Loads a `--trust-roster <path>` document: a flat JSON object mapping
+/// signer identity to a 64-lowercase-hex-character Ed25519 public key, for
+/// [`SignaturePolicyContext::identity_public_keys`]. Fails closed, each with
+/// its own distinct reason, on an oversized file (`read_bounded` below),
+/// malformed JSON, a top-level JSON value that is not an object, an entry
+/// value that is not a string, a string that is not exactly 64
+/// lowercase-hex characters, and a value that is hex-shaped but decodes to
+/// bytes `ed25519-dalek` itself rejects as a verifying key (not a valid
+/// curve point).
+///
+/// An identity present in the roster but never named by any signature in
+/// the capsule under test is harmless and silently unused here -- exactly
+/// as an operator's roster naturally accumulates identities across many
+/// capsules, only some of which sign any one of them; `check_signature_policy`
+/// (`audit_capsule.rs`, called from [`run_verify`]) is what actually looks
+/// an identity up, and it already distinguishes "identity absent from
+/// roster" (`SPX-Z90*` signature errors, unrelated to this front's own
+/// `SPX-Z920`) from every hostile case handled here.
+///
+/// This function never builds a filesystem path from anything the *capsule*
+/// (untrusted input) says: a roster identity is only ever compared as an
+/// in-memory `BTreeMap` key against `SignatureEntry::identity`, unlike
+/// [`object_bytes_from_directory`], which must guard [`is_safe_object_id`]
+/// because object ids from the capsule really are joined into a directory
+/// path. A traversal-shaped identity string, on either side, therefore has
+/// no filesystem effect through this mechanism at all.
+fn load_trust_roster(path: &Path) -> Result<BTreeMap<String, [u8; 32]>, Diagnostic> {
+    let bytes = read_bounded(path, MAX_TRUST_ROSTER_FILE_BYTES)?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        document_error(format!(
+            "trust roster {} is not valid JSON: {error}",
+            path.display()
+        ))
+    })?;
+    let Value::Object(map) = value else {
+        return Err(document_error(format!(
+            "trust roster {} must be a JSON object mapping identity to a 64-lowercase-hex-\
+             character Ed25519 public key, not {}",
+            path.display(),
+            json_shape(&value)
+        )));
+    };
+    let mut roster = BTreeMap::new();
+    for (identity, key_value) in map {
+        let Some(hex) = key_value.as_str() else {
+            return Err(document_error(format!(
+                "trust roster {} entry `{identity}` must be a hex string, not {}",
+                path.display(),
+                json_shape(&key_value)
+            )));
+        };
+        let Some(key_bytes) = decode_public_key_hex(hex) else {
+            return Err(document_error(format!(
+                "trust roster {} entry `{identity}` is not 64 lowercase-hex characters encoding \
+                 a 32-byte Ed25519 public key",
+                path.display()
+            )));
+        };
+        if VerifyingKey::from_bytes(&key_bytes).is_err() {
+            return Err(document_error(format!(
+                "trust roster {} entry `{identity}`'s key is not a valid Ed25519 verifying key",
+                path.display()
+            )));
+        }
+        roster.insert(identity, key_bytes);
+    }
+    Ok(roster)
+}
+
+/// The three states [`run_verify`]'s report must keep plainly
+/// distinguishable (see the module doc and AGENTS.md's rule that
+/// local/absent evidence must never be described as stronger than it is):
+/// a roster was supplied and every signature verified against it
+/// (cryptographically verified); no `--trust-roster` was given at all
+/// (present but unverified); or `--trust-roster` was given but names zero
+/// identities, which performs exactly the same (no) cryptographic check as
+/// omitting it entirely, so it must still read as unverified, never as
+/// "verified against nothing." `roster_identity_count` is `None` when
+/// `--trust-roster` was not supplied and `Some(len)` (`len` possibly `0`)
+/// when it was. A capsule with no signatures at all makes none of these
+/// claims either way.
+fn signature_verification_summary(
+    signature_count: usize,
+    roster_identity_count: Option<usize>,
+) -> String {
+    if signature_count == 0 {
+        return "signatures: 0 present\n".to_owned();
+    }
+    match roster_identity_count {
+        None => format!(
+            "signatures: {signature_count} present -- NOT cryptographically verified (no \
+             `--trust-roster` was supplied)\n"
+        ),
+        Some(0) => format!(
+            "signatures: {signature_count} present -- NOT cryptographically verified \
+             (`--trust-roster` was supplied but names 0 identities, which checks nothing, \
+             identically to omitting it)\n"
+        ),
+        Some(identity_count) => format!(
+            "signatures: {signature_count} present -- all CRYPTOGRAPHICALLY VERIFIED against \
+             the supplied trust roster ({identity_count} {})\n",
+            if identity_count == 1 {
+                "identity"
+            } else {
+                "identities"
+            }
+        ),
+    }
+}
+
 fn now_unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -238,15 +421,16 @@ fn now_unix_seconds() -> u64 {
         .unwrap_or(0)
 }
 
-/// The nonclaims banner every successful `verify` and `inspect` prints,
-/// independent of the capsule's own `nonclaims` field (which is printed
-/// separately, in full, below it). Kept as one constant so no output path
-/// can drift into implying more than this front establishes.
+/// The nonclaims banner every successful `verify` prints, independent of
+/// the capsule's own `nonclaims` field (which is printed separately, in
+/// full, above it) and of [`signature_verification_summary`] (which is the
+/// one claim this banner used to make unconditionally, before `--trust-roster`
+/// existed, and must not make unconditionally any more). Kept as one
+/// constant so no output path can drift into implying more than this front
+/// establishes.
 const FRONT_NONCLAIMS: &str = "\
-This command performs no cryptographic signature verification and contacts \
-no transparency log: `check_signature_policy` and `check_transparency` \
-check plaintext policy facts and internal consistency only. It writes, \
-executes, and publishes nothing.\n";
+This command contacts no transparency log: `check_transparency` checks \
+internal consistency only. It writes, executes, and publishes nothing.\n";
 
 /// `audit inspect <capsule.json>`: structural decode only, no object bytes
 /// required and no verification performed.
@@ -308,18 +492,24 @@ pub(crate) fn run_verify(options: &VerifyOptions) -> Result<String, Diagnostic> 
     let manifest_bytes = read_bounded(&options.capsule, MAX_MANIFEST_FILE_BYTES)?;
     let capsule = audit_capsule::parse_capsule(&manifest_bytes)?;
     let object_bytes = object_bytes_from_directory(&capsule, &options.objects_dir)?;
+    let signature_count = capsule.signatures.len();
+    // `None` iff `--trust-roster` was not supplied at all; `Some(roster)`
+    // (possibly empty) otherwise. Read before building `signature_ctx` below
+    // so the distinction survives into the report even though
+    // `check_signature_policy` treats an empty roster identically to no
+    // roster at all (see `signature_verification_summary`'s doc).
+    let trust_roster = match &options.trust_roster {
+        Some(path) => Some(load_trust_roster(path)?),
+        None => None,
+    };
+    let roster_identity_count = trust_roster.as_ref().map(BTreeMap::len);
     let signature_ctx = SignaturePolicyContext {
         verification_time_unix_seconds: options
             .verification_time_unix_seconds
             .unwrap_or_else(now_unix_seconds),
         revoked_identities: options.revoked_identities.iter().cloned().collect(),
         required_roles: options.required_roles.clone(),
-        // No CLI flag wires a trust roster in yet (issue #209 residue,
-        // alongside real signing): an empty roster preserves this front's
-        // existing policy-only behavior exactly. See
-        // `audit_capsule::signature_verification` for the opt-in library
-        // capability this leaves unreached from the command line.
-        identity_public_keys: BTreeMap::new(),
+        identity_public_keys: trust_roster.unwrap_or_default(),
     };
     let transparency_ctx = TransparencyContext {
         known_logs: options.trusted_logs.iter().cloned().collect(),
@@ -347,6 +537,10 @@ pub(crate) fn run_verify(options: &VerifyOptions) -> Result<String, Diagnostic> 
     for (id, object_type, reason) in &report.unavailable_claims {
         out.push_str(&format!("  {id} ({object_type}): {reason}\n"));
     }
+    out.push_str(&signature_verification_summary(
+        signature_count,
+        roster_identity_count,
+    ));
     out.push_str("nonclaims:\n");
     for nonclaim in &report.nonclaims {
         out.push_str(&format!("  {nonclaim}\n"));

@@ -10,7 +10,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use semaprax::audit_capsule::{render_capsule, sha256_digest, AssociationEdge, ObjectRef, Profile};
+use ed25519_dalek::{Signer as _, SigningKey};
+
+use semaprax::audit_capsule::{
+    render_capsule, sha256_digest, AssociationEdge, ObjectRef, Profile, SignatureEntry,
+};
 
 use super::*;
 
@@ -331,6 +335,7 @@ fn a_traversal_shaped_object_id_is_rejected_before_any_file_is_read() {
         required_roles: Vec::new(),
         revoked_identities: Vec::new(),
         trusted_logs: Vec::new(),
+        trust_roster: None,
         minimum_accepted_checkpoint_size: 0,
         verification_time_unix_seconds: Some(0),
     };
@@ -370,6 +375,7 @@ fn verify_succeeds_against_the_matching_objects_directory_and_never_claims_signi
         required_roles: Vec::new(),
         revoked_identities: Vec::new(),
         trusted_logs: Vec::new(),
+        trust_roster: None,
         minimum_accepted_checkpoint_size: 0,
         verification_time_unix_seconds: Some(0),
     };
@@ -382,8 +388,11 @@ fn verify_succeeds_against_the_matching_objects_directory_and_never_claims_signi
     for nonclaim in audit_capsule::nonclaims::ALWAYS_REQUIRED_NONCLAIMS {
         assert!(report.contains(nonclaim), "missing nonclaim {nonclaim}");
     }
-    assert!(report.contains("no cryptographic signature verification"));
+    // This fixture carries no signatures at all, so the report must make no
+    // verified/unverified claim either way -- just the plain count.
+    assert!(report.contains("signatures: 0 present"));
     assert!(!report.to_lowercase().contains("signed capsule"));
+    assert!(report.contains("This command contacts no transparency log"));
 }
 
 /// Negative control: this is the exact test that proves `verify` performs
@@ -400,6 +409,7 @@ fn verify_fails_closed_when_an_object_file_does_not_match_its_declared_digest() 
         required_roles: Vec::new(),
         revoked_identities: Vec::new(),
         trusted_logs: Vec::new(),
+        trust_roster: None,
         minimum_accepted_checkpoint_size: 0,
         verification_time_unix_seconds: Some(0),
     };
@@ -418,6 +428,7 @@ fn verify_fails_closed_when_an_object_file_is_missing() {
         required_roles: Vec::new(),
         revoked_identities: Vec::new(),
         trusted_logs: Vec::new(),
+        trust_roster: None,
         minimum_accepted_checkpoint_size: 0,
         verification_time_unix_seconds: Some(0),
     };
@@ -466,6 +477,7 @@ fn inspect_and_verify_reports_are_byte_identical_across_repeated_runs() {
         required_roles: Vec::new(),
         revoked_identities: Vec::new(),
         trusted_logs: Vec::new(),
+        trust_roster: None,
         minimum_accepted_checkpoint_size: 0,
         verification_time_unix_seconds: Some(42),
     };
@@ -485,4 +497,536 @@ fn this_front_spawns_no_process_and_reaches_no_network() {
     assert!(!source.contains("std::process::Command"));
     assert!(!source.contains("TcpStream"));
     assert!(!source.contains("std::net::"));
+}
+
+// ---------------------------------------------------------------------
+// `--trust-roster`: the CLI wiring for issue #209's forged-signature gap.
+// `audit_capsule::signature_verification` already carries its own
+// exhaustive positive/negative cryptographic suite; these tests exercise
+// only this front's own roster loading, argument parsing, and report
+// wording, end to end through `parse` and `run_verify`.
+// ---------------------------------------------------------------------
+
+const TRUST_OBJECT_A_BYTES: &[u8] = b"trust-roster fixture: program-root";
+const TRUST_OBJECT_B_BYTES: &[u8] = b"trust-roster fixture: semantic-transaction";
+const TRUST_OBJECT_C_BYTES: &[u8] = b"trust-roster fixture: assurance-manifest";
+const TRUST_OBJECT_D_BYTES: &[u8] = b"trust-roster fixture: source-projection";
+
+fn trust_capsule_objects() -> Vec<ObjectRef> {
+    vec![
+        ObjectRef {
+            id: "obj-a-program-root".to_owned(),
+            object_type: "program-root".to_owned(),
+            schema: "semaprax.program-root.v3".to_owned(),
+            digest: sha256_digest(TRUST_OBJECT_A_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: BTreeMap::new(),
+        },
+        ObjectRef {
+            id: "obj-b-semantic-transaction".to_owned(),
+            object_type: "semantic-transaction".to_owned(),
+            schema: "semaprax.project-candidate-semantic-delta.v1".to_owned(),
+            digest: sha256_digest(TRUST_OBJECT_B_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: BTreeMap::new(),
+        },
+        ObjectRef {
+            id: "obj-c-assurance-manifest".to_owned(),
+            object_type: "assurance-manifest".to_owned(),
+            schema: "semaprax.assurance-manifest.v1".to_owned(),
+            digest: sha256_digest(TRUST_OBJECT_C_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: BTreeMap::new(),
+        },
+        ObjectRef {
+            id: "obj-d-source-projection".to_owned(),
+            object_type: "source-projection".to_owned(),
+            schema: "semaprax.program-root.v3".to_owned(),
+            digest: sha256_digest(TRUST_OBJECT_D_BYTES),
+            redacted: false,
+            redaction_reason: None,
+            binds: BTreeMap::new(),
+        },
+    ]
+}
+
+fn render_trust_capsule(revision: &str, signatures: &[SignatureEntry]) -> Vec<u8> {
+    render_capsule(
+        Profile::Change,
+        &change_subject(revision),
+        &trust_capsule_objects(),
+        &[],
+        signatures,
+        None,
+        &base_nonclaims(),
+    )
+    .expect("a well-formed change capsule with signatures must render")
+}
+
+fn write_trust_objects(objects_dir: &std::path::Path) {
+    fs::create_dir_all(objects_dir).unwrap();
+    fs::write(objects_dir.join("obj-a-program-root"), TRUST_OBJECT_A_BYTES).unwrap();
+    fs::write(
+        objects_dir.join("obj-b-semantic-transaction"),
+        TRUST_OBJECT_B_BYTES,
+    )
+    .unwrap();
+    fs::write(
+        objects_dir.join("obj-c-assurance-manifest"),
+        TRUST_OBJECT_C_BYTES,
+    )
+    .unwrap();
+    fs::write(
+        objects_dir.join("obj-d-source-projection"),
+        TRUST_OBJECT_D_BYTES,
+    )
+    .unwrap();
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
+/// A genuinely Ed25519-signed `change` capsule naming `identity` under
+/// `role`, plus the exact 32-byte verifying key that signature verifies
+/// against. `render_trust_capsule(revision, &[])`'s bytes are what
+/// `signature_verification::signable_bytes` would independently recompute
+/// from the final, signed manifest (it zeroes the `signatures` field before
+/// re-serializing, and every other field here is identical either way; this
+/// crate cannot call that `pub(super)` function directly, but
+/// `an_end_to_end_genuine_signature_actually_verifies` below is the
+/// empirical proof this equivalence holds).
+fn genuinely_signed_capsule(role: &str, identity: &str, revision: &str) -> (Vec<u8>, [u8; 32]) {
+    let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+    let verifying_key = signing_key.verifying_key();
+    let bytes_to_sign = render_trust_capsule(revision, &[]);
+    let real_signature = signing_key.sign(&bytes_to_sign);
+    let entries = [SignatureEntry {
+        role: role.to_owned(),
+        identity: identity.to_owned(),
+        algorithm: "ed25519-raw-v1".to_owned(),
+        signature: hex_encode(&real_signature.to_bytes()),
+        not_valid_after_unix_seconds: 9_999_999_999,
+    }];
+    (
+        render_trust_capsule(revision, &entries),
+        verifying_key.to_bytes(),
+    )
+}
+
+fn trust_roster_json(entries: &[(&str, [u8; 32])]) -> String {
+    let mut map = serde_json::Map::new();
+    for (identity, key) in entries {
+        map.insert((*identity).to_owned(), Value::String(hex_encode(key)));
+    }
+    serde_json::to_string(&Value::Object(map)).expect("a flat string map always serializes")
+}
+
+fn write_roster(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
+    fs::create_dir_all(dir).unwrap();
+    let path = dir.join(name);
+    fs::write(&path, body).unwrap();
+    path
+}
+
+fn verify_options_with_roster(
+    manifest_path: PathBuf,
+    objects_dir: PathBuf,
+    trust_roster: Option<PathBuf>,
+) -> VerifyOptions {
+    VerifyOptions {
+        capsule: manifest_path,
+        objects_dir,
+        required_roles: Vec::new(),
+        revoked_identities: Vec::new(),
+        trusted_logs: Vec::new(),
+        trust_roster,
+        minimum_accepted_checkpoint_size: 0,
+        verification_time_unix_seconds: Some(0),
+    }
+}
+
+#[test]
+fn parse_admits_the_trust_roster_flag() {
+    match parse(&strings(&[
+        "verify",
+        "capsule.json",
+        "objects",
+        "--trust-roster",
+        "roster.json",
+    ])) {
+        Ok(AuditCommand::Verify(options)) => {
+            assert_eq!(options.trust_roster, Some(PathBuf::from("roster.json")));
+        }
+        _ => panic!("expected Verify with --trust-roster"),
+    }
+    // Omitted entirely is the backward-compatible default.
+    match parse(&strings(&["verify", "capsule.json", "objects"])) {
+        Ok(AuditCommand::Verify(options)) => assert_eq!(options.trust_roster, None),
+        _ => panic!("expected Verify"),
+    }
+}
+
+// ---------------------------------------------------------------------
+// The three report states: never let "not verified" read as "verified".
+// ---------------------------------------------------------------------
+
+#[test]
+fn verify_with_no_trust_roster_reports_signatures_present_but_not_cryptographically_verified() {
+    let root = scratch_dir("no-roster");
+    let manifest = render_trust_capsule(
+        "r1",
+        &[SignatureEntry {
+            role: "publisher".to_owned(),
+            identity: "agent://alice".to_owned(),
+            algorithm: "ed25519-raw-v1".to_owned(),
+            signature: "not-a-real-signature".to_owned(),
+            not_valid_after_unix_seconds: 9_999_999_999,
+        }],
+    );
+    let manifest_path = root.join("capsule.json");
+    fs::write(&manifest_path, &manifest).unwrap();
+    let objects_dir = root.join("objects");
+    write_trust_objects(&objects_dir);
+
+    let options = verify_options_with_roster(manifest_path, objects_dir, None);
+    let report = run_verify(&options).expect("no roster means no crypto check, so this succeeds");
+    assert!(report.contains(
+        "signatures: 1 present -- NOT cryptographically verified (no `--trust-roster` was supplied)"
+    ));
+    assert!(!report.contains("CRYPTOGRAPHICALLY VERIFIED"));
+}
+
+#[test]
+fn verify_with_an_explicitly_empty_trust_roster_is_distinguished_from_no_roster_at_all() {
+    let root = scratch_dir("empty-roster");
+    let manifest = render_trust_capsule(
+        "r1",
+        &[SignatureEntry {
+            role: "publisher".to_owned(),
+            identity: "agent://alice".to_owned(),
+            algorithm: "ed25519-raw-v1".to_owned(),
+            signature: "not-a-real-signature".to_owned(),
+            not_valid_after_unix_seconds: 9_999_999_999,
+        }],
+    );
+    let manifest_path = root.join("capsule.json");
+    fs::write(&manifest_path, &manifest).unwrap();
+    let objects_dir = root.join("objects");
+    write_trust_objects(&objects_dir);
+    let roster_path = write_roster(&root, "roster.json", "{}");
+
+    let options = verify_options_with_roster(manifest_path, objects_dir, Some(roster_path));
+    let report =
+        run_verify(&options).expect("an empty roster performs no check, so this succeeds too");
+    assert!(report.contains(
+        "signatures: 1 present -- NOT cryptographically verified (`--trust-roster` was supplied \
+         but names 0 identities"
+    ));
+    // The wording must differ from the "no --trust-roster at all" case above,
+    // even though both leave the signature unverified.
+    assert!(!report.contains("no `--trust-roster` was supplied"));
+    assert!(!report.contains("CRYPTOGRAPHICALLY VERIFIED"));
+}
+
+#[test]
+fn verify_succeeds_and_reports_cryptographic_verification_for_a_genuine_signature() {
+    let (manifest, key_bytes) = genuinely_signed_capsule("publisher", "agent://alice", "r1");
+    let root = scratch_dir("roster-ok");
+    let manifest_path = root.join("capsule.json");
+    fs::write(&manifest_path, &manifest).unwrap();
+    let objects_dir = root.join("objects");
+    write_trust_objects(&objects_dir);
+    let roster_path = write_roster(
+        &root,
+        "roster.json",
+        &trust_roster_json(&[("agent://alice", key_bytes)]),
+    );
+
+    let options = verify_options_with_roster(manifest_path, objects_dir, Some(roster_path));
+    let report =
+        run_verify(&options).expect("a genuine signature must verify against the matching key");
+    assert!(report.contains(
+        "signatures: 1 present -- all CRYPTOGRAPHICALLY VERIFIED against the supplied trust \
+         roster (1 identity)"
+    ));
+    assert!(!report.contains("NOT cryptographically verified"));
+}
+
+/// **The sentence issue #209 closes on.** This is also the fault-injection
+/// target: temporarily hardcoding `identity_public_keys: BTreeMap::new()`
+/// in `run_verify` (ignoring `options.trust_roster` entirely) turns this
+/// test's expected `Err` into an `Ok`, which is exactly the silent-forgery
+/// defect this change closes -- confirmed by hand during this change and
+/// reverted before landing.
+#[test]
+fn verify_rejects_a_forged_signature_naming_an_approved_identity_when_trust_roster_supplied() {
+    let (manifest, key_bytes) = genuinely_signed_capsule("publisher", "agent://alice", "r1");
+    // Forge: flip one hex character of the real signature after the fact,
+    // keeping the identity, role, and every other field exactly as an
+    // approved signer's would look. Located by exact text surgery on the
+    // one signature string present, not by guessing an offset.
+    let manifest_text = String::from_utf8(manifest).unwrap();
+    let capsule_for_signature =
+        audit_capsule::parse_capsule(manifest_text.as_bytes()).expect("fixture must parse");
+    let real_signature = capsule_for_signature.signatures[0].signature.clone();
+    let mut forged_signature = real_signature.clone();
+    let flipped = if &forged_signature[0..1] == "0" {
+        "1"
+    } else {
+        "0"
+    };
+    forged_signature.replace_range(0..1, flipped);
+    let forged_manifest_text = manifest_text.replacen(&real_signature, &forged_signature, 1);
+    assert_ne!(
+        forged_manifest_text, manifest_text,
+        "the forgery must change the manifest bytes"
+    );
+
+    let root = scratch_dir("roster-forged");
+    let manifest_path = root.join("capsule.json");
+    fs::write(&manifest_path, forged_manifest_text.as_bytes()).unwrap();
+    let objects_dir = root.join("objects");
+    write_trust_objects(&objects_dir);
+    let roster_path = write_roster(
+        &root,
+        "roster.json",
+        &trust_roster_json(&[("agent://alice", key_bytes)]),
+    );
+
+    let options = verify_options_with_roster(manifest_path, objects_dir, Some(roster_path));
+    let error = run_verify(&options)
+        .expect_err("a forged signature naming an approved identity must be rejected");
+    assert!(
+        error
+            .message
+            .contains("does not verify against this capsule's exact manifest bytes"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn verify_rejects_an_identity_the_roster_does_not_recognize() {
+    let (manifest, _unused_key) = genuinely_signed_capsule("publisher", "agent://alice", "r1");
+    let root = scratch_dir("roster-unknown-identity");
+    let manifest_path = root.join("capsule.json");
+    fs::write(&manifest_path, &manifest).unwrap();
+    let objects_dir = root.join("objects");
+    write_trust_objects(&objects_dir);
+    // The roster is non-empty (so strict mode turns on) but never names
+    // `agent://alice`, the capsule's actual signer.
+    let roster_path = write_roster(
+        &root,
+        "roster.json",
+        &trust_roster_json(&[("agent://someone-else", [3u8; 32])]),
+    );
+
+    let options = verify_options_with_roster(manifest_path, objects_dir, Some(roster_path));
+    let error =
+        run_verify(&options).expect_err("an identity absent from a non-empty roster is unknown");
+    assert!(
+        error.message.contains("not in the trusted signer roster"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn verify_ignores_a_roster_entry_for_an_identity_absent_from_the_capsule() {
+    let (manifest, key_bytes) = genuinely_signed_capsule("publisher", "agent://alice", "r1");
+    let root = scratch_dir("roster-extra-identity");
+    let manifest_path = root.join("capsule.json");
+    fs::write(&manifest_path, &manifest).unwrap();
+    let objects_dir = root.join("objects");
+    write_trust_objects(&objects_dir);
+    // An extra entry for an identity this capsule never signs with must be
+    // harmless -- a real operator's roster naturally accumulates entries
+    // across many capsules.
+    let roster_path = write_roster(
+        &root,
+        "roster.json",
+        &trust_roster_json(&[
+            ("agent://alice", key_bytes),
+            ("agent://nobody-in-this-capsule", [3u8; 32]),
+        ]),
+    );
+
+    let options = verify_options_with_roster(manifest_path, objects_dir, Some(roster_path));
+    let report =
+        run_verify(&options).expect("an unrelated extra roster entry must not affect verification");
+    assert!(report.contains("all CRYPTOGRAPHICALLY VERIFIED"));
+}
+
+#[test]
+fn a_traversal_shaped_signature_identity_has_no_filesystem_effect_through_the_trust_roster() {
+    // Unlike an object id (joined into `objects_dir` and guarded by
+    // `is_safe_object_id`), a signature identity is only ever compared as an
+    // in-memory `BTreeMap` key against the roster -- so a traversal-shaped
+    // identity is just an unusual string, not a path. This proves it end to
+    // end rather than merely asserting the reasoning.
+    let hostile_identity = "../../outside-roster-dir";
+    let (manifest, key_bytes) = genuinely_signed_capsule("publisher", hostile_identity, "r1");
+    let root = scratch_dir("roster-traversal-identity");
+    let manifest_path = root.join("capsule.json");
+    fs::write(&manifest_path, &manifest).unwrap();
+    let objects_dir = root.join("objects");
+    write_trust_objects(&objects_dir);
+    let roster_path = write_roster(
+        &root,
+        "roster.json",
+        &trust_roster_json(&[(hostile_identity, key_bytes)]),
+    );
+
+    let options = verify_options_with_roster(manifest_path, objects_dir, Some(roster_path));
+    let report = run_verify(&options)
+        .expect("a traversal-shaped identity is just a string key, never a filesystem path");
+    assert!(report.contains("all CRYPTOGRAPHICALLY VERIFIED"));
+}
+
+#[test]
+fn a_trust_roster_path_with_parent_directory_components_is_read_like_any_other_cli_path() {
+    // `--trust-roster`, like `<capsule.json>` and `<objects-dir>`, is a
+    // plain caller-supplied path: a legitimate `..`-containing path to a
+    // real file elsewhere must work exactly as `std::fs` would resolve it,
+    // with no extra restriction this front does not also apply to its other
+    // two path arguments.
+    let (manifest, key_bytes) = genuinely_signed_capsule("publisher", "agent://alice", "r1");
+    let root = scratch_dir("roster-dotdot");
+    let manifest_dir = root.join("capsule-dir");
+    fs::create_dir_all(&manifest_dir).unwrap();
+    let manifest_path = manifest_dir.join("capsule.json");
+    fs::write(&manifest_path, &manifest).unwrap();
+    let objects_dir = manifest_dir.join("objects");
+    write_trust_objects(&objects_dir);
+    let roster_dir = root.join("elsewhere");
+    write_roster(
+        &roster_dir,
+        "roster.json",
+        &trust_roster_json(&[("agent://alice", key_bytes)]),
+    );
+    let roster_path_via_dotdot = manifest_dir.join("../elsewhere/roster.json");
+
+    let options =
+        verify_options_with_roster(manifest_path, objects_dir, Some(roster_path_via_dotdot));
+    let report = run_verify(&options).expect("a `..`-containing roster path must resolve fine");
+    assert!(report.contains("all CRYPTOGRAPHICALLY VERIFIED"));
+}
+
+// ---------------------------------------------------------------------
+// `load_trust_roster`: hostile documents, each failing closed with its own
+// distinct, stable reason.
+// ---------------------------------------------------------------------
+
+#[test]
+fn load_trust_roster_accepts_an_explicitly_empty_object() {
+    let root = scratch_dir("roster-load-empty");
+    let path = write_roster(&root, "roster.json", "{}");
+    let roster = load_trust_roster(&path).expect("an empty JSON object is a valid, empty roster");
+    assert!(roster.is_empty());
+}
+
+#[test]
+fn load_trust_roster_rejects_malformed_json() {
+    let root = scratch_dir("roster-load-malformed");
+    let path = write_roster(&root, "roster.json", "not json at all {{{");
+    let error = load_trust_roster(&path).expect_err("malformed JSON must fail closed");
+    assert!(
+        error.message.contains("is not valid JSON"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn load_trust_roster_rejects_a_non_object_top_level_value() {
+    let root = scratch_dir("roster-load-non-object");
+    let path = write_roster(&root, "roster.json", "[\"agent://alice\"]");
+    let error = load_trust_roster(&path).expect_err("an array is not a valid roster shape");
+    assert!(
+        error.message.contains("must be a JSON object"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn load_trust_roster_rejects_a_non_string_entry_value() {
+    let root = scratch_dir("roster-load-non-string");
+    let path = write_roster(&root, "roster.json", r#"{"agent://alice": 12345}"#);
+    let error = load_trust_roster(&path).expect_err("a numeric key value is not a hex string");
+    assert!(
+        error.message.contains("must be a hex string"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn load_trust_roster_rejects_an_entry_of_the_wrong_hex_length() {
+    let root = scratch_dir("roster-load-short-hex");
+    let path = write_roster(&root, "roster.json", r#"{"agent://alice": "abcd"}"#);
+    let error = load_trust_roster(&path).expect_err("4 hex characters cannot encode 32 bytes");
+    assert!(
+        error.message.contains("64 lowercase-hex characters"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn load_trust_roster_rejects_uppercase_hex() {
+    let root = scratch_dir("roster-load-uppercase-hex");
+    let body = format!(r#"{{"agent://alice": "{}"}}"#, "AB".repeat(32));
+    let path = write_roster(&root, "roster.json", &body);
+    let error = load_trust_roster(&path).expect_err("uppercase hex must not be tolerated");
+    assert!(
+        error.message.contains("64 lowercase-hex characters"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn load_trust_roster_rejects_a_hex_shaped_but_invalid_curve_point() {
+    let root = scratch_dir("roster-load-invalid-point");
+    // A little-endian encoded y-coordinate of 2 (compressed-point byte `02`
+    // followed by 31 zero bytes) has no corresponding x on the Edwards25519
+    // curve, so `VerifyingKey::from_bytes` rejects it as `PointDecompression`
+    // even though it is exactly 64 lowercase-hex characters. Found by direct
+    // search over this exact `ed25519-dalek` version rather than assumed --
+    // e.g. 32 bytes of `0xff` (a non-canonical, out-of-range field element)
+    // decompresses to a *valid* point in this crate and is not a usable
+    // negative fixture.
+    let body = format!(r#"{{"agent://alice": "02{}"}}"#, "0".repeat(62));
+    let path = write_roster(&root, "roster.json", &body);
+    let error =
+        load_trust_roster(&path).expect_err("an invalid curve point must be rejected, not parsed");
+    assert!(
+        error.message.contains("not a valid Ed25519 verifying key"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn load_trust_roster_rejects_an_oversized_document() {
+    let root = scratch_dir("roster-load-oversized");
+    let path = root.join("roster.json");
+    fs::create_dir_all(&root).unwrap();
+    let oversized = vec![b'0'; (MAX_TRUST_ROSTER_FILE_BYTES + 1) as usize];
+    fs::write(&path, &oversized).unwrap();
+    let error = load_trust_roster(&path).expect_err("an oversized document must fail closed");
+    assert!(
+        error.message.contains("byte bound for this front"),
+        "{}",
+        error.message
+    );
 }

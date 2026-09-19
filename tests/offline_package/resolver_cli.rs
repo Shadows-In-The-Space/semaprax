@@ -254,9 +254,13 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
     // also after these witnesses were pinned, and its three usages are the
     // 272 bytes that otherwise push the length pin below off by exactly that
     // much. Normalize them away for the same reason as the release verb above.
+    // `verify`'s own usage later grew a `--trust-roster <path.json>` flag
+    // (issue #209's forged-signature residue, wiring `check_signature_policy`'s
+    // trust roster in from the command line) -- normalized away here too, so
+    // it never needs to touch the historical pins below either.
     const AUDIT_LINES: [&str; 3] = [
         "semaprax audit inspect <capsule.json>\n",
-        "semaprax audit verify <capsule.json> <objects-dir> [--require-role <role>]... [--revoke <identity>]... [--trust-log <log-id>]... [--min-checkpoint-size <n>] [--now <unix-seconds>]\n",
+        "semaprax audit verify <capsule.json> <objects-dir> [--require-role <role>]... [--revoke <identity>]... [--trust-log <log-id>]... [--trust-roster <path.json>] [--min-checkpoint-size <n>] [--now <unix-seconds>]\n",
         "semaprax audit diff <capsule-a.json> <capsule-b.json>\n",
     ];
     for line in AUDIT_LINES {

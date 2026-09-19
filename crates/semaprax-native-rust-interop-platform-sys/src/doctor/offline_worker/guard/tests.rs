@@ -144,13 +144,12 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
         ]
     );
     // The one admitted role-scoped extension, pinned by exact inventory and by
-    // the named operation each number is. `accept4` and `perf_event_open` are
-    // the two entries that are not obviously event-loop primitives; they are
-    // pinned here so a reader sees them rather than finding them inside a
-    // bare number list. See the x86-only note on `X86_EVENT_LOOP`.
+    // the named operation each number is, so a reader sees what is admitted
+    // rather than finding bare numbers. Issue #270 removed `accept4` and
+    // `perf_event_open`; see the note on `X86_EVENT_LOOP`.
     assert_eq!(
         X86_SAFE_ADDITIONS,
-        &[232, 233, 281, 283, 284, 286, 287, 288, 290, 291, 292, 293, 294, 295, 296, 297, 298,]
+        &[232, 233, 281, 283, 284, 286, 287, 290, 291, 292, 293, 294, 295, 296, 297,]
     );
     for (name, number) in EVENT_LOOP_NAMES {
         assert!(
@@ -184,7 +183,6 @@ const EVENT_LOOP_NAMES: &[(&str, u32)] = &[
     ("eventfd", 284),
     ("timerfd_settime", 286),
     ("timerfd_gettime", 287),
-    ("accept4", 288),
     ("eventfd2", 290),
     ("epoll_create1", 291),
     ("dup3", 292),
@@ -193,8 +191,66 @@ const EVENT_LOOP_NAMES: &[(&str, u32)] = &[
     ("preadv", 295),
     ("pwritev", 296),
     ("rt_tgsigqueueinfo", 297),
-    ("perf_event_open", 298),
 ];
+
+/// Issue #270: `accept4` was removed from the admitted inventory on the
+/// grounds that it is not merely unused but *unreachable*. This pins the
+/// structural facts that make that true, so the removal cannot be quietly
+/// undone by re-admitting a socket route somewhere else.
+///
+/// No socket descriptor can exist in the confined worker: `socket` and
+/// `socketpair` are in the mandatory-deny floor, and `accept`, `listen` and
+/// `accept4` itself are admitted by no role under a default-deny filter. The
+/// worker additionally `dup2`s only its two `pipe2` descriptors to 3 and 4 and
+/// runs `close_range(5.., CLOEXEC)` before exec, so nothing socket-shaped is
+/// inherited either.
+///
+/// If a future change admits any of these, this test fails and whoever made it
+/// has to decide deliberately whether `accept4` should come back.
+#[test]
+fn no_role_can_obtain_a_socket_so_accept4_is_unreachable() {
+    const SOCKET: u32 = 41;
+    const SOCKETPAIR: u32 = 53;
+    const ACCEPT: u32 = 43;
+    const LISTEN: u32 = 50;
+    const ACCEPT4: u32 = 288;
+
+    for denied in [SOCKET, SOCKETPAIR] {
+        assert!(
+            X86_MANDATORY_DENY.contains(&denied),
+            "syscall {denied} left the mandatory-deny floor; `accept4` may no longer be unreachable"
+        );
+    }
+    for unadmitted in [ACCEPT, LISTEN, ACCEPT4, SOCKET, SOCKETPAIR] {
+        assert!(
+            !X86_COMMON.contains(&unadmitted),
+            "syscall {unadmitted} is in the shared inventory"
+        );
+        assert!(
+            !X86_SAFE_ADDITIONS.contains(&unadmitted),
+            "syscall {unadmitted} is admitted as a role extension"
+        );
+        for policy in ROLE_POLICIES {
+            assert!(
+                !policy.x86_additional.contains(&unadmitted),
+                "{:?} admits syscall {unadmitted}",
+                policy.tool
+            );
+        }
+    }
+
+    // And the filter itself agrees, for every role: each of these is DENY.
+    for tool in TOOLS {
+        let guard = Guard::for_arch(expected_role(tool), tool, X86_ARCH).unwrap();
+        for number in [SOCKET, SOCKETPAIR, ACCEPT, LISTEN, ACCEPT4] {
+            assert_eq!(
+                evaluate(&guard, X86_ARCH, number, [0; 6]),
+                DENY,
+                "{tool:?} admits syscall {number}"
+            );
+        }
+    }
+}
 
 #[test]
 fn role_table_is_closed_single_role_only_and_rejects_union_widening() {

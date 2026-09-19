@@ -36,8 +36,22 @@ const X86_COMMON: &[u32] = &[
 // because that union is shared with clang -- a static binary that needs none
 // of them -- and the role table's own contract says "later compatibility work
 // must add a syscall to exactly one reviewed row rather than widen a union".
+//
+// Issue #270 removed two of the nineteen this originally carried, because
+// neither is an event-loop primitive:
+//
+// - `accept4` (288) is provably inert here, not merely unused. `socket` (41)
+//   and `socketpair` (53) are in `X86_MANDATORY_DENY`, `accept` (43) and
+//   `listen` (50) are admitted by no role under a default-deny filter, and the
+//   worker `dup2`s only its two `pipe2` descriptors to 3 and 4 before
+//   `close_range(5.., CLOEXEC)`. No socket descriptor can exist, so `accept4`
+//   had nothing it could ever operate on.
+// - `perf_event_open` (298) is a real capability -- performance counters --
+//   and nothing on a `--version` path reads them. Unlike `accept4` this has no
+//   structural proof behind it; it is a judgement that a confinement allowlist
+//   should not carry a counter syscall on the chance a loader wants it.
 const X86_EVENT_LOOP: &[u32] = &[
-    232, 233, 281, 283, 284, 286, 287, 288, 290, 291, 292, 293, 294, 295, 296, 297, 298,
+    232, 233, 281, 283, 284, 286, 287, 290, 291, 292, 293, 294, 295, 296, 297,
 ];
 const ARM_COMMON: &[u32] = &[
     63, 65, 67, 57, 80, 79, 291, 62, 17, 78, 48, 439, 214, 222, 226, 215, 216, 233, 134, 135, 139,

@@ -114,6 +114,9 @@ fn locked_version<'a>(lock: &'a str, package: &str) -> &'a str {
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn standalone_setup_reuses_the_root_native_builder_toolchain_closure() {
     let root = include_str!("../Cargo.lock");
     let setup = include_str!("../examples/owned-data-rust/Cargo.lock");
@@ -126,6 +129,9 @@ fn standalone_setup_reuses_the_root_native_builder_toolchain_closure() {
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn provider_uses_compiler_layouts_and_rejects_hostile_handles_at_o0_and_o2() {
     assert!(
         Command::new("clang")
@@ -251,6 +257,9 @@ int main(void) {
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn borrow_str_rejects_invalid_utf8_before_semantic_execution() {
     assert!(
         Command::new("clang")
@@ -295,6 +304,9 @@ fn borrow_str_rejects_invalid_utf8_before_semantic_execution() {
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn descriptor_replay_is_exact_and_display_rename_preserves_the_provider_api() {
     let original = artifact(SOURCE);
     let renamed_source = SOURCE
@@ -328,6 +340,9 @@ fn descriptor_replay_is_exact_and_display_rename_preserves_the_provider_api() {
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn published_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
     assert!(
         Command::new("clang")

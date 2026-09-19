@@ -60,6 +60,9 @@ fn execute_probe(label: &str, provider: &str, probe: &str, threaded: bool) {
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn live_contexts_reincarnation_and_all_4096_slots_keep_exact_handle_authority() {
     execute_probe(
         "handle-identity",
@@ -70,6 +73,9 @@ fn live_contexts_reincarnation_and_all_4096_slots_keep_exact_handle_authority() 
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn exhausted_and_contended_serial_reservations_never_publish_or_retry() {
     let provider = artifact(SOURCE);
     let load = "atomic_load_explicit(&spx_owned_data_next_serial_v1, memory_order_relaxed)";
@@ -87,11 +93,17 @@ fn exhausted_and_contended_serial_reservations_never_publish_or_retry() {
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn distinct_thread_confined_contexts_share_one_nonreusing_issuer() {
     execute_probe("handle-threads", artifact(SOURCE).source(), THREADS, true);
 }
 
 #[test]
+#[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
+            per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
+            its result; run explicitly with --ignored there"]
 fn owned_issuer_is_private_atomic_and_uses_the_complete_slot_width() {
     let provider = artifact(SOURCE);
     let source = provider.source();

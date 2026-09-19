@@ -346,6 +346,179 @@ fn real_os_thread_concurrent_claim_race_grants_the_lease_to_exactly_one_worker()
     }
 }
 
+/// Closes "Concurrent enqueue and idempotency races" from issue #192's
+/// required-tests list. Every other concurrent test in this module races
+/// `claim` against an *already-enqueued* job; nothing before this test raced
+/// `enqueue` itself, so the idempotency-key uniqueness check
+/// (`self.jobs.iter().find(...)` followed by an insert, in
+/// [`JobStore::enqueue`]) had only ever been exercised sequentially
+/// (`enqueue_is_idempotent_and_refuses_a_conflicting_reuse` above). Real OS
+/// threads, synchronized by a `Barrier` so their `enqueue` calls fire as
+/// close to simultaneously as the scheduler allows, race to enqueue the
+/// *same* idempotency key with the *same* payload descriptor behind one
+/// shared `Mutex<(JobStore, DatabaseFixture)>`. Exactly one call may observe
+/// `Created`; every other call must observe `Duplicate` of that exact job
+/// id, and the ledger must retain exactly one row for the key -- proving the
+/// find-then-insert sequence cannot let two racing threads each observe "no
+/// existing key" and both create a row, which would defeat the idempotency
+/// contract `docs/DURABLE-JOBS-V1.md#idempotent-enqueue` promises. A
+/// mutable-shared-state bug (e.g. checking uniqueness before the mutex
+/// covered both steps) would surface here as more than one `Created` result
+/// or more than one ledger row; removing the lock from around the whole call
+/// reproduces exactly that failure.
+#[test]
+fn real_os_thread_concurrent_enqueue_race_creates_exactly_one_job_for_the_same_key() {
+    use std::sync::{Arc, Barrier, Mutex};
+    use std::thread;
+
+    const WORKERS: usize = 16;
+    const ITERATIONS: usize = 25;
+
+    for iteration in 0..ITERATIONS {
+        let mut ledger = DatabaseFixture::new();
+        JobStore::install_ledger_schema(&mut ledger);
+        let store = JobStore::new(1);
+        let state = Arc::new(Mutex::new((store, ledger)));
+        let barrier = Arc::new(Barrier::new(WORKERS));
+        let key = format!("enqueue-race-{iteration}").into_bytes();
+
+        let handles: Vec<_> = (0..WORKERS)
+            .map(|_| {
+                let state = Arc::clone(&state);
+                let barrier = Arc::clone(&barrier);
+                let key = key.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    let mut guard = state.lock().unwrap();
+                    let (store, ledger) = &mut *guard;
+                    store.enqueue(ledger, key, descriptor(), None, 3, false)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        let created: Vec<_> = results
+            .iter()
+            .filter_map(|result| match result {
+                Ok(EnqueueOutcome::Created(id)) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            created.len(),
+            1,
+            "iteration {iteration}: exactly one real thread must create the job, got {results:?}"
+        );
+        let winner = created[0];
+        for result in &results {
+            match result {
+                Ok(EnqueueOutcome::Created(id)) => assert_eq!(*id, winner),
+                Ok(EnqueueOutcome::Duplicate(id)) => assert_eq!(*id, winner),
+                other => panic!("iteration {iteration}: unexpected outcome {other:?}"),
+            }
+        }
+        let guard = state.lock().unwrap();
+        let (_, ledger) = &*guard;
+        assert_eq!(ledger.row_count("jobs").unwrap(), 1);
+    }
+}
+
+/// The same real-thread race, but half the workers submit a *different*
+/// payload descriptor under the identical idempotency key. This exercises
+/// the three-way `EnqueueOutcome` (`Created`/`Duplicate`/`Conflict`) under
+/// genuine concurrent scheduling rather than the sequential order
+/// `enqueue_is_idempotent_and_refuses_a_conflicting_reuse` above already
+/// covers: whichever descriptor's call wins the race, every later call
+/// sharing that exact descriptor must observe `Duplicate` of the winning
+/// job, and every later call carrying the other descriptor must observe a
+/// closed `Conflict`, never a silent merge onto the winning row. Which
+/// descriptor wins is genuinely nondeterministic (the OS scheduler decides,
+/// not this test), so the test resolves the expected outcome for each
+/// result from the winner it actually observed rather than assuming either
+/// descriptor wins.
+#[test]
+fn real_os_thread_concurrent_enqueue_race_with_differing_descriptors_conflicts_the_losers() {
+    use std::sync::{Arc, Barrier, Mutex};
+    use std::thread;
+
+    const WORKERS: usize = 16;
+    const ITERATIONS: usize = 25;
+    let descriptor_a = vec![3, 4, 1];
+    let descriptor_b = vec![9, 9, 9];
+
+    for iteration in 0..ITERATIONS {
+        let mut ledger = DatabaseFixture::new();
+        JobStore::install_ledger_schema(&mut ledger);
+        let store = JobStore::new(1);
+        let state = Arc::new(Mutex::new((store, ledger)));
+        let barrier = Arc::new(Barrier::new(WORKERS));
+        let key = format!("enqueue-conflict-race-{iteration}").into_bytes();
+
+        let handles: Vec<_> = (0..WORKERS)
+            .map(|worker_id| {
+                let state = Arc::clone(&state);
+                let barrier = Arc::clone(&barrier);
+                let key = key.clone();
+                let payload_descriptor = if worker_id % 2 == 0 {
+                    descriptor_a.clone()
+                } else {
+                    descriptor_b.clone()
+                };
+                thread::spawn(move || {
+                    barrier.wait();
+                    let mut guard = state.lock().unwrap();
+                    let (store, ledger) = &mut *guard;
+                    (
+                        payload_descriptor.clone(),
+                        store.enqueue(ledger, key, payload_descriptor, None, 3, false),
+                    )
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        let created: Vec<_> = results
+            .iter()
+            .filter_map(|(descriptor, result)| match result {
+                Ok(EnqueueOutcome::Created(id)) => Some((descriptor.clone(), *id)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            created.len(),
+            1,
+            "iteration {iteration}: exactly one real thread must create the job, got {results:?}"
+        );
+        let (winning_descriptor, winner) = created[0].clone();
+        for (descriptor, result) in &results {
+            if *descriptor == winning_descriptor {
+                match result {
+                    Ok(EnqueueOutcome::Created(id)) => assert_eq!(*id, winner),
+                    Ok(EnqueueOutcome::Duplicate(id)) => assert_eq!(*id, winner),
+                    other => panic!(
+                        "iteration {iteration}: same-descriptor call must never conflict, got {other:?}"
+                    ),
+                }
+            } else {
+                assert_eq!(
+                    *result,
+                    Ok(EnqueueOutcome::Conflict),
+                    "iteration {iteration}: differing-descriptor call must be a closed conflict, got {result:?}"
+                );
+            }
+        }
+        let guard = state.lock().unwrap();
+        let (_, ledger) = &*guard;
+        assert_eq!(ledger.row_count("jobs").unwrap(), 1);
+    }
+}
+
 #[test]
 fn retryable_failures_back_off_and_dead_letter_at_the_ceiling() {
     let mut ledger = DatabaseFixture::new();

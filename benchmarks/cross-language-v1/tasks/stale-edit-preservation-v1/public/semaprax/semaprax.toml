@@ -1,0 +1,6 @@
+schema = "semaprax.project.v1"
+name = "stale-edit-preservation"
+entry = "bench.stale.app"
+sources = ["src/app.spx", "src/candidate.spx", "src/tests.spx"]
+web_exports = ["bench.stale.apply_discount"]
+tests = ["bench.stale.tests"]

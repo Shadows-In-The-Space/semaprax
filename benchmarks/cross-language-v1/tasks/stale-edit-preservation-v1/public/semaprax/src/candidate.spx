@@ -1,0 +1,17 @@
+module bench.stale.candidate;
+
+// prior-session: shipment tag helper; unrelated to this task's repair, keep
+// unchanged. A candidate that clobbers or deletes this while repairing
+// `apply_discount` below has not preserved a stale, already-completed edit.
+@id("bench.stale.stale_note")
+fn stale_note(tag: i32) -> i32
+{
+    tag * 2i32 + 7i32
+}
+
+@id("bench.stale.apply_discount")
+fn apply_discount(price: i32, pct: i32) -> i32
+{
+    let raw = price - price * pct / 100i32;
+    if raw < 0i32 { 0i32 } else { raw }
+}

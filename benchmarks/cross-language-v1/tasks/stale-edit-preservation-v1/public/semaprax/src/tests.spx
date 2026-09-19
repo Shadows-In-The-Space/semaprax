@@ -1,0 +1,7 @@
+module bench.stale.tests;
+
+@id("bench.stale.tests")
+fn main() -> i64
+{
+    0
+}

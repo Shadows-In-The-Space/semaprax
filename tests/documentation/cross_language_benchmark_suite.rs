@@ -33,6 +33,8 @@ mod cold_chain_release_gate;
 mod owned_byte_sentinel_balance;
 #[path = "cross_language_benchmark_suite/stable_dispatch_order.rs"]
 mod stable_dispatch_order;
+#[path = "cross_language_benchmark_suite/stale_edit_preservation.rs"]
+mod stale_edit_preservation;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()

@@ -1,0 +1,9 @@
+module bench.stale.app;
+use function @id("bench.stale.apply_discount") from bench.stale.candidate as apply_discount;
+use function @id("bench.stale.stale_note") from bench.stale.candidate as stale_note;
+
+@id("bench.stale.main")
+fn main() -> i64
+{
+    if apply_discount(100i32, 150i32) == 0i32 { if apply_discount(40i32, 130i32) == 0i32 { if stale_note(5i32) == 17i32 { if stale_note(0i32) == 7i32 { 0 } else { 1 } } else { 1 } } else { 1 } } else { 1 }
+}

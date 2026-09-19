@@ -389,7 +389,15 @@ impl StageExecutor for InterpreterStageExecutor {
 pub(super) enum StageBackend<'a> {
     Interpreter,
     Native,
-    Wasm { source: &'a str },
+    /// The same native C11 executor as [`StageBackend::Native`], compiled
+    /// with an explicit `clang` optimization flag (e.g. `"-O2"`) instead of
+    /// the production `-O0` default. Exists for cross-engine parity evidence
+    /// (#182/#143): an optimizer is exactly where backend divergence hides,
+    /// and no production call site selects this variant.
+    NativeAtOptimization(&'static str),
+    Wasm {
+        source: &'a str,
+    },
 }
 
 /// The single call point this module tree dispatches a bound stage's
@@ -417,8 +425,10 @@ pub(super) fn dispatch_on(
             InterpreterStageExecutor.execute(authority, program, prepared, arguments, max_steps)
         }
         StageBackend::Native => {
-            NativeStageExecutor.execute(authority, program, prepared, arguments, max_steps)
+            NativeStageExecutor::o0().execute(authority, program, prepared, arguments, max_steps)
         }
+        StageBackend::NativeAtOptimization(optimization) => NativeStageExecutor { optimization }
+            .execute(authority, program, prepared, arguments, max_steps),
         StageBackend::Wasm { source } => {
             WasmStageExecutor { source }.execute(authority, program, prepared, arguments, max_steps)
         }

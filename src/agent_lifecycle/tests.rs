@@ -818,11 +818,14 @@ fn the_owned_data_arena_still_refuses_a_bound_stage_signature_directly() {
     }
 }
 
-/// Parity evidence for #182: the SAME source program, the SAME arguments and
-/// the SAME decoded `RetainedCallOutcome` on all three executors --
-/// interpreter, native C11, and Core Wasm -- for every deterministic stage
-/// the fixture binds, including both branches of `authorize` so agreement is
-/// never established by a single happy path.
+/// Parity evidence for #182/#143: the SAME source program, the SAME
+/// arguments and the SAME decoded `RetainedCallOutcome` on four executor
+/// legs -- interpreter, native C11 at `-O0`, native C11 at `-O2`, and Core
+/// Wasm -- for every deterministic stage the fixture binds, including both
+/// branches of `authorize` so agreement is never established by a single
+/// happy path. Both native optimization levels are exercised deliberately:
+/// an optimizer is exactly where backend divergence hides, and `-O0` alone
+/// never exercises it.
 ///
 /// The Core Wasm leg is a real module: the stage body is compiled into a Core
 /// Wasm owned-data package and executed under a real `node`/V8 host through
@@ -830,14 +833,14 @@ fn the_owned_data_arena_still_refuses_a_bound_stage_signature_directly() {
 /// in a Wasm-shaped name.
 ///
 /// What this does NOT claim: no budget, cancellation, effect-dispatch or
-/// evidence loop runs on Wasm here, `steps_used` is not comparable across
-/// engines (native and Wasm both report `0`), and this is local, re-runnable
-/// evidence requiring `clang` and `node` -- not a hosted run, a browser run,
-/// or a production-support decision.
+/// evidence loop runs on native or Wasm here, `steps_used` is not comparable
+/// across engines (native and Wasm both report `0`), and this is local,
+/// re-runnable evidence on macOS arm64 requiring `clang` and `node` -- not a
+/// hosted run, a browser run, or a production-support claim.
 #[test]
 fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_program() {
     if !native_wasm_tools_available() {
-        eprintln!("skipping three-engine stage parity: clang or node unavailable");
+        eprintln!("skipping four-leg stage parity: clang or node unavailable");
         return;
     }
     let compiled = lifecycle();
@@ -848,6 +851,8 @@ fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_progra
     // explicitly rather than recovered from the compiled product.
     let source = MODULE;
     let mut wasm_dispatches = 0usize;
+    let mut native_o0_dispatches = 0usize;
+    let mut native_o2_dispatches = 0usize;
 
     let mut compare = |label: &str,
                        prepared: &crate::interpreter::retained_call::PreparedRetainedCall,
@@ -861,14 +866,24 @@ fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_progra
             DEFAULT_STAGE_STEPS,
         )
         .unwrap_or_else(|error| panic!("interpreter evaluates {label}: {error:?}"));
-        let native = authorization::dispatch_on(
+        let native_o0 = authorization::dispatch_on(
             authorization::StageBackend::Native,
             &compiled.program,
             prepared,
             arguments,
             DEFAULT_STAGE_STEPS,
         )
-        .unwrap_or_else(|error| panic!("native evaluates {label}: {error:?}"));
+        .unwrap_or_else(|error| panic!("native -O0 evaluates {label}: {error:?}"));
+        native_o0_dispatches += 1;
+        let native_o2 = authorization::dispatch_on(
+            authorization::StageBackend::NativeAtOptimization("-O2"),
+            &compiled.program,
+            prepared,
+            arguments,
+            DEFAULT_STAGE_STEPS,
+        )
+        .unwrap_or_else(|error| panic!("native -O2 evaluates {label}: {error:?}"));
+        native_o2_dispatches += 1;
         let wasm = authorization::dispatch_on(
             authorization::StageBackend::Wasm { source },
             &compiled.program,
@@ -878,7 +893,14 @@ fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_progra
         )
         .unwrap_or_else(|error| panic!("Core Wasm evaluates {label}: {error:?}"));
         wasm_dispatches += 1;
-        assert_eq!(interpreter.outcome, native.outcome, "{label}: native");
+        assert_eq!(
+            interpreter.outcome, native_o0.outcome,
+            "{label}: native -O0"
+        );
+        assert_eq!(
+            interpreter.outcome, native_o2.outcome,
+            "{label}: native -O2"
+        );
         assert_eq!(interpreter.outcome, wasm.outcome, "{label}: Core Wasm");
         interpreter.outcome
     };
@@ -937,10 +959,18 @@ fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_progra
         ],
     );
 
-    // Positive proof the Wasm leg really ran rather than being skipped: five
-    // stage dispatches, each of which built and executed a Core Wasm module.
+    // Positive proof every leg really ran rather than being skipped or
+    // vacuously matching zero cases: five stage dispatches on each of the
+    // three non-interpreter legs (native -O0, native -O2, Core Wasm), each
+    // of which actually compiled and executed a fresh artifact.
+    assert_eq!(native_o0_dispatches, 5);
+    assert_eq!(native_o2_dispatches, 5);
     assert_eq!(wasm_dispatches, 5);
-    eprintln!("core wasm stage dispatches executed: {wasm_dispatches}");
+    eprintln!(
+        "four-leg stage parity: {native_o0_dispatches} native -O0, \
+         {native_o2_dispatches} native -O2, {wasm_dispatches} Core Wasm \
+         dispatches, each compared against the interpreter"
+    );
 }
 
 /// Wrong ProgramRoot / wrong entry, and a malformed argument shape, are

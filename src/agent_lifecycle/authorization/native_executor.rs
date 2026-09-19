@@ -57,7 +57,29 @@ use crate::agent_lifecycle::stages::invariant;
 
 use super::{sealed, ExecutionAuthority, StageExecutor};
 
-pub(in crate::agent_lifecycle) struct NativeStageExecutor;
+/// The native C11 executor, parameterized by the `clang` optimization flag
+/// its one compile step uses.
+///
+/// [`super::StageBackend::Native`] always selects [`Self::o0`] -- production
+/// dispatch behavior is unchanged by this field's addition. A second
+/// dispatch route, [`super::StageBackend::NativeAtOptimization`], exists
+/// solely so `tests.rs`'s cross-engine parity evidence can additionally
+/// compile and run the exact same stage body at `-O2`: an optimizer is
+/// exactly where backend divergence hides, and `-O0` alone never exercises
+/// it. Both construct this same, single `StageExecutor` implementation --
+/// the optimization level is data on an existing seam, not a fourth sealed
+/// executor.
+pub(in crate::agent_lifecycle) struct NativeStageExecutor {
+    pub(in crate::agent_lifecycle) optimization: &'static str,
+}
+
+impl NativeStageExecutor {
+    pub(in crate::agent_lifecycle) const fn o0() -> Self {
+        Self {
+            optimization: "-O0",
+        }
+    }
+}
 
 impl sealed::Sealed for NativeStageExecutor {}
 
@@ -70,7 +92,7 @@ impl StageExecutor for NativeStageExecutor {
         arguments: &[RetainedValue],
         max_steps: usize,
     ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
-        run(program, prepared, arguments, max_steps).map_err(|error| vec![error])
+        run(program, prepared, arguments, max_steps, self.optimization).map_err(|error| vec![error])
     }
 }
 
@@ -363,6 +385,7 @@ fn run(
     prepared: &PreparedRetainedCall,
     arguments: &[RetainedValue],
     max_steps: usize,
+    optimization: &str,
 ) -> Result<RetainedCallEvaluation, Diagnostic> {
     if !(1..=1_000_000).contains(&max_steps) {
         return Err(invariant("native_executor.max_steps"));
@@ -431,7 +454,7 @@ fn run(
 
     let root = probe_root();
     std::fs::create_dir(&root).map_err(|_| invariant("native_executor.probe_directory"))?;
-    let outcome = compile_and_run(&generated, &body, &root);
+    let outcome = compile_and_run(&generated, &body, &root, optimization);
     let _ = std::fs::remove_dir_all(&root);
     let stdout = outcome?;
     let result_declaration = nominal_declaration(&entry.return_type)?.clone();
@@ -439,7 +462,12 @@ fn run(
     decode(entry.id.clone(), &result_declaration, &stdout, max_steps)
 }
 
-fn compile_and_run(generated: &str, driver_body: &str, root: &Path) -> Result<String, Diagnostic> {
+fn compile_and_run(
+    generated: &str,
+    driver_body: &str,
+    root: &Path,
+    optimization: &str,
+) -> Result<String, Diagnostic> {
     let source_path = root.join("native_executor.c");
     let executable_path = root.join(format!("native_executor{}", std::env::consts::EXE_SUFFIX));
     let source = format!("{generated}\nint main(void) {{\n{driver_body}\n}}\n");
@@ -447,10 +475,11 @@ fn compile_and_run(generated: &str, driver_body: &str, root: &Path) -> Result<St
     let compiled = Command::new("clang")
         .args([
             "-std=c11",
-            "-O0",
+            optimization,
             "-Wall",
             "-Wextra",
             "-Werror",
+            "-Wno-tautological-compare",
             "-DSPX_NO_ENTRY_WRAPPER",
         ])
         .arg(&source_path)

@@ -41,7 +41,7 @@ fn focused_product_acceptance_is_locked_offline_and_tool_authenticated() {
         "CLANG=",
         "SEMAPRAX_ARCHIVER=",
         "SEMAPRAX_REQUIRE_DARWIN_REAL_ARCHIVE: \"1\"",
-        "tests::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions",
+        "tests::archive_admission::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions",
         "VCToolsInstallDir",
         "SEMAPRAX_LINKER=",
         "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=%SEMAPRAX_LINKER%",

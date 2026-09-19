@@ -49,8 +49,8 @@ fn hosted_matrix_routes_public_sdk_evidence_on_all_three_operating_systems() {
         "SEMAPRAX_ARCHIVER",
         "SEMAPRAX_REQUIRE_PUBLIC_NATIVE_RUST_SDK",
         "SEMAPRAX_REQUIRE_DARWIN_REAL_ARCHIVE",
-        "tests::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions",
-        "cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions",
+        "tests::archive_admission::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions",
+        "cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::archive_admission::darwin_real_d_archive_is_exact_and_reproducible_across_tool_versions",
     ] {
         assert!(
             public_sdk.contains(required),

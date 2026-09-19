@@ -203,6 +203,7 @@ pub mod workspace;
 pub mod workspace_patch_evidence;
 
 pub mod database_fixture;
+pub mod durable_jobs;
 pub mod filesystem_provider;
 mod graph_cleanup;
 mod graph_loan;

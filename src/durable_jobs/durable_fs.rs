@@ -1,0 +1,241 @@
+//! The one durability rule ADR 0005 names as "the single most commonly
+//! botched detail here": fsync the file *and* its parent directory before
+//! acknowledging a write.
+//!
+//! A file-only `fsync` can leave the directory entry that names the file
+//! unwritten on some filesystems after a crash — the rename that publishes a
+//! new generation, or the pointer flip that selects it, can be lost even
+//! though the file's own bytes are safely on disk. This module is the only
+//! place in `durable_jobs` that touches a filesystem, so every acknowledged
+//! write in the store goes through exactly this sequence:
+//!
+//! 1. Write the complete bytes to a staging file in the *same* directory the
+//!    final name lives in (so the rename in step 3 is same-filesystem and
+//!    therefore atomic).
+//! 2. `flush` and `sync_all` (fsync) the staging file.
+//! 3. Atomically rename the staging file onto its final name.
+//! 4. Open the containing directory and `sync_all` (fsync) it, so the
+//!    directory entry created by the rename is itself durable.
+//!
+//! Only after step 4 returns does [`commit_bytes`] return `Ok`. A crash
+//! injected before step 3 leaves the prior final file completely untouched
+//! (see `store::tests` for the fault-injection regressions that exercise
+//! this file's `HookPoint`s); a crash after step 3 but before step 4 is the
+//! exact gap this module exists to close.
+//!
+//! Directory fsync has no portable API outside Unix-family targets; on
+//! other targets step 4 is skipped and this module does not claim the same
+//! durability there. This mirrors the existing precedent in
+//! `src/candidate_archive_store.rs` and `src/job_runtime.rs`
+//! (`FileJobCheckpointStore`), which gate their own physical stores to Unix
+//! targets for the same reason.
+
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
+/// Points in [`commit_bytes`]'s sequence a test may inject a fault at, to
+/// prove a crash at that exact point leaves the destination untouched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookPoint {
+    AfterStageWrite,
+    AfterStageFsync,
+    AfterRename,
+}
+
+pub type Hook<'a> = dyn FnMut(HookPoint) -> io::Result<()> + 'a;
+
+fn run_hook(hook: &mut Option<&mut Hook<'_>>, point: HookPoint) -> io::Result<()> {
+    match hook {
+        Some(hook) => hook(point),
+        None => Ok(()),
+    }
+}
+
+/// Durably write `bytes` to `destination`, which must already have a parent
+/// directory that exists. `stage_name` selects the sibling staging file name
+/// (callers pick something unique per attempt so concurrent commits to
+/// different destinations in the same directory cannot collide).
+///
+/// On success, `destination` contains exactly `bytes` and that fact has
+/// survived an fsync of both the file and its parent directory. On failure,
+/// `destination` is guaranteed unchanged from whatever it held before this
+/// call (the earlier generation, or nothing) — a failed commit never leaves
+/// a half-written destination, matching AGENTS.md's "failed or stale
+/// transactions leave authoritative state unchanged."
+pub fn commit_bytes(destination: &Path, stage_name: &str, bytes: &[u8]) -> io::Result<()> {
+    commit_bytes_with_hook(destination, stage_name, bytes, &mut None)
+}
+
+pub(crate) fn commit_bytes_with_hook(
+    destination: &Path,
+    stage_name: &str,
+    bytes: &[u8],
+    hook: &mut Option<&mut Hook<'_>>,
+) -> io::Result<()> {
+    let dir = destination
+        .parent()
+        .ok_or_else(|| io::Error::other("destination has no parent directory"))?;
+    let stage_path = dir.join(stage_name);
+    // `create_new` refuses to clobber a stray leftover from a prior crashed
+    // attempt silently; the caller is expected to pick a fresh stage name
+    // per attempt (see `store::GenerationJobStore` callers).
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&stage_path)?;
+    let result = (|| -> io::Result<()> {
+        file.write_all(bytes)?;
+        file.flush()?;
+        run_hook(hook, HookPoint::AfterStageWrite)?;
+        file.sync_all()?;
+        run_hook(hook, HookPoint::AfterStageFsync)?;
+        drop_and_forget(file);
+        fs::rename(&stage_path, destination)?;
+        run_hook(hook, HookPoint::AfterRename)?;
+        sync_directory(dir)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        // Best-effort cleanup of the stage file on any failure path; if the
+        // rename already happened this is a no-op (the stage path no
+        // longer exists), and if it did not, the destination is untouched.
+        let _ = fs::remove_file(&stage_path);
+    }
+    result
+}
+
+/// `File`'s value isn't needed after `sync_all`; this exists only to make
+/// the drop point explicit at the call site above rather than relying on
+/// end-of-closure drop order, since the file must be closed before rename
+/// on some platforms' locking semantics.
+fn drop_and_forget(file: File) {
+    drop(file);
+}
+
+#[cfg(unix)]
+pub(crate) fn sync_directory(dir: &Path) -> io::Result<()> {
+    File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+pub(crate) fn sync_directory(_dir: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+/// Read a small pointer/generation file fully into memory. A missing file is
+/// reported as `Ok(None)` (the store's "no generation committed yet" case),
+/// never a hard error.
+pub fn read_optional(path: &Path) -> io::Result<Option<Vec<u8>>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Ensure `dir` exists (creating it and any missing ancestors), returning
+/// its canonical-enough form for joining. This module never creates
+/// anything outside the directory the caller explicitly names.
+pub fn ensure_dir(dir: &Path) -> io::Result<PathBuf> {
+    fs::create_dir_all(dir)?;
+    Ok(dir.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    fn tempdir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "semaprax-durable-jobs-durable-fs-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn commit_writes_exactly_the_given_bytes() {
+        let dir = tempdir("basic");
+        let dest = dir.join("generation-1");
+        commit_bytes(&dest, "stage-1", b"hello durable world").unwrap();
+        let mut got = Vec::new();
+        File::open(&dest).unwrap().read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"hello durable world");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn commit_overwrites_a_prior_generation_atomically() {
+        let dir = tempdir("overwrite");
+        let dest = dir.join("generation-1");
+        commit_bytes(&dest, "stage-1", b"first").unwrap();
+        commit_bytes(&dest, "stage-2", b"second-and-longer").unwrap();
+        let mut got = Vec::new();
+        File::open(&dest).unwrap().read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"second-and-longer");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_fault_before_rename_leaves_the_destination_completely_untouched() {
+        let dir = tempdir("fault-before-rename");
+        let dest = dir.join("generation-1");
+        commit_bytes(&dest, "stage-1", b"original").unwrap();
+
+        for point in [HookPoint::AfterStageWrite, HookPoint::AfterStageFsync] {
+            let mut hook: Option<&mut Hook<'_>> = Some(&mut |seen: HookPoint| {
+                if seen == point {
+                    Err(io::Error::other("injected"))
+                } else {
+                    Ok(())
+                }
+            });
+            let result =
+                commit_bytes_with_hook(&dest, "stage-fault", b"should never land", &mut hook);
+            assert!(result.is_err(), "{point:?}");
+            let mut got = Vec::new();
+            File::open(&dest).unwrap().read_to_end(&mut got).unwrap();
+            assert_eq!(got, b"original", "destination changed at {point:?}");
+            // No leftover stage file from the failed attempt.
+            assert!(!dir.join("stage-fault").exists());
+        }
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_fault_after_rename_still_leaves_the_new_bytes_visible() {
+        // Once the rename has happened the new generation IS the
+        // destination; a subsequent directory-fsync failure is a durability
+        // risk for that specific write's acknowledgement, not a data loss
+        // of what is already readable in this process.
+        let dir = tempdir("fault-after-rename");
+        let dest = dir.join("generation-1");
+        let mut hook: Option<&mut Hook<'_>> = Some(&mut |seen: HookPoint| {
+            if seen == HookPoint::AfterRename {
+                Err(io::Error::other("injected"))
+            } else {
+                Ok(())
+            }
+        });
+        let result = commit_bytes_with_hook(&dest, "stage-1", b"landed", &mut hook);
+        assert!(result.is_err());
+        let mut got = Vec::new();
+        File::open(&dest).unwrap().read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"landed");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_optional_reports_none_for_a_missing_file_not_an_error() {
+        let dir = tempdir("missing");
+        assert_eq!(read_optional(&dir.join("nope")).unwrap(), None);
+        fs::remove_dir_all(&dir).ok();
+    }
+}

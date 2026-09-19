@@ -8,6 +8,27 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Extend the source-live repair preview with an explicitly selected OpenCode
+  Provider-Adapter route, durable V2 receipts, a restart-stable absolute
+  deadline, and checkpoint identity bound to the chosen executable and
+  scratch path. The route remains source-immutable and grants neither test
+  execution nor publication authority; the scripted V1 seam stays frozen for
+  offline regression coverage (#116).
+
+- Add whole-line UTF-8 validation and checked nonnegative `i64` total helpers
+  to the catalog-normalizer example, with malformed-scalar, boundary-total,
+  backend-parity, and mutation-control regressions. This is a
+  bounded foundation tranche; the complete record parser, canonical writer,
+  duplicate handling, and independent oracle remain open (#124).
+
+- Have tag release jobs produce pinned GitHub build-provenance attestations
+  for each platform archive and keylessly sign the final aggregate provenance
+  with pinned cosign tooling. Release publication now carries those bundles
+  beside the manifest and provenance, while policy and tests distinguish the
+  GitHub OIDC `sub` claim from the Fulcio workflow-URL certificate identity.
+  No signed hosted release or offline cryptographic verification is claimed
+  yet (#168).
+
 - Stop Universal Semantic Transaction v1 from refusing every project with a
   commented bundled dependency (#274). `ProjectCandidate::apply`'s
   `materialize` step re-derived *every* source in the revision through the

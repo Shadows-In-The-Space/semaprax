@@ -374,15 +374,20 @@ commit and no evidence section for v0.4.1 at all.
 
 ## Publication boundary
 
-Artifact matrix jobs retain read-only repository authority. The final
-`publish-release` job alone receives `contents: write`, and only after both
-`release-gate` and every artifact-matrix child succeed. It authenticates the
-exact three-archive inventory, writes one `SHA256SUMS`, and publishes a GitHub
-prerelease because SEMAPRAX remains alpha. The publisher derives the body
-with `scripts/release-notes.py`: it selects only the tagged version's dated
-`CHANGELOG.md` section, stopping at the next release heading, and surrounds it
-with the release nonclaims. A missing, duplicate, or empty section fails the
-publication instead of silently creating incomplete notes.
+Artifact matrix jobs retain read-only repository authority. Each receives only
+the job-scoped OIDC and attestation permissions needed to generate GitHub's
+SLSA provenance for its own already smoke-tested archive. The final
+`publish-release` job alone receives `contents: write` and, after both
+`release-gate` and every artifact-matrix child succeed, the separate OIDC
+capability needed to sign the final aggregate provenance. It authenticates the
+exact three-archive inventory, writes one `SHA256SUMS`, creates the final
+manifest and provenance, and keylessly signs that provenance before publishing
+a GitHub prerelease because SEMAPRAX remains alpha. No repository signing key
+exists. The publisher derives the body with `scripts/release-notes.py`: it
+selects only the tagged version's dated `CHANGELOG.md` section, stopping at the
+next release heading, and surrounds it with the release nonclaims. A missing,
+duplicate, or empty section fails the publication instead of silently creating
+incomplete notes.
 
 ## Canonical release manifest
 
@@ -427,27 +432,35 @@ real synthetic archives; it also cross-checks that the required-check
 inventory this script derives from the live workflow agrees, as a set, with
 the exact inventory `tests/offline_package/ci_release_gate.rs` pins.
 
-**Recommended workflow wiring (not made by this change -- `.github/workflows/**`
-is out of scope here):** `publish-release` should run
-`scripts/release-manifest.py` immediately after it writes `dist/SHA256SUMS` and
-before `gh release create`, uploading `dist/release-manifest.json` as an
-additional release asset alongside the three archives. That is the concrete
-mechanism that would let a later `--check` (or a hosted consumer) verify a
-published release's own manifest against its own artifacts, rather than only
-against a manifest built locally after the fact.
+The release workflow runs `scripts/release-manifest.py` immediately after it
+writes `dist/SHA256SUMS`, then `scripts/release-provenance.py`, then the pinned
+keyless `cosign sign-blob` command. Separately, each producer runs the pinned
+GitHub `attest-build-provenance` action after its smoke test and before the
+archive is retained, copies that action's bundle into its deterministic
+`release-attestation-<target>.json` release asset, and fails if the aggregate
+publisher does not receive exactly one non-empty bundle per admitted target. It
+uploads `release-manifest.json`,
+`release-provenance.json`, and the Sigstore `release-provenance.bundle` with the
+three archives and checksum file. The per-archive attestations do not replace
+the signature over the final closed inventory, and the bundle does not replace
+the archive attestations. This strict order prevents signing a mutable or
+incomplete archive inventory. Workflow configuration is not hosted evidence:
+only a completed tag run and its immutable assets can establish that a release
+was signed.
 
-## Release provenance and signing (not yet active)
+## Release provenance and keyless signing (workflow wired; no hosted signed release yet)
 
 **Every SEMAPRAX release remains unsigned today** -- see "Nonclaims" below.
 [Issue #168](https://github.com/wavect/semaprax/issues/168) defines the
-policy and tooling a future signed pipeline will use, and
+policy and tooling the configured pipeline will use on its first qualifying
+tag, and
 `docs/RELEASE-SIGNING-POLICY-V1.md` is the owning versioned specification:
 the threat model, the pinned trusted-identity policy (OIDC issuer,
 repository, workflow path, per-tag subject), the `semaprax.release-provenance.v1`
 and `semaprax.release-signature-claim.v1` schemas, what independent
-verification does and does not prove, and the exact human-owned checklist
-(signing-tool selection, `id-token: write` wiring, workflow ordering) still
-needed before any of this is live.
+verification does and does not prove, and the remaining hosted-evidence and
+identity-rotation checklist. The workflow has not been used as evidence for a
+signed release.
 
 `scripts/release-provenance.py` builds the provenance document from an
 already-built `scripts/release-manifest.py` manifest -- copying its version,
@@ -455,6 +468,11 @@ tag, commit, prerelease flag, required-check inventory, and artifact
 inventory verbatim rather than re-deriving them, plus a byte-exact digest of
 the manifest and explicit (never ambient-environment) builder/toolchain/
 host-class fields:
+
+`build_host_class` names the runner that creates the aggregate provenance
+document. It does not overwrite or summarize the Linux, macOS, and Windows
+archive build hosts; each archive's separately published GitHub attestation
+carries that producer identity.
 
 ```sh
 python3 scripts/release-provenance.py \

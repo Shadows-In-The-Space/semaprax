@@ -1,8 +1,8 @@
 # Release signing and provenance policy v1
 
-Status: versioned trusted-identity policy, schema contract, and human-owned
-checklist. No SEMAPRAX release is signed today; this document defines what a
-signed pipeline must satisfy and what a maintainer must still supply by hand.
+Status: versioned trusted-identity policy and schema contract. The keyless
+workflow path is configured; no SEMAPRAX release is signed today, and only a
+completed hosted tag run with immutable assets can change that status.
 
 Audience: maintainers, release engineers, and security reviewers.
 
@@ -10,14 +10,15 @@ Audience: maintainers, release engineers, and security reviewers.
 
 [Issue #168](https://github.com/wavect/semaprax/issues/168) asks for
 authentic signing and machine-verifiable provenance for tagged releases.
-Nobody working this issue has a signing key, a keyless-signing (Sigstore)
+Nobody working this issue has a signing key, a local keyless-signing (Sigstore)
 identity, a registry credential, or authority to publish, tag, or trigger a
 release workflow; per `AGENTS.md`, generated code and this repository's own
-tooling gain no ambient signing authority. This document and its paired
-implementation therefore split the work into what is safely buildable
-without any secret -- the **provenance document**, the **identity policy**,
-and **binding verification** -- and what remains a human-owned setup task,
-listed in full at the end of this document.
+tooling gain no ambient signing authority. The configured GitHub-hosted
+`publish-release` job alone receives a short-lived OIDC token when it runs.
+This document and its paired implementation therefore split the work into what
+is safely buildable without any secret -- the **provenance document**, the
+**identity policy**, and **binding verification** -- and the hosted evidence
+and human review that remain after wiring.
 
 **The release archives remain unsigned.** `docs/RELEASE-PROCESS.md`'s
 nonclaims correctly still say so, and this document must not be read as
@@ -53,22 +54,32 @@ cross-checks all three (code, script, and this table) agree.
 | Trusted workflow path | `.github/workflows/ci.yml` | The only workflow file whose run may claim to have produced a release. |
 | Tag pattern | `refs/tags/v<MAJOR>.<MINOR>.<PATCH>` | Bound per-release, not globally: verification always compares against the *exact* tag the provenance statement under test itself declares (its `tag` field), not a wildcard. This is what makes "replayed provenance from another version" fail: the expected identity subject is recomputed from the tag under test, so a claim minted for `v0.4.1` cannot satisfy a check against `v0.4.2`. |
 
-The expected Sigstore/Fulcio certificate **subject** for a release built from
-tag `vX.Y.Z` is exactly:
+The expected GitHub OIDC **`sub` claim** for a release built from tag
+`vX.Y.Z` is exactly:
 
 ```
 repo:wavect/semaprax:ref:refs/tags/vX.Y.Z
 ```
 
-and the expected **workflow reference** is exactly:
+The Fulcio certificate identity used by `cosign verify-blob` is the workflow
+URL SAN, exactly:
+
+```
+https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z
+```
+
+The corresponding provenance **workflow reference** (the same identity
+without the URL scheme and host) is exactly:
 
 ```
 wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z
 ```
 
-Both are GitHub Actions' own standard OIDC claim shapes for a tag-triggered
-workflow run using `id-token: write`; nothing here invents a new claim
-format.
+These are GitHub Actions' standard identity representations for a
+tag-triggered workflow run using `id-token: write`. The OIDC `sub` claim and
+the Fulcio certificate URL SAN are deliberately distinct; the former belongs
+in the structural signature claim below, while the latter is passed to
+cosign's `--certificate-identity` verification option.
 
 ### Rotation and revocation
 
@@ -119,7 +130,7 @@ manifest even if the edit reparses to the same JSON value.
 | `builder.run_id` / `builder.run_attempt` | strings | The workflow run that produced this document, for operator traceability. Not independently verified -- see nonclaims. |
 | `toolchain.rustc_version` | string | The Rust compiler version used to build the release binaries. |
 | `toolchain.cargo_locked` | boolean | Always `true`: every packaging command in `docs/RELEASE-PROCESS.md` uses `--locked`. |
-| `build_host_class` | string | One of `github-hosted-ubuntu-24.04`, `github-hosted-macos-15`, `github-hosted-windows-2025` -- the admitted hosted runners table in `docs/RELEASE-PROCESS.md`. |
+| `build_host_class` | string | The admitted hosted runner that generated this aggregate provenance document, not a claim that every listed archive was built on that host. Each archive's separate GitHub attestation carries its own matrix builder identity. One of `github-hosted-ubuntu-24.04`, `github-hosted-macos-15`, `github-hosted-windows-2025` from `docs/RELEASE-PROCESS.md`. |
 | `nonclaims` | array of strings | What this document does not assert (see below); never empty. |
 
 This document is generated **before** publication (like the manifest it
@@ -247,7 +258,7 @@ this module's binding check with a real external verifier, such as:
 
 ```sh
 cosign verify-blob \
-  --certificate-identity "repo:wavect/semaprax:ref:refs/tags/vX.Y.Z" \
+  --certificate-identity "https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --bundle release-signature.bundle \
   release-provenance.json
@@ -264,30 +275,38 @@ repository has, which is unrelated -- it authenticates a *doctor-installed
 generation directory*, not a release archive), production support, or
 semantic/compiler correctness.
 
-## Human-owned checklist (`HUMAN_BLOCKED`)
+## Hosted-release follow-up (`HUMAN_BLOCKED`)
 
-Everything below requires a decision, a credential, or an infrastructure
-change nobody implementing this issue has authority to make. Each item names
-exactly what "done" looks like so this stays a short checklist rather than a
-research project.
+The workflow now applies items 1-4 below on a qualifying tag. They are listed
+as an auditable configuration contract, not as a claim that a signed release
+exists. A completed hosted run must still be reviewed before the status and
+historical evidence are changed.
 
-1. **Enable keyless signing in the release workflow.** Add `id-token: write`
-   permission to the `publish-release` job in `.github/workflows/ci.yml`
-   (out of scope for this change -- `.github/workflows/**` requires a
-   maintainer or the coordinator) so it can mint a Sigstore/Fulcio
-   certificate bound to `repo:wavect/semaprax:ref:refs/tags/<tag>`.
-2. **Choose and pin the actual signing tool.** `cosign` (Sigstore) is the
-   concrete recommendation this document assumes above; record the exact
-   pinned version in the workflow, the same way other tool versions in this
-   repository are pinned.
-3. **Order signing after the artifact inventory is final, not before.**
-   `publish-release` must run `scripts/release-manifest.py` (already
-   documented in `docs/RELEASE-PROCESS.md`) and `scripts/release-provenance.py`
-   (this change) only after every target archive exists, then sign the
-   resulting `release-provenance.json` -- never sign a manifest before the
-   last archive is built, and never let a rerun replace an archive while
-   keeping an old signature (see the threat model row above).
-4. **Wire the concrete workflow step.** The recommended shape is:
+1. **Keyless workflow authority is scoped by artifact shape.** Each
+   `release-artifacts` matrix producer has the `id-token: write` and
+   `attestations: write` permissions needed for the pinned
+   `actions/attest-build-provenance` action to attest its own smoke-tested
+   archive; its returned bundle is copied into the exact target's release
+   artifact and must be present at aggregate publication. `publish-release`
+   separately has `id-token: write` only for the
+   Sigstore/Fulcio certificate whose URL SAN is bound to
+   `https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/<tag>`
+   over the final aggregate provenance. The underlying GitHub OIDC `sub`
+   remains `repo:wavect/semaprax:ref:refs/tags/<tag>`; it is not the
+   certificate identity accepted by `cosign verify-blob`. No repository
+   signing secret is configured.
+2. **The signing tools are pinned.** The workflow pins both
+   `actions/attest-build-provenance` and `sigstore/cosign-installer` by
+   immutable action revision, and requests the declared `cosign` release
+   version. The workflow contract test rejects a missing or changed pin.
+3. **Attestation and signing follow the admitted subjects.** Each producer
+   smoke-tests then attests its archive before upload. `publish-release` runs
+   `scripts/release-manifest.py` only after every target archive exists, then
+   `scripts/release-provenance.py`, then signs the resulting
+   `release-provenance.json`. It never signs a manifest before the last archive
+   is built, and `gh release create` fails rather than replacing an existing
+   release's assets.
+4. **The concrete configured shape is:**
    ```sh
    python3 scripts/release-manifest.py --version "$VERSION" --tag "$TAG" \
      --commit "$COMMIT" --archives-dir dist --output dist/release-manifest.json
@@ -301,7 +320,8 @@ research project.
    ```
    followed by uploading `release-manifest.json`, `release-provenance.json`,
    and `release-provenance.bundle` as release assets alongside the three
-   archives. This is a recommendation, not a change made here.
+   archives. The source-locked CI contract requires this order and exact asset
+   set.
 5. **Publish verification instructions with the one documented command.**
    The command itself now exists: `semaprax release verify <release-dir>`
    (see "The one documented command" above) performs the binding, artifact,
@@ -319,10 +339,11 @@ research project.
    what review is required before that edit merges. This document does not
    itself grant that authority to anyone.
 
-None of items 1-7 are performed by this change. What is implemented instead
--- the schemas, the identity policy, and the binding verifier -- is what
-would let a real signing pipeline, once wired up by a maintainer, be
-verified mechanically rather than trusted on prose.
+Items 1-4 are configuration now present in the workflow; items 5-7 remain
+human-owned. The schemas, identity policy, binding verifier, and source-locked
+workflow contract make a real hosted signature mechanically checkable rather
+than a fact trusted only from prose. They do not substitute for that hosted
+signature or its review.
 
 ## Nonclaims
 

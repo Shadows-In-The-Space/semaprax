@@ -87,6 +87,155 @@ fn job<'a>(workflow: &'a str, name: &str) -> &'a str {
         .unwrap_or(tail)
 }
 
+fn named_step_positions(job: &str, names: &[&str]) -> Result<Vec<usize>, String> {
+    names
+        .iter()
+        .map(|name| {
+            let marker = format!("      - name: {name}\n");
+            let count = job.matches(&marker).count();
+            if count != 1 {
+                return Err(format!(
+                    "expected exactly one {marker:?} step, found {count}"
+                ));
+            }
+            Ok(job
+                .find(&marker)
+                .expect("the counted step must be findable"))
+        })
+        .collect()
+}
+
+#[test]
+fn release_artifacts_are_attested_and_the_final_inventory_is_keylessly_signed_before_uploading() {
+    let workflow = workflow();
+    let publisher = job(&workflow, "publish-release");
+    let producers = job(&workflow, "release-artifacts");
+
+    for exact in [
+        "if: ${{ startsWith(github.ref, 'refs/tags/v') && success() }}",
+        "actions: read",
+        "contents: write",
+        "id-token: write",
+        "uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2",
+        "cosign-release: v3.1.3",
+        "--tag \"$GITHUB_REF_NAME\"",
+        "--commit \"$GITHUB_SHA\"",
+        "--workflow-identity \"wavect/semaprax/.github/workflows/ci.yml@refs/tags/$tag\"",
+        "--run-id \"$GITHUB_RUN_ID\"",
+        "--run-attempt \"$GITHUB_RUN_ATTEMPT\"",
+        "--host-class github-hosted-ubuntu-24.04",
+        "cosign sign-blob --yes \\\n            --bundle dist/release-provenance.bundle \\\n            dist/release-provenance.json",
+        "dist/release-manifest.json dist/release-provenance.json \\\n            dist/release-provenance.bundle",
+        "dist/release-attestation-x86_64-unknown-linux-gnu.json \\\n            dist/release-attestation-aarch64-apple-darwin.json \\\n            dist/release-attestation-x86_64-pc-windows-msvc.json",
+        "find dist -maxdepth 1 -type f -name 'release-attestation-*.json'",
+    ] {
+        assert!(
+            publisher.contains(exact),
+            "release publisher lost exact Sigstore/inventory contract: {exact}"
+        );
+    }
+    for script in [
+        "scripts/release-manifest.py",
+        "scripts/release-provenance.py",
+    ] {
+        assert_eq!(
+            publisher.matches(script).count(),
+            1,
+            "the final publisher must build exactly one {script} document"
+        );
+    }
+    assert_eq!(publisher.matches("id-token: write").count(), 1);
+    for exact in [
+        "attestations: write",
+        "contents: read",
+        "id-token: write",
+        "uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2",
+        "subject-path: dist/semaprax-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.extension }}",
+        "ATTESTATION_BUNDLE: ${{ steps.attest-release-archive.outputs.bundle-path }}",
+        "RELEASE_BUNDLE: dist/release-attestation-${{ matrix.target }}.json",
+        "cp -- \"$ATTESTATION_BUNDLE\" \"$RELEASE_BUNDLE\"",
+        "dist/release-attestation-${{ matrix.target }}.json",
+    ] {
+        assert!(
+            producers.contains(exact),
+            "release artifact producer lost exact SLSA attestation contract: {exact}"
+        );
+    }
+    assert_eq!(
+        producers.matches("id-token: write").count(),
+        1,
+        "the archive producer requires its own OIDC token for GitHub provenance attestation"
+    );
+    assert!(
+        !workflow
+            .split_once("\njobs:\n")
+            .expect("workflow must declare jobs")
+            .0
+            .contains("id-token: write"),
+        "OIDC minting authority must be job-scoped, never a workflow default"
+    );
+    assert!(
+        publisher.matches("set -euo pipefail").count() >= 5,
+        "every archive/inventory/provenance/sign/publish shell boundary must fail closed"
+    );
+    let producer_positions = named_step_positions(
+        producers,
+        &[
+            "Build, package, and smoke-test the Unix release artifact",
+            "Build, package, and smoke-test the Windows release artifact",
+            "Attest the exact smoke-tested target archive",
+            "Stage the exact target attestation bundle for release publication",
+            "Retain the exact target archive for aggregate publication",
+        ],
+    )
+    .expect("every archive producer must smoke-test, attest, then retain its archive");
+    assert!(
+        producer_positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "the provenance action must attest the smoke-tested archive before publication aggregation"
+    );
+    let positions = named_step_positions(
+        publisher,
+        &[
+            "Authenticate the complete archive inventory and produce SHA256SUMS",
+            "Generate the final release manifest",
+            "Generate release provenance from the final manifest",
+            "Install pinned cosign",
+            "Sign final release provenance with keyless Sigstore",
+            "Publish the alpha archives only after complete aggregation",
+        ],
+    )
+    .expect("each final-inventory/signing step must be present once");
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "a release may only sign after final inventory and provenance, then upload the exact signed set"
+    );
+
+    // Mutation control: changing the signing step into a second provenance
+    // step is syntactically harmless YAML but makes the signing boundary
+    // disappear. `named_step_positions` must reject it, so this contract is
+    // not merely a collection of positive substring witnesses.
+    let mutated = publisher.replacen(
+        "      - name: Sign final release provenance with keyless Sigstore\n",
+        "      - name: Generate release provenance from the final manifest\n",
+        1,
+    );
+    assert!(
+        named_step_positions(
+            &mutated,
+            &[
+                "Authenticate the complete archive inventory and produce SHA256SUMS",
+                "Generate the final release manifest",
+                "Generate release provenance from the final manifest",
+                "Install pinned cosign",
+                "Sign final release provenance with keyless Sigstore",
+                "Publish the alpha archives only after complete aggregation",
+            ],
+        )
+        .is_err(),
+        "the order guard must reject a mutation that removes the signing step"
+    );
+}
+
 #[test]
 fn desktop_product_is_an_exact_dedicated_release_blocker() {
     let workflow = workflow();

@@ -96,6 +96,16 @@ fn trusted_identity_constants_match_the_script_and_the_policy_document() {
         policy.contains("https://token.actions.githubusercontent.com"),
         "policy document must record the exact trusted OIDC issuer string"
     );
+    assert!(
+        policy.contains(
+            "--certificate-identity \"https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z\""
+        ),
+        "cosign verification must match the Fulcio workflow URL SAN, not the GitHub OIDC sub claim"
+    );
+    assert!(
+        !policy.contains("--certificate-identity \"repo:wavect/semaprax:ref:refs/tags/vX.Y.Z\""),
+        "the GitHub OIDC sub claim is not the Fulcio certificate identity URL"
+    );
 }
 
 /// End-to-end: build three synthetic archives and a real

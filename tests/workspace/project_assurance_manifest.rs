@@ -281,4 +281,33 @@ fn snapshot_source_drift_and_obligation_or_output_budgets_fail_closed() {
     assert_code(generate(&bounded.manifest(), &one_obligation), "SPX-Z102");
     let tight_output = ProjectAssuranceOptions::new(2_048, 65_536).unwrap();
     assert_code(generate(&bounded.manifest(), &tight_output), "SPX-Z102");
+
+    // Issue #271, second half: the refusal must say WHICH budget was
+    // exceeded, by how much, and how to raise it. `SPX-Z101` beside it has
+    // always stated its valid range ("max_bytes must be between ..."); there
+    // is no reason a runtime exhaustion should tell a caller less than an
+    // option rejection does. Before this, the message was a bare "exceeds its
+    // obligation or output byte budget" and a user who hit it on a freshly
+    // scaffolded project had nothing to act on.
+    let obligation_error = generate(&bounded.manifest(), &one_obligation).unwrap_err();
+    assert!(
+        obligation_error[0].message.contains("max_obligations is 1"),
+        "the obligation refusal must name the bound it hit: {}",
+        obligation_error[0].message
+    );
+    let byte_error = generate(&bounded.manifest(), &tight_output).unwrap_err();
+    assert!(
+        byte_error[0].message.contains("max_bytes is 2048"),
+        "the byte refusal must name the budget it hit: {}",
+        byte_error[0].message
+    );
+    for error in [&obligation_error, &byte_error] {
+        assert!(
+            error[0].help.as_deref().is_some_and(
+                |help| help.contains("--max-bytes") && help.contains("--max-obligations")
+            ),
+            "the refusal must name the flags that raise the budget: {:?}",
+            error[0].help
+        );
+    }
 }

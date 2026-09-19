@@ -258,7 +258,11 @@ pub fn verify_against_revision(
 ) -> Result<()> {
     options.validate()?;
     if document.len() > options.max_bytes {
-        return Err(capacity());
+        return Err(capacity_detail(format!(
+            "the document is {} bytes and max_bytes is {}",
+            document.len(),
+            options.max_bytes
+        )));
     }
     let expected = derive(revision, options)?;
     if document != expected {
@@ -295,7 +299,10 @@ impl<'a> Records<'a> {
             ));
         }
         if self.rows.len() >= self.options.max_obligations {
-            return Err(capacity());
+            return Err(capacity_detail(format!(
+                "max_obligations is {} and this project reached it",
+                self.options.max_obligations
+            )));
         }
         let mut counts: Vec<_> = AssuranceClass::ALL
             .into_iter()
@@ -306,7 +313,10 @@ impl<'a> Records<'a> {
                 super::render::render_obligation(&obligation, &mut counts)
             });
         if overflowed {
-            return Err(capacity());
+            return Err(capacity_detail(format!(
+                "one obligation's rendering alone exceeds max_bytes {}",
+                self.options.max_bytes
+            )));
         }
         let mut value: Value = serde_json::from_str(&encoded)
             .map_err(|_| invalid("project assurance obligation cannot be encoded"))?;
@@ -320,7 +330,10 @@ impl<'a> Records<'a> {
             .and_then(|size| size.checked_add(source.map_or(0, str::len)))
             .ok_or_else(capacity)?;
         if self.encoded_bytes > self.options.max_bytes {
-            return Err(capacity());
+            return Err(capacity_detail(format!(
+                "encoded obligations reached {} bytes and max_bytes is {}",
+                self.encoded_bytes, self.options.max_bytes
+            )));
         }
         self.rows.insert(obligation.id.clone(), (obligation, value));
         Ok(())
@@ -330,11 +343,28 @@ impl<'a> Records<'a> {
 fn invalid(message: &str) -> Vec<Diagnostic> {
     vec![Diagnostic::io("SPX-Z101", message)]
 }
-fn capacity() -> Vec<Diagnostic> {
+/// Issue #271 left this half open: the refusal named neither which budget was
+/// exceeded, nor by how much, nor the flag that raises it -- so
+/// `semaprax new --template service` followed by
+/// `semaprax project-assurance-manifest semaprax.toml` failed with nothing a
+/// caller could act on. Its `SPX-Z101` sibling already states its valid range
+/// ("max_bytes must be between ..."), and there is no reason a runtime
+/// exhaustion should say less than an option rejection.
+///
+/// The code is unchanged, so anything matching on `SPX-Z102` keeps working.
+fn capacity_detail(detail: String) -> Vec<Diagnostic> {
     vec![Diagnostic::io(
         "SPX-Z102",
-        "project assurance exceeds its obligation or output byte budget",
+        format!("project assurance exceeds its obligation or output byte budget: {detail}"),
+    )
+    .with_help(
+        "raise the budget with `--max-bytes N` or `--max-obligations N`, \
+         or narrow the project",
     )]
+}
+
+fn capacity() -> Vec<Diagnostic> {
+    capacity_detail("budget exhausted while encoding".to_owned())
 }
 
 fn canonical(mut value: Value, limit: usize) -> Result<String> {

@@ -1,8 +1,70 @@
+use semaprax::assurance_manifest::project::{generate_from_snapshot, ProjectAssuranceOptions};
 use semaprax::project::{
     derive_project_scaffold_v1, derive_project_scaffold_v1_with_layout, replay_project_scaffold_v1,
-    ScaffoldLayout,
+    with_authenticated_project, ScaffoldLayout, PROJECT_SCAFFOLD_TEMPLATES,
 };
 use sha2::{Digest, Sha256};
+
+/// Issue #271: `semaprax new --template service` produced a project whose own
+/// `project-assurance-manifest` was refused at the default budget —
+/// `DEFAULT_MAX_BYTES` was 262,144 and that template's manifest is 317,698
+/// bytes — so two consecutive commands from the documented journey could not
+/// both succeed. Raising the default fixes today's templates; this is what
+/// stops a new or grown template reintroducing it, which is the half that
+/// actually prevents recurrence.
+///
+/// It asserts the DEFAULT options deliberately. A test that passed an explicit
+/// budget would prove nothing about the experience a user actually gets.
+#[test]
+fn every_shipped_template_fits_the_default_assurance_budget() {
+    for template in PROJECT_SCAFFOLD_TEMPLATES {
+        let layout = if template == "service" {
+            ScaffoldLayout::Tables
+        } else {
+            ScaffoldLayout::Frozen
+        };
+        let derived = derive_project_scaffold_v1_with_layout(NAME, template, layout)
+            .unwrap_or_else(|error| panic!("`{template}` derives: {error:?}"));
+
+        // Canonicalize: on macOS `std::env::temp_dir()` is `/var/...`, a
+        // symlink, and the Project route refuses a non-real ancestor with
+        // `SPX-J102`.
+        let root = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!(
+                "semaprax-template-assurance-{template}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        for file in derived.files() {
+            let path = root.join(file.path());
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, file.utf8()).unwrap();
+        }
+
+        let manifest = root.join("semaprax.toml");
+        let generated = with_authenticated_project(&manifest, |snapshot| {
+            generate_from_snapshot(snapshot, &ProjectAssuranceOptions::default())
+        });
+        std::fs::remove_dir_all(&root).ok();
+
+        let document = generated.unwrap_or_else(|error| {
+            panic!(
+                "`{template}` does not fit the default assurance budget, which is exactly \
+                 the issue #271 refusal: {error:?}"
+            )
+        });
+        assert!(
+            document.len() <= ProjectAssuranceOptions::default().max_bytes,
+            "`{template}` assurance manifest is {} bytes, over the {} default",
+            document.len(),
+            ProjectAssuranceOptions::default().max_bytes
+        );
+    }
+}
 
 const NAME: &str = "demo-project";
 const DIGEST_DOMAIN: &[u8] = b"semaprax.project-scaffold.digest.v2\0";

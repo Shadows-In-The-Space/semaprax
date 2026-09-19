@@ -401,9 +401,24 @@ esac
         "#!/bin/sh\nprintf 'node:%s\\n' \"$*\" >>\"$QUALITY_LOG\"\n",
     )
     .unwrap();
+    // The `full` profile's `kernel0-lean-proof` gate shells out to `python3`
+    // directly rather than through `cargo`, so without a stub it ran the real
+    // gate against a fixture that has neither `scripts/kernel0-lean-gate.py`
+    // nor `proofs/kernel0-lean/Kernel0.lean`, and `full` failed on a missing
+    // file. That said nothing about the gate ORDER this test exists to pin.
+    // Stubbed like every other external command here, so the gate still
+    // announces itself and the sequence stays checkable without the fixture
+    // needing real proof inputs or a Lean toolchain.
+    let python = fixture.path.join("bin/python3");
+    fs::write(
+        &python,
+        "#!/bin/sh\nprintf 'python3:%s\\n' \"$*\" >>\"$QUALITY_LOG\"\n",
+    )
+    .unwrap();
     make_executable(&cargo);
     make_executable(&git);
     make_executable(&node);
+    make_executable(&python);
 
     let log = fixture.path.join("quality.log");
     let path = format!(

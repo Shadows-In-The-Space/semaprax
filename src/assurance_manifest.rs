@@ -56,7 +56,17 @@ use crate::{graph, patch};
 
 use render::{render, RenderInput};
 
-const DEFAULT_MAX_BYTES: usize = 262_144;
+/// Issue #271: this was 262,144, which the toolchain's own `service` template
+/// exceeded at 317,698 bytes — so `semaprax new --template service` followed by
+/// `semaprax project-assurance-manifest semaprax.toml`, two commands from the
+/// documented journey, refused with `SPX-Z102` and named neither the budget nor
+/// the flag that would raise it. A default a shipped template cannot satisfy is
+/// not a useful default.
+///
+/// 1 MiB leaves roughly 3x headroom over the largest template today.
+/// `every_shipped_template_fits_the_default_assurance_budget` keeps a new or
+/// grown template from quietly reintroducing the same refusal.
+const DEFAULT_MAX_BYTES: usize = 1_048_576;
 const DEFAULT_MAX_OBLIGATIONS: usize = 65_536;
 const MIN_MAX_BYTES: usize = 2048;
 const MAX_MAX_BYTES: usize = 16 * 1024 * 1024;

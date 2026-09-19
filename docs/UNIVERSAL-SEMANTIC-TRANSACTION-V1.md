@@ -64,6 +64,19 @@ prevents the reused candidate formatter from silently erasing comments or
 normalizing unrelated trivia. Comment-bearing and noncanonical projects are not
 admitted by this first slice.
 
+"Every ... source" means the complete revision `ProjectCandidate::apply`
+rebuilds from, which is every compiler-bundled dependency source the project's
+manifest reaches as well as its own modules -- not only the module owning the
+renamed declaration. This is deliberate, not an overbroad bound narrower work
+happened to miss: `apply`'s candidate-materialization step re-derives every
+program in the revision through this same comment-dropping canonical
+formatter for every v1 operation, whether or not that operation's own rewrite
+touches it, so a source outside the rewrite still needs the comment-free
+requirement to guarantee the reformat is a no-op for it. A project depending
+on a commented bundled package (for example `std.auth` or `std.jobs`) cannot
+satisfy this precondition by editing its own source; `SPX-G525`'s message
+says so rather than reading as caller-actionable (issue #274).
+
 ## ReplaceBlock
 
 `replace_block` carries `target`, `expected_old_block`, and `replacement`. The

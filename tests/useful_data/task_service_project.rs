@@ -255,8 +255,7 @@ assert.equal(linked.instance.exports.semaprax_main(), 0n);
 /// into -- to be entirely comment-free. `std.auth` carries 253 `//` comment
 /// lines and `std.jobs` 34 (`rg -c '//' std/auth/src/auth.spx
 /// std/jobs/src/jobs.spx`), so `preview` below fails closed with
-/// `SPX-G525` ("semantic transaction v1 requires comment-free canonical
-/// source") on first use, before any candidate is derived. Because that
+/// `SPX-G525` on first use, before any candidate is derived. Because that
 /// dependency source is compiler-bundled and immutable
 /// (`src/project/standard_dependencies.rs`), no project consuming
 /// `std.auth`/`std.jobs`/`std.log`/any other commented bundled package can
@@ -267,11 +266,34 @@ assert.equal(linked.instance.exports.semaprax_main(), 0n);
 /// project's README) are two independent capacity/precondition ceilings that
 /// both happen to bite the same two-dependency reference application.
 ///
-/// This assertion is a stable regression, not a shrug: if a future change
-/// lifts or narrows the comment-free-workspace precondition (e.g. scoping it
-/// to only the renamed function's own module), this test starts failing on
-/// the `Err` match and must be revisited to demonstrate the full apply/retest
-/// steps this issue's acceptance criterion actually asks for.
+/// **Issue #274 investigated narrowing this to only the renamed function's
+/// own module and concluded it would not be safe.** `ProjectCandidate::apply`
+/// (`src/project/candidate/mod.rs::materialize`) unconditionally re-derives
+/// *every* source in `revision.sources()` through the comment-dropping
+/// canonical formatter for every v1 operation, dependency sources included --
+/// not only the module an operation's own rewrite touches. The whole-workspace
+/// comment-free requirement is what lets that blind reformat be proven a
+/// no-op for every source the operation does not intend to change (a
+/// comment-free canonical formatter round-trips its own output exactly); an
+/// untouched but commented dependency source has no such guarantee and would
+/// have its comments silently dropped from the candidate the moment the
+/// requirement no longer covered it. `semantic_transaction_v2.rs`'s own
+/// `ReplaceExpression`, which *does* admit comments in the one file it edits,
+/// confirms this reading: it needed dedicated splice/round-trip machinery to
+/// do so for that single path and still requires every other source,
+/// dependency included, to remain comment-free canonical
+/// (`require_canonical_comment_free_sources_except`). Extending that to every
+/// untouched source in a v1 operation is future work on `materialize`, not a
+/// bounded fix to this one precondition. Issue #274 therefore only reworded
+/// the `SPX-G525` message so it no longer reads as fixable by editing this
+/// project's own source; the precondition and this test's outcome are
+/// unchanged.
+///
+/// This assertion is a stable regression, not a shrug: if a future change to
+/// `materialize` ever lets the precondition be narrowed safely, this test
+/// starts failing on the `Err` match and must be revisited to demonstrate the
+/// full apply/retest steps this issue's acceptance criterion actually asks
+/// for.
 #[test]
 fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precondition() {
     project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {

@@ -1394,6 +1394,19 @@ fn comment_free_canonical_workspace(revision: &ProjectRevision) -> bool {
     })
 }
 
+// This check spans every source `ProjectCandidate::apply`'s `materialize`
+// step will re-derive through the comment-dropping canonical formatter,
+// which is the complete revision `revision.sources()` returns -- the
+// project's own modules *and* every compiler-bundled dependency source
+// `standard_dependencies::extend_sources` reached (issue #274). That is not
+// an overbroad scope choice layered on a narrower rewrite: `materialize`
+// unconditionally reformats every program in the revision for every v1
+// operation, so this precondition is the only thing standing between an
+// already-canonical, comment-free base and a candidate that silently drops
+// comments from a source the operation never intended to touch. A project
+// cannot satisfy it by editing its own source when a bundled dependency
+// (e.g. `std.auth`, `std.jobs`) carries comments; the message says so rather
+// than reading as caller-actionable.
 fn require_canonical_comment_free_sources(
     revision: &ProjectRevision,
 ) -> Result<(), Vec<Diagnostic>> {
@@ -1403,7 +1416,9 @@ fn require_canonical_comment_free_sources(
                 .map_err(|error| vec![error])?;
         if !comments.items.is_empty() || crate::format::canonical(&program) != source.source() {
             return Err(invalid(
-                "semantic transaction v1 requires comment-free canonical source",
+                "semantic transaction v1 requires comment-free canonical source across the \
+                 complete workspace, including compiler-bundled dependency source; this is not \
+                 fixable by editing the project's own source",
             ));
         }
     }

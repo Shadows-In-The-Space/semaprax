@@ -1,0 +1,9 @@
+module clean_install_calculator.app;
+use function @id("clean-install-calculator.add") from clean_install_calculator.core as add;
+use function @id("clean-install-calculator.subtract") from clean_install_calculator.core as subtract;
+
+@id("clean-install-calculator.app.main")
+fn main() -> i64
+{
+    if subtract(8, 50) == -42 { if subtract(-5, -5) == 0 { if add(19, 23) == 42 { 0 } else { 1 } } else { 1 } } else { 1 }
+}

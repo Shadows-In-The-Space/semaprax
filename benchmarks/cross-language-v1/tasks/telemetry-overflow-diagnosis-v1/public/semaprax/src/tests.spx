@@ -1,0 +1,7 @@
+module bench.telemetry.tests;
+
+@id("bench.telemetry.tests")
+fn main() -> i64
+{
+    0
+}

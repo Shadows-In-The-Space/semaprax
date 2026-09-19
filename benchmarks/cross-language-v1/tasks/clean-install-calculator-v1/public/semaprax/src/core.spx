@@ -1,0 +1,13 @@
+module clean_install_calculator.core;
+
+@id("clean-install-calculator.add")
+fn add(left: i64, right: i64) -> i64
+{
+    left + right
+}
+
+@id("clean-install-calculator.subtract")
+fn subtract(left: i64, right: i64) -> i64
+{
+    left - right
+}

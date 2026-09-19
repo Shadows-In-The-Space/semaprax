@@ -1,0 +1,13 @@
+schema = "semaprax.manifest.v1"
+
+[package]
+name = "clean-install-calculator"
+version = "0.1.0"
+
+[modules]
+entry = "clean_install_calculator.app"
+sources = ["src/app.spx", "src/core.spx", "src/tests.spx"]
+tests = ["clean_install_calculator.tests"]
+
+[exports]
+web = ["clean-install-calculator.add"]

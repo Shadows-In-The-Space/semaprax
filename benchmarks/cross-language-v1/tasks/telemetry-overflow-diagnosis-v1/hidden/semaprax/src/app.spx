@@ -1,0 +1,8 @@
+module bench.telemetry.app;
+use function @id("bench.telemetry.combine_telemetry") from bench.telemetry.candidate as combine_telemetry;
+
+@id("bench.telemetry.main")
+fn main() -> i64
+{
+    if combine_telemetry(2147483647i32, 1i32) == 2147483647i32 { if combine_telemetry(-2147483648i32, -1i32) == -2147483648i32 { 0 } else { 1 } } else { 1 }
+}

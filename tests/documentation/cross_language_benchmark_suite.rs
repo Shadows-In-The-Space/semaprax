@@ -27,6 +27,8 @@ static SERIAL: AtomicUsize = AtomicUsize::new(0);
 
 #[path = "cross_language_benchmark_suite/booking_window_conflict.rs"]
 mod booking_window_conflict;
+#[path = "cross_language_benchmark_suite/clean_install_calculator.rs"]
+mod clean_install_calculator;
 #[path = "cross_language_benchmark_suite/cold_chain_release_gate.rs"]
 mod cold_chain_release_gate;
 #[path = "cross_language_benchmark_suite/owned_byte_sentinel_balance.rs"]
@@ -35,6 +37,8 @@ mod owned_byte_sentinel_balance;
 mod stable_dispatch_order;
 #[path = "cross_language_benchmark_suite/stale_edit_preservation.rs"]
 mod stale_edit_preservation;
+#[path = "cross_language_benchmark_suite/telemetry_overflow_diagnosis.rs"]
+mod telemetry_overflow_diagnosis;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()

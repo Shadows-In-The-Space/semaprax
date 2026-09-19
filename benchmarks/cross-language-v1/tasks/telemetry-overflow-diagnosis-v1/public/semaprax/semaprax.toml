@@ -1,0 +1,6 @@
+schema = "semaprax.project.v1"
+name = "telemetry-overflow-diagnosis"
+entry = "bench.telemetry.app"
+sources = ["src/app.spx", "src/candidate.spx", "src/tests.spx"]
+web_exports = ["bench.telemetry.combine_telemetry"]
+tests = ["bench.telemetry.tests"]

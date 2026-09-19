@@ -1,0 +1,7 @@
+module clean_install_calculator.tests;
+
+@id("clean-install-calculator.tests.main")
+fn main() -> i64
+{
+    if 19 + 23 == 42 { 0 } else { 1 }
+}

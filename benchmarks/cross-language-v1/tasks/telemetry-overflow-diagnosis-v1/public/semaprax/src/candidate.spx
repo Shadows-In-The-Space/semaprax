@@ -1,0 +1,12 @@
+module bench.telemetry.candidate;
+
+// A telemetry combiner register must saturate at the 32-bit signed boundary
+// rather than wrap or trap: two independent delta readings are summed into
+// one running total, and a reading that would carry the total past
+// `i32::MAX`/`i32::MIN` must clamp there instead of raising a checked
+// overflow fault.
+@id("bench.telemetry.combine_telemetry")
+fn combine_telemetry(delta_a: i32, delta_b: i32) -> i32
+{
+    if delta_b > 0i32 { if delta_a > 2147483647i32 - delta_b { 2147483647i32 } else { delta_a + delta_b } } else { if delta_b < 0i32 { if delta_a < -2147483648i32 - delta_b { -2147483648i32 } else { delta_a + delta_b } } else { delta_a + delta_b } }
+}

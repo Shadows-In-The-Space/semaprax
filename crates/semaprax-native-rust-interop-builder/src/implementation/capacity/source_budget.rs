@@ -146,7 +146,8 @@ pub(in crate::implementation) fn validate_native_rust_expression_budget_for_clos
             | ResolvedExprKind::Try { operand: value, .. }
             | ResolvedExprKind::TryOption { operand: value, .. }
             | ResolvedExprKind::Project { base: value, .. }
-            | ResolvedExprKind::Upcast { source: value } => pending.push((value, child_depth)),
+            | ResolvedExprKind::Upcast { source: value }
+            | ResolvedExprKind::Yield { request: value } => pending.push((value, child_depth)),
             ResolvedExprKind::Binary { left, right, .. } => {
                 pending.push((left, child_depth));
                 pending.push((right, child_depth));

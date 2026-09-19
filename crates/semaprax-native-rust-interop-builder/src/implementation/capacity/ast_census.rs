@@ -67,6 +67,7 @@ pub(in crate::implementation) fn scan_ast_capacity<'a>(
                     crate::ast::ExprKind::Binary { .. } => 2,
                     crate::ast::ExprKind::Unary { .. }
                     | crate::ast::ExprKind::Try { .. }
+                    | crate::ast::ExprKind::Yield { .. }
                     | crate::ast::ExprKind::Project { .. } => 1,
                     crate::ast::ExprKind::Int(_)
                     | crate::ast::ExprKind::Int32(_)

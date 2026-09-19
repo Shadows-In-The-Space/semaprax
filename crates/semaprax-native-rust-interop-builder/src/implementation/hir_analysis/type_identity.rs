@@ -623,6 +623,11 @@ pub(in crate::implementation) fn fingerprint_expression_types_scratch(
                     ResolvedExprKind::Upcast { source } => {
                         push(&mut stack, &mut stack_len, Frame::Expr(source, child_depth))?
                     }
+                    ResolvedExprKind::Yield { request } => push(
+                        &mut stack,
+                        &mut stack_len,
+                        Frame::Expr(request, child_depth),
+                    )?,
                 }
             }
             Frame::Exprs(expressions, index, depth) => {

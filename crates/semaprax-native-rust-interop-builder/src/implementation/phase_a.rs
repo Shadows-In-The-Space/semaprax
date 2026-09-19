@@ -1193,7 +1193,13 @@ pub(super) fn validate_selected_scalar_closure(
             | ResolvedExprKind::UpdateRecord { .. }
             | ResolvedExprKind::Project { .. }
             | ResolvedExprKind::Upcast { .. }
-            | ResolvedExprKind::Place(_) => {
+            | ResolvedExprKind::Place(_)
+            // Resumable Effects v1 (issue #204): a `yields`-declaring
+            // function suspends the whole call and hands control back to a
+            // caller outside this translation unit; the native backend has
+            // no such control-transfer mechanism (`SPX-B116`), so it is not
+            // admitted into the native Rust interop scalar closure at all.
+            | ResolvedExprKind::Yield { .. } => {
                 return Err(b107("scalar value signature required"));
             }
         }

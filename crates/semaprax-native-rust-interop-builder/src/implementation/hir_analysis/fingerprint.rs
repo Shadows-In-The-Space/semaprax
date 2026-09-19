@@ -452,7 +452,12 @@ pub(in crate::implementation) fn hash_expr(
                     | ResolvedExprKind::Float64(_)
                     | ResolvedExprKind::String(_)
                     | ResolvedExprKind::BorrowPlace { .. }
-                    | ResolvedExprKind::ByteRange { .. } => {
+                    | ResolvedExprKind::ByteRange { .. }
+                    // Resumable Effects v1 (issue #204): a `yields`-declaring
+                    // function is refused by `validate_selected_scalar_closure`
+                    // before this ever runs, exactly like `Closure` and
+                    // `Invoke` above -- admission rejects it first.
+                    | ResolvedExprKind::Yield { .. } => {
                         // Non-i64 scalar signatures are outside the scalar
                         // native boundary; admission rejects them first.
                         return Err(b107("scalar value signature required"));

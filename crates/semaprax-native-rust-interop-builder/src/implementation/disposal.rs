@@ -281,7 +281,8 @@ fn drain_disposal_frames(
                 }
                 ResolvedExprKind::Unary { value, .. }
                 | ResolvedExprKind::Project { base: value, .. }
-                | ResolvedExprKind::Upcast { source: value } => {
+                | ResolvedExprKind::Upcast { source: value }
+                | ResolvedExprKind::Yield { request: value } => {
                     pending_expression = Some(*value);
                 }
                 ResolvedExprKind::Binary { left, right, .. } => {

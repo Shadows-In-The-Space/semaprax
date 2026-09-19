@@ -181,7 +181,8 @@ pub(in crate::implementation) fn resolved_expression_child<'a>(
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => {
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => {
             (index == 0).then(|| advance(1, 0, value.as_ref()))?
         }
         ResolvedExprKind::Binary { left, right, .. } => {

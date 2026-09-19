@@ -597,8 +597,12 @@ fn cleanup_binding_flow<'a>(
                 // only snapshots its captures; the body has no creation-time
                 // ownership or failure effect.
                 crate::ast::ExprKind::Closure { .. } => false,
+                // Resumable Effects v1 (issue #204): `yield`'s request is an
+                // admitted Copy scalar, transparent in exactly the same way
+                // an upcast is -- it does not consume the binding.
                 crate::ast::ExprKind::Project { .. }
                 | crate::ast::ExprKind::Unary { .. }
+                | crate::ast::ExprKind::Yield { .. }
                 | crate::ast::ExprKind::Binary { .. } => false,
                 crate::ast::ExprKind::SuperMethod { .. } => child_index != 0 && consume,
                 crate::ast::ExprKind::Int(_)

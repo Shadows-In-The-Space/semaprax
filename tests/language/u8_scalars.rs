@@ -169,7 +169,8 @@ fn children(expression: &hir::ResolvedExpr) -> Vec<&hir::ResolvedExpr> {
         | hir::ResolvedExprKind::Try { operand: value, .. }
         | hir::ResolvedExprKind::TryOption { operand: value, .. }
         | hir::ResolvedExprKind::Project { base: value, .. }
-        | hir::ResolvedExprKind::Upcast { source: value } => vec![value.as_ref()],
+        | hir::ResolvedExprKind::Upcast { source: value }
+        | hir::ResolvedExprKind::Yield { request: value } => vec![value.as_ref()],
         hir::ResolvedExprKind::Binary { left, right, .. } => vec![left.as_ref(), right.as_ref()],
         hir::ResolvedExprKind::ByteRange {
             source, start, end, ..

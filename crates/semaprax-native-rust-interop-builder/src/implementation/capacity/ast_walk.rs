@@ -122,6 +122,7 @@ pub(in crate::implementation) fn ast_child<'a>(
         }
         crate::ast::ExprKind::Unary { value, .. }
         | crate::ast::ExprKind::Try { operand: value }
+        | crate::ast::ExprKind::Yield { request: value }
         | crate::ast::ExprKind::Project { base: value, .. } => {
             (index == 0).then(|| advance(1, 0, value.as_ref()))?
         }
@@ -324,6 +325,7 @@ pub(super) fn ast_child_identity_path_increment(
             }
         }
         crate::ast::ExprKind::Try { .. } => ".operand".len(),
+        crate::ast::ExprKind::Yield { .. } => ".request".len(),
         crate::ast::ExprKind::Project { .. } => ".base".len(),
         crate::ast::ExprKind::Int(_)
         | crate::ast::ExprKind::Int32(_)

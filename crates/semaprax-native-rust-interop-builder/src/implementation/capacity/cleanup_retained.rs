@@ -1090,7 +1090,14 @@ pub(super) fn cleanup_retained_stats(
                             CleanupTypeKey::Unknown
                         }
                     }
-                    crate::ast::ExprKind::Try { .. } => CleanupTypeKey::Scalar,
+                    // Resumable Effects v1 (issue #204): a `yields`-declaring
+                    // function's declared response type is always an
+                    // admitted Copy scalar (`hir::resolve_yield` enforces
+                    // this), so the whole `Yield` node is scalar-keyed just
+                    // like `Try`.
+                    crate::ast::ExprKind::Try { .. } | crate::ast::ExprKind::Yield { .. } => {
+                        CleanupTypeKey::Scalar
+                    }
                     crate::ast::ExprKind::UpdateRecord { fields, .. } => {
                         let base = children.first().copied().unwrap_or(CleanupTypeKey::Unknown);
                         let destination_storage_identity_bytes =

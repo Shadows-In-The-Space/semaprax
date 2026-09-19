@@ -275,6 +275,10 @@ fn hir_expr_owned_capacity(expression: &ResolvedExpr) -> Result<usize, Diagnosti
                 pending.extend(&call.args);
             }
             ResolvedExprKind::Unary { value, .. } => pending.push(value),
+            // Resumable Effects v1 (issue #204): `request` is the node's
+            // only child and carries no extra identity strings, exactly
+            // like `Unary`'s `value`.
+            ResolvedExprKind::Yield { request } => pending.push(request),
             ResolvedExprKind::Try {
                 operand,
                 result,

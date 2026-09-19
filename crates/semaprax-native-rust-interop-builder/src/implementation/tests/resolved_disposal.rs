@@ -537,6 +537,7 @@ fn every_expression_shape_resolves_at_exact_depth_512_and_rejects_513() {
                 .any(|child| replace_payload(child, replacement)),
             ExprKind::Unary { value, .. }
             | ExprKind::Try { operand: value }
+            | ExprKind::Yield { request: value }
             | ExprKind::Project { base: value, .. } => replace_payload(value, replacement),
             ExprKind::SuperMethod { args, .. } => args
                 .iter_mut()

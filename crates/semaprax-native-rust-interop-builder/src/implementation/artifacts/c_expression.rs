@@ -345,6 +345,7 @@ fn c_expression_linear(
                 | ResolvedExprKind::Try { .. }
                 | ResolvedExprKind::TryOption { .. }
                 | ResolvedExprKind::UpdateRecord { .. }
+                | ResolvedExprKind::Yield { .. }
                 | ResolvedExprKind::Project { .. }
                 | ResolvedExprKind::Upcast { .. }
                 | ResolvedExprKind::Place(_) => {

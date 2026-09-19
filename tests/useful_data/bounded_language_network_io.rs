@@ -185,7 +185,8 @@ fn collect_operations(
         | ResolvedExprKind::Try { operand: value, .. }
         | ResolvedExprKind::TryOption { operand: value, .. }
         | ResolvedExprKind::Project { base: value, .. }
-        | ResolvedExprKind::Upcast { source: value } => collect_operations(value, operations),
+        | ResolvedExprKind::Upcast { source: value }
+        | ResolvedExprKind::Yield { request: value } => collect_operations(value, operations),
         ResolvedExprKind::Binary { left, right, .. } => {
             collect_operations(left, operations);
             collect_operations(right, operations);

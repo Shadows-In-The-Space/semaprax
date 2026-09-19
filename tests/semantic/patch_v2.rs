@@ -58,7 +58,8 @@ fn first_call<'a>(expression: &'a ResolvedExpr, template: &str) -> Option<&'a Re
         ResolvedExprKind::Unary { value, .. }
         | ResolvedExprKind::Upcast { source: value }
         | ResolvedExprKind::Try { operand: value, .. }
-        | ResolvedExprKind::TryOption { operand: value, .. } => first_call(value, template),
+        | ResolvedExprKind::TryOption { operand: value, .. }
+        | ResolvedExprKind::Yield { request: value } => first_call(value, template),
         ResolvedExprKind::Binary { left, right, .. } => {
             first_call(left, template).or_else(|| first_call(right, template))
         }

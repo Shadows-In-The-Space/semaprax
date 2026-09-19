@@ -10,6 +10,13 @@
 use super::*;
 use crate::interpreter::retained_call::evaluate_retained_call;
 
+/// Multi-turn cross-engine conversation parity (#182/#143). Kept in its own
+/// submodule rather than appended here: this file is already near the
+/// repository's 1500-line module cap, and every gate in it that scans a
+/// module's own text by `include_str!` keeps reading exactly the file it
+/// audits.
+mod turn_parity;
+
 /// The `runtime_v1` compatibility material of the frozen fixture definition.
 /// The definition compiler supplies its own schema and nonclaims.
 pub(in crate::agent_lifecycle) const RUNTIME_V1: &str = concat!(

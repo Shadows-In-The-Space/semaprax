@@ -1,5 +1,8 @@
 # Audit Capsule v1
 
+Audience: implementers wiring a capsule producer, reviewers auditing a
+capsule, and anyone extending `src/audit_capsule.rs`.
+
 Status: versioned manifest schema and registries, a canonical builder, a
 structural verifier, a structural diff, machine-readable `nonclaims`,
 independent replay of a `change` capsule against source, opt-in Ed25519
@@ -10,8 +13,6 @@ CLI front whose `verify` verb now exposes that roster as `--trust-roster
 are `HUMAN_BLOCKED` -- neither exists here, and this document must not be
 read as claiming otherwise.
 
-Audience: implementers wiring a capsule producer, reviewers auditing a
-capsule, and anyone extending `src/audit_capsule.rs`.
 
 ## Scope and current state
 

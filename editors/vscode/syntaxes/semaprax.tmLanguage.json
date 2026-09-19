@@ -86,7 +86,7 @@
         },
         {
           "name": "keyword.control.semaprax",
-          "match": "\\b(if|else|match|while|for|in|unsafe|with)\\b"
+          "match": "\\b(if|else|match|while|for|in|unsafe|with|yield)\\b"
         },
         {
           "name": "storage.modifier.semaprax",
@@ -94,7 +94,7 @@
         },
         {
           "name": "keyword.other.contract.semaprax",
-          "match": "\\b(requires|ensures|uses|effects|permits|failure|infallible|status|consumes|always)\\b"
+          "match": "\\b(requires|ensures|uses|effects|permits|failure|infallible|status|consumes|always|yields)\\b"
         },
         {
           "name": "keyword.other.import.semaprax",

@@ -4,6 +4,9 @@ Status: implemented bounded Project-v8 API; generated packages remain unpublishe
 and formal public promotion remains open. Release regression evidence is **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 
+Audience: language users, generated-SDK consumers, tool authors, and compiler
+contributors.
+
 GitHub issue [#145](https://github.com/wavect/semaprax/issues/145) chose this
 exact profile as the candidate for a maintained, reproducible generated-package
 consumer route. `scripts/generated-package-release.py` prepares a preview
@@ -11,9 +14,6 @@ bundle (deterministic README/LICENSE/checksum manifest around the compiler's
 own unchanged output) and dry-run-checks it; it never publishes anything. See
 [docs/GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md](GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md)
 for the unapproved draft maintainer decision this prepares for.
-
-Audience: language users, generated-SDK consumers, tool authors, and compiler
-contributors.
 
 Public Owned Data API v1 defines one additive Project profile for calling a
 closed set of stable-ID functions from JavaScript/TypeScript and safe Rust. It

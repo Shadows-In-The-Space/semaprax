@@ -300,6 +300,8 @@ Audience: all documentation readers.
 - [Project Revision Store Windows-entry v1](PROJECT-REVISION-STORE-WINDOWS-V1.md)
 - [Project Profile Admission v1](PROJECT-PROFILE-ADMISSION-V1.md)
 - [Public Owned Data API v1](PUBLIC-OWNED-DATA-API-V1.md)
+- [Generated package publication decision (draft)](GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md)
+- [OCI Deployable Artifact v1](OCI-DEPLOYABLE-ARTIFACT-V1.md)
 - [Project v8 Promotion Receipt v1](PROJECT-V8-PROMOTION-RECEIPT-V1.md)
 - [Public Flat Owned Record API v1](PUBLIC-FLAT-OWNED-RECORD-API-V1.md)
 - [Public Flat Owned Record C++ Adapter v1](PUBLIC-FLAT-OWNED-RECORD-CXX-ADAPTER-V1.md)

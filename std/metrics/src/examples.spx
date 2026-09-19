@@ -4,6 +4,8 @@ use function @id("std.metrics.gauge-clamped") from std.metrics as gauge_clamped;
 use function @id("std.metrics.histogram-observe-count") from std.metrics as histogram_observe_count;
 use function @id("std.metrics.histogram-observe-sum") from std.metrics as histogram_observe_sum;
 use function @id("std.metrics.try-admit-series") from std.metrics as try_admit_series;
+use function @id("std.metrics.label-admitted") from std.metrics as label_admitted;
+use function @id("std.metrics.try-admit-labeled-series") from std.metrics as try_admit_labeled_series;
 
 @id("std.metrics.examples.main")
 fn main() -> i64
@@ -13,5 +15,9 @@ fn main() -> i64
     let observed_count = histogram_observe_count(0);
     let observed_sum = histogram_observe_sum(0, 42);
     let outcome = try_admit_series(0);
-    if requests == 1 && queue_depth == 5 && observed_count == 1 && observed_sum == 42 && outcome == 1 { 0 } else { 1 }
+    let route_name = [114u8, 111u8, 117u8, 116u8, 101u8];
+    let route_value = [47u8, 104u8, 101u8, 97u8, 108u8, 116u8, 104u8];
+    let route_admitted = label_admitted(array_as_slice(route_name), array_as_slice(route_value));
+    let labeled_outcome = try_admit_labeled_series(0, array_as_slice(route_name), array_as_slice(route_value));
+    if requests == 1 && queue_depth == 5 && observed_count == 1 && observed_sum == 42 && outcome == 1 && route_admitted && labeled_outcome == 1 { 0 } else { 1 }
 }

@@ -5,6 +5,18 @@ use function @id("std.metrics.gauge-clamped") from std.metrics as gauge_clamped;
 use function @id("std.metrics.histogram-observe-count") from std.metrics as histogram_observe_count;
 use function @id("std.metrics.histogram-observe-sum") from std.metrics as histogram_observe_sum;
 use function @id("std.metrics.try-admit-series") from std.metrics as try_admit_series;
+use function @id("std.metrics.byte-is-label-name-start") from std.metrics as byte_is_label_name_start;
+use function @id("std.metrics.byte-is-label-name-char") from std.metrics as byte_is_label_name_char;
+use function @id("std.metrics.label-name-max-len") from std.metrics as label_name_max_len;
+use function @id("std.metrics.label-name-is-valid") from std.metrics as label_name_is_valid;
+use function @id("std.metrics.byte-is-label-value-unsafe") from std.metrics as byte_is_label_value_unsafe;
+use function @id("std.metrics.value-is-label-safe") from std.metrics as value_is_label_safe;
+use function @id("std.metrics.label-value-max-len") from std.metrics as label_value_max_len;
+use function @id("std.metrics.label-value-len-admitted") from std.metrics as label_value_len_admitted;
+use function @id("std.metrics.label-count-max") from std.metrics as label_count_max;
+use function @id("std.metrics.label-count-admitted") from std.metrics as label_count_admitted;
+use function @id("std.metrics.label-admitted") from std.metrics as label_admitted;
+use function @id("std.metrics.try-admit-labeled-series") from std.metrics as try_admit_labeled_series;
 
 @id("std.metrics.tests.counter_increment_accumulates")
 fn counter_increment_accumulates() -> bool
@@ -50,8 +62,135 @@ fn refuses_at_the_limit() -> bool
     try_admit_series(cardinality_limit()) == -1
 }
 
-@id("std.metrics.tests.main")
-fn main() -> i64
+// ---------------------------------------------------------------------
+// Labels (issue #193)
+// ---------------------------------------------------------------------
+@id("std.metrics.tests.byte_is_label_name_start_admits_letters_and_underscore_only")
+fn byte_is_label_name_start_admits_letters_and_underscore_only() -> bool
+{
+    byte_is_label_name_start(97u8) && byte_is_label_name_start(90u8) && byte_is_label_name_start(95u8) && !byte_is_label_name_start(57u8) && !byte_is_label_name_start(32u8)
+}
+
+@id("std.metrics.tests.byte_is_label_name_char_admits_digits_too")
+fn byte_is_label_name_char_admits_digits_too() -> bool
+{
+    byte_is_label_name_char(57u8) && byte_is_label_name_char(97u8) && byte_is_label_name_char(95u8) && !byte_is_label_name_char(32u8) && !byte_is_label_name_char(45u8)
+}
+
+@id("std.metrics.tests.byte_is_label_value_unsafe_flags_exact_set")
+fn byte_is_label_value_unsafe_flags_exact_set() -> bool
+{
+    byte_is_label_value_unsafe(10u8) && byte_is_label_value_unsafe(13u8) && byte_is_label_value_unsafe(0u8) && byte_is_label_value_unsafe(34u8) && byte_is_label_value_unsafe(92u8) && !byte_is_label_value_unsafe(97u8)
+}
+
+// A leading digit is refused (Prometheus label-name grammar reserves the
+// first byte), a space is refused wherever it appears, and the empty name is
+// refused by the length floor, not by falling through the byte scan.
+@id("std.metrics.tests.label_name_admits_allowed_bytes_only")
+fn label_name_admits_allowed_bytes_only() -> bool
+{
+    let ok = [114u8, 111u8, 117u8, 116u8, 101u8, 95u8, 57u8];
+    let with_space_middle = [114u8, 32u8, 117u8];
+    let with_space_final = [114u8, 111u8, 32u8];
+    let leading_digit = [57u8, 97u8, 98u8];
+    let empty = [0u8; 0];
+    label_name_is_valid(array_as_slice(ok)) && !label_name_is_valid(array_as_slice(with_space_middle)) && !label_name_is_valid(array_as_slice(with_space_final)) && !label_name_is_valid(array_as_slice(leading_digit)) && !label_name_is_valid(array_as_slice(empty))
+}
+
+@id("std.metrics.tests.label_name_len_bounds_at_max_and_max_plus_one")
+fn label_name_len_bounds_at_max_and_max_plus_one() -> bool
+{
+    let max_len = [97u8; 64];
+    let over_max = [97u8; 65];
+    label_name_max_len() == 64usize && label_name_is_valid(array_as_slice(max_len)) && !label_name_is_valid(array_as_slice(over_max))
+}
+
+// Line feed, carriage return and NUL each break a Prometheus-style text
+// exposition value or the transport underneath it. Each is asserted in the
+// FINAL byte position as well as the middle: a scan that stops one byte
+// early would pass every case here except the middle ones.
+@id("std.metrics.tests.label_value_refuses_line_and_nul_bytes")
+fn label_value_refuses_line_and_nul_bytes() -> bool
+{
+    let clean = [97u8, 98u8, 99u8];
+    let lf_middle = [97u8, 10u8, 99u8];
+    let lf_final = [97u8, 98u8, 10u8];
+    let cr_middle = [97u8, 13u8, 99u8];
+    let cr_final = [97u8, 98u8, 13u8];
+    let nul_middle = [97u8, 0u8, 99u8];
+    let nul_final = [97u8, 98u8, 0u8];
+    value_is_label_safe(array_as_slice(clean)) && !value_is_label_safe(array_as_slice(lf_middle)) && !value_is_label_safe(array_as_slice(lf_final)) && !value_is_label_safe(array_as_slice(cr_middle)) && !value_is_label_safe(array_as_slice(cr_final)) && !value_is_label_safe(array_as_slice(nul_middle)) && !value_is_label_safe(array_as_slice(nul_final))
+}
+
+// The Prometheus text format's own value escape covers exactly backslash and
+// double quote alongside line feed, so both are refused outright here too,
+// again in the final position as well as the middle.
+@id("std.metrics.tests.label_value_refuses_quote_and_backslash")
+fn label_value_refuses_quote_and_backslash() -> bool
+{
+    let clean = [97u8, 98u8, 99u8];
+    let quote_middle = [97u8, 34u8, 99u8];
+    let quote_final = [97u8, 98u8, 34u8];
+    let backslash_middle = [97u8, 92u8, 99u8];
+    let backslash_final = [97u8, 98u8, 92u8];
+    value_is_label_safe(array_as_slice(clean)) && !value_is_label_safe(array_as_slice(quote_middle)) && !value_is_label_safe(array_as_slice(quote_final)) && !value_is_label_safe(array_as_slice(backslash_middle)) && !value_is_label_safe(array_as_slice(backslash_final))
+}
+
+// A label value may be empty; the bound is an upper one, checked at the
+// limit and one past it.
+@id("std.metrics.tests.label_value_len_bounds_at_max_and_max_plus_one")
+fn label_value_len_bounds_at_max_and_max_plus_one() -> bool
+{
+    let max_len = [97u8; 128];
+    let over_max = [97u8; 129];
+    label_value_max_len() == 128usize && label_value_len_admitted(0usize) && label_value_len_admitted(byte_len(array_as_slice(max_len))) && !label_value_len_admitted(byte_len(array_as_slice(over_max)))
+}
+
+// Zero labels (an unlabeled series) is admitted, the bound itself is
+// admitted, one past it is refused, and a negative count -- which no real
+// caller should be able to construct but a hostile one might pass -- is
+// refused rather than accidentally admitted by an unchecked lower bound.
+@id("std.metrics.tests.label_count_bounds_at_zero_max_and_over")
+fn label_count_bounds_at_zero_max_and_over() -> bool
+{
+    label_count_max() == 32 && label_count_admitted(0) && label_count_admitted(label_count_max()) && !label_count_admitted(label_count_max() + 1) && !label_count_admitted(-1)
+}
+
+// The composed judgement: a bad name alone or a bad value alone each sink
+// the whole label, and a refusal is attributable to whichever half failed.
+@id("std.metrics.tests.label_admitted_composes_name_and_value")
+fn label_admitted_composes_name_and_value() -> bool
+{
+    let ok_name = [114u8, 111u8, 117u8, 116u8, 101u8];
+    let ok_value = [47u8, 104u8, 101u8, 97u8, 108u8, 116u8, 104u8];
+    let bad_name = [32u8];
+    let bad_value = [97u8, 10u8];
+    label_admitted(array_as_slice(ok_name), array_as_slice(ok_value)) && !label_admitted(array_as_slice(bad_name), array_as_slice(ok_value)) && !label_admitted(array_as_slice(ok_name), array_as_slice(bad_value))
+}
+
+// The negative control that matters most for this issue: a registry with
+// plenty of cardinality budget left (existing_count == 0) still refuses a
+// series keyed by a bad label, proving admission actually inspects the
+// label rather than only counting an abstract series as `try_admit_series`
+// does. The cardinality bound itself still applies to a good label, at one
+// below and exactly at `cardinality_limit()`.
+@id("std.metrics.tests.try_admit_labeled_series_sees_the_label")
+fn try_admit_labeled_series_sees_the_label() -> bool
+{
+    let ok_name = [114u8, 111u8, 117u8, 116u8, 101u8];
+    let ok_value = [47u8, 104u8, 101u8, 97u8, 108u8, 116u8, 104u8];
+    let bad_name = [32u8];
+    try_admit_labeled_series(0, array_as_slice(ok_name), array_as_slice(ok_value)) == 1 && try_admit_labeled_series(0, array_as_slice(bad_name), array_as_slice(ok_value)) == -1 && try_admit_labeled_series(cardinality_limit() - 1, array_as_slice(ok_name), array_as_slice(ok_value)) == cardinality_limit() && try_admit_labeled_series(cardinality_limit(), array_as_slice(ok_name), array_as_slice(ok_value)) == -1
+}
+
+// Split from `main` into three smaller aggregators, each summing a disjoint
+// subset of unique failure bits, and combined by addition in `main` below.
+// A single 17-branch aggregator exceeded the cleanup-replay skeleton-work
+// budget (`SPX-H006`): "restructure the branches to be mutually exclusive
+// ... or combine their results across separate calls instead" is the
+// diagnostic's own remedy, and this is the "separate calls" half of it.
+@id("std.metrics.tests.main_scalars")
+fn main_scalars() -> i64
 {
     let mut failed = 0;
     failed = failed + if counter_increment_accumulates() { 0 } else { 1 };
@@ -61,4 +200,35 @@ fn main() -> i64
     failed = failed + if admits_one_below_the_limit() { 0 } else { 16 };
     failed = failed + if refuses_at_the_limit() { 0 } else { 32 };
     failed
+}
+
+@id("std.metrics.tests.main_label_bytes")
+fn main_label_bytes() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if byte_is_label_name_start_admits_letters_and_underscore_only() { 0 } else { 64 };
+    failed = failed + if byte_is_label_name_char_admits_digits_too() { 0 } else { 128 };
+    failed = failed + if byte_is_label_value_unsafe_flags_exact_set() { 0 } else { 256 };
+    failed = failed + if label_name_admits_allowed_bytes_only() { 0 } else { 512 };
+    failed = failed + if label_name_len_bounds_at_max_and_max_plus_one() { 0 } else { 1024 };
+    failed = failed + if label_value_refuses_line_and_nul_bytes() { 0 } else { 2048 };
+    failed
+}
+
+@id("std.metrics.tests.main_label_admission")
+fn main_label_admission() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if label_value_refuses_quote_and_backslash() { 0 } else { 4096 };
+    failed = failed + if label_value_len_bounds_at_max_and_max_plus_one() { 0 } else { 8192 };
+    failed = failed + if label_count_bounds_at_zero_max_and_over() { 0 } else { 16384 };
+    failed = failed + if label_admitted_composes_name_and_value() { 0 } else { 32768 };
+    failed = failed + if try_admit_labeled_series_sees_the_label() { 0 } else { 65536 };
+    failed
+}
+
+@id("std.metrics.tests.main")
+fn main() -> i64
+{
+    main_scalars() + main_label_bytes() + main_label_admission()
 }

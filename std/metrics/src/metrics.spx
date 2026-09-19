@@ -61,3 +61,149 @@ fn try_admit_series(existing_count: i64) -> i64
 {
     if existing_count < cardinality_limit() { existing_count + 1 } else { -1 }
 }
+
+// ---------------------------------------------------------------------
+// Labels (issue #193)
+// ---------------------------------------------------------------------
+// Everything above admits a metric's numeric state. Nothing above attaches a
+// label to it or looks at a label's bytes, so `try_admit_series` counted
+// abstract series and a caller-controlled label name or value could carry
+// whatever bytes a Prometheus-style text exporter would then choke on. This
+// section is that missing decision layer: pure predicates over
+// `borrow Slice<u8>`, no I/O, no `permit`/`uses`, refuse rather than
+// sanitize -- the same shape `std.email` and `std.http` already established
+// for their own injection boundaries.
+//
+// Label NAME validity is a closed allowlist, following
+// `std.http.header_name_is_token`'s reasoning: the bytes that break a
+// metrics exposition format's `name="value"` grammar are exactly the ones a
+// denylist forgets. A label name in the Prometheus text format is
+// `[a-zA-Z_][a-zA-Z0-9_]*`, so only that admitted set -- never anything
+// merely "not yet seen to be dangerous" -- is admitted.
+@id("std.metrics.byte-is-label-name-start")
+fn byte_is_label_name_start(byte: u8) -> bool
+{
+    byte >= 65u8 && byte <= 90u8 || byte >= 97u8 && byte <= 122u8 || byte == 95u8
+}
+
+@id("std.metrics.byte-is-label-name-char")
+fn byte_is_label_name_char(byte: u8) -> bool
+{
+    byte_is_label_name_start(byte) || byte >= 48u8 && byte <= 57u8
+}
+
+@id("std.metrics.label-name-max-len")
+fn label_name_max_len() -> usize
+{
+    64usize
+}
+
+@id("std.metrics.label-name-is-valid")
+fn label_name_is_valid(name: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut valid = length >= 1usize && length <= label_name_max_len();
+    while index < length && valid {
+        valid = match byte_get(name, index) { Option::Some { value } => if index == 0usize { byte_is_label_name_start(value) } else { byte_is_label_name_char(value) }, Option::None {} => false, };
+        index = index + 1usize;
+        index < length && valid
+    }
+    valid
+}
+
+// Label VALUE safety is the opposite shape: a denylist of the exact bytes a
+// Prometheus-style text exposition format breaks on, because a label value
+// is otherwise arbitrary text and has no admitted-character grammar to
+// allowlist. A value is written `"..."` in the exposition format, and its
+// own escaping rule only covers backslash, double quote, and line feed
+// (`\\`, `\"`, `\n`) -- so those three are refused outright rather than
+// escaped, matching `std.email.value_is_header_safe` and
+// `std.http.value_is_header_safe`'s refuse-don't-sanitize discipline. CR and
+// NUL are refused alongside them for the same defensive reason those two
+// packages already refuse them next to their own format's separator: CR
+// pairs with LF in most real line-oriented consumers of this text, and NUL
+// truncates a C-string-backed writer regardless of the length this package
+// believes the value has.
+//
+// Written as a `match` rather than a chained `||` of five `byte == ...`
+// comparisons: `std.http.byte_is_tchar`'s single-expression form hit the
+// cleanup-replay skeleton-work budget (`SPX-H006`) at three ranges plus one
+// helper call, so a five-literal disjunction scanned inside this package's
+// own `while` loop is designed out from the start rather than discovered by
+// a failing gate.
+@id("std.metrics.byte-is-label-value-unsafe")
+fn byte_is_label_value_unsafe(byte: u8) -> bool
+{
+    match byte { 10u8 => true, 13u8 => true, 0u8 => true, 34u8 => true, 92u8 => true, _ => false, }
+}
+
+@id("std.metrics.value-is-label-safe")
+fn value_is_label_safe(field: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(field);
+    let mut index = 0usize;
+    let mut safe = true;
+    while index < length && safe {
+        safe = match byte_get(field, index) { Option::Some { value } => !byte_is_label_value_unsafe(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && safe
+    }
+    safe
+}
+
+@id("std.metrics.label-value-max-len")
+fn label_value_max_len() -> usize
+{
+    128usize
+}
+
+// A label value may be empty (an unset label is a legitimate series key), so
+// this is an upper bound only, unlike the name's lower-bounded length.
+@id("std.metrics.label-value-len-admitted")
+fn label_value_len_admitted(length: usize) -> bool
+{
+    length <= label_value_max_len()
+}
+
+// One deployment-independent bound on how many labels a single series may
+// carry, alongside the per-name and per-value byte bounds above: three
+// separate budgets, because a caller told only "labels rejected" without
+// which budget it hit is exactly the diagnostic failure this repository
+// keeps finding elsewhere.
+@id("std.metrics.label-count-max")
+fn label_count_max() -> i64
+{
+    32
+}
+
+@id("std.metrics.label-count-admitted")
+fn label_count_admitted(count: i64) -> bool
+{
+    count >= 0 && count <= label_count_max()
+}
+
+// The composed judgement a caller asks once per label, before attaching it
+// to a series -- in the style of `std.email.address_admitted` and
+// `std.http.request_line_admitted`. Every clause is one of the predicates
+// above, so a refusal can always be attributed to a named rule.
+@id("std.metrics.label-admitted")
+fn label_admitted(name: borrow Slice<u8>, value: borrow Slice<u8>) -> bool
+{
+    label_name_is_valid(name) && value_is_label_safe(value) && label_value_len_admitted(byte_len(value))
+}
+
+// Cardinality admission that actually sees the label, rather than counting
+// an abstract series as `try_admit_series` does above. A label that fails
+// `label_admitted` is refused with the same fixed `-1` sentinel a registry
+// already at `cardinality_limit()` returns, so a caller cannot tell "bad
+// label" apart from "budget exhausted" by the return value alone, but it can
+// never register a series keyed by a label this package refused.
+@id("std.metrics.try-admit-labeled-series")
+fn try_admit_labeled_series(existing_count: i64, name: borrow Slice<u8>, value: borrow Slice<u8>) -> i64
+    requires existing_count >= 0
+    requires existing_count <= cardinality_limit()
+    ensures result == -1 || result >= 1 && result <= cardinality_limit()
+{
+    if label_admitted(name, value) { try_admit_series(existing_count) } else { -1 }
+}

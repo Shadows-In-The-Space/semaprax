@@ -1081,6 +1081,7 @@ name = "semaprax"
 version = "0.5.0"
 dependencies = [
  "argon2",
+ "ed25519-dalek",
  "fs2",
  "getrandom 0.4.3",
  "hmac",

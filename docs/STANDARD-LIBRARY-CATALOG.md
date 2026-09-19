@@ -2361,6 +2361,26 @@ message - while an absent sender is not.
 fn envelope_is_complete(has_sender: bool, has_recipient: bool, has_subject: bool) -> bool
 ```
 
+### `std.email.value_is_header_safe_guarded`
+
+---------------------------------------------------------------------
+Redaction guard (issue #193)
+---------------------------------------------------------------------
+`value_is_header_safe` above refuses only CR/LF/NUL -- the header
+injection boundary. It has no notion of a header's own secret-classified
+content: a Reply-To, a Subject, or a display name that echoes back an SMTP
+credential or a session token used to authenticate the send is ordinary
+header-safe text and passes unchanged. This composes that byte-safety
+check with `std.log.redact.event_is_safe`'s six caller-declared flags,
+exactly like `std.log.append-event-guarded` gates a log event and
+`std.http.value_is_header_safe_guarded` gates an outbound HTTP header, so
+a header value the caller has classified as a secret is refused before it
+is ever assembled into a message.
+
+```semaprax
+fn value_is_header_safe_guarded(field: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+```
+
 ## `std.encoding`
 
 Package `std/encoding`, tier `core`, status partial. Required project profile: `scalar`. Dependency: `std.encoding = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
@@ -3294,12 +3314,71 @@ version field and is a request-line injection in its own right.
 fn request_target_is_safe(target: borrow Slice<u8>) -> bool
 ```
 
+### `std.http.target_is_origin_form`
+
+---------------------------------------------------------------------
+Userinfo refusal (issue #193): the classic credential-in-a-URL leak
+---------------------------------------------------------------------
+RFC 7230 Section 5.3.1 defines origin-form as `absolute-path [ "?" query ]`
+— it starts with `/` and carries no authority component at all, so a `@`
+byte inside one is ordinary path or query content (an email address in a
+query value, say) and must not be refused. Every other request-target form
+this package's caller might assemble — absolute-form (`scheme://user:pass
+@host/path`, the proxy form) and authority-form (`host:port`, the CONNECT
+form) — carries an authority component, and RFC 7230 Section 5.3.3 is
+explicit that a sender "MUST NOT generate" userinfo in either: `user:pass@`
+is deprecated precisely because it ships a credential in the one part of a
+request line every intermediary and access log sees in clear text. This is
+therefore a flat refusal of `@` outside origin-form, not a URL parser: it
+never inspects a scheme, a host, or a port, so it cannot mistake one
+request-target form for another.
+
+```semaprax
+fn target_is_origin_form(target: borrow Slice<u8>) -> bool
+```
+
+### `std.http.byte_is_at_sign`
+
+```semaprax
+fn byte_is_at_sign(byte: u8) -> bool
+```
+
+### `std.http.non_origin_target_admits_no_userinfo`
+
+```semaprax
+fn non_origin_target_admits_no_userinfo(target: borrow Slice<u8>) -> bool
+```
+
+### `std.http.request_target_admits_no_userinfo`
+
+```semaprax
+fn request_target_admits_no_userinfo(target: borrow Slice<u8>) -> bool
+```
+
 ### `std.http.request_line_admitted`
 
 The composed judgement a caller asks once, before assembling anything.
 
 ```semaprax
 fn request_line_admitted(method: borrow Slice<u8>, target: borrow Slice<u8>) -> bool
+```
+
+### `std.http.value_is_header_safe_guarded`
+
+---------------------------------------------------------------------
+Outbound header value redaction guard (issue #193)
+---------------------------------------------------------------------
+`value_is_header_safe` above refuses only the request-splitting bytes; it
+has no notion of a value's own secret-classified content (an Authorization
+header's bearer token, say). This composes that byte-safety check with
+`std.log.redact.event_is_safe`'s six caller-declared secret-bearing flags,
+exactly like `std.log.append-event-guarded` gates a log event, so an
+outbound header whose value the caller has classified as a secret is
+refused before it is ever assembled into a request, independent of whether
+its bytes would otherwise pass the separator scan.
+
+```semaprax
+fn value_is_header_safe_guarded(field: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
 ```
 
 ## `std.io`
@@ -4168,6 +4247,41 @@ never register a series keyed by a label this package refused.
 
 ```semaprax
 fn try_admit_labeled_series(existing_count: i64, name: borrow Slice<u8>, value: borrow Slice<u8>) -> i64
+    requires existing_count >= 0
+    requires existing_count <= cardinality_limit()
+    ensures result == -1 || result >= 1 && result <= cardinality_limit()
+```
+
+### `std.metrics.label-admitted-guarded`
+
+---------------------------------------------------------------------
+Redaction guard (issue #193)
+---------------------------------------------------------------------
+Everything above judges a label's SHAPE: a name grammar and a value
+denylist keep a series out of a Prometheus-style exposition format's own
+injection boundary, but neither one has any notion of a label's
+caller-classified secret content. A password or API key that carries no
+CR/LF/NUL/quote/backslash is a perfectly shape-valid label value and would
+be admitted and exported by `label_admitted`/`try_admit_labeled_series`
+alone -- this closes exactly that gap, composing the shape check with
+`std.log.redact.event_is_safe`'s six caller-declared flags exactly like
+`std.log.append-event-guarded` gates a log event.
+
+```semaprax
+fn label_admitted_guarded(name: borrow Slice<u8>, value: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+```
+
+### `std.metrics.try-admit-labeled-series-guarded`
+
+The registration entry point a real exporter would actually call: a
+secret-classified label never grows the registered series count, refused
+with the same fixed `-1` sentinel a shape-invalid label or an exhausted
+budget already returns, so a caller cannot tell the three refusal reasons
+apart from the return value alone but can never register a series keyed by
+a label this package refused for any of them.
+
+```semaprax
+fn try_admit_labeled_series_guarded(existing_count: i64, name: borrow Slice<u8>, value: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> i64
     requires existing_count >= 0
     requires existing_count <= cardinality_limit()
     ensures result == -1 || result >= 1 && result <= cardinality_limit()
@@ -5796,4 +5910,23 @@ to a named rule.
 
 ```semaprax
 fn delivery_admitted(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64) -> bool
+```
+
+### `std.webhook.delivery_admitted_guarded`
+
+---------------------------------------------------------------------
+Redaction guard (issue #193)
+---------------------------------------------------------------------
+Everything above judges signature shape, payload budget, and replay
+window -- none of it has any notion of a payload's own content. A payload
+that accidentally embeds the webhook's own signing secret in cleartext (a
+caller-assembled body that echoes its configuration back, say) passes
+every check above unchanged. This composes the existing admission with
+`std.log.redact.event_is_safe`'s six caller-declared flags, exactly like
+`std.log.append-event-guarded` gates a log event, so a delivery the caller
+has classified as carrying a secret in its payload is refused before an
+attempt is ever made, independent of signature, size, or timestamp.
+
+```semaprax
+fn delivery_admitted_guarded(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
 ```

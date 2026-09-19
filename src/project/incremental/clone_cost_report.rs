@@ -33,6 +33,17 @@
 //! running fourteen concurrent `cargo` builds. Source byte count is recorded
 //! alongside for comparison, since #85 already showed `modules_parsed == 0`
 //! does not by itself imply cheap reuse.
+//!
+//! #130 asks for cold, warm, edited *and recovered* workflows measured on
+//! like-for-like footing. `measure_cold_open` and `measure_recovered_open`
+//! (alongside `measure_warm_open`) complete that set on this module's AST-
+//! node metric: cold is a brand-new cache's first build (nothing to clone);
+//! recovered is a warm cache surviving a refused build (a provider signature
+//! change) and then rebuilding the original sources at the same cost as an
+//! already-unchanged rebuild -- proving the refused attempt left no residue,
+//! per #131's "failed rebuild leaves prior cache/service state intact."
+//! `classify_next_build` is the one shared classifier all three call, so
+//! cold/warm/recovered can never disagree about what counts as a hit.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -109,21 +120,21 @@ pub(crate) fn program_ast_node_count(program: &Program) -> usize {
     count
 }
 
-/// Cold-build `initial`, then warm-build `next` against the same cache, and
-/// classify every module in `next` as cloned or reparsed using the exact
+/// Snapshot `cache`'s current entries, build `next` against it, and classify
+/// every module in `next` as cloned or reparsed using the exact
 /// `invalidated_sources` the real build already computes. This function
 /// reads that field; it never recomputes invalidation itself, so it cannot
-/// disagree with -- or bypass -- the real admission it replays.
-pub(crate) fn measure_warm_open(
+/// disagree with -- or bypass -- the real admission it replays. Shared by
+/// every scenario below (#130's cold, warm-unchanged/edited, and recovered
+/// workflows) so they all measure through one code path.
+fn classify_next_build(
+    cache: &mut ProjectFrontendCache,
     manifest: &ProjectManifest,
-    initial: &[ProjectFrontendSource],
     next: &[ProjectFrontendSource],
 ) -> Result<CloneCostReport> {
-    let mut cache = ProjectFrontendCache::new_with_semantic_cache();
-    cache.build(manifest, initial)?;
-    // Snapshot what the cache holds before the second build: these are the
-    // exact `Arc<Program>` values `lookup` clones if their path's source is
-    // unchanged and the path is not invalidated.
+    // Snapshot what the cache holds before this build: these are the exact
+    // `Arc<Program>` values `lookup` clones if their path's source is
+    // unchanged and the path is not invalidated. Empty for a cold cache.
     let baseline: BTreeMap<String, (usize, usize)> = cache
         .entries
         .iter()
@@ -174,6 +185,59 @@ pub(crate) fn measure_warm_open(
         }
     }
     Ok(CloneCostReport { cloned, reparsed })
+}
+
+/// Cold-build `initial`, then warm-build `next` against the same cache, and
+/// classify every module in `next` as cloned or reparsed. See
+/// `classify_next_build` for the classification contract.
+pub(crate) fn measure_warm_open(
+    manifest: &ProjectManifest,
+    initial: &[ProjectFrontendSource],
+    next: &[ProjectFrontendSource],
+) -> Result<CloneCostReport> {
+    let mut cache = ProjectFrontendCache::new_with_semantic_cache();
+    cache.build(manifest, initial)?;
+    classify_next_build(&mut cache, manifest, next)
+}
+
+/// #130's "cold" workflow: a brand-new cache's first build of `sources`.
+/// There is nothing yet to clone, so every module is necessarily reparsed;
+/// this is the explicit baseline the warm scenarios above are implicitly
+/// compared against, measured on the identical AST-node footing rather than
+/// left as an unstated setup step.
+pub(crate) fn measure_cold_open(
+    manifest: &ProjectManifest,
+    sources: &[ProjectFrontendSource],
+) -> Result<CloneCostReport> {
+    let mut cache = ProjectFrontendCache::new_with_semantic_cache();
+    classify_next_build(&mut cache, manifest, sources)
+}
+
+/// #130's "recovered" workflow, on the same footing as the other scenarios:
+/// warm-build `sources`, attempt a build of `failing` that is expected to be
+/// refused by real admission, discard that outcome without inspecting it
+/// (the point is that the cache must not be poisoned regardless of *why*
+/// the attempt failed), then classify a rebuild of the original `sources`.
+/// `ProjectFrontendCache::build` only commits `self.context`/`self.entries`/
+/// `self.checked` after `build_owned_with_frontend` and the work-report
+/// render both succeed (see `build` in `src/project/incremental.rs`), so a
+/// refused `failing` build leaves the cache byte-for-byte as it was; this
+/// function does not special-case that, it just measures the AST cost of
+/// the recovery build and lets a poisoned/partially-evicted cache show up
+/// as an unexpected reparse if that guarantee were ever broken.
+pub(crate) fn measure_recovered_open(
+    manifest: &ProjectManifest,
+    sources: &[ProjectFrontendSource],
+    failing: &[ProjectFrontendSource],
+) -> Result<CloneCostReport> {
+    let mut cache = ProjectFrontendCache::new_with_semantic_cache();
+    cache.build(manifest, sources)?;
+    if cache.build(manifest, failing).is_ok() {
+        return Err(super::invalid(
+            "recovered-open fixture's failing build was unexpectedly admitted",
+        ));
+    }
+    classify_next_build(&mut cache, manifest, sources)
 }
 
 #[cfg(test)]
@@ -262,6 +326,33 @@ mod tests {
         );
     }
 
+    /// #130's "cold" workflow, measured on the same footing as the warm
+    /// scenarios around it rather than left as their unstated setup step: a
+    /// brand-new cache's first build has nothing to clone, so every module
+    /// is reparsed. Cross-checked against `measure_warm_open`'s own
+    /// unchanged-rebuild total: cold-open's total parse volume must equal
+    /// warm-unchanged's total clone volume, because both walk the identical
+    /// admitted `Program` set -- only which side of the report it lands on
+    /// differs.
+    #[test]
+    fn cold_open_parses_every_module_and_clones_none() {
+        let (manifest, sources) = calculator_project();
+        let report = measure_cold_open(&manifest, &sources).unwrap();
+        assert!(report.cloned.is_empty());
+        assert_eq!(report.reparsed.len(), sources.len());
+        assert!(report.total_reparsed_nodes() > 0);
+        let warm_unchanged = measure_warm_open(&manifest, &sources, &sources).unwrap();
+        assert_eq!(
+            report.total_reparsed_nodes(),
+            warm_unchanged.total_cloned_nodes()
+        );
+        eprintln!(
+            "cold open: {} modules parsed, {} AST nodes",
+            report.reparsed.len(),
+            report.total_reparsed_nodes()
+        );
+    }
+
     /// A body-only edit to a module nothing else imports invalidates exactly
     /// that module (matching
     /// `warm_open_after_local_body_edit_reuses_unaffected_modules` in the
@@ -320,6 +411,38 @@ mod tests {
             report.total_cloned_nodes(),
             report.reparsed.len(),
             report.total_reparsed_nodes()
+        );
+    }
+
+    /// #130's "recovered" workflow, on the same footing as the other
+    /// scenarios: #131 requires that a failed rebuild leave prior cache
+    /// state intact and never label historical facts current. Here a build
+    /// with a signature-breaking provider edit is refused (matching
+    /// `changed_import_signature_is_rechecked_and_failed_build_does_not_poison_cache`
+    /// in `tests/project/frontend_cache.rs`), and the measurement is what a
+    /// *subsequent* build of the original, unedited sources costs. A
+    /// poisoned or partially evicted cache would show up here as an
+    /// unexpected reparse; instead recovery costs exactly what an
+    /// already-unchanged rebuild costs.
+    #[test]
+    fn recovered_open_after_a_failed_build_reclones_the_whole_project() {
+        let (manifest, sources) = calculator_project();
+        let failing = with_replacement(
+            &sources,
+            "src/core.spx",
+            "fn add(left: i64, right: i64)",
+            "fn add(left: i64, right: i64, extra: i64)",
+        );
+        let report = measure_recovered_open(&manifest, &sources, &failing).unwrap();
+        assert!(report.reparsed.is_empty());
+        assert_eq!(report.cloned.len(), sources.len());
+        assert!(report.total_cloned_nodes() > 0);
+        let unchanged = measure_warm_open(&manifest, &sources, &sources).unwrap();
+        assert_eq!(report.total_cloned_nodes(), unchanged.total_cloned_nodes());
+        eprintln!(
+            "recovered open: {} modules cloned, {} AST nodes",
+            report.cloned.len(),
+            report.total_cloned_nodes()
         );
     }
 

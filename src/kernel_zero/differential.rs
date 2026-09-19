@@ -35,6 +35,10 @@ use super::eval::eval_program;
 use super::reify::translate_program;
 use super::value::{Fault, Value};
 
+// Native C11 and Core Wasm extension of this module's own interpreter-only
+// differential test -- see that submodule's header doc.
+mod cross_backend;
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 fn write_temp(source: &str) -> PathBuf {

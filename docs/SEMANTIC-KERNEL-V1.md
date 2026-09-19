@@ -82,9 +82,12 @@ Read this section before citing this document elsewhere.
   concrete-argument comparisons total, seed `0x4b65726e656c3021` --
   see "Differential testing" below for exact counts and what was found).
   This is **not** a proof that the interpreter always agrees with Kernel-0's
-  operational semantics: the corpus is finite, and it is silent on the
-  **native and Wasm backends**, which this session's differential test does
-  not touch at all. Section "Reification: HIR to Kernel-0, and its
+  operational semantics: the corpus is finite. **A later session extended
+  the same comparison to native C11 (`-O0`/`-O2`) and Core Wasm**
+  (`src/kernel_zero/differential/cross_backend.rs`) over the identical
+  corpus and seed: 591 comparisons, 0 disagreements. This remains evidence
+  over one finite seeded corpus, not a proof, and is silent on any program
+  outside it. Section "Reification: HIR to Kernel-0, and its
   unproved edge" and "Differential testing" together name what is now
   checked and what remains open.
 - **The `SPX-G171` byte figures below are not independently re-measured at
@@ -308,8 +311,49 @@ reified": the predicate below is now implemented and tested as a standalone
 `pub(crate)` checker, but it is not wired into any compiler diagnostic path.
 Calling it never rejects a real program -- it only answers "does this
 function's HIR shape match Kernel-0's grammar" for a caller, today only its
-own tests, that asks. Wiring it into an actual admission gate, if ever
-wanted, is separate, undone work.)*
+own tests, that asks.
+
+**Decision (issue #188, this session): recorded as permanently inert by
+design, not left open as undone wiring.** `reifies_into_kernel_zero` names
+proof-fragment membership -- "does this function's shape match the one
+paper-and-Lean-proved calculus" -- which is orthogonal to admission: every
+function outside Kernel-0 is already independently checked and admitted by
+the compiler's real verifier, so nothing about whether a program compiles
+should ever turn on it. A **mandatory** refusal wired from this predicate
+would silently narrow the admitted language on a proof-infrastructure
+pretext -- exactly the mistake a prior session made on issue #208 and had
+rejected -- so that shape is out regardless of where it lived. The remaining
+honest option was a **non-mandatory, queryable** surface (a new
+`semaprax.agent-context.v1`/`v2` facet in `src/graph.rs`'s
+`AgentContextFilter`, or a new top-level CLI verb) that only reports
+membership for a caller that asks. Three independent reasons this session
+did not build that surface, not only that this session's shared checkout
+made it temporarily unsafe to edit the files it would touch:
+1. This repository's own determinism invariant ("graph JSON... and
+   contracted generated artifacts are deterministic") makes any such facet a
+   new versioned wire-format/CLI commitment with golden fixtures and spec
+   text of its own -- a materially larger and more permanent surface than
+   the one boolean function the predicate itself is.
+2. Every fact the predicate reads (effect emptiness, empty
+   `requires`/`ensures`, `Value`-only ownership, `i64`/`bool`-only scalar
+   types, and the absence of records/variants/match/closures/mutation in the
+   body) is already independently visible through facts the compiler
+   exposes today -- the existing `contracts`/`ownership`/`effects`/`types`
+   context facets, or simply the function's own signature and body. A
+   dedicated `kernel-zero` facet would package a boolean *derived* from
+   information already exposed, not reveal anything a caller could not
+   already determine.
+3. Concretely, at the time of this decision, `src/graph.rs` sat exactly at
+   its recorded `tests/module-size-budget.tsv` ceiling (5596/5596 lines),
+   and that gate's own text is explicit that a budgeted file grows by moving
+   code into a submodule, never by raising the recorded number -- so even
+   the lightest version of this wiring was not a small, local edit.
+
+A future session with independent evidence that a caller needs this exact
+fact, and that it is worth the wire-format commitment point 1 names, can
+revisit this; nothing here forecloses that. What is foreclosed is treating
+"wire the predicate somewhere" as unfinished work this issue still owes --
+it does not, by design.)*
 
 > A `ResolvedFunction` **reifies into Kernel-0** iff every parameter and its
 > return type is `i64` or `bool`, its `uses`/effect set is empty, it has no
@@ -361,14 +405,17 @@ weak link."* What is closed now, and what remains open:
   Kernel-0 reference interpreter (`src/kernel_zero/{term,value,eval}.rs`), a
   total-on-admission HIR translator (`src/kernel_zero/reify.rs`), and a
   differential test (`src/kernel_zero/differential.rs`) -- see "Differential
-  testing" below for the corpus, the seed, and the exact result. **Still
-  open:** the native and Wasm backends are not compared at all, the corpus
-  is finite and not exhaustive (a passing differential test is evidence a
-  disagreement was not found, not a proof none exists), and Kernel-0's own
-  operational-semantics rules turned out to need an explicit extension
-  before a reference interpreter could even be written against them --
-  "Differential testing" documents that extension rather than treating it as
-  already covered by the "Paper safety proof" above.
+  testing" below for the corpus, the seed, and the exact result. **Extended
+  to native C11 and Core Wasm in a later session**
+  (`src/kernel_zero/differential/cross_backend.rs`): the same corpus, same
+  seed, 591 comparisons (197 samples x native `-O0` x native `-O2` x Core
+  Wasm), 0 disagreements -- see "Differential testing" below. **Still
+  open:** the corpus is finite and not exhaustive (a passing differential
+  test is evidence a disagreement was not found, not a proof none exists),
+  and Kernel-0's own operational-semantics rules turned out to need an
+  explicit extension before a reference interpreter could even be written
+  against them -- "Differential testing" documents that extension rather
+  than treating it as already covered by the "Paper safety proof" above.
 
 This narrower remaining gap was the highest-priority follow-up this document
 identified; "Differential testing" below records what closing part of it
@@ -417,8 +464,52 @@ sides. This is evidence over one finite, seeded corpus that the interpreter
 backend's checked-arithmetic, short-circuit, evaluation-order, and call
 semantics agree with Kernel-0's operational semantics (as extended below) on
 every case this corpus reached -- it is not a proof that no disagreement
-exists outside this corpus, and it says nothing about the native or Wasm
-backends.
+exists outside this corpus. The native and Wasm backends are covered
+separately below, in "Extension to native C11 and Core Wasm."
+
+### Extension to native C11 and Core Wasm (a later session, issue #188)
+
+**What ran.** `src/kernel_zero/differential/cross_backend.rs`'s
+`native_c11_and_core_wasm_agree_with_the_kernel_zero_reference_interpreter_over_the_corpus`
+runs the identical 74-case, 197-comparison corpus above (same source text,
+same seed, unmodified) through two additional paths per case, each compared
+against the from-scratch reference interpreter side above (not against the
+compiler's interpreter a second time, since the test above already
+establishes that agreement):
+
+1. **Native C11:** `crate::codegen::emit_hir_c` on the case's resolved
+   program, plus one small generated `main` (compiled with
+   `-DSPX_NO_ENTRY_WRAPPER` so it replaces the emitted decoy entry wrapper)
+   that calls the entry function's raw `spx_decl_<hex(id)>` symbol directly,
+   once per sample argument tuple, and prints either the returned value or
+   the resolved `spx_normalized_status`'s exact `domain_id`/`code`. Compiled
+   with the local `clang` at both `-O0` and `-O2`.
+2. **Core Wasm:** `crate::wasm::build_web_with_scalar_exports` (Public
+   Scalar Export Profile v1, the same profile
+   `tests/wasm/scalar_exports_v1.rs` proves Node-executable) exporting only
+   the entry function, then one Node script that calls the generated
+   `semaprax.bindings.js` runtime's `call(id, ...args)` once per sample and
+   prints either the returned value or `status.domain_id`/`status.code`.
+
+Both paths reuse the `spx_decl_<hex(id)>` raw-symbol convention
+`tests/scalar_status_backend_equivalence.rs` and
+`tests/wasm/scalar_exports_v1.rs` already rely on externally, and both
+compile/build once per corpus program (not once per sample) to keep the
+74-program corpus's wall-clock cost bounded.
+
+**Result: zero disagreements.** 591 comparisons (197 samples x native `-O0`
+x native `-O2` x Core Wasm), every one an identical outcome against the
+reference interpreter -- the same returned `i64`/`bool` value, or the same
+`semaprax.arithmetic.v1` domain and code. This is evidence over the same
+one finite, seeded corpus that native C11 and Core Wasm compute the same
+values, and reach the same checked-arithmetic fault, as the interpreter
+backend already proved to agree with -- it is not a proof for any program
+outside the corpus, and it says nothing about programs
+`reifies_into_kernel_zero` rejects. Gated on a local `clang` and `node`
+(skips with a printed notice when either is absent; set
+`SEMAPRAX_REQUIRE_KERNEL_ZERO_CROSS_BACKEND=1` to make their absence a hard
+failure instead, following `tests/scalar_status_backend_equivalence.rs`'s
+own convention).
 
 **Two gaps this exercise found, neither of them a compiler bug:**
 
@@ -490,7 +581,7 @@ backends.
 | A given `.spx` source text is admitted or rejected by the real toolchain, with a named diagnostic, at a named boundary | **Yes**, for the three ceilings below | `tests/cleanup_backends/kernel_boundary.rs`, `src/parser/depth/tests.rs` |
 | A real `ResolvedFunction`'s HIR shape matches Kernel-0's grammar (the admission predicate itself) | **Yes.** | `src/kernel_zero.rs`, its `tests` submodule |
 | A reifying function's real evaluation agrees with Kernel-0's operational semantics on it, for the **interpreter backend**, over a finite corpus | **Partially.** 197 comparisons across 74 seeded, deterministic programs, 0 disagreements this session. Not exhaustive; a passing run is evidence, not a proof. | `src/kernel_zero/differential.rs`, "Differential testing" above |
-| The same, for the **native or Wasm backends** | **No.** Not attempted; the differential test added this session compares the interpreter backend only. | "Differential testing" above |
+| The same, for the **native or Wasm backends** | **Partially.** 591 comparisons (197 samples x native `-O0` x native `-O2` x Core Wasm) over the identical corpus, 0 disagreements, in a later session. Not exhaustive; a passing run is evidence, not a proof; and it is silent on any program outside the corpus. | `src/kernel_zero/differential/cross_backend.rs`, "Differential testing" above |
 | Interpreter, native, and Wasm backends agree on one concrete Kernel-0-shaped program's observable output | **Partially, for one hand-run example this session**, not as an automated, repeatable gate | "Rung 0 evidence" below |
 | Deterministic stable-ID graph projection | **No new checking added by this session.** Existing coverage is in `tests/workspace/semantic_graph.rs` and `src/workspace_graph/*`; this document does not extend it. | out of scope this session |
 | Semantic-transaction precondition/replay validity | **No new checking added by this session.** Existing coverage is in `src/semantic_workspace_*.rs`. | out of scope this session |
@@ -694,15 +785,27 @@ papering over:
    differential}.rs`), with two document-level gaps found and recorded
    rather than silently patched (Progress's incompleteness at `i64`
    overflow/division-by-zero, and the missing `bool == bool`/`bool != bool`
-   typing rule). **Still open:** the same differential comparison against
-   the **native and Wasm backends** (this session's test compares the
-   interpreter backend only), a **larger or adversarially-chosen corpus**
-   rather than one seeded generator's 60 programs (a passing differential
-   test bounds the search that was actually done, not the space of possible
-   disagreements), and a **restated paper proof** for the three-outcome
-   (value/fault/divergence) calculus "Differential testing" above's first
-   finding shows the original two-outcome (value/divergence) proof sketch
-   does not, as literally written, cover.
+   typing rule). **The differential comparison now also covers native C11
+   (`-O0`/`-O2`) and Core Wasm, done in a later session** (issue #188;
+   `src/kernel_zero/differential/cross_backend.rs`): the same 74-program,
+   197-comparison corpus run through `crate::codegen::emit_hir_c` compiled
+   with the local `clang` and through
+   `crate::wasm::build_web_with_scalar_exports`'s Public Scalar Export
+   Profile v1 under Node, each outcome compared against the from-scratch
+   reference interpreter -- 591 comparisons (197 samples x native `-O0` x
+   native `-O2` x Core Wasm), zero disagreements. This is evidence over the
+   same finite seeded corpus, not a proof, and it is silent on any program
+   outside that corpus. **The admission predicate's own wiring question is
+   now closed, not open:** "Reification: HIR to Kernel-0, and its unproved
+   edge" above records the decision to leave it permanently unwired into any
+   diagnostic path, with the reasoning. **Still open:** a **larger or
+   adversarially-chosen corpus** rather than one seeded generator's 60
+   programs (a passing differential test bounds the search that was
+   actually done, not the space of possible disagreements), and a
+   **restated paper proof** for the three-outcome (value/fault/divergence)
+   calculus "Differential testing" above's first finding shows the original
+   two-outcome (value/divergence) proof sketch does not, as literally
+   written, cover.
 2. **File issue #241's three required-evidence items** using this document's
    exact numbers: a boundary regression fixture for `SPX-H006` (now added,
    here, ahead of that issue landing it independently — coordination needed

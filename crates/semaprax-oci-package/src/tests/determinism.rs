@@ -7,7 +7,13 @@ use std::fs;
 use super::{fixture_plan, fresh_output_dir, TEST_LOCK};
 use crate::build_and_publish;
 
-fn read_layout(dir: &std::path::Path) -> (Vec<u8>, Vec<u8>, Vec<(String, Vec<u8>)>) {
+/// The three things a byte-identical emission must reproduce exactly:
+/// `oci-layout` bytes, `index.json` bytes, and every blob as
+/// `(digest filename, bytes)`. The blob filenames are the digests themselves,
+/// so naming this type keeps that meaning attached to it.
+type LayoutBytes = (Vec<u8>, Vec<u8>, Vec<(String, Vec<u8>)>);
+
+fn read_layout(dir: &std::path::Path) -> LayoutBytes {
     let oci_layout = fs::read(dir.join("oci-layout")).expect("oci-layout");
     let index = fs::read(dir.join("index.json")).expect("index.json");
     let blobs_dir = dir.join("blobs").join("sha256");

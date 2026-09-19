@@ -569,7 +569,7 @@ jobs:
           cargo test --locked -p semaprax --test project standard_library::testing -- --nocapture
           cargo test --locked -p semaprax --test project standard_library::json_cursors -- --nocapture
           cargo test --locked -p semaprax --test project standard_library::logging -- --nocapture
-          cargo test --locked -p semaprax --test project standard_library::catalog -- --nocapture
+          cargo test --locked -p semaprax --test project standard_library::committed_catalogs_match_the_sources -- --nocapture
           cargo test --locked -p semaprax --test project standard_library::environment -- --nocapture
           cargo test --locked -p semaprax --test project standard_library::process -- --nocapture
           cargo test --locked -p semaprax --test project standard_library::text -- --nocapture
@@ -1269,7 +1269,7 @@ jobs:
           node --version
           cargo test --locked -p semaprax --test language generic_functions::nested_owning_generic_relays_preserve_exact_instances_for_every_copy_scalar -- --exact --nocapture
           cargo test --locked -p semaprax --test language generic_functions::generic_forwarding_closes_over_transitive_instances_in_authored_fifo_order -- --exact --nocapture
-          cargo test --locked -p semaprax --test language generic_functions::generic_forwarding_rejects_nonidentity_arguments_and_cycles_stably -- --exact --nocapture
+          cargo test --locked -p semaprax --test language generic_functions::generic_forwarding_rejects_incompatible_nonidentity_returns_and_cycles_stably -- --exact --nocapture
           cargo test --locked -p semaprax --test language generic_functions::nested_owning_generic_relay_source_and_hir_boundaries_fail_closed -- --exact --nocapture
           cargo test --locked -p semaprax --test language generic_functions::nested_owning_generic_relay_uses_the_existing_global_depth_bound -- --exact --nocapture
           cargo test --locked -p semaprax --test language generic_functions::nested_owning_generic_relay_uses_the_existing_global_owned_leaf_bound -- --exact --nocapture
@@ -1304,7 +1304,7 @@ jobs:
           cargo test --locked -p semaprax --test project flat_owned_record_api::frozen_v9_descriptor_rejects_an_admitted_concrete_generic_result -- --exact --nocapture
           cargo test --locked -p semaprax --test project nested_owned_record_api::frozen_v11_descriptor_rejects_an_admitted_concrete_generic_result -- --exact --nocapture
           cargo test --locked -p semaprax --test language generic_records::nested_generic_owned_records_round_trip_and_retain_exact_hir_instances -- --exact --nocapture
-          cargo test --locked -p semaprax --test language generic_records::nested_generic_owned_records_keep_nonconcrete_and_nonrecord_descendants_closed -- --exact --nocapture
+          cargo test --locked -p semaprax --test language generic_records::nested_generic_owned_records_admit_multiple_owners_but_keep_nonrecord_descendants_closed -- --exact --nocapture
           cargo test --locked -p semaprax --test owned_data nested_generic_owned_record_frontend_hir::nested_concrete_generic_instances_substitute_before_hir_and_cleanup -- --exact --nocapture
           cargo test --locked -p semaprax --test owned_data nested_generic_owned_record_frontend_hir::hostile_nested_type_arguments_and_cleanup_carriers_fail_closed -- --exact --nocapture
           cargo test --locked -p semaprax --lib aggregate_layout::tests::nested_concrete_generic_layouts_substitute_recursively_and_remain_distinct -- --exact --nocapture
@@ -1318,7 +1318,7 @@ jobs:
           cargo test --locked -p semaprax --test owned_data generic_owned_variant_runtime::concrete_generic_owned_variant_cases_replay_and_execute_on_three_engines -- --exact --nocapture
           cargo test --locked -p semaprax --test language generic_variants::exact_two_owned_generic_variant_resolves_construction_and_match_bindings -- --exact --nocapture
           cargo test --locked -p semaprax --test language generic_variants::owned_generic_variant_templates_admit_every_direct_copy_scalar_field -- --exact --nocapture
-          cargo test --locked -p semaprax --test language generic_variants::concrete_owned_generic_variant_profile_rejects_broader_two_owned_and_closed_shapes -- --exact --nocapture
+          cargo test --locked -p semaprax --test language generic_variants::concrete_owned_generic_variant_profile_admits_parameter_slot_but_rejects_broader_shapes -- --exact --nocapture
           cargo test --locked -p semaprax --test language generic_variants::independent_hir_validation_rejects_two_owned_generic_variant_identity_drift -- --exact --nocapture
           cargo test --locked -p semaprax --test owned_data generic_two_owned_variant_runtime::authored_two_owned_branch_variant_replays_and_executes_on_all_engines -- --exact --nocapture
           cargo test --locked -p semaprax --lib wasm::aggregate::tests::raw_two_owned_generic_variant_rejects_invalid_tag_before_payload_authority -- --exact --nocapture

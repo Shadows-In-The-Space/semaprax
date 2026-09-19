@@ -12,6 +12,7 @@ mod agent_lowering;
 mod authority;
 mod build;
 mod candidate;
+mod canonical_sources;
 mod canonical_workspace_revision;
 mod contracts_and_tests_facts;
 mod create;

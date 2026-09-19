@@ -29,13 +29,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use semaprax::project::{
-    SemanticQuery, SemanticTransaction, SemanticTransactionRenameDisplayName,
-    SemanticWorkspaceService,
+    ProjectCandidate, SemanticQuery, SemanticTransaction, SemanticTransactionRenameDisplayName,
+    SemanticTransactionReplaceExpression, SemanticTransactionV2, SemanticWorkspaceService,
 };
 use semaprax::workspace_analysis::{
     WorkspaceAnalysisTargetKind, WorkspaceContextOptions, WorkspaceImpactOptions,
 };
 use semaprax::{codegen, project};
+use serde_json::json;
 
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/task-service-project")
@@ -255,8 +256,9 @@ assert.equal(linked.instance.exports.semaprax_main(), 0n);
 /// immutable (`src/project/standard_dependencies.rs`), so the precondition
 /// was unsatisfiable by construction for any consumer of a commented bundled
 /// package. `materialize` now preserves an untouched source's exact base
-/// bytes, and `semantic_transaction/canonical_sources.rs` requires
-/// comment-free canonical source only of the sources a transaction actually
+/// bytes, and `src/project/canonical_sources.rs` (shared by the v1 and v2
+/// transaction kernels since issue #277) requires comment-free canonical
+/// source only of the sources a transaction actually
 /// rewrites. Verified directly: with this project's own three modules copied
 /// out and stripped of comments, `semaprax change preview <copy>
 /// rename-display-name task_service.core.identifier_byte_ok
@@ -364,6 +366,142 @@ fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precond
                 .any(|diagnostic| diagnostic.code == "SPX-G525"),
             "expected SPX-G525 (comment-free canonical source), got {diagnostics:?}"
         );
+        Ok(())
+    })
+    .unwrap();
+}
+
+/// Issue #277's acceptance criterion, using this project's real
+/// `std.auth`/`std.jobs` closure rather than a synthetic fixture: a
+/// `ReplaceExpression` v2 preview succeeds against a project whose own
+/// edited source is comment-free while its bundled dependency closure still
+/// carries comments (`std.auth` alone carries 253 `//` lines, `std.jobs`
+/// 34). This is the v2 counterpart of
+/// `stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precondition`
+/// above, which pins the *same* comment precondition for v1's
+/// `rename_display_name` against the checked-in project (whose own
+/// `src/core.spx` still carries comments, so that v1 preview still refuses
+/// for a project-actionable reason). Here the project's own three modules
+/// are copied out and stripped of comments first -- `std.auth` and
+/// `std.jobs` are compiler-bundled and untouched either way -- so nothing
+/// about the source this transaction actually rewrites can trip `SPX-G525`,
+/// and only the ported #277 fix (`src/project/canonical_sources.rs`'s
+/// differential, rewrite-domain check, shared by v1 and v2) lets this
+/// succeed.
+#[test]
+fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closure() {
+    let scratch = scratch("v2-bundled-comments");
+    std::fs::create_dir_all(scratch.join("src")).unwrap();
+    std::fs::copy(
+        fixture().join("semaprax.toml"),
+        scratch.join("semaprax.toml"),
+    )
+    .unwrap();
+    for file in ["src/app.spx", "src/core.spx", "src/tests.spx"] {
+        let source = std::fs::read_to_string(fixture().join(file)).unwrap();
+        let (program, comments) = semaprax::parse_with_comments(&source, Path::new(file)).unwrap();
+        assert!(
+            !comments.items.is_empty(),
+            "{file} must really carry comments in the checked-in project, or this copy is not \
+             exercising the strip this test relies on"
+        );
+        std::fs::write(scratch.join(file), semaprax::format::canonical(&program)).unwrap();
+    }
+
+    project::with_authenticated_project(&scratch.join("semaprax.toml"), |snapshot| {
+        snapshot.check()?;
+        let revision = snapshot.retain_revision();
+
+        // The fixture really is non-vacuous: this project's own three
+        // modules are now comment-free, but the bundled `std.auth` and
+        // `std.jobs` closure this project depends on still carries its
+        // checked-in comments untouched.
+        for path in ["src/app.spx", "src/core.spx", "src/tests.spx"] {
+            let own_source = revision
+                .sources()
+                .iter()
+                .find(|source| source.path() == path)
+                .unwrap_or_else(|| panic!("revision must carry {path}"));
+            let (_, comments) =
+                semaprax::parse_with_comments(own_source.source(), Path::new(path)).unwrap();
+            assert!(
+                comments.items.is_empty(),
+                "{path} must be comment-free after the strip"
+            );
+        }
+        for (dependency, path) in [
+            ("std.auth", "dependencies/std.auth/0.1.0/auth.spx"),
+            ("std.jobs", "dependencies/std.jobs/0.1.0/jobs.spx"),
+        ] {
+            let dependency_source = revision
+                .sources()
+                .iter()
+                .find(|source| source.path() == path)
+                .unwrap_or_else(|| panic!("revision must carry bundled {dependency}"));
+            let (_, comments) =
+                semaprax::parse_with_comments(dependency_source.source(), Path::new(path)).unwrap();
+            assert!(
+                !comments.items.is_empty(),
+                "bundled {dependency} must still carry its checked-in comments, or this test is \
+                 not exercising the bundled-dependency closure issue #277 is about"
+            );
+        }
+
+        // Select `task_service.core.identifier_byte_ok`'s last disjunct
+        // (`byte == 95u8`) and replace it with itself: this test's claim is
+        // that the *preview validates*, not that the replacement changes
+        // behavior (`ReplaceExpression`'s own nonclaims explicitly exclude
+        // behavioral equivalence).
+        let target = "task_service.core.identifier_byte_ok";
+        let candidate =
+            ProjectCandidate::open(revision.clone(), revision.project_revision()).unwrap();
+        let catalog: serde_json::Value =
+            serde_json::from_str(&candidate.expression_catalog(target).unwrap()).unwrap();
+        let owner_path = catalog["source"]["path"].as_str().unwrap().to_owned();
+        let owner_source = revision
+            .sources()
+            .iter()
+            .find(|source| source.path() == owner_path)
+            .unwrap()
+            .source();
+        let row = catalog["expressions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| {
+                row["phase"] == "body"
+                    && row["replaceable"] == true
+                    && row["source_span"]["start"]
+                        .as_u64()
+                        .zip(row["source_span"]["end"].as_u64())
+                        .and_then(|(start, end)| owner_source.get(start as usize..end as usize))
+                        == Some("byte == 95u8")
+            })
+            .expect("identifier_byte_ok must offer a replaceable `byte == 95u8` body expression");
+        let expression_id = row["expression_id"].as_str().unwrap().to_owned();
+
+        let workspace = revision.canonical_workspace_revision()?;
+        let transaction = SemanticTransactionV2::replace_expression(
+            workspace.workspace_revision(),
+            SemanticTransactionReplaceExpression::new(
+                target,
+                &expression_id,
+                "byte == 95u8",
+                json!({
+                    "kind": "binary", "op": "==",
+                    "left": {"kind": "place", "name": "byte"},
+                    "right": {"kind": "u8", "value": 95}
+                }),
+            ),
+        )?;
+        let _ = transaction
+            .validate(revision.clone())
+            .unwrap_or_else(|errors| {
+                panic!(
+                "ReplaceExpression v2 must succeed against a comment-free own source even though \
+                 the bundled std.auth/std.jobs closure carries comments (issue #277): {errors:?}"
+            )
+            });
         Ok(())
     })
     .unwrap();

@@ -109,7 +109,7 @@ pub(in crate::project) fn add_declaration_eligibility(
     Ok(AddDeclarationEligibility {
         expected_old_module,
         comment_free_canonical_workspace:
-            super::canonical_sources::comment_free_canonical_rewrite_domain(
+            crate::project::canonical_sources::comment_free_canonical_rewrite_domain(
                 revision,
                 owner.as_deref(),
             ),

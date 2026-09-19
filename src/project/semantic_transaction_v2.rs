@@ -13,8 +13,8 @@ use sha2::{Digest, Sha256};
 use crate::diagnostic::Diagnostic;
 
 use super::{
-    ExactProgramContext, ExactProgramContextV2, ProgramRoot, ProgramRootV2, ProgramRootV3,
-    ProjectCandidate, ProjectRevision, SemanticChange, SEMANTIC_CHANGE_REQUIREMENTS,
+    canonical_sources, ExactProgramContext, ExactProgramContextV2, ProgramRoot, ProgramRootV2,
+    ProgramRootV3, ProjectCandidate, ProjectRevision, SemanticChange, SEMANTIC_CHANGE_REQUIREMENTS,
 };
 
 pub const SEMANTIC_TRANSACTION_V2_SCHEMA: &str = "semaprax.semantic-transaction.v2";
@@ -273,13 +273,22 @@ impl SemanticTransactionV2 {
         }
         // Every source other than the edited one is unaffected by this
         // transaction, so it retains the pre-existing exact canonical,
-        // comment-free requirement. See CANONICAL-COMMENTS-V1's nonclaim for
+        // comment-free requirement -- but only of the sources the candidate
+        // actually rewrites or drops (issue #277, porting #274's v1 fix):
+        // `canonical_sources::require_comment_free_canonical_rewrites` below
+        // checks that differentially, after the candidate exists, rather
+        // than across the whole base workspace up front. That is what lets
+        // a project whose bundled dependency closure (`std.auth`,
+        // `std.jobs`) carries comments still use this route: those sources
+        // are untouched by this operation, so `materialize` preserves their
+        // exact base bytes and the differential check has nothing to
+        // require of them. See CANONICAL-COMMENTS-V1's nonclaim for
         // workspace-level routes: only the one authenticated edited source
         // may now carry comments, and only in their canonical position (a
         // file `fmt --check` already accepts). Non-canonical whitespace, and
-        // comments elsewhere in the workspace, remain out of scope for this
-        // bounded route; see docs/UNIVERSAL-SEMANTIC-TRANSACTION-V2.md.
-        require_canonical_comment_free_sources_except(&base, &old.path)?;
+        // comments elsewhere in a source this operation actually rewrites,
+        // remain out of scope for this bounded route; see
+        // docs/UNIVERSAL-SEMANTIC-TRANSACTION-V2.md.
         let target_source = base
             .sources()
             .iter()
@@ -309,7 +318,11 @@ impl SemanticTransactionV2 {
             }),
         )?;
         let candidate = initial.apply(initial.candidate_digest(), &change)?;
-        require_canonical_comment_free_sources(candidate.revision())?;
+        canonical_sources::require_comment_free_canonical_rewrites(
+            &base,
+            candidate.revision(),
+            Some(&old.path),
+        )?;
         let replacement = if target_comment_free_canonical {
             require_source_preserving_expression_replacement(
                 &base,
@@ -949,47 +962,6 @@ fn require_function_target(
         return Err(invalid(
             "ReplaceExpression v2 requires one explicit monomorphic function",
         ));
-    }
-    Ok(())
-}
-
-fn require_canonical_comment_free_sources(
-    revision: &ProjectRevision,
-) -> Result<(), Vec<Diagnostic>> {
-    for source in revision.sources() {
-        let (program, comments) =
-            crate::parse_with_comments(source.source(), Path::new(source.path()))
-                .map_err(|error| vec![error])?;
-        if !comments.items.is_empty() || crate::format::canonical(&program) != source.source() {
-            return Err(invalid(
-                "semantic transaction v2 requires comment-free canonical source",
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Same requirement as [`require_canonical_comment_free_sources`] for every
-/// source except `exempt_path`, which the caller has separately admitted
-/// under the comment-preserving splice policy. Every other source is
-/// unaffected by the transaction, so its exact canonical, comment-free
-/// requirement is unchanged.
-fn require_canonical_comment_free_sources_except(
-    revision: &ProjectRevision,
-    exempt_path: &str,
-) -> Result<(), Vec<Diagnostic>> {
-    for source in revision.sources() {
-        if source.path() == exempt_path {
-            continue;
-        }
-        let (program, comments) =
-            crate::parse_with_comments(source.source(), Path::new(source.path()))
-                .map_err(|error| vec![error])?;
-        if !comments.items.is_empty() || crate::format::canonical(&program) != source.source() {
-            return Err(invalid(
-                "semantic transaction v2 requires comment-free canonical source outside the edited file",
-            ));
-        }
     }
     Ok(())
 }

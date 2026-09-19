@@ -14,11 +14,11 @@ use sha2::{Digest, Sha256};
 use crate::diagnostic::Diagnostic;
 
 use super::{
-    ProgramRoot, ProjectCandidate, ProjectRevision, SemanticChange, SEMANTIC_CHANGE_REQUIREMENTS,
+    canonical_sources, ProgramRoot, ProjectCandidate, ProjectRevision, SemanticChange,
+    SEMANTIC_CHANGE_REQUIREMENTS,
 };
 
 mod add_declaration;
-mod canonical_sources;
 mod exact;
 pub(super) use add_declaration::add_declaration_eligibility;
 pub use add_declaration::SemanticTransactionAddDeclaration;
@@ -549,7 +549,11 @@ impl SemanticTransaction {
             }
         };
         let candidate = initial.apply(initial.candidate_digest(), &change)?;
-        canonical_sources::require_comment_free_canonical_rewrites(&base, candidate.revision())?;
+        canonical_sources::require_comment_free_canonical_rewrites(
+            &base,
+            candidate.revision(),
+            None,
+        )?;
         let candidate_workspace = candidate.revision().canonical_workspace_revision()?;
         let candidate_program_root = candidate_workspace.program_root()?;
         let source_review_text = candidate.source_review(candidate.candidate_digest())?;

@@ -1,18 +1,21 @@
-//! Which sources a Universal Semantic Transaction v1 operation must find
+//! Which sources a Universal Semantic Transaction operation must find
 //! comment-free canonical, and why that is no longer the whole workspace.
 //!
-//! Split out of `semantic_transaction.rs` to keep that module under the
-//! repository's 1500-line cap.
+//! Shared by the v1 kernel (`semantic_transaction.rs`) and the v2 kernel
+//! (`semantic_transaction_v2.rs`) so the same differential, rewrite-domain
+//! rule governs both wire formats identically -- porting #274's fix to v2
+//! (issue #277) is exactly reusing this module rather than re-deriving the
+//! rule a second time.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::diagnostic::Diagnostic;
 
-use super::{invalid, ProjectRevision};
+use super::ProjectRevision;
 
-/// Comment-free canonical source is required of exactly the sources a v1
-/// operation **rewrites**, not of the complete workspace (issue #274).
+/// Comment-free canonical source is required of exactly the sources an
+/// operation **rewrites**, not of the complete workspace (issue #274, #277).
 ///
 /// The old whole-workspace scope was load-bearing while
 /// `ProjectCandidate::apply`'s `materialize` step re-derived *every* source
@@ -32,9 +35,20 @@ use super::{invalid, ProjectRevision};
 /// canonical on both sides, so the rewrite is still provably the operation's
 /// own intent and never an incidental reformat. This check fails closed on
 /// anything it cannot pair.
+///
+/// `exempt_path`, when given, is skipped entirely regardless of whether it
+/// was rewritten: its caller has already validated that one source under a
+/// separate, more permissive policy. `ReplaceExpression` v2 admits comments
+/// in its single authenticated edited source through a dedicated
+/// comment-preserving splice (`require_comment_preserving_expression_replacement`)
+/// and independently proves that splice byte-for-byte; re-imposing
+/// comment-free canonical on that same path here would refuse the very
+/// comment-preserving edits that route exists to admit. v1 has no such path
+/// and always passes `None`.
 pub(super) fn require_comment_free_canonical_rewrites(
     base: &ProjectRevision,
     candidate: &ProjectRevision,
+    exempt_path: Option<&str>,
 ) -> Result<(), Vec<Diagnostic>> {
     let base_sources = base
         .sources()
@@ -42,6 +56,9 @@ pub(super) fn require_comment_free_canonical_rewrites(
         .map(|source| (source.path(), source.source()))
         .collect::<BTreeMap<_, _>>();
     for source in candidate.sources() {
+        if Some(source.path()) == exempt_path {
+            continue;
+        }
         match base_sources.get(source.path()).copied() {
             // Byte-identical to the base: `materialize` preserved it
             // verbatim, so no comment and no formatting choice was lost and
@@ -57,6 +74,9 @@ pub(super) fn require_comment_free_canonical_rewrites(
     // A base source the candidate no longer carries had its bytes discarded
     // rather than preserved, so it is a rewrite too.
     for (path, base_source) in &base_sources {
+        if Some(*path) == exempt_path {
+            continue;
+        }
         if !candidate
             .sources()
             .iter()
@@ -72,11 +92,12 @@ fn require_comment_free_canonical_source(path: &str, source: &str) -> Result<(),
     let (program, comments) =
         crate::parse_with_comments(source, Path::new(path)).map_err(|error| vec![error])?;
     if !comments.items.is_empty() || crate::format::canonical(&program) != source {
-        return Err(invalid(
-            "semantic transaction v1 requires comment-free canonical source in every source it \
+        return Err(vec![Diagnostic::io(
+            "SPX-G525",
+            "semantic transaction requires comment-free canonical source in every source it \
              rewrites; sources the operation leaves untouched -- compiler-bundled dependency \
              source included -- keep their exact bytes and carry no such requirement",
-        ));
+        )]);
     }
     Ok(())
 }

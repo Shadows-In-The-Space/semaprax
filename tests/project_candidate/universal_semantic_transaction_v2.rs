@@ -689,19 +689,39 @@ fn non_canonical_target_spacing_is_refused_not_silently_reformatted() {
     assert_eq!(inventory(&fixture.0), disk_before);
 }
 
+/// Issue #277, porting #274's v1 fix to `ReplaceExpression` v2: a comment in
+/// a source this operation never rewrites must not refuse the transaction,
+/// and the candidate must carry that source's exact base bytes rather than a
+/// re-derived, comment-stripped projection. Before this fix,
+/// `require_canonical_comment_free_sources_except` spanned every non-edited
+/// source -- including compiler-bundled dependency source such as
+/// `std.auth` (253 comment lines) and `std.jobs` (34) -- so this precondition
+/// was unsatisfiable by construction for any consumer of a commented bundled
+/// package; see also the dedicated bundled-dependency success case in
+/// `tests/useful_data/task_service_project.rs`.
+///
+/// `src/app.spx` merely calls `calculator.add` by `@id`, so a body-expression
+/// replacement inside `add` changes `src/core.spx` only.
 #[test]
-fn a_comment_in_an_unrelated_source_is_still_refused() {
-    // This bounded route admits comments only in the one authenticated
-    // edited source; every other source keeps the pre-existing exact
-    // canonical, comment-free requirement. Documented explicitly rather than
-    // silently widened, since materialize's shared candidate rebuild has no
-    // comment representation for sources it is not asked to preserve.
+fn a_comment_outside_the_rewritten_source_is_admitted_and_preserved_verbatim() {
     let fixture = Fixture::new();
     let app_path = fixture.0.join("src/app.spx");
     let app_source = std::fs::read_to_string(&app_path).unwrap();
-    std::fs::write(&app_path, format!("// entry point\n{app_source}")).unwrap();
+    let commented_app = format!("// entry point\n{app_source}");
+    std::fs::write(&app_path, &commented_app).unwrap();
     let disk_before = inventory(&fixture.0);
     let revision = fixture.revision();
+    let base_app = revision
+        .sources()
+        .iter()
+        .find(|source| source.path().ends_with("app.spx"))
+        .expect("the fixture carries app.spx")
+        .source()
+        .to_owned();
+    assert!(
+        base_app.contains("// entry point"),
+        "the fixture must really carry a comment outside the rewritten source"
+    );
     let workspace = revision.canonical_workspace_revision().unwrap();
     let (expression_id, old) = selection(&revision, "calculator.add", "subtotal + bonus");
     let transaction = SemanticTransactionV2::replace_expression(
@@ -715,7 +735,37 @@ fn a_comment_in_an_unrelated_source_is_still_refused() {
     )
     .unwrap();
 
-    assert_code(transaction.validate(Arc::clone(&revision)), "SPX-G525");
+    let artifacts = transaction
+        .validate(Arc::clone(&revision))
+        .expect("a comment outside the rewritten source must not refuse the replacement");
+
+    let candidate_app = artifacts
+        .candidate()
+        .revision()
+        .sources()
+        .iter()
+        .find(|source| source.path().ends_with("app.spx"))
+        .expect("the candidate carries app.spx")
+        .source()
+        .to_owned();
+    assert_eq!(
+        candidate_app, base_app,
+        "an untouched source must keep its exact base bytes, comments included"
+    );
+    let candidate_core = artifacts
+        .candidate()
+        .revision()
+        .sources()
+        .iter()
+        .find(|source| source.path().ends_with("core.spx"))
+        .expect("the candidate carries core.spx")
+        .source()
+        .to_owned();
+    assert!(
+        candidate_core.contains("subtotal + 2 - 1"),
+        "the rewritten source must still carry the replacement"
+    );
+    // A successful preview never writes.
     assert_eq!(inventory(&fixture.0), disk_before);
 }
 

@@ -1,20 +1,50 @@
 # Public Generic Ownership Milestone v1
 
-Status: open milestone, separately gated. Five of its nine prerequisite gates
-are hosted green for one exact implementation commit; three more (PG-5, PG-6,
-PG-7) now have real code and passing local gates but no hosted run and named
-open gaps (see the gate table below). PG-9 remains undecided. No public
-generic ownership surface is admitted, generated, published, or supported at
-this commit. This document owns the milestone's identity, its gates, the
-separation invariants, and the standing support/publication decision. It is a
-charter, not evidence.
+Status: open milestone, separately gated. Eight of its nine prerequisite gates
+are hosted green (see the gate table below); PG-9 remains undecided. No
+public generic ownership surface is admitted, generated, published, or
+supported at this commit. This document owns the milestone's identity, its
+gates, the separation invariants, and the standing support/publication
+decision. It is a charter, not evidence.
 
 Audience: language, ABI, package, evidence, and promotion reviewers.
 
-Every CI run on `main` since the recorded PG-8 commit has been cancelled
-(`cancel-in-progress` plus a fast push cadence), so none of PG-5/PG-6/PG-7's
-local evidence below is hosted evidence yet, and the recorded PG-8 green run
-predates all of that code.
+**Correction, 2026-09-19 (issue #164 audit):** six of the eight hosted-green
+gates above (PG-1 through PG-4, PG-8) were already hosted green for
+implementation commit `2ef043ba…`; PG-5, PG-6, and PG-7 became additionally
+hosted green for the widened corpus at commit
+`7def8fb1a727787f989428d77eea603ffd0513cf` (run
+[35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593),
+2026-09-19; see "PG-8 — hosted green" below). Named open gaps remain despite
+this (see the gate table below).
+
+This document previously said
+"every CI run on `main` since the recorded PG-8 commit has been cancelled," so
+none of PG-5/PG-6/PG-7's local evidence was hosted yet. That was true when
+written but is no longer true: [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+completed (not cancelled) at commit `7def8fb1a727787f989428d77eea603ffd0513cf`
+on 2026-09-19T08:55–09:41Z, and its three `public-generic-ownership-milestone`
+jobs — 105871581195 (ubuntu-latest), 105871581214 (macos-latest), and
+105871581165 (windows-latest) — all concluded `success`, every one of their
+steps included (the Linux-only sanitizer-evidence and compiled-Wasm steps ran
+and passed on ubuntu-latest; they correctly skipped on the other two hosts).
+The overall workflow run's conclusion is `failure`, but that is from unrelated
+jobs (`Rust tests macos-latest`, `STD-08 bundled library depth`, `Public
+Native Rust SDK v1`, `Rust 1.88 minimum`) — none of them named
+`Public generic ownership milestone`. This is genuine hosted evidence for the
+complete widened corpus (PG-5's calling consumers, PG-6's hostile
+descriptor/carrier replay, and PG-7's cross-engine settlement, not only the
+PG-1–PG-4 grammar/metadata half). It is **not** a #164 frozen candidate:
+`7def8fb1` sits 18 commits behind the head this correction was made against
+(`e0c268b378ecf9279f1968ee706ea990b0da18d1`), and no SHA-freeze protocol ran.
+Diffing that range against every public-generic path (`src/public_generic_abi`,
+`src/public_generic_consumer`, both adapter test directories,
+`docs/PUBLIC-GENERIC*`, `.github/workflows/ci.yml`, `scripts/public_generic_*`)
+found exactly one touching commit, `11f07087`, which adds an unrelated
+`std.export.policy` CI step and changes nothing this job runs — so the result
+is representative of current `main`, but representativeness is not a freeze.
+See the "Reverified 2026-09-19" addendum after the PG-9 decision record below
+for the full detail; this does not change the recommended decision.
 
 ## Why this is a separate milestone
 
@@ -78,10 +108,10 @@ reads `Hosted green`.
 | PG-2 | Explicit template identity and ordered argument identities: persistent template declaration identity, declared arity, positional parameter owner and index, and digests that distinguish permutation, omission, duplication, and substitution | [Public Generic Type Grammar v1](PUBLIC-GENERIC-TYPE-GRAMMAR-V1.md) | Hosted green |
 | PG-3 | Semantic compatibility rules: a closed classification over two grammar surfaces with explicit reasons, no compatibility inferred from a diff classification, and no version decision inferred from a classification | [Public Generic Compatibility v1](PUBLIC-GENERIC-COMPATIBILITY-V1.md) | Hosted green |
 | PG-4 | Candidate ABI-delta evidence that selects the public generic signature, retains ordered arguments and substituted fields, and survives mutation, recovery, and independent byte-exact replay | [Public Generic Candidate Delta v1](PUBLIC-GENERIC-CANDIDATE-DELTA-V1.md) | Hosted green |
-| PG-5 | Generated Rust, TypeScript/Wasm, C, and C++ consumers derived from the grammar, byte-deterministic, with no ambient authority | [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Implemented, local evidence |
-| PG-6 | Hostile metadata replay: forged, stale, truncated, reordered, and mutated grammar or descriptor bytes fail closed in every consumer route and in independent replay | [Public Generic Descriptor v1](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Implemented, local evidence |
-| PG-7 | Owned allocation and failure settlement across the boundary: bounded allocation, exact copy-out, sticky failure selection, canonical cleanup order, and equal checked behavior on interpreter, native C11, and Core Wasm | [Public Generic Settlement Obligations v1](PUBLIC-GENERIC-SETTLEMENT-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md); also documented in [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | Implemented, local evidence |
-| PG-8 | Cross-platform hosted evidence for the complete milestone corpus on Linux, macOS, and Windows, recorded for an exact implementation commit | The `public-generic-ownership-milestone` job in [CI required checks v1](CI-REQUIRED-CHECKS-V1.md) | Hosted green |
+| PG-5 | Generated Rust, TypeScript/Wasm, C, and C++ consumers derived from the grammar, byte-deterministic, with no ambient authority | [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Hosted green (see PG-8 note; not yet a #164 frozen candidate) |
+| PG-6 | Hostile metadata replay: forged, stale, truncated, reordered, and mutated grammar or descriptor bytes fail closed in every consumer route and in independent replay | [Public Generic Descriptor v1](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Hosted green (see PG-8 note; not yet a #164 frozen candidate) |
+| PG-7 | Owned allocation and failure settlement across the boundary: bounded allocation, exact copy-out, sticky failure selection, canonical cleanup order, and equal checked behavior on interpreter, native C11, and Core Wasm | [Public Generic Settlement Obligations v1](PUBLIC-GENERIC-SETTLEMENT-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md); also documented in [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | Hosted green (see PG-8 note; not yet a #164 frozen candidate) |
+| PG-8 | Cross-platform hosted evidence for the complete milestone corpus on Linux, macOS, and Windows, recorded for an exact implementation commit | The `public-generic-ownership-milestone` job in [CI required checks v1](CI-REQUIRED-CHECKS-V1.md) | Hosted green (complete corpus, commit `7def8fb1…`, run 35433295593) |
 | PG-9 | An explicit support and publication decision naming the exact version, target, and consumer scope, with its prerequisite profile decisions | This milestone | Open |
 
 PG-1 through PG-8 are prerequisites of PG-9, not substitutes for it. A complete
@@ -94,8 +124,10 @@ A gate moves only when the whole of it is done. Where part of a gate has landed
 with its own artifact and its own executable gate, it is recorded here rather
 than by advancing the row.
 
-- **PG-5 and PG-6 — grammar half hosted green, calling half now implemented
-  with local evidence only.**
+- **PG-5 and PG-6 — grammar half hosted green since `2ef043ba…`; calling half
+  now hosted green too, at `7def8fb1…` (run 35433295593, 2026-09-19; see the
+  PG-8 note below and the "Reverified 2026-09-19" addendum after the PG-9
+  decision record). Not yet a #164 frozen candidate.**
   [Public Generic Metadata Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md)
   generates a Rust, TypeScript/Wasm, C, and C++ consumer of the canonical
   metadata of a candidate surface. All four are compiled warning-free and run
@@ -128,10 +160,12 @@ than by advancing the row.
   line per caller and the same honesty line reproduced above). A shared
   hostile corpus (#160) is checked
   identically across the Rust reference decoder, the native manifest, and all
-  four consumers. None of this has a hosted CI run: every run on `main` since
-  implementation commit `2ef043ba…` has been cancelled (`cancel-in-progress`
-  plus a fast push cadence), so PG-8 has not been re-executed against any of
-  it (tracked by #163). Three concrete gaps remain open and undecided:
+  four consumers. **Correction, 2026-09-19**: this paragraph previously said
+  none of this had a hosted CI run because every run on `main` since
+  `2ef043ba…` had been cancelled. PG-8 has since re-executed against exactly
+  this code: run 35433295593 at commit `7def8fb1…` completed successfully on
+  all three `public-generic-ownership-milestone` jobs (see the PG-8 note
+  below). Two concrete gaps remain open and undecided regardless:
   - every provider adapter (interpreter, native, Wasm) binds a **fixture**
     endpoint and **fixture** trusted descriptor/binding bytes, not a real
     function body generated from an admitted public-generic export — the
@@ -199,8 +233,10 @@ than by advancing the row.
     through four spawned toolchains per trial was judged out of proportion
     to this round's scope and is not attempted here).
 
-  Both gates therefore move from `Open` to `Implemented, local evidence`, not
-  `Hosted green`.
+  Both gates moved from `Open` to `Implemented, local evidence` on this
+  session's own local runs, and have since moved to `Hosted green` at
+  `7def8fb1…` (run 35433295593; see the PG-8 note below) — not yet a #164
+  frozen candidate.
 - **PG-4 — route implemented, and it now describes a genuine generic export
   when one is named explicitly (issue #139).**
   [Public Generic Candidate Delta v1](PUBLIC-GENERIC-CANDIDATE-DELTA-V1.md)
@@ -289,45 +325,83 @@ than by advancing the row.
     not what #119 covered (see the native adapter's own "Deferred scope" note
     in [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md)).
 
-  The gate therefore moves from `Open` to `Implemented, local evidence`, not
-  `Hosted green`: no hosted CI run exists for any of this (every run on `main`
-  since `2ef043ba…` has been cancelled), and #174 ("execute settlement on all
-  admitted backends") is closed only for interpreter/Wasm parity plus
-  independently-compiled native, explicitly short of full cross-engine
-  settlement and a hosted run.
-- **PG-8 — hosted green, and what it did and did not establish.** The
-  `public-generic-ownership-milestone` job runs the whole milestone corpus on
-  `ubuntu-latest`, `macos-latest`, and `windows-latest`, and it is a declared
-  release blocker rather than an optional lane, so it cannot be satisfied
-  vacuously. It resolves the consumer toolchains each host really has and
-  prints them, because a language whose toolchain is absent is skipped and a
-  narrower run must be visible rather than read as a pass. All three legs are
-  green for implementation commit `2ef043ba1b989f49b256e456f71fb6e89068bf33`
-  in [run 34594793245](https://github.com/wavect/semaprax/actions/runs/34594793245) — jobs 103248047092 (Linux), 103248046648
-  (macOS), and 103248046983 (Windows) — and each leg's log records all four
-  consumer toolchains, `rust`, `typescript`, `c`, and `cxx`, as exercised
-  rather than skipped. This is hosted evidence for the corpus those gates
-  own. It is not evidence for PG-5's calling consumers, PG-6's descriptor
-  bytes, or PG-7's boundary settlement, none of which the corpus contains.
+  The gate moved from `Open` to `Implemented, local evidence` on this
+  session's own local runs, and has since moved to `Hosted green` at
+  `7def8fb1…` (run 35433295593; see the PG-8 note below) — not yet a #164
+  frozen candidate. #174 ("execute settlement on all admitted backends") is
+  still closed only for interpreter/Wasm parity plus independently-compiled
+  native, explicitly short of full cross-engine settlement; that scope
+  limit is unaffected by the hosted run existing.
+- **PG-8 — hosted green for the complete widened corpus, and what it did and
+  did not establish.** The `public-generic-ownership-milestone` job runs the
+  whole milestone corpus on `ubuntu-latest`, `macos-latest`, and
+  `windows-latest`, and it is a declared release blocker rather than an
+  optional lane, so it cannot be satisfied vacuously. It resolves the
+  consumer toolchains each host really has and prints them, because a
+  language whose toolchain is absent is skipped and a narrower run must be
+  visible rather than read as a pass.
 
-  Getting there found three real defects that a Unix-only run could not: the
-  Windows checkout failed before any gate for want of `core.longpaths`; a CRLF
-  checkout of the generator's templates silently stopped every placeholder from
-  substituting, so generated consumers lost their declarations and embedded
-  metadata; and the Windows UCRT's deprecation of the standard `fopen` broke
-  the generated C and C++ consumers' `-Werror` build. Each was fixed at its
-  cause and each is now pinned by a gate.
+  Two hosted runs are on record for this job, at two different scopes:
 
-  This hosted run predates, and the job as it stands today still does not
-  run, any of PG-5/PG-6's calling-consumer work (issues #156–#160, #172,
-  #173) or PG-7's cross-engine settlement corpus (issue #162): confirmed by
-  reading `.github/workflows/ci.yml` directly, the job's "Four-language
-  metadata consumers and hostile replay" step is unchanged and still invokes
-  only `cargo test --locked -p semaprax --test projections
-  public_generic_consumers`. Extending this required job to cover the new
-  work is the next step this milestone still owes; it is out of this update's
-  file lease (`.github/workflows/**`), so the exact delta is recorded in
-  `HANDOFF.md` instead.
+  1. All three legs were green for implementation commit
+     `2ef043ba1b989f49b256e456f71fb6e89068bf33` in
+     [run 34594793245](https://github.com/wavect/semaprax/actions/runs/34594793245)
+     — jobs 103248047092 (Linux), 103248046648 (macOS), and 103248046983
+     (Windows) — and each leg's log records all four consumer toolchains,
+     `rust`, `typescript`, `c`, and `cxx`, as exercised rather than skipped.
+     That commit predates PG-5/PG-6's calling-consumer work and PG-7's
+     cross-engine settlement corpus, so this run is evidence only for the
+     grammar/metadata half of the job as it existed then.
+  2. **Found during this issue's (#164) audit, 2026-09-19**: all three legs
+     are also green for implementation commit
+     `7def8fb1a727787f989428d77eea603ffd0513cf` in
+     [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+     — jobs 105871581195 (ubuntu-latest), 105871581214 (macos-latest), and
+     105871581165 (windows-latest). Every step in the job as it exists today
+     ran and passed on the ubuntu-latest leg, including the two steps added
+     after run 1 that run PG-5/PG-6/PG-7's new work: "Callable-boundary
+     corpus, generated consumers, settlement and hostile replay"
+     (`public_generic_native_adapter_v1`, `public_generic_wasm_adapter_v1`,
+     `public_generic_descriptor_carrier_hostile_replay`) and "Native
+     settlement sanitizer evidence and independent replay" (the Linux-only
+     Python sanitizer/settlement scripts) and "Compiled C11-reference
+     provider inside Core Wasm" (also Linux-only). The macOS and Windows
+     legs correctly skipped the Linux-only steps and passed everything else.
+     The workflow run's own overall conclusion is `failure`, from unrelated
+     jobs (`Rust tests macos-latest`, `STD-08 bundled library depth`,
+     `Public Native Rust SDK v1`, `Rust 1.88 minimum`) that are outside this
+     milestone's scope — verified by job name, none of them is named
+     `Public generic ownership milestone`.
+
+     This **is** hosted evidence for PG-5's calling consumers, PG-6's
+     hostile descriptor/carrier replay, and PG-7's cross-engine settlement —
+     the exact things run 1 predates and does not cover. It is **not** the
+     #164 frozen candidate: `7def8fb1` is 18 commits behind the head this
+     finding was made against (`e0c268b378ecf9279f1968ee706ea990b0da18d1`),
+     and no SHA-freeze protocol (issue #164's numbered steps) was run around
+     it. That 18-commit range was diffed against every public-generic path
+     and contains exactly one touching commit (`11f07087`), which adds an
+     unrelated `std.export.policy` CI step and changes nothing this job
+     runs — so the result is representative of current `main`, which is a
+     weaker claim than a frozen candidate.
+
+  Getting run 1 hosted found three real defects that a Unix-only run could
+  not: the Windows checkout failed before any gate for want of
+  `core.longpaths`; a CRLF checkout of the generator's templates silently
+  stopped every placeholder from substituting, so generated consumers lost
+  their declarations and embedded metadata; and the Windows UCRT's
+  deprecation of the standard `fopen` broke the generated C and C++
+  consumers' `-Werror` build. Each was fixed at its cause and each is now
+  pinned by a gate.
+
+  The job's "Four-language metadata consumers and hostile replay" step
+  itself is still, as of `7def8fb1`, exactly what it was at `2ef043ba…`: it
+  still invokes only `cargo test --locked -p semaprax --test projections
+  public_generic_consumers` (confirmed by reading `.github/workflows/ci.yml`
+  directly). What changed is that the *job* gained five more steps after
+  that one, and run 2 above is hosted evidence that all of them pass. See
+  the "Reverified 2026-09-19" addendum after the PG-9 decision record for
+  the full detail.
 
 ## Separation invariants
 
@@ -367,20 +441,22 @@ is a diagnostic, never a backend accident.
 
 ## Where the milestone stands
 
-Five gates are hosted green on Linux, macOS, and Windows for one exact
-implementation commit. Three more (PG-5, PG-6, PG-7) have real code and
-passing local gates but no hosted run. One (PG-8) needs a fresh run once
-those three are ready to claim. PG-9 is undecided.
+Eight gates are hosted green: PG-1 through PG-4 and PG-8 on Linux, macOS, and
+Windows for implementation commit `2ef043ba…`, and PG-5, PG-6, and PG-7
+additionally on all three hosts for implementation commit `7def8fb1…` (run
+35433295593, found during this issue's #164 audit, 2026-09-19; see the PG-8
+note above and the "Reverified 2026-09-19" addendum after the PG-9 decision
+record). Neither commit is a #164 frozen candidate. PG-9 is undecided.
 
 | Gate | Artifact | What remains |
 | --- | --- | --- |
 | PG-1, PG-2 | [type grammar](PUBLIC-GENERIC-TYPE-GRAMMAR-V1.md) | nothing; hosted green on three hosts |
 | PG-3 | [compatibility rules](PUBLIC-GENERIC-COMPATIBILITY-V1.md) | nothing; hosted green on three hosts |
 | PG-4 | [candidate delta](PUBLIC-GENERIC-CANDIDATE-DELTA-V1.md) | nothing; hosted green on three hosts. It describes a genuine public-generic signature only when one is named explicitly via `public_generic_delta_with_boundary_subjects` (#139, #161); no manifest-profile route admits one on its own |
-| PG-5, PG-6 | [consumers](PUBLIC-GENERIC-CONSUMERS-V1.md), [descriptor](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md) | a hosted run; codegen wiring from a verified descriptor to a real callable function body on any backend (every provider still binds a fixture endpoint); a compiled `.wasm` implementing the full provider ABI (#229); #173's remaining descriptor-level hostile cases exercised through all four calling consumers, plus MSRV and the 16 MiB bound for foreign consumers (#226) |
-| PG-7 | [settlement obligations](PUBLIC-GENERIC-SETTLEMENT-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md); [cross-engine corpus](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | a hosted run; complete model/compiled-Wasm/consumer participation in the persisted settlement corpus; comparable all-engine peaks and logical traces; the same fixture-endpoint and nested-record limitations as PG-5/PG-6 above |
-| PG-8 | the `public-generic-ownership-milestone` CI job | a fresh run at the exact commit where PG-5/PG-6/PG-7 land, once `main`'s CI stops being cancelled before completion; the recorded green run predates all of PG-5/PG-6/PG-7's code |
-| PG-9 | this document | the decision itself, once the eight above are hosted green |
+| PG-5, PG-6 | [consumers](PUBLIC-GENERIC-CONSUMERS-V1.md), [descriptor](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md) | hosted at `7def8fb1…`, not yet a #164 frozen candidate; codegen wiring from a verified descriptor to a real callable function body on any backend (every provider still binds a fixture endpoint); a compiled `.wasm` implementing the full provider ABI (#229); #173's remaining descriptor-level hostile cases exercised through all four calling consumers |
+| PG-7 | [settlement obligations](PUBLIC-GENERIC-SETTLEMENT-V1.md), [carrier](PUBLIC-GENERIC-CARRIER-V1.md); [cross-engine corpus](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | hosted at `7def8fb1…`, not yet a #164 frozen candidate; complete model/compiled-Wasm/consumer participation in the persisted settlement corpus; comparable all-engine peaks and logical traces; the same fixture-endpoint and nested-record limitations as PG-5/PG-6 above |
+| PG-8 | the `public-generic-ownership-milestone` CI job | nothing for the corpus as it exists today (hosted at `7def8fb1…` for all three hosts); #164's formal exact-head freeze protocol has not run |
+| PG-9 | this document | the decision itself, once #164's freeze protocol runs and the remaining structural blockers (fixture endpoints, #229) are resolved or explicitly accepted |
 
 The shape of what is left is no longer "there is no versioned public generic
 descriptor and carrier" — one now exists, with local evidence for all three
@@ -505,8 +581,11 @@ them:
   and #163 (both open, P0)," and that the fixture provider used in testing
   is deliberately named `unsupported-unpublished`.
 
-**One correction to the milestone doc's own "what remains" table above**: it
-still lists "MSRV and the 16 MiB bound for foreign consumers (#226)" as
+**One correction to the milestone doc's own "what remains" table above** (as
+it read on 2026-09-18; the table has since been edited during this issue's
+#164 audit on 2026-09-19 to drop the stale item along with the hosted-run
+corrections described in the addendum after this decision record): it
+listed "MSRV and the 16 MiB bound for foreign consumers (#226)" as
 outstanding under PG-5/PG-6. #226 is **closed** (`d9410607`) — the generated
 Rust consumer now builds against the pinned MSRV toolchain and the native
 provider's true payload ceiling was proven and reconciled with the documented
@@ -658,6 +737,74 @@ compiled Wasm provider ABI; no compiler-derived generic export reaching any
 adapter; no guarantee beyond the exact bounded profile described above; no
 reinterpretation of Project v8/v9/v11 formats; no distributed/concurrent
 calling; no hidden allocator ABI.
+
+### Reverified 2026-09-19: fresh hosted evidence found for the widened corpus (issue #164 audit; does not change the decision)
+
+This addendum is an evidence-integrity correction made while auditing issue
+#164, not a new decision, not a #164 candidate freeze, and not a change to
+Option A below. The 2026-09-18 gate-by-gate table above is left as it reads:
+it was an accurate snapshot of what had been checked by that date. What
+follows corrects the parts of it, and of the surrounding prose, that a fresh
+check on 2026-09-19 found stale.
+
+**What was found.** [Run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+(workflow `CI`, `.github/workflows/ci.yml`) executed at commit
+`7def8fb1a727787f989428d77eea603ffd0513cf` on 2026-09-19T08:55–09:41Z. Its
+three `public-generic-ownership-milestone` jobs — 105871581195
+(ubuntu-latest), 105871581214 (macos-latest), 105871581165 (windows-latest)
+— all concluded `success`, step for step, including the two steps that carry
+PG-5/PG-6/PG-7's new work ("Callable-boundary corpus, generated consumers,
+settlement and hostile replay" and "Native settlement sanitizer evidence and
+independent replay", the latter Linux-only and exercised on the ubuntu leg)
+and the Linux-only "Compiled C11-reference provider inside Core Wasm" step.
+The ubuntu-latest job's own log records `exercised consumer toolchains:
+["rust", "typescript", "c", "cxx"]` and resolves Rust 1.97.1 and Node
+22.23.2. The workflow run's aggregate conclusion is `failure`; the failing
+jobs (`Rust tests macos-latest`, `STD-08 bundled library depth`, `Public
+Native Rust SDK v1`, `Rust 1.88 minimum`) are, by name, unrelated to this
+milestone.
+
+**Why the 2026-09-18 table did not have this.** That reverification correctly
+reported the state of `main` as of the runs it checked: at that point every
+completed run of the `CI` workflow since `2ef043ba…` genuinely was either
+`cancelled` or `failure`-at-the-aggregate-level with no one having checked
+whether the *milestone job itself* had completed inside a `failure`-concluded
+run. Run 35433295593 is exactly such a case: its aggregate conclusion is
+`failure`, but the three `public-generic-ownership-milestone` jobs inside it
+are `success`. The lesson generalizes: an aggregate `failure` conclusion does
+not mean every job inside a run failed, and neither the milestone document
+nor the release-candidate evidence document had checked job-level conclusions
+before this audit.
+
+**What this changes.** PG-5, PG-6, and PG-7 move from "local evidence only"
+to "hosted evidence exists," at commit `7def8fb1…`, per the gate table and
+prose edits made elsewhere in this document as part of this same audit. PG-8
+gains a second, complete hosted run (the first, `34594793245`, remains valid
+evidence for the narrower pre-#140 job it actually exercised; history is not
+rewritten). This closes the specific evidentiary basis that issues #163 and
+#175 exist to produce, but does not close #163 or #175 themselves — this
+audit is scoped to #164 and does not carry authority to close a different
+issue; a maintainer or the #163/#175 owner should confirm and close those
+issues using this run as the citation if they agree it satisfies their gate.
+
+**What this does not change.** It is not a #164 candidate freeze:
+`7def8fb1` is 18 commits behind the head this finding was made against
+(`e0c268b378ecf9279f1968ee706ea990b0da18d1`), no fast-forward/clean-tree
+check or SHA-freeze protocol (issue #164's numbered steps 1–9) was run
+around it, and no fresh local gate run was captured alongside it. Diffing
+the 18-commit range against every public-generic path
+(`src/public_generic_abi`, `src/public_generic_consumer`, both adapter test
+directories, `docs/PUBLIC-GENERIC*`, `.github/workflows/ci.yml`,
+`scripts/public_generic_*`) found exactly one touching commit (`11f07087`),
+which adds an unrelated `std.export.policy` CI step and changes nothing this
+job runs — so the run is representative of current `main` for this scope,
+which is weaker than a frozen candidate and does not substitute for one.
+The **Recommended option** below is unchanged: Option A, remain unsupported
+and unpublished. PG-9 remains open. The two structural blockers (every
+adapter still binds a fixture endpoint; no compiled `.wasm` implements the
+provider ABI, #229) are untouched by a green CI run, since neither is
+something a test suite currently exercises against a real compiled generic
+export.
 
 ## Nonclaims
 

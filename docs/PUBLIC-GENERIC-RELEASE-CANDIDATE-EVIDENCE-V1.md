@@ -6,9 +6,14 @@ convergence and freeze the evidence record") and anyone reviewing PG-9
 
 Status: **partial, and deliberately not a candidate freeze.** Sections A
 (contract inventory) and B (implementation map) of #164 are assembled here
-from the checked-out tree alone. No candidate SHA is frozen, no local gate was
-run to produce it, and no hosted run has executed the widened milestone job on
-any host. Section 3 lists every #164 requirement that remains open.
+from the checked-out tree alone. No candidate SHA is frozen and no local gate
+was run to produce Sections A/B. **Revised 2026-09-19** (this issue's own
+audit pass): the widened milestone job *has* since executed hosted, at commit
+`7def8fb1a727787f989428d77eea603ffd0513cf` — [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593),
+all three OS jobs `success` — found by checking `gh run list`/`gh api` job
+conclusions rather than only aggregate run conclusions. This is real hosted
+evidence, not a frozen #164 candidate: see the corrected §2.16 and §3 below.
+Section 3 lists every #164 requirement that remains open.
 
 ## What this document is, and is not
 
@@ -34,15 +39,23 @@ satisfied here. In particular:
   never as a frozen release candidate.
 - **No hosted CI evidence is claimed here beyond what
   [PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md)
-  and [PUBLIC-GENERIC-CONSUMERS-V1.md](PUBLIC-GENERIC-CONSUMERS-V1.md) already
-  record.** Those two documents record exactly one hosted run,
+  now records, as of its own 2026-09-19 correction.** When this document was
+  first assembled, those two documents recorded exactly one hosted run,
   [run 34594793245](https://github.com/wavect/semaprax/actions/runs/34594793245)
-  at implementation commit `2ef043ba1b989f49b256e456f71fb6e89068bf33`, and it
+  at implementation commit `2ef043ba1b989f49b256e456f71fb6e89068bf33`, which
   predates all PG-5/PG-6/PG-7 calling-consumer, hostile-carrier, and
-  settlement code. Every other identifier, status, and test count below is
-  **local, proof-only, or source-inspection evidence**, and is labelled that
-  way throughout. Nothing here upgrades any of that to hosted, current-head,
-  physical-device, or production support.
+  settlement code. **That is no longer the only hosted run on record**: this
+  issue's own audit found [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+  at commit `7def8fb1a727787f989428d77eea603ffd0513cf`, whose three
+  `public-generic-ownership-milestone` jobs (105871581195, 105871581214,
+  105871581165) are all `success` and cover the complete widened corpus —
+  see the milestone document's own "Reverified 2026-09-19" addendum and its
+  corrected PG-8 section for the full citation. This is real hosted
+  evidence, but `7def8fb1` is not a frozen #164 candidate (see §3, revised).
+  Every other identifier, status, and test count below not tied to one of
+  these two runs is **local, proof-only, or source-inspection evidence**,
+  and is labelled that way throughout. Nothing here upgrades any of that to
+  current-head, physical-device, or production support.
 - **No test was executed to produce this document.** Every test count cited
   below was a verbatim quotation from an existing, already-committed document,
   cited by file and line, never a number this document's author measured.
@@ -51,6 +64,16 @@ satisfied here. In particular:
   `public_generic_wasm_adapter_v1` is **25**, not 15. The source document has
   been corrected; the lesson is that quoting a figure faithfully does not make
   the figure true.
+- **Line-number citations into `PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md`
+  below may be imprecise as of 2026-09-19.** That document grew from 697 to
+  840 lines during this issue's own audit pass (new PG-8 hosted-run evidence,
+  corrected gate statuses, and a new "Reverified 2026-09-19" addendum). The
+  citations most load-bearing for #164 (the PG-8/hosted-run ones) were
+  re-verified and corrected against the new line numbers; citations to
+  unrelated content (predecessor-format rejections, #229's exact lines, the
+  candidate-delta bullet) were not individually re-walked line-by-line. If a
+  cited range looks off, search the target document for the quoted phrase
+  rather than trusting the line number alone.
 
 ## 1. Section A — Contract inventory
 
@@ -72,7 +95,7 @@ its reason is stated instead of a guess.
 | # | Contract | Exact identifier(s) | Verified at |
 | --- | --- | --- | --- |
 | 5 | Native C11 adapter ABI | Header `spx_pg_v1.h`, generated verbatim into every emitted provider translation unit (never hand-edited per provider); binding schema `semaprax.public-generic-native-adapter.v1`; binding digest domain `semaprax.public-generic-native-adapter.v1.binding\0` | Header: `src/public_generic_abi/native/spx_pg_v1.h:1-9` (banner: "Native C11 physical adapter ABI for Public Generic Carrier v1 (issue #154)"); `HEADER_V1` constant `include_str!`s it at `src/public_generic_abi/native/template.rs:19`; schema/domain: `src/public_generic_abi/native/binding.rs:20,23` |
-| 6 | Core Wasm adapter ABI | Binding schema `semaprax.public-generic-wasm-adapter.v1`; binding digest domain `semaprax.public-generic-wasm-adapter.v1.binding\0` | `src/public_generic_abi/wasm/binding.rs:19,21`. **Caveat, load-bearing**: this is the *logical/binding* schema only. No compiled `.wasm` artifact implements the adapter's `open`/`input_prepare`/`call`/`result_export`/`release` ABI anywhere in this repository — `public_generic_abi::wasm::provider::WasmProvider` is an in-process Rust struct (`src/public_generic_abi/wasm/provider.rs:85-86` names its bound endpoint a "fixture"), stated as open blocker #229 in `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:475-487`. |
+| 6 | Core Wasm adapter ABI | Binding schema `semaprax.public-generic-wasm-adapter.v1`; binding digest domain `semaprax.public-generic-wasm-adapter.v1.binding\0` | `src/public_generic_abi/wasm/binding.rs:19,21`. **Caveat, load-bearing**: this is the *logical/binding* schema only. No compiled `.wasm` artifact implements the adapter's `open`/`input_prepare`/`call`/`result_export`/`release` ABI anywhere in this repository — `public_generic_abi::wasm::provider::WasmProvider` is an in-process Rust struct (`src/public_generic_abi/wasm/provider.rs:85-86` names its bound endpoint a "fixture"), stated as open blocker #229 in `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:554-566` (line numbers as of 2026-09-19; see the disclaimer above). |
 
 ### 1.3 Provider binding format(s)
 
@@ -90,10 +113,10 @@ evidence — no hosted CI run is recorded for any calling-consumer section.**
 
 | # | Contract | Generator (module) | Status quoted at | Verified at |
 | --- | --- | --- | --- | --- |
-| 8 | Rust calling consumer (issue #156) | `semaprax::public_generic_consumer::rust_calling`, `generate_rust_calling_consumer(...)` | "local, proof-only evidence only (no hosted CI run recorded for this section)" | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:205-215`; module at `src/public_generic_consumer/rust_calling.rs` |
-| 9 | TypeScript/Wasm calling consumer (issue #157) | `semaprax::public_generic_consumer::typescript_calling`, `generate_typescript_calling_consumer(...)` | "local, proof-only evidence only (no hosted CI run recorded for this section)" | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:465-472`; module at `src/public_generic_consumer/typescript_calling.rs` |
-| 10 | C11 calling consumer (issue #158) | `semaprax::public_generic_consumer::c_calling`, `generate_c_calling_consumer(...)` | "local, proof-only evidence only (no hosted CI run recorded for this section)" | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:332-340`; module at `src/public_generic_consumer/c_calling.rs` |
-| 11 | C++17 calling consumer (issue #159) | `semaprax::public_generic_consumer::cxx_calling`, `generate_cxx_calling_consumer(...)`, thin wrapper reusing `c_calling`'s files byte-for-byte | "local, proof-only evidence only (no hosted CI run recorded for this section)" | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:644-651`; module at `src/public_generic_consumer/cxx_calling.rs` |
+| 8 | Rust calling consumer (issue #156) | `semaprax::public_generic_consumer::rust_calling`, `generate_rust_calling_consumer(...)` | "unsupported and unpublished" (revised 2026-09-19: hosted evidence now exists, run 35433295593 at `7def8fb1…`, not yet a #164 frozen candidate) | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:201-217`; module at `src/public_generic_consumer/rust_calling.rs` |
+| 9 | TypeScript/Wasm calling consumer (issue #157) | `semaprax::public_generic_consumer::typescript_calling`, `generate_typescript_calling_consumer(...)` | "unsupported and unpublished" (revised 2026-09-19: hosted evidence now exists, run 35433295593 at `7def8fb1…`, not yet a #164 frozen candidate) | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:473-489`; module at `src/public_generic_consumer/typescript_calling.rs` |
+| 10 | C11 calling consumer (issue #158) | `semaprax::public_generic_consumer::c_calling`, `generate_c_calling_consumer(...)` | "unsupported and unpublished" (revised 2026-09-19: hosted evidence now exists, run 35433295593 at `7def8fb1…`, not yet a #164 frozen candidate) | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:333-349`; module at `src/public_generic_consumer/c_calling.rs` |
+| 11 | C++17 calling consumer (issue #159) | `semaprax::public_generic_consumer::cxx_calling`, `generate_cxx_calling_consumer(...)`, thin wrapper reusing `c_calling`'s files byte-for-byte | "unsupported and unpublished" (revised 2026-09-19: hosted evidence now exists, run 35433295593 at `7def8fb1…`, not yet a #164 frozen candidate) | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:656-671`; module at `src/public_generic_consumer/cxx_calling.rs` |
 
 Metadata-only consumer format shared by all four (a distinct, narrower,
 **hosted-green** artifact — see §1.5):
@@ -284,9 +307,9 @@ diagnostic/reason range, CI job/step, and support/publication standing.
 #### 2.6.2 Core Wasm physical adapter (issue #155)
 
 - **Owning code module**: `src/public_generic_abi/wasm.rs`, `wasm/binding.rs`, `wasm/provider.rs`, `wasm/memory.rs`, `wasm/registry.rs`, `wasm/probe.rs`, `wasm/reverse_probe.mjs`
-- **Fixture endpoint caveat**: `src/public_generic_abi/wasm/provider.rs:85-86` names `FIXTURE_ENDPOINT_EXPORT_NAME = "spx_pg_wasm_endpoint_reverse_bytes_v1"` and calls it "the one fixture endpoint this round's adapter binds"; no compiled `.wasm` implements the full provider ABI anywhere in the repository (issue #229, open, `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:475-487`)
+- **Fixture endpoint caveat**: `src/public_generic_abi/wasm/provider.rs:85-86` names `FIXTURE_ENDPOINT_EXPORT_NAME = "spx_pg_wasm_endpoint_reverse_bytes_v1"` and calls it "the one fixture endpoint this round's adapter binds"; no compiled `.wasm` implements the full provider ABI anywhere in the repository (issue #229, open, `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:554-566` (line numbers as of 2026-09-19; see the disclaimer above))
 - **Focused test selector**: `cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1` (`.github/workflows/ci.yml:470`, quoted verbatim)
-- **Canonical golden fixture**: `tests/public_generic_wasm_adapter_v1/reference_wasm_module.rs` — explicitly a "hand-assembled, committed test-only stand-in," not a build of `src/public_generic_abi/wasm/**` — `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:137-141`
+- **Canonical golden fixture**: `tests/public_generic_wasm_adapter_v1/reference_wasm_module.rs` — explicitly a "hand-assembled, committed test-only stand-in," not a build of `src/public_generic_abi/wasm/**` — `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:170-177` (line numbers as of 2026-09-19; see the disclaimer above)
 - **Support/publication standing**: Local evidence only
 
 #### 2.6.3 Reference interpreter physical adapter (issue #162)
@@ -375,7 +398,7 @@ diagnostic/reason range, CI job/step, and support/publication standing.
 - **Owning specification**: `docs/CI-REQUIRED-CHECKS-V1.md` (job listed at line 156 of that file: `public-generic-ownership-milestone` / "Public generic ownership milestone (ubuntu-latest \| macos-latest \| windows-latest)" / weight 3)
 - **Owning workflow file**: `.github/workflows/ci.yml`, job definition starting at line 253 (`public-generic-ownership-milestone:`), matrix `[ubuntu-latest, macos-latest, windows-latest]`, `timeout-minutes: 240`
 - **Steps, as they exist in source at the commit named in §3** (quoted, not executed): "Allow Windows to check out long evidence paths"; a candidate-delta/frozen-descriptor-rejection step; "Four-language metadata consumers and hostile replay" (`public_generic_consumers`); "Public generic ABI carrier, settlement corpus and WIT projection" (`--lib public_generic_abi`); "Callable-boundary corpus, generated consumers, settlement and hostile replay" (`public_generic_native_adapter_v1`, `public_generic_wasm_adapter_v1`, `public_generic_descriptor_carrier_hostile_replay`); "Native settlement sanitizer evidence and independent replay" (Linux-only); "Compiled C11-reference provider inside Core Wasm (not public generic admission)" (Linux-only)
-- **Support/publication standing**: **The only hosted run this repository's docs record for this job (34594793245) exercised only the "Four-language metadata consumers and hostile replay" step**, per `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:318-323` ("confirmed by reading `.github/workflows/ci.yml` directly, the job's … step is unchanged and still invokes only `cargo test --locked -p semaprax --test projections public_generic_consumers`"). **This session found the job's source, as currently checked out, already contains the additional steps** listed above — see §3 for why that is a *source* observation, not a claim that any of those steps has ever produced a hosted result.
+- **Support/publication standing (revised 2026-09-19)**: two hosted runs are now on record for this job. Run `34594793245` at commit `2ef043ba…` exercised only the "Four-language metadata consumers and hostile replay" step (that step is, as of the commit below, still unchanged and still invokes only `cargo test --locked -p semaprax --test projections public_generic_consumers`). **This issue's own audit found [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593) at commit `7def8fb1a727787f989428d77eea603ffd0513cf`**, whose three `public-generic-ownership-milestone` jobs (105871581195 ubuntu-latest, 105871581214 macos-latest, 105871581165 windows-latest) are all `success`, with every step listed above — including the two Linux-only sanitizer/compiled-Wasm steps — passing on the ubuntu-latest leg. The workflow run's own aggregate conclusion is `failure`, from unrelated jobs (verified by name: `Rust tests macos-latest`, `STD-08 bundled library depth`, `Public Native Rust SDK v1`, `Rust 1.88 minimum`), which is why no prior document had surfaced it — job-level conclusions were not checked, only run-level ones. `7def8fb1` is 18 commits behind the head this finding was made against (`e0c268b378ecf9279f1968ee706ea990b0da18d1`); that range was diffed against every public-generic path and contains exactly one touching commit (`11f07087`, an unrelated `std.export.policy` CI addition), so the result is representative of current `main` but is **not** a #164 frozen candidate.
 
 ### 2.17 Completion matrix cross-reference
 
@@ -405,14 +428,30 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
    Wasm adapter harness 25, against the quoted 16 and 15 — so a quotation in
    this document establishes only what another document claimed, never what a
    run would report.
-3. **No hosted CI run was triggered or newly inspected.** The only hosted run
-   in evidence anywhere in this repository's docs remains run `34594793245`
-   at commit `2ef043ba1b989f49b256e456f71fb6e89068bf33`, and it predates every
-   PG-5/PG-6/PG-7 calling-consumer, hostile-carrier, and settlement-execution
-   change (§2.16). §164's Section D ("Hosted evidence") — exact implementation
-   SHA, workflow run ID, per-job IDs, runner labels, resolved toolchains,
-   timestamps for a *current*-head run — **does not exist and is not
-   fabricated here.**
+3. **Revised 2026-09-19 by a later #164 audit session (this one), which was
+   permitted to run `gh` and `cargo`.** The claim above — "the only hosted run
+   in evidence anywhere in this repository's docs remains run `34594793245`"
+   — was accurate for the session that wrote it, which was not permitted to
+   inspect GitHub Actions. It is no longer accurate: this session ran `gh run
+   list`/`gh api` job-level (not just run-level) queries and found
+   [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+   at commit `7def8fb1a727787f989428d77eea603ffd0513cf`, whose three
+   `public-generic-ownership-milestone` jobs (105871581195 ubuntu-latest,
+   105871581214 macos-latest, 105871581165 windows-latest) are all `success`,
+   covering PG-5/PG-6/PG-7's calling-consumer, hostile-carrier, and
+   settlement-execution work that run `34594793245` predates. No *new* run
+   was triggered — this is an existing, already-completed run that no
+   document had previously cross-referenced by job ID rather than by the
+   run's own (misleading, because it aggregates unrelated failing jobs)
+   `failure` conclusion. §164's Section D ("Hosted evidence") is still not
+   fully produced — no candidate-SHA freeze protocol ran around this commit,
+   and `7def8fb1` sits 18 commits behind the head this finding was checked
+   against (`e0c268b378ecf9279f1968ee706ea990b0da18d1`; the range was diffed
+   against every public-generic path and contains exactly one unrelated
+   touching commit, `11f07087`). A genuine, verifiable hosted run now exists
+   for this scope; it is simply not yet the exact-head frozen candidate
+   Section D requires. See §2.16 (revised) and the milestone document's own
+   "Reverified 2026-09-19" addendum for the full citation.
 4. **No artifact inventory (Section E) was built.** No descriptor bytes,
    provider bindings, native/Wasm artifacts, or generated-package outputs
    were built, hashed, or sized in this session (that would require running
@@ -436,22 +475,30 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
    `native/provider_body.c:18-26`, all confirmed live in §2.6.1-2.6.3); (b) no
    compiled `.wasm` artifact implements the Core Wasm provider ABI (issue
    #229, open).
-8. **A genuine drift was found and is recorded here rather than silently
-   corrected**: `docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:318-323`
-   (reverified 2026-09-18) states the CI job's calling-consumer step is
+8. **A genuine drift was found (2026-09-18) and is recorded here rather than
+   silently corrected — and then partly resolved by hosted evidence
+   (2026-09-19).** The milestone document's PG-8 note (as it read on
+   2026-09-18, since reworded) stated the CI job's calling-consumer step is
    "unchanged" and still invokes only the metadata-consumer test. §2.16 above
-   shows the **currently checked-out** `.github/workflows/ci.yml` already
-   contains additional steps (native/Wasm adapter tests, hostile-replay
-   projection test, sanitizer/settlement Python scripts, the compiled-Wasm
-   step) that postdate that milestone-doc note — `git log --oneline -- .github/workflows/ci.yml`
-   shows commits `c841b9b8`, `862f886a`, `4d02a4fa`/`684588d6`, and `3548dc9a`
-   landing after it. **None of this is hosted evidence**: it shows the CI
-   *definition* has moved since the milestone document's own snapshot, not
-   that any hosted run has ever executed the widened job. This is exactly the
-   #163 → #164 dependency chain the milestone document itself names
-   (`docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md:463-470`): #163 (host
-   matrix refresh) must close and produce a fresh three-host run before #164
-   can freeze anything, and #164 cannot start honestly until it does.
+   (revised) shows the **currently checked-out** `.github/workflows/ci.yml`
+   already contains additional steps (native/Wasm adapter tests,
+   hostile-replay projection test, sanitizer/settlement Python scripts, the
+   compiled-Wasm step) that postdate that 2026-09-18 note —
+   `git log --oneline -- .github/workflows/ci.yml` shows commits `c841b9b8`,
+   `862f886a`, `4d02a4fa`/`684588d6`, and `3548dc9a` landing after it. **At
+   the time this was written, none of that was hosted evidence** — it showed
+   only that the CI *definition* had moved, not that any hosted run had
+   executed the widened job. **That has since changed**: this issue's own
+   audit on 2026-09-19 found [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+   at commit `7def8fb1a727787f989428d77eea603ffd0513cf`, whose three
+   `public-generic-ownership-milestone` jobs are all `success`, covering
+   every one of those additional steps. This closes the specific evidentiary
+   gap the #163 → #164 dependency chain describes, though it does not close
+   #163 or #164 themselves: no SHA-freeze protocol ran, and `7def8fb1` is 18
+   commits behind the head this finding was checked against (diffed clean for
+   public-generic scope except one unrelated commit, `11f07087`). See the
+   milestone document's own "Reverified 2026-09-19" addendum for the full
+   citation.
 9. **The release-candidate decision packet template** (`Candidate SHA:`,
    `Contracts/versions:`, `Hosted run/jobs:`, …) that #164 asks maintainers be
    handed is not filled in here — filling it now, with an unfrozen SHA and no
@@ -465,7 +512,7 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
 | A single versioned "hostile corpus" schema identifier | No `semaprax.public-generic-hostile-corpus.v*` (or similar) constant exists anywhere in `src/` or `docs/`; the corpus exists as three separately-scoped, unversioned case tables (§1.5) |
 | MSRV 1.88 pin for the generated Rust consumer building on a provisioned 1.88 toolchain *in a hosted run* | The workflow does provision it: `.github/workflows/ci.yml`'s "Install the generated Rust consumer's declared MSRV toolchain" step runs `rustup toolchain install "1.88"` so that `generated_rust_calling_consumer_builds_and_runs_on_the_declared_msrv_toolchain` resolves it through `rustup which cargo --toolchain 1.88`. What is unverified is only that a *hosted run has executed that step*, which is the same open item as every other row in §3 |
 | `HEAD` as a stable subject | This is a shared checkout; `HEAD` moved during this session's own reads (§3, item 1). Any single SHA cited elsewhere in this document names only what a specific fact was checked against, never a frozen candidate |
-| PG-8's hosted run job IDs mapping to the *current* job definition | The recorded jobs (103248047092/103248046648/103248046983) map to the job as it existed at commit `2ef043ba…`, not to the widened job now in source (§2.16, §3 item 8) |
+| PG-8's hosted run job IDs mapping to the *current* job definition | **Resolved 2026-09-19**, no longer unverified: jobs 103248047092/103248046648/103248046983 map to the job as it existed at commit `2ef043ba…` (the narrower grammar/metadata scope), but jobs 105871581195/105871581214/105871581165 (run 35433295593, commit `7def8fb1…`) map to the widened job as it exists in source today, and all three are `success` (§2.16, §3 item 3, revised) |
 
 ## 5. Nonclaims
 

@@ -192,8 +192,9 @@ surfaces, and the milestone's separation gate continues to prove it. The
 hosted run recorded above covers this corpus and nothing else: it is not a
 support decision and not a publication. Calling a public generic export over
 a versioned descriptor and carrier is a separate generator, described next
-for Rust, C11, TypeScript/Wasm, and C++17; every one of these four calling
-generators is local, proof-only evidence with no hosted CI run recorded, and
+for Rust, C11, TypeScript/Wasm, and C++17; hosted evidence now exists for all
+four (corrected 2026-09-19: run 35433295593 at `7def8fb1…`, not yet a #164
+frozen candidate — see each section's own Status line), and
 none of them admits a public generic signature either, which is why PG-5
 and PG-6 stay open despite the sections below.
 
@@ -202,8 +203,12 @@ and PG-6 stay open despite the sections below.
 Audience: generated-consumer integrators and ABI reviewers evaluating the
 calling half of PG-5/PG-6 for Rust.
 
-Status: local, proof-only evidence only (no hosted CI run recorded for this
-section), unsupported and unpublished. Extends the existing generator
+Status: unsupported and unpublished. **Revised 2026-09-19** (issue #164
+audit): hosted evidence now exists for this section's own harness — [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+at commit `7def8fb1a727787f989428d77eea603ffd0513cf`, all three
+`public-generic-ownership-milestone` OS jobs `success` (see
+PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md's PG-8 note) — not yet a #164
+frozen candidate. Extends the existing generator
 (`semaprax::public_generic_consumer::rust_calling`) rather than a parallel
 framework: it reuses the metadata consumer's own identifier scheme
 (lowercase hex of identity bytes, never display text) and its
@@ -308,9 +313,11 @@ allocations/handles afterward via the provider's own test-only counters. A
 second test confirms the generated `Cargo.toml` declares no dependency at
 all, so the crate never depends on this workspace's own `semaprax` crate.
 
-**Known limitations, stated once.** Local evidence only: no hosted CI run is
-recorded for this section, and this harness assumes a Unix-like host with
-`clang`, `ar`, and `cargo` on `PATH` — Windows/MSVC is untried. The trusted
+**Known limitations, stated once.** (Corrected 2026-09-19: hosted evidence
+now exists, see the Status line above.) This harness assumes a Unix-like host
+with `clang`, `ar`, and `cargo` on `PATH`; hosted CI resolves `clang` via LLVM
+on `windows-latest` too (confirmed in run 35433295593), so "untried on
+Windows" no longer holds, though the toolchain there is clang, not MSVC. The trusted
 descriptor bytes are a canonical encoded Descriptor-v1 test fixture, not
 derived from a real checked generic export. The generated
 `rust-version = "1.88"` field states the minimum-toolchain claim; the
@@ -329,8 +336,12 @@ Audience: generated-consumer integrators and ABI reviewers evaluating the
 calling half of PG-5/PG-6 for C11, and the C++17 consumer ([C++17 calling
 consumer (issue #159)](#c17-calling-consumer-issue-159)) that wraps it.
 
-Status: local, proof-only evidence only (no hosted CI run recorded for this
-section), unsupported and unpublished. `semaprax::public_generic_consumer::c_calling`
+Status: unsupported and unpublished. **Revised 2026-09-19** (issue #164
+audit): hosted evidence now exists for this section's own harness — [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+at commit `7def8fb1a727787f989428d77eea603ffd0513cf`, all three
+`public-generic-ownership-milestone` OS jobs `success` (see
+PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md's PG-8 note) — not yet a #164
+frozen candidate. `semaprax::public_generic_consumer::c_calling`
 is a separate generator from [`rust_calling`](#rust-calling-consumer-issue-156)
 — it links against the native ABI's own real C symbols directly, never
 through a Rust FFI restatement of them — but shares that generator's shape
@@ -444,9 +455,11 @@ matching `fixture.rs`'s own convention) runs the same matrix under
 `-fsanitize=address,undefined` when `SEMAPRAX_STRING_SANITIZER_CLANG` is
 provisioned.
 
-**Known limitations, stated once.** Local evidence only: no hosted CI run is
-recorded for this section, and this harness assumes a Unix-like host with
-`clang` (or `$CLANG`) and `ar` on `PATH` — Windows/MSVC is untried. The
+**Known limitations, stated once.** (Corrected 2026-09-19: hosted evidence
+now exists, see the Status line above.) This harness assumes a Unix-like host
+with `clang` (or `$CLANG`) and `ar` on `PATH`; hosted CI resolves `clang` via
+LLVM on `windows-latest` too (confirmed in run 35433295593), so "untried on
+Windows" no longer holds, though the toolchain there is clang, not MSVC. The
 trusted descriptor bytes are a canonical encoded Descriptor-v1 test fixture,
 not derived from a real checked generic export. The type model covers flat
 owned-`Bytes` leaves only (see above); nested records and Copy scalars are
@@ -462,8 +475,12 @@ here.
 Audience: generated-consumer integrators and ABI reviewers evaluating the
 calling half of PG-5/PG-6 for TypeScript/Wasm.
 
-Status: local, proof-only evidence only (no hosted CI run recorded for this
-section), unsupported and unpublished. Extends the existing metadata
+Status: unsupported and unpublished. **Revised 2026-09-19** (issue #164
+audit): hosted evidence now exists for this section's own harness — [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+at commit `7def8fb1a727787f989428d77eea603ffd0513cf`, all three
+`public-generic-ownership-milestone` OS jobs `success` (see
+PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md's PG-8 note) — not yet a #164
+frozen candidate. Extends the existing metadata
 generator (`semaprax::public_generic_consumer::typescript_calling`, a new
 sibling of `rust_calling`) rather than a parallel framework: it reuses
 `rust_calling`'s own `RecordShape`/`OwnedByteField`/`ShapeError` types and
@@ -617,8 +634,9 @@ each asserting zero live allocations/handles afterward via
 declares no runtime dependency at all beyond the pinned `typescript`
 devDependency.
 
-**Known limitations, stated once.** Local evidence only: no hosted CI run is
-recorded for this section, and no browser/Chromium fixture is exercised —
+**Known limitations, stated once.** (Corrected 2026-09-19: hosted evidence
+now exists, see the Status line above.) No browser/Chromium fixture is
+exercised —
 "at minimum exercise the current Node/Wasm route" is met; the browser route
 is deferred, not claimed. The older package harness skips when its toolchains are missing. The new
 [settlement gate](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#typescript-host-owned-caller-continuation-issue-162)
@@ -641,8 +659,12 @@ Audience: generated-consumer integrators and ABI reviewers evaluating the
 calling half of PG-5/PG-6 for C++17, and anyone checking that the C++
 wrapper genuinely wraps rather than reimplements the C11 client.
 
-Status: local, proof-only evidence only (no hosted CI run recorded for this
-section), unsupported and unpublished.
+Status: unsupported and unpublished. **Revised 2026-09-19** (issue #164
+audit): hosted evidence now exists for this section's own harness — [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+at commit `7def8fb1a727787f989428d77eea603ffd0513cf`, all three
+`public-generic-ownership-milestone` OS jobs `success` (see
+PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md's PG-8 note) — not yet a #164
+frozen candidate.
 `semaprax::public_generic_consumer::cxx_calling` is a thin generator on top
 of [`c_calling`](#c11-calling-consumer-issue-158): it calls
 `c_calling::generate_c_calling_consumer` for the exact same arguments and
@@ -776,10 +798,13 @@ namespace (`semaprax::public_generic::v1`), and the include guard
 (`SEMAPRAX_PUBLIC_GENERIC_CONSUMER_V1_HPP`) is a stable literal tied to that
 same contract identity, not derived from any one descriptor.
 
-**Known limitations, stated once.** Local evidence only: no hosted CI run is
-recorded for this section, and this harness assumes a Unix-like host with
-`clang`/`clang++` (or `$CLANG`/`$CLANGXX`) on `PATH` — Windows/MSVC is
-untried, matching every other native-adapter harness in this document. The
+**Known limitations, stated once.** (Corrected 2026-09-19: hosted evidence
+now exists, see the Status line above.) This harness assumes a Unix-like host
+with `clang`/`clang++` (or `$CLANG`/`$CLANGXX`) on `PATH`; hosted CI resolves
+`clang`/`clang++` via LLVM on `windows-latest` too (confirmed in run
+35433295593), so "untried on Windows" no longer holds, matching every other
+native-adapter harness in this document — the toolchain there is clang, not
+MSVC. The
 trusted descriptor bytes are a canonical encoded Descriptor-v1 test fixture,
 not derived from a real checked generic export. The type model covers
 flat owned-`Bytes` leaves only (see above); nested records and Copy scalars
@@ -798,8 +823,10 @@ Audience: reviewers checking whether "all four consumers reject the same
 malformed input" is genuinely cross-checked, or merely four independent
 hand-written approximations that happen to look similar.
 
-Status: local, proof-only evidence (no hosted CI run recorded), unsupported
-and unpublished — the same standing as every consumer section above.
+Status: unsupported and unpublished — the same standing as every consumer
+section above, corrected 2026-09-19 the same way: hosted evidence now exists
+(run 35433295593 at `7def8fb1…`, all three OS jobs `success`), not yet a
+#164 frozen candidate.
 
 **Why this section exists.** Each consumer section above already generates
 and runs its own hostile-pairing tests: a mutated descriptor, a mutated
@@ -1008,10 +1035,11 @@ Audience: anyone who wants "all four generated calling consumers execute"
 to be a single command they can run, rather than a claim reconstructed by
 reading four separate test files.
 
-Status: local, proof-only evidence, same standing as every section above —
-this script runs the same four `cargo test`-selected tests the sections
-above already describe; it adds no new generator, no new provider, and no
-new claim.
+Status: unsupported and unpublished, same standing as every section above
+(corrected 2026-09-19: hosted evidence now exists, not yet a #164 frozen
+candidate) — this script runs the same four `cargo test`-selected tests the
+sections above already describe; it adds no new generator, no new provider,
+and no new claim.
 
 `tests/public_generic_native_adapter_v1/run_all_four_callers.sh` runs, as
 four `cargo test` invocations against the checked-out tree: the Rust
@@ -1051,10 +1079,15 @@ Audience: PG-7 reviewers checking whether "equal checked behavior on
 interpreter, native C11, and Core Wasm" is one comparison or three unrelated
 claims that happen to agree.
 
-Status: local, in-process, proof-only evidence — a narrower standing than
-every section above, and stated precisely rather than rounded up. This is
-**not** a fifth generated calling consumer: it does not compile a foreign
-language, does not link a real native provider binary, and does not
+Status: in-process, proof-only evidence — a narrower standing than every
+section above in what it exercises (see below), though no longer narrower in
+whether it is hosted: `cargo test --locked -p semaprax --lib
+public_generic_abi` (which includes this module) is part of the
+"Public generic ABI carrier, settlement corpus and WIT projection" step, and
+that step is `success` in [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593)
+at `7def8fb1…` (corrected 2026-09-19; not yet a #164 frozen candidate). This
+is still **not** a fifth generated calling consumer: it does not compile a
+foreign language, does not link a real native provider binary, and does not
 instantiate a compiled `.wasm` module. It compares two in-process Rust
 adapters directly.
 

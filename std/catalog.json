@@ -6664,6 +6664,214 @@
           "kind": "function",
           "name": "try_admit_series",
           "requires": 2
+        },
+        {
+          "description": [
+            "---------------------------------------------------------------------",
+            "Labels (issue #193)",
+            "---------------------------------------------------------------------",
+            "Everything above admits a metric's numeric state. Nothing above attaches a",
+            "label to it or looks at a label's bytes, so `try_admit_series` counted",
+            "abstract series and a caller-controlled label name or value could carry",
+            "whatever bytes a Prometheus-style text exporter would then choke on. This",
+            "section is that missing decision layer: pure predicates over",
+            "`borrow Slice<u8>`, no I/O, no `permit`/`uses`, refuse rather than",
+            "sanitize -- the same shape `std.email` and `std.http` already established",
+            "for their own injection boundaries.",
+            "",
+            "Label NAME validity is a closed allowlist, following",
+            "`std.http.header_name_is_token`'s reasoning: the bytes that break a",
+            "metrics exposition format's `name=\"value\"` grammar are exactly the ones a",
+            "denylist forgets. A label name in the Prometheus text format is",
+            "`[a-zA-Z_][a-zA-Z0-9_]*`, so only that admitted set -- never anything",
+            "merely \"not yet seen to be dangerous\" -- is admitted."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn byte_is_label_name_start(byte: u8) -> bool"
+          ],
+          "id": "std.metrics.byte-is-label-name-start",
+          "kind": "function",
+          "name": "byte_is_label_name_start",
+          "requires": 0
+        },
+        {
+          "description": [],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn byte_is_label_name_char(byte: u8) -> bool"
+          ],
+          "id": "std.metrics.byte-is-label-name-char",
+          "kind": "function",
+          "name": "byte_is_label_name_char",
+          "requires": 0
+        },
+        {
+          "description": [],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn label_name_max_len() -> usize"
+          ],
+          "id": "std.metrics.label-name-max-len",
+          "kind": "function",
+          "name": "label_name_max_len",
+          "requires": 0
+        },
+        {
+          "description": [],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn label_name_is_valid(name: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.metrics.label-name-is-valid",
+          "kind": "function",
+          "name": "label_name_is_valid",
+          "requires": 0
+        },
+        {
+          "description": [
+            "Label VALUE safety is the opposite shape: a denylist of the exact bytes a",
+            "Prometheus-style text exposition format breaks on, because a label value",
+            "is otherwise arbitrary text and has no admitted-character grammar to",
+            "allowlist. A value is written `\"...\"` in the exposition format, and its",
+            "own escaping rule only covers backslash, double quote, and line feed",
+            "(`\\\\`, `\\\"`, `\\n`) -- so those three are refused outright rather than",
+            "escaped, matching `std.email.value_is_header_safe` and",
+            "`std.http.value_is_header_safe`'s refuse-don't-sanitize discipline. CR and",
+            "NUL are refused alongside them for the same defensive reason those two",
+            "packages already refuse them next to their own format's separator: CR",
+            "pairs with LF in most real line-oriented consumers of this text, and NUL",
+            "truncates a C-string-backed writer regardless of the length this package",
+            "believes the value has.",
+            "",
+            "Written as a `match` rather than a chained `||` of five `byte == ...`",
+            "comparisons: `std.http.byte_is_tchar`'s single-expression form hit the",
+            "cleanup-replay skeleton-work budget (`SPX-H006`) at three ranges plus one",
+            "helper call, so a five-literal disjunction scanned inside this package's",
+            "own `while` loop is designed out from the start rather than discovered by",
+            "a failing gate."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn byte_is_label_value_unsafe(byte: u8) -> bool"
+          ],
+          "id": "std.metrics.byte-is-label-value-unsafe",
+          "kind": "function",
+          "name": "byte_is_label_value_unsafe",
+          "requires": 0
+        },
+        {
+          "description": [],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn value_is_label_safe(field: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.metrics.value-is-label-safe",
+          "kind": "function",
+          "name": "value_is_label_safe",
+          "requires": 0
+        },
+        {
+          "description": [],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn label_value_max_len() -> usize"
+          ],
+          "id": "std.metrics.label-value-max-len",
+          "kind": "function",
+          "name": "label_value_max_len",
+          "requires": 0
+        },
+        {
+          "description": [
+            "A label value may be empty (an unset label is a legitimate series key), so",
+            "this is an upper bound only, unlike the name's lower-bounded length."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn label_value_len_admitted(length: usize) -> bool"
+          ],
+          "id": "std.metrics.label-value-len-admitted",
+          "kind": "function",
+          "name": "label_value_len_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "One deployment-independent bound on how many labels a single series may",
+            "carry, alongside the per-name and per-value byte bounds above: three",
+            "separate budgets, because a caller told only \"labels rejected\" without",
+            "which budget it hit is exactly the diagnostic failure this repository",
+            "keeps finding elsewhere."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn label_count_max() -> i64"
+          ],
+          "id": "std.metrics.label-count-max",
+          "kind": "function",
+          "name": "label_count_max",
+          "requires": 0
+        },
+        {
+          "description": [],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn label_count_admitted(count: i64) -> bool"
+          ],
+          "id": "std.metrics.label-count-admitted",
+          "kind": "function",
+          "name": "label_count_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "The composed judgement a caller asks once per label, before attaching it",
+            "to a series -- in the style of `std.email.address_admitted` and",
+            "`std.http.request_line_admitted`. Every clause is one of the predicates",
+            "above, so a refusal can always be attributed to a named rule."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn label_admitted(name: borrow Slice<u8>, value: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.metrics.label-admitted",
+          "kind": "function",
+          "name": "label_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "Cardinality admission that actually sees the label, rather than counting",
+            "an abstract series as `try_admit_series` does above. A label that fails",
+            "`label_admitted` is refused with the same fixed `-1` sentinel a registry",
+            "already at `cardinality_limit()` returns, so a caller cannot tell \"bad",
+            "label\" apart from \"budget exhausted\" by the return value alone, but it can",
+            "never register a series keyed by a label this package refused."
+          ],
+          "effects": [],
+          "ensures": 1,
+          "head": [
+            "fn try_admit_labeled_series(existing_count: i64, name: borrow Slice<u8>, value: borrow Slice<u8>) -> i64",
+            "    requires existing_count >= 0",
+            "    requires existing_count <= cardinality_limit()",
+            "    ensures result == -1 || result >= 1 && result <= cardinality_limit()"
+          ],
+          "id": "std.metrics.try-admit-labeled-series",
+          "kind": "function",
+          "name": "try_admit_labeled_series",
+          "requires": 2
         }
       ],
       "dependency": "std.metrics = \"^0.1.0\"",
@@ -8752,19 +8960,32 @@
         {
           "description": [
             "Issue #193's tracing slice: the pure, effect-free decision layer that",
-            "admits or refuses a W3C Trace Context `traceparent` header BEFORE a caller",
-            "creates, propagates, or exports a span. It performs no I/O, declares no",
-            "`permit`, calls no `uses`-gated operation, and never accepts, retains, or",
-            "returns anything beyond the header bytes it is asked to judge.",
+            "admits or refuses a W3C Trace Context `traceparent`/`tracestate` header,",
+            "derives a child span context from an admitted parent, and judges a",
+            "sampling decision's consistency, all BEFORE a caller creates, propagates,",
+            "or exports a span. It performs no I/O, declares no `permit`, calls no",
+            "`uses`-gated operation, and never accepts, retains, or returns anything",
+            "beyond the header bytes and scalars it is asked to judge.",
             "",
-            "What this package is NOT: it does not generate a trace-id or a parent-id,",
-            "does not create, start, or export a span, and does not implement a",
-            "sampler. It does not parse a `tracestate` header's list-members from raw",
-            "bytes either — splitting on `,` and `=` while tolerating the header's",
-            "optional whitespace needs a general delimiter scanner this package does",
-            "not implement, so only the two aggregate `tracestate` budgets a caller can",
-            "compute without parsing (list-member count, combined header length) are",
-            "exposed as predicates.",
+            "What this package is NOT: it does not generate a trace-id, a parent-id, or",
+            "a span-id — `child_context_admitted` takes the child's span-id as a",
+            "caller-supplied argument and only judges it, because generating one needs",
+            "a randomness capability this package does not have and must not pretend",
+            "to. It does not create, start, or export a span, and it does not",
+            "implement a sampler: `sampling_decision_consistent` judges whether an",
+            "outbound sampled bit is consistent with an inbound one, it does not choose",
+            "one. Nor does it split a raw `tracestate` header into its comma-separated",
+            "list-members: that needs a general delimiter scanner tolerant of the",
+            "header's optional surrounding whitespace, which this package still does",
+            "not implement, so `tracestate_member_admitted` takes an already-isolated",
+            "`key=value` member as its own slice rather than a whole header, and only",
+            "the two aggregate budgets a caller can compute without parsing (list-member",
+            "count, combined header length) cover the whole `tracestate` value. Key",
+            "admission covers only the spec's `simple-key` form; a `multi-tenant-key`",
+            "(`tenant-id \"@\" system-id`) that would be spec-valid is refused here.",
+            "`tracestate_mutation_admitted` checks one candidate key against one",
+            "sibling at a time (front-of-list placement and non-duplication); enforcing",
+            "it across a full list is the caller's loop, not this package's.",
             "",
             "It also does not implement the spec's forward-compatibility allowance for",
             "a higher-version header carrying additional bytes past position 55 (W3C",
@@ -9037,6 +9258,221 @@
           "id": "std.tracing.tracestate_combined_length_admitted",
           "kind": "function",
           "name": "tracestate_combined_length_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "---------------------------------------------------------------------",
+            "General byte-field comparison",
+            "---------------------------------------------------------------------",
+            "Two views are equal exactly when they are the same length and agree at",
+            "every index; a length mismatch refuses without reading a single byte.",
+            "Shared below by child-context consistency (fixed-width trace/parent-id and",
+            "trace-flags fields) and `tracestate` key comparison (variable-width keys)."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn slice_equal(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.tracing.slice_equal",
+          "kind": "function",
+          "name": "slice_equal",
+          "requires": 0
+        },
+        {
+          "description": [
+            "---------------------------------------------------------------------",
+            "Outbound field admission",
+            "---------------------------------------------------------------------",
+            "The trace-id, parent-id, and trace-flags fields of one traceparent context,",
+            "each supplied as its own slice starting at index zero rather than embedded",
+            "in a full 55-byte header. `hex_run_admitted` and `field_is_all_zero` are",
+            "reused unchanged at `start = 0`; the exact-length check comes first for",
+            "every field, since `hex_run_admitted` alone only scans the first `length`",
+            "bytes and would silently accept a trailing extra byte it never reads —",
+            "exactly the \"stops one byte early\" failure shape this repository has hit",
+            "before. `version` is excluded here on purpose: it names the wire format of",
+            "a `traceparent` header, not a property of the trace context these three",
+            "fields carry, so `child_context_admitted` below reuses this without ever",
+            "taking a version argument. Factored out of both callers below (rather than",
+            "inlined at each) specifically because inlining it twice combined enough",
+            "independent `&&`/`!` branches in one function body to exceed the",
+            "cleanup-replay skeleton-work budget (SPX-H006); as a named call, each use",
+            "site is one opaque unit to that replay instead of a dozen more branches."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn trace_context_fields_admitted(trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.tracing.trace_context_fields_admitted",
+          "kind": "function",
+          "name": "trace_context_fields_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "The judgement an adapter assembling an outbound header actually calls",
+            "before joining `version \"-\" trace_id \"-\" parent_id \"-\" trace_flags` with",
+            "dashes and sending it. `version_field_admitted` is reused unchanged: its",
+            "two checked positions (0 and 1) are exactly a standalone two-byte version",
+            "field's only two bytes."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn outbound_traceparent_fields_admitted(version: borrow Slice<u8>, trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.tracing.outbound_traceparent_fields_admitted",
+          "kind": "function",
+          "name": "outbound_traceparent_fields_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "---------------------------------------------------------------------",
+            "Child-context derivation",
+            "---------------------------------------------------------------------",
+            "Whether a child span context derived from an admitted parent is itself",
+            "admitted and consistent with that parent (W3C Trace Context Section 3.2.2,",
+            "Section 3.3.1.3): the same trace-id throughout, a parent-id that differs",
+            "from the parent's own (a child cannot be its own parent), and trace-flags",
+            "carried forward unchanged — this predicate only checks that inheritance",
+            "held, it never decides a new sampling outcome; `sampling_decision_consistent`",
+            "below is where a changed flags byte gets judged. The child's span-id is",
+            "supplied by the caller (an argument, not a return value) because this",
+            "package has no randomness capability to generate one."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn child_context_admitted(parent_trace_id: borrow Slice<u8>, parent_parent_id: borrow Slice<u8>, parent_trace_flags: borrow Slice<u8>, child_trace_id: borrow Slice<u8>, child_span_id: borrow Slice<u8>, child_trace_flags: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.tracing.child_context_admitted",
+          "kind": "function",
+          "name": "child_context_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "---------------------------------------------------------------------",
+            "Sampling-decision admission",
+            "---------------------------------------------------------------------",
+            "The sampled bit read from a standalone two-byte trace-flags field, the",
+            "counterpart to `traceparent_sampled` for a field that has not been",
+            "embedded in a full 55-byte header. Every other bit of trace-flags is",
+            "reserved and carries no admission rule (Section 3.2.2.5): any two-hex-digit",
+            "value is a legal flags byte, so nothing here narrows that further."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn trace_flags_sampled(trace_flags: borrow Slice<u8>) -> bool",
+            "    requires byte_len(trace_flags) == 2usize && hex_run_admitted(trace_flags, 0usize, 2usize)"
+          ],
+          "id": "std.tracing.trace_flags_sampled",
+          "kind": "function",
+          "name": "trace_flags_sampled",
+          "requires": 1
+        },
+        {
+          "description": [
+            "Whether an outbound sampling decision is consistent with the inbound one",
+            "it follows. The spec's one-way rule: a participant may raise an unsampled",
+            "context to sampled, but must never lower a sampled context back to",
+            "unsampled downstream, so the only refused transition is",
+            "sampled-inbound-then-unsampled-outbound. This decides consistency; it",
+            "never picks a sampling outcome itself."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn sampling_decision_consistent(inbound_trace_flags: borrow Slice<u8>, outbound_trace_flags: borrow Slice<u8>) -> bool",
+            "    requires byte_len(inbound_trace_flags) == 2usize && hex_run_admitted(inbound_trace_flags, 0usize, 2usize) && byte_len(outbound_trace_flags) == 2usize && hex_run_admitted(outbound_trace_flags, 0usize, 2usize)"
+          ],
+          "id": "std.tracing.sampling_decision_consistent",
+          "kind": "function",
+          "name": "sampling_decision_consistent",
+          "requires": 1
+        },
+        {
+          "description": [
+            "---------------------------------------------------------------------",
+            "`tracestate` list-member shape",
+            "---------------------------------------------------------------------",
+            "A `simple-key`: 1 to 256 bytes, first byte a lowercase letter only (never a",
+            "digit), every remaining byte a lowercase letter, a digit, or one of the",
+            "four punctuation symbols `_ - * /` (Section 3.3.1.1). The `multi-tenant-key`",
+            "form (`tenant-id \"@\" system-id`) is out of scope; see the package header."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn tracestate_key_shape_admitted(key: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.tracing.tracestate_key_shape_admitted",
+          "kind": "function",
+          "name": "tracestate_key_shape_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "A `value`: 1 to 256 bytes from the `chr` set — printable ASCII 0x20-0x7E",
+            "excluding the two delimiter bytes `,` and `=` (Section 3.3.1.2) — whose final",
+            "byte is not a space, per the grammar's trailing `nblk-chr`: a value may",
+            "carry interior whitespace but may not trail it."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn tracestate_value_shape_admitted(value: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.tracing.tracestate_value_shape_admitted",
+          "kind": "function",
+          "name": "tracestate_value_shape_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "The judgement a caller with one already-isolated `key=value` member slice",
+            "actually calls; splitting the raw `tracestate` header into such slices",
+            "remains the caller's job (see the package header). Counting `=` and",
+            "locating its one admitted occurrence share a single pass: counting rather",
+            "than accepting the first occurrence is deliberate, mirroring",
+            "`std.email.at_sign_count`, since a stray extra `=` before the intended one",
+            "would otherwise still look like a plausible split point."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn tracestate_member_admitted(member: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.tracing.tracestate_member_admitted",
+          "kind": "function",
+          "name": "tracestate_member_admitted",
+          "requires": 0
+        },
+        {
+          "description": [
+            "---------------------------------------------------------------------",
+            "`tracestate` ordering and duplication",
+            "---------------------------------------------------------------------",
+            "A mutating vendor's entry must become the list's first member (Section 3.3.1.3)",
+            "and its key must not already belong to another member. Checked pairwise —",
+            "one candidate key against one sibling key at a time, since this package",
+            "does not walk an unbounded member list (see the package header); a caller",
+            "enforcing this across N members calls it once per sibling with",
+            "`first_member_key` held fixed."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn tracestate_mutation_admitted(mutated_key: borrow Slice<u8>, first_member_key: borrow Slice<u8>, sibling_key: borrow Slice<u8>) -> bool"
+          ],
+          "id": "std.tracing.tracestate_mutation_admitted",
+          "kind": "function",
+          "name": "tracestate_mutation_admitted",
           "requires": 0
         }
       ],

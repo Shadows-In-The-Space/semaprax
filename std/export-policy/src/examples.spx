@@ -1,0 +1,42 @@
+module std.export.policy.examples;
+use function @id("std.export.policy.export_admitted") from std.export.policy as export_admitted;
+use function @id("std.export.policy.try_admit_export") from std.export.policy as try_admit_export;
+use function @id("std.export.policy.target_id_admitted") from std.export.policy as target_id_admitted;
+use function @id("std.export.policy.attempt_admitted") from std.export.policy as attempt_admitted;
+use function @id("std.export.policy.backoff_seconds") from std.export.policy as backoff_seconds;
+
+// A synthetic host-adapter walk: the checks a sink adapter for any of the
+// six observability families would run before it emits a batch, retries a
+// failed one, and gives up -- all before any transport exists. Nothing here
+// performs I/O, opens a queue, or sends anything.
+@id("std.export.policy.examples.main")
+fn main() -> i64
+{
+    // An ordinary sink identifier: seven ASCII bytes, none of them
+    // header-splitting.
+    let mut target = bytes_zeroed(7usize);
+    target = bytes_set(target, 0usize, 115u8);
+    target = bytes_set(target, 1usize, 105u8);
+    target = bytes_set(target, 2usize, 110u8);
+    target = bytes_set(target, 3usize, 107u8);
+    target = bytes_set(target, 4usize, 45u8);
+    target = bytes_set(target, 5usize, 48u8);
+    target = bytes_set(target, 6usize, 49u8);
+    let target_slice = bytes_as_slice(target);
+    let target_ok = target_id_admitted(target_slice);
+    // A queue with room, a modest batch: admitted.
+    let fresh_batch_admitted = export_admitted(3, 64usize, 4096usize, target_slice);
+    // The same batch once the queue has reached its ceiling: refused.
+    let saturated_queue_refused = !export_admitted(1024, 64usize, 4096usize, target_slice);
+    // An oversized batch is refused before anything serializes it.
+    let oversized_batch_refused = !export_admitted(3, 513usize, 4096usize, target_slice);
+    // The depth counter a host would actually store after admission.
+    let next_depth = try_admit_export(3);
+    let queue_full_refusal = try_admit_export(1024);
+    // A sink that has failed seven times in a row still gets one more
+    // attempt with a bounded delay; an eighth failure exhausts the budget.
+    let first_backoff = backoff_seconds(1);
+    let last_backoff = backoff_seconds(8);
+    let ninth_attempt_refused = !attempt_admitted(9);
+    if target_ok && fresh_batch_admitted && saturated_queue_refused && oversized_batch_refused && next_depth == 4 && queue_full_refusal == -1 && first_backoff == 1 && last_backoff == 60 && ninth_attempt_refused { 0 } else { 1 }
+}

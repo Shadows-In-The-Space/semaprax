@@ -56,6 +56,7 @@ fn declared_owners() -> Vec<(&'static str, Owner)> {
         ("std.encoding.base64", Test("base64::base64_encoding_executes_on_all_three_backends")),
         ("std.env", Test("environment::environment_package_executes_all_functions_with_injected_snapshot")),
         ("std.env.policy", Test("env_policy::env_policy_executes_on_all_three_backends")),
+        ("std.export.policy", Test("export_policy_backend_audit::export_policy_executes_on_all_three_backends")),
         ("std.format", Test("formatting::format_writer_executes_on_all_three_backends")),
         ("std.fs", Test("filesystem::filesystem_standard_commands_execute_on_all_three_backends")),
         ("std.http", Test("async_net_backend_audit::async_http_net_execute_on_all_three_backends")),

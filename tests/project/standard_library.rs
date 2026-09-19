@@ -1381,6 +1381,9 @@ mod webhook_backend_audit;
 #[path = "standard_library/metrics_backend_audit.rs"]
 mod metrics_backend_audit;
 
+#[path = "standard_library/export_policy_backend_audit.rs"]
+mod export_policy_backend_audit;
+
 #[path = "standard_library/composition_inventory.rs"]
 mod composition_inventory;
 #[path = "standard_library/imported_view_composition.rs"]

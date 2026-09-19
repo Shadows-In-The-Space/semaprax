@@ -1,0 +1,122 @@
+module std.export.policy.tests;
+use function @id("std.export.policy.batch_size_admitted") from std.export.policy as batch_size_admitted;
+use function @id("std.export.policy.batch_bytes_admitted") from std.export.policy as batch_bytes_admitted;
+use function @id("std.export.policy.target_id_len_admitted") from std.export.policy as target_id_len_admitted;
+use function @id("std.export.policy.target_id_admitted") from std.export.policy as target_id_admitted;
+use function @id("std.export.policy.queue_depth_max") from std.export.policy as queue_depth_max;
+use function @id("std.export.policy.try_admit_export") from std.export.policy as try_admit_export;
+use function @id("std.export.policy.attempt_admitted") from std.export.policy as attempt_admitted;
+use function @id("std.export.policy.backoff_seconds") from std.export.policy as backoff_seconds;
+use function @id("std.export.policy.export_admitted") from std.export.policy as export_admitted;
+
+// A batch of zero records is refused (it is not an export), one record and
+// the 512-record ceiling are both admitted, and one past the ceiling is
+// refused. A regression that drops either the floor or the ceiling check
+// passes exactly the case the other one guards.
+@id("std.export.policy.tests.batch_size_bounds_at_min_max_and_beyond")
+fn batch_size_bounds_at_min_max_and_beyond() -> bool
+{
+    !batch_size_admitted(0usize) && batch_size_admitted(1usize) && batch_size_admitted(512usize) && !batch_size_admitted(513usize)
+}
+
+// A zero-byte batch (every record serializes to nothing observable) is
+// admitted, since this bound is an upper one only; the ceiling itself and one
+// byte past it are each asserted on their own.
+@id("std.export.policy.tests.batch_bytes_bounds_at_max_and_max_plus_one")
+fn batch_bytes_bounds_at_max_and_max_plus_one() -> bool
+{
+    batch_bytes_admitted(0usize) && batch_bytes_admitted(1048576usize) && !batch_bytes_admitted(1048577usize)
+}
+
+// An empty target names no sink and is refused by the length floor; the
+// 128-byte ceiling and one byte past it are asserted through actual byte
+// arrays, not just the raw `usize` the predicate takes, so the composition
+// with `byte_len` is exercised too.
+@id("std.export.policy.tests.target_id_len_bounds_at_min_max_and_beyond")
+fn target_id_len_bounds_at_min_max_and_beyond() -> bool
+{
+    let max_len = [97u8; 128];
+    let over_max = [97u8; 129];
+    !target_id_len_admitted(0usize) && target_id_len_admitted(byte_len(array_as_slice(max_len))) && !target_id_len_admitted(byte_len(array_as_slice(over_max)))
+}
+
+// Line feed, carriage return and NUL each let a caller-controlled target
+// identifier splice a second field into whatever text a host adapter later
+// renders it into. Each is asserted in the FINAL byte position as well as
+// the middle: a scan that stops one byte early would pass every case here
+// except the middle ones.
+@id("std.export.policy.tests.target_id_admitted_refuses_splitting_bytes")
+fn target_id_admitted_refuses_splitting_bytes() -> bool
+{
+    let clean = [115u8, 105u8, 110u8, 107u8];
+    let cr_middle = [115u8, 13u8, 110u8, 107u8];
+    let cr_final = [115u8, 105u8, 110u8, 13u8];
+    let lf_middle = [115u8, 10u8, 110u8, 107u8];
+    let lf_final = [115u8, 105u8, 110u8, 10u8];
+    let nul_middle = [115u8, 0u8, 110u8, 107u8];
+    let nul_final = [115u8, 105u8, 110u8, 0u8];
+    target_id_admitted(array_as_slice(clean)) && !target_id_admitted(array_as_slice(cr_middle)) && !target_id_admitted(array_as_slice(cr_final)) && !target_id_admitted(array_as_slice(lf_middle)) && !target_id_admitted(array_as_slice(lf_final)) && !target_id_admitted(array_as_slice(nul_middle)) && !target_id_admitted(array_as_slice(nul_final))
+}
+
+// The refusal that has teeth: one below the ceiling still advances the
+// depth counter, exactly at the ceiling is refused with the fixed `-1`
+// sentinel, and a queue counted from zero admits its first entry as `1`, not
+// `0` (which this package's own `ensures` reserves for "no result").
+@id("std.export.policy.tests.queue_depth_admission_boundaries")
+fn queue_depth_admission_boundaries() -> bool
+{
+    queue_depth_max() == 1024 && try_admit_export(0) == 1 && try_admit_export(queue_depth_max() - 1) == queue_depth_max() && try_admit_export(queue_depth_max()) == -1
+}
+
+// Attempts are counted from 1, so 0 is refused rather than treated as
+// "before the first"; the fixed retry ceiling and one past it are each
+// asserted on their own.
+@id("std.export.policy.tests.attempt_bounds_at_min_max_and_beyond")
+fn attempt_bounds_at_min_max_and_beyond() -> bool
+{
+    !attempt_admitted(0) && attempt_admitted(1) && attempt_admitted(8) && !attempt_admitted(9)
+}
+
+// Backoff doubles and then saturates rather than growing without bound, and
+// never returns a delay outside its own declared postcondition range.
+@id("std.export.policy.tests.backoff_doubles_then_saturates")
+fn backoff_doubles_then_saturates() -> bool
+{
+    let first = backoff_seconds(1) == 1;
+    let second = backoff_seconds(2) == 2;
+    let third = backoff_seconds(3) == 4;
+    let seventh = backoff_seconds(7) == 60;
+    let eighth = backoff_seconds(8) == 60;
+    first && second && third && seventh && eighth
+}
+
+// A composed refusal is attributable: each of the four clauses refuses on
+// its own while the other three hold, and the all-clear case actually
+// admits rather than only ever refusing.
+@id("std.export.policy.tests.export_admitted_composes_and_is_attributable")
+fn export_admitted_composes_and_is_attributable() -> bool
+{
+    let target = [115u8, 105u8, 110u8, 107u8];
+    let unsafe_target = [115u8, 13u8, 110u8, 107u8];
+    let all_hold = export_admitted(0, 1usize, 0usize, array_as_slice(target));
+    let saturated_only = !export_admitted(queue_depth_max(), 1usize, 0usize, array_as_slice(target));
+    let empty_batch_only = !export_admitted(0, 0usize, 0usize, array_as_slice(target));
+    let oversized_only = !export_admitted(0, 1usize, 1048577usize, array_as_slice(target));
+    let unsafe_target_only = !export_admitted(0, 1usize, 0usize, array_as_slice(unsafe_target));
+    all_hold && saturated_only && empty_batch_only && oversized_only && unsafe_target_only
+}
+
+@id("std.export.policy.tests.main")
+fn main() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if batch_size_bounds_at_min_max_and_beyond() { 0 } else { 1 };
+    failed = failed + if batch_bytes_bounds_at_max_and_max_plus_one() { 0 } else { 2 };
+    failed = failed + if target_id_len_bounds_at_min_max_and_beyond() { 0 } else { 4 };
+    failed = failed + if target_id_admitted_refuses_splitting_bytes() { 0 } else { 8 };
+    failed = failed + if queue_depth_admission_boundaries() { 0 } else { 16 };
+    failed = failed + if attempt_bounds_at_min_max_and_beyond() { 0 } else { 32 };
+    failed = failed + if backoff_doubles_then_saturates() { 0 } else { 64 };
+    failed = failed + if export_admitted_composes_and_is_attributable() { 0 } else { 128 };
+    failed
+}

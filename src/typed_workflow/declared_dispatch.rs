@@ -268,10 +268,7 @@ mod wire_tests {
         let request = parse_request(br#"{"target": "../../etc/passwd"}"#).unwrap();
         assert_eq!(request.target, "../../etc/passwd");
         let policy = DispatchPolicy::new(["../../etc/passwd".to_owned()]);
-        assert_eq!(
-            decide(&policy, &request),
-            Ok("../../etc/passwd".to_owned())
-        );
+        assert_eq!(decide(&policy, &request), Ok("../../etc/passwd".to_owned()));
     }
 }
 

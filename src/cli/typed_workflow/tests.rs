@@ -187,7 +187,11 @@ fn validate_is_deterministic() {
 #[test]
 fn checkpoint_reports_the_recorded_state() {
     let dir = scratch_dir("checkpoint-valid");
-    let path = write(&dir, "checkpoint.json", valid_checkpoint_document().as_bytes());
+    let path = write(
+        &dir,
+        "checkpoint.json",
+        valid_checkpoint_document().as_bytes(),
+    );
     let report = run_checkpoint(&path).unwrap();
     assert!(report.contains("revision: 7"));
     assert!(report.contains("step: 3"));
@@ -249,11 +253,7 @@ fn dispatch_refuses_a_target_outside_the_declared_policy_with_this_fronts_own_co
 fn dispatch_treats_a_path_traversal_shaped_target_as_an_opaque_string() {
     let dir = scratch_dir("dispatch-traversal");
     let policy = write(&dir, "policy.json", br#"{"allowed_targets": []}"#);
-    let request = write(
-        &dir,
-        "request.json",
-        br#"{"target": "../../etc/passwd"}"#,
-    );
+    let request = write(&dir, "request.json", br#"{"target": "../../etc/passwd"}"#);
     let error = run_dispatch(&policy, &request).unwrap_err();
     assert_eq!(error.code, "SPX-Z924");
     assert!(error.message.contains("../../etc/passwd"));

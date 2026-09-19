@@ -88,19 +88,13 @@ fn is_flag(argument: &str) -> bool {
 /// usage line and exit code 2 before any path is opened.
 pub(crate) fn parse(args: &[String]) -> Result<WorkflowCommand, u8> {
     let rejected = match args {
-        [subcommand, path]
-            if subcommand == "inspect" && !path.is_empty() && !is_flag(path) =>
-        {
+        [subcommand, path] if subcommand == "inspect" && !path.is_empty() && !is_flag(path) => {
             return Ok(WorkflowCommand::Inspect(PathBuf::from(path)));
         }
-        [subcommand, path]
-            if subcommand == "validate" && !path.is_empty() && !is_flag(path) =>
-        {
+        [subcommand, path] if subcommand == "validate" && !path.is_empty() && !is_flag(path) => {
             return Ok(WorkflowCommand::Validate(PathBuf::from(path)));
         }
-        [subcommand, path]
-            if subcommand == "checkpoint" && !path.is_empty() && !is_flag(path) =>
-        {
+        [subcommand, path] if subcommand == "checkpoint" && !path.is_empty() && !is_flag(path) => {
             return Ok(WorkflowCommand::Checkpoint(PathBuf::from(path)));
         }
         [subcommand, policy, request]
@@ -140,9 +134,8 @@ fn read_bounded(path: &Path, what: &str) -> Result<Vec<u8>, Diagnostic> {
             metadata.len()
         )));
     }
-    std::fs::read(path).map_err(|error| {
-        document_error(format!("cannot read {what} {}: {error}", path.display()))
-    })
+    std::fs::read(path)
+        .map_err(|error| document_error(format!("cannot read {what} {}: {error}", path.display())))
 }
 
 fn step_kind_label(kind: &StepKind) -> String {
@@ -215,10 +208,7 @@ pub(crate) fn run_validate(path: &Path) -> Result<String, Diagnostic> {
     let bytes = read_bounded(path, "workflow graph document")?;
     let graph = graph_wire::parse_graph(&bytes)?;
     graph.validate().map_err(|error| {
-        check_failed(format!(
-            "{} does not validate: {error:?}",
-            path.display()
-        ))
+        check_failed(format!("{} does not validate: {error:?}", path.display()))
     })?;
     Ok(format!(
         "workflow validate: {}\nsteps: {}\nedges: {}\nstatus: VALID\n",
@@ -235,9 +225,8 @@ pub(crate) fn run_validate(path: &Path) -> Result<String, Diagnostic> {
 /// bare file path.
 pub(crate) fn run_checkpoint(path: &Path) -> Result<String, Diagnostic> {
     let bytes = read_bounded(path, "checkpoint document")?;
-    let text = std::str::from_utf8(&bytes).map_err(|_| {
-        document_error(format!("{} is not valid UTF-8", path.display()))
-    })?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| document_error(format!("{} is not valid UTF-8", path.display())))?;
     let checkpoint = Checkpoint::decode(text).map_err(|error| {
         document_error(format!(
             "{} is not a valid checkpoint document: {error:?}",

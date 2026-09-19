@@ -330,10 +330,7 @@ pub fn parse_graph(bytes: &[u8]) -> Result<WorkflowGraph, Diagnostic> {
             "`document.schema` must be `{GRAPH_WIRE_SCHEMA}`, got `{schema}`"
         )));
     }
-    let entry = StepId(as_u32(
-        field(map, "entry", "document")?,
-        "document.entry",
-    )?);
+    let entry = StepId(as_u32(field(map, "entry", "document")?, "document.entry")?);
     let steps_array = as_array(field(map, "steps", "document")?, "document.steps")?;
     if steps_array.len() > MAX_STEPS {
         return Err(malformed(format!(

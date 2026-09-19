@@ -168,10 +168,8 @@ fn a_non_object_top_level_value_is_refused() {
 
 #[test]
 fn an_unknown_top_level_field_is_refused() {
-    let document = minimal_document().replace(
-        "\"entry\": 0,",
-        "\"entry\": 0, \"unexpected\": true,",
-    );
+    let document =
+        minimal_document().replace("\"entry\": 0,", "\"entry\": 0, \"unexpected\": true,");
     assert_malformed(document.as_bytes());
 }
 
@@ -234,7 +232,10 @@ fn a_non_integer_entry_is_refused() {
 
 #[test]
 fn a_negative_step_id_is_refused() {
-    let document = minimal_document().replace("\"id\": 0, \"kind\": \"sequential\"", "\"id\": -1, \"kind\": \"sequential\"");
+    let document = minimal_document().replace(
+        "\"id\": 0, \"kind\": \"sequential\"",
+        "\"id\": -1, \"kind\": \"sequential\"",
+    );
     assert_malformed(document.as_bytes());
 }
 
@@ -242,7 +243,10 @@ fn a_negative_step_id_is_refused() {
 /// refused rather than silently truncated.
 #[test]
 fn a_step_id_beyond_u32_is_refused() {
-    let document = minimal_document().replace("\"id\": 0, \"kind\": \"sequential\"", "\"id\": 4294967296, \"kind\": \"sequential\"");
+    let document = minimal_document().replace(
+        "\"id\": 0, \"kind\": \"sequential\"",
+        "\"id\": 4294967296, \"kind\": \"sequential\"",
+    );
     assert_malformed(document.as_bytes());
 }
 

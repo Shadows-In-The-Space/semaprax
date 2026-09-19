@@ -998,14 +998,15 @@ fn compensation_replays_in_exact_reverse_of_commit_order_after_a_mid_workflow_fa
     let mut ledger = CompensationLedger::new();
     let mut actually_compensated = Vec::new();
     for record in proof.required() {
-        ledger.apply(
-            CompensationKey {
-                step: record.step,
-                run: record.run,
-            },
-            || Ok(()),
-        )
-        .unwrap();
+        ledger
+            .apply(
+                CompensationKey {
+                    step: record.step,
+                    run: record.run,
+                },
+                || Ok(()),
+            )
+            .unwrap();
         actually_compensated.push(*record);
     }
     assert!(proof.verify_complete(&actually_compensated).is_ok());
@@ -1155,10 +1156,9 @@ fn a_nontrivial_build_test_approve_publish_pipeline_authors_and_runs_end_to_end(
                 approve: true,
             },
         );
-        inputs.declared_dispatch_policies.insert(
-            StepId(3),
-            DispatchPolicy::new(["npm-registry".to_string()]),
-        );
+        inputs
+            .declared_dispatch_policies
+            .insert(StepId(3), DispatchPolicy::new(["npm-registry".to_string()]));
         inputs.declared_dispatch_requests.insert(
             StepId(3),
             DispatchRequest {

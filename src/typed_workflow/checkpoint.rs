@@ -393,14 +393,15 @@ mod tests {
     #[test]
     fn resume_at_matching_revision_succeeds() {
         let mut ledger = CompensationLedger::new();
-        ledger.apply(
-            CompensationKey {
-                step: StepId(2),
-                run: 1,
-            },
-            || Ok(()),
-        )
-        .unwrap();
+        ledger
+            .apply(
+                CompensationKey {
+                    step: StepId(2),
+                    run: 1,
+                },
+                || Ok(()),
+            )
+            .unwrap();
         let checkpoint = Checkpoint::new(RevisionId(1), StepId(4), 3, &ledger);
 
         let (step, sequence, restored) = checkpoint
@@ -471,14 +472,15 @@ mod tests {
     #[test]
     fn encode_then_decode_round_trips_exactly() {
         let mut ledger = CompensationLedger::new();
-        ledger.apply(
-            CompensationKey {
-                step: StepId(2),
-                run: 7,
-            },
-            || Ok(()),
-        )
-        .unwrap();
+        ledger
+            .apply(
+                CompensationKey {
+                    step: StepId(2),
+                    run: 7,
+                },
+                || Ok(()),
+            )
+            .unwrap();
         let checkpoint = Checkpoint::new(RevisionId(3), StepId(5), 11, &ledger);
         let document = checkpoint.encode();
         assert!(document.starts_with(&format!(
@@ -531,22 +533,24 @@ mod tests {
     #[test]
     fn decode_rejects_a_reordered_ledger() {
         let mut ledger = CompensationLedger::new();
-        ledger.apply(
-            CompensationKey {
-                step: StepId(1),
-                run: 1,
-            },
-            || Ok(()),
-        )
-        .unwrap();
-        ledger.apply(
-            CompensationKey {
-                step: StepId(9),
-                run: 9,
-            },
-            || Ok(()),
-        )
-        .unwrap();
+        ledger
+            .apply(
+                CompensationKey {
+                    step: StepId(1),
+                    run: 1,
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        ledger
+            .apply(
+                CompensationKey {
+                    step: StepId(9),
+                    run: 9,
+                },
+                || Ok(()),
+            )
+            .unwrap();
         let checkpoint = Checkpoint::new(RevisionId(1), StepId(1), 1, &ledger);
         let document = checkpoint.encode();
 

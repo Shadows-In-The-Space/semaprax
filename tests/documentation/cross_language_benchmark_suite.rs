@@ -249,6 +249,91 @@ fn deterministic_mock_adapters_produce_known_ok_failed_and_blocked_artifacts() {
     assert_eq!(summary["drifted"], 0);
 }
 
+/// Issue #211's report-generation surface has three verdict branches in
+/// `compare_rows`, and two were already covered: "incomparable" by
+/// `a_failing_pair_can_never_be_scored_as_an_improvement`, and the summary
+/// counts by the mock-adapter artifact test. The third was not.
+///
+/// A task present locally but absent from the baseline must be reported as
+/// `no baseline` — never silently dropped, and never folded into the
+/// unchanged count. Dropping it would understate the denominator, which is
+/// precisely the failure mode #211 names: record unsupported outcomes in the
+/// denominator rather than omitting them.
+///
+/// Note the fixture shape. An *empty* baseline does not reach this branch:
+/// `run.py` refuses one outright with "baseline holds no recorded
+/// measurement", which is correct fail-closed behaviour and was the first
+/// thing this test got wrong. Reaching `no baseline` requires a baseline that
+/// really recorded something, for a different task.
+#[test]
+fn a_task_absent_from_the_baseline_is_reported_not_silently_dropped() {
+    let directory = scratch("compare-no-baseline");
+    let task_dir = directory.join("task");
+    write_mock_language(
+        &task_dir,
+        &MockLanguage {
+            id: "mockok",
+            exit_code: 0,
+            hidden_exit_code: None,
+        },
+    );
+    let adapters_path = directory.join("adapters.json");
+    write_json(&adapters_path, &mock_adapters_document(&["mockok"]));
+
+    // Baseline: a real recorded run of one task id.
+    let baseline_tasks = directory.join("baseline-tasks.json");
+    write_json(
+        &baseline_tasks,
+        &mock_tasks_document("baseline-task", &["mockok"]),
+    );
+    let baseline_output = directory.join("baseline.json");
+    let baseline_run = runner()
+        .arg("--root")
+        .arg(&directory)
+        .arg("--tasks")
+        .arg(&baseline_tasks)
+        .arg("--adapters")
+        .arg(&adapters_path)
+        .arg("--output")
+        .arg(&baseline_output)
+        .output()
+        .unwrap();
+    assert!(baseline_run.status.success());
+
+    // Local: a different task id, so the baseline has nothing for it.
+    let local_tasks = directory.join("local-tasks.json");
+    write_json(&local_tasks, &mock_tasks_document("mock-task", &["mockok"]));
+    let local_output = directory.join("local.json");
+    let run = runner()
+        .arg("--root")
+        .arg(&directory)
+        .arg("--tasks")
+        .arg(&local_tasks)
+        .arg("--adapters")
+        .arg(&adapters_path)
+        .arg("--output")
+        .arg(&local_output)
+        .arg("--compare")
+        .arg(&baseline_output)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("mock-task::mockok:"))
+        .unwrap_or_else(|| {
+            panic!("a task missing from the baseline must still be reported:\n{stdout}")
+        });
+    assert!(
+        line.contains("no baseline"),
+        "expected the `no baseline` verdict, got: {line}"
+    );
+    assert!(
+        !line.contains("unchanged"),
+        "a task with no baseline must not be counted as unchanged: {line}"
+    );
+}
+
 #[test]
 fn a_failing_pair_can_never_be_scored_as_an_improvement() {
     let directory = scratch("compare-incomparable");

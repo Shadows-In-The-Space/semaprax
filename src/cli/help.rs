@@ -127,6 +127,7 @@ pub(crate) enum CommandId {
     PatchWithEvidenceV2,
     Repairs,
     Repair,
+    Audit,
     Version,
     VersionFlag,
     // Keep this final: the closed-catalog test uses its ordinal as the count.
@@ -163,6 +164,7 @@ static COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: CommandId::Change, canonical: "change", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax change preview <project> rename-display-name <stable-id> <new-name> [--revision digest] [--evidence|--structural-diff]", "semaprax change preview <project> replace-expression <stable-id> <expression-id> <replacement-json> [--revision digest] [--evidence|--structural-diff]", "semaprax change preview <project> add-contract <stable-id> <requires|ensures> <predicate-json> [--revision digest] [--evidence|--structural-diff]", "semaprax change preview <project> add-declaration <anchor-stable-id> <declaration-json> [--revision digest] [--evidence|--structural-diff]", "semaprax change rebase <base-project> rename-display-name <stable-id> <new-name> --onto <onto-project> [--revision digest] [--onto-revision digest]", "semaprax change merge <project> rename-display-name <left-id> <left-new-name> --with rename-display-name <right-id> <right-new-name> [--revision digest] --order <left-then-right|right-then-left>"] },
     CommandSpec { id: CommandId::Package, canonical: "package", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax package report <file> [--max-bytes N]", "semaprax package lock <subject.json>... [--max-bytes N]", "semaprax package resolve <subject.json>... --require <package>:<range> [--require ...] --target <native64|wasm32> [--allow-capability <capability>]... [--max-bytes N]"] },
     CommandSpec { id: CommandId::Release, canonical: "release", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax release verify <release-dir>"] },
+    CommandSpec { id: CommandId::Audit, canonical: "audit", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax audit inspect <capsule.json>", "semaprax audit verify <capsule.json> <objects-dir> [--require-role <role>]... [--revoke <identity>]... [--trust-log <log-id>]... [--min-checkpoint-size <n>] [--now <unix-seconds>]", "semaprax audit diff <capsule-a.json> <capsule-b.json>"] },
     CommandSpec { id: CommandId::Add, canonical: "add", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax add <dir>|semaprax.toml <package> <range>"] },
     CommandSpec { id: CommandId::Fetch, canonical: "fetch", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax fetch <cache-dir> <subject.json>..."] },
     CommandSpec { id: CommandId::ProjectImage, canonical: "project-image", aliases: &[], availability: Availability::Public, global: true, usages: &["semaprax project-image <manifest>"] },
@@ -1007,6 +1009,7 @@ mod tests {
         "change",
         "package",
         "release",
+        "audit",
         "add",
         "assurance-policy",
         "assurance-diff",

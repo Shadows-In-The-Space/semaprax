@@ -1,10 +1,11 @@
 # Audit Capsule v1
 
 Status: versioned manifest schema and registries, a canonical builder, a
-structural verifier, a structural diff, machine-readable `nonclaims`, and
-independent replay of a `change` capsule against source. Cryptographic
-signing and real transparency-log submission are `HUMAN_BLOCKED` -- neither
-exists here, and this document must not be read as claiming otherwise.
+structural verifier, a structural diff, machine-readable `nonclaims`,
+independent replay of a `change` capsule against source, and a read-only
+`semaprax audit inspect|verify|diff` CLI front. Cryptographic signing and
+real transparency-log submission are `HUMAN_BLOCKED` -- neither exists here,
+and this document must not be read as claiming otherwise.
 
 Audience: implementers wiring a capsule producer, reviewers auditing a
 capsule, and anyone extending `src/audit_capsule.rs`.
@@ -79,22 +80,27 @@ the referenced object's exact bytes -- the same digest an independent
   concrete design for how a composed capsule's own required-object-type
   checking and association graph behave across the boundary, which issue
   #209 leaves unspecified.
-- **No CLI surface.** Issue #209's implementation sequence asks for
-  `semaprax audit verify`, `audit inspect`, and `audit diff` subcommands.
-  Wiring those touches `src/cli/help.rs` (the `CommandId` enum and the
-  `CommandSpec` table, e.g. around the existing `Context`/`Graph`/`Verify`
-  entries) and `src/cli_driver.rs`'s dispatch `match` -- both large, shared,
-  actively-worked files outside this change's file lease
-  (`src/audit_capsule.rs`, this document, and its tests only). The library
-  surface a thin CLI wrapper would call already exists: [`verify_capsule`]
-  and [`parse_capsule`] for `audit verify`, [`ParsedCapsule`]'s public
-  fields for `audit inspect`, and [`diff_capsules`] for `audit diff`.
-  Adding the wrapper is follow-up work for whoever owns `cli/help.rs` and
-  `cli_driver.rs` next.
+- **CLI surface: now wired, thinly.** `src/cli/audit.rs` adds
+  `semaprax audit inspect|verify|diff` (`CommandId::Audit` in
+  `src/cli/help.rs`, dispatched from `src/cli_driver.rs`). It is a pure
+  adapter: `inspect` calls [`parse_capsule`] and prints the decoded
+  structure; `verify` reads each non-redacted object's bytes from a
+  caller-supplied `<objects-dir>/<object-id>` file (rejecting a
+  traversal-shaped id before ever joining it into a path) and calls
+  [`verify_capsule`];
+  `diff` calls [`parse_capsule`] on two manifests and [`diff_capsules`] on
+  the results. No rule lives in the CLI front -- every check is
+  `audit_capsule`'s own, and the front's own diagnostic code (`SPX-Z920`) is
+  used only for "this document could not be read at all," never for a
+  decode or verification failure. **`audit verify`'s success line and every
+  capsule's own required `nonclaims` are printed together**, so a green
+  `audit verify` run cannot be mistaken for a cryptographic signature check.
+  Profile composition (below) remains unimplemented, so there is nothing for
+  a composed-capsule CLI verb to do yet.
 - **`diff_capsules` compares two already-parsed capsules, not two capsule
-  files.** A CLI `audit diff` would still need to load and independently
-  `parse_capsule` both manifests first; [`diff_capsules`] itself never reads
-  a file and never re-verifies either side.
+  files.** [`diff_capsules`] itself never reads a file and never
+  re-verifies either side; `semaprax audit diff` is the thin wrapper that
+  does both independently before calling it.
 
 ## Schema: `semaprax.audit-capsule.v1`
 
@@ -196,9 +202,10 @@ values and returns a [`CapsuleDiff`]: profile/subject changes, added and
 removed object ids, per-id [`ObjectChange`] (digest/type/schema change vs.
 a redaction-only change), and added/removed associations and signature
 roles. It is pure data comparison -- it never re-verifies either capsule
-and never reads a file; a CLI `audit diff` would still need to
-independently `parse_capsule` (and likely `verify_capsule`) each manifest
-first.
+and never reads a file. `semaprax audit diff` (`src/cli/audit.rs`) is that
+wrapper: it independently `parse_capsule`s each manifest first and never
+calls `verify_capsule` on either side, so a clean diff is not evidence that
+either capsule is itself valid -- run `audit verify` on each side for that.
 
 ### Portability
 
@@ -391,8 +398,9 @@ silently assuming one.
 
 ## What is still not implemented
 
-Unchanged by this work, and repeated here so a reader of this section alone
-is not misled: there is no cryptographic signing, no transparency-log
-submission or verification, no `semaprax audit verify|inspect|diff` CLI
-surface, no profile composition, and no replay for the `agent-run` or
-`release` profiles.
+Repeated here so a reader of this section alone is not misled: there is no
+cryptographic signing, no transparency-log submission or verification, no
+profile composition, and no replay for the `agent-run` or `release`
+profiles. `semaprax audit inspect|verify|diff` (`src/cli/audit.rs`) is now
+wired, but it is a thin, purely structural front over the checks above --
+running it changes none of these nonclaims.

@@ -393,6 +393,12 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
             print!("{receipt}");
             Ok(())
         }
+        CommandId::Audit => {
+            let command = cli::audit::parse(&args[1..])?;
+            let output = cli::audit::run(&command).map_err(|error| report(&[error], false))?;
+            print!("{output}");
+            Ok(())
+        }
         CommandId::Add => {
             let options = cli::add::parse(&args[1..])?;
             cli::add::run(&options, |errors| report(errors, false))

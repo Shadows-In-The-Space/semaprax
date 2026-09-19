@@ -1,5 +1,6 @@
 pub(crate) mod add;
 pub(crate) mod agent;
+pub(crate) mod audit;
 pub(crate) mod build;
 pub(crate) mod candidate_archive;
 pub(crate) mod candidate_git;

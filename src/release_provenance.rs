@@ -57,8 +57,8 @@ mod offline_bundle;
 pub use offline_bundle::{
     parse_sigstore_archive_attestation_bundle, parse_sigstore_message_signature_bundle,
     parse_sigstore_trusted_root_jsonl, verify_archive_attestation_binds_manifest,
-    verify_archive_attestation_with_offline_capability, verify_offline_release_with_capability,
-    verify_signature_claim_consumes_sigstore_bundle,
+    verify_archive_attestation_binds_release, verify_archive_attestation_with_offline_capability,
+    verify_offline_release_with_capability, verify_signature_claim_consumes_sigstore_bundle,
     verify_signature_claim_with_offline_capability, ExpectedReleaseIdentity,
     OfflineBundleVerificationCapability, OfflineReleaseArchive,
     ParsedSigstoreArchiveAttestationBundle, ParsedSigstoreMessageSignatureBundle,

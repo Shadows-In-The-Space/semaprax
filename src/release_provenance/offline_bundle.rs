@@ -129,7 +129,15 @@ fn git_commit(value: &Value, what: &str) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-fn github_artifact_predicate(value: &Value) -> Result<(), Diagnostic> {
+#[derive(Debug, Clone)]
+struct ParsedGithubArtifactPredicate {
+    workflow_repository: String,
+    workflow_path: String,
+    workflow_ref: String,
+    resolved_commits: Vec<String>,
+}
+
+fn github_artifact_predicate(value: &Value) -> Result<ParsedGithubArtifactPredicate, Diagnostic> {
     let predicate = object(value, "in-toto statement.predicate")?;
     check_exact_keys(
         predicate,
@@ -177,12 +185,21 @@ fn github_artifact_predicate(value: &Value) -> Result<(), Diagnostic> {
         &["path", "ref", "repository"],
         "in-toto statement.predicate.buildDefinition.externalParameters.workflow",
     )?;
-    for key in ["path", "ref", "repository"] {
-        text(
-            &value["buildDefinition"]["externalParameters"]["workflow"][key],
-            "in-toto statement.predicate.buildDefinition.externalParameters.workflow value",
-        )?;
-    }
+    let workflow_path = text(
+        &value["buildDefinition"]["externalParameters"]["workflow"]["path"],
+        "in-toto statement.predicate.buildDefinition.externalParameters.workflow.path",
+    )?
+    .to_owned();
+    let workflow_ref = text(
+        &value["buildDefinition"]["externalParameters"]["workflow"]["ref"],
+        "in-toto statement.predicate.buildDefinition.externalParameters.workflow.ref",
+    )?
+    .to_owned();
+    let workflow_repository = text(
+        &value["buildDefinition"]["externalParameters"]["workflow"]["repository"],
+        "in-toto statement.predicate.buildDefinition.externalParameters.workflow.repository",
+    )?
+    .to_owned();
     let internal = object(
         &value["buildDefinition"]["internalParameters"],
         "in-toto statement.predicate.buildDefinition.internalParameters",
@@ -242,6 +259,7 @@ fn github_artifact_predicate(value: &Value) -> Result<(), Diagnostic> {
             "in-toto statement.predicate.buildDefinition.resolvedDependencies must contain 1 through {MAX_PREDICATE_DEPENDENCIES} entries"
         )));
     }
+    let mut resolved_commits = Vec::with_capacity(dependencies.len());
     for dependency in dependencies {
         let dependency = object(
             dependency,
@@ -265,10 +283,15 @@ fn github_artifact_predicate(value: &Value) -> Result<(), Diagnostic> {
             &["gitCommit"],
             "in-toto statement.predicate.buildDefinition.resolvedDependencies[].digest",
         )?;
+        let commit = text(
+            &dependency["digest"]["gitCommit"],
+            "in-toto statement.predicate.buildDefinition.resolvedDependencies[].digest.gitCommit",
+        )?;
         git_commit(
             &dependency["digest"]["gitCommit"],
             "in-toto statement.predicate.buildDefinition.resolvedDependencies[].digest.gitCommit",
         )?;
+        resolved_commits.push(commit.to_owned());
     }
     let details = object(
         &value["runDetails"],
@@ -305,7 +328,12 @@ fn github_artifact_predicate(value: &Value) -> Result<(), Diagnostic> {
         &value["runDetails"]["metadata"]["invocationId"],
         "in-toto statement.predicate.runDetails.metadata.invocationId",
     )?;
-    Ok(())
+    Ok(ParsedGithubArtifactPredicate {
+        workflow_repository,
+        workflow_path,
+        workflow_ref,
+        resolved_commits,
+    })
 }
 
 fn tlog_entry(value: &Value, expected_kind: &str) -> Result<(), Diagnostic> {
@@ -634,6 +662,7 @@ pub fn parse_sigstore_message_signature_bundle(
 pub struct ParsedSigstoreArchiveAttestationBundle {
     pub archive_name: String,
     pub archive_digest: String,
+    build: ParsedGithubArtifactPredicate,
 }
 
 pub fn parse_sigstore_archive_attestation_bundle(
@@ -716,7 +745,7 @@ pub fn parse_sigstore_archive_attestation_bundle(
             "in-toto statement has an unadmitted type".to_owned(),
         ));
     }
-    github_artifact_predicate(&statement["predicate"])?;
+    let build = github_artifact_predicate(&statement["predicate"])?;
     let subjects = require_array(&statement["subject"], "in-toto statement.subject")?;
     if subjects.len() != 1 {
         return Err(shape_error(
@@ -745,6 +774,7 @@ pub fn parse_sigstore_archive_attestation_bundle(
     Ok(ParsedSigstoreArchiveAttestationBundle {
         archive_name: name.to_owned(),
         archive_digest: format!("sha256:{digest}"),
+        build,
     })
 }
 
@@ -823,6 +853,68 @@ pub fn verify_archive_attestation_binds_manifest(
     if bundle.archive_name != artifact.name || bundle.archive_digest != artifact.digest {
         return Err(binding_error(
             "archive-attestation subject disagrees with its manifest archive".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Bind one archive attestation's producer identity to the exact release
+/// statement before a caller-supplied cryptographic verifier receives it.
+/// The lower-level manifest function above remains useful for per-archive
+/// integrity checks; aggregate verification additionally rejects a structurally
+/// valid attestation replayed from another repository, workflow, tag, or
+/// source commit.
+pub fn verify_archive_attestation_binds_release(
+    manifest_bytes: &[u8],
+    provenance_bytes: &[u8],
+    name: &str,
+    bytes: &[u8],
+    bundle_bytes: &[u8],
+) -> Result<(), Diagnostic> {
+    verify_provenance_binds_manifest(provenance_bytes, manifest_bytes)?;
+    let manifest = parse_manifest(manifest_bytes)?;
+    let provenance = parse_provenance(provenance_bytes)?;
+    let artifact = manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.name == name)
+        .ok_or_else(|| {
+            artifact_error(format!(
+                "archive {name:?} is not named by the release manifest"
+            ))
+        })?;
+    if bytes.len() as u64 != artifact.size || sha256_digest(bytes) != artifact.digest {
+        return Err(artifact_error(format!(
+            "archive {name:?} disagrees with its manifest size or digest"
+        )));
+    }
+    let bundle = parse_sigstore_archive_attestation_bundle(bundle_bytes)?;
+    if bundle.archive_name != artifact.name || bundle.archive_digest != artifact.digest {
+        return Err(binding_error(
+            "archive-attestation subject disagrees with its manifest archive".to_owned(),
+        ));
+    }
+
+    let expected_repository = format!("https://github.com/{TRUSTED_REPOSITORY}");
+    let expected_ref = format!("refs/tags/{}", provenance.tag);
+    if bundle.build.workflow_repository != expected_repository
+        || bundle.build.workflow_path != TRUSTED_WORKFLOW_PATH
+        || bundle.build.workflow_ref != expected_ref
+    {
+        return Err(identity_error(
+            "archive-attestation workflow identity does not match the trusted release repository, workflow, and exact tag"
+                .to_owned(),
+        ));
+    }
+    if !bundle
+        .build
+        .resolved_commits
+        .iter()
+        .any(|commit| commit == &provenance.commit)
+    {
+        return Err(binding_error(
+            "archive-attestation resolved dependencies do not include the exact release commit"
+                .to_owned(),
         ));
     }
     Ok(())
@@ -928,8 +1020,9 @@ pub fn verify_offline_release_with_capability(
                 artifact.name
             ))
         })?;
-        verify_archive_attestation_binds_manifest(
+        verify_archive_attestation_binds_release(
             manifest_bytes,
+            provenance_bytes,
             archive.name,
             archive.bytes,
             archive.attestation_bundle_bytes,
@@ -962,7 +1055,7 @@ pub fn verify_archive_attestation_with_offline_capability(
     capability: &dyn OfflineBundleVerificationCapability,
 ) -> Result<(), Diagnostic> {
     verify_release_binding(manifest, provenance, claim)?;
-    verify_archive_attestation_binds_manifest(manifest, name, bytes, bundle)?;
+    verify_archive_attestation_binds_release(manifest, provenance, name, bytes, bundle)?;
     parse_sigstore_trusted_root_jsonl(root)?;
     capability.verify_offline_bundle(
         &expected_release_identity(manifest, provenance)?,

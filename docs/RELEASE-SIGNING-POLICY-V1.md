@@ -300,11 +300,14 @@ by `tests/offline_package/release_provenance.rs`) provides:
   stand-in for wiring only, never a claim about the real algorithm, which
   stays Sigstore/cosign per this document.
 - `parse_sigstore_archive_attestation_bundle` /
-  `verify_archive_attestation_binds_manifest`: bounded, closed replay of the
+  `verify_archive_attestation_binds_manifest` /
+  `verify_archive_attestation_binds_release`: bounded, closed replay of the
   published archive DSSE bundle's one SLSA subject against the exact manifest
-  entry and archive bytes. It validates the bounded structural snapshot of
-  GitHub's workflow-v1 predicate, but does not verify the predicate's semantics
-  or any signature.
+  entry and archive bytes. Aggregate verification additionally binds the
+  predicate's GitHub repository URL, workflow path, tag ref, and one resolved
+  source dependency commit to the exact provenance statement before handing
+  any bytes to a cryptographic capability. It does not verify the predicate's
+  signature or other semantics.
 - `parse_sigstore_message_signature_bundle` /
   `verify_signature_claim_consumes_sigstore_bundle`: bounded, closed replay
   of the distinct `cosign sign-blob` message-signature bundle and exact claim

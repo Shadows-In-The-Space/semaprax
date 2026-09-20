@@ -991,6 +991,89 @@ fn aggregate_offline_release_binds_the_complete_inventory_before_capabilities_ru
 }
 
 #[test]
+fn aggregate_release_rejects_archive_attestation_identity_or_commit_replays_before_capability() {
+    let archive_bytes = b"0123456789";
+    let manifest = manifest_for_archive_bytes("v9.9.9", archive_bytes);
+    let provenance = provenance_for_archive_bytes("v9.9.9", archive_bytes, manifest.as_bytes());
+    let claim = claim_json("v9.9.9", provenance.as_bytes())
+        .replace(FIXTURE_CLAIM_SIGNATURE, FIXTURE_BUNDLE_SIGNATURE)
+        .replace(FIXTURE_CLAIM_CERTIFICATE, FIXTURE_BUNDLE_CERTIFICATE);
+    let message_bundle = message_signature_bundle(
+        provenance.as_bytes(),
+        FIXTURE_BUNDLE_SIGNATURE,
+        FIXTURE_BUNDLE_CERTIFICATE,
+    );
+    let linux = "semaprax-v9.9.9-x86_64-unknown-linux-gnu.tar.gz";
+    let macos = "semaprax-v9.9.9-aarch64-apple-darwin.tar.gz";
+    let windows = "semaprax-v9.9.9-x86_64-pc-windows-msvc.zip";
+    let macos_bundle = archive_attestation_bundle(macos, archive_bytes);
+    let windows_bundle = archive_attestation_bundle(windows, archive_bytes);
+
+    for (description, predicate, code) in [
+        (
+            "another repository",
+            github_artifact_predicate().replace(
+                "https://github.com/wavect/semaprax",
+                "https://github.com/wavect/other",
+            ),
+            "SPX-Z703",
+        ),
+        (
+            "another workflow path",
+            github_artifact_predicate()
+                .replace(".github/workflows/ci.yml", ".github/workflows/other.yml"),
+            "SPX-Z703",
+        ),
+        (
+            "another tag",
+            github_artifact_predicate().replace("refs/tags/v9.9.9", "refs/tags/v9.9.8"),
+            "SPX-Z703",
+        ),
+        (
+            "another source commit",
+            github_artifact_predicate()
+                .replace(FAKE_COMMIT, "1111111111111111111111111111111111111111"),
+            "SPX-Z702",
+        ),
+    ] {
+        let linux_bundle =
+            archive_attestation_bundle_with_predicate(linux, archive_bytes, &predicate);
+        let archives = [
+            OfflineReleaseArchive {
+                name: windows,
+                bytes: archive_bytes,
+                attestation_bundle_bytes: windows_bundle.as_bytes(),
+            },
+            OfflineReleaseArchive {
+                name: linux,
+                bytes: archive_bytes,
+                attestation_bundle_bytes: linux_bundle.as_bytes(),
+            },
+            OfflineReleaseArchive {
+                name: macos,
+                bytes: archive_bytes,
+                attestation_bundle_bytes: macos_bundle.as_bytes(),
+            },
+        ];
+        let capability = AggregateOfflineCapability {
+            subjects: RefCell::new(Vec::new()),
+        };
+        let error = verify_offline_release_with_capability(
+            manifest.as_bytes(),
+            provenance.as_bytes(),
+            claim.as_bytes(),
+            message_bundle.as_bytes(),
+            FIXTURE_TRUSTED_ROOT,
+            &archives,
+            &capability,
+        )
+        .expect_err(description);
+        assert_eq!(error.code, code, "{description}");
+        assert!(capability.subjects.borrow().is_empty(), "{description}");
+    }
+}
+
+#[test]
 fn aggregate_release_rejects_duplicate_or_missing_archives_before_any_capability() {
     let archive_bytes = b"0123456789";
     let manifest = manifest_for_archive_bytes("v9.9.9", archive_bytes);

@@ -111,6 +111,60 @@ pub(crate) fn warm_open(
     Ok(format!("{value}\n"))
 }
 
+/// Continue an explicit, authenticated restart chain after the caller has
+/// changed canonical Project inputs. The prior cache is read and authenticated
+/// before any current source is considered. Current source admission then
+/// rebuilds every affected semantic fact through the ordinary VNext boundary;
+/// only that freshly compiler-created cache is eligible for a new immutable
+/// store entry. The predecessor is never overwritten or evicted.
+///
+/// This is restart-with-reuse, not hot reload: it starts a fresh process and
+/// does not retain a running target, live request, or source authority.
+pub(crate) fn refresh(
+    manifest: &Path,
+    root: &Path,
+    expected: &str,
+) -> Result<String, Vec<Diagnostic>> {
+    let restored = semantic_cache_store::load(root, expected)?;
+    let mut session = VNextSession::open_with_retained_semantic_cache(
+        &absolute(manifest)?,
+        VNextPolicy::default(),
+        restored,
+    )?;
+    let work = initial_work(&session)?;
+    let project_revision = text(&work, "project_revision")?.to_owned();
+    let image_revision = session.image_revision().to_owned();
+    // This borrow is from the session's post-admission cache, not from the
+    // restored historical entry. A rejected live admission therefore reaches
+    // neither the cache-store persistence path nor a new entry publication.
+    let refreshed = session.retained_semantic_cache()?;
+    session.finish()?;
+    let receipt = semantic_cache_store::persist(root, &refreshed)?;
+    let mut value = json!({
+        "schema":"semaprax.semantic-cache-refresh.v1",
+        "predecessor_entry_digest":expected,
+        "entry_digest":receipt.entry_digest(),
+        "compiler_digest":receipt.compiler_digest(),
+        "payload_bytes":receipt.payload_bytes(),
+        "project_revision":project_revision,
+        "image_revision":image_revision,
+        "frontend_work":work,
+        "source_authority":false,
+        "live_source_admission":true,
+        "canonical_source_mutation":false,
+        "publication_authority":false,
+        "store_effect":"authenticated_entry_read_then_new_immutable_entry_persisted",
+        "nonclaims":[
+            "not_hot_reload",
+            "not_wall_clock_or_RSS_measurement",
+            "not_crash_or_power_loss_recovery_evidence",
+            "no_automatic_eviction_or_retry_after_store_uncertainty",
+        ],
+    });
+    value.sort_all_objects();
+    Ok(format!("{value}\n"))
+}
+
 pub(crate) fn load(root: &Path, expected: &str) -> Result<String, Vec<Diagnostic>> {
     let cache = semantic_cache_store::load(root, expected)?;
     cache.restored_work().map(str::to_owned).ok_or_else(|| {

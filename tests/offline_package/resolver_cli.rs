@@ -300,9 +300,10 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
         assert_eq!(current.matches(line).count(), 1);
         current = current.replacen(line, "", 1);
     }
-    const CACHE_OPEN_LINES: [&str; 2] = [
+    const CACHE_OPEN_LINES: [&str; 3] = [
         "semaprax semantic-cache-cold-open <manifest>\n",
         "semaprax semantic-cache-warm-open <manifest> <store-root> <entry-digest>\n",
+        "semaprax semantic-cache-refresh <manifest> <store-root> <entry-digest>\n",
     ];
     for line in CACHE_OPEN_LINES {
         assert_eq!(current.matches(line).count(), 1);

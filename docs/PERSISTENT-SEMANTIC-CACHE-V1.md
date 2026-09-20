@@ -33,6 +33,7 @@ semaprax semantic-cache-evict <store-root> <entry-digest>
 semaprax semantic-cache-lifecycle <manifest> <empty-store-root>
 semaprax semantic-cache-cold-open <manifest>
 semaprax semantic-cache-warm-open <manifest> <store-root> <entry-digest>
+semaprax semantic-cache-refresh <manifest> <store-root> <entry-digest>
 ```
 
 `semantic-cache-cold-open` and `semantic-cache-warm-open` are each one
@@ -47,6 +48,18 @@ below. A `semantic-cache-warm-open` against a stale or evicted digest fails
 closed with `SPX-G308`, the same as `semantic-cache-load`; recovery is an
 explicit, separate `semantic-cache-cold-open` call, never an implicit
 fallback inside the failed command.
+
+`semantic-cache-refresh` is the explicit next-restart operation after a
+source edit. It authenticates the selected historical entry, admits the
+current manifest and sources through the same fresh VNext session boundary as
+`semantic-cache-warm-open`, then persists only the resulting
+compiler-created cache as a new immutable entry. Its receipt binds the
+predecessor and successor entry digests, the admitted Project/image identities,
+and actual frontend work. It never overwrites or evicts the predecessor, never
+falls back to a cold build, and grants no source, execution, publication, or
+hot-reload authority. If current-source admission fails, no successor is
+prepared; if the final store write reports uncertainty, callers must inspect
+the store under the ordinary contract rather than blindly retrying.
 
 Initialization emits `semaprax.semantic-cache-initialized.v1`; persistence emits
 `semaprax.semantic-cache-receipt.v1` with `entry_digest`, `compiler_digest`, and
@@ -186,6 +199,13 @@ embeds; unaffected functions elsewhere still reuse exact monomorphic HIR; and
 a `warm-open` against an
 evicted digest fails closed with `SPX-G308` and a following `cold-open`
 reproduces the original cold product exactly.
+
+The harness also covers `semantic-cache-refresh`: after a local body edit it
+authenticates the predecessor, resolves exactly the changed module while
+reusing unaffected checked HIR, persists a distinct successor, and proves that
+the next fresh warm open of that successor has complete checked-HIR reuse. A
+fresh warm open of the retained predecessor still detects the changed source,
+so keeping historical entries cannot turn a stale cache into current meaning.
 
 Private codec regressions additionally cover full HIR with nonempty cleanup and
 loan plans, canonical reencoding, malformed containers, allocation limits,

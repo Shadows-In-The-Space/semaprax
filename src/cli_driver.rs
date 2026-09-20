@@ -243,7 +243,9 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
             print!("{output}");
             Ok(())
         }
-        CommandId::SemanticCacheColdOpen | CommandId::SemanticCacheWarmOpen => {
+        CommandId::SemanticCacheColdOpen
+        | CommandId::SemanticCacheWarmOpen
+        | CommandId::SemanticCacheRefresh => {
             let arity = if command == "semantic-cache-cold-open" {
                 2
             } else {
@@ -259,11 +261,15 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
             }
             let output = match command {
                 "semantic-cache-cold-open" => cli::semantic_cache::cold_open(Path::new(&args[1])),
-                _ => cli::semantic_cache::warm_open(
+                "semantic-cache-warm-open" => cli::semantic_cache::warm_open(
                     Path::new(&args[1]),
                     Path::new(&args[2]),
                     &args[3],
                 ),
+                "semantic-cache-refresh" => {
+                    cli::semantic_cache::refresh(Path::new(&args[1]), Path::new(&args[2]), &args[3])
+                }
+                _ => unreachable!("semantic-cache command selector disagrees with its command ID"),
             }
             .map_err(|errors| report(&errors, false))?;
             print!("{output}");

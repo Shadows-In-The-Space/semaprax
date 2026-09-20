@@ -149,6 +149,15 @@ impl Fixture {
             .output()
             .unwrap()
     }
+    fn refresh(&self, digest: &str) -> Output {
+        Command::new(&self.compiler)
+            .arg("semantic-cache-refresh")
+            .arg(self.root.join("semaprax.toml"))
+            .arg(&self.store)
+            .arg(digest)
+            .output()
+            .unwrap()
+    }
     fn lifecycle(&self) -> Output {
         Command::new(&self.compiler)
             .arg("semantic-cache-lifecycle")
@@ -542,6 +551,68 @@ fn warm_open_after_provider_edit_reuses_unaffected_consumers_ast() {
     assert_eq!(
         cold_report["frontend_work"]["work"]["checked_HIR_reused"],
         0
+    );
+}
+
+/// A changed Project can continue the explicit derived-cache chain without a
+/// cold re-persist. The new entry is built only after current sources have
+/// passed ordinary authenticated admission; the historical entry remains an
+/// immutable retry/recovery input rather than a mutable cache slot.
+#[test]
+fn refresh_persists_the_authenticated_changed_generation_for_the_next_restart() {
+    let fixture = Fixture::new();
+    fixture.initialize();
+    let first = fixture.persist();
+    let predecessor = first["entry_digest"].as_str().unwrap();
+
+    let path = fixture.root.join("src/app.spx");
+    let changed = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("multiply(6, 7)", "multiply(7, 6)");
+    let canonical = semaprax::format::canonical(&semaprax::parse(&changed, "src/app.spx").unwrap());
+    std::fs::write(&path, &canonical).unwrap();
+
+    let refreshed = value(fixture.refresh(predecessor));
+    assert_eq!(refreshed["schema"], "semaprax.semantic-cache-refresh.v1");
+    assert_eq!(refreshed["predecessor_entry_digest"], predecessor);
+    assert_eq!(refreshed["source_authority"], false);
+    assert_eq!(refreshed["live_source_admission"], true);
+    assert_eq!(refreshed["canonical_source_mutation"], false);
+    assert_eq!(refreshed["publication_authority"], false);
+    assert_eq!(
+        refreshed["store_effect"],
+        "authenticated_entry_read_then_new_immutable_entry_persisted"
+    );
+    let successor = refreshed["entry_digest"].as_str().unwrap();
+    assert_ne!(successor, predecessor);
+    assert_eq!(
+        refreshed["frontend_work"]["invalidated_sources"],
+        json!(["src/app.spx"])
+    );
+    assert_eq!(refreshed["frontend_work"]["work"]["modules_resolved"], 1);
+    assert_eq!(refreshed["frontend_work"]["work"]["checked_HIR_reused"], 2);
+
+    // The refreshed entry is a full next-restart cache: it reaches zero
+    // resolution on the exact changed sources. The predecessor remains valid
+    // historical input, but cannot conceal the changed module when reopened.
+    let warm_successor = value(fixture.warm_open(successor));
+    warm(&warm_successor["frontend_work"]);
+    assert_eq!(
+        warm_successor["project_revision"],
+        refreshed["project_revision"]
+    );
+    assert_eq!(
+        warm_successor["image_revision"],
+        refreshed["image_revision"]
+    );
+    let warm_predecessor = value(fixture.warm_open(predecessor));
+    assert_eq!(
+        warm_predecessor["frontend_work"]["invalidated_sources"],
+        json!(["src/app.spx"])
+    );
+    assert_eq!(
+        warm_predecessor["frontend_work"]["work"]["modules_resolved"],
+        1
     );
 }
 

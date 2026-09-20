@@ -54,8 +54,8 @@ use super::reference_wasm_module;
 #[path = "../support/public_generic_hostile_corpus.rs"]
 mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
-    assert_matches_expected, baseline_descriptor_bytes, malformed_trusted_descriptor_cases,
-    malformed_result_carrier_cases, malformed_trusted_descriptor_mutation_cases,
+    assert_matches_expected, baseline_descriptor_bytes, malformed_result_carrier_cases,
+    malformed_trusted_descriptor_cases, malformed_trusted_descriptor_mutation_cases,
     parse_shared_corpus_lines, structured_descriptor_cases, MAX_BYTES_PER_LEAF,
 };
 
@@ -346,10 +346,8 @@ console.log("MUTATED_RESULT_CARRIER_CAPACITY_BRANCH_REACHED");
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
-    assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("MUTATED_RESULT_CARRIER_CAPACITY_BRANCH_REACHED")
-    );
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("MUTATED_RESULT_CARRIER_CAPACITY_BRANCH_REACHED"));
 }
 
 impl Drop for Workspace {

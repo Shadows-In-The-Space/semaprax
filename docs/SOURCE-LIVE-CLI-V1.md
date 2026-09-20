@@ -114,9 +114,11 @@ runtime's compiler-derived canonical source-proposal request and schema, runs
 with the deny-all tool policy, and must pass the existing run/export receipt
 validation before its raw text reaches the compiler proposal decoder. A fresh
 adapter instance is created only after the checked journal acknowledges an
-attempt intent. Resume first rebinds and recovers that journal; a terminal
-checkpoint dispatches neither provider nor typed effect again, a changed source
-or executable/scratch host binding refuses, and an unresolved acknowledged delivery remains
+attempt intent. Both V1 and V2 resume first rebind and recover their journal;
+terminal recovery occurs before V1 fixture-only target lookup or diagnostic
+derivation, and before V2 host, candidate, or typed-effect construction. A
+terminal checkpoint dispatches neither provider nor typed effect again, a
+changed source or executable/scratch host binding refuses, and an unresolved acknowledged delivery remains
 uncertain rather than being sent again. These facts make interruption/resume
 observable in the journal, not an exactly-once claim about an external service.
 The V1 scripted fixture is a deterministic terminal-receipt seam only; this
@@ -323,9 +325,14 @@ failed-test feedback reaches a later recorded provider request,
 malformed/oversized/withheld observation data is refused, terminal resume does
 not redispatch either provider or observer, and capability-binding drift fails
 closed. Its V2 hostile-recovery corpus additionally covers malformed settled
-response wire, stale checked source, and changed task binding. Those three
-mutations have exact local stable refusal assertions before a provider, effect,
-or candidate-test handler can be constructed. The implementation also maps its
+response hex, unknown settled-response fields, a settled-response sequence
+mismatch, an unknown envelope field, stale checked source, and changed task
+binding. The V1 terminal-replay corpus separately replaces the configured
+candidate target with a valid-but-missing declaration and alters the fixture
+diagnostic shape; recovery still returns its retained receipt because neither
+fixture-only action is constructed. These mutations have exact local stable
+refusal or replay assertions before a provider, effect, or candidate-test
+handler can be constructed. The implementation also maps its
 other closed journal recovery classes (clock, capacity, uncertain delivery, or
 unavailable store) to diagnostics, but this corpus does not claim a hostile
 fixture for each of them. The clean terminal V2 replay remains an exact

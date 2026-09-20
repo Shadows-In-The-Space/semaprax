@@ -981,13 +981,16 @@ pub(super) fn execute_with_runner_and_candidate_test<
         ));
     }
 
-    // V2 recovery is deliberately completed before this function creates an
-    // OpenCode host, grants the adapter capability, or creates the candidate
-    // and effect handlers. The exact binding is derived by the existing typed
-    // runtime and the retained document is admitted by the existing journal
-    // decoder; this preflight neither recreates either trust calculation nor
-    // treats the evidence as authority.
-    if !fresh && matches!(&config.provider, RepairProvider::OpenCode) {
+    // Recovery is deliberately completed before this function creates an
+    // adapter, grants an adapter capability, or creates fixture-only candidate
+    // and effect handlers. This applies to the inherited V1 fixture as well as
+    // the V2 OpenCode route: a terminal journal is sufficient for a read-only
+    // receipt, so fixture-only diagnostic derivation must not turn replay into
+    // a target lookup or candidate-preview action. The exact binding is
+    // derived by the existing typed runtime and the retained document is
+    // admitted by the existing journal decoder; this preflight neither
+    // recreates either trust calculation nor treats the evidence as authority.
+    if !fresh {
         let recovered = runtime
             .preflight_source_live_checkpoint(
                 &model_binding,
@@ -995,7 +998,12 @@ pub(super) fn execute_with_runner_and_candidate_test<
                 latest.as_deref().expect("resume mode has a latest journal"),
                 clock.as_ref(),
             )
-            .map_err(v2_replay_refusal)?;
+            .map_err(|error| match &config.provider {
+                RepairProvider::OpenCode => v2_replay_refusal(error),
+                RepairProvider::Scripted(_) => {
+                    CliError::refused("repair V1 retained checkpoint cannot be recovered")
+                }
+            })?;
         store.set_generation(recovered.generation());
         if recovered.terminal_snapshot().is_some() {
             let replayed_candidate_test_evidence = replayed_candidate_test_evidence(

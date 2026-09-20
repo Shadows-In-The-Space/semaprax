@@ -14,16 +14,14 @@ semaprax run   examples/task-service-project
 
 ## What it demonstrates
 
-- **Two `[dependencies]` edges on bundled standard-library packages**:
-  `std.auth = "=0.1.0"` (session lifecycle, password-hash policy bounds) and
-  `std.jobs = "=0.1.0"` (claim/lease/retry/idempotency state machines). Both
-  packages existed under `std/` before this change but were not yet wired
-  into the compiler's closed bundled-dependency registry
-  (`src/project/standard_dependencies.rs`), so no ordinary project could
-  declare them; this change adds `std.auth`, `std.db`, `std.http`, and
-  `std.jobs` to that registry (see the accompanying Rust regression in the
-  same file). Only `std.auth`/`std.jobs` are used here -- see the ceiling
-  below for why.
+- **Three `[dependencies]` edges on bundled standard-library packages**:
+  `std.auth = "=0.1.0"` (session lifecycle and password-policy bounds),
+  `std.jobs = "=0.1.0"` (claim/lease/retry/idempotency state machines), and
+  `std.tracing = "=0.1.0"` (pure W3C trace-context shape and caller-classified
+  secret policy). The first two packages became project-selectable when
+  `std.auth`, `std.db`, `std.http`, and `std.jobs` joined the compiler's
+  closed bundled-dependency registry; `std.tracing` was already selectable.
+  The tracing dependency contributes no telemetry emission authority.
 - **Row-level authorization**, not just session validity:
   `task_service.core.task_owner_authorized` requires both a usable session
   *and* that the session's own account matches the row's owner. A retired
@@ -38,8 +36,8 @@ semaprax run   examples/task-service-project
   invalid input, duplicate enqueue).
 - **Three execution lanes, not only the interpreter**:
   `tests/useful_data/task_service_project.rs::entry_and_conformance_return_zero_on_interpreter_native_and_wasm`
-  runs the entry and conformance closures on the interpreter, on native C11
-  at `-O0`/`-O2`, and on Core Wasm under Node -- the same shape
+  runs entry and conformance on the interpreter and native C11 at `-O0`/`-O2`;
+  Core Wasm under Node runs the conformance closure only -- the same shape
   `agent_response_project.rs`/`vector_stats_project.rs` already assert for
   their own sibling reference projects.
 
@@ -51,6 +49,10 @@ semaprax run   examples/task-service-project
   performs both outside this decision.
 - No socket, database, or job queue is opened. `run_scenario` is a fixture
   walk over caller-supplied ticks and byte literals, not a running server.
+- No log or span is emitted, exported, or collected. `std.tracing` only
+  checks a caller-supplied trace ID, parent ID, flags, and whether the caller
+  has classified the event as secret; an adapter must perform classification
+  and any eventual emission outside this pure decision.
 - The domain record and job are modeled as plain scalar facts (an id, an
   owner account id, a status), not an authored `record`, because
   `Public Useful Data Export v1` -- the `[exports].web` gate every
@@ -63,24 +65,18 @@ semaprax run   examples/task-service-project
 ## Limits this example is shaped by
 
 **`SPX-G171`** (the workspace semantic graph's 18,874,368-byte
-`builder_bytes` pre-bound) is charged against the whole link closure -- own
-source plus every dependency actually reached -- exactly as
-`examples/agent-response-project/README.md` already documents for a single
-dependency. Composing all four candidate packages (`std.auth` 17,208 B +
-`std.jobs` 8,983 B + `std.http` 5,746 B + `std.db` 4,739 B = 36,676 B of
-dependency source, transitively pulling in `std.bytes` too) with roughly ten
-distinct functions used across them exceeded the bound outright, even with
-this project's own source under 12 KB and even after consolidating from six
-of this project's own modules down to three. Dropping to two dependencies
-(`std.auth` + `std.jobs`, 26,191 B combined) with nine distinct functions
-admits cleanly. The breakpoint tracks the **combined reached closure**, not
-raw dependency byte count alone: a first, minimal probe using all four
-packages but only one function from each (four total) also admitted, so the
-number of *distinct functions pulled from each package* -- not merely which
-packages are named in `[dependencies]` -- drives the charge. This is
-consistent with `agent-response-project`'s own measurement that "adding a
-second dependency ... costs far more than it saves," and is further evidence
-for issue #241.
+`builder_bytes` pre-bound) is charged against the reached link closure -- own
+source plus the selected dependency declarations -- exactly as
+`examples/agent-response-project/README.md` documents. Before issue #124's
+reachability pruning, composing the four candidate domain packages
+(`std.auth`, `std.jobs`, `std.http`, and `std.db`) with roughly ten distinct
+functions exceeded the bound even after this project was consolidated from
+six modules to three. The current three-dependency closure instead selects
+only the declarations reached from `std.auth`, `std.jobs`, and `std.tracing`
+(including `std.bytes`, `std.encoding`, and `std.log.redact`) and admits
+cleanly. Adding real `std.http` and `std.db` behavior remains outside this
+fixture and must be measured against that same reached-closure bound rather
+than inferred from raw source byte counts.
 
 Separately, the built-in persistent semantic cache (`semaprax
 semantic-cache-persist`/`-load`, `docs/PERSISTENT-SEMANTIC-CACHE-V1.md`) could
@@ -121,11 +117,11 @@ actually rewrites. Checked directly: with this project's own three modules
 copied out and stripped of comments, `semaprax change preview <copy>
 rename-display-name task_service.core.identifier_byte_ok
 identifier_char_is_safe` succeeds against the same commented `std.auth` +
-`std.jobs` closure.
+`std.jobs` + `std.tracing` closure.
 
 What still refuses on the checked-in project is this project's **own**
 source. `src/core.spx` owns `task_service.core.identifier_byte_ok` and is
-therefore the source the rename rewrites, and it carries 29 comment lines.
+therefore the source the rename rewrites, and it carries 31 comment lines.
 A rewritten source's comments would be dropped by the canonical formatter, so
 refusing is correct -- and, unlike the old whole-workspace scope, it is
 fixable here. Authoring `src/core.spx` comment-free would complete issue
@@ -133,39 +129,16 @@ fixable here. Authoring `src/core.spx` comment-free would complete issue
 this file is reference documentation as much as it is code, so the write side
 of that demonstration stays open by choice rather than by construction.
 
-**Neither `std.log` nor `std.tracing` can be added to this project's
-dependency closure.** Both packages are wired into the compiler's bundled
-dependency registry, and both were tried against a scratch copy of this
-project's manifest in this session. `std.tracing` is the lighter of the two
-candidates -- `std.encoding` is its only transitive dependency, versus
-`std.log`'s four (`std.data.json.utf8`, `std.data.json.write`, `std.io`,
-`std.log.redact`) -- and it is refused too: `semaprax check` reports
-`SPX-G171`'s static admission pre-charge already reaching 19,160,008 bytes
-against the 18,874,368-byte cap (**101.5%**) from `std.auth` + `std.bytes` +
-`std.encoding` + `std.jobs` + `std.tracing` alone, in canonical path order --
-before this project's own three source files are resolved at all. Adding
-`std.log` instead is refused the same way, and by a wider margin before its
-full five-package closure is even completely counted: the pre-charge already
-reaches 19,080,680 bytes (**101.1%**) from only the first five
-alphabetically-ordered dependency modules, before `std.jobs`, `std.log`, or
-`std.log.redact` are reached. Adding both together reaches 19,922,880 bytes
-(**105.6%**). Because this pre-charge sums whole reachable *modules*
-regardless of which functions this project's own source calls (the same
-"whole-file, not whole-project" charge shape this README's `std.auth`/
-`std.jobs` measurement above already documents), no reduction of this
-project's own three files can close the gap -- the checked-in baseline
-(`std.auth` + `std.jobs` + `std.bytes`) alone already sits at roughly 92.7%
-of the cap by the estimate above, and at 88.2% (16,656,400 bytes) measured
-freshly in this session via the real build's own fallback-mode accounting
-(`checked_retention_prebound_with_uncached_peak`, the same ladder
-`semaprax check` actually walks); either way, the remaining headroom is
-under 12%, and even the lighter candidate's whole-file charge exceeds it
-outright.
-`tests/useful_data/task_service_project.rs::adding_std_tracing_to_the_dependency_closure_exceeds_the_builder_bytes_cap`
-pins this as a regression: it patches a scratch copy of this project to add
-`std.tracing` and one trivial probe function, and asserts `semaprax check`
-refuses with `SPX-G171`. This is the same `SPX-G171` ceiling named above and
-in issue #241, not a new one.
+**`std.tracing` now fits, but only as a pure policy dependency.** Its reached
+closure includes `std.encoding` and `std.log.redact`; the checked-in
+`trace_context_is_admitted` call validates W3C-shaped IDs and refuses a
+caller-classified secret. `tests/useful_data/task_service_project.rs` pins
+that real closure and runs the application’s tests on the interpreter, native
+C11, and Core Wasm; the entry runs on the interpreter and native C11 only.
+This is not `std.log`, an emission
+adapter, span export, or a claim that any observability profile is supported.
+`std.log` remains deliberately absent and is not represented as a supported
+fallback by this reference application.
 
 **This project's manifest does not qualify for `semaprax build --target
 oci`.** [OCI Deployable Artifact v1](OCI-DEPLOYABLE-ARTIFACT-V1.md) is

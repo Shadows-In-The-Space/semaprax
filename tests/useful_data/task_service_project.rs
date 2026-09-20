@@ -160,9 +160,9 @@ fn the_declared_web_exports_are_reachable_public_functions() {
     .unwrap();
 }
 
-/// Entry and conformance both return `0` on all three execution lanes:
-/// interpreter, native C11 at `-O0` and `-O2`, and Core Wasm under Node. The
-/// Wasm harness below is the same generic byte-slice ABI shim
+/// Entry and conformance both return `0` on the interpreter and native C11 at
+/// `-O0` and `-O2`; Core Wasm under Node executes the conformance closure
+/// only. The Wasm harness below is the same generic byte-slice ABI shim
 /// `tests/useful_data/agent_response_project.rs` uses (this project's own
 /// `borrow Slice<u8>` grammar checks -- `identifier_is_valid`,
 /// `method_is_rejected` -- need the same `spx_bytes_*` import set that
@@ -507,54 +507,28 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
     .unwrap();
 }
 
-/// The reachability-based bundled-dependency pruning introduced for issue
-/// #124 removed the former SPX-G171 blocker for the reference application's
-/// `std.auth` + `std.jobs` closure. Pin that improvement with `std.tracing`'s
-/// real transitive closure (`std.encoding` and `std.log.redact`) rather than
-/// retaining the old expected-failure regression. This is an admission gate,
-/// not a claim that the application already emits or exports spans; #194 owns
-/// that product wiring.
+/// The real reference application carries `std.tracing` after the
+/// reachability-based pruning from issue #124 removed the former SPX-G171
+/// blocker. Pin its selected package and transitive redaction closure; the
+/// source-level tests cover valid and refused trace contexts, while the
+/// cross-backend gate below executes them. This is still only a pure policy
+/// dependency, not an emission, export, or span-support claim.
 #[test]
-fn std_tracing_and_its_redaction_dependency_fit_the_reference_application() {
-    let scratch = scratch("tracing-overflow");
-    std::fs::create_dir_all(scratch.join("src")).unwrap();
-
-    let manifest = std::fs::read_to_string(fixture().join("semaprax.toml")).unwrap();
-    let augmented_manifest = manifest.replacen(
-        "std.jobs = \"=0.1.0\"\n",
-        "std.jobs = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\n",
-        1,
-    );
-    assert_ne!(
-        augmented_manifest, manifest,
-        "the manifest's std.jobs dependency line must still be present to patch"
-    );
-    std::fs::write(scratch.join("semaprax.toml"), augmented_manifest).unwrap();
-
-    std::fs::copy(fixture().join("src/app.spx"), scratch.join("src/app.spx")).unwrap();
-    std::fs::copy(
-        fixture().join("src/tests.spx"),
-        scratch.join("src/tests.spx"),
-    )
-    .unwrap();
-
-    // A small real import keeps both the selected package and its transitive
-    // redaction dependency inside the authenticated workspace closure.
-    let core = std::fs::read_to_string(fixture().join("src/core.spx")).unwrap();
-    let augmented_core = core.replacen(
-        "module task_service.core;\n",
-        "module task_service.core;\nuse function @id(\"std.tracing.trace_context_fields_admitted_guarded\") from std.tracing as trace_context_fields_admitted_guarded;\n",
-        1,
-    ) + "\n@id(\"task_service.core.trace_header_probe\")\nfn trace_header_probe(header: borrow Slice<u8>) -> bool\n{\n    trace_context_fields_admitted_guarded(header, header, header, false, false, false, false, false, false)\n}\n";
-    assert_ne!(
-        augmented_core, core,
-        "the module header must still be present to patch"
-    );
-    std::fs::write(scratch.join("src/core.spx"), augmented_core).unwrap();
-
-    project::with_authenticated_project(&scratch.join("semaprax.toml"), |snapshot| {
-        snapshot.check()
+fn std_tracing_and_its_redaction_dependency_fit_the_real_reference_application() {
+    project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
+        snapshot.check()?;
+        let manifest = snapshot.workspace_manifest();
+        for package in [
+            "dependencies/std.tracing/0.1.0",
+            "dependencies/std.encoding/0.1.0",
+            "dependencies/std.log.redact/0.1.0",
+        ] {
+            assert!(
+                manifest.contains(package),
+                "the workspace does not carry `{package}` from std.tracing's real closure"
+            );
+        }
+        Ok(())
     })
-    .expect("std.tracing and its transitive redaction policy must fit under SPX-G171");
-    let _ = std::fs::remove_dir_all(scratch);
+    .expect("the checked-in std.tracing policy closure must fit under SPX-G171");
 }

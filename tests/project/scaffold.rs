@@ -596,8 +596,8 @@ fn tables_layout_derives_a_v3_capsule_and_replays_only_as_itself() {
     assert_eq!(manifest.bytes(), LIBRARY_TABLES_MANIFEST);
 }
 
-/// The service template composes two bundled standard-library dependencies
-/// (`std.auth`, `std.jobs`) through the extensible table manifest. It only
+/// The service template composes three bundled standard-library dependencies
+/// (`std.auth`, `std.jobs`, `std.tracing`) through the extensible table manifest. It only
 /// derives under `ScaffoldLayout::Tables`: the frozen layout has no
 /// `[dependencies]` table, so that pairing is refused before anything is
 /// rendered, and it still passes `validate_rendered_project`'s in-memory
@@ -649,7 +649,9 @@ fn service_template_composes_bundled_dependencies_and_only_derives_under_tables_
     assert!(manifest.contains(
         "web = [\"demo-project.identifier_is_valid\", \"demo-project.method_is_rejected\"]\n"
     ));
-    assert!(manifest.contains("[dependencies]\nstd.auth = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\n"));
+    assert!(manifest.contains(
+        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\n"
+    ));
 
     let agents = derived.files()[1].utf8();
     assert!(agents.contains("Project v1 function boundaries"));
@@ -666,6 +668,10 @@ fn service_template_composes_bundled_dependencies_and_only_derives_under_tables_
         core.contains("use function @id(\"std.auth.password.policy_within_bounds\") from std.auth")
     );
     assert!(core.contains("use function @id(\"std.jobs.claim.is_legal\") from std.jobs"));
+    assert!(core.contains(
+        "use function @id(\"std.tracing.trace_context_fields_admitted_guarded\") from std.tracing"
+    ));
+    assert!(core.contains("it neither reads headers nor emits a log or span"));
 
     // Deterministic and self-replaying under its own schema.
     let again =
@@ -707,4 +713,69 @@ fn service_template_composes_bundled_dependencies_and_only_derives_under_tables_
             .unwrap();
     assert_ne!(other.canonical_bytes(), derived.canonical_bytes());
     assert_ne!(other.digest(), derived.digest());
+}
+
+/// The checked-in task-service fixture is a named projection of the service
+/// scaffold. Normalize only intentional package/module names, the fixture's
+/// version, reference-README path, and its module-scoped versus scaffold
+/// package-scoped declaration IDs; the manifest and executable sources must
+/// otherwise remain byte-identical.
+#[test]
+fn checked_in_task_service_matches_the_normalized_service_projection() {
+    fn normalize(bytes: &str, package: &str, module: &str) -> String {
+        bytes
+            .replace(package, "{{package}}")
+            .replace(module, "{{module}}")
+            .replace("{{package}}.", "{{declaration}}.")
+            .replace("{{module}}.app.", "{{declaration}}.app.")
+            .replace("{{module}}.core.", "{{declaration}}.")
+            .replace("{{module}}.tests.", "{{declaration}}.tests.")
+            .replace(
+                "examples/task-service-project/README.md",
+                "{{reference_readme}}",
+            )
+            .replace(
+                "examples/{{package}}-project/README.md",
+                "{{reference_readme}}",
+            )
+            .replace("version = \"0.1.0\"", "version = \"{{version}}\"")
+            .replace("version = \"1.0.0\"", "version = \"{{version}}\"")
+    }
+
+    let derived = derive_project_scaffold_v1_with_layout(
+        "scaffold-parity",
+        "service",
+        ScaffoldLayout::Tables,
+    )
+    .unwrap();
+    for (path, reference) in [
+        (
+            "semaprax.toml",
+            include_str!("../../examples/task-service-project/semaprax.toml"),
+        ),
+        (
+            "src/app.spx",
+            include_str!("../../examples/task-service-project/src/app.spx"),
+        ),
+        (
+            "src/core.spx",
+            include_str!("../../examples/task-service-project/src/core.spx"),
+        ),
+        (
+            "src/tests.spx",
+            include_str!("../../examples/task-service-project/src/tests.spx"),
+        ),
+    ] {
+        let generated = derived
+            .files()
+            .iter()
+            .find(|file| file.path() == path)
+            .unwrap_or_else(|| panic!("missing service scaffold file `{path}`"))
+            .utf8();
+        assert_eq!(
+            normalize(generated, "scaffold-parity", "scaffold_parity"),
+            normalize(reference, "task-service", "task_service"),
+            "the checked-in reference drifted from the normalized service projection at `{path}`"
+        );
+    }
 }

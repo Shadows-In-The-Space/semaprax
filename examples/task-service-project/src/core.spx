@@ -8,6 +8,7 @@ use function @id("std.jobs.idempotency.enqueue_outcome") from std.jobs as idempo
 use function @id("std.jobs.retry.next_state_after_outcome") from std.jobs as retry_next_state_after_outcome;
 use function @id("std.jobs.schedule.is_due") from std.jobs as schedule_is_due;
 use function @id("std.jobs.state.is_terminal") from std.jobs as state_is_terminal;
+use function @id("std.tracing.trace_context_fields_admitted_guarded") from std.tracing as trace_context_fields_admitted_guarded;
 
 // This module models the domain record (a task) and its background job as
 // plain scalar facts -- an id, an owner account id, a status -- rather than
@@ -15,13 +16,12 @@ use function @id("std.jobs.state.is_terminal") from std.jobs as state_is_termina
 // `[exports].web` gate every `semaprax.manifest.v1` project must satisfy)
 // admits no authored aggregate anywhere in a project that also declares a
 // web export, and every dependency-consuming project needs the manifest.v1
-// schema. See this project's README for the exact `SPX-G171`/`SPX-G172`
-// shapes this composition already met.
+// schema.
 // A closed safe-identifier grammar for table names and usernames: a letter
 // or underscore, then letters, digits, or underscores, 1..63 bytes. This
 // mirrors `std.db.identifier.is_valid`'s grammar (kept local here rather
-// than as a dependency -- see this project's README for the `SPX-G171`
-// workspace-graph budget this two-dependency composition already reaches).
+// than as a dependency -- see `examples/task-service-project/README.md` for
+// the `SPX-G171` workspace-graph budget another dependency would reach).
 @id("task_service.core.identifier_byte_ok")
 fn identifier_byte_ok(byte: u8) -> bool
 {
@@ -111,6 +111,15 @@ fn job_status_is_complete(state: usize) -> bool
     state_is_terminal(state)
 }
 
+// Trace metadata is admitted only after the adapter has classified whether
+// the event carries a secret. This is a pure validation/redaction decision:
+// it neither reads headers nor emits a log or span.
+@id("task_service.core.trace_context_is_admitted")
+fn trace_context_is_admitted(trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>, carries_secret: bool) -> bool
+{
+    trace_context_fields_admitted_guarded(trace_id, parent_id, trace_flags, carries_secret, false, false, false, false, false)
+}
+
 // The full acceptance scenario: register, log in, create/update the domain
 // record, enqueue and complete a background job, query its status, log out,
 // then confirm both an unauthorized access and an invalid request are
@@ -149,5 +158,9 @@ fn run_scenario() -> i64
     let method_rejected = method_is_rejected(array_as_slice(bad_method));
     let bad_identifier = [49u8, 116u8, 97u8, 115u8, 107u8];
     let identifier_rejected = !identifier_is_valid(array_as_slice(bad_identifier));
-    if registered && usable_at_login && table_ok && task_id == 1 && update_authorized && in_progress_status == 1usize && enqueue_legal && enqueue_outcome_code == 0usize && status_done && intruder_rejected && retired_session_rejected && method_rejected && identifier_rejected { 0 } else { 1 }
+    let trace_id = [52u8, 98u8, 102u8, 57u8, 50u8, 102u8, 51u8, 53u8, 55u8, 55u8, 98u8, 51u8, 52u8, 100u8, 97u8, 54u8, 97u8, 51u8, 99u8, 101u8, 57u8, 50u8, 57u8, 100u8, 48u8, 101u8, 48u8, 101u8, 52u8, 55u8, 51u8, 54u8];
+    let parent_id = [48u8, 48u8, 102u8, 48u8, 54u8, 55u8, 97u8, 97u8, 48u8, 98u8, 97u8, 57u8, 48u8, 50u8, 98u8, 55u8];
+    let trace_flags = [48u8, 49u8];
+    let trace_context_ok = trace_context_is_admitted(array_as_slice(trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), false);
+    if registered && usable_at_login && table_ok && task_id == 1 && update_authorized && in_progress_status == 1usize && enqueue_legal && enqueue_outcome_code == 0usize && status_done && intruder_rejected && retired_session_rejected && method_rejected && identifier_rejected && trace_context_ok { 0 } else { 1 }
 }

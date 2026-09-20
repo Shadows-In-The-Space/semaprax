@@ -7,6 +7,7 @@ use function @id("task_service.core.method_is_rejected") from task_service.core 
 use function @id("task_service.core.registration_admitted") from task_service.core as registration_admitted;
 use function @id("task_service.core.run_scenario") from task_service.core as run_scenario;
 use function @id("task_service.core.task_owner_authorized") from task_service.core as task_owner_authorized;
+use function @id("task_service.core.trace_context_is_admitted") from task_service.core as trace_context_is_admitted;
 
 // The whole acceptance scenario succeeds end to end.
 @id("task_service.tests.scenario_succeeds")
@@ -53,8 +54,36 @@ fn duplicate_enqueue_is_idempotent() -> bool
     enqueue_outcome(true, array_as_slice(key), array_as_slice(key)) == 1usize
 }
 
+// A valid W3C-shaped trace context with no classified secret is admitted by
+// the pure policy. It does not emit a log or span.
+@id("task_service.tests.trace_context_is_admitted")
+fn trace_context_is_admitted_test() -> bool
+{
+    let trace_id = [52u8, 98u8, 102u8, 57u8, 50u8, 102u8, 51u8, 53u8, 55u8, 55u8, 98u8, 51u8, 52u8, 100u8, 97u8, 54u8, 97u8, 51u8, 99u8, 101u8, 57u8, 50u8, 57u8, 100u8, 48u8, 101u8, 48u8, 101u8, 52u8, 55u8, 51u8, 54u8];
+    let parent_id = [48u8, 48u8, 102u8, 48u8, 54u8, 55u8, 97u8, 97u8, 48u8, 98u8, 97u8, 57u8, 48u8, 50u8, 98u8, 55u8];
+    let trace_flags = [48u8, 49u8];
+    trace_context_is_admitted(array_as_slice(trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), false)
+}
+
+// Every trace-context field is independently refused when malformed; the
+// trace ID also rejects same-length non-hex and all-zero values. A
+// caller-classified secret is refused before any adapter could emit telemetry.
+@id("task_service.tests.trace_context_is_refused")
+fn trace_context_is_refused_test() -> bool
+{
+    let trace_id = [52u8, 98u8, 102u8, 57u8, 50u8, 102u8, 51u8, 53u8, 55u8, 55u8, 98u8, 51u8, 52u8, 100u8, 97u8, 54u8, 97u8, 51u8, 99u8, 101u8, 57u8, 50u8, 57u8, 100u8, 48u8, 101u8, 48u8, 101u8, 52u8, 55u8, 51u8, 54u8];
+    let parent_id = [48u8, 48u8, 102u8, 48u8, 54u8, 55u8, 97u8, 97u8, 48u8, 98u8, 97u8, 57u8, 48u8, 50u8, 98u8, 55u8];
+    let trace_flags = [48u8, 49u8];
+    let malformed_trace_id = [48u8];
+    let non_hex_trace_id = [71u8; 32];
+    let all_zero_trace_id = [48u8; 32];
+    let malformed_parent_id = [48u8];
+    let malformed_trace_flags = [48u8];
+    !trace_context_is_admitted(array_as_slice(malformed_trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), false) && !trace_context_is_admitted(array_as_slice(non_hex_trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), false) && !trace_context_is_admitted(array_as_slice(all_zero_trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), false) && !trace_context_is_admitted(array_as_slice(trace_id), array_as_slice(malformed_parent_id), array_as_slice(trace_flags), false) && !trace_context_is_admitted(array_as_slice(trace_id), array_as_slice(parent_id), array_as_slice(malformed_trace_flags), false) && !trace_context_is_admitted(array_as_slice(trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), true)
+}
+
 @id("task_service.tests.main")
 fn main() -> i64
 {
-    if scenario_succeeds() && success_path() && unauthorized_is_rejected() && invalid_is_rejected() && duplicate_enqueue_is_idempotent() { 0 } else { 1 }
+    if scenario_succeeds() && success_path() && unauthorized_is_rejected() && invalid_is_rejected() && duplicate_enqueue_is_idempotent() && trace_context_is_admitted_test() && trace_context_is_refused_test() { 0 } else { 1 }
 }

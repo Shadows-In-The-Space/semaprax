@@ -75,7 +75,7 @@ fn opt_json(value: &Option<String>) -> String {
     }
 }
 
-fn render_method(method: &MethodRecord) -> String {
+pub(super) fn render_method(method: &MethodRecord) -> String {
     let inputs = method
         .inputs
         .iter()

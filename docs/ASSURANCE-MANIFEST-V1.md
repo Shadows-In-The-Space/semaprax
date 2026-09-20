@@ -210,6 +210,37 @@ single-file token does not gain a `compiler_proved` label by analogy. A caller m
 assurance summary — this tranche's automatic derivation — never waits on
 any of those backends existing.
 
+### Bounded resumable contract placement
+
+For single-file source functions with `yields` and source contracts, the
+producer additionally lowers the admitted sequential Copy-scalar profile and
+validates its closed start and resume projections. Each existing precondition
+or postcondition obligation retains its identity and original method, followed
+by one `runtime_guarded` method from
+`semaprax-resumable-contract-placement.v1`. This uses the existing v1 method
+fields; non-yielding obligation bytes and the envelope schema are unchanged.
+
+The method's ordered `inputs` are the persistent function ID, the exact
+`plan:sha256:<lowercase hex>` lowering identity, projection role (`start` or
+`final_resume`), source state ID, and destination state ID. Preconditions
+belong to entry-to-first-suspension; postconditions belong to
+last-suspension-to-completion. Intermediate resumptions do not gain a
+postcondition claim. `bounds` records `sequential_copy_scalar_yields:<count>`;
+`target` is `resumable_yield_free_projection`. No artifact was emitted or run,
+so `artifact_digest` remains null. A contracted yielding function that cannot
+produce the bounded closed projections refuses generation with `SPX-H006`.
+
+Source-bound replay independently re-lowers and compares the exact placement
+methods, their enclosing source declaration and obligation kind, and their
+order and presence; removing or changing a binding,
+even after recomputing the envelope digest, fails with `SPX-Z104`. Structural
+`verify_envelope` alone remains a consistency check, not compiler replay.
+These records confer no handler, execution, checkpoint, or resume authority
+and do not claim general resumable lowering, a durable runtime, target
+execution, or Project-manifest integration. The Project producer is unchanged.
+Focused evidence: `cargo test --locked -p semaprax --lib
+assurance_manifest::resumable::tests::`.
+
 ## The assurance lattice
 
 `AssuranceClass` is a closed set of nine tokens, ordered bottom to top by

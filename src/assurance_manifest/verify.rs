@@ -489,6 +489,7 @@ pub fn verify_envelope_against_source(
                 .to_owned(),
         ));
     }
+    super::resumable::verify_source(envelope, &String::from_utf8_lossy(&current), source_path)?;
     Ok(())
 }
 

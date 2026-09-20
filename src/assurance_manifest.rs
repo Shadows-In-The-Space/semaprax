@@ -36,6 +36,7 @@ mod obligation;
 pub mod project;
 pub mod proof_certificate;
 mod render;
+mod resumable;
 pub mod smt_discharge;
 mod verify;
 
@@ -191,6 +192,7 @@ pub fn generate(
 
     // An AST-only success cannot justify these two compiler-proved classes.
     let mut obligations = derive::derive_obligations(&program);
+    resumable::attach(&resolved, &mut obligations).map_err(|error| vec![error])?;
     obligations
         .extend(derive::derive_resolved_obligations(&resolved).map_err(|error| vec![error])?);
     obligations.extend(options.external_records.obligations.iter().cloned());

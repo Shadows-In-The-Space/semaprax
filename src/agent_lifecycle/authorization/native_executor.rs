@@ -153,7 +153,14 @@ fn decode_hex_payload(hex: &str) -> Result<DeclarationId, Diagnostic> {
 }
 
 fn c_i64(value: i64) -> String {
-    format!("INT64_C({value})")
+    if value == i64::MIN {
+        // `INT64_C(-9223372036854775808)` asks the C preprocessor to form a
+        // positive magnitude it cannot represent. Keep the same portable
+        // spelling the main native backend uses for the signed minimum.
+        "(-INT64_C(9223372036854775807) - INT64_C(1))".to_owned()
+    } else {
+        format!("INT64_C({value})")
+    }
 }
 
 struct Emitter {

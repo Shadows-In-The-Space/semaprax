@@ -16,6 +16,7 @@ use crate::interpreter::retained_call::evaluate_retained_call;
 /// module's own text by `include_str!` keeps reading exactly the file it
 /// audits.
 mod turn_parity;
+mod wasm_literal_edges;
 
 /// The `runtime_v1` compatibility material of the frozen fixture definition.
 /// The definition compiler supplies its own schema and nonclaims.

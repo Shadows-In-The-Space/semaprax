@@ -75,7 +75,7 @@
 //! `Bytes` or `i64`. A bare scalar result still takes the direct path (no
 //! driver needed); anything else -- a nested record leaf, a `Str`/`Float`
 //! leaf, a generic instantiation, a variant case with no fields, an empty
-//! `Bytes` argument, or `i64::MIN` -- fails closed with an `SPX-G570`
+//! `Bytes` argument -- fails closed with an `SPX-G570`
 //! diagnostic naming the unsupported shape rather than guessing.
 //!
 //! ## What this is not
@@ -561,7 +561,11 @@ fn render_value(
             if *item >= 0 {
                 Ok(item.to_string())
             } else if *item == i64::MIN {
-                Err(invariant("wasm_executor.argument.i64_min"))
+                // The parser folds this exact canonical spelling to one
+                // signed-minimum literal. Do not route it through `0 - N`:
+                // `9223372036854775808` is deliberately not a positive i64
+                // literal, so that subtraction form cannot represent MIN.
+                Ok("-9223372036854775808".to_owned())
             } else {
                 let name = format!("spx_lit{next}");
                 *next += 1;

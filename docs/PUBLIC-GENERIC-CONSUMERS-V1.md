@@ -29,8 +29,11 @@ API: generation embeds the supplied trusted descriptor bytes without granting
 them authority. At **open**, Rust, C11, and TypeScript/Wasm independently check
 that the submitted descriptor is exactly twelve bounded UTF-8 Descriptor-v1
 frames with the frozen descriptor, boundary-profile, and type-grammar versions,
-then require byte-exact equality with the embedded trusted bytes before any
-provider call or Wasm instantiation. C++17 uses the C11 check. A generated
+then independently parse the embedded trusted descriptor and compare all twelve
+contracted fields in order before any provider call or Wasm instantiation.
+C++17 uses the C11 check. Because fixed-width framing and every field are
+covered, this structured replay preserves byte-exact calling-layer admission
+without treating the descriptor as one opaque blob. A generated
 consumer configured with malformed trusted bytes therefore cannot open, even
 when a caller submits those same bytes. This calling-layer pairing is stricter
 than the reference descriptor identity replay: a presentation-name-only
@@ -254,7 +257,7 @@ Cargo.toml         -- fixed template; zero dependencies; [lints.rust] unsafe_cod
 build.rs           -- fixed template; links SPX_PG_PROVIDER_LIB_DIR/_NAME, compiles nothing itself
 src/lib.rs          -- fixed template; #![deny(unsafe_code)]; re-exports the safe API
 src/error.rs        -- fixed template; closed Error enum, sticky-failure secondary-release note
-src/descriptor.rs   -- embeds TRUSTED_DESCRIPTOR_BYTES/TRUSTED_BINDING_BYTES; independent byte-exact verify()
+src/descriptor.rs   -- embeds TRUSTED_DESCRIPTOR_BYTES/TRUSTED_BINDING_BYTES; bounded twelve-field parse/replay
 src/types.rs        -- Input/Output structs, one Vec<u8> field per leaf, field order preserved
 src/carrier.rs       -- encode/decode for exactly FIELD_COUNT leaves, independently validated
 src/provider.rs      -- the FFI shim (unsafe confined here) and the safe Provider/diagnostics API
@@ -283,7 +286,8 @@ derives only `Debug`.
 
 **Ownership and settlement.** `Provider::open` independently replays
 submitted descriptor/binding bytes against the embedded trusted values
-(byte-exact equality) *before* calling the native adapter at all — a
+(descriptor fields independently parsed and compared; binding byte-exact)
+*before* calling the native adapter at all — a
 consumer that only trusted the native side's own answer would defeat the
 point of an independently verified descriptor
 ([issue #152](PUBLIC-GENERIC-DESCRIPTOR-V1.md)). `Provider::transform`
@@ -400,7 +404,8 @@ rather than invent a second ABI.
 
 **Ownership and settlement.** `spx_pg_consumer_open` independently replays
 submitted descriptor/binding bytes against the embedded trusted values
-(byte-exact equality) *before* calling the native adapter at all — the same
+(descriptor fields independently parsed and compared; binding byte-exact)
+*before* calling the native adapter at all — the same
 independent-verification requirement [`rust_calling`] documents (issue
 #152). `spx_pg_consumer_transform` consumes `*input` by value: every leaf's
 bytes are copied into an independent carrier buffer before any native
@@ -536,7 +541,7 @@ package.json          -- fixed template; one devDependency, typescript 5.8.3 (re
 package-lock.json     -- fixed template; the same pinned integrity hash this repo already uses
 tsconfig.json         -- fixed template; strict mode, ES2023+DOM lib (for WebAssembly/Web Crypto types)
 src/errors.ts         -- fixed template; closed discriminated error union and retained secondary cleanup statuses
-src/descriptor.ts     -- embeds TRUSTED_DESCRIPTOR_BYTES/TRUSTED_BINDING_BYTES/endpoint name/artifact digest; independent byte-exact verify() and Web-Crypto module-artifact-digest verification
+src/descriptor.ts     -- embeds trusted descriptor/binding bytes; bounded twelve-field descriptor replay plus Web-Crypto module-artifact verification
 src/types.ts          -- Input/Output interfaces, one readonly Uint8Array field per leaf, field order preserved
 src/carrier.ts         -- Logical Carrier v1 codec for exactly FIELD_COUNT leaves, BigInt-exact leaf-count/length handling
 src/wasm-provider.ts   -- fixed template; the host-owned allocator/registry/lifecycle wrapper and the safe Provider API
@@ -1007,9 +1012,13 @@ either expected status in `EXPECTED` failed both the native and the
 TypeScript harness with the exact case and the exact (correct) status
 observed, then was reverted.
 
-**Descriptor branch reachability.** The nine structured descriptor cases
-above pass through all four generated consumers, but exact-byte pairing can
-mask their structural checks. The separate six-case malformed-trusted
+**Descriptor branch reachability.** The generated Rust, C11, and TypeScript
+verifiers now parse both submitted and embedded Descriptor-v1 bytes into twelve
+bounded UTF-8 fields, enforce the three frozen version literals, and compare
+each field in canonical order; C++17 executes that C11 verifier. They no longer
+authorize a descriptor through one opaque whole-buffer equality check. The nine
+structured descriptor cases above pass through all four generated consumers,
+while the separate six-case malformed-trusted
 manifest therefore embeds each hostile document as the consumer's own
 trusted bytes, then submits identical bytes. It exercises truncation,
 descriptor schema, boundary-profile version, type-grammar version, UTF-8,

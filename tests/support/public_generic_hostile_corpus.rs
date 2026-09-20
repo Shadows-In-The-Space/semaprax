@@ -36,8 +36,9 @@
 //! Descriptor-v1 baseline. The shared descriptor cases mutate individual
 //! framed fields, UTF-8, schema, length, order, and frame count, then pin the
 //! reference decoder/replay reason before passing identical bytes to all four
-//! generated consumers. Each generated caller also checks the Descriptor-v1
-//! frame envelope before its byte-exact trusted-descriptor pairing. The
+//! generated consumers. Each generated caller checks the Descriptor-v1 frame
+//! envelope and independently replays all twelve parsed fields against its
+//! embedded trusted descriptor. The
 //! provider ABI still treats its descriptor as authenticated bytes. The
 //! reference replay accepts a presentation-name-only change to the same
 //! identity; calling-consumer pairing remains byte-exact by its own contract.
@@ -282,13 +283,14 @@ fn baseline_frames() -> Vec<std::ops::Range<usize>> {
 ///
 /// This is the discriminating half of the hostile corpus.
 /// [`structured_descriptor_cases`] submits mutated bytes to a consumer
-/// generated from the *canonical* baseline, so the consumer's byte-exact
-/// pairing check alone already refuses every one of them — a consumer whose
+/// generated from the *canonical* baseline, so the consumer's field-by-field
+/// pairing check already refuses every well-formed field mutation — a consumer
+/// whose
 /// structural envelope check were deleted entirely would still pass that
 /// family. Here pairing cannot refuse anything, because the submitted and
 /// trusted bytes are equal by construction, so only the consumer's own
 /// bounded Descriptor-v1 envelope check can fail closed. Each case drives
-/// exactly one distinct branch of that check (`canonical_descriptor_v1` in
+/// exactly one distinct branch of that check (`parse_descriptor_v1` in
 /// each generated consumer, and its C11/TypeScript transliterations):
 ///
 /// | case | branch it alone exercises |

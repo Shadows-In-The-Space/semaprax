@@ -61,7 +61,13 @@ static int spx_pg_ccc_utf8(const uint8_t *bytes, size_t length) {
     return 1;
 }
 
-static int spx_pg_ccc_descriptor_v1(const uint8_t *bytes, size_t length) {
+typedef struct spx_pg_ccc_descriptor_fields {
+    const uint8_t *bytes[12];
+    size_t lengths[12];
+} spx_pg_ccc_descriptor_fields;
+
+static int spx_pg_ccc_parse_descriptor_v1(const uint8_t *bytes, size_t length,
+                                           spx_pg_ccc_descriptor_fields *out) {
     if (length > 131072u) return 0;
     size_t offset = 0;
     for (size_t field = 0; field < 12u; field += 1u) {
@@ -83,20 +89,39 @@ static int spx_pg_ccc_descriptor_v1(const uint8_t *bytes, size_t length) {
         if (field == 2u) { version = grammar_schema; version_length = sizeof(grammar_schema) - 1u; }
         if (version != NULL &&
             (field_length != version_length || memcmp(content, version, version_length) != 0)) return 0;
+        out->bytes[field] = content;
+        out->lengths[field] = field_length;
         offset += field_length;
     }
     return offset == length;
+}
+
+static int spx_pg_ccc_descriptor_fields_replay(const uint8_t *candidate_bytes,
+                                                size_t candidate_len,
+                                                const uint8_t *trusted_bytes,
+                                                size_t trusted_len) {
+    spx_pg_ccc_descriptor_fields candidate = {0};
+    spx_pg_ccc_descriptor_fields trusted = {0};
+    if (!spx_pg_ccc_parse_descriptor_v1(candidate_bytes, candidate_len, &candidate) ||
+        !spx_pg_ccc_parse_descriptor_v1(trusted_bytes, trusted_len, &trusted)) return 0;
+    for (size_t field = 0; field < 12u; field += 1u) {
+        if (!spx_pg_ccc_bytes_equal(candidate.bytes[field], candidate.lengths[field],
+                                    trusted.bytes[field], trusted.lengths[field])) return 0;
+    }
+    return 1;
 }
 
 static spx_pg_consumer_status spx_pg_ccc_verify_pairing(const uint8_t *descriptor_bytes,
                                                          size_t descriptor_len,
                                                          const uint8_t *binding_bytes,
                                                          size_t binding_len) {
-    if (!spx_pg_ccc_descriptor_v1(descriptor_bytes, descriptor_len)) {
+    spx_pg_ccc_descriptor_fields candidate = {0};
+    if (!spx_pg_ccc_parse_descriptor_v1(descriptor_bytes, descriptor_len, &candidate)) {
         return SPX_PG_CONSUMER_DESCRIPTOR_REJECTED;
     }
-    if (!spx_pg_ccc_bytes_equal(descriptor_bytes, descriptor_len, spx_pg_trusted_descriptor_bytes,
-                                 spx_pg_trusted_descriptor_len)) {
+    if (!spx_pg_ccc_descriptor_fields_replay(
+            descriptor_bytes, descriptor_len, spx_pg_trusted_descriptor_bytes,
+            spx_pg_trusted_descriptor_len)) {
         return SPX_PG_CONSUMER_DESCRIPTOR_REJECTED;
     }
     if (!spx_pg_ccc_bytes_equal(binding_bytes, binding_len, spx_pg_trusted_binding_bytes,

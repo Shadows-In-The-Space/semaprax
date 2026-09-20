@@ -8,37 +8,46 @@ export function trustedDescriptorAndBinding(): readonly [Uint8Array, Uint8Array]
   return [EXPECTED_DESCRIPTOR_BYTES.slice(), EXPECTED_BINDING_BYTES.slice()];
 }
 
-function canonicalDescriptorV1(bytes: Uint8Array): boolean {
-  if (bytes.length > 131_072) return false;
+function parseDescriptorV1(bytes: Uint8Array): readonly Uint8Array[] | null {
+  if (bytes.length > 131_072) return null;
   // ignoreBOM=true retains a leading U+FEFF. The reference UTF-8 decoder
   // preserves it too, so a BOM-prefixed schema must never become valid here.
   const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   let offset = 0;
+  const fields: Uint8Array[] = [];
   for (let field = 0; field < 12; field += 1) {
-    if (offset > bytes.length || bytes.length - offset < 8) return false;
+    if (offset > bytes.length || bytes.length - offset < 8) return null;
     let width = 0n;
     for (let index = 0; index < 8; index += 1) {
       width |= BigInt(bytes[offset + index] as number) << BigInt(index * 8);
     }
-    if (width > 65_536n) return false;
+    if (width > 65_536n) return null;
     offset += 8;
     const length = Number(width);
-    if (length > bytes.length - offset) return false;
+    if (length > bytes.length - offset) return null;
     let text: string;
     try {
       text = decoder.decode(bytes.subarray(offset, offset + length));
     } catch {
-      return false;
+      return null;
     }
     const version = [
       "semaprax.public-generic-descriptor.v1",
       "semaprax.public-generic-boundary-profile.v1",
       "semaprax.public-generic-type-grammar.v1",
     ][field];
-    if (version !== undefined && text !== version) return false;
+    if (version !== undefined && text !== version) return null;
+    fields.push(bytes.subarray(offset, offset + length));
     offset += length;
   }
-  return offset === bytes.length;
+  return offset === bytes.length ? fields : null;
+}
+
+function descriptorFieldsReplay(candidateBytes: Uint8Array, trustedBytes: Uint8Array): boolean {
+  const candidate = parseDescriptorV1(candidateBytes);
+  const trusted = parseDescriptorV1(trustedBytes);
+  if (candidate === null || trusted === null) return false;
+  return candidate.every((field, index) => bytesEqual(field, trusted[index] as Uint8Array));
 }
 
 export function verifyDescriptorAndBinding(
@@ -50,8 +59,8 @@ export function verifyDescriptorAndBinding(
   try { descriptor = byteView(descriptorBytes); }
   catch { throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-framing" }); }
   if (descriptor.length > 131072) throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-bound" });
-  if (!canonicalDescriptorV1(descriptor)) throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-framing" });
-  if (!bytesEqual(descriptor, EXPECTED_DESCRIPTOR_BYTES)) throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-replay" });
+  if (parseDescriptorV1(descriptor) === null) throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-framing" });
+  if (!descriptorFieldsReplay(descriptor, EXPECTED_DESCRIPTOR_BYTES)) throw new SemapraxPublicGenericException({ kind: "descriptor-rejected", reason: "descriptor-replay" });
   try { binding = byteView(bindingBytes); }
   catch { throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "binding-replay" }); }
   if (binding.length > 262144) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "binding-bound" });

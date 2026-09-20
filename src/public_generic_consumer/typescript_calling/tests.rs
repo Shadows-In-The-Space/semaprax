@@ -163,6 +163,21 @@ fn embeds_the_exact_trusted_descriptor_and_binding_bytes() {
 }
 
 #[test]
+fn descriptor_replay_is_bounded_and_field_structured() {
+    let consumer = generate();
+    let source = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == "src/descriptor.ts")
+        .unwrap()
+        .1;
+    assert!(source.contains("function parseDescriptorV1"));
+    assert!(source.contains("const fields: Uint8Array[] = []"));
+    assert!(source.contains("candidate.every((field, index)"));
+    assert!(!source.contains("bytesEqual(descriptor, EXPECTED_DESCRIPTOR_BYTES)"));
+}
+
+#[test]
 fn no_host_path_or_checkout_specific_text_survives_generation() {
     for (name, contents) in generate().files() {
         assert!(

@@ -210,6 +210,23 @@ fn embeds_the_exact_trusted_descriptor_and_binding_bytes() {
 }
 
 #[test]
+fn descriptor_replay_is_bounded_and_field_structured() {
+    let consumer = generate();
+    let source = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == CONSUMER_SOURCE_FILE_NAME)
+        .unwrap()
+        .1;
+    assert!(source.contains("spx_pg_ccc_parse_descriptor_v1"));
+    assert!(source.contains("spx_pg_ccc_descriptor_fields"));
+    assert!(source.contains("for (size_t field = 0; field < 12u; field += 1u)"));
+    assert!(!source.contains(
+        "spx_pg_ccc_bytes_equal(descriptor_bytes, descriptor_len, spx_pg_trusted_descriptor_bytes"
+    ));
+}
+
+#[test]
 fn no_host_path_or_checkout_specific_text_survives_generation() {
     for (name, contents) in generate().files() {
         assert!(

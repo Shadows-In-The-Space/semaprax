@@ -268,8 +268,8 @@ fn weaken_rust_descriptor_branch(source: &mut String, case: &str) {
     match case {
         "truncated_final_frame" => replace_once(
             source,
-            "let Some(content) = bytes.get(prefix_end..end) else { return false; };",
-            "let Some(content) = bytes.get(prefix_end..end) else { return true; };",
+            "if end > bytes.len() { return None; }",
+            "if end > bytes.len() { offset = bytes.len(); break; }",
             case,
         ),
         "unknown_descriptor_schema" => replace_once(
@@ -292,13 +292,16 @@ fn weaken_rust_descriptor_branch(source: &mut String, case: &str) {
         ),
         "invalid_utf8_export_id" => replace_once(
             source,
-            "if std::str::from_utf8(content).is_err() { return false; }",
-            "if false { return false; }",
+            "if std::str::from_utf8(content).is_err() { return None; }",
+            "if false { return None; }",
             case,
         ),
-        "trailing_bytes_after_final_frame" => {
-            replace_once(source, "offset == bytes.len()", "true", case)
-        }
+        "trailing_bytes_after_final_frame" => replace_once(
+            source,
+            "(offset == bytes.len()).then_some(fields)",
+            "Some(fields)",
+            case,
+        ),
         other => panic!("{other}: not an admitted #173 mutation control"),
     }
 }
@@ -592,9 +595,9 @@ fn generated_rust_consumer_rejects_a_byte_identical_malformed_trusted_descriptor
 ///
 /// Each case's bytes are simultaneously the consumer's embedded trusted
 /// descriptor and the caller's submission, so
-/// `spx_pg_ccc_verify_pairing`'s byte-equality check admits all of them and
-/// only `spx_pg_ccc_descriptor_v1` can refuse. Deleting any single branch of
-/// that function therefore turns exactly one case green-to-red rather than
+/// `spx_pg_ccc_verify_pairing`'s structured replay sees identical fields and
+/// only `spx_pg_ccc_parse_descriptor_v1` can refuse. Deleting any single
+/// branch of that function therefore turns exactly one case green-to-red rather than
 /// being masked by the pairing check.
 #[test]
 fn malformed_trusted_corpus_is_refused_by_the_c11_and_cxx17_consumers() {

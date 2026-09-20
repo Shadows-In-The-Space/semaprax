@@ -422,8 +422,8 @@ fn weaken_typescript_descriptor_branch(source: &mut String, case: &str) {
     match case {
         "truncated_final_frame" => replace_once(
             source,
-            "if (length > bytes.length - offset) return false;",
-            "if (length > bytes.length - offset) return true;",
+            "if (length > bytes.length - offset) return null;",
+            "if (length > bytes.length - offset) { offset = bytes.length; break; }",
             case,
         ),
         "unknown_descriptor_schema" => replace_once(
@@ -446,14 +446,14 @@ fn weaken_typescript_descriptor_branch(source: &mut String, case: &str) {
         ),
         "invalid_utf8_export_id" => replace_once(
             source,
-            "catch {\n      return false;\n    }",
+            "catch {\n      return null;\n    }",
             "catch {\n      text = \"\";\n    }",
             case,
         ),
         "trailing_bytes_after_final_frame" => replace_once(
             source,
-            "return offset === bytes.length;",
-            "return true;",
+            "return offset === bytes.length ? fields : null;",
+            "return fields;",
             case,
         ),
         other => panic!("{other}: not an admitted #173 mutation control"),

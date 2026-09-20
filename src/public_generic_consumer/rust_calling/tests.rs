@@ -280,6 +280,21 @@ fn embeds_the_exact_trusted_descriptor_and_binding_bytes() {
 }
 
 #[test]
+fn descriptor_replay_is_bounded_and_field_structured() {
+    let consumer = generate();
+    let source = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == "src/descriptor.rs")
+        .unwrap()
+        .1;
+    assert!(source.contains("fn parse_descriptor_v1"));
+    assert!(source.contains("let mut fields = [&bytes[0..0]; 12]"));
+    assert!(source.contains("candidate.iter().zip(trusted)"));
+    assert!(!source.contains("descriptor_bytes != TRUSTED_DESCRIPTOR_BYTES"));
+}
+
+#[test]
 fn no_host_path_or_checkout_specific_text_survives_generation() {
     for (name, contents) in generate().files() {
         assert!(

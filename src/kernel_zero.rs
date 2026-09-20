@@ -69,6 +69,8 @@ mod value;
 mod corpus;
 #[cfg(test)]
 mod differential;
+#[cfg(test)]
+mod lean_fixture;
 
 /// Returns `true` iff the function declared as `id` in `program` reifies
 /// into Kernel-0, per this module's predicate. `false` covers both "no such

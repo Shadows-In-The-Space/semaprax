@@ -23,6 +23,8 @@ from opencode_agent_task_pilot.eligibility import (
     compute_eligibility,
     initialize_intervention_ledger,
     record_blinded_review,
+    finish_blinded_review,
+    start_blinded_review,
     write_presentation_evidence,
 )
 from opencode_agent_task_pilot.evidence import gateway_diagnostics, mcp_tool_metrics, provider_usage
@@ -971,6 +973,26 @@ def main():
     packet.add_argument("--evidence-dir", required=True)
     packet.add_argument("--output", required=True)
 
+    start_review = sub.add_parser(
+        "start-review",
+        help="freeze a blinded packet and begin an automatically timed reviewer session",
+    )
+    start_review.add_argument("--evidence-dir", required=True)
+
+    finish_review = sub.add_parser(
+        "finish-review",
+        help="finish a host-clock timed blinded review session and record its verdict",
+    )
+    finish_review.add_argument("--evidence-dir", required=True)
+    finish_review.add_argument("--reviewer-id", required=True)
+    finish_review.add_argument("--verdict", choices=("accept", "reject"), required=True)
+    finish_review.add_argument(
+        "--blinded",
+        action="store_true",
+        required=True,
+        help="required reviewer attestation that direct lane/model/runner labels were withheld",
+    )
+
     audit = sub.add_parser("audit-cohort", help="audit exact tuple accounting without running a model")
     audit.add_argument("--evidence-root", required=True)
     audit.add_argument("--manifest", default=str(ROOT / "benchmarks/agent-task-comparison-v1/manifest.json"))
@@ -990,6 +1012,10 @@ def main():
         )
     elif n.command == "prepare-review":
         output = prepare_review_packet(Path(n.evidence_dir), Path(n.output))
+    elif n.command == "start-review":
+        output = start_blinded_review(Path(n.evidence_dir))
+    elif n.command == "finish-review":
+        output = finish_blinded_review(Path(n.evidence_dir), n.reviewer_id, n.verdict, n.blinded)
     else:
         output = audit_cohort(Path(n.evidence_root), Path(n.manifest))
         if not output["complete"]:

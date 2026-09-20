@@ -679,6 +679,42 @@ class BlindedReviewTests(unittest.TestCase):
             self.assertEqual(result["status"], "unavailable")
             self.assertIn("blinded", result["reason"])
 
+    def test_host_clock_timed_packet_session_is_the_eligible_review_shape(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            started = elig.start_blinded_review(evidence, started_ns=1_000_000_000)
+            with self.assertRaisesRegex(ValueError, "artifact already exists"):
+                elig.start_blinded_review(evidence, started_ns=1_000_000_001)
+            review = elig.finish_blinded_review(
+                evidence, "reviewer-1", "accept", True, stopped_ns=3_500_000_000,
+            )
+            self.assertEqual(review["review_session_sha256"], started["review_session_sha256"])
+            result = elig.blinded_review_slot(evidence)
+            self.assertEqual(result["status"], "observed")
+            self.assertEqual(result["assurance"], "timed_packet_bound")
+            self.assertEqual(result["review_wall_ms"], 2500)
+
+    def test_timed_session_rejects_stale_packet_and_tampered_duration(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            elig.start_blinded_review(evidence, started_ns=1_000_000_000)
+            (evidence / "candidate.diff").write_text("--- changed\n")
+            with self.assertRaisesRegex(ValueError, "stale"):
+                elig.finish_blinded_review(
+                    evidence, "reviewer-1", "reject", True, stopped_ns=3_000_000_000,
+                )
+
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = self._evidence_with_diff(temp)
+            elig.start_blinded_review(evidence, started_ns=1_000_000_000)
+            elig.finish_blinded_review(evidence, "reviewer-1", "reject", True, stopped_ns=3_000_000_000)
+            review = json.loads((evidence / "review.json").read_text())
+            review["active_ms"] -= 1
+            (evidence / "review.json").write_text(json.dumps(review, sort_keys=True) + "\n")
+            result = elig.blinded_review_slot(evidence)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertIn("duration", result["reason"])
+
 
 class InterventionLedgerTests(unittest.TestCase):
     def test_absent_ledger_is_unavailable_not_zero(self):
@@ -796,10 +832,11 @@ class ComputeEligibilityTests(unittest.TestCase):
         wire = (_mcp_frame(42) + "\n").encode()
         (evidence / "mcp-wire.jsonl").write_bytes(wire)
         elig.write_presentation_evidence(evidence, prompt, wire)
-        packet = prepare_review_packet(evidence, evidence / "review-packet.json")
         elig.initialize_intervention_ledger(evidence)
-        elig.record_blinded_review(evidence, "reviewer-1", 0, 600_000_000_000, 400_000, True,
-                                   evidence / "review-packet.json", packet["candidate_digest"], "accept")
+        elig.start_blinded_review(evidence, started_ns=0)
+        elig.finish_blinded_review(
+            evidence, "reviewer-1", "accept", True, stopped_ns=600_000_000_000,
+        )
         return evidence
 
     def _complete_kwargs(self, evidence, drift_declared=False, gateway_log_bytes=b""):
@@ -888,6 +925,30 @@ class ComputeEligibilityTests(unittest.TestCase):
 
 
 class RunTupleEligibilityCliTests(unittest.TestCase):
+    def test_start_and_finish_review_cli_derive_host_clock_duration(self):
+        with tempfile.TemporaryDirectory(prefix="spx-cli-timed-review-") as temp:
+            evidence = Path(temp)
+            (evidence / "candidate.diff").write_text("--- a\n+++ b\n")
+            started = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/opencode-agent-task-pilot.py"),
+                 "start-review", "--evidence-dir", str(evidence)],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(started.returncode, 0, started.stderr)
+            start_record = json.loads(started.stdout)
+            self.assertIn("review_session_sha256", start_record)
+            time.sleep(0.01)
+            finished = subprocess.run(
+                [sys.executable, str(ROOT / "scripts/opencode-agent-task-pilot.py"),
+                 "finish-review", "--evidence-dir", str(evidence), "--reviewer-id", "r1",
+                 "--verdict", "reject", "--blinded"],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(finished.returncode, 0, finished.stderr)
+            result = elig.blinded_review_slot(evidence)
+            self.assertEqual(result["assurance"], "timed_packet_bound")
+            self.assertGreaterEqual(result["review_wall_ms"], 1)
+
     def test_intervene_and_record_review_cli_subcommands(self):
         with tempfile.TemporaryDirectory(prefix="spx-cli-eligibility-") as temp:
             evidence = Path(temp)

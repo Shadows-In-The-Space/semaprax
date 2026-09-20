@@ -54,6 +54,11 @@ REVIEW_KEYS = frozenset(
      "stopped_monotonic_ns", "active_ms"}
 )
 REVIEW_KEYS_V2 = REVIEW_KEYS | frozenset({"candidate_digest", "packet_sha256", "verdict"})
+REVIEW_SESSION_SCHEMA = "semaprax.opencode-agent-task-pilot-blinded-review-session.v1"
+REVIEW_SESSION_KEYS = frozenset(
+    {"schema", "candidate_digest", "packet_sha256", "started_monotonic_ns"}
+)
+REVIEW_KEYS_V3 = REVIEW_KEYS_V2 | frozenset({"review_session_sha256"})
 MAX_REVIEW_BYTES = 65536
 
 INTERVENTION_SCHEMA = "semaprax.opencode-agent-task-pilot-intervention.v1"
@@ -196,7 +201,8 @@ def presented_context_bytes(evidence_dir, prompt):
 
 
 def record_blinded_review(evidence_dir, reviewer_id, started_ns, stopped_ns, active_ms, blinded,
-                          packet_path=None, candidate_digest=None, verdict=None):
+                          packet_path=None, candidate_digest=None, verdict=None,
+                          review_session_sha256=None):
     """Write one operator-supplied blinded active review record, once.
 
     The reviewer works from a packet whose direct lane, model, and runner
@@ -243,8 +249,14 @@ def record_blinded_review(evidence_dir, reviewer_id, started_ns, stopped_ns, act
         if verdict not in ("accept", "reject"):
             raise ValueError("packet-bound review requires verdict accept or reject")
         packet_sha256 = hashlib.sha256(_read_regular(packet_path, 8 * 1024 * 1024)).hexdigest()
+        if review_session_sha256 is not None:
+            if (not isinstance(review_session_sha256, str) or len(review_session_sha256) != 64
+                    or any(character not in "0123456789abcdef" for character in review_session_sha256)):
+                raise ValueError("review session digest is malformed")
     elif candidate_digest is not None:
         raise ValueError("candidate digest requires a review packet")
+    elif review_session_sha256 is not None:
+        raise ValueError("review session digest requires a review packet")
     record = {
         "schema": REVIEW_SCHEMA,
         "reviewer_id": reviewer_id,
@@ -258,6 +270,8 @@ def record_blinded_review(evidence_dir, reviewer_id, started_ns, stopped_ns, act
         record["candidate_digest"] = candidate_digest
         record["packet_sha256"] = packet_sha256
         record["verdict"] = verdict
+        if review_session_sha256 is not None:
+            record["review_session_sha256"] = review_session_sha256
     path = evidence_dir / "review.json"
     body = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
     fd = None
@@ -289,6 +303,118 @@ def record_blinded_review(evidence_dir, reviewer_id, started_ns, stopped_ns, act
     return record
 
 
+def start_blinded_review(evidence_dir, started_ns=None):
+    """Freeze a label-free packet and host-clock review start for one trial.
+
+    The caller deliberately supplies no timing data.  The session's start comes
+    from the host monotonic clock after the immutable packet is created and is
+    bound to both the exact packet bytes and the current candidate inventory.
+    A reviewer may receive only the resulting packet plus this opaque session;
+    lane/model/runner fields are not copied into either artifact.
+    """
+    evidence_dir = Path(evidence_dir)
+    from opencode_agent_task_pilot.review_workflow import (
+        _canonical as packet_canonical, _read_regular, candidate_digest_for_evidence,
+        load_review_packet, prepare_review_packet,
+    )
+    if started_ns is None:
+        started_ns = time.monotonic_ns()
+    if isinstance(started_ns, bool) or not isinstance(started_ns, int) or started_ns < 0:
+        raise ValueError("review session start must be a nonnegative integer")
+    for name in ("review.json", "review-session.json", "review-packet.json"):
+        if (evidence_dir / name).exists() or (evidence_dir / name).is_symlink():
+            raise ValueError("a review artifact already exists for this trial")
+    packet_path = evidence_dir / "review-packet.json"
+    prepare_review_packet(evidence_dir, packet_path)
+    packet_bytes = _read_regular(packet_path, 8 * 1024 * 1024)
+    packet = load_review_packet(packet_path)
+    if packet_canonical(packet) + b"\n" != packet_bytes:
+        raise ValueError("review packet is not canonical JSON")
+    live_digest = candidate_digest_for_evidence(evidence_dir)
+    if packet["candidate_digest"] != live_digest:
+        raise ValueError("review packet is stale for the archived candidate")
+    session = {
+        "schema": REVIEW_SESSION_SCHEMA,
+        "candidate_digest": live_digest,
+        "packet_sha256": hashlib.sha256(packet_bytes).hexdigest(),
+        "started_monotonic_ns": started_ns,
+    }
+    body = _canonical(session) + b"\n"
+    path = evidence_dir / "review-session.json"
+    fd = None
+    try:
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise ValueError("safe review session creation is unavailable")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        written = 0
+        while written < len(body):
+            count = os.write(fd, body[written:])
+            if count <= 0:
+                raise ValueError("review session write made no progress")
+            written += count
+        held = os.fstat(fd)
+        current = os.stat(path, follow_symlinks=False)
+        if (not stat.S_ISREG(held.st_mode) or held.st_nlink != 1 or held.st_size != len(body)
+                or (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino)):
+            raise ValueError("review session changed during creation")
+    except (OSError, ValueError) as error:
+        # Keep a partial exclusive artifact fail-closed: never unlink an
+        # attacker-rebindable pathname during error cleanup.
+        raise ValueError("review session could not be created exclusively") from error
+    finally:
+        if fd is not None:
+            os.close(fd)
+    return {
+        "packet_path": str(packet_path),
+        "candidate_digest": live_digest,
+        "review_session_sha256": hashlib.sha256(body).hexdigest(),
+        "started_monotonic_ns": started_ns,
+    }
+
+
+def finish_blinded_review(evidence_dir, reviewer_id, verdict, blinded, stopped_ns=None):
+    """Record a verdict with elapsed active time derived from a started session."""
+    evidence_dir = Path(evidence_dir)
+    from opencode_agent_task_pilot.review_workflow import (
+        _read_regular, candidate_digest_for_evidence, load_review_packet,
+    )
+    if blinded is not True:
+        raise ValueError("a review record must attest blinded=True to be recorded")
+    if stopped_ns is None:
+        stopped_ns = time.monotonic_ns()
+    if isinstance(stopped_ns, bool) or not isinstance(stopped_ns, int) or stopped_ns < 0:
+        raise ValueError("review session stop must be a nonnegative integer")
+    session_path = evidence_dir / "review-session.json"
+    session_bytes = _read_regular(session_path, MAX_REVIEW_BYTES)
+    try:
+        session = json.loads(session_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("review session is not readable canonical JSON") from error
+    if (not isinstance(session, dict) or set(session) != REVIEW_SESSION_KEYS
+            or session.get("schema") != REVIEW_SESSION_SCHEMA
+            or _canonical(session) + b"\n" != session_bytes):
+        raise ValueError("review session has an unexpected shape")
+    started_ns = session.get("started_monotonic_ns")
+    if isinstance(started_ns, bool) or not isinstance(started_ns, int) or started_ns < 0:
+        raise ValueError("review session start is invalid")
+    if stopped_ns <= started_ns:
+        raise ValueError("review session stop must be after its host-clock start")
+    active_ms = (stopped_ns - started_ns) // 1_000_000
+    if active_ms <= 0:
+        raise ValueError("review session must last at least one millisecond")
+    packet_path = evidence_dir / "review-packet.json"
+    packet_bytes = _read_regular(packet_path, 8 * 1024 * 1024)
+    packet = load_review_packet(packet_path)
+    live_digest = candidate_digest_for_evidence(evidence_dir)
+    if (packet["candidate_digest"] != live_digest or session.get("candidate_digest") != live_digest
+            or session.get("packet_sha256") != hashlib.sha256(packet_bytes).hexdigest()):
+        raise ValueError("review session packet binding is stale")
+    return record_blinded_review(
+        evidence_dir, reviewer_id, started_ns, stopped_ns, active_ms, True,
+        packet_path, live_digest, verdict, hashlib.sha256(session_bytes).hexdigest(),
+    )
+
+
 def blinded_review_slot(evidence_dir):
     """Read the recorded input slot for blinded active review time.
 
@@ -308,7 +434,7 @@ def blinded_review_slot(evidence_dir):
         value = json.loads(_read_regular(path, MAX_REVIEW_BYTES).decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return {"status": "unavailable", "reason": "blinded review record is not readable JSON"}
-    if not isinstance(value, dict) or set(value) not in (REVIEW_KEYS, REVIEW_KEYS_V2):
+    if not isinstance(value, dict) or set(value) not in (REVIEW_KEYS, REVIEW_KEYS_V2, REVIEW_KEYS_V3):
         return {"status": "unavailable", "reason": "blinded review record has an unexpected shape"}
     if value.get("schema") != REVIEW_SCHEMA:
         return {"status": "unavailable", "reason": "blinded review record schema differs"}
@@ -339,7 +465,7 @@ def blinded_review_slot(evidence_dir):
             "review_wall_ms": active, "reviewer_id": reviewer_id,
             "diff_sha256": value["diff_sha256"],
         }
-    if set(value) != REVIEW_KEYS_V2:
+    if set(value) not in (REVIEW_KEYS_V2, REVIEW_KEYS_V3):
         return {"status": "unavailable", "reason": "review packet binding is malformed"}
     if (not isinstance(value.get("candidate_digest"), str) or len(value["candidate_digest"]) != 64 or
             any(c not in "0123456789abcdef" for c in value["candidate_digest"]) or
@@ -359,9 +485,33 @@ def blinded_review_slot(evidence_dir):
         return {"status": "unavailable", "reason": "review packet was deleted or replaced"}
     if packet["candidate_digest"] != value["candidate_digest"] or live_digest != value["candidate_digest"]:
         return {"status": "unavailable", "reason": "review packet candidate digest is stale"}
+    if set(value) == REVIEW_KEYS_V3:
+        session_path = evidence_dir / "review-session.json"
+        try:
+            session_bytes = _read_regular(session_path, MAX_REVIEW_BYTES)
+            session = json.loads(session_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return {"status": "unavailable", "reason": "timed review session is not readable JSON"}
+        if (not isinstance(session, dict) or set(session) != REVIEW_SESSION_KEYS
+                or session.get("schema") != REVIEW_SESSION_SCHEMA
+                or _canonical(session) + b"\n" != session_bytes):
+            return {"status": "unavailable", "reason": "timed review session has an unexpected shape"}
+        session_start = session.get("started_monotonic_ns")
+        if isinstance(session_start, bool) or not isinstance(session_start, int) or session_start < 0:
+            return {"status": "unavailable", "reason": "timed review session start is invalid"}
+        if (value.get("review_session_sha256") != hashlib.sha256(session_bytes).hexdigest()
+                or session.get("candidate_digest") != value["candidate_digest"]
+                or session.get("packet_sha256") != value["packet_sha256"]):
+            return {"status": "unavailable", "reason": "timed review session binding differs"}
+        if (value["started_monotonic_ns"] != session_start
+                or value["active_ms"] != (value["stopped_monotonic_ns"] - session_start) // 1_000_000):
+            return {"status": "unavailable", "reason": "timed review duration differs from host-clock session"}
+        assurance = "timed_packet_bound"
+    else:
+        assurance = "packet_bound_manual_time"
     return {
         "status": "observed",
-        "assurance": "packet_bound",
+        "assurance": assurance,
         "review_wall_ms": active,
         "reviewer_id": reviewer_id,
         "diff_sha256": value["diff_sha256"],
@@ -711,8 +861,8 @@ def compute_eligibility(*, prompt, gateway_log_bytes, drift_declared, evidence_d
         review = {"status": "unavailable", "reason": f"blinded review computation failed: {error}"}
     if review.get("status") != "observed":
         reasons.append("blinded active review time: " + review.get("reason", "unavailable"))
-    elif review.get("assurance") != "packet_bound":
-        reasons.append("blinded active review time: legacy review lacks packet binding")
+    elif review.get("assurance") != "timed_packet_bound":
+        reasons.append("blinded active review time: review lacks a host-clock timed packet session")
 
     try:
         interventions = intervention_ledger(evidence_dir)

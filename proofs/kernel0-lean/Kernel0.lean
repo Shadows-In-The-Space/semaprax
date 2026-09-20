@@ -44,6 +44,15 @@ proof left exactly this case as `sorry` for exactly this reason).
 through `preservation` as a hypothesis, closing the gap honestly rather than
 by construction-order coincidence.
 
+The later normalization tranche adds `WeightedCallCertificate`: supplied
+function weights must strictly dominate their bodies, calls pay their callee
+weight, and value substitution preserves the resulting potential. Every real
+`Step` then strictly decreases that natural number, so strong induction plus
+Preservation proves finite normalization of closed well-typed terms to a value
+or modeled arithmetic fault. This is certificate-conditioned proof, not a
+claim that Rust HIR currently emits or verifies the weights, and it does not
+compute a concrete universal fuel bound.
+
 Issue #188's seeded-defect audit of this file (proving the mechanized proof
 can actually reject an injected unsoundness, not only that it currently
 passes) surfaced a third real gap while choosing which real-system boundary
@@ -1456,6 +1465,157 @@ theorem step_decreases_nodes_or_contextual_call_beta {P e e'} (hs : Step P e e')
       · exact Or.inr ⟨callee, .callArgs hvs hbeta⟩
   | callBeta hargs hf => exact Or.inr ⟨_, .here hargs hf⟩
 
+/-! ## A global weighted normalization measure
+
+Raw node count cannot decrease across every call beta, but the program can
+carry an independently checkable weight certificate: every function's weight
+strictly dominates the potential of its body.  Variables and scalar values
+both cost one, so substituting value arguments preserves this potential.  A
+call then pays the callee's weight in addition to its argument potential.
+Consequently every real `Step`, including a beta expansion beneath an
+evaluation context, strictly decreases one natural number.
+
+This certificate is proof data, not execution permission.  The theorem below
+checks a supplied certificate; deriving compact weights automatically from a
+ranked program remains a separate compiler-correspondence obligation.
+-/
+
+mutual
+  def weightedPotential (weight : Nat → Nat) : Expr → Nat
+    | .intLit _ | .boolLit _ | .var _ => 1
+    | .arith _ a b | .cmp _ a b | .and a b | .or a b | .letIn a b =>
+        weightedPotential weight a + weightedPotential weight b + 1
+    | .neg e | .not e => weightedPotential weight e + 1
+    | .ite c a b => weightedPotential weight c + weightedPotential weight a +
+        weightedPotential weight b + 1
+    | .call f args => weightedArgsPotential weight args + weight f
+
+  def weightedArgsPotential (weight : Nat → Nat) : List Expr → Nat
+    | [] => 0
+    | e :: es => weightedPotential weight e + weightedArgsPotential weight es
+end
+
+def WeightedCallCertificate (P : Program) (weight : Nat → Nat) : Prop :=
+  ∀ f fd, P[f]? = some fd → weightedPotential weight fd.body < weight f
+
+theorem weightedPotential_value {weight v} (hv : IsValue v) :
+    weightedPotential weight v = 1 := by
+  cases hv <;> rfl
+
+theorem weightedArgsPotential_append (weight : Nat → Nat) (left right : List Expr) :
+    weightedArgsPotential weight (left ++ right) =
+      weightedArgsPotential weight left + weightedArgsPotential weight right := by
+  induction left with
+  | nil => simp [weightedArgsPotential]
+  | cons e es ih =>
+      simp only [List.cons_append, weightedArgsPotential, ih, Nat.add_assoc]
+
+mutual
+
+theorem weightedPotential_substEnvAt_values (weight : Nat → Nat) (base : Nat)
+    (env : List Expr) : (∀ v ∈ env, IsValue v) → ∀ e,
+      weightedPotential weight (substEnvAt base env e) = weightedPotential weight e
+  | henv, .intLit _ => by simp [substEnvAt, weightedPotential]
+  | henv, .boolLit _ => by simp [substEnvAt, weightedPotential]
+  | henv, .var i => by
+      simp only [substEnvAt]
+      split
+      · rfl
+      · split
+        · rename_i h
+          exact weightedPotential_value (henv _ (List.getElem_mem h))
+        · rfl
+  | henv, .arith op a b => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv a,
+        weightedPotential_substEnvAt_values weight base env henv b]
+  | henv, .cmp op a b => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv a,
+        weightedPotential_substEnvAt_values weight base env henv b]
+  | henv, .neg e => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv e]
+  | henv, .not e => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv e]
+  | henv, .and a b => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv a,
+        weightedPotential_substEnvAt_values weight base env henv b]
+  | henv, .or a b => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv a,
+        weightedPotential_substEnvAt_values weight base env henv b]
+  | henv, .ite c a b => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv c,
+        weightedPotential_substEnvAt_values weight base env henv a,
+        weightedPotential_substEnvAt_values weight base env henv b]
+  | henv, .letIn a b => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv a,
+        weightedPotential_substEnvAt_values weight (base + 1) env henv b]
+  | henv, .call f args => by
+      simp only [substEnvAt, weightedPotential]
+      rw [weightedArgsPotential_substEnvAt_values weight base env henv args]
+
+theorem weightedArgsPotential_substEnvAt_values (weight : Nat → Nat) (base : Nat)
+    (env : List Expr) : (∀ v ∈ env, IsValue v) → ∀ args,
+      weightedArgsPotential weight (args.map (substEnvAt base env)) =
+        weightedArgsPotential weight args
+  | henv, [] => rfl
+  | henv, e :: es => by
+      simp only [List.map_cons, weightedArgsPotential]
+      rw [weightedPotential_substEnvAt_values weight base env henv e,
+        weightedArgsPotential_substEnvAt_values weight base env henv es]
+
+end
+
+
+/-- A checked weight certificate turns the entire small-step relation into a
+strict descent on one natural-number potential. -/
+theorem step_decreases_weighted_potential {P weight e e'}
+    (hc : WeightedCallCertificate P weight) (hs : Step P e e') :
+    weightedPotential weight e' < weightedPotential weight e := by
+  induction hs with
+  | arithStep1 h ih => simp only [weightedPotential] at ih ⊢; omega
+  | arithStep2 hv h ih => simp only [weightedPotential] at ih ⊢; omega
+  | arithVal h => simp [weightedPotential]
+  | cmpStep1 h ih => simp only [weightedPotential] at ih ⊢; omega
+  | cmpStep2 hv h ih => simp only [weightedPotential] at ih ⊢; omega
+  | cmpVal => simp [weightedPotential]
+  | cmpBoolVal hop => simp [weightedPotential]
+  | negStep h ih => simp only [weightedPotential] at ih ⊢; omega
+  | negVal h => simp [weightedPotential]
+  | notStep h ih => simp only [weightedPotential] at ih ⊢; omega
+  | notVal => simp [weightedPotential]
+  | andStep h ih => simp only [weightedPotential] at ih ⊢; omega
+  | andTrue => simp [weightedPotential]; omega
+  | andFalse => simp [weightedPotential]; omega
+  | orStep h ih => simp only [weightedPotential] at ih ⊢; omega
+  | orTrue => simp [weightedPotential]; omega
+  | orFalse => simp [weightedPotential]; omega
+  | iteStep h ih => simp only [weightedPotential] at ih ⊢; omega
+  | iteTrue => simp [weightedPotential]; omega
+  | iteFalse => simp [weightedPotential]; omega
+  | letStep h ih => simp only [weightedPotential] at ih ⊢; omega
+  | letBeta hv =>
+      simp only [substAt]
+      rw [weightedPotential_substEnvAt_values weight 0 [_] (by simpa using hv)]
+      simp only [weightedPotential]
+      rw [weightedPotential_value hv]
+      omega
+  | callArgs hvs h ih =>
+      simp only [weightedPotential, weightedArgsPotential_append,
+        weightedArgsPotential] at ih ⊢
+      omega
+  | callBeta hargs hf =>
+      rw [weightedPotential_substEnvAt_values weight 0 _ hargs]
+      simp only [weightedPotential]
+      have hbody := hc _ _ hf
+      omega
+
 /-- The helper fixture's first beta step is deliberately *not* a raw syntax
 decrease: both source and target are one call node. The dichotomy classifies it
 as the ranked-beta branch instead of hiding it behind a false size claim. -/
@@ -1528,6 +1688,77 @@ theorem bounded_step_progress {P e T} (hwf : WellFormedProgram P)
         · exact Or.inr ⟨frontier, next, .cons hs hsteps, hnext⟩
       · exact Or.inl ⟨e, 0, Nat.zero_le _, .refl e, Or.inr hf⟩
 
+/-- **Full normalization from a checked global weight certificate.** Every
+closed, well-typed term reaches a value or modeled arithmetic fault after a
+finite sequence of the real small-step relation. The proof recurses on the
+strictly decreasing weighted potential, and uses Preservation at each step. -/
+theorem normalizes_from_weighted_certificate {P weight e T}
+    (hwf : WellFormedProgram P) (hc : WeightedCallCertificate P weight)
+    (ht : HasType P [] e T) :
+    ∃ out n, Steps P e out n ∧ Terminal out := by
+  have terminate : ∀ m, ∀ e T, weightedPotential weight e = m →
+      HasType P [] e T → ∃ out n, Steps P e out n ∧ Terminal out := by
+    intro m
+    induction m using Nat.strongRecOn with
+    | ind m ih =>
+      intro e T hm ht
+      rcases progress_full e ht with hv | ⟨e', hs⟩ | hf
+      · exact ⟨e, 0, .refl e, Or.inl hv⟩
+      · have hdec := step_decreases_weighted_potential hc hs
+        have ht' := preservation hwf ht hs
+        have hlt : weightedPotential weight e' < m := by simpa [← hm] using hdec
+        rcases ih _ hlt e' _ rfl ht' with ⟨out, n, hsteps, hterminal⟩
+        exact ⟨out, n + 1, .cons hs hsteps, hterminal⟩
+      · exact ⟨e, 0, .refl e, Or.inr hf⟩
+  exact terminate _ e T rfl ht
+
+def acyclicCallWeight (f : Nat) : Nat := if f = 0 then 3 else 2
+
+/-- The positive two-function fixture carries a non-vacuous certificate: its
+caller weight dominates the helper call, and the helper weight dominates its
+literal body. -/
+theorem acyclic_call_fixture_weighted :
+    WeightedCallCertificate acyclicCallFixture acyclicCallWeight := by
+  intro f fd hf
+  cases f with
+  | zero =>
+      simp [acyclicCallFixture] at hf
+      subst fd
+      simp [acyclicCallWeight, weightedPotential, weightedArgsPotential]
+  | succ f =>
+      cases f with
+      | zero =>
+          simp [acyclicCallFixture] at hf
+          subst fd
+          simp [acyclicCallWeight, weightedPotential]
+      | succ f => simp [acyclicCallFixture] at hf
+
+theorem acyclic_call_fixture_well_formed :
+    WellFormedProgram acyclicCallFixture := by
+  intro f fd hf
+  cases f with
+  | zero =>
+      simp [acyclicCallFixture] at hf
+      subst fd
+      exact HasType.call (fd := ⟨[], .int, .intLit 42⟩)
+        (by simp [acyclicCallFixture]) ArgsHaveTypes.nil
+  | succ f =>
+      cases f with
+      | zero =>
+          simp [acyclicCallFixture] at hf
+          subst fd
+          exact HasType.intLit
+      | succ f => simp [acyclicCallFixture] at hf
+
+/-- The general theorem applies to the real helper-call fixture, rather than
+only to call-free terms. -/
+theorem helper_call_globally_normalizes :
+    ∃ out n, Steps acyclicCallFixture (.call 0 []) out n ∧ Terminal out := by
+  apply normalizes_from_weighted_certificate acyclic_call_fixture_well_formed
+    acyclic_call_fixture_weighted
+  exact HasType.call (fd := ⟨[], .int, .call 1 []⟩)
+    (by simp [acyclicCallFixture]) ArgsHaveTypes.nil
+
 /-- The two real beta steps in the positive helper-call fixture. -/
 theorem helper_call_takes_two_steps :
     Steps acyclicCallFixture (.call 0 []) (.intLit 42) 2 := by
@@ -1586,3 +1817,8 @@ the substring `sorryAx`). -/
 #print axioms Kernel0.helper_first_step_is_contextual_call_beta
 #print axioms Kernel0.helper_first_step_not_node_decrease
 #print axioms Kernel0.helper_first_beta_targets_have_lower_rank
+#print axioms Kernel0.weightedPotential_substEnvAt_values
+#print axioms Kernel0.step_decreases_weighted_potential
+#print axioms Kernel0.normalizes_from_weighted_certificate
+#print axioms Kernel0.acyclic_call_fixture_weighted
+#print axioms Kernel0.helper_call_globally_normalizes

@@ -34,7 +34,7 @@ What it catches, and how
 3. A headline theorem starts depending on a custom axiom, or on `sorryAx`
    (Lean's marker for an admitted hole).
    -> After `lake build`, the gate writes an unpredictable-marker audit
-      driver that imports `Kernel0` and issues all 29 `#print axioms`
+      driver that imports `Kernel0` and issues all 34 `#print axioms`
       commands itself. Only reports inside that invocation's owned marker
       interval are parsed; missing, duplicate, forged source-owned, or
       unexpected reports fail. Each set must be a subset of `propext`,
@@ -57,7 +57,7 @@ What it catches, and how
    constructor, a zero-cost `Steps.teleport` constructor, or a local notation
    that rebinds `FaultRedex` to `fun _ => True` for later declarations.
    -> The SHA-256 pin of the complete comment/string-stripped live source
-      authenticates every command and every gap between declarations. Thirteen
+      authenticates every command and every gap between declarations. Fourteen
       narrower exact pins identify changes to the main semantic regions. Any
       live command or proof-body change therefore requires a deliberate full
       source repin. Always-run hostile self-tests inject all three attacks and
@@ -139,6 +139,11 @@ HEADLINE_THEOREMS = [
     "helper_first_step_is_contextual_call_beta",
     "helper_first_step_not_node_decrease",
     "helper_first_beta_targets_have_lower_rank",
+    "weightedPotential_substEnvAt_values",
+    "step_decreases_weighted_potential",
+    "normalizes_from_weighted_certificate",
+    "acyclic_call_fixture_weighted",
+    "helper_call_globally_normalizes",
 ]
 
 # Frozen, byte-exact expected statement text for each headline theorem,
@@ -282,6 +287,30 @@ PINNED_SIGNATURES = {
         "    ∀ g ∈ callTargets (substEnvAt 0 [] (Expr.call 1 [])),\n"
         "      (if g = 0 then 1 else 0) < (if (0 : Nat) = 0 then 1 else 0)"
     ),
+    "weightedPotential_substEnvAt_values": (
+        "theorem weightedPotential_substEnvAt_values (weight : Nat → Nat) (base : Nat)\n"
+        "    (env : List Expr) : (∀ v ∈ env, IsValue v) → ∀ e,\n"
+        "      weightedPotential weight (substEnvAt base env e) = weightedPotential weight e"
+    ),
+    "step_decreases_weighted_potential": (
+        "theorem step_decreases_weighted_potential {P weight e e'}\n"
+        "    (hc : WeightedCallCertificate P weight) (hs : Step P e e') :\n"
+        "    weightedPotential weight e' < weightedPotential weight e"
+    ),
+    "normalizes_from_weighted_certificate": (
+        "theorem normalizes_from_weighted_certificate {P weight e T}\n"
+        "    (hwf : WellFormedProgram P) (hc : WeightedCallCertificate P weight)\n"
+        "    (ht : HasType P [] e T) :\n"
+        "    ∃ out n, Steps P e out n ∧ Terminal out"
+    ),
+    "acyclic_call_fixture_weighted": (
+        "theorem acyclic_call_fixture_weighted :\n"
+        "    WeightedCallCertificate acyclicCallFixture acyclicCallWeight"
+    ),
+    "helper_call_globally_normalizes": (
+        "theorem helper_call_globally_normalizes :\n"
+        "    ∃ out n, Steps acyclicCallFixture (.call 0 []) out n ∧ Terminal out"
+    ),
 }
 
 # Comment/string-stripped exact code regions that define the judgments named
@@ -312,9 +341,12 @@ SEMANTIC_REGION_PINS = [
     ("args_progress", "inductive ArgsProgress", "theorem progress_full",
      "99cf370b72cdeab1b541f46a3f766c27ceff9ec050e13c7ca718adc989ca1ae5"),
     ("structural_decrease", "  def nodeCount : Expr → Nat", "inductive Steps",
-     "0c2b4ab8f2cd5a275d894a42158bb8b27f87e539facfce1d84be6f838f78e5ee"),
+     "3eb5482b7c5bda52c0e3261103b36c6115ceb4b22ad1f175ad854af9b3d8ce24"),
     ("bounded_steps", "inductive Steps", "theorem bounded_step_progress",
      "d37830caa89da3799719efc5842d0a6566498ff3c00ada15faee6297ac2c0edc"),
+    ("weighted_normalization", "theorem bounded_step_progress",
+     "theorem helper_call_takes_two_steps",
+     "b4d750929afb051e008a59f736d0ae5e7e42d40a88ef193fc8d09e18342d027b"),
 ]
 
 # This closes the gaps between the targeted regions above. Lean commands in a
@@ -326,7 +358,7 @@ SEMANTIC_REGION_PINS = [
 # by the same lexer used for signatures and token checks. Do not update this
 # value merely to make the gate green: every live-source change needs review.
 PINNED_LIVE_SOURCE_SHA256 = (
-    "faa63bb11f828768d9382c8bd21ae3537435757c2749aa97917ef0e86692aad8"
+    "7d4d2965a36027e8a094a590a474a2fdc7e7ed19328b788183600587bd543265"
 )
 
 PINNED_RECURSIVE_CONTROL = """import Kernel0

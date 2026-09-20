@@ -30,8 +30,12 @@ Read this before citing this document elsewhere.
   explicit strict-rank certificate. A further measure tranche proves that
   value substitution preserves exact call targets and syntax size, and that
   every real step either strictly shrinks syntax or is a contextual call beta
-  whose expanded body's calls have lower rank. It does not yet compose these
-  facts into a global well-founded measure or universal fuel bound, and a
+  whose expanded body's calls have lower rank. The weighted-measure tranche
+  adds an independently checkable per-function certificate, proves every
+  real step strictly decreases its global natural-number potential, and
+  derives finite normalization to a value or modeled fault for every closed,
+  well-typed term under that certificate. It does not yet derive weights from
+  call ranks or compiler HIR, nor compute a universal numeric fuel bound. The
   connection to the compiler's HIR remains open. The existing
   `kernel0-lean-proof-gate` CI job runs the proof
   gate; a wired job does not establish a hosted verdict for an unrun commit.
@@ -402,17 +406,25 @@ one call node, demonstrating the ranked branch rather than hiding it behind a
 false size decrease. The committed hostile control tries that false strict
 decrease and must fail specifically at `1 < 1`.
 
-These facts still do not construct the global multiset or weighted
-well-founded measure needed to account for an expanding callee body beside
-unrelated pending calls, so they do not derive a universal evaluation bound.
-They also do not emit or verify a certificate from Rust HIR. The Rust bounded reifier's active-path
+The weighted-measure tranche now defines `weightedPotential` and
+`WeightedCallCertificate`: each function's supplied weight must strictly
+dominate its body potential, while a call pays that weight plus its arguments.
+Value substitution preserves the potential exactly, every `Step` strictly
+decreases it (including contextual beta), and
+`normalizes_from_weighted_certificate` uses strong induction plus Preservation
+to derive finite normalization to a value or modeled fault. The ordinary
+two-function helper has a concrete non-vacuous certificate and exercises the
+global theorem.
+
+This still does not derive certificate weights from `CallGraphRanked`, emit or
+verify them from Rust HIR, or calculate an executable numeric fuel bound. The Rust bounded reifier's active-path
 cycle refusal is the corresponding implementation discipline, with finite
 differential evidence and independent exact-source replay; no theorem connects
 the two. The finite scalar Kernel-0 scope, pinned Lean toolchain, zero external
 Lean packages, backend non-claims, and self-hosting rung remain unchanged.
 
 An exact-current-worktree local run of
-`python3 scripts/kernel0-lean-gate.py --require-kernel` passed all 29 pinned
+`python3 scripts/kernel0-lean-gate.py --require-kernel` passed all 34 pinned
 theorem signatures, the no-hole scan, `lake build`, every theorem's axiom-set
 audit, the forged recursive-certificate rejection control, the hostile
 one-step budget control, and the false structural-decrease control. This is local
@@ -423,13 +435,13 @@ The gate's trust boundary is now adversarially pinned as well. Signature
 lookup runs on comment/string-stripped Lean, so a commented copy cannot shadow
 a changed live theorem. The source scan rejects both `axiom` and Lean's
 equivalent top-level `constant` declarations. A fresh gate-owned audit driver,
-not `Kernel0.lean` output, imports the built module and emits all 29 reports
+not `Kernel0.lean` output, imports the built module and emits all 34 reports
 between unpredictable markers; missing, duplicate, unexpected, or source-
 forged reports fail closed. The authoritative environment pin hashes the
 complete comment/string-stripped live source: every command, gap between
 declarations, and proof body. Thus a notation, macro, syntax/scope command,
 attribute, instance, or any other live elaboration change requires deliberate
-review and repinning. Thirteen narrower exact regions remain for precise
+review and repinning. Fourteen narrower exact regions remain for precise
 diagnostics over `Expr`, `Step`, `FaultRedex`, `ArgsProgress`, `Steps`,
 `Terminal`, `NormalizesWithin`, and their semantic dependencies. Always-run
 hostile self-tests exercise the commented-signature, forged-report/removal,
@@ -598,8 +610,13 @@ same inventory in more detail):
   classified beta exposes a real function lookup whose substituted-body calls
   have strictly lower rank. The equal-size helper beta is the positive control,
   while a compiled hostile proof of its strict size decrease fails at `1 < 1`.
-- **Explicitly not covered**: the global multiset/weighted measure and derived
-  universal small-step normalization bound, any connection
+- **Added after the structural-decrease tranche**: a supplied
+  `WeightedCallCertificate` makes the complete `Step` relation strictly
+  decrease one natural-number potential; the mechanization derives finite
+  small-step normalization under that certificate and applies it to a real
+  helper-call fixture.
+- **Explicitly not covered**: derivation of weights from strict call ranks or
+  compiler HIR, a computed universal numeric fuel bound, any connection
   to the compiler's real HIR (`src/kernel_zero.rs` or otherwise), and the
   native/Wasm backends.
 

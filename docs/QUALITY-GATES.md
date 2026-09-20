@@ -157,8 +157,11 @@ progress theorem: within any supplied budget a closed, well-typed term reaches
 a value/fault or consumes the exact budget with a witnessed next `Step`. This
 proof also establishes the local decrease bridge: value substitution preserves
 node count and call targets, and every step either shrinks syntax or is a
-contextual beta whose introduced calls have lower rank. This is not yet a
-global well-founded measure or universal normalization bound --
+contextual beta whose introduced calls have lower rank. A supplied
+`WeightedCallCertificate` now yields a global natural-number potential that
+strictly decreases on every real step and a finite normalization theorem for
+closed well-typed terms. The gate does not derive weights from the ranked call
+graph or compiler HIR, and does not compute a numeric fuel bound --
 see [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md) for the
 design record and [Semantic Kernel v1](SEMANTIC-KERNEL-V1.md) for what
 Kernel-0 is. Before issue #188, nothing in the repository re-checked that
@@ -169,14 +172,14 @@ stop building.
 `scripts/kernel0-lean-gate.py` is that executable gate, and its own module
 doc comment is the source of truth for its exact behavior. Summary:
 
-- **Always runs, no Lean toolchain required**: re-locates each of the 29
+- **Always runs, no Lean toolchain required**: re-locates each of the 34
   headline theorems (`progress_scalarIf`, `progress_scalarIf_closed`,
   `preservation`, `subst_preserves_type`, `subst_preserves_type_args`,
   `hastype_weaken_right`, `hastype_weaken_right_args`,
   `bool_equality_has_type`, `bool_equality_steps`, `bool_inequality_steps`,
   `bool_ordering_is_not_typed`, the five ranked-call-graph theorems, the
   full-language progress pair, bounded-step theorem, two-step fixture, and
-  eight structural/rank-bridge theorems)
+  eight structural/rank-bridge theorems and five weighted-normalization theorems)
   by name in the source
   and fails if any is missing (deleted or renamed); compares each theorem's
   exact statement text against a frozen, byte-exact pin in the script and
@@ -185,7 +188,7 @@ doc comment is the source of truth for its exact behavior. Summary:
   complete comment/string-stripped live source (every command, declaration
   gap, and proof body), so notation/macro/syntax/scope/attribute/instance or
   other elaboration-environment changes require a deliberate full-source
-  repin; retains 13 narrower exact code-region pins for precise diagnostics
+  repin; retains 14 narrower exact code-region pins for precise diagnostics
   over the semantic boundary
   (`Expr`, `Step`, the complete `FaultRedex` and `ArgsProgress` constructors,
   `Steps`, `Terminal`, `NormalizesWithin`, and their type/value/program/
@@ -200,7 +203,7 @@ doc comment is the source of truth for its exact behavior. Summary:
   [the mechanization doc's "A concrete pitfall"](KERNEL-PROOF-MECHANIZATION-V1.md#a-concrete-pitfall-the-textual-half-of-the-gate-must-avoid).
 - **Runs only when `lake` is on `PATH`**: a `lake build` of
   `proofs/kernel0-lean/`, followed by a gate-owned temporary Lean driver that
-  imports `Kernel0` and issues all 29 `#print axioms` commands between fresh,
+  imports `Kernel0` and issues all 34 `#print axioms` commands between fresh,
   unpredictable markers. The gate parses only that owned interval and fails
   on a missing/duplicate/unexpected report, `sorryAx`, or an axiom outside
   `propext`/`Classical.choice`/`Quot.sound`; proof-source output cannot stand in
@@ -423,7 +426,7 @@ Select every row touched by the change; these categories are cumulative.
 | Unix npm publication | Real-carrier parent/ancestor substitution, exact retained artifact and foreign-byte preservation, healthy alias binding, unchanged no-clobber behavior and thread-local fixture isolation; [Project Manifest v2](PROJECT-MANIFEST-V2.md) owns the shared boundary and maintained regression modules |
 | Shared full-toolchain test launcher | Exact Cargo artifact selection, stale guessed-path rejection, unique manifest-bound binary and successful build completion; [development](DEVELOPMENT.md#verification) owns the helper boundary and maintained regression entry point |
 | Unpacked release product | Explicit native archive admission, exact inventory and manifest/version agreement, outside-checkout calculator and read-only daemon execution, stable source/package bytes, and real generated Node/Rust consumers; [release process](RELEASE-PROCESS.md) separates artifact labels, local execution and release provenance. No implicit archive build, extraction, installation or hosted promotion. |
-| Kernel-0 Lean proof (`proofs/kernel0-lean/`) | Headline-theorem presence and byte-exact pinned signatures extracted from comment/string-stripped source (deletion, renaming, statement-weakening and commented-signature spoofing fail closed, no Lean toolchain needed), one authoritative exact pin over the complete live comment/string-stripped source plus 13 narrower semantic-region pins for diagnostics, a comment/string-aware `sorry`/`admit`/`axiom`/`constant` token scan, and, where `lake` is on PATH, a `lake build` plus a gate-owned unpredictable-marker `#print axioms` audit requiring every headline theorem's axiom set to be a subset of `propext`/`Classical.choice`/`Quot.sound`. The complete-source pin makes every live command, declaration gap, and proof body review-and-repin controlled. Built-in hostile self-tests reject commented signatures, source-forged/removed reports, live `constant` declarations, an injected zero-cost `Steps.teleport`, an injected universal `FaultRedex`, and a gap-injected local notation rebinding `FaultRedex` to `True`. The build half also requires three semantic hostile controls to fail at their exact type mismatches: a recursive call cannot forge strict rank, a genuine two-step fixture cannot fit a one-step normalization budget, and its equal-size first beta cannot be forged into a strict node decrease. See "Kernel-0 Lean proof gate" below for the exact catch/skip inventory; a missing toolchain is an explicit, visible skip of the build half only, never a silent pass. |
+| Kernel-0 Lean proof (`proofs/kernel0-lean/`) | Headline-theorem presence and byte-exact pinned signatures extracted from comment/string-stripped source (deletion, renaming, statement-weakening and commented-signature spoofing fail closed, no Lean toolchain needed), one authoritative exact pin over the complete live comment/string-stripped source plus 14 narrower semantic-region pins for diagnostics, a comment/string-aware `sorry`/`admit`/`axiom`/`constant` token scan, and, where `lake` is on PATH, a `lake build` plus a gate-owned unpredictable-marker `#print axioms` audit requiring every headline theorem's axiom set to be a subset of `propext`/`Classical.choice`/`Quot.sound`. The complete-source pin makes every live command, declaration gap, and proof body review-and-repin controlled. Built-in hostile self-tests reject commented signatures, source-forged/removed reports, live `constant` declarations, an injected zero-cost `Steps.teleport`, an injected universal `FaultRedex`, and a gap-injected local notation rebinding `FaultRedex` to `True`. The build half also requires three semantic hostile controls to fail at their exact type mismatches: a recursive call cannot forge strict rank, a genuine two-step fixture cannot fit a one-step normalization budget, and its equal-size first beta cannot be forged into a strict node decrease. See "Kernel-0 Lean proof gate" below for the exact catch/skip inventory; a missing toolchain is an explicit, visible skip of the build half only, never a silent pass. |
 
 The owning specification lists exact focused tests. If it does not, add the
 missing evidence section there instead of growing this document into a second

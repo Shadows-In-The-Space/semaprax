@@ -497,13 +497,13 @@ Success or any unrelated failure is a gate failure.
 
 The gate itself does not trust proof-source report text. It locates pinned
 signatures only after stripping comments and strings, rejects top-level
-`constant` as well as `axiom`, and runs all 29 axiom queries from a generated
+`constant` as well as `axiom`, and runs all 34 axiom queries from a generated
 driver bracketed by unpredictable markers. Hostile self-tests pin rejection of
 a commented-signature shadow, forged reports after source-report removal, and
 a live `constant` declaration. One authoritative digest covers the complete
 comment/string-stripped live source, including commands between declarations
 and every proof body, so later notation/macro/syntax/scope/attribute/instance
-changes cannot silently alter elaboration. Thirteen narrower region pins bind the
+changes cannot silently alter elaboration. Fourteen narrower region pins bind the
 headline statements to `Expr`, `Step`, the complete `FaultRedex` and
 `ArgsProgress` relations, `Steps`, `Terminal`, `NormalizesWithin`, and their
 semantic dependencies with more precise diagnostics. Further hostile self-tests
@@ -517,14 +517,18 @@ that the Rust traversal produces a Lean rank certificate. A later tranche
 proves full-language Progress and fuel-bounded iteration over the real `Step`
 relation: for every supplied fuel, a closed well-typed term reaches a
 value/fault within budget or consumes the exact budget and has a witnessed
-next step. The latest tranche proves value substitution preserves exact call
+next step. The structural tranche proves value substitution preserves exact call
 targets and raw node count, classifies every real step as either a strict node
 decrease or a contextual call beta, and proves every classified beta exposes
-an actual substituted callee body whose calls have strictly lower rank. It
-does not yet combine those local facts into the multiset/weighted global
-measure needed when beta expansion coexists with unrelated pending calls, so
-it does not derive a universal fuel from call rank and term structure. Full
-small-step normalization, source-to-Lean correspondence,
+an actual substituted callee body whose calls have strictly lower rank. The
+weighted tranche adds a separately checked `WeightedCallCertificate`: each
+function weight dominates its body potential, calls pay their callee weight,
+value substitution preserves potential, and every real step strictly
+decreases it. Lean therefore proves finite small-step normalization to a value
+or modeled fault for every closed well-typed term under that certificate, with
+the helper-call fixture as a non-vacuous positive case. It does not derive
+weights from the ranked graph or Rust HIR and does not compute a numeric fuel
+bound. Source-to-Lean correspondence,
 resource-limit equivalence, hosted execution, and every self-hosting rung
 above zero remain separate work. See
 [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md#ranked-call-graph-extension-issue-188)

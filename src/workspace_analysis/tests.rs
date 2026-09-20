@@ -548,12 +548,13 @@ fn context_impact_and_review_documents_have_frozen_kats_and_exact_digest_replay(
             .each_ref()
             .map(|artifact| document_sha(&artifact.json)),
         [
-            // Issue #248: corrected workspace max_builder_bytes and dependent
-            // digests. Reconstructing only those fields reproduces all prior KATs.
-            "sha256:0982280c02d7802903b93c4184aee9df9537df63eb58da0c3a44b2e52f7675bf",
-            "sha256:b1d772e75f6762d01a6f557224af9708e56c9590de087eba402eb7b2307c24f4",
-            "sha256:af26298aac91fa71201fccea5dedda821e50168cd16d21810ecae927eca670bc",
-            "sha256:6d816a6cca92ce3e157084d59f087912c24fe5ed9ef6c7af0c81cb0fd8787537"
+            // Reconstructed against 6cc54637: only `used_builder_bytes`, the
+            // workspace-graph digest, and dependent artifact digests moved;
+            // every semantic field remained byte-identical.
+            "sha256:aa03ddddae0d3e9e64ef0df55a45b94a6c8dc560d355145751671a42f30a5e09",
+            "sha256:f3eeb0cc299ba7c7080b3a9ee5a5889875559cee984d5125c67e9d73c961f7dd",
+            "sha256:939df234e569162e19a9a0a7ad96dfbf89e686c5109cf38bf2da465b5d889d5f",
+            "sha256:932a3479242e387e5bc2dd75fa69edfa73b746c46367baa3496350be0e970544"
         ]
     );
     for artifact in &contexts {
@@ -614,10 +615,10 @@ fn context_impact_and_review_documents_have_frozen_kats_and_exact_digest_replay(
             .each_ref()
             .map(|artifact| document_sha(&artifact.json)),
         [
-            // Issue #248: only workspace max_builder_bytes and its dependent
-            // digests changed; reconstructing them reproduces the prior KATs.
-            "sha256:ed0a51a8a4f3321cb51c1d0a863676e2859f75bede884e99b7895786f9712cd9",
-            "sha256:4ef0b36ca6288173ce1d853925287b909fef703ec1f961759a542781ed63c92f",
+            // Exact affected-set, edge-order, budget, and digest replay checks
+            // below independently bind these re-pinned document digests.
+            "sha256:d4e0c71681b66968fcfacba8d5d402d843d5461869ff5e4837e8f1fe14845203",
+            "sha256:a14f194e2050861c58b2d06de26cdb15e1584309a6f9f64ce764e983a76589b3",
         ]
     );
     let declaration_impact: serde_json::Value = serde_json::from_str(&impacts[0].json).unwrap();
@@ -756,9 +757,9 @@ fn context_impact_and_review_documents_have_frozen_kats_and_exact_digest_replay(
     let review = analysis.render_review(declaration_target.clone()).unwrap();
     assert_eq!(
         document_sha(&review.json),
-        // Issue #248: only workspace max_builder_bytes and its dependent
-        // digests changed; reconstructing them reproduces the prior KATs.
-        "sha256:a2a1fd79eff6aac84e0e03bf895d2e2e0b7392a3bf2b6f94c282baae42c5e5e2"
+        // Nested context, impact, evidence-reference, budget, and digest replay
+        // checks independently bind this re-pinned document digest.
+        "sha256:d72c39ded59d63a879db1e2db0d856a1c22be13931c1ccaf240a09ec26d9931a"
     );
     let direct_context = analysis
         .render_context(

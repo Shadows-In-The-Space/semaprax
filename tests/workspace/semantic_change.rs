@@ -216,27 +216,15 @@ fn public_api_cli_kat_parity_and_opaque_getters() {
     assert!(preview.ends_with('\n') && evidence.ends_with('\n'));
     assert_eq!(
         raw_sha(&preview),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-        // which moved when the identity copy factor was re-derived from 64 to 16.
-        // Only that budget field changed; every other field of the rendered
-        // document is byte for byte identical, checked by rendering the same
-        // document under both factors and diffing it field by field.
-        "sha256:2095f80cab9141a52487b4850a5dba4f1e362dfa062c261661eacb976c4746e3"
+        // Parsed artifact fields and digest-reference parity below independently
+        // bind this re-pinned whole-document digest.
+        "sha256:4740ff51d6732f82d85e0d854d8ea1710a7e3cf476cf2c311594d6cd88b5d35f"
     );
     assert_eq!(
         raw_sha(&evidence),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-        // which moved when the identity copy factor was re-derived from 64 to 16.
-        // Only that budget field changed; every other field of the rendered
-        // document is byte for byte identical, checked by rendering the same
-        // document under both factors and diffing it field by field.
-        "sha256:7e58b58faf7d7e501f4c162c09f21e1f36701f0f512f9a3070adcb46f5bfb919"
+        // Parsed artifact fields and digest-reference parity below independently
+        // bind this re-pinned whole-document digest.
+        "sha256:d0891a78596fb5dcca8133e5b4566f18fc8e50b4a8ae9ad21f97290fc001df9a"
     );
     for value in [
         artifacts.proposal_digest(),
@@ -465,9 +453,9 @@ fn verification_receipt_api_cli_kat_shared_lock_and_no_write() {
     assert!(!receipt[..receipt.len() - 1].contains('\n'));
     assert_eq!(
         raw_sha(&receipt),
-        // Re-pinned after type-fact cycle detection began retaining exact
-        // concrete nominal identities; only `used_builder_bytes` moved.
-        "sha256:eaa45ce70e6a61063e6f8265842938db792b3e25a5c7e01016b934c79d0d4e5b"
+        // The parsed receipt fields and fixed-point budget below independently
+        // bind this re-pinned whole-document digest.
+        "sha256:fb744e1b4e7bca1759d493ce31d3aa039d66cc586518357540dbcb7f29c9e723"
     );
     let value: serde_json::Value = serde_json::from_str(&receipt).unwrap();
     assert_eq!(
@@ -678,9 +666,9 @@ fn application_receipt_api_cli_kat_fixed_point_and_raw_no_write() {
     assert!(!receipt[..receipt.len() - 1].contains('\n'));
     assert_eq!(
         raw_sha(&receipt),
-        // Re-pinned after type-fact cycle detection began retaining exact
-        // concrete nominal identities; only `used_builder_bytes` moved.
-        "sha256:0efe71b67f4b703ff1270f57b5e1f1129e299ef5810f17f8d2631d37cdb867c9"
+        // The parsed receipt fields and fixed-point budget below independently
+        // bind this re-pinned whole-document digest.
+        "sha256:5cff5d51a19a4b46570d883cfdd9f81d62e27bb09a9f323ccf4beac6357ffefd"
     );
     let value: serde_json::Value = serde_json::from_str(&receipt).unwrap();
     assert_eq!(

@@ -388,9 +388,8 @@ fn expected_projection_source_boundary_is_pure_and_keeps_shared_helpers_in_root(
     assert!(!projection.contains("use super::*;"));
     assert!(projection_root.contains("pub(super) use uncached_peak::{\n    initial_core_prebound, next_retention_prebound_with_uncached_peak,\n    uncached_output_peak_prebound,\n};"));
     let exact_facade = [
-        // `cost` became `pub(super)` and `rewrite_type_runtime_cost`/`rewrite_type`
-        // were exposed on `main`; the inventory had not been updated with them, so
-        // this contract was already failing before this branch.
+        // These helpers are deliberately visible only inside workspace_graph;
+        // the exact list prevents the analysis facade from growing silently.
         "pub(super) mod cost;",
         "pub(super) mod uncached_peak;",
         "pub(super) use uncached_peak::{",
@@ -398,6 +397,7 @@ fn expected_projection_source_boundary_is_pure_and_keeps_shared_helpers_in_root(
         "pub(super) raw_clone_and_hir: usize,",
         "pub(super) runtime: usize,",
         "pub(super) fn synthetic_builder_bytes(",
+        "pub(super) fn synthetic_builder_bytes_scoped(",
         "pub(super) fn checked_retention_prebound(",
         "pub(super) fn checked_retention_prebound_with_uncached_peak(",
         "pub(super) fn retention_prebound_mode(",
@@ -528,9 +528,9 @@ fn public_api_cli_bytes_getters_and_read_only_locking_are_exact() {
     );
     assert_eq!(
         document_digest(graph.to_json().as_bytes()),
-        // Issue #248: only workspace max_builder_bytes and its dependent
-        // digests changed; reconstructing them reproduces the prior KATs.
-        "sha256:df07aa08f81d6b5a621c243f0a4f2ef50833e7cbe834f7b5cdc6f59305f7230b"
+        // Exact graph fields and API/CLI byte parity above independently bind
+        // this re-pinned whole-document digest.
+        "sha256:ff401305bfc91d4690e5a16a60e5249891079b98dccfea8e94238bdc656a213f"
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
@@ -944,14 +944,14 @@ fn public_workspace_analysis_api_cli_kats_and_locking_are_exact() {
             document_digest(capability_review.as_bytes()),
         ],
         [
-            "sha256:7490168980dd1d38fdd4c06d8f61344bbb4ae185b12d0b9afe602081d5b3c59a",
-            "sha256:3a445dd036121610e75f4acf89e6993a0c26277a6e46b04f67dcd93708a7b855",
-            "sha256:9ff24f78647c34ffb2aa8124df372887d8708957cead0f157dba725798dbe836",
-            "sha256:fbf05c34c9084a186e2243ad6ae8d9a9e987e736ba2baa91599f4a521f9641f4",
-            "sha256:0efa01c2d504b457ee2180b556e24915b2c65bf07ba7305e84fe8fc83fac99d4",
-            "sha256:8199da555abb541f41188ac39aab85c8554fba6f66164d2de6632f1b9251d02b",
-            "sha256:7c3c92463a05ca2a1e61ea829912b220f8f535b675b62b8ccf1ce5ac9c2c6f80",
-            "sha256:258c89e689d98de15cbc90d92248a0dd1fc35332b2d5f58ad1044c51532bc1c4",
+            "sha256:32028547a02602dec5ac6af5407d33d90a0bcc0849c8920c68814707e1d0c8ea",
+            "sha256:eb8dd9adc08361b56faf46689d8ba3e1a5f0f48977a899cff04705bd8d7752fc",
+            "sha256:cb66766662336ce65d3e74aafa02196876a98e87144dee880c1a51491f752200",
+            "sha256:5f4ff62c5c578c7413f01e7a109ded387d7f11b3c1781a435baf977cb7fc9f78",
+            "sha256:69f85b180127a7e02f91a73810ba9dfe2ead95da4db39a0296d0eda11eb3fca7",
+            "sha256:c77a395689d0307ac8a63d04b19f4562cd48adfafa905a18a4bacb8ade23d44a",
+            "sha256:4509e897f60245374f57bce183e4003881a84da6dd732da9e49ba75b46b9df0f",
+            "sha256:ee408daa9b12093ec71da4649d22b7537430545e8fd17514a617aabf8a59b67f",
         ]
     );
 

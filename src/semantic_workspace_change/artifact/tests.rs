@@ -110,18 +110,15 @@ fn literal_kats_wire_order_domains_and_reference_parity() {
             raw_sha(artifacts.evidence()),
         ],
         [
-            // Re-pinned after type-fact cycle detection began retaining exact
-            // concrete nominal identities; only `used_builder_bytes` moved.
-            // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-            // which moved when the identity copy factor was re-derived from 64 to 16.
-            // Only that budget field changed; every other field of the rendered
-            // document is byte for byte identical, checked by rendering the same
-            // document under both factors and diffing it field by field.
-            "sha256:2095f80cab9141a52487b4850a5dba4f1e362dfa062c261661eacb976c4746e3",
-            "sha256:4d5401d10da1f5b2d99c0a6281242635dc870e7b1ceb9a7768a6e08b7e146f3a",
-            "sha256:26c0154e10f0ba64f843c0ac2bfcb3441314dca23a86175ef9342dabe2564820",
-            "sha256:27c959b3d9c91b099fd23bd5d783ddaf6401bb4427beed53467dbdc599736bd3",
-            "sha256:7e58b58faf7d7e501f4c162c09f21e1f36701f0f512f9a3070adcb46f5bfb919"
+            // Reconstructed against 9e7e40ad: only the base/candidate
+            // `used_builder_bytes`, their graph digests, and dependent child
+            // digests moved; graph modules, declarations, edges, byte counts,
+            // and every other artifact field remained byte-identical.
+            "sha256:4740ff51d6732f82d85e0d854d8ea1710a7e3cf476cf2c311594d6cd88b5d35f",
+            "sha256:119d5a33c50ae8d0769e7fd6be32a49da86f62ae50bd4c38fef12a07b588ef17",
+            "sha256:4f1aeceb2c1bc9f931f2d1461d9a209a44b96154576e56855e75971f78387a88",
+            "sha256:1c8c94b308d5b552dc85bc4d7519566310c2cc9d64965c9c8a6621fdd49bb309",
+            "sha256:d0891a78596fb5dcca8133e5b4566f18fc8e50b4a8ae9ad21f97290fc001df9a"
         ]
     );
 

@@ -1,7 +1,7 @@
 use super::{
     checked_retention_prebound, dependency_identity_max, next_retention_prebound,
     next_retention_prebound_with_uncached_peak, retention_prebound, retention_prebound_mode,
-    uncached_peak_prebound,
+    synthetic_builder_bytes_scoped, uncached_peak_prebound,
 };
 use crate::ast::Program;
 fn fixture(count: usize, padding: usize, reverse: bool) -> Vec<Program> {
@@ -69,6 +69,25 @@ fn identity_prebound_still_charges_reachable_long_identities() {
     let authored = super::super::index_authored(&programs).unwrap();
     assert!(dependency_identity_max(&programs[0], &authored, &programs).unwrap() >= 220);
     assert!(checked_retention_prebound(&programs, &authored).is_err());
+}
+
+/// Issue #83. Pin the projection term itself instead of comparing complete
+/// workspace limits, whose unrelated structural costs legitimately move as
+/// the AST grows. Keep `16` literal here so increasing the production copy
+/// factor reopens this regression rather than updating the test in lockstep.
+#[test]
+fn identity_length_uses_sixteen_bytes_per_slot_and_identity_byte() {
+    let programs = fixture(24, 32, false);
+    let authored = super::super::index_authored(&programs).unwrap();
+    let program = &programs[0];
+    let identity_slots = super::identity_slots::ast_program_identity_slots(program).unwrap();
+    let short = synthetic_builder_bytes_scoped(program, &authored, &programs, Some(16), 0, true)
+        .unwrap()
+        .retained_hir;
+    let long = synthetic_builder_bytes_scoped(program, &authored, &programs, Some(48), 0, true)
+        .unwrap()
+        .retained_hir;
+    assert_eq!(long - short, identity_slots * (48 - 16) * 16);
 }
 #[test]
 fn identity_prebound_json_cursor_package_is_bounded() {

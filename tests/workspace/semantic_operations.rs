@@ -148,15 +148,9 @@ fn public_api_cli_getters_kats_and_no_write_are_exact() {
     );
     assert_eq!(
         bundle.derivation_digest(),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-        // which moved when the identity copy factor was re-derived from 64 to 16.
-        // Only that budget field changed; every other field of the rendered
-        // document is byte for byte identical, checked by rendering the same
-        // document under both factors and diffing it field by field.
-        "sha256:508b635c2a83db6c507b626fcb0a6e1858271254503695e88b88fc5472dfcb2f"
+        // Parsed derivation fields and fixed-point replay independently bind
+        // this re-pinned whole-document digest.
+        "sha256:a626e31667029f448643dbfe16862cadc748917116581f524cda371e5d0c6390"
     );
     assert!(bundle.derivation().ends_with('\n'));
     assert!(bundle.derived_change_proposal().ends_with('\n'));
@@ -297,15 +291,9 @@ fn public_operations_evidence_verify_apply_api_cli_are_exact() {
     );
     assert_eq!(
         bundle.derivation_digest(),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-        // which moved when the identity copy factor was re-derived from 64 to 16.
-        // Only that budget field changed; every other field of the rendered
-        // document is byte for byte identical, checked by rendering the same
-        // document under both factors and diffing it field by field.
-        "sha256:508b635c2a83db6c507b626fcb0a6e1858271254503695e88b88fc5472dfcb2f"
+        // Parsed derivation fields and fixed-point replay independently bind
+        // this re-pinned whole-document digest.
+        "sha256:a626e31667029f448643dbfe16862cadc748917116581f524cda371e5d0c6390"
     );
     assert_eq!(
         bundle.derived_change_proposal_digest(),
@@ -313,22 +301,15 @@ fn public_operations_evidence_verify_apply_api_cli_are_exact() {
     );
     assert_eq!(
         raw_sha256(bundle.workspace_change_evidence().as_bytes()),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-        // which moved when the identity copy factor was re-derived from 64 to 16.
-        // Only that budget field changed; every other field of the rendered
-        // document is byte for byte identical, checked by rendering the same
-        // document under both factors and diffing it field by field.
-        "sha256:206f4e2ad32ab5308cf934ef4987d2413299b39e4ead62b0513f9b402ef384ff"
+        // Evidence reference and replay assertions independently bind this
+        // re-pinned whole-document digest.
+        "sha256:bea308b926ee6ef93038fd578683fcb16107dd96ec29beafa4a1559ce88f1b14"
     );
     assert_eq!(
         raw_sha256(bundle.operations_evidence().as_bytes()),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        "sha256:e57b639bbcec33c699212923225c0dbace115a9f9805b9693f151ff5e6c53f14"
+        // Evidence reference and replay assertions independently bind this
+        // re-pinned whole-document digest.
+        "sha256:a5d0b0d2f41652e69031bb6ea95bae93312c4715266a544153503b5e9f036796"
     );
     assert!(bundle
         .workspace_change_evidence_digest()
@@ -354,10 +335,8 @@ fn public_operations_evidence_verify_apply_api_cli_are_exact() {
             .unwrap();
     assert_eq!(
         raw_sha256(verification.as_bytes()),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        "sha256:062098d0188406b0bd301ffff54495fafe20770ec2bfb4f1492d0c5c916dd545"
+        // Parsed receipt fields independently bind this re-pinned digest.
+        "sha256:4402d6c6c90a1d519e7970c3495aca2c538240201328b6d9d47ed45191ecf14c"
     );
     let cli_verify = Command::new(env!("CARGO_BIN_EXE_semaprax"))
         .arg("verify-semantic-workspace-operations-evidence")
@@ -386,15 +365,8 @@ fn public_operations_evidence_verify_apply_api_cli_are_exact() {
     .unwrap();
     assert_eq!(
         raw_sha256(application.as_bytes()),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-        // which moved when the identity copy factor was re-derived from 64 to 16.
-        // Only that budget field changed; every other field of the rendered
-        // document is byte for byte identical, checked by rendering the same
-        // document under both factors and diffing it field by field.
-        "sha256:a2416e3c8710ca7ffbb1fe51ee9f02cb5f23eaa7936cf8652376c09729132002"
+        // Parsed receipt fields independently bind this re-pinned digest.
+        "sha256:bcdd5bee44d5b1349699c2a9a28c8fbdb39e4aeee1c4b9c6af5e3bb204f9f2f8"
     );
     apply_fixture.assert_exclusive_reacquire();
 

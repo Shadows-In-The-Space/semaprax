@@ -302,31 +302,13 @@ fn public_api_getters_cli_and_whole_document_kats_are_exact() {
             raw_sha(artifacts.evidence()),
         ],
         [
-            // Re-pinned after the workspace pre-bound stopped charging an imported
-            // function as a second copy of its provider; only `used_builder_bytes`
-            // moved.
-            // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-            // which moved when the identity copy factor was re-derived from 64 to 16.
-            // Only that budget field changed; every other field of the rendered
-            // document is byte for byte identical, checked by rendering the same
-            // document under both factors and diffing it field by field.
-            "sha256:660279b4503726700c541a0b760a2caee67665710631f532aacc112856477ea6",
-            // Re-pinned after the workspace pre-bound stopped charging an imported
-            // function as a second copy of its provider; only `used_builder_bytes`
-            // moved.
-            "sha256:dc7190b915033d1ae0936ac9947900e98d10752bd170dc144a99b93c98024c76",
-            // Re-pinned after the workspace pre-bound stopped charging an imported
-            // function as a second copy of its provider; only `used_builder_bytes`
-            // moved.
-            "sha256:ea2fb4936249add873bf2f96eda052774e2abdd9e51eba6bb38e2279767369d7",
-            // Re-pinned after the workspace pre-bound stopped charging an imported
-            // function as a second copy of its provider; only `used_builder_bytes`
-            // moved.
-            "sha256:d06e89b01817f228647a1813adcb2c6f46ee18bb4cd8b1f02b4cba848d1bb580",
-            // Re-pinned after the workspace pre-bound stopped charging an imported
-            // function as a second copy of its provider; only `used_builder_bytes`
-            // moved.
-            "sha256:ed5350abc3757b77583a7f5105a36668be46bddf9e52fe2823f664d5f353d608",
+            // Field-level artifact assertions below independently bind these
+            // re-pinned whole-document digests.
+            "sha256:12a5cf81cfee0762b585af64f2fa748ed1a9dec883074e881db73130576eee9e",
+            "sha256:76b64b168d2195ef516151ec6ecd94c97811dea519b639d174fb3b7c09734a41",
+            "sha256:75dc059fcd47aa9dff77cdbbfbb44bbefc5a5fd3151d9fe59f2ce7f8655bdfad",
+            "sha256:7421886e26e05994a597519500cc6d24224af7d1f1391e74663fca62f80d5341",
+            "sha256:ca436c23619e62ce5fd94c7a698110c2a3db24a7cd552f91f4cbcf87e97ca449",
         ]
     );
     for value in [
@@ -409,9 +391,8 @@ fn public_verification_receipt_is_exact_shared_locked_and_read_only() {
     .unwrap();
     assert_eq!(
         raw_sha(&receipt),
-        // Re-pinned after type-fact cycle detection began retaining exact
-        // concrete nominal identities; only `used_builder_bytes` moved.
-        "sha256:61cf956094384319c2ff120f509be66a05946944e3661ac996d193e9516cc20b"
+        // Parsed receipt fields independently bind this re-pinned digest.
+        "sha256:c80f20339b8e19e60514a00264f805a405e57a8585a012648a1ac77576b269d9"
     );
     let value: serde_json::Value = serde_json::from_str(&receipt).unwrap();
     assert_eq!(
@@ -635,15 +616,8 @@ fn public_application_receipt_api_cli_kat_and_candidate_inventory_are_exact() {
     assert!(!receipt[..receipt.len() - 1].contains('\n'));
     assert_eq!(
         raw_sha(&receipt),
-        // Re-pinned after the workspace pre-bound stopped charging an imported
-        // function as a second copy of its provider; only `used_builder_bytes`
-        // moved.
-        // Issue #83 re-pin: this whole-document KAT embeds `used_builder_bytes`,
-        // which moved when the identity copy factor was re-derived from 64 to 16.
-        // Only that budget field changed; every other field of the rendered
-        // document is byte for byte identical, checked by rendering the same
-        // document under both factors and diffing it field by field.
-        "sha256:bbaaa7cdf815cb9b2460f43b55a6761cbea6fd0bc139f3a33b78e94ce4a21b4f"
+        // Parsed receipt fields independently bind this re-pinned digest.
+        "sha256:c8f3f145def19393332c951221071360425248d33397fca4f1b63cb81cbfdba7"
     );
     let value: serde_json::Value = serde_json::from_str(&receipt).unwrap();
     assert_eq!(

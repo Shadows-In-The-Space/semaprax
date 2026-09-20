@@ -192,25 +192,6 @@ fn identity_scale_workspace(
     ]
 }
 
-/// Issue #83. The identity term charges every identity slot the longest
-/// identity in scope, so the copy factor decides how far a declaration's
-/// *name* can move the budget. At sixty-four copies a thirty-two byte module
-/// segment more than doubled the minimum builder limit of this fixture, which
-/// is why renaming `document` to `doc` bought `std.data.json.doc` about 960
-/// bytes of admitted source. Measured retained identity bytes are 0.87 to
-/// 1.11 per slot per identity byte, so naming must stay a minor term.
-#[test]
-fn identity_length_does_not_dominate_the_builder_pre_bound() {
-    let short = minimum_successful_builder_limit(&identity_scale_workspace(0, 24, 0));
-    let long = minimum_successful_builder_limit(&identity_scale_workspace(32, 24, 0));
-    assert!(short < long, "a longer identity must still cost something");
-    assert!(
-        long * 4 < short * 5,
-        "thirty-two identity bytes may not cost a quarter of the pre-bound \
-         again: short {short}, long {long}"
-    );
-}
-
 /// Issue #83. `std.data.json.doc` was admitted at 12,216 source bytes and
 /// refused at 12,292, so every further standard-library slice was blocked.
 /// Padding the six `std.data.json.*` packages until `SPX-G171` fires moved

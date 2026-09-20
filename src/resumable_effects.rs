@@ -25,12 +25,15 @@
 //! complete identities plus independently validated yield-free start and
 //! per-site resume HIR projections. `interpreter::resumable` consumes the
 //! plan's state, invocation binding and opaque in-memory replay history. The
-//! crate-private, `cfg(test)`-only `backend` module exercises those projections
-//! through real native `-O0`/`-O2` and Core Wasm target paths; its temporary
-//! storage and local tool processes are test-harness authority only. Ordinary
-//! native/Wasm emission still refuses a `yields` function; there is no public
-//! continuation ABI, external-await scheduler, durable source checkpoint,
-//! Agent migration, owned live-frame lowering or control-dependent yield.
+//! [`target`] prepares a bounded, deterministic in-memory inventory of those
+//! projections as native C11 source or Core Wasm bytes without acquiring host
+//! authority. The crate-private, `cfg(test)`-only `backend` module executes the
+//! projections through real native `-O0`/`-O2` and Core Wasm target paths; its
+//! temporary storage and local tool processes are test-harness authority only.
+//! Ordinary native/Wasm emission still refuses a `yields` function; there is
+//! no public continuation ABI, external-await scheduler, durable source
+//! checkpoint, Agent migration, owned live-frame lowering or control-dependent
+//! yield.
 //!
 //! [`docs/RESUMABLE-EFFECTS-V1.md`](../../docs/RESUMABLE-EFFECTS-V1.md)
 //! records the full design and exactly this scope boundary.
@@ -97,6 +100,7 @@ pub mod core;
 pub(crate) mod lowering;
 pub mod migration;
 pub mod signature;
+pub mod target;
 #[cfg(test)]
 mod tests;
 

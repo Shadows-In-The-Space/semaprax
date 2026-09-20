@@ -776,12 +776,22 @@ order, prunes disconnected functions and correlated declaration-index facts,
 and rederives byte provenance. Retained functions must remain explicit,
 effect-free and Copy-scalar with no owned cleanup; authored nominal/authority surfaces,
 generic calls, function references and retained yielding callees fail closed.
-The crate-private `src/resumable_effects/backend/` runners compile only under
-`cfg(test)` and send those projections through the ordinary native C11 and
-Core-Wasm generators as local parity evidence. Their test process explicitly
-owns its temporary storage and local `clang`/Node process use; production
-library code and generated programs gain none of that authority. They add no
-public continuation ABI, scheduler or checkpoint authority. Covered
+`src/resumable_effects/target.rs` owns the public, authority-free production
+preparation profile for those already authenticated projections. It emits an
+exact bounded inventory of deterministic native C11 source or Core-Wasm bytes
+in memory, binding each artifact to the plan, target, projection role/state,
+selected entry symbol, and artifact bytes. Native projections suppress the
+ordinary program-entry wrapper and expose only their plan/site-specific wrapper
+as the selected resumable entry. Emission is capped while backend sinks build
+the artifact; preparation performs no compilation, execution, publication,
+host call, or checkpoint recovery. Ordinary backend entry points continue to refuse
+source `yield` directly. The crate-private `src/resumable_effects/backend/`
+runners remain `cfg(test)`-only and execute the prepared semantic projections
+through local native C11 and Core-Wasm target paths as parity evidence. Their
+test process explicitly owns its temporary storage and local `clang`/Node
+process use; production library code and generated programs gain none of that
+authority. The preparation profile adds no public continuation ABI, scheduler,
+or checkpoint authority. Covered
 arithmetic and contract failures retain exact normalized statuses; arbitrary
 NaN payload preservation is not claimed across the JavaScript `Number` test
 adapter. Ordinary backend emission retains its explicit `yields` refusals.

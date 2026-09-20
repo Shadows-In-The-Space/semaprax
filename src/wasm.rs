@@ -2871,6 +2871,24 @@ pub(crate) fn prepare_project_web_with_scalar_exports(
     })
 }
 
+/// Emit one already-lowered, yield-free resumable projection through the
+/// ordinary public-scalar Core Wasm backend without publishing a package or
+/// acquiring filesystem/process authority. The resumable profile owns the
+/// projection and authenticates it before reaching this byte-only seam.
+pub(crate) fn emit_resumable_scalar_projection(
+    program: &ResolvedProgram,
+    function_id: &str,
+) -> Result<(Vec<u8>, String), Diagnostic> {
+    let plans = scalar_exports::prepare(program, &[function_id.to_owned()])?;
+    let entry_symbol = plans
+        .first()
+        .ok_or_else(|| Diagnostic::io("SPX-W116", "resumable scalar export plan is empty"))?
+        .wasm_export
+        .clone();
+    let bytes = emit_resolved_module_internal(program, &plans, &[])?;
+    Ok((bytes, entry_symbol))
+}
+
 fn publish_scalar_package(output: &Path, artifacts: &[(&str, &[u8])]) -> Result<(), Diagnostic> {
     output.file_name().ok_or_else(|| {
         Diagnostic::io(

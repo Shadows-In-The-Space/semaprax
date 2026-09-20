@@ -8,6 +8,23 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Harden the paired-agent pilot's stale-recovery metric so only an exact,
+  well-formed conditional write to the drifted source can count as recovery,
+  and only the gateway's exact stale-precondition refusal can count as a
+  rejected stale write. Reads, unrelated paths, malformed commands, and other
+  failures now fail closed instead of producing optimistic evidence (#105).
+
+- Preserve `i64::MIN` when source-native Agent stage arguments are synthesized
+  for Core Wasm and native C11 execution. A four-leg regression now exercises
+  the value through the interpreter, native `-O0`, native `-O2`, and Core Wasm,
+  while empty byte literals retain their stable refusal (#182).
+
+- Add a binding-first Lean-kernel certificate recheck that re-derives the
+  source, exact obligation selector, Lean document, and Wasm artifact before
+  consulting caller-supplied kernel authority, then requires exact recorded
+  axiom results. No process, filesystem, network, or tool-discovery authority
+  is added to the compiler (#186).
+
 - Preserve every failing real-distribution role in the provisioned Linux
   doctor diagnostics instead of stopping at Node's first failure. Hosted run
   35472257722 remains red (12/13 in both suites): Clang passed, Node received

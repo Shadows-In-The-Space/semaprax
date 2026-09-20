@@ -81,7 +81,7 @@ pub use lean::{export_module, ModuleExport, ASSUMPTIONS, EXPORT_SCHEMA, NAMESPAC
 pub use profile::{Excluded, PROFILE_V1};
 pub use verify::{
     verify_certificate, verify_certificate_against_artifact, verify_certificate_against_source,
-    verify_certificate_with_capability, CheckedCertificate,
+    verify_certificate_with_capability, verify_certificate_with_kernel, CheckedCertificate,
 };
 
 pub(crate) use crate::assurance_manifest::smt_discharge::postcondition_obligation_id;

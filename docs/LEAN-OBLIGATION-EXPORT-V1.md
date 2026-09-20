@@ -294,8 +294,10 @@ with the claim so a reader is always told what the export refused.
    re-parses and re-verifies it, re-derives the semantic revision,
    **re-renders the Lean document from scratch and requires byte
    equality**, checks the compiler identity, and recompiles the bound Wasm
-   core module requiring digest equality. Re-rendering rather than trusting
-   the embedded bytes is the point: a hand-edited document that weakens a
+   core module requiring digest equality. It also requires the payload's
+   module, declaration id, ensures index, obligation id, and theorem name to
+   select the exact re-derived obligation before any kernel is consulted.
+   Re-rendering rather than trusting the embedded bytes is the point: a hand-edited document that weakens a
    theorem or drops an obligation no longer equals what the translator
    deterministically produces, so it is refused even though its recorded
    verdict still reads `kernel_checked`.
@@ -305,6 +307,14 @@ with the claim so a reader is always told what the export refused.
 4. `verify_certificate_with_capability` — bindings first, then the supplied
    `ExternalKernelCapability`. A capability that always confirms can never
    widen what the binding layer already refused.
+5. `verify_certificate_with_kernel` — bindings first, then the supplied
+   `LeanKernel` rechecks the exact re-rendered document. Its closed Lean
+   report parser must accept every current exported theorem, and the exact
+   complete canonical obligation inventory and axiom sets for the certified
+   declaration must reproduce the certificate's recorded results. A re-sealed
+   removal of a non-headline range obligation, or a change from one standard axiom set to another,
+   is therefore still refused; merely obtaining a second clean result is not
+   enough.
 
 Diagnostics: `SPX-Z110` nothing to certify, `SPX-Z111` certificate
 inconsistency, `SPX-Z112` drift.
@@ -343,8 +353,10 @@ written about this module:
   transcribed in this document was produced on one developer host. A hosted
   run's verdict becomes quotable when one exists, per commit.
 - **No `LeanKernel` implementation inside the crate**, by design; the runner
-  is `scripts/lean-export-gate.py`. It is not in `scripts/quality.sh`,
-  which stays toolchain-free; CI runs it directly.
+  is `scripts/lean-export-gate.py`. `verify_certificate_with_kernel` is a
+  binding-first adapter over a caller-supplied kernel, not a runner: it grants
+  no process, filesystem, network, or tool-discovery authority. The script is
+  not in `scripts/quality.sh`, which stays toolchain-free; CI runs it directly.
 - The kernel has been run over exactly one module, the committed golden. No
   corpus, and no generated-source mutation ladder beyond the two seeds.
 - No CLI surface; the module is library-only.

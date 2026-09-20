@@ -38,7 +38,9 @@ use super::certificate::{
     artifact_digest, lean_digest, payload_digest, source_digest, ARTIFACT_TARGET,
     CERTIFICATE_SCHEMA,
 };
-use super::kernel_report::{KERNEL_IDENTITY, PINNED_TOOLCHAIN, STANDARD_AXIOMS};
+use super::kernel_report::{
+    parse as parse_kernel_report, KernelVerdict, KERNEL_IDENTITY, PINNED_TOOLCHAIN, STANDARD_AXIOMS,
+};
 use super::lean::{export_module, EXPORT_SCHEMA, NAMESPACE};
 use super::profile::PROFILE_V1;
 
@@ -401,13 +403,51 @@ pub fn verify_certificate(certificate: &str) -> Result<CheckedCertificate, Diagn
     })
 }
 
-/// Everything [`verify_certificate`] checks, plus rebinding to the current
-/// bytes at `source_path`. Fails closed on any drift.
-pub fn verify_certificate_against_source(
+/// Extract the payload facts which remain private implementation detail of a
+/// live kernel recheck. [`verify_certificate`] runs first, so this helper
+/// never turns permissive JSON parsing into an admission path.
+fn recheck_payload_facts(
+    certificate: &str,
+    declaration_id: &str,
+) -> Result<(String, Vec<(String, Vec<String>)>), Diagnostic> {
+    let value: Value = serde_json::from_str(certificate)
+        .map_err(|error| consistency_error(format!("certificate is not valid JSON: {error}")))?;
+    let payload = &value["payload"];
+    let module = require_string(&payload["module"], "payload.module")?.to_owned();
+    let obligations = require_array(&payload["obligations"], "payload.obligations")?;
+    let mut axioms = Vec::new();
+    for obligation in obligations {
+        if require_string(&obligation["declaration_id"], "obligation.declaration_id")?
+            != declaration_id
+        {
+            continue;
+        }
+        let name = require_string(&obligation["theorem_name"], "obligation.theorem_name")?;
+        let recorded = require_array(&obligation["axioms"], "obligation.axioms")?
+            .iter()
+            .map(|axiom| require_string(axiom, "obligation.axioms[]").map(str::to_owned))
+            .collect::<Result<Vec<_>, _>>()?;
+        axioms.push((name.to_owned(), recorded));
+    }
+    Ok((module, axioms))
+}
+
+/// Re-derive every source and artifact binding once, retaining the exact
+/// exported theorem set for a subsequent external-kernel replay.
+fn rebind_certificate_against_source(
     certificate: &str,
     source_path: &Path,
-) -> Result<CheckedCertificate, Diagnostic> {
+) -> Result<
+    (
+        CheckedCertificate,
+        super::ModuleExport,
+        Vec<(String, Vec<String>)>,
+    ),
+    Diagnostic,
+> {
     let checked = verify_certificate(certificate)?;
+    let (recorded_module, recorded_axioms) =
+        recheck_payload_facts(certificate, &checked.declaration_id)?;
     if checked.compiler_version != env!("CARGO_PKG_VERSION") {
         return Err(drift_error(format!(
             "certificate was produced by compiler {} but this is {}",
@@ -446,6 +486,55 @@ pub fn verify_certificate_against_source(
         ));
     }
     let export = export_module(&program, &revision);
+    if recorded_module != export.module {
+        return Err(drift_error(
+            "the bound source's module name does not match the certificate".to_owned(),
+        ));
+    }
+    let function = export
+        .exported
+        .iter()
+        .find(|function| function.declaration_id == checked.declaration_id)
+        .ok_or_else(|| {
+            drift_error(
+                "the certificate's declaration_id is not an exported declaration of the bound source"
+                    .to_owned(),
+            )
+        })?;
+    let obligation = function
+        .obligations
+        .iter()
+        .find(|obligation| obligation.ensures_index == Some(checked.ensures_index))
+        .ok_or_else(|| {
+            drift_error(
+                "the certificate's ensures_index is not a postcondition of its bound declaration"
+                    .to_owned(),
+            )
+        })?;
+    if checked.obligation_id != obligation.obligation_id
+        || checked.theorem_name != format!("{NAMESPACE}.{}", obligation.theorem_name)
+    {
+        return Err(drift_error(
+            "the certificate's selected obligation identity does not match the bound source"
+                .to_owned(),
+        ));
+    }
+    let expected_axiom_names = function
+        .obligations
+        .iter()
+        .map(|obligation| format!("{NAMESPACE}.{}", obligation.theorem_name))
+        .collect::<Vec<_>>();
+    if recorded_axioms
+        .iter()
+        .map(|(name, _)| name)
+        .ne(expected_axiom_names.iter())
+    {
+        return Err(drift_error(
+            "the certificate does not record the complete canonical obligation inventory for \
+             its bound declaration"
+                .to_owned(),
+        ));
+    }
     if export.lean_source != checked.lean_source {
         return Err(drift_error(
             "re-rendering the Lean document from the bound source does not reproduce the \
@@ -470,7 +559,16 @@ pub fn verify_certificate_against_source(
                 .to_owned(),
         ));
     }
-    Ok(checked)
+    Ok((checked, export, recorded_axioms))
+}
+
+/// Everything [`verify_certificate`] checks, plus rebinding to the current
+/// bytes at `source_path`. Fails closed on any drift.
+pub fn verify_certificate_against_source(
+    certificate: &str,
+    source_path: &Path,
+) -> Result<CheckedCertificate, Diagnostic> {
+    rebind_certificate_against_source(certificate, source_path).map(|(checked, _, _)| checked)
 }
 
 /// Confirm that artifact bytes a caller already holds are the ones this
@@ -505,5 +603,48 @@ pub fn verify_certificate_with_capability(
 ) -> Result<CheckedCertificate, Diagnostic> {
     let checked = verify_certificate_against_source(certificate, source_path)?;
     capability.confirm(&checked.lean_source)?;
+    Ok(checked)
+}
+
+/// Rebind a certificate first, then have an explicitly supplied Lean kernel
+/// check the exact re-rendered document and reproduce its recorded axiom
+/// results. Unlike the generic capability seam, this adapter knows Lean's
+/// closed report grammar and therefore refuses a substituted clean result.
+///
+/// The caller supplies all external authority through [`super::LeanKernel`].
+/// This function performs no process, network, or tool discovery; source and
+/// artifact reads are the same ones required by source-bound replay.
+pub fn verify_certificate_with_kernel(
+    certificate: &str,
+    source_path: &Path,
+    kernel: &dyn super::LeanKernel,
+) -> Result<CheckedCertificate, Diagnostic> {
+    let (checked, export, recorded_axioms) =
+        rebind_certificate_against_source(certificate, source_path)?;
+    let run = kernel.check(&export.lean_source)?;
+    let axioms = match parse_kernel_report(&export.theorem_names(), &run.toolchain, &run.output) {
+        KernelVerdict::Checked { axioms } => axioms,
+        KernelVerdict::Rejected(rejection) => {
+            return Err(Diagnostic::io(
+                "SPX-Z110",
+                format!(
+                    "the pinned Lean kernel did not accept this recheck ({}): {}",
+                    rejection.code(),
+                    rejection.detail()
+                ),
+            ))
+        }
+    };
+    let observed: Vec<(String, Vec<String>)> = axioms
+        .into_iter()
+        .filter(|(name, _)| recorded_axioms.iter().any(|(recorded, _)| recorded == name))
+        .collect();
+    if observed != recorded_axioms {
+        return Err(drift_error(
+            "the external Lean kernel's axiom results do not reproduce the certificate's exact \
+             recorded obligations"
+                .to_owned(),
+        ));
+    }
     Ok(checked)
 }

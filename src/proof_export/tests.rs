@@ -20,14 +20,15 @@
 //! recorded half of the same evidence, and they go stale silently unless
 //! that job re-derives them, which is why it is a release blocker.
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
-use super::certificate::{render_coverage, ARTIFACT_TARGET};
+use super::certificate::{payload_digest, render_coverage, ARTIFACT_TARGET, CERTIFICATE_SCHEMA};
 use super::kernel_report::{parse, KernelVerdict, Rejection, PINNED_TOOLCHAIN};
 use super::lean::{escape_ident, export_function, export_module, NAMESPACE};
 use super::verify::{
     verify_certificate, verify_certificate_against_artifact, verify_certificate_against_source,
-    verify_certificate_with_capability,
+    verify_certificate_with_capability, verify_certificate_with_kernel,
 };
 use super::{export_obligation_certificate, export_source, KernelRun, LeanKernel};
 
@@ -112,6 +113,20 @@ struct FixedKernel {
     output: String,
 }
 
+struct CountingKernel {
+    calls: Cell<usize>,
+}
+
+impl LeanKernel for CountingKernel {
+    fn check(&self, lean_source: &str) -> Result<KernelRun, Diagnostic> {
+        self.calls.set(self.calls.get() + 1);
+        Ok(KernelRun {
+            toolchain: PINNED_TOOLCHAIN.to_owned(),
+            output: accepting_output(lean_source),
+        })
+    }
+}
+
 impl LeanKernel for FixedKernel {
     fn check(&self, _lean_source: &str) -> Result<KernelRun, Diagnostic> {
         Ok(KernelRun {
@@ -124,6 +139,17 @@ impl LeanKernel for FixedKernel {
 fn certificate_for(path: &Path) -> String {
     export_obligation_certificate(path, "app.t.shifted", 0, &AcceptingKernel)
         .expect("fixture certificate")
+}
+
+fn reseal_payload(certificate: &str) -> String {
+    const PAYLOAD_KEY: &str = "\"payload\":";
+    let offset = certificate.find(PAYLOAD_KEY).expect("certificate payload");
+    let payload = &certificate[offset + PAYLOAD_KEY.len()..certificate.len() - 1];
+    format!(
+        "{{\"schema\":\"{CERTIFICATE_SCHEMA}\",\"digest\":\"{}\",\"bytes\":{},\"payload\":{payload}}}",
+        payload_digest(payload.as_bytes()),
+        payload.len(),
+    )
 }
 
 // ---------------------------------------------------------------------
@@ -599,6 +625,159 @@ fn a_capability_that_always_confirms_cannot_rescue_a_drifted_certificate() {
     assert!(
         verify_certificate_with_capability(&certificate, &path, &AlwaysConfirms).is_err(),
         "binding checks must run before the capability is consulted"
+    );
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_lean_kernel_recheck_reproduces_the_exact_recorded_axiom_results() {
+    let path = write_temp(FIXTURE, "kernel-recheck");
+    let certificate = certificate_for(&path);
+    verify_certificate_with_kernel(&certificate, &path, &AcceptingKernel)
+        .expect("the same pinned-kernel result must reproduce");
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_lean_kernel_recheck_refuses_an_admitted_hole() {
+    let path = write_temp(FIXTURE, "kernel-recheck-sorry");
+    let certificate = certificate_for(&path);
+    let kernel = FixedKernel {
+        toolchain: PINNED_TOOLCHAIN.to_owned(),
+        output: "warning: Export.lean:3:0: declaration uses `sorry`\n".to_owned(),
+    };
+    let error = verify_certificate_with_kernel(&certificate, &path, &kernel)
+        .expect_err("a recheck with an admitted hole is not proof");
+    assert_eq!(error.code, "SPX-Z110");
+    assert!(error.message.contains("admitted_hole"), "{}", error.message);
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_lean_kernel_recheck_refuses_a_resealed_axiom_result_tamper() {
+    let path = write_temp(FIXTURE, "kernel-recheck-axiom-tamper");
+    let certificate = certificate_for(&path);
+    let changed = certificate.replacen(
+        "\"axioms\":[\"Classical.choice\",\"Quot.sound\",\"propext\"]",
+        "\"axioms\":[\"Quot.sound\"]",
+        1,
+    );
+    assert_ne!(changed, certificate, "fixture must carry recorded axioms");
+    let tampered = reseal_payload(&changed);
+    verify_certificate_against_source(&tampered, &path)
+        .expect("the deliberately resealed tamper must reach the external result check");
+    let error = verify_certificate_with_kernel(&tampered, &path, &AcceptingKernel)
+        .expect_err("the fresh kernel result must disagree with the tampered record");
+    assert_eq!(error.code, "SPX-Z112");
+    assert!(error.message.contains("axiom results"), "{}", error.message);
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_lean_kernel_recheck_never_runs_before_source_binding() {
+    let path = write_temp(FIXTURE, "kernel-recheck-drift");
+    let certificate = certificate_for(&path);
+    std::fs::write(
+        &path,
+        with_main(&FIXTURE.replace("ensures result >= a", "ensures result >= 0")),
+    )
+    .unwrap();
+    let kernel = CountingKernel {
+        calls: Cell::new(0),
+    };
+    let error = verify_certificate_with_kernel(&certificate, &path, &kernel)
+        .expect_err("source drift must be refused before kernel invocation");
+    assert_eq!(error.code, "SPX-Z112");
+    assert_eq!(
+        kernel.calls.get(),
+        0,
+        "the kernel must not see unbound bytes"
+    );
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn source_replay_refuses_every_resealed_selected_obligation_identity_tamper_before_kernel() {
+    let path = write_temp(FIXTURE, "kernel-recheck-identity-tamper");
+    let certificate = certificate_for(&path);
+    let checked = verify_certificate(&certificate).expect("fixture certificate is structural");
+    let mutations = [
+        (
+            "module",
+            "\"module\":\"app.t\"".to_owned(),
+            "\"module\":\"app.other\"".to_owned(),
+        ),
+        (
+            "declaration_id",
+            "\"declaration_id\":\"app.t.shifted\"".to_owned(),
+            "\"declaration_id\":\"app.t.other\"".to_owned(),
+        ),
+        (
+            "ensures_index",
+            "\"ensures_index\":0".to_owned(),
+            "\"ensures_index\":1".to_owned(),
+        ),
+        (
+            "obligation_id",
+            format!("\"obligation_id\":\"{}\"", checked.obligation_id),
+            "\"obligation_id\":\"semaprax.obligation.v1:forged\"".to_owned(),
+        ),
+        (
+            "theorem_name",
+            format!("\"theorem_name\":\"{}\"", checked.theorem_name),
+            "\"theorem_name\":\"SemapraxExport.spx_forged_ensures_0\"".to_owned(),
+        ),
+    ];
+    for (label, from, to) in mutations {
+        let changed = certificate.replace(&from, &to);
+        assert_ne!(changed, certificate, "{label} mutation must apply");
+        let tampered = reseal_payload(&changed);
+        verify_certificate(&tampered).expect("{label} tamper remains structurally consistent");
+        let kernel = CountingKernel {
+            calls: Cell::new(0),
+        };
+        let error = verify_certificate_with_kernel(&tampered, &path, &kernel)
+            .expect_err("{label} tamper must be refused before a kernel can run");
+        assert_eq!(error.code, "SPX-Z112", "{label}");
+        assert_eq!(kernel.calls.get(), 0, "{label}");
+    }
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn source_replay_refuses_a_resealed_missing_range_obligation_before_kernel() {
+    let path = write_temp(FIXTURE, "kernel-recheck-obligation-removal");
+    let certificate = certificate_for(&path);
+    let mut value: serde_json::Value =
+        serde_json::from_str(&certificate).expect("certificate JSON");
+    let obligations = value["payload"]["obligations"]
+        .as_array_mut()
+        .expect("certificate obligations");
+    let index = obligations
+        .iter()
+        .position(|obligation| {
+            obligation["declaration_id"].as_str() == Some("app.t.shifted")
+                && obligation["kind"].as_str() == Some("checked_arithmetic_range")
+        })
+        .expect("fixture has a non-headline range obligation");
+    obligations.remove(index);
+    let payload = serde_json::to_string(&value["payload"]).expect("payload JSON");
+    let tampered = format!(
+        "{{\"schema\":\"{CERTIFICATE_SCHEMA}\",\"digest\":\"{}\",\"bytes\":{},\"payload\":{payload}}}",
+        payload_digest(payload.as_bytes()),
+        payload.len(),
+    );
+    verify_certificate(&tampered).expect("missing non-headline record remains structural");
+    let kernel = CountingKernel {
+        calls: Cell::new(0),
+    };
+    let error = verify_certificate_with_kernel(&tampered, &path, &kernel)
+        .expect_err("a complete selected-obligation inventory is required before recheck");
+    assert_eq!(error.code, "SPX-Z112");
+    assert_eq!(
+        kernel.calls.get(),
+        0,
+        "kernel must not see an incomplete claim"
     );
     std::fs::remove_file(&path).ok();
 }

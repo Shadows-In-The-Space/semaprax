@@ -1,5 +1,12 @@
 module catalog_normalizer.batch;
 use function @id("std.data.json.dec.at_in") from std.data.json.dec as byte_in;
+use function @id("catalog_normalizer.record.id-value") from catalog_normalizer.record as record_id_value;
+use function @id("catalog_normalizer.record.same-id") from catalog_normalizer.record as same_decoded_id;
+use function @id("catalog_normalizer.record.quantity-value") from catalog_normalizer.record as record_quantity_value;
+use function @id("catalog_normalizer.record.quantity-or") from catalog_normalizer.record as quantity_or;
+use function @id("catalog_normalizer.record.record-problem") from catalog_normalizer.record as record_problem;
+use function @id("catalog_normalizer.record.problem-category") from catalog_normalizer.record as record_problem_category;
+use function @id("catalog_normalizer.record.problem-offset") from catalog_normalizer.record as record_problem_offset;
 
 // A terminal LF closes the last record; it never creates an additional one.
 // The one-byte LF body therefore contains zero records.
@@ -150,4 +157,144 @@ fn total_would_overflow(total: i64, quantity: i64) -> bool
 fn total_after(total: i64, quantity: i64) -> i64
 {
     if total_would_overflow(total, quantity) { total } else { total + quantity }
+}
+
+// CNORM-014 is intentionally a bounded quadratic scan: no owned id map is
+// needed for a maximum of 256 records, and decoded_token_eq keeps escaped
+// equivalents equal without materializing either id.  The batch coordinator
+// calls this only after every record has passed `record_problem`.
+@id("catalog_normalizer.batch.first-duplicate-record")
+fn first_duplicate_record(body: borrow Slice<u8>) -> usize
+{
+    let count = record_count(body);
+    let mut record = 1usize;
+    let mut duplicate = count;
+    let mut scanning = record < count;
+    while scanning {
+        let start = line_start(body, record);
+        let line = byte_range(body, start, line_end(body, start));
+        let id = record_id_value(line);
+        let mut prior = 0usize;
+        let mut same = false;
+        let mut comparing = prior < record;
+        while comparing {
+            let prior_start = line_start(body, prior);
+            let prior_line = byte_range(body, prior_start, line_end(body, prior_start));
+            same = same_decoded_id(body, prior_start + record_id_value(prior_line), start + id);
+            prior = prior + 1usize;
+            comparing = !same && prior < record;
+            comparing
+        }
+        duplicate = if same { record } else { duplicate };
+        record = if same { count } else { record + 1usize };
+        scanning = record < count;
+        scanning
+    }
+    duplicate
+}
+
+// One scalar carries the exact CNORM-020 envelope inputs without publishing
+// bytes while validation is still in progress.  The scales exceed every
+// admitted byte offset and record index: category, (record + 1), offset.
+// 33,554,944 is exactly 512 * 65,537, so every field has a disjoint range.
+@id("catalog_normalizer.batch.pack-failure")
+fn pack_failure(category: usize, record_plus_one: usize, offset: usize) -> usize
+{
+    category * 33554944usize + record_plus_one * 65537usize + offset
+}
+
+@id("catalog_normalizer.batch.failure-category")
+fn failure_category(failure: usize) -> usize
+{
+    failure / 33554944usize
+}
+
+@id("catalog_normalizer.batch.failure-record-plus-one")
+fn failure_record_plus_one(failure: usize) -> usize
+{
+    failure % 33554944usize / 65537usize
+}
+
+@id("catalog_normalizer.batch.failure-offset")
+fn failure_offset(failure: usize) -> usize
+{
+    failure % 65537usize
+}
+
+// CNORM-001..016 first-error coordinator. It validates one line completely,
+// checks that line's decoded id against prior accepted lines, then performs
+// the checked total addition. A nonzero result is the only information the
+// writer receives, so a valid prefix can never be rendered as output.
+@id("catalog_normalizer.batch.record-basic-failure")
+fn record_basic_failure(body: borrow Slice<u8>, record: usize) -> usize
+{
+    let start = line_start(body, record);
+    let end = line_end(body, start);
+    let line = byte_range(body, start, end);
+    let too_long = end - start > 512usize;
+    let utf8 = if too_long { true } else { line_utf8_valid(body, record) };
+    let empty = end == start;
+    let parsed = if !too_long && utf8 && !empty { record_problem(line) } else { 0usize };
+    if too_long { pack_failure(1usize, record + 1usize, 512usize) } else { if !utf8 { pack_failure(2usize, record + 1usize, line_utf8_fault(body, record)) } else { if empty { pack_failure(3usize, record + 1usize, 0usize) } else { if parsed != 0usize { pack_failure(record_problem_category(parsed), record + 1usize, record_problem_offset(parsed)) } else { 0usize } } } }
+}
+
+@id("catalog_normalizer.batch.record-is-duplicate")
+fn record_is_duplicate(body: borrow Slice<u8>, record: usize) -> bool
+{
+    let start = line_start(body, record);
+    let line = byte_range(body, start, line_end(body, start));
+    let id = record_id_value(line);
+    let mut prior = 0usize;
+    let mut duplicate = false;
+    let mut comparing = prior < record;
+    while comparing {
+        let prior_start = line_start(body, prior);
+        let prior_line = byte_range(body, prior_start, line_end(body, prior_start));
+        duplicate = same_decoded_id(body, prior_start + record_id_value(prior_line), start + id);
+        prior = prior + 1usize;
+        comparing = !duplicate && prior < record;
+        comparing
+    }
+    duplicate
+}
+
+@id("catalog_normalizer.batch.record-failure")
+fn record_failure(body: borrow Slice<u8>, record: usize, total: i64) -> usize
+{
+    let basic = record_basic_failure(body, record);
+    let duplicate = if basic == 0usize { record_is_duplicate(body, record) } else { false };
+    let start = line_start(body, record);
+    let line = byte_range(body, start, line_end(body, start));
+    let id = if basic == 0usize { record_id_value(line) } else { 0usize };
+    let quantity = if basic == 0usize && !duplicate { quantity_or(line, record_quantity_value(line), -1) } else { 0 };
+    let overflow = basic == 0usize && !duplicate && total_would_overflow(total, quantity);
+    if basic != 0usize { basic } else { if duplicate { pack_failure(5usize, record + 1usize, id) } else { if overflow { pack_failure(6usize, record + 1usize, id) } else { 0usize } } }
+}
+
+@id("catalog_normalizer.batch.valid-record-quantity")
+fn valid_record_quantity(body: borrow Slice<u8>, record: usize) -> i64
+{
+    let start = line_start(body, record);
+    let line = byte_range(body, start, line_end(body, start));
+    quantity_or(line, record_quantity_value(line), -1)
+}
+
+@id("catalog_normalizer.batch.first-failure")
+fn first_failure(body: borrow Slice<u8>) -> usize
+{
+    let count = record_count(body);
+    let whole = body_too_long(body);
+    let many = !whole && count > 256usize;
+    let mut record = 0usize;
+    let mut total = 0;
+    let mut failure = if whole { pack_failure(1usize, 0usize, 65536usize) } else { if many { pack_failure(1usize, 257usize, 0usize) } else { 0usize } };
+    let mut scanning = failure == 0usize && record < count;
+    while scanning {
+        failure = record_failure(body, record, total);
+        total = if failure == 0usize { total_after(total, valid_record_quantity(body, record)) } else { total };
+        record = if failure == 0usize { record + 1usize } else { count };
+        scanning = failure == 0usize && record < count;
+        scanning
+    }
+    failure
 }

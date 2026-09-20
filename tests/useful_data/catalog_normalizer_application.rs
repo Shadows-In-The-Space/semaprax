@@ -11,7 +11,12 @@ fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/catalog-normalizer-project")
 }
 
-fn run_oracle(input: &[u8]) -> serde_json::Value {
+fn application_options() -> project::ProjectExecutionOptions {
+    project::ProjectExecutionOptions::new(64 * 1024, 1_000_000)
+        .expect("catalog-normalizer's documented bounded interpreter envelope")
+}
+
+fn run_oracle_bytes(input: &[u8]) -> Vec<u8> {
     let oracle_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/oracle/catalog_normalizer");
     let mut child = Command::new("python3")
         .arg("oracle.py")
@@ -33,7 +38,11 @@ fn run_oracle(input: &[u8]) -> serde_json::Value {
         "oracle failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    serde_json::from_slice(&output.stdout).expect("oracle emits one JSON response")
+    output.stdout
+}
+
+fn run_oracle(input: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(&run_oracle_bytes(input)).expect("oracle emits one JSON response")
 }
 
 #[test]
@@ -55,6 +64,60 @@ fn decoded_id_bounds_and_escaped_duplicates_match_the_independent_oracle() {
     assert_eq!(duplicate_response["record_index"], 1);
 }
 
+// These literals are also exercised by the candidate's named `test_record_parser`
+// and `test_duplicate_batch` cases. Running the independent oracle here keeps
+// their frozen category/position contract honest without pretending the current
+// scalar parser helper already publishes a complete CNORM-042 response envelope.
+#[test]
+fn record_parser_categories_and_positions_match_the_independent_oracle() {
+    for (input, category, record_index, byte_offset) in [
+        (b"{\"id\":\"a\",\"label\":\"x\"}\n".as_slice(), "schema", 0, 0),
+        (
+            b"{\"id\":\"a\",\"label\":\"x\",\"quantity\":\"1\"}\n".as_slice(),
+            "schema",
+            0,
+            33,
+        ),
+        (
+            b"{\"\\u0069d\":\"a\",\"label\":\"x\",\"quantity\":1}\n".as_slice(),
+            "schema",
+            0,
+            1,
+        ),
+        (b"{\"id\":\"a\n".as_slice(), "malformed_json", 0, 8),
+        (
+            b"{\"id\":\"a\",\"label\":\"\",\"quantity\":0}\n{\"id\":\"\\u0061\",\"label\":\"\",\"quantity\":0}\n"
+                .as_slice(),
+            "duplicate_id",
+            1,
+            6,
+        ),
+    ] {
+        let output = run_oracle(input);
+        assert_eq!(output["status"], "error", "input={input:?}");
+        assert_eq!(output["category"], category, "input={input:?}");
+        assert_eq!(output["record_index"], record_index, "input={input:?}");
+        assert_eq!(output["byte_offset"], byte_offset, "input={input:?}");
+    }
+}
+
+// Exact canonical lines retained in the Semaprax source's `test_canonical_responses`.
+// This proves that its expected bytes are independently derived by the frozen oracle,
+// while the three-backend project test below proves that the candidate reaches them.
+#[test]
+fn canonical_response_literals_match_the_independent_oracle() {
+    assert_eq!(
+        run_oracle_bytes(b"{\"id\":\"a\",\"label\":\" x \",\"quantity\":1}\n"),
+        b"{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"a\",\"label\":\"x\",\"quantity\":1}]}\n"
+    );
+    assert_eq!(
+        run_oracle_bytes(
+            b"{\"id\":\"a\",\"label\":\"\",\"quantity\":0}\n{\"id\":\"\\u0061\",\"label\":\"\",\"quantity\":0}\n"
+        ),
+        b"{\"status\":\"error\",\"category\":\"duplicate_id\",\"record_index\":1,\"byte_offset\":6}\n"
+    );
+}
+
 #[test]
 fn batch_boundaries_and_string_normalization_agree_across_backends() {
     let root = fixture();
@@ -62,6 +125,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         "src/app.spx",
         "src/batch.spx",
         "src/limits.spx",
+        "src/record.spx",
         "src/tests.spx",
     ] {
         let path = root.join(source);
@@ -81,7 +145,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         .filter(|function| function.name.starts_with("test_"))
         .count();
     assert_eq!(
-        named_cases, 10,
+        named_cases, 13,
         "catalog-normalizer application case inventory drifted"
     );
     #[cfg(windows)]
@@ -106,7 +170,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
     std::fs::create_dir_all(&scratch).unwrap();
     project::with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
-        let result = snapshot.execute_test(&project::ProjectExecutionOptions::default())?;
+        let result = snapshot.execute_test(&application_options())?;
         assert_eq!(
             result.outcome(),
             &project::ProjectExecutionOutcome::Returned(0),
@@ -172,7 +236,13 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
     let mutant = scratch.join("mutant");
     std::fs::create_dir_all(mutant.join("src")).unwrap();
     std::fs::copy(root.join("semaprax.toml"), mutant.join("semaprax.toml")).unwrap();
-    for source in ["app.spx", "batch.spx", "limits.spx", "tests.spx"] {
+    for source in [
+        "app.spx",
+        "batch.spx",
+        "limits.spx",
+        "record.spx",
+        "tests.spx",
+    ] {
         std::fs::copy(
             root.join("src").join(source),
             mutant.join("src").join(source),
@@ -186,7 +256,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
     std::fs::write(&batch_path, broken).unwrap();
     project::with_authenticated_project(&mutant.join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
-        let result = snapshot.execute_test(&project::ProjectExecutionOptions::default())?;
+        let result = snapshot.execute_test(&application_options())?;
         assert_ne!(
             result.outcome(),
             &project::ProjectExecutionOutcome::Returned(0)
@@ -204,7 +274,13 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         utf8_mutant.join("semaprax.toml"),
     )
     .unwrap();
-    for source in ["app.spx", "batch.spx", "limits.spx", "tests.spx"] {
+    for source in [
+        "app.spx",
+        "batch.spx",
+        "limits.spx",
+        "record.spx",
+        "tests.spx",
+    ] {
         std::fs::copy(
             root.join("src").join(source),
             utf8_mutant.join("src").join(source),
@@ -221,7 +297,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
     std::fs::write(&batch_path, broken).unwrap();
     project::with_authenticated_project(&utf8_mutant.join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
-        let result = snapshot.execute_test(&project::ProjectExecutionOptions::default())?;
+        let result = snapshot.execute_test(&application_options())?;
         assert_ne!(
             result.outcome(),
             &project::ProjectExecutionOutcome::Returned(0)
@@ -239,7 +315,13 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         total_mutant.join("semaprax.toml"),
     )
     .unwrap();
-    for source in ["app.spx", "batch.spx", "limits.spx", "tests.spx"] {
+    for source in [
+        "app.spx",
+        "batch.spx",
+        "limits.spx",
+        "record.spx",
+        "tests.spx",
+    ] {
         std::fs::copy(
             root.join("src").join(source),
             total_mutant.join("src").join(source),
@@ -256,7 +338,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
     std::fs::write(&batch_path, broken).unwrap();
     project::with_authenticated_project(&total_mutant.join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
-        let result = snapshot.execute_test(&project::ProjectExecutionOptions::default())?;
+        let result = snapshot.execute_test(&application_options())?;
         assert_ne!(
             result.outcome(),
             &project::ProjectExecutionOutcome::Returned(0)

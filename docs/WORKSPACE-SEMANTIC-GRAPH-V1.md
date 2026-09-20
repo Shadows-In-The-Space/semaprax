@@ -128,14 +128,14 @@ The `limits` object has this exact order and values:
 | `max_uses` | 4,096 |
 | `max_resolved_cross_file_edges` | 65,536 |
 | `max_dependency_depth` | 16 |
-| `max_builder_bytes` | 18,874,368 |
+| `max_builder_bytes` | 67,108,864 |
 | `max_manifest_bytes` | 1,048,576 |
 | `max_output_bytes` | 16,777,216 |
 | `max_retained_generations` | 32 |
 | `max_staging_attempts` | 32 |
 | `max_unexpected_inventory_entries` | 0 |
 
-Corrective byte compatibility: `max_builder_bytes` is 18,874,368 because that
+Corrective byte compatibility: `max_builder_bytes` is 67,108,864 because that
 is the `SPX-G171` enforcement limit. Earlier v1 output that encoded
 16,777,216 was defective and is not canonical. Re-rendering a graph with the
 corrected limit changes its digest, but does not change the schema or raise a

@@ -97,7 +97,7 @@ Read this section before citing this document elsewhere.
   unproved edge" and "Differential testing" together name what is now
   checked and what remains open.
 - **The `SPX-G171` byte figures below are not independently re-measured at
-  full scale in this session.** The 18,874,368-byte `MAX_BUILDER_BYTES`
+  full scale in this session.** The 67,108,864-byte `MAX_BUILDER_BYTES`
   constant is read directly from source and cited with its exact location;
   the "~35-40 KB of source" translation of that budget is the finding of the
   session recorded in `examples/catalog-normalizer-project/README.md` and
@@ -812,7 +812,7 @@ fixture now have one.
 
 ### Ceiling 1 — `SPX-G171`, the Workspace Semantic Graph builder-bytes budget
 
-- **Constant:** `MAX_BUILDER_BYTES: usize = 18 * 1024 * 1024` (`18_874_368`
+- **Constant:** `MAX_BUILDER_BYTES: usize = 64 * 1024 * 1024` (`67_108_864`
   bytes) — `src/workspace_graph.rs:57`, surfaced via `limit_error("builder_bytes", ...)`
   in `src/workspace_graph/diagnostics.rs:33-38`.
 - **What it charges:** not raw source bytes. It is an in-memory structural-
@@ -835,7 +835,7 @@ fixture now have one.
 ### Ceiling 2 — `SPX-H006`, the cleanup-replay path/work budget
 
 - **Constants:** `MAX_REPLAY_PATHS: usize = 65_536` and
-  `MAX_REPLAY_WORK_UNITS: usize = 8_000_000` —
+  `MAX_REPLAY_WORK_UNITS: usize = 32_000_000` —
   `src/cleanup_plan/replay.rs:60-61`, enforced by
   `validate_replay_size_budget` in `src/cleanup_plan/replay/path_summary.rs`.
 - **What it charges:** the number of distinct terminal control-flow paths

@@ -7,7 +7,7 @@ profile = "owned-data-api.v1"
 
 [modules]
 entry = "catalog_normalizer.app"
-sources = ["src/app.spx", "src/batch.spx", "src/limits.spx", "src/tests.spx"]
+sources = ["src/app.spx", "src/batch.spx", "src/limits.spx", "src/record.spx", "src/tests.spx"]
 tests = ["catalog_normalizer.tests"]
 
 [exports]
@@ -15,3 +15,4 @@ web = ["catalog_normalizer.tests.smoke"]
 
 [dependencies]
 std.data.json.dec = "=0.1.0"
+std.data.json.doc = "=0.1.0"

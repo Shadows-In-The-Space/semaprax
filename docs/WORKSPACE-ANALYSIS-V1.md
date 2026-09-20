@@ -212,7 +212,7 @@ All routes embed the exact Workspace Semantic Graph `limits` and `budget`
 objects under `limits.workspace` and `budget.workspace`.
 
 Corrective byte compatibility: the embedded `limits.workspace.max_builder_bytes`
-is 18,874,368, exactly matching the Workspace Semantic Graph v1 `SPX-G171`
+is 67,108,864, exactly matching the Workspace Semantic Graph v1 `SPX-G171`
 limit. Earlier Analysis v1 bytes that embedded 16,777,216 were defective and
 are not canonical. The corrected embedded object changes Context, Impact, and
 Review artifact digests without changing either schema or any enforced ceiling.

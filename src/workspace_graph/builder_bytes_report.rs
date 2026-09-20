@@ -398,7 +398,7 @@ mod tests {
     ///
     /// On an unmodified tree this measured:
     /// - Mode 0 (the most conservative accounting, tried first) refuses:
-    ///   summed module costs alone are ~26.7MB against an 18,874,368-byte cap.
+    ///   summed module costs alone are ~26.7MB against a 67,108,864-byte cap.
     /// - The real build succeeds at mode 2 (`retention_prebound_mode`'s third
     ///   rung), the first rung that fits: ~17.50MB used, ~1.34MB (7.3%)
     ///   margin. `build_owned` on the real sources confirms this: it verifies.

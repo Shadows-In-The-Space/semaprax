@@ -8,6 +8,17 @@ use function @id("std.data.json.dec.decoded_token_eq") from std.data.json.dec as
 use function @id("std.data.json.dec.code_byte") from std.data.json.dec as dec_code_byte;
 use function @id("catalog_normalizer.limits.max_id_bytes") from catalog_normalizer.limits as max_id_bytes;
 use function @id("catalog_normalizer.limits.max_label_bytes") from catalog_normalizer.limits as max_label_bytes;
+use function @id("catalog_normalizer.batch.record-count") from catalog_normalizer.batch as record_count;
+use function @id("catalog_normalizer.batch.line-start") from catalog_normalizer.batch as line_start;
+use function @id("catalog_normalizer.batch.line-end") from catalog_normalizer.batch as line_end;
+use function @id("catalog_normalizer.batch.first-failure") from catalog_normalizer.batch as first_failure;
+use function @id("catalog_normalizer.batch.failure-category") from catalog_normalizer.batch as failure_category;
+use function @id("catalog_normalizer.batch.failure-record-plus-one") from catalog_normalizer.batch as failure_record_plus_one;
+use function @id("catalog_normalizer.batch.failure-offset") from catalog_normalizer.batch as failure_offset;
+use function @id("catalog_normalizer.record.id-value") from catalog_normalizer.record as record_id_value;
+use function @id("catalog_normalizer.record.quantity-value") from catalog_normalizer.record as record_quantity_value;
+use function @id("catalog_normalizer.record.quantity-or") from catalog_normalizer.record as quantity_or;
+use function @id("catalog_normalizer.record.label-value") from catalog_normalizer.record as record_label_value;
 
 // This module owns bounded JSON string decoding and label normalization.
 // The batch module owns line boundaries. Both are application code; full
@@ -20,35 +31,6 @@ use function @id("catalog_normalizer.limits.max_label_bytes") from catalog_norma
 fn is_space(byte: u8) -> bool
 {
     byte == 32u8 || byte == 9u8 || byte == 13u8 || byte == 10u8
-}
-
-@id("catalog_normalizer.app.trim_start")
-fn trim_start(view: borrow Slice<u8>) -> usize
-{
-    let length = byte_len(view);
-    let mut index = 0usize;
-    let mut scanning = index < length;
-    while scanning {
-        let blank = match byte_get(view, index) { Option::Some { value } => is_space(value), Option::None {} => false, };
-        index = if blank { index + 1usize } else { index };
-        scanning = blank && index < length;
-        scanning
-    }
-    index
-}
-
-@id("catalog_normalizer.app.trim_end")
-fn trim_end(view: borrow Slice<u8>) -> usize
-{
-    let mut end = byte_len(view);
-    let mut scanning = end > 0usize;
-    while scanning {
-        let blank = match byte_get(view, end - 1usize) { Option::Some { value } => is_space(value), Option::None {} => false, };
-        end = if blank { end - 1usize } else { end };
-        scanning = blank && end > 0usize;
-        scanning
-    }
-    end
 }
 
 @id("catalog_normalizer.app.bytes_equal")
@@ -97,59 +79,439 @@ fn same_decoded_id(input: borrow Slice<u8>, left_pos: usize, right_pos: usize) -
     id_token_valid(input, left_pos) && id_token_valid(input, right_pos) && decoded_token_eq(input, left_pos, right_pos)
 }
 
-// Decodes the JSON string token at `pos` (escapes resolved exactly as
-// `std.data.json.dec` documents) into a freshly owned buffer sized to its
-// exact decoded length.
-@id("catalog_normalizer.app.decode_into")
-fn decode_into(line: borrow Slice<u8>, pos: usize) -> Bytes
-{
-    let total = decoded_len(line, pos);
-    let mut out = bytes_zeroed(256usize);
-    let mut index = pos + 1usize;
-    let mut part = 0usize;
-    let mut write = 0usize;
-    let mut running = write < total;
-    while running {
-        out = bytes_set(out, write, dec_code_byte(emit_at(line, index, part)));
-        let last = part + 1usize >= emit_len(line, index);
-        index = if last { token_end(line, index) } else { index };
-        part = if last { 0usize } else { part + 1usize };
-        write = write + 1usize;
-        running = write < total;
-        running
-    }
-    let out_view = bytes_as_slice(out);
-    bytes_copy(byte_range(out_view, 0usize, total))
-}
-
-// CNORM-012: the decoded value with only the four ASCII whitespace bytes
-// stripped from both boundaries -- nothing else touched, no other Unicode
-// whitespace, no Unicode normalization.
-@id("catalog_normalizer.app.trimmed_bytes")
-fn trimmed_bytes(line: borrow Slice<u8>, pos: usize) -> Bytes
-{
-    let decoded = decode_into(line, pos);
-    let view = bytes_as_slice(decoded);
-    let start = trim_start(view);
-    let end_raw = trim_end(view);
-    let end = if end_raw > start { end_raw } else { start };
-    bytes_copy(byte_range(view, start, end))
-}
-
-// Cross-module-safe (scalar `bool`) wrappers: the `Bytes` values above
-// never leave this module, only the comparison result does.
+// Cross-module-safe scalar comparisons decode without allocating an
+// intermediate buffer. CNORM-012 strips only the four ASCII whitespace bytes
+// at the decoded boundaries; no Unicode normalization is performed.
 @id("catalog_normalizer.app.trimmed_matches")
 fn trimmed_matches(line: borrow Slice<u8>, pos: usize, expected_trimmed: borrow Slice<u8>) -> bool
 {
-    let trimmed = trimmed_bytes(line, pos);
-    bytes_equal(bytes_as_slice(trimmed), expected_trimmed)
+    let start = decoded_trim_start(line, pos);
+    let end_raw = decoded_trim_end(line, pos);
+    let end = if end_raw > start { end_raw } else { start };
+    let mut index = 0usize;
+    let mut same = end - start == byte_len(expected_trimmed);
+    while same && index < end - start {
+        let expected = match byte_get(expected_trimmed, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        same = decoded_byte_at(line, pos, start + index) == expected;
+        index = index + 1usize;
+        same && index < end - start
+    }
+    same
 }
 
 @id("catalog_normalizer.app.decoded_matches")
 fn decoded_matches(line: borrow Slice<u8>, pos: usize, expected: borrow Slice<u8>) -> bool
 {
-    let decoded = decode_into(line, pos);
-    bytes_equal(bytes_as_slice(decoded), expected)
+    let total = decoded_len(line, pos);
+    let mut index = 0usize;
+    let mut same = total == byte_len(expected);
+    while same && index < total {
+        let item = match byte_get(expected, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        same = decoded_byte_at(line, pos, index) == item;
+        index = index + 1usize;
+        same && index < total
+    }
+    same
+}
+
+// The response writer is a two-pass scalar projection. Length and byte-at
+// helpers perform no allocation; only the final loop owns a buffer. This keeps
+// aggregate calls out of loop bodies and makes partial output unobservable.
+@id("catalog_normalizer.app.text-byte")
+fn text_byte(value: borrow str, index: usize) -> u8
+{
+    match byte_get(str_as_bytes(value), index) { Option::Some { value: item } => item, Option::None {} => 0u8, }
+}
+
+@id("catalog_normalizer.app.usize-len")
+fn usize_len(value: usize) -> usize
+{
+    let mut remaining = value;
+    let mut length = 1usize;
+    while remaining >= 10usize {
+        remaining = remaining / 10usize;
+        length = length + 1usize;
+        remaining >= 10usize
+    }
+    length
+}
+
+@id("catalog_normalizer.app.usize-byte")
+fn usize_byte(value: usize, index: usize) -> u8
+{
+    let length = usize_len(value);
+    let mut remaining = value;
+    let mut place = length - index - 1usize;
+    while place > 0usize {
+        remaining = remaining / 10usize;
+        place = place - 1usize;
+        place > 0usize
+    }
+    match remaining % 10usize { 0usize => 48u8, 1usize => 49u8, 2usize => 50u8, 3usize => 51u8, 4usize => 52u8, 5usize => 53u8, 6usize => 54u8, 7usize => 55u8, 8usize => 56u8, _ => 57u8, }
+}
+
+@id("catalog_normalizer.app.i64-len")
+fn i64_len(value: i64) -> usize
+{
+    let mut remaining = if value > 0 { 0 - value } else { value };
+    let mut length = 1usize;
+    while remaining <= -10 {
+        remaining = remaining / 10;
+        length = length + 1usize;
+        remaining <= -10
+    }
+    if value < 0 { length + 1usize } else { length }
+}
+
+@id("catalog_normalizer.app.i64-byte")
+fn i64_byte(value: i64, index: usize) -> u8
+{
+    let length = i64_len(value);
+    let sign = if value < 0 { 1usize } else { 0usize };
+    let mut remaining = if value > 0 { 0 - value } else { value };
+    let mut place = if index >= sign { length - index - 1usize } else { 0usize };
+    while place > 0usize {
+        remaining = remaining / 10;
+        place = place - 1usize;
+        place > 0usize
+    }
+    if index < sign { 45u8 } else { dec_code_byte(48 - remaining % 10) }
+}
+
+@id("catalog_normalizer.app.literal-byte")
+fn literal_byte(kind: usize, index: usize) -> u8
+{
+    match kind { 1usize => { let value = "{\"status\":\"error\",\"category\":\""; text_byte(string_as_str(value), index) }, 2usize => { let value = "\",\"record_index\":"; text_byte(string_as_str(value), index) }, 3usize => { let value = ",\"byte_offset\":"; text_byte(string_as_str(value), index) }, 4usize => { let value = "}\n"; text_byte(string_as_str(value), index) }, 5usize => { let value = "{\"status\":\"ok\",\"count\":"; text_byte(string_as_str(value), index) }, 6usize => { let value = ",\"total_quantity\":"; text_byte(string_as_str(value), index) }, 7usize => { let value = ",\"records\":["; text_byte(string_as_str(value), index) }, 8usize => { let value = "]}\n"; text_byte(string_as_str(value), index) }, 9usize => { let value = "{\"id\":\""; text_byte(string_as_str(value), index) }, 10usize => { let value = "\",\"label\":\""; text_byte(string_as_str(value), index) }, _ => { let value = "\",\"quantity\":"; text_byte(string_as_str(value), index) }, }
+}
+
+@id("catalog_normalizer.app.category-len")
+fn category_len(category: usize) -> usize
+{
+    match category { 1usize => 15usize, 2usize => 12usize, 3usize => 14usize, 4usize => 6usize, 5usize => 12usize, _ => 8usize, }
+}
+
+@id("catalog_normalizer.app.category-byte")
+fn category_byte(category: usize, index: usize) -> u8
+{
+    match category { 1usize => { let value = "oversized_input"; text_byte(string_as_str(value), index) }, 2usize => { let value = "invalid_utf8"; text_byte(string_as_str(value), index) }, 3usize => { let value = "malformed_json"; text_byte(string_as_str(value), index) }, 4usize => { let value = "schema"; text_byte(string_as_str(value), index) }, 5usize => { let value = "duplicate_id"; text_byte(string_as_str(value), index) }, _ => { let value = "overflow"; text_byte(string_as_str(value), index) }, }
+}
+
+@id("catalog_normalizer.app.error-len")
+fn error_len(failure: usize) -> usize
+{
+    let record = failure_record_plus_one(failure);
+    30usize + category_len(failure_category(failure)) + 17usize + if record == 0usize { 2usize } else { usize_len(record - 1usize) } + 15usize + usize_len(failure_offset(failure)) + 2usize
+}
+
+@id("catalog_normalizer.app.error-byte-at")
+fn error_byte_at(failure: usize, index: usize) -> u8
+{
+    let category = failure_category(failure);
+    let record = failure_record_plus_one(failure);
+    let record_len = if record == 0usize { 2usize } else { usize_len(record - 1usize) };
+    let category_end = 30usize + category_len(category);
+    let record_start = category_end + 17usize;
+    let offset_start = record_start + record_len + 15usize;
+    if index < 30usize { literal_byte(1usize, index) } else { if index < category_end { category_byte(category, index - 30usize) } else { if index < record_start { literal_byte(2usize, index - category_end) } else { if index < record_start + record_len { if record == 0usize { if index == record_start { 45u8 } else { 49u8 } } else { usize_byte(record - 1usize, index - record_start) } } else { if index < offset_start { literal_byte(3usize, index - record_start - record_len) } else { if index < offset_start + usize_len(failure_offset(failure)) { usize_byte(failure_offset(failure), index - offset_start) } else { literal_byte(4usize, index - offset_start - usize_len(failure_offset(failure))) } } } } } }
+}
+
+@id("catalog_normalizer.app.decoded-byte-at")
+fn decoded_byte_at(line: borrow Slice<u8>, token: usize, wanted: usize) -> u8
+{
+    let mut index = token + 1usize;
+    let mut part = 0usize;
+    let mut emitted = 0usize;
+    while emitted < wanted {
+        let last = part + 1usize >= emit_len(line, index);
+        index = if last { token_end(line, index) } else { index };
+        part = if last { 0usize } else { part + 1usize };
+        emitted = emitted + 1usize;
+        emitted < wanted
+    }
+    dec_code_byte(emit_at(line, index, part))
+}
+
+@id("catalog_normalizer.app.decoded-trim-start")
+fn decoded_trim_start(line: borrow Slice<u8>, token: usize) -> usize
+{
+    let total = decoded_len(line, token);
+    let mut index = 0usize;
+    while index < total && is_space(decoded_byte_at(line, token, index)) {
+        index = index + 1usize;
+        index < total && is_space(decoded_byte_at(line, token, index))
+    }
+    index
+}
+
+@id("catalog_normalizer.app.decoded-trim-end")
+fn decoded_trim_end(line: borrow Slice<u8>, token: usize) -> usize
+{
+    let mut end = decoded_len(line, token);
+    while end > 0usize && is_space(decoded_byte_at(line, token, end - 1usize)) {
+        end = end - 1usize;
+        end > 0usize && is_space(decoded_byte_at(line, token, end - 1usize))
+    }
+    end
+}
+
+@id("catalog_normalizer.app.escape-len")
+fn escape_len(value: u8) -> usize
+{
+    if value == 34u8 || value == 92u8 || value == 8u8 || value == 9u8 || value == 10u8 || value == 12u8 || value == 13u8 { 2usize } else { if value < 32u8 { 6usize } else { 1usize } }
+}
+
+@id("catalog_normalizer.app.hex-byte")
+fn hex_byte(value: u8) -> u8
+{
+    match value { 0u8 => 48u8, 1u8 => 49u8, 2u8 => 50u8, 3u8 => 51u8, 4u8 => 52u8, 5u8 => 53u8, 6u8 => 54u8, 7u8 => 55u8, 8u8 => 56u8, 9u8 => 57u8, 10u8 => 97u8, 11u8 => 98u8, 12u8 => 99u8, 13u8 => 100u8, 14u8 => 101u8, 15u8 => 102u8, 16u8 => 48u8, 17u8 => 49u8, 18u8 => 50u8, 19u8 => 51u8, 20u8 => 52u8, 21u8 => 53u8, 22u8 => 54u8, 23u8 => 55u8, 24u8 => 56u8, 25u8 => 57u8, 26u8 => 97u8, 27u8 => 98u8, 28u8 => 99u8, 29u8 => 100u8, 30u8 => 101u8, _ => 102u8, }
+}
+
+@id("catalog_normalizer.app.escape-byte")
+fn escape_byte(value: u8, part: usize) -> u8
+{
+    let named = value == 34u8 || value == 92u8 || value == 8u8 || value == 9u8 || value == 10u8 || value == 12u8 || value == 13u8;
+    if named { if part == 0usize { 92u8 } else { if value == 34u8 { 34u8 } else { if value == 92u8 { 92u8 } else { if value == 8u8 { 98u8 } else { if value == 9u8 { 116u8 } else { if value == 10u8 { 110u8 } else { if value == 12u8 { 102u8 } else { 114u8 } } } } } } } } else { if value < 32u8 { if part == 0usize { 92u8 } else { if part == 1usize { 117u8 } else { if part < 5usize { 48u8 } else { hex_byte(value) } } } } else { value } }
+}
+
+@id("catalog_normalizer.app.escaped-len")
+fn escaped_len(line: borrow Slice<u8>, token: usize, start: usize, end: usize) -> usize
+{
+    let mut index = start;
+    let mut total = 0usize;
+    while index < end {
+        total = total + escape_len(decoded_byte_at(line, token, index));
+        index = index + 1usize;
+        index < end
+    }
+    total
+}
+
+@id("catalog_normalizer.app.escaped-byte-at")
+fn escaped_byte_at(line: borrow Slice<u8>, token: usize, start: usize, end: usize, wanted: usize) -> u8
+{
+    let mut index = start;
+    let mut offset = 0usize;
+    let mut found = false;
+    let mut value = 0u8;
+    while index < end && !found {
+        let decoded = decoded_byte_at(line, token, index);
+        let width = escape_len(decoded);
+        found = wanted < offset + width;
+        value = if found { escape_byte(decoded, wanted - offset) } else { value };
+        offset = if found { offset } else { offset + width };
+        index = if found { index } else { index + 1usize };
+        index < end && !found
+    }
+    value
+}
+
+@id("catalog_normalizer.app.record-output-len")
+fn record_output_len(line: borrow Slice<u8>) -> usize
+{
+    let id = record_id_value(line);
+    let label = record_label_value(line);
+    let label_start = decoded_trim_start(line, label);
+    let label_end_raw = decoded_trim_end(line, label);
+    let label_end = if label_end_raw > label_start { label_end_raw } else { label_start };
+    let quantity = quantity_or(line, record_quantity_value(line), -1);
+    32usize + escaped_len(line, id, 0usize, decoded_len(line, id)) + escaped_len(line, label, label_start, label_end) + i64_len(quantity)
+}
+
+@id("catalog_normalizer.app.record-output-byte")
+fn record_output_byte(line: borrow Slice<u8>, index: usize) -> u8
+{
+    let id = record_id_value(line);
+    let label = record_label_value(line);
+    let id_len = escaped_len(line, id, 0usize, decoded_len(line, id));
+    let label_start = decoded_trim_start(line, label);
+    let label_end_raw = decoded_trim_end(line, label);
+    let label_end = if label_end_raw > label_start { label_end_raw } else { label_start };
+    let label_len = escaped_len(line, label, label_start, label_end);
+    let quantity = quantity_or(line, record_quantity_value(line), -1);
+    if index < 7usize { literal_byte(9usize, index) } else { if index < 7usize + id_len { escaped_byte_at(line, id, 0usize, decoded_len(line, id), index - 7usize) } else { if index < 18usize + id_len { literal_byte(10usize, index - 7usize - id_len) } else { if index < 18usize + id_len + label_len { escaped_byte_at(line, label, label_start, label_end, index - 18usize - id_len) } else { if index < 31usize + id_len + label_len { literal_byte(11usize, index - 18usize - id_len - label_len) } else { if index < 31usize + id_len + label_len + i64_len(quantity) { i64_byte(quantity, index - 31usize - id_len - label_len) } else { 125u8 } } } } } }
+}
+
+@id("catalog_normalizer.app.success-total")
+fn success_total(body: borrow Slice<u8>) -> i64
+{
+    let count = record_count(body);
+    let mut record = 0usize;
+    let mut total = 0;
+    while record < count {
+        let start = line_start(body, record);
+        let line = byte_range(body, start, line_end(body, start));
+        total = total + quantity_or(line, record_quantity_value(line), -1);
+        record = record + 1usize;
+        record < count
+    }
+    total
+}
+
+@id("catalog_normalizer.app.success-len")
+fn success_len(body: borrow Slice<u8>) -> usize
+{
+    let count = record_count(body);
+    let mut length = 23usize + usize_len(count) + 18usize + i64_len(success_total(body)) + 12usize + 3usize;
+    let mut record = 0usize;
+    while record < count {
+        let start = line_start(body, record);
+        let end = line_end(body, start);
+        let line = byte_range(body, start, end);
+        length = length + if record == 0usize { 0usize } else { 1usize } + record_output_len(line);
+        record = record + 1usize;
+        record < count
+    }
+    length
+}
+
+@id("catalog_normalizer.app.absolute-field")
+fn absolute_field(body: borrow Slice<u8>, record: usize, field: usize) -> usize
+{
+    let start = line_start(body, record);
+    let line = byte_range(body, start, line_end(body, start));
+    start + if field == 1usize { record_id_value(line) } else { if field == 2usize { record_label_value(line) } else { record_quantity_value(line) } }
+}
+
+@id("catalog_normalizer.app.success-phase-byte")
+fn success_phase_byte(body: borrow Slice<u8>, phase: usize, part: usize, count: usize, total: i64, id: usize, id_length: usize, label: usize, label_start: usize, label_end: usize, label_length: usize, quantity: i64) -> u8
+{
+    match phase { 0usize => literal_byte(5usize, part), 1usize => usize_byte(count, part), 2usize => literal_byte(6usize, part), 3usize => i64_byte(total, part), 4usize => literal_byte(7usize, part), 5usize => literal_byte(9usize, part), 6usize => if part < id_length { escaped_byte_at(body, id, 0usize, decoded_len(body, id), part) } else { 0u8 }, 7usize => literal_byte(10usize, part), 8usize => if part < label_length { escaped_byte_at(body, label, label_start, label_end, part) } else { 0u8 }, 9usize => literal_byte(11usize, part), 10usize => i64_byte(quantity, part), 11usize => if part == 0usize { 125u8 } else { 44u8 }, _ => literal_byte(8usize, part), }
+}
+
+@id("catalog_normalizer.app.success-phase-len")
+fn success_phase_len(phase: usize, count: usize, total: i64, record: usize, id_length: usize, label_length: usize, quantity: i64) -> usize
+{
+    match phase { 0usize => 23usize, 1usize => usize_len(count), 2usize => 18usize, 3usize => i64_len(total), 4usize => 12usize, 5usize => 7usize, 6usize => id_length, 7usize => 11usize, 8usize => label_length, 9usize => 13usize, 10usize => i64_len(quantity), 11usize => if record + 1usize < count { 2usize } else { 1usize }, _ => 3usize, }
+}
+
+@id("catalog_normalizer.app.field-if")
+fn field_if(body: borrow Slice<u8>, active: bool, record: usize, field: usize, fallback: usize) -> usize
+{
+    if active { absolute_field(body, record, field) } else { fallback }
+}
+
+@id("catalog_normalizer.app.escaped-len-if")
+fn escaped_len_if(body: borrow Slice<u8>, active: bool, token: usize, start: usize, end: usize, fallback: usize) -> usize
+{
+    if active { escaped_len(body, token, start, end) } else { fallback }
+}
+
+@id("catalog_normalizer.app.trim-start-if")
+fn trim_start_if(body: borrow Slice<u8>, active: bool, token: usize, fallback: usize) -> usize
+{
+    if active { decoded_trim_start(body, token) } else { fallback }
+}
+
+@id("catalog_normalizer.app.trim-end-if")
+fn trim_end_if(body: borrow Slice<u8>, active: bool, token: usize, start: usize, fallback: usize) -> usize
+{
+    let end = if active { decoded_trim_end(body, token) } else { fallback };
+    if end > start { end } else { start }
+}
+
+@id("catalog_normalizer.app.quantity-if")
+fn quantity_if(body: borrow Slice<u8>, active: bool, at: usize, fallback: i64) -> i64
+{
+    if active { quantity_or(body, at, -1) } else { fallback }
+}
+
+@id("catalog_normalizer.app.next-record")
+fn next_record(done: bool, phase: usize, record: usize) -> usize
+{
+    if done && phase == 11usize { record + 1usize } else { record }
+}
+
+@id("catalog_normalizer.app.next-phase")
+fn next_phase(done: bool, phase: usize, count: usize, record: usize) -> usize
+{
+    if !done { phase } else { if phase == 4usize && count == 0usize { 12usize } else { if phase == 11usize { if record + 1usize < count { 5usize } else { 12usize } } else { phase + 1usize } } }
+}
+
+@id("catalog_normalizer.app.next-part")
+fn next_part(done: bool, advanced: usize) -> usize
+{
+    if done { 0usize } else { advanced }
+}
+
+// CNORM-042 writer. The input is a fully selected failure; it cannot emit a
+// prefix of a success response because `normalize` chooses one branch first.
+@id("catalog_normalizer.app.error-response")
+fn error_response(failure: usize) -> Bytes
+{
+    let length = error_len(failure);
+    let mut out = bytes_zeroed(65536usize);
+    let mut index = 0usize;
+    while index < length {
+        out = bytes_set(out, index, error_byte_at(failure, index));
+        index = index + 1usize;
+        index < length
+    }
+    let view = bytes_as_slice(out);
+    bytes_copy(byte_range(view, 0usize, length))
+}
+
+// CNORM-041 writer. Validation has already established all field locations,
+// decoded bounds, duplicate freedom, and checked-total safety; this second
+// pass is therefore projection only and preserves input record order.
+@id("catalog_normalizer.app.success-response")
+fn success_response(body: borrow Slice<u8>) -> Bytes
+{
+    let count = record_count(body);
+    let total = success_total(body);
+    let length = success_len(body);
+    let mut out = bytes_zeroed(65536usize);
+    let mut index = 0usize;
+    let mut phase = 0usize;
+    let mut part = 0usize;
+    let mut record = 0usize;
+    let active = count > 0usize;
+    let mut id = field_if(body, active, 0usize, 1usize, 0usize);
+    let mut label = field_if(body, active, 0usize, 2usize, 0usize);
+    let mut quantity_at = field_if(body, active, 0usize, 3usize, 0usize);
+    let mut id_length = escaped_len_if(body, active, id, 0usize, if active { decoded_len(body, id) } else { 0usize }, 0usize);
+    let mut label_start = trim_start_if(body, active, label, 0usize);
+    let mut label_end = trim_end_if(body, active, label, label_start, label_start);
+    let mut label_length = escaped_len_if(body, active, label, label_start, label_end, 0usize);
+    let mut quantity = quantity_if(body, active, quantity_at, 0);
+    while index < length {
+        let value = success_phase_byte(body, phase, part, count, total, id, id_length, label, label_start, label_end, label_length, quantity);
+        out = bytes_set(out, index, value);
+        index = index + 1usize;
+        let advanced_part = part + 1usize;
+        let segment = success_phase_len(phase, count, total, record, id_length, label_length, quantity);
+        let done = advanced_part >= segment;
+        let next_record_value = next_record(done, phase, record);
+        let changed_record = next_record_value != record && next_record_value < count;
+        phase = next_phase(done, phase, count, record);
+        part = next_part(done, advanced_part);
+        record = next_record_value;
+        id = field_if(body, changed_record, record, 1usize, id);
+        label = field_if(body, changed_record, record, 2usize, label);
+        quantity_at = field_if(body, changed_record, record, 3usize, quantity_at);
+        let id_end = if changed_record { decoded_len(body, id) } else { 0usize };
+        id_length = escaped_len_if(body, changed_record, id, 0usize, id_end, id_length);
+        label_start = trim_start_if(body, changed_record, label, label_start);
+        label_end = trim_end_if(body, changed_record, label, label_start, label_end);
+        label_length = escaped_len_if(body, changed_record, label, label_start, label_end, label_length);
+        quantity = quantity_if(body, changed_record, quantity_at, quantity);
+        index < length
+    }
+    let view = bytes_as_slice(out);
+    bytes_copy(byte_range(view, 0usize, length))
+}
+
+@id("catalog_normalizer.app.normalize")
+fn normalize(body: borrow Slice<u8>) -> Bytes
+{
+    let failure = first_failure(body);
+    if failure == 0usize { success_response(body) } else { error_response(failure) }
+}
+
+@id("catalog_normalizer.app.normalizes-to")
+fn normalizes_to(body: borrow Slice<u8>, expected: borrow Slice<u8>) -> bool
+{
+    let response = normalize(body);
+    bytes_equal(bytes_as_slice(response), expected)
 }
 
 @id("main")

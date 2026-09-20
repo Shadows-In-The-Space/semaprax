@@ -139,13 +139,14 @@ into**, re-verified against current `main`, not arbitrary round numbers:
 
 | Bound | Value | Site | Reproduction |
 | --- | --- | --- | --- |
-| Workspace Semantic Graph `builder_bytes` (`SPX-G171`) | 18,874,368 bytes | `MAX_BUILDER_BYTES`, `src/workspace_graph.rs:59` | Add `std.data.json.doc = "^0.1.0"` back to `semaprax.toml` (alongside `std.fs`) and run `check`: exceeds the cap, forecasting 23,741,424 bytes. |
+| Workspace Semantic Graph `builder_bytes` (`SPX-G171`) | 67,108,864 bytes | `MAX_BUILDER_BYTES`, `src/workspace_graph.rs:59` | The former 18,874,368-byte ceiling rejected this product's `std.data.json.doc` + `std.fs` closure at a 23,741,424-byte forecast. The raised ceiling admits that bounded closure; oversized projections still fail closed at the same diagnostic. |
 | `bytes_copy`/`bytes_set`/`writer_write_u8` interprocedural site count (`SPX-T267`) | 16 sites | `MAX_BYTES_COPY_SITES`, `src/byte_data_capacity.rs:13` | Extend `report_writer` past the 7-byte report: `bytes_copy path reaches 17 sites; limit is 16`. |
 
-Both are why `record_count = 3` and the 7-byte, one-field report are the
-largest bounds this product fits under both constraints at once with a real
-`fs.write`. A maintainer, not this product, should decide whether either
-budget should move for genuinely bounded, small workloads like this one —
+The interprocedural site count remains why `record_count = 3` and the 7-byte,
+one-field report are this product's checked bounds with a real `fs.write`.
+The graph ceiling was raised for the measured, bounded multi-package workload;
+future increases still require a measured capacity case rather than an
+application-local workaround —
 this is the same class of ceiling already blocking #124 and forcing the
 reference application (#194) to reimplement `std.db`/`std.http` locally, so
 this product is a third, independently-reproduced case to decide that

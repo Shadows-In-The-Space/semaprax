@@ -4,6 +4,7 @@ use function @id("catalog_normalizer.app.id_valid") from catalog_normalizer.app 
 use function @id("catalog_normalizer.app.same_id") from catalog_normalizer.app as same_decoded_id;
 use function @id("catalog_normalizer.app.trimmed_matches") from catalog_normalizer.app as trimmed_matches;
 use function @id("catalog_normalizer.app.decoded_matches") from catalog_normalizer.app as decoded_matches;
+use function @id("catalog_normalizer.app.normalizes-to") from catalog_normalizer.app as normalizes_to;
 use function @id("catalog_normalizer.batch.record-count") from catalog_normalizer.batch as record_count;
 use function @id("catalog_normalizer.batch.line-start") from catalog_normalizer.batch as line_start;
 use function @id("catalog_normalizer.batch.line-end") from catalog_normalizer.batch as line_end;
@@ -15,6 +16,10 @@ use function @id("catalog_normalizer.batch.line-utf8-valid") from catalog_normal
 use function @id("catalog_normalizer.batch.line-utf8-fault") from catalog_normalizer.batch as line_utf8_fault;
 use function @id("catalog_normalizer.batch.total-would-overflow") from catalog_normalizer.batch as total_would_overflow;
 use function @id("catalog_normalizer.batch.total-after") from catalog_normalizer.batch as total_after;
+use function @id("catalog_normalizer.batch.first-duplicate-record") from catalog_normalizer.batch as first_duplicate_record;
+use function @id("catalog_normalizer.record.record-problem") from catalog_normalizer.record as record_problem;
+use function @id("catalog_normalizer.record.problem-category") from catalog_normalizer.record as problem_category;
+use function @id("catalog_normalizer.record.problem-offset") from catalog_normalizer.record as problem_offset;
 
 // `owned-data-api.v1` requires every function reachable from `[exports]
 // web` to be contract-free; `std.data.json.dec` uses `ensures` throughout
@@ -41,10 +46,13 @@ fn smoke() -> bool
 @id("catalog_normalizer.tests.test-basic-label")
 fn test_basic_label() -> i64
 {
-    let token = [34u8, 104u8, 101u8, 108u8, 108u8, 111u8, 34u8];
-    let view = array_as_slice(token);
-    let expected = [104u8, 101u8, 108u8, 108u8, 111u8];
-    if token_valid(view, 0usize) && decoded_matches(view, 0usize, array_as_slice(expected)) && trimmed_matches(view, 0usize, array_as_slice(expected)) { 0 } else { 1 }
+    let token = "\"hello\"";
+    let token_text = string_as_str(token);
+    let view = str_as_bytes(token_text);
+    let expected = "hello";
+    let expected_text = string_as_str(expected);
+    let expected_view = str_as_bytes(expected_text);
+    if token_valid(view, 0usize) && decoded_matches(view, 0usize, expected_view) && trimmed_matches(view, 0usize, expected_view) { 0 } else { 1 }
 }
 
 // "label-trim-boundary-whitespace": " \t hello world \t " -> "hello world".
@@ -53,10 +61,13 @@ fn test_basic_label() -> i64
 @id("catalog_normalizer.tests.test-label-trim-boundary-whitespace")
 fn test_label_trim_boundary_whitespace() -> i64
 {
-    let token = [34u8, 32u8, 92u8, 116u8, 32u8, 104u8, 101u8, 108u8, 108u8, 111u8, 32u8, 119u8, 111u8, 114u8, 108u8, 100u8, 32u8, 92u8, 116u8, 32u8, 34u8];
-    let view = array_as_slice(token);
-    let expected = [104u8, 101u8, 108u8, 108u8, 111u8, 32u8, 119u8, 111u8, 114u8, 108u8, 100u8];
-    if token_valid(view, 0usize) && trimmed_matches(view, 0usize, array_as_slice(expected)) { 0 } else { 1 }
+    let token = "\" \\t hello world \\t \"";
+    let token_text = string_as_str(token);
+    let view = str_as_bytes(token_text);
+    let expected = "hello world";
+    let expected_text = string_as_str(expected);
+    let expected_view = str_as_bytes(expected_text);
+    if token_valid(view, 0usize) && trimmed_matches(view, 0usize, expected_view) { 0 } else { 1 }
 }
 
 // "label-internal-whitespace-preserved": "hello    world" -> unchanged;
@@ -64,10 +75,13 @@ fn test_label_trim_boundary_whitespace() -> i64
 @id("catalog_normalizer.tests.test-label-internal-whitespace-preserved")
 fn test_label_internal_whitespace_preserved() -> i64
 {
-    let token = [34u8, 104u8, 101u8, 108u8, 108u8, 111u8, 32u8, 32u8, 32u8, 32u8, 119u8, 111u8, 114u8, 108u8, 100u8, 34u8];
-    let view = array_as_slice(token);
-    let expected = [104u8, 101u8, 108u8, 108u8, 111u8, 32u8, 32u8, 32u8, 32u8, 119u8, 111u8, 114u8, 108u8, 100u8];
-    if token_valid(view, 0usize) && trimmed_matches(view, 0usize, array_as_slice(expected)) { 0 } else { 1 }
+    let token = "\"hello    world\"";
+    let token_text = string_as_str(token);
+    let view = str_as_bytes(token_text);
+    let expected = "hello    world";
+    let expected_text = string_as_str(expected);
+    let expected_view = str_as_bytes(expected_text);
+    if token_valid(view, 0usize) && trimmed_matches(view, 0usize, expected_view) { 0 } else { 1 }
 }
 
 // "label-multibyte-unicode-no-normalization": "  Café STRASSE ÜBER  " ->
@@ -76,10 +90,13 @@ fn test_label_internal_whitespace_preserved() -> i64
 @id("catalog_normalizer.tests.test-label-multibyte-unicode-no-normalization")
 fn test_label_multibyte_unicode_no_normalization() -> i64
 {
-    let token = [34u8, 32u8, 32u8, 67u8, 97u8, 102u8, 195u8, 169u8, 32u8, 83u8, 84u8, 82u8, 65u8, 83u8, 83u8, 69u8, 32u8, 195u8, 156u8, 66u8, 69u8, 82u8, 32u8, 32u8, 34u8];
-    let view = array_as_slice(token);
-    let expected = [67u8, 97u8, 102u8, 195u8, 169u8, 32u8, 83u8, 84u8, 82u8, 65u8, 83u8, 83u8, 69u8, 32u8, 195u8, 156u8, 66u8, 69u8, 82u8];
-    if token_valid(view, 0usize) && trimmed_matches(view, 0usize, array_as_slice(expected)) { 0 } else { 1 }
+    let token = "\"  Café STRASSE ÜBER  \"";
+    let token_text = string_as_str(token);
+    let view = str_as_bytes(token_text);
+    let expected = "Café STRASSE ÜBER";
+    let expected_text = string_as_str(expected);
+    let expected_view = str_as_bytes(expected_text);
+    if token_valid(view, 0usize) && trimmed_matches(view, 0usize, expected_view) { 0 } else { 1 }
 }
 
 // CNORM-010: an unterminated string is a decode failure, not a value.
@@ -89,8 +106,9 @@ fn test_label_multibyte_unicode_no_normalization() -> i64
 @id("catalog_normalizer.tests.test-unterminated-string-rejected")
 fn test_unterminated_string_rejected() -> i64
 {
-    let token = [34u8, 110u8, 101u8, 118u8, 101u8, 114u8, 32u8, 99u8, 108u8, 111u8, 115u8, 101u8, 115u8];
-    if !token_valid(array_as_slice(token), 0usize) { 0 } else { 1 }
+    let token = "\"never closes";
+    let token_text = string_as_str(token);
+    if !token_valid(str_as_bytes(token_text), 0usize) { 0 } else { 1 }
 }
 
 @id("catalog_normalizer.tests.main")
@@ -107,6 +125,9 @@ fn main() -> i64
     failed = failed + if test_decoded_id_rules() == 0 { 0 } else { 128 };
     failed = failed + if test_batch_utf8() == 0 { 0 } else { 256 };
     failed = failed + if test_checked_total() == 0 { 0 } else { 512 };
+    failed = failed + if test_record_parser() == 0 { 0 } else { 1024 };
+    failed = failed + if test_duplicate_batch() == 0 { 0 } else { 2048 };
+    failed = failed + if test_canonical_responses() == 0 { 0 } else { 4096 };
     failed
 }
 
@@ -130,21 +151,31 @@ fn test_decoded_id_rules() -> i64
     id_boundary = bytes_set(id_boundary, 65usize, 34u8);
     let boundary_view = bytes_as_slice(id_boundary);
     let exact = byte_range(boundary_view, 0usize, 66usize);
-    let empty = [34u8, 34u8];
-    let duplicate_tokens = [34u8, 100u8, 117u8, 112u8, 34u8, 34u8, 100u8, 92u8, 117u8, 48u8, 48u8, 55u8, 53u8, 112u8, 34u8];
-    if id_token_valid(exact, 0usize) && too_long_rejected && !id_token_valid(array_as_slice(empty), 0usize) && same_decoded_id(array_as_slice(duplicate_tokens), 0usize, 5usize) { 0 } else { 1 }
+    let empty = "\"\"";
+    let duplicate_tokens = "\"dup\"\"d\\u0075p\"";
+    let empty_text = string_as_str(empty);
+    let empty_view = str_as_bytes(empty_text);
+    let duplicate_text = string_as_str(duplicate_tokens);
+    let duplicate_view = str_as_bytes(duplicate_text);
+    if id_token_valid(exact, 0usize) && too_long_rejected && !id_token_valid(empty_view, 0usize) && same_decoded_id(duplicate_view, 0usize, 5usize) { 0 } else { 1 }
 }
 
 @id("catalog_normalizer.tests.test-batch-boundaries")
 fn test_batch_boundaries() -> i64
 {
     let empty = [0u8];
-    let one_lf = [10u8];
-    let two_lf = [10u8, 10u8];
-    let two = [97u8, 10u8, 98u8, 10u8];
+    let one_lf = "\n";
+    let two_lf = "\n\n";
+    let two = "a\nb\n";
     let empty_view = array_as_slice(empty);
     let zero = byte_range(empty_view, 0usize, 0usize);
-    if record_count(zero) == 0usize && record_count(array_as_slice(one_lf)) == 0usize && record_count(array_as_slice(two_lf)) == 2usize && line_empty(array_as_slice(two_lf), 0usize) && record_count(array_as_slice(two)) == 2usize && line_start(array_as_slice(two), 1usize) == 2usize && line_end(array_as_slice(two), 2usize) == 3usize && !line_empty(array_as_slice(two), 1usize) && !line_too_long(array_as_slice(two), 1usize) && !body_too_long(array_as_slice(two)) && !too_many_records(array_as_slice(two)) { 0 } else { 1 }
+    let one_lf_text = string_as_str(one_lf);
+    let one_lf_view = str_as_bytes(one_lf_text);
+    let two_lf_text = string_as_str(two_lf);
+    let two_lf_view = str_as_bytes(two_lf_text);
+    let two_text = string_as_str(two);
+    let two_view = str_as_bytes(two_text);
+    if record_count(zero) == 0usize && record_count(one_lf_view) == 0usize && record_count(two_lf_view) == 2usize && line_empty(two_lf_view, 0usize) && record_count(two_view) == 2usize && line_start(two_view, 1usize) == 2usize && line_end(two_view, 2usize) == 3usize && !line_empty(two_view, 1usize) && !line_too_long(two_view, 1usize) && !body_too_long(two_view) && !too_many_records(two_view) { 0 } else { 1 }
 }
 
 @id("catalog_normalizer.tests.test-batch-limits")
@@ -175,12 +206,14 @@ fn test_batch_limits() -> i64
 @id("catalog_normalizer.tests.test-batch-utf8")
 fn test_batch_utf8() -> i64
 {
-    let valid = [123u8, 195u8, 169u8, 125u8];
+    let valid = "{é}";
     let invalid_lead = [123u8, 195u8, 40u8, 125u8];
     let overlong = [91u8, 224u8, 128u8, 128u8, 93u8];
     let surrogate = [91u8, 237u8, 160u8, 128u8, 93u8];
     let too_large = [91u8, 244u8, 144u8, 128u8, 128u8, 93u8];
-    if line_utf8_valid(array_as_slice(valid), 0usize) && !line_utf8_valid(array_as_slice(invalid_lead), 0usize) && line_utf8_fault(array_as_slice(invalid_lead), 0usize) == 1usize && !line_utf8_valid(array_as_slice(overlong), 0usize) && line_utf8_fault(array_as_slice(overlong), 0usize) == 1usize && !line_utf8_valid(array_as_slice(surrogate), 0usize) && line_utf8_fault(array_as_slice(surrogate), 0usize) == 1usize && !line_utf8_valid(array_as_slice(too_large), 0usize) && line_utf8_fault(array_as_slice(too_large), 0usize) == 1usize { 0 } else { 1 }
+    let valid_text = string_as_str(valid);
+    let valid_view = str_as_bytes(valid_text);
+    if line_utf8_valid(valid_view, 0usize) && !line_utf8_valid(array_as_slice(invalid_lead), 0usize) && line_utf8_fault(array_as_slice(invalid_lead), 0usize) == 1usize && !line_utf8_valid(array_as_slice(overlong), 0usize) && line_utf8_fault(array_as_slice(overlong), 0usize) == 1usize && !line_utf8_valid(array_as_slice(surrogate), 0usize) && line_utf8_fault(array_as_slice(surrogate), 0usize) == 1usize && !line_utf8_valid(array_as_slice(too_large), 0usize) && line_utf8_fault(array_as_slice(too_large), 0usize) == 1usize { 0 } else { 1 }
 }
 
 // CNORM-015: the second record in the frozen overflow example is rejected
@@ -190,4 +223,62 @@ fn test_checked_total() -> i64
 {
     let maximum = 9223372036854775807;
     if !total_would_overflow(0, maximum) && total_after(0, maximum) == maximum && !total_would_overflow(maximum - 1, 1) && total_after(maximum - 1, 1) == maximum && total_would_overflow(maximum, 1) && total_after(maximum, 1) == maximum && total_would_overflow(maximum - 1, 2) && total_after(maximum - 1, 2) == maximum - 1 && !total_would_overflow(40, 2) && total_after(40, 2) == 42 { 0 } else { 1 }
+}
+
+// CNORM-006..011: structural scanner failures precede schema failures; a
+// schema key error points at that raw key, and a type error at its value.
+// These cases are deliberately source-authored rather than copied output
+// fixtures, while the Rust owning gate compares their categories/positions
+// to a live independent-oracle invocation.
+@id("catalog_normalizer.tests.test-record-parser")
+fn test_record_parser() -> i64
+{
+    let valid = "{\"id\":\"a\",\"label\":\"x\",\"quantity\":1}";
+    let missing = "{\"id\":\"a\",\"label\":\"x\"}";
+    let wrong_quantity = "{\"id\":\"a\",\"label\":\"x\",\"quantity\":\"1\"}";
+    let escaped_key = "{\"\\u0069d\":\"a\",\"label\":\"x\",\"quantity\":1}";
+    let malformed = "{\"id\":\"a";
+    let valid_text = string_as_str(valid);
+    let missing_text = string_as_str(missing);
+    let wrong_quantity_text = string_as_str(wrong_quantity);
+    let escaped_key_text = string_as_str(escaped_key);
+    let malformed_text = string_as_str(malformed);
+    let valid_problem = record_problem(str_as_bytes(valid_text));
+    let missing_problem = record_problem(str_as_bytes(missing_text));
+    let quantity_problem = record_problem(str_as_bytes(wrong_quantity_text));
+    let escaped_problem = record_problem(str_as_bytes(escaped_key_text));
+    let malformed_problem = record_problem(str_as_bytes(malformed_text));
+    if valid_problem == 0usize && problem_category(missing_problem) == 4usize && problem_offset(missing_problem) == 0usize && problem_category(quantity_problem) == 4usize && problem_offset(quantity_problem) == 33usize && problem_category(escaped_problem) == 4usize && problem_offset(escaped_problem) == 1usize && problem_category(malformed_problem) == 3usize && problem_offset(malformed_problem) == 8usize { 0 } else { 1 }
+}
+
+// CNORM-014: the second decoded-equivalent id is rejected, even though its
+// raw spelling uses a JSON escape.  The helper returns `record_count` when
+// no duplicate exists, which makes the sentinel independent of a magic id.
+@id("catalog_normalizer.tests.test-duplicate-batch")
+fn test_duplicate_batch() -> i64
+{
+    let body = "{\"id\":\"a\",\"label\":\"\",\"quantity\":0}\n{\"id\":\"\\u0061\",\"label\":\"\",\"quantity\":0}";
+    let body_text = string_as_str(body);
+    if first_duplicate_record(str_as_bytes(body_text)) == 1usize { 0 } else { 1 }
+}
+
+// CNORM-016/040..042: the success and error branches produce one canonical
+// line each. The response helper itself selects failure before allocating the
+// success projection, so the error check also guards all-or-nothing output.
+@id("catalog_normalizer.tests.test-canonical-responses")
+fn test_canonical_responses() -> i64
+{
+    let success = "{\"id\":\"a\",\"label\":\" x \",\"quantity\":1}";
+    let duplicate = "{\"id\":\"a\",\"label\":\"\",\"quantity\":0}\n{\"id\":\"\\u0061\",\"label\":\"\",\"quantity\":0}";
+    let expected_success = "{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"a\",\"label\":\"x\",\"quantity\":1}]}\n";
+    let expected_duplicate = "{\"status\":\"error\",\"category\":\"duplicate_id\",\"record_index\":1,\"byte_offset\":6}\n";
+    let success_text = string_as_str(success);
+    let success_view = str_as_bytes(success_text);
+    let duplicate_text = string_as_str(duplicate);
+    let duplicate_view = str_as_bytes(duplicate_text);
+    let expected_success_text = string_as_str(expected_success);
+    let expected_success_view = str_as_bytes(expected_success_text);
+    let expected_duplicate_text = string_as_str(expected_duplicate);
+    let expected_duplicate_view = str_as_bytes(expected_duplicate_text);
+    if normalizes_to(success_view, expected_success_view) && normalizes_to(duplicate_view, expected_duplicate_view) { 0 } else { 1 }
 }

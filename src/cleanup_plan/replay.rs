@@ -60,7 +60,7 @@ use resolved_call::resolved_call_params;
 pub(crate) use schema::selected_schema;
 
 const MAX_REPLAY_PATHS: usize = 65_536;
-const MAX_REPLAY_WORK_UNITS: usize = 8_000_000;
+const MAX_REPLAY_WORK_UNITS: usize = 32_000_000;
 
 struct ReplayBudget {
     remaining: usize,

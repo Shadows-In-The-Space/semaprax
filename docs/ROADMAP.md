@@ -407,7 +407,7 @@ representative hosted or device evidence.
 
 [Issue #241](https://github.com/wavect/semaprax/issues/241) records two
 independent compiler capacity ceilings — `SPX-G171` (whole-project workspace
-graph builder-bytes, 18,874,368 bytes) and `SPX-H006` (per-function
+graph builder-bytes, 67,108,864 bytes) and `SPX-H006` (per-function
 cleanup-replay path budget, 65,536 terminal paths, driven by combinatorial
 independent-branch multiplication rather than raw branch count) — that bound
 an "ordinary application" well below what this section's exit condition needs.

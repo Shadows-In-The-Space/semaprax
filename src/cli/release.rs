@@ -678,7 +678,7 @@ mod tests {
     fn base64(bytes: &[u8]) -> String {
         const ALPHABET: &[u8; 64] =
             b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut output = String::with_capacity((bytes.len() + 2) / 3 * 4);
+        let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
         for chunk in bytes.chunks(3) {
             let first = chunk[0];
             let second = *chunk.get(1).unwrap_or(&0);

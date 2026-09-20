@@ -63,7 +63,8 @@
 //!    executor was handed, and a mismatch fails closed before any artifact
 //!    is built.
 //! 5. **No admission-rule change.** Each driver takes either no parameters
-//!    or one `i64` by value, and returns `i64` or owned `Bytes` --
+//!    or one `i64` by value, and returns `i64`, `bool`, `usize`, or owned
+//!    `Bytes` --
 //!    `project::public_api::parameter_type` and `result_type` already admit
 //!    all of those unmodified. The record/variant argument and result never
 //!    cross that boundary.
@@ -72,10 +73,11 @@
 //!
 //! This executor's closed result vocabulary is the same one
 //! `native_executor.rs` uses: a record or variant whose leaves are all
-//! `Bytes` or `i64`. A bare scalar result still takes the direct path (no
-//! driver needed); anything else -- a nested record leaf, a `Str`/`Float`
-//! leaf, a generic instantiation, or a variant case with no fields -- fails
-//! closed with an `SPX-G570`
+//! `Bytes`, `i64`, or `bool`, or a record whose leaves may additionally be
+//! `usize`. A bare scalar result still takes the direct path (no driver
+//! needed); anything else -- a nested record leaf, a `Str`/`Float` leaf, a
+//! generic instantiation, a variant `usize` leaf, or a variant case with no
+//! fields -- fails closed with an `SPX-G570`
 //! diagnostic naming the unsupported shape rather than guessing.
 //!
 //! ## What this is not
@@ -266,14 +268,18 @@ fn evaluation(
 /// One admitted projection leaf: what a single driver function returns.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Leaf {
-    Scalar,
+    I64,
+    Bool,
+    Usize,
     Bytes,
 }
 
 impl Leaf {
     fn of(ty: &ResolvedType) -> Option<Self> {
         match ty {
-            ResolvedType::I64 => Some(Self::Scalar),
+            ResolvedType::I64 => Some(Self::I64),
+            ResolvedType::Bool => Some(Self::Bool),
+            ResolvedType::Usize => Some(Self::Usize),
             ResolvedType::Bytes => Some(Self::Bytes),
             _ => None,
         }
@@ -294,7 +300,9 @@ impl Leaf {
 /// restriction and is returned whole.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Projection {
-    Scalar,
+    I64,
+    Bool,
+    Usize,
     OwnedBytes,
     IndexedBytes,
 }
@@ -302,7 +310,9 @@ enum Projection {
 impl Projection {
     fn signature(self, name: &str) -> String {
         match self {
-            Self::Scalar => format!("fn {name}() -> i64"),
+            Self::I64 => format!("fn {name}() -> i64"),
+            Self::Bool => format!("fn {name}() -> bool"),
+            Self::Usize => format!("fn {name}() -> usize"),
             Self::OwnedBytes => format!("fn {name}() -> Bytes"),
             Self::IndexedBytes => format!("fn {name}(spx_index: i64) -> i64"),
         }
@@ -429,10 +439,20 @@ impl ResultPlan {
                 }
                 let mut planned = Vec::with_capacity(cases.len());
                 for case in cases {
+                    let fields = field_leaves(&case.fields)?;
+                    // `match own` may return a Copy `i64` or `bool` arm, but
+                    // not `usize`. A variant `usize` projection would make
+                    // the synthesized driver fail at source checking, so
+                    // refuse it explicitly before any target artifact is
+                    // prepared. Record projections do not use `match own`
+                    // and retain their full `usize` support.
+                    if fields.iter().any(|field| field.leaf == Leaf::Usize) {
+                        return Err(invariant("wasm_executor.result.variant_usize"));
+                    }
                     planned.push(CasePlan {
                         case: case.id.clone(),
                         name: case.name.clone(),
-                        fields: field_leaves(&case.fields)?,
+                        fields,
                     });
                 }
                 Ok(Self::Variant {
@@ -488,7 +508,9 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
                     id: format!("wasm.stage.driver.{}", drivers.len()),
                     name: format!("spx_wasm_stage_driver_{}", drivers.len()),
                     projection: match field.leaf {
-                        Leaf::Scalar => Projection::Scalar,
+                        Leaf::I64 => Projection::I64,
+                        Leaf::Bool => Projection::Bool,
+                        Leaf::Usize => Projection::Usize,
                         Leaf::Bytes => Projection::OwnedBytes,
                     },
                     tail: format!("    spx_call.{}\n", field.name),
@@ -504,7 +526,7 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
             drivers.push(Driver {
                 id: "wasm.stage.driver.0".to_owned(),
                 name: "spx_wasm_stage_driver_0".to_owned(),
-                projection: Projection::Scalar,
+                projection: Projection::I64,
                 tail: format!("    match own spx_call {{\n{tag}    }}\n"),
             });
             for (case_index, case) in cases.iter().enumerate() {
@@ -512,7 +534,9 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
                     let ordinal = drivers.len();
                     let arms = variant_arms(name, cases, |index, _| {
                         match (index == case_index, field.leaf) {
-                            (true, Leaf::Scalar) => format!("spx_f{position}"),
+                            (true, Leaf::I64 | Leaf::Bool | Leaf::Usize) => {
+                                format!("spx_f{position}")
+                            }
                             (true, Leaf::Bytes) => {
                                 format!("spx_wasm_stage_helper_byte_at(spx_f{position}, spx_index)")
                             }
@@ -522,7 +546,9 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
                             // sentinel the indexed read uses, so a
                             // non-selected byte stream is empty rather than
                             // wrong.
-                            (false, Leaf::Scalar) => "0".to_owned(),
+                            (false, Leaf::I64) => "0".to_owned(),
+                            (false, Leaf::Bool) => "false".to_owned(),
+                            (false, Leaf::Usize) => "0usize".to_owned(),
                             (false, Leaf::Bytes) => "-1".to_owned(),
                         }
                     });
@@ -530,7 +556,9 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
                         id: format!("wasm.stage.driver.{ordinal}"),
                         name: format!("spx_wasm_stage_driver_{ordinal}"),
                         projection: match field.leaf {
-                            Leaf::Scalar => Projection::Scalar,
+                            Leaf::I64 => Projection::I64,
+                            Leaf::Bool => Projection::Bool,
+                            Leaf::Usize => Projection::Usize,
                             Leaf::Bytes => Projection::IndexedBytes,
                         },
                         tail: format!("    match own spx_call {{\n{arms}    }}\n"),
@@ -735,7 +763,10 @@ fn run_through_injected_driver(
     let calls = drivers
         .iter()
         .map(|driver| match driver.projection {
-            Projection::Scalar => format!("String(api.functions['{}']())", driver.id),
+            Projection::I64 | Projection::Usize => {
+                format!("String(api.functions['{}']())", driver.id)
+            }
+            Projection::Bool => format!("(api.functions['{}']() ? 'true' : 'false')", driver.id),
             Projection::OwnedBytes => format!(
                 "Array.from(api.functions['{}'](), b => b.toString(16).padStart(2, '0')).join('')",
                 driver.id
@@ -763,10 +794,20 @@ fn run_through_injected_driver(
     let mut leaves = Vec::with_capacity(drivers.len());
     for (driver, line) in drivers.iter().zip(&lines) {
         leaves.push(match driver.projection {
-            Projection::Scalar => RetainedValue::I64(
+            Projection::I64 => RetainedValue::I64(
                 line.trim()
                     .parse()
                     .map_err(|_| invariant("wasm_executor.decode.scalar"))?,
+            ),
+            Projection::Bool => RetainedValue::Bool(match line.trim() {
+                "false" => false,
+                "true" => true,
+                _ => return Err(invariant("wasm_executor.decode.bool")),
+            }),
+            Projection::Usize => RetainedValue::Usize(
+                line.trim()
+                    .parse()
+                    .map_err(|_| invariant("wasm_executor.decode.usize"))?,
             ),
             Projection::OwnedBytes | Projection::IndexedBytes => {
                 RetainedValue::Bytes(decode_hex(line.trim())?)

@@ -11,6 +11,10 @@ use super::*;
 use crate::interpreter::retained_call::evaluate_retained_call;
 
 mod lifecycle_parity;
+/// Target-private scalar carrier parity (#182). Kept separate from the
+/// lifecycle authority gates because it owns an independently bound source
+/// profile and runs native/Core-Wasm artifacts.
+mod target_scalar_carriers;
 /// Multi-turn cross-engine conversation parity (#182/#143). Kept in its own
 /// submodule rather than appended here: this file is already near the
 /// repository's 1500-line module cap, and every gate in it that scans a

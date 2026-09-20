@@ -18,7 +18,9 @@
 //! signatures to: `i64`/`bool`/`u8`/`usize` scalars, one level of
 //! `own`/`borrow` record arguments built only from `Bytes`/`i64` leaves
 //! (`Task`/`State`/`Observation`/`Outcome`), and record or two-/four-case
-//! variant results built the same way (`Decision`/`Report`/`Step`). Record
+//! variant results whose leaves are `Bytes`, `i64`, or `bool`, plus record
+//! results that may additionally carry `usize` (`Decision`/`Report`/`Step`).
+//! Record
 //! and variant field/case C member names are recomputed here from each
 //! field's persistent [`DeclarationId`] using the exact hex-encoding
 //! `src/codegen/native_emit/symbols.rs` uses (`spx_record_<hex>`,
@@ -302,7 +304,11 @@ fn nominal_declaration(ty: &ResolvedType) -> Result<&DeclarationId, Diagnostic> 
 
 /// Emits the decode/print statements for one record-typed result, reusing
 /// the record's own layout for field order and member names.
-fn emit_record_print(body: &mut String, layout: &AggregateLayout, expr: &str) {
+fn emit_record_print(
+    body: &mut String,
+    layout: &AggregateLayout,
+    expr: &str,
+) -> Result<(), Diagnostic> {
     body.push_str("    printf(\"RECORD\");\n");
     for field in &layout.fields {
         let hex = hex_payload(&field.field);
@@ -315,17 +321,34 @@ fn emit_record_print(body: &mut String, layout: &AggregateLayout, expr: &str) {
             }
             ResolvedType::I64 => {
                 body.push_str(&format!(
-                    "    printf(\" {hex}=%lld\", (long long)({expr}).{member});\n",
+                    "    printf(\" {hex}=I:%lld\", (long long)({expr}).{member});\n",
                     member = field_symbol(&field.field)
                 ));
             }
-            _ => {}
+            ResolvedType::Bool => {
+                body.push_str(&format!(
+                    "    printf(\" {hex}=T:%u\", (unsigned)(({expr}).{member} ? 1 : 0));\n",
+                    member = field_symbol(&field.field)
+                ));
+            }
+            ResolvedType::Usize => {
+                body.push_str(&format!(
+                    "    printf(\" {hex}=U:%llu\", (unsigned long long)({expr}).{member});\n",
+                    member = field_symbol(&field.field)
+                ));
+            }
+            _ => return Err(invariant("native_executor.result.leaf")),
         }
     }
     body.push_str("    printf(\"\\n\");\n");
+    Ok(())
 }
 
-fn emit_variant_print(body: &mut String, layout: &VariantLayout, expr: &str) {
+fn emit_variant_print(
+    body: &mut String,
+    layout: &VariantLayout,
+    expr: &str,
+) -> Result<(), Diagnostic> {
     body.push_str(&format!("    switch (({expr}).spx_tag) {{\n"));
     for case in &layout.cases {
         body.push_str(&format!("    case UINT32_C({}): {{\n", case.tag));
@@ -348,15 +371,21 @@ fn emit_variant_print(body: &mut String, layout: &VariantLayout, expr: &str) {
                 }
                 ResolvedType::I64 => {
                     body.push_str(&format!(
-                        "        printf(\" {hex}=%lld\", (long long)({member}));\n"
+                        "        printf(\" {hex}=I:%lld\", (long long)({member}));\n"
                     ));
                 }
-                _ => {}
+                ResolvedType::Bool => {
+                    body.push_str(&format!(
+                        "        printf(\" {hex}=T:%u\", (unsigned)({member} ? 1 : 0));\n"
+                    ));
+                }
+                _ => return Err(invariant("native_executor.result.leaf")),
             }
         }
         body.push_str("        printf(\"\\n\");\n        break;\n    }\n");
     }
     body.push_str("    default: printf(\"INVALID_TAG\\n\"); break;\n    }\n");
+    Ok(())
 }
 
 fn c_value_type_name(
@@ -446,11 +475,11 @@ fn run(
     if let Ok(layout) =
         AggregateLayout::for_type(program, AggregateTarget::Native64, &entry.return_type)
     {
-        emit_record_print(&mut body, &layout, "spx_native_exec_result");
+        emit_record_print(&mut body, &layout, "spx_native_exec_result")?;
     } else if let Ok(layout) =
         VariantLayout::for_type(program, VariantTarget::Native64, &entry.return_type)
     {
-        emit_variant_print(&mut body, &layout, "spx_native_exec_result");
+        emit_variant_print(&mut body, &layout, "spx_native_exec_result")?;
     } else {
         return Err(invariant("native_executor.result.shape"));
     }
@@ -554,12 +583,26 @@ fn decode_field(token: &str) -> Result<RetainedField, Diagnostic> {
     let field = decode_hex_payload(hex)?;
     let value = if let Some(bytes_hex) = value.strip_prefix("B:") {
         RetainedValue::Bytes(decode_bytes_hex(bytes_hex)?)
-    } else {
+    } else if let Some(scalar) = value.strip_prefix("I:") {
         RetainedValue::I64(
-            value
+            scalar
                 .parse()
-                .map_err(|_| invariant("native_executor.decode.scalar"))?,
+                .map_err(|_| invariant("native_executor.decode.i64"))?,
         )
+    } else if let Some(flag) = value.strip_prefix("T:") {
+        RetainedValue::Bool(match flag {
+            "0" => false,
+            "1" => true,
+            _ => return Err(invariant("native_executor.decode.bool")),
+        })
+    } else if let Some(count) = value.strip_prefix("U:") {
+        RetainedValue::Usize(
+            count
+                .parse()
+                .map_err(|_| invariant("native_executor.decode.usize"))?,
+        )
+    } else {
+        return Err(invariant("native_executor.decode.field_value"));
     };
     Ok(RetainedField { field, value })
 }

@@ -160,6 +160,21 @@ struct RepairConfig {
     provider: RepairProvider,
 }
 
+/// Review-facing identities already checked before provider construction.
+/// These strings describe the selected profile and its compiler-owned inputs;
+/// they carry no provider, candidate-test, publication, or filesystem authority.
+struct RepairReceiptContext {
+    provider_id: String,
+    model_id: String,
+    adapter_identity: String,
+    adapter_version: String,
+    provider_profile: String,
+    program_root: String,
+    source_revision: String,
+    proposal_schema_digest: String,
+    deployment_binding: String,
+}
+
 impl RepairConfig {
     fn load(path: &Path) -> Result<Self, CliError> {
         if !is_absolute_like(path) {
@@ -889,6 +904,7 @@ pub(super) fn execute_with_runner_and_candidate_test<
         }
     };
     let bound_adapter_identity = adapter_identity.adapter_identity.clone();
+    let receipt_adapter_identity = adapter_identity.clone();
     let model_binding = runtime
         .source_model_binding(adapter_identity)
         .map_err(|diagnostics| {
@@ -900,6 +916,18 @@ pub(super) fn execute_with_runner_and_candidate_test<
         model_binding.max_response_bytes(),
         clock.clock_domain(),
     );
+    let receipt_context =
+        matches!(&config.provider, RepairProvider::OpenCode).then(|| RepairReceiptContext {
+            provider_id: receipt_adapter_identity.provider_id,
+            model_id: receipt_adapter_identity.model_id,
+            adapter_identity: receipt_adapter_identity.adapter_identity,
+            adapter_version: receipt_adapter_identity.adapter_version,
+            provider_profile: receipt_adapter_identity.provider_profile,
+            program_root: root.program_root_digest().to_owned(),
+            source_revision: source.source_revision().to_owned(),
+            proposal_schema_digest: compiled.proposal_schema().schema().digest().to_owned(),
+            deployment_binding: model_binding.digest().to_owned(),
+        });
 
     let mut store = if fresh {
         CheckpointDir::fresh(&checkpoint_path, &project_root)?
@@ -1079,6 +1107,7 @@ pub(super) fn execute_with_runner_and_candidate_test<
         candidate_test_evidence,
         replayed_candidate_test_evidence,
         candidate_test_selected,
+        receipt_context.as_ref(),
         &complete.run().checkpoint,
         model_dispatches,
         effect_dispatches,
@@ -1091,6 +1120,7 @@ fn receipt(
     candidate_test_evidence: Option<&CandidateTestEvidence>,
     replayed_candidate_test_evidence: Option<ReplayedCandidateTestEvidence>,
     candidate_test_selected: bool,
+    receipt_context: Option<&RepairReceiptContext>,
     checkpoint: &semaprax::live_invocation::source_journal::RecoveredSourceCheckpoint,
     model_dispatches: u32,
     effect_dispatches: u32,
@@ -1109,7 +1139,36 @@ fn receipt(
         "publication_authority": false,
     });
     if matches!(&config.provider, RepairProvider::OpenCode) {
+        let receipt_context = receipt_context.ok_or(CliError::refused(
+            "repair V2 receipt has no checked profile context",
+        ))?;
         report["schema"] = json!(RECEIPT_SCHEMA_V2);
+        report["selected_profile"] = json!({
+            "config_schema": CONFIG_SCHEMA_V2,
+            "provider_id": receipt_context.provider_id.as_str(),
+            "model_id": receipt_context.model_id.as_str(),
+            "adapter_identity": receipt_context.adapter_identity.as_str(),
+            "adapter_version": receipt_context.adapter_version.as_str(),
+            "provider_profile": receipt_context.provider_profile.as_str(),
+        });
+        report["checked_prerequisites"] = json!({
+            "program_root": receipt_context.program_root.as_str(),
+            "source_revision": receipt_context.source_revision.as_str(),
+            "proposal_schema_digest": receipt_context.proposal_schema_digest.as_str(),
+            "deployment_binding": receipt_context.deployment_binding.as_str(),
+        });
+        report["model_attempts"] = Value::Array(
+            semaprax::model_call_receipt::source_projection::project_source_calls(checkpoint)
+                .map_err(|_| CliError::refused("repair model-attempt projection refused"))?
+                .into_iter()
+                .map(|attempt| {
+                    checked_value(
+                        &attempt.render(),
+                        "repair model-attempt receipt projection refused",
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        );
         report["journal_binding"] = json!({
             "invocation": checkpoint.invocation(),
             "chain": checkpoint.chain(),
@@ -1237,6 +1296,7 @@ fn receipt_with_preview(
     candidate_test_evidence: Option<&CandidateTestEvidence>,
     replayed_candidate_test_evidence: Option<ReplayedCandidateTestEvidence>,
     candidate_test_selected: bool,
+    receipt_context: Option<&RepairReceiptContext>,
     checkpoint: &semaprax::live_invocation::source_journal::RecoveredSourceCheckpoint,
     model_dispatches: u32,
     effect_dispatches: u32,
@@ -1247,6 +1307,7 @@ fn receipt_with_preview(
         candidate_test_evidence,
         replayed_candidate_test_evidence,
         candidate_test_selected,
+        receipt_context,
         checkpoint,
         model_dispatches,
         effect_dispatches,

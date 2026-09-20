@@ -651,6 +651,59 @@ fn repair_v2_settled_wire_terminal_resume_is_zero_dispatch_and_nonpublishing() {
     assert_eq!(first["candidate_test_execution"]["status"], "not_run");
     assert_eq!(first["source_mutation"], false);
     assert_eq!(first["publication_authority"], false);
+    assert_eq!(first["selected_profile"]["config_schema"], CONFIG_SCHEMA_V2);
+    assert_eq!(first["selected_profile"]["provider_id"], "opencode");
+    assert_eq!(
+        first["selected_profile"]["model_id"],
+        "muse-spark-1.3-contributor-free"
+    );
+    assert_eq!(first["selected_profile"]["adapter_version"], "1.0.0");
+    assert_eq!(
+        first["selected_profile"]["provider_profile"],
+        "opencode-free"
+    );
+    assert!(first["selected_profile"]["adapter_identity"]
+        .as_str()
+        .is_some_and(|identity| identity.starts_with("opencode-repair-adapter:sha256:")));
+    assert!(first["checked_prerequisites"]["program_root"]
+        .as_str()
+        .is_some_and(|digest| digest.starts_with("sha256:")));
+    assert!(first["checked_prerequisites"]["source_revision"]
+        .as_str()
+        .is_some_and(|digest| digest.starts_with("sha256:")));
+    assert_eq!(
+        first["checked_prerequisites"]["proposal_schema_digest"],
+        digest
+    );
+    assert!(first["checked_prerequisites"]["deployment_binding"]
+        .as_str()
+        .is_some_and(|binding| binding.starts_with("sha256:")));
+    let attempts = first["model_attempts"]
+        .as_array()
+        .expect("V2 exports bounded per-attempt journal projections");
+    assert_eq!(attempts.len(), 2);
+    for (turn, attempt) in attempts.iter().enumerate() {
+        assert_eq!(attempt["turn"].as_u64(), Some(turn as u64));
+        assert_eq!(attempt["attempt"].as_u64(), Some(0));
+        assert_eq!(attempt["stage"], "decoded");
+        assert!(attempt["request_digest"].is_string());
+        assert!(attempt["response_digest"].is_string());
+        assert!(attempt["response_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0));
+        assert_eq!(
+            attempt["provider_reported"]["total"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            attempt["provider_reported"]["input"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            attempt["provider_reported"]["output"],
+            serde_json::Value::Null
+        );
+    }
     assert!(first["journal_binding"]["invocation"].is_string());
     assert_eq!(calls.get(), 2);
     assert_eq!(prompts.borrow().len(), 2);
@@ -681,6 +734,12 @@ fn repair_v2_settled_wire_terminal_resume_is_zero_dispatch_and_nonpublishing() {
     assert_eq!(resumed["analysis"]["coverage"]["source_review"], false);
     assert_eq!(resumed["source_mutation"], false);
     assert_eq!(resumed["publication_authority"], false);
+    assert_eq!(resumed["selected_profile"], first["selected_profile"]);
+    assert_eq!(
+        resumed["checked_prerequisites"],
+        first["checked_prerequisites"]
+    );
+    assert_eq!(resumed["model_attempts"], first["model_attempts"]);
     assert_eq!(calls.get(), 2, "terminal replay must not start OpenCode");
     assert_eq!(
         fs::read(&source_path).unwrap(),
@@ -799,6 +858,9 @@ fn v2_failed_candidate_test_is_bound_feedback_and_terminal_resume_never_redispat
     .unwrap();
     let first: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(first["candidate_test_execution"]["status"], "failed");
+    assert!(first["selected_profile"]["adapter_identity"]
+        .as_str()
+        .is_some_and(|identity| identity.contains(":candidate-test:sha256:")));
     assert_eq!(
         first["analysis"]["coverage"]["candidate_test_execution"],
         true

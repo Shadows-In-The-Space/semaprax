@@ -140,8 +140,24 @@ candidate count, checkpoint generation and dispatch counters. V2 emits the
 additive `semaprax.source-live-cli.repair-receipt.v2` projection. On the
 invocation that produces a candidate it additionally carries `journal_binding`
 (invocation, chain, generation) and `analysis.coverage` / `analysis.blind_spots`
-for those review artifacts. V2's `candidate_test_execution.status: "not_run"`
-is deliberate when the ordinary CLI route supplies no capability. A
+for those review artifacts. It also prints `selected_profile` with the exact
+config schema, provider/model, adapter identity/version and provider profile,
+plus `checked_prerequisites` with the ProgramRoot, checked source revision,
+compiler-derived proposal-schema digest and deployment binding. These are the
+same identities used to bind the durable invocation, not independently authored
+receipt labels; terminal replay must reproduce them exactly. They are review
+evidence only and mint no provider, filesystem, test or publication authority.
+`model_attempts` is the bounded, replayable per-attempt projection of that same
+validated, binding-checked retained source journal: it reports intent and settlement stages, request /
+response digests and byte counts, decode/refusal outcome, and provider-reported
+usage only when the adapter actually recorded it. Missing usage remains `null`;
+the receipt does not manufacture zero tokens, cost, timing or delivery. Terminal
+replay recomputes the identical projection without starting the provider.
+The hash chain supplies integrity and causal shape, not freshness or external
+authentication; a storage controller can replay an older same-binding journal,
+so consumers must not treat this receipt as proof that it is the newest state.
+V2's `candidate_test_execution.status: "not_run"` is deliberate when the
+ordinary CLI route supplies no capability. A
 capability-bearing embedding can instead report the bounded canonical observation
 and its feedback code in the fresh receipt. A terminal replay carries the
 previously settled status and typed feedback with `replayed: true`; the full
@@ -271,14 +287,14 @@ redispatched nothing. It does not include raw model text, credentials,
 provider stderr, or a publication grant. A failure reports its selected
 status and last acknowledged counters; the journal remains the reviewable
 causal artifact. The CLI never rewrites authoritative `.spx` source or Git
-state. Real failed-check observation, semantic candidate preview (source
-diff, semantic impact, blind spots), repair feedback, and approval-bound
-publication remain issue #116's separate vertical-slice work; the general
-`run`/`resume`/`migrate` route is a domain-agnostic Agent-lifecycle host
-adapter; it is not itself wired to the candidate-preview machinery that
-`offline-repair` demonstrates for its one fixed project. No live provider,
-hosted CI, durable power-loss, or exactly-once physical delivery claim
-follows from local injected tests.
+state. The separate `source-live repair run|resume` route described above now
+provides the host-selected failed-check observation seam, semantic candidate
+preview (source diff, semantic impact and blind spots), checked repair feedback,
+and durable journal binding for issue #116. It still provides no approval-bound
+publication. The general `run`/`resume`/`migrate` route remains a domain-agnostic
+Agent-lifecycle host adapter and is not itself a repair command. No
+operator-approved live repair run, hosted CI, durable power-loss, or exactly-once
+physical delivery claim follows from the local injected tests.
 
 A completed priced run returns
 `semaprax.source-live-cli.receipt.v2` with the same top-level status,

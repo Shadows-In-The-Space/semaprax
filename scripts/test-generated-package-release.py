@@ -10,9 +10,10 @@ standard names: a determinism test (same input package directory ->
 byte-identical prepared output) and refusal tests (the tool refuses rather
 than proceeding when a required safety input is violated -- a live publish
 credential present, a secret- or local-path-shaped byte, an inexact
-inventory, or an attempted `--publish`). It also covers tamper detection
-between `prepare` and `check`, and -- only when a real `npm`/`cargo` binary
-is available on this machine -- the real dry-run tool invocations.
+inventory, a prepared-tree link or special entry, or an attempted
+`--publish`). It also covers tamper detection between `prepare` and `check`,
+and -- only when a real `npm`/`cargo` binary is available on this machine --
+the real dry-run tool invocations.
 """
 
 import importlib.util
@@ -23,7 +24,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -41,6 +44,43 @@ gpr = _load("semaprax_generated_package_release", "scripts/generated-package-rel
 def scratch_dir():
     directory = Path(tempfile.mkdtemp(prefix="semaprax-generated-package-release-"))
     return directory
+
+
+def actual_toolchain_cargo():
+    """Resolve a direct Cargo only for the opt-in real-tool regression.
+
+    The production checker intentionally refuses Rustup's cargo proxy because
+    its ambient Rustup state is outside the preview's authority.  Ask Rustup
+    for the selected toolchain binary in this test setup, and skip rather
+    than weakening that production boundary when no direct binary is known.
+    """
+    configured_cargo = shutil.which("cargo")
+    if not configured_cargo:
+        return None
+    rustup = shutil.which("rustup")
+    if rustup:
+        try:
+            result = subprocess.run(
+                [rustup, "which", "cargo"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except OSError:
+            return None
+        if result.returncode != 0:
+            return None
+        candidate = Path(result.stdout.strip())
+    else:
+        candidate = Path(configured_cargo)
+    if not candidate.is_absolute() or not candidate.is_file():
+        return None
+    try:
+        gpr._reject_rustup_proxy_cargo(candidate)
+    except gpr.Rejected:
+        return None
+    return candidate
 
 
 class NpmFixtureMixin:
@@ -255,6 +295,320 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         with self.assertRaises(gpr.Rejected):
             gpr.check("rust", prepared, publish=False)
 
+    def test_resealed_npm_prepack_payload_is_refused_before_pack_tool(self):
+        """A matching attacker-written checksum is not tool-run authority."""
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        package_json_path = prepared / "payload" / "package.json"
+        package_json = json.loads(package_json_path.read_text(encoding="utf-8"))
+        package_json["scripts"] = {"prepack": "hostile-command"}
+        package_json_path.write_text(json.dumps(package_json) + "\n", encoding="utf-8")
+        manifest_path = prepared / "package-preview-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["files"] = gpr.describe_prepared(prepared)
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        with mock.patch.object(gpr, "run_closed") as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"package\.json must not declare 'scripts'"):
+                gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        run_closed.assert_not_called()
+
+    def test_resealed_manifest_cannot_change_closed_nonclaim_or_schema(self):
+        for mutation, expected in (
+            (lambda manifest: manifest.update(status="published"), r"required unpublished nonclaim"),
+            (lambda manifest: manifest.update(maintainer_approval=True), r"exact preview schema fields"),
+        ):
+            with self.subTest(expected=expected):
+                case = self.root / expected.replace(" ", "-").replace("/", "-")
+                case.mkdir()
+                package_dir = self.npm_package_dir(case)
+                prepared = case / "prepared"
+                gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+                manifest_path = prepared / "package-preview-manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                mutation(manifest)
+                manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                with mock.patch.object(gpr, "run_closed") as run_closed:
+                    with self.assertRaisesRegex(gpr.Rejected, expected):
+                        gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+                run_closed.assert_not_called()
+
+    def test_private_tool_environment_ignores_hostile_ambient_tool_config(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        ambient = self.root / "ambient-config"
+        ambient.mkdir()
+
+        def inspect_private_environment(_command, cwd, path_dirs, extra_env, **_kwargs):
+            snapshot = Path(cwd).parent
+            self.assertEqual(path_dirs, ["/not-reached"])
+            self.assertEqual(Path(extra_env["HOME"]).parent, snapshot)
+            self.assertEqual(Path(extra_env["CARGO_HOME"]).parent, snapshot)
+            self.assertEqual(Path(extra_env["npm_config_cache"]).parent, snapshot)
+            self.assertEqual(Path(extra_env["npm_config_userconfig"]).parent, snapshot)
+            self.assertNotIn(str(ambient), extra_env.values())
+            self.assertTrue(Path(extra_env["npm_config_userconfig"]).is_file())
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        hostile = {
+            "HOME": str(ambient),
+            "USERPROFILE": str(ambient),
+            "CARGO_HOME": str(ambient),
+            "npm_config_userconfig": str(ambient / "npmrc"),
+            "NPM_CONFIG_CACHE": str(ambient / "npm-cache"),
+        }
+        with mock.patch.dict(os.environ, hostile, clear=False):
+            with mock.patch.object(gpr, "run_closed", side_effect=inspect_private_environment) as run_closed:
+                report = gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        run_closed.assert_called_once()
+        self.assertTrue(any("npm pack --dry-run succeeded" in line for line in report))
+
+    def test_rustup_proxy_cargo_is_refused_before_snapshot_or_tool_run(self):
+        package_dir = self.rust_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("rust", package_dir, "frame-payload", "0.1.0", None, prepared)
+        with mock.patch.object(gpr.os.path, "samefile", return_value=True):
+            with mock.patch.object(gpr, "_write_verified_snapshot") as snapshot:
+                with mock.patch.object(gpr, "run_closed") as run_closed:
+                    with self.assertRaisesRegex(gpr.Rejected, r"--cargo-bin is a Rustup proxy"):
+                        gpr.check("rust", prepared, publish=False, cargo_bin=Path("/not-reached/cargo"))
+        snapshot.assert_not_called()
+        run_closed.assert_not_called()
+
+    def test_run_closed_windows_uses_only_system_and_explicit_tool_paths(self):
+        completed = SimpleNamespace(returncode=0, stderr=b"")
+        with mock.patch.object(gpr.os, "name", "nt"):
+            with mock.patch.object(gpr.os, "pathsep", ";"):
+                with mock.patch.dict(
+                    gpr.os.environ,
+                    {
+                        "SystemRoot": r"C:\Windows",
+                        "ComSpec": r"C:\Windows\System32\cmd.exe",
+                        "HOME": r"C:\hostile-home",
+                        "CARGO_HOME": r"C:\hostile-cargo",
+                        "NPM_CONFIG_USERCONFIG": r"C:\hostile-npmrc",
+                    },
+                    clear=True,
+                ):
+                    with mock.patch.object(gpr.subprocess, "run", return_value=completed) as run:
+                        result = gpr.run_closed(
+                            [r"C:\tools\npm.cmd", "pack", "--dry-run"],
+                            cwd=r"C:\snapshot\payload",
+                            path_dirs=[r"C:\tools"],
+                            extra_env={"HOME": r"C:\snapshot\home"},
+                        )
+        self.assertIs(result, completed)
+        command = run.call_args.args[0]
+        environment = run.call_args.kwargs["env"]
+        self.assertEqual(command[:4], [r"C:\Windows\System32\cmd.exe", "/d", "/s", "/c"])
+        self.assertIn(r"C:\tools\npm.cmd", command[-1])
+        self.assertTrue(environment["PATH"].startswith(r"C:\tools;"))
+        self.assertEqual(environment["SystemRoot"], r"C:\Windows")
+        self.assertEqual(environment["ComSpec"], r"C:\Windows\System32\cmd.exe")
+        self.assertEqual(environment["HOME"], r"C:\snapshot\home")
+        self.assertNotIn("CARGO_HOME", environment)
+        self.assertNotIn("NPM_CONFIG_USERCONFIG", environment)
+
+    def test_same_byte_payload_symlink_is_rejected_before_pack_tool(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        original = prepared / "payload" / "semaprax.js"
+        linked_bytes = self.root / "same-semaprax.js"
+        linked_bytes.write_bytes(original.read_bytes())
+        original.unlink()
+        try:
+            original.symlink_to(linked_bytes)
+        except OSError as error:
+            self.skipTest(f"symlink fixtures are unavailable on this host: {error}")
+
+        # A matching byte digest alone is not enough: never let an optional
+        # pack tool resolve a filesystem link outside the checked payload.
+        with mock.patch.object(gpr, "run_closed") as run_closed:
+            with self.assertRaisesRegex(
+                gpr.Rejected,
+                r"prepared payload/semaprax\.js cannot be opened without following links",
+            ):
+                gpr.check(
+                    "npm",
+                    prepared,
+                    publish=False,
+                    npm_bin=Path("/not-reached/npm"),
+                )
+        run_closed.assert_not_called()
+
+    def test_prepared_payload_subdirectory_is_rejected_before_pack_tool(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        (prepared / "payload" / "generated-cache").mkdir()
+
+        with mock.patch.object(gpr, "run_closed") as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"generated-cache is not a plain file"):
+                gpr.check(
+                    "npm",
+                    prepared,
+                    publish=False,
+                    npm_bin=Path("/not-reached/npm"),
+                )
+        run_closed.assert_not_called()
+
+    def test_manifest_readme_and_payload_directory_symlinks_are_refused(self):
+        for name in ("package-preview-manifest.json", "README.md", "payload"):
+            with self.subTest(name=name):
+                case = self.root / name.replace(".", "-")
+                case.mkdir()
+                package_dir = self.npm_package_dir(case)
+                prepared = case / "prepared"
+                gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+                original = prepared / name
+                replacement = case / f"replacement-{name.replace('/', '-') }"
+                if name == "payload":
+                    shutil.copytree(original, replacement)
+                    shutil.rmtree(original)
+                    try:
+                        original.symlink_to(replacement, target_is_directory=True)
+                    except OSError as error:
+                        self.skipTest(f"symlink fixtures are unavailable on this host: {error}")
+                else:
+                    replacement.write_bytes(original.read_bytes())
+                    original.unlink()
+                    try:
+                        original.symlink_to(replacement)
+                    except OSError as error:
+                        self.skipTest(f"symlink fixtures are unavailable on this host: {error}")
+                with mock.patch.object(gpr, "run_closed") as run_closed:
+                    with self.assertRaisesRegex(gpr.Rejected, r"cannot be opened without following links"):
+                        gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+                run_closed.assert_not_called()
+
+    def test_named_pipe_in_payload_is_rejected_before_pack_tool(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("named-pipe fixtures are unavailable on this host")
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        os.mkfifo(prepared / "payload" / "named-pipe")
+        with mock.patch.object(gpr, "run_closed") as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"named-pipe is not a plain file"):
+                gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        run_closed.assert_not_called()
+
+    def test_swap_after_descriptor_open_uses_verified_private_snapshot(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        original = prepared / "payload" / "semaprax.js"
+        expected = original.read_bytes()
+        replacement = self.root / "replacement-semaprax.js"
+        replacement.write_bytes(b"export const swapped_after_open = true;\n")
+        real_open = gpr.os.open
+        swapped = False
+
+        def open_then_swap(*args, **kwargs):
+            nonlocal swapped
+            descriptor = real_open(*args, **kwargs)
+            if args[0] == "semaprax.js" and kwargs.get("dir_fd") is not None and not swapped:
+                swapped = True
+                os.replace(replacement, original)
+            return descriptor
+
+        def inspect_snapshot(_command, cwd, **_kwargs):
+            snapshot = Path(cwd)
+            self.assertNotEqual(snapshot, original.parent)
+            self.assertEqual((snapshot / "semaprax.js").read_bytes(), expected)
+            self.assertEqual(original.read_bytes(), b"export const swapped_after_open = true;\n")
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(gpr.os, "open", side_effect=open_then_swap):
+            with mock.patch.object(gpr, "run_closed", side_effect=inspect_snapshot) as run_closed:
+                report = gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        self.assertTrue(swapped)
+        run_closed.assert_called_once()
+        self.assertTrue(any("npm pack --dry-run succeeded" in line for line in report))
+
+    def test_cargo_dry_run_receives_verified_private_snapshot(self):
+        package_dir = self.rust_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("rust", package_dir, "frame-payload", "0.1.0", None, prepared)
+        expected = (prepared / "payload" / "Cargo.toml").read_bytes()
+
+        def inspect_snapshot(command, cwd, path_dirs, extra_env, **_kwargs):
+            snapshot = Path(cwd)
+            self.assertNotEqual(snapshot, prepared / "payload")
+            self.assertEqual((snapshot / "Cargo.toml").read_bytes(), expected)
+            self.assertEqual(Path(command[-1]), snapshot / "Cargo.toml")
+            self.assertEqual(path_dirs, ["/not-reached"])
+            self.assertEqual(Path(extra_env["HOME"]).parent, snapshot.parent)
+            self.assertEqual(Path(extra_env["CARGO_HOME"]).parent, snapshot.parent)
+            self.assertNotIn("RUSTUP_HOME", extra_env)
+            return SimpleNamespace(returncode=1, stderr=b"package cannot be published")
+
+        with mock.patch.object(gpr, "run_closed", side_effect=inspect_snapshot) as run_closed:
+            report = gpr.check("rust", prepared, publish=False, cargo_bin=Path("/not-reached/cargo"))
+        run_closed.assert_called_once()
+        self.assertTrue(any("cargo publish --dry-run independently refused" in line for line in report))
+
+    def test_descriptor_read_unavailable_uses_verified_private_snapshot(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        expected = (prepared / "payload" / "semaprax.js").read_bytes()
+
+        def inspect_snapshot(_command, cwd, **_kwargs):
+            snapshot = Path(cwd)
+            self.assertNotEqual(snapshot, prepared / "payload")
+            self.assertEqual((snapshot / "semaprax.js").read_bytes(), expected)
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(gpr, "_descriptor_reads_available", return_value=False):
+            with mock.patch.object(gpr, "run_closed", side_effect=inspect_snapshot) as run_closed:
+                report = gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        run_closed.assert_called_once()
+        self.assertTrue(any("npm pack --dry-run succeeded" in line for line in report))
+
+    def test_descriptor_read_unavailable_preserves_prepare_and_check_semantics(self):
+        package_dir = self.npm_package_dir(self.root)
+        first = self.root / "first"
+        second = self.root / "second"
+        with mock.patch.object(gpr, "_descriptor_reads_available", return_value=False):
+            gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", "a" * 40, first)
+            gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", "a" * 40, second)
+            report = gpr.check("npm", first, publish=False)
+        self.assertEqual(
+            sorted((path.relative_to(first), path.read_bytes()) for path in first.rglob("*") if path.is_file()),
+            sorted((path.relative_to(second), path.read_bytes()) for path in second.rglob("*") if path.is_file()),
+        )
+        self.assertTrue(any("npm dry-run skipped" in line for line in report))
+
+    def test_fallback_rejects_swap_after_open_before_pack_tool(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        original = prepared / "payload" / "semaprax.js"
+        replacement = self.root / "fallback-replacement-semaprax.js"
+        replacement.write_bytes(b"export const swapped_after_open = true;\n")
+        real_open = open
+        swapped = False
+
+        def open_then_swap(path, *args, **kwargs):
+            nonlocal swapped
+            source = real_open(path, *args, **kwargs)
+            if Path(path) == original and not swapped:
+                swapped = True
+                os.replace(replacement, original)
+            return source
+
+        with mock.patch.object(gpr, "_descriptor_reads_available", return_value=False):
+            with mock.patch("builtins.open", side_effect=open_then_swap):
+                with mock.patch.object(gpr, "run_closed") as run_closed:
+                    with self.assertRaisesRegex(gpr.Rejected, r"prepared payload/semaprax\.js changed while it was read"):
+                        gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        self.assertTrue(swapped)
+        run_closed.assert_not_called()
+
     def test_check_refuses_with_a_live_publish_credential_present(self):
         package_dir = self.npm_package_dir(self.root)
         prepared = self.root / "prepared"
@@ -281,12 +635,14 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         self.assertEqual(before, after, "npm pack --dry-run must not write a tarball to disk")
         self.assertTrue(any("dry-run succeeded" in line for line in report))
 
-    @unittest.skipUnless(shutil.which("cargo"), "cargo is not installed on this machine")
     def test_real_cargo_publish_dry_run_is_refused_by_cargo_itself(self):
+        cargo_bin = actual_toolchain_cargo()
+        if cargo_bin is None:
+            self.skipTest("actual toolchain Cargo is unavailable; unresolved Rustup proxy paths are refused")
         package_dir = self.rust_package_dir(self.root)
         prepared = self.root / "prepared"
         gpr.prepare("rust", package_dir, "frame-payload", "0.1.0", None, prepared)
-        report = gpr.check("rust", prepared, publish=False, cargo_bin=Path(shutil.which("cargo")))
+        report = gpr.check("rust", prepared, publish=False, cargo_bin=cargo_bin)
         self.assertTrue(any("independently refused" in line for line in report))
 
 

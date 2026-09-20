@@ -8,6 +8,22 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add an offline, unavailable-only admission gate for future external coding-
+  agent baselines. It binds the owner-pinned task inventory bytes and Zero
+  source revision to closed toolchain, interface, model, and reviewed-port
+  provenance without running a model or treating provenance as execution
+  evidence (#107).
+
+- Carry exact empty `Bytes` arguments through source-native Core Wasm Agent
+  stages using the existing named slice/range/copy ownership path, with
+  interpreter, native `-O0`/`-O2`, and Core Wasm parity plus a retained
+  malformed-carrier refusal (#143).
+
+- Harden generated package preview verification around a flat physical-file
+  inventory and private verified snapshots before optional npm or Cargo dry-
+  runs. Package publication, signing, registry credentials, and support-policy
+  promotion remain outside this tool (#145).
+
 - Harden the paired-agent pilot's stale-recovery metric so only an exact,
   well-formed conditional write to the drifted source can count as recovery,
   and only the gateway's exact stale-precondition refusal can count as a

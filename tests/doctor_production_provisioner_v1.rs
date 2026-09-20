@@ -350,6 +350,440 @@ fn provisioner_source_tripwires(sources: &Sources) -> Result<(), String> {
     Ok(())
 }
 
+fn workflow_lines(workflow: &str) -> Result<Vec<(usize, &str)>, String> {
+    workflow
+        .lines()
+        .filter_map(|line| {
+            if line.contains('\t') {
+                return Some(Err("workflow uses a tab-indented line".to_owned()));
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return None;
+            }
+            Some(Ok((
+                line.len() - line.trim_start().len(),
+                line.trim_start(),
+            )))
+        })
+        .collect()
+}
+
+fn section_end(lines: &[(usize, &str)], start: usize, indentation: usize) -> usize {
+    lines[start + 1..]
+        .iter()
+        .position(|(line_indentation, _)| *line_indentation <= indentation)
+        .map_or(lines.len(), |offset| start + 1 + offset)
+}
+
+fn direct_children(lines: &[(usize, &str)], start: usize, indentation: usize) -> Vec<String> {
+    let end = section_end(lines, start, indentation);
+    lines[start + 1..end]
+        .iter()
+        .filter(|(line_indentation, _)| *line_indentation == indentation + 2)
+        .map(|(_, value)| (*value).to_owned())
+        .collect()
+}
+
+fn required_section<'a>(
+    lines: &'a [(usize, &'a str)],
+    key: &str,
+) -> Result<(usize, Vec<String>), String> {
+    let matches: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, (indentation, value))| *indentation == 0 && *value == key)
+        .map(|(index, _)| index)
+        .collect();
+    match matches.as_slice() {
+        [start] => Ok((*start, direct_children(lines, *start, 0))),
+        [] => Err(format!("workflow is missing top-level `{key}`")),
+        _ => Err(format!("workflow repeats top-level `{key}`")),
+    }
+}
+
+fn parse_aarch64_tracking_workflow(workflow: &str) -> Result<(), String> {
+    let lines = workflow_lines(workflow)?;
+    let top_level: Vec<_> = lines
+        .iter()
+        .filter(|(indentation, _)| *indentation == 0)
+        .map(|(_, value)| *value)
+        .collect();
+    let expected_top_level = [
+        "name: Doctor AArch64 Linux lifecycle tracking",
+        "on:",
+        "permissions:",
+        "concurrency:",
+        "env:",
+        "jobs:",
+    ];
+    if top_level != expected_top_level {
+        return Err(format!(
+            "workflow top-level shape changed: expected {expected_top_level:?}, got {top_level:?}"
+        ));
+    }
+
+    let (_, triggers) = required_section(&lines, "on:")?;
+    let (_, permissions) = required_section(&lines, "permissions:")?;
+    if triggers != ["workflow_dispatch:"] {
+        return Err(format!(
+            "workflow triggers must be only workflow_dispatch, got {triggers:?}"
+        ));
+    }
+    if permissions != ["contents: read"] {
+        return Err(format!(
+            "workflow permissions must be only contents: read, got {permissions:?}"
+        ));
+    }
+
+    let (_, concurrency) = required_section(&lines, "concurrency:")?;
+    if concurrency
+        != [
+            "group: doctor-provisioned-linux-aarch64",
+            "cancel-in-progress: false",
+        ]
+    {
+        return Err(format!(
+            "workflow concurrency shape changed: {concurrency:?}"
+        ));
+    }
+    let (_, environment) = required_section(&lines, "env:")?;
+    if environment
+        != [
+            "CARGO_INCREMENTAL: \"0\"",
+            "CARGO_PROFILE_DEV_DEBUG: \"0\"",
+            "CARGO_PROFILE_TEST_DEBUG: \"0\"",
+            "CARGO_TERM_COLOR: never",
+            "PYTHONDONTWRITEBYTECODE: \"1\"",
+        ]
+    {
+        return Err(format!(
+            "workflow environment shape changed: {environment:?}"
+        ));
+    }
+
+    let (jobs_start, jobs) = required_section(&lines, "jobs:")?;
+    if jobs != ["doctor-provisioned-linux-aarch64:"] {
+        return Err(format!(
+            "workflow must define exactly one named job, got {jobs:?}"
+        ));
+    }
+    let job_start = jobs_start + 1;
+    let job_fields = direct_children(&lines, job_start, 2);
+    if job_fields
+        != [
+            "name: Linux AArch64 offline doctor lifecycle (partial tracking)",
+            "runs-on: ubuntu-24.04-arm",
+            "timeout-minutes: 180",
+            "steps:",
+        ]
+    {
+        return Err(format!("workflow job shape changed: {job_fields:?}"));
+    }
+    let job_end = section_end(&lines, job_start, 2);
+    let step_starts: Vec<_> = lines[job_start + 1..job_end]
+        .iter()
+        .enumerate()
+        .filter(|(_, (indentation, value))| *indentation == 6 && value.starts_with("- "))
+        .map(|(offset, _)| job_start + 1 + offset)
+        .collect();
+    let steps: Vec<_> = step_starts
+        .iter()
+        .map(|start| lines[*start].1.to_owned())
+        .collect();
+    let expected_step_headers = [
+        "- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7",
+        "- uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master",
+        "- name: Require a native Linux AArch64 runner",
+        "- name: Acquire the locked dependency closure before offline execution",
+        "- name: Require the source bytes the tracking result binds",
+        "- name: Run the AArch64 partial lifecycle tracking probe",
+        "- name: Preserve the explicit non-promotion boundary",
+    ];
+    if steps != expected_step_headers {
+        return Err(format!(
+            "workflow step headers changed: expected {expected_step_headers:?}, got {steps:?}"
+        ));
+    }
+    let actual_step_bodies: Vec<Vec<String>> = step_starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = step_starts.get(index + 1).copied().unwrap_or(job_end);
+            lines[*start..end]
+                .iter()
+                .map(|(indentation, value)| format!("{indentation}:{value}"))
+                .collect()
+        })
+        .collect();
+    let expected_step_bodies: Vec<Vec<String>> = vec![
+        vec![
+            "6:- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7",
+            "8:with:",
+            "10:fetch-depth: 1",
+            "10:filter: blob:none",
+            "10:fetch-tags: false",
+            "10:lfs: false",
+        ],
+        vec![
+            "6:- uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master",
+            "8:with:",
+            "10:toolchain: 1.97.1",
+        ],
+        vec![
+            "6:- name: Require a native Linux AArch64 runner",
+            "8:run: |",
+            "10:set -euo pipefail",
+            "10:test \"$(uname -s)\" = Linux",
+            "10:case \"$(uname -m)\" in",
+            "12:aarch64|arm64) ;;",
+            "12:*) echo \"expected native AArch64 runner, got $(uname -m)\" >&2; exit 1 ;;",
+            "10:esac",
+        ],
+        vec![
+            "6:- name: Acquire the locked dependency closure before offline execution",
+            "8:run: cargo fetch --locked",
+        ],
+        vec![
+            "6:- name: Require the source bytes the tracking result binds",
+            "8:run: |",
+            "10:set -euo pipefail",
+            "10:test -z \"$(git status --porcelain)\"",
+        ],
+        vec![
+            "6:- name: Run the AArch64 partial lifecycle tracking probe",
+            "8:env:",
+            "10:CARGO_NET_OFFLINE: \"true\"",
+            "10:CARGO_TARGET_DIR: ${{ runner.temp }}/semaprax-doctor-aarch64-target",
+            "8:run: bash scripts/doctor-provisioned-linux-aarch64-local-lifecycle.sh",
+        ],
+        vec![
+            "6:- name: Preserve the explicit non-promotion boundary",
+            "8:run: |",
+            "10:set -euo pipefail",
+            "10:printf '%s\\n' \\",
+            "12:'This dispatch is a 24-case AArch64 tracking probe, not the full 26-case signed-release gate.' \\",
+            "12:'A result does not resolve the two real-distribution exclusions or promote WP-05.'",
+        ],
+    ]
+    .into_iter()
+    .map(|step| step.into_iter().map(str::to_owned).collect())
+    .collect();
+    if actual_step_bodies != expected_step_bodies {
+        return Err("workflow step keys or contents changed".to_owned());
+    }
+    if workflow.contains("continue-on-error:") || workflow.contains("if: ${{") {
+        return Err("workflow permits a conditional or masked result".to_owned());
+    }
+
+    Ok(())
+}
+
+fn aarch64_local_driver_boundary(local_driver: &str) -> Result<(), String> {
+    fn bash_array(source: &str, name: &str) -> Result<Vec<String>, String> {
+        let header = format!("readonly -a {name}=(");
+        let (_, body) = source
+            .split_once(&header)
+            .ok_or_else(|| format!("AArch64 driver is missing `{header}`"))?;
+        let mut values = Vec::new();
+        for line in body.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if line == ")" {
+                return Ok(values);
+            }
+            let value = line
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .ok_or_else(|| format!("AArch64 driver has a non-literal `{name}` item"))?;
+            values.push(value.to_owned());
+        }
+        Err(format!("AArch64 driver leaves `{name}` unterminated"))
+    }
+
+    let expected_platform = [
+        "doctor::offline_root::linux::tests::provisioned_close_uncertainty_is_fail_stop",
+        "doctor::offline_root::linux::tests::provisioned_detached_root_bytes_modes_and_read_only",
+        "doctor::offline_root::linux::tests::provisioned_metadata_mismatches_feed_actual_admission",
+        "doctor::offline_root::linux::tests::provisioned_setup_and_exact_write_failures_return_no_root",
+        "doctor::offline_root::linux::tests::provisioned_wrong_page_cost_stops_before_tree_writes",
+        "doctor::offline_worker::tests::hostile::provisioned_capability_operations_and_process_creation_are_denied",
+        "doctor::offline_worker::tests::hostile::provisioned_root_hides_real_outside_file_and_rejects_write_opens",
+        "doctor::offline_worker::tests::hostile::provisioned_stdin_is_eof_and_nonstandard_descriptors_are_closed",
+        "doctor::offline_worker::tests::lifecycle::post_exec_capabilities_and_supervisor_death_are_observed_externally",
+        "doctor::offline_worker::tests::provisioned_materializer_exec_and_socket_denial",
+        "doctor::offline_worker::tests::provisioned_missing_role_bad_hash_and_invalid_request_emit_no_frame",
+        "doctor::offline_worker::tests::provisioned_overflow_and_timeout_publish_only_settled_failure",
+    ];
+    let expected_collector = [
+        "actual_worker_materializes_executes_and_settles_before_canonical_report",
+        "complete_frame_and_capture_eof_each_still_require_worker_exit",
+        "complete_literal_frame_followed_by_nonzero_exit_never_becomes_a_report",
+        "created_handoff::production_created_native_and_all_files_reach_worker_and_reject_digest_drift",
+        "launched_handoff::production_launcher_rejects_both_image_defects_and_digest_drift",
+        "launched_handoff::production_launcher_rejects_structural_collector_with_missing_loader",
+        "launched_handoff::production_launcher_reports_native_and_all_from_literal_transport_files",
+        "literal_reply_surrogates_reject_cross_binding_and_malformed_frames",
+        "nonchild::nonchild_pidfd_rejects_without_killing_or_stopping_the_owned_sentinel",
+        "physical_reports::all_three_roles_settle_and_tool_failure_is_an_ordinary_exit_one_report",
+        "physical_reports::closed_report_sink_fails_after_collection_without_successful_delivery",
+        "prepared_handoff::prepared_native_and_all_role_handoffs_preserve_literal_wire_and_reject_transport_drift",
+    ];
+    if bash_array(local_driver, "PLATFORM_LIFECYCLE_TESTS")? != expected_platform {
+        return Err("AArch64 platform lifecycle selection changed".to_owned());
+    }
+    if bash_array(local_driver, "COLLECTOR_LIFECYCLE_TESTS")? != expected_collector {
+        return Err("AArch64 collector lifecycle selection changed".to_owned());
+    }
+    require(
+        local_driver,
+        "AArch64 local lifecycle plan",
+        &[
+            "readonly TRACKING_FIXTURE_COUNT=24",
+            "[ \"${#PLATFORM_LIFECYCLE_TESTS[@]}\" -eq 12 ]",
+            "[ \"${#COLLECTOR_LIFECYCLE_TESTS[@]}\" -eq 12 ]",
+            "--ignored --exact --test-threads=1",
+            "\"${PLATFORM_LIFECYCLE_TESTS[@]}\"",
+            "\"${COLLECTOR_LIFECYCLE_TESTS[@]}\"",
+        ],
+    )?;
+    let exclusions = [
+        "--skip doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions",
+        "--skip real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions",
+    ];
+    let actual_exclusions: Vec<_> = local_driver
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("--skip "))
+        .map(|line| {
+            line.strip_suffix(" \\").ok_or_else(|| {
+                "AArch64 exclusion selector must continue into its exact plan".to_owned()
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    if actual_exclusions != exclusions {
+        return Err(format!(
+            "AArch64 partial driver exclusions changed: expected {exclusions:?}, got {actual_exclusions:?}"
+        ));
+    }
+    if local_driver
+        .matches("--ignored --exact --test-threads=1")
+        .count()
+        != 3
+        || local_driver.contains("doctor::offline_worker doctor::offline_root")
+    {
+        return Err(
+            "AArch64 driver no longer uses only the closed exact lifecycle plan".to_owned(),
+        );
+    }
+
+    let command_prefix = "unshare --user --map-root-user --mount --net --ipc --uts -- \\\n\t\tcargo test --locked --offline";
+    let commands: Vec<_> = local_driver.split(command_prefix).skip(1).collect();
+    if commands.len() != 3 {
+        return Err(format!(
+            "expected exactly three AArch64 lifecycle test commands, got {}",
+            commands.len()
+        ));
+    }
+    for (index, command) in commands[..2].iter().enumerate() {
+        if command.contains("||") {
+            return Err(format!(
+                "selected AArch64 lifecycle command {index} is masked instead of fail-fast"
+            ));
+        }
+    }
+    if commands[2].contains("--skip ")
+        || !commands[2].contains(
+            "doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions ||\n\t\techo \"   (nonzero exit expected without a provisioned real bundle -- not a confinement failure)\"",
+        )
+    {
+        return Err(
+            "only the explicit missing-real-bundle precondition probe may mask its expected nonzero"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn aarch64_tracking_contract_tripwires(
+    tracking: &str,
+    workflow: &str,
+    local_driver: &str,
+    guard_policy: &str,
+    guard_tests: &str,
+    provisioner_admission: &str,
+) -> Result<(), String> {
+    require(
+        tracking,
+        "AArch64 tracking contract",
+        &[
+            "Status: **in scope, tracked, and unexecuted on the proposed hosted runner.**",
+            "first implementation is native 64-bit little-endian Linux\nx86-64 **and AArch64**",
+            "default-deny syscall table for each native ABI",
+            "Commit [`734e67af`]",
+            "**local Docker-VM evidence**, not GitHub-hosted evidence and not\nphysical-device evidence",
+            "passed 24 of the 26 ignored lifecycle fixtures",
+            "doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions",
+            "real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions",
+            "failed fast because that local run supplied neither the required real\nClang/Node/Rust bundle nor its selector",
+            "GitHub-hosted `ubuntu-24.04-arm` runner",
+            "exactly two named\n`--skip` exclusions",
+            "Those exclusions define its twenty-four-case boundary.",
+            "masks only that expected nonzero result, which is not a\nconfinement pass.",
+            "Every selected lifecycle command is otherwise unmasked and\nfail-fast",
+            "does **not** call itself a full AArch64 gate",
+            "not a production or WP-05 promotion",
+            "needs an observed real-binary behaviour and a negative control",
+        ],
+    )?;
+    parse_aarch64_tracking_workflow(workflow)?;
+    require(
+        local_driver,
+        "AArch64 local lifecycle driver",
+        &[
+            "THIS IS NOT scripts/doctor-provisioned-linux-gate.py",
+            "aarch64 | arm64",
+            "This is a failure, not a skip.",
+            "--skip doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions",
+            "--skip real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions",
+            "nonzero exit expected without a provisioned real bundle -- not a confinement failure",
+        ],
+    )?;
+    aarch64_local_driver_boundary(local_driver)?;
+    require(
+        guard_policy,
+        "AArch64 closed syscall policy",
+        &[
+            "const ARM_ARCH: u32 = 0xc000_00b7;",
+            "const ARM_COMMON",
+            "const ARM_MANDATORY_DENY",
+            "const ARM_SAFE_ADDITIONS: &[u32] = &[];",
+            "ARM_ARCH => (",
+            "ARM_COMMON,",
+            "ARM_MANDATORY_DENY,",
+        ],
+    )?;
+    require(
+        guard_tests,
+        "AArch64 default-deny proof",
+        &[
+            "fn complete_syscall_selection_is_default_deny_on_both_native_abis()",
+            "for arch in [X86_ARCH, ARM_ARCH]",
+        ],
+    )?;
+    require(
+        provisioner_admission,
+        "AArch64 provisioner admission",
+        &[
+            "DoctorOfflineArchitecture::LinuxAarch64",
+            "crate::doctor::DoctorOfflineArchitecture::LinuxAarch64 => 183u16",
+        ],
+    )?;
+    Ok(())
+}
+
 #[test]
 fn production_provisioner_source_layout_tripwires_are_present() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -481,6 +915,165 @@ fn source_layout_tripwire_rejects_representative_widening_and_role_swap() {
         assert!(
             provisioner_source_tripwires(&hostile).is_err(),
             "hostile {name} mutation escaped the source-layout tripwire"
+        );
+    }
+}
+
+#[test]
+fn aarch64_linux_tracking_contract_is_separate_fail_closed_and_non_promotional() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tracking = read(repository, "docs/DOCTOR-PROVISIONED-LINUX-AARCH64-V1.md");
+    let workflow = read(
+        repository,
+        ".github/workflows/doctor-provisioned-linux-aarch64.yml",
+    );
+    let local_driver = read(
+        repository,
+        "scripts/doctor-provisioned-linux-aarch64-local-lifecycle.sh",
+    );
+    let guard_policy = read(
+        repository,
+        "crates/semaprax-native-rust-interop-platform-sys/src/doctor/offline_worker/guard.rs",
+    );
+    let guard_tests = read(
+        repository,
+        "crates/semaprax-native-rust-interop-platform-sys/src/doctor/offline_worker/guard/tests.rs",
+    );
+    let provisioner_admission = read(
+        repository,
+        "crates/semaprax-native-rust-interop-platform-sys/src/doctor/offline_provisioner/admission.rs",
+    );
+    aarch64_tracking_contract_tripwires(
+        &tracking,
+        &workflow,
+        &local_driver,
+        &guard_policy,
+        &guard_tests,
+        &provisioner_admission,
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    let added_lifecycle_case = local_driver.replacen(
+        "\t\"doctor::offline_worker::tests::provisioned_overflow_and_timeout_publish_only_settled_failure\"\n)",
+        "\t\"doctor::offline_worker::tests::provisioned_overflow_and_timeout_publish_only_settled_failure\"\n\t\"doctor::offline_worker::tests::unexpected_new_ignored_case\"\n)",
+        1,
+    );
+    assert!(
+        aarch64_local_driver_boundary(&added_lifecycle_case).is_err(),
+        "an added ignored lifecycle case must require an explicit reviewed 24-case-plan update"
+    );
+
+    for (name, hostile_tracking, hostile_workflow) in [
+        (
+            "hosted promotion",
+            tracking.replacen(
+                "unexecuted on the proposed hosted runner",
+                "HOSTED GREEN",
+                1,
+            ),
+            workflow.clone(),
+        ),
+        (
+            "foreign runner",
+            tracking.clone(),
+            workflow.replacen("ubuntu-24.04-arm", "ubuntu-24.04", 1),
+        ),
+        (
+            "push trigger",
+            tracking.clone(),
+            format!("{workflow}\npush:\n  branches: [main]\n"),
+        ),
+        (
+            "scheduled trigger",
+            tracking.clone(),
+            workflow.replacen(
+                "  workflow_dispatch:\n",
+                "  workflow_dispatch:\n  schedule:\n    - cron: '* * * * *'\n",
+                1,
+            ),
+        ),
+        (
+            "reusable workflow trigger",
+            tracking.clone(),
+            workflow.replacen(
+                "  workflow_dispatch:\n",
+                "  workflow_dispatch:\n  workflow_call:\n",
+                1,
+            ),
+        ),
+        (
+            "repository dispatch trigger",
+            tracking.clone(),
+            workflow.replacen(
+                "  workflow_dispatch:\n",
+                "  workflow_dispatch:\n  repository_dispatch:\n",
+                1,
+            ),
+        ),
+        (
+            "additional job",
+            tracking.clone(),
+            workflow.replacen(
+                "jobs:\n",
+                "jobs:\n  unexpected-second-job:\n    runs-on: ubuntu-24.04-arm\n    steps: []\n",
+                1,
+            ),
+        ),
+        (
+            "additional step",
+            tracking.clone(),
+            format!("{workflow}\n      - name: Unexpected extra step\n        run: true\n"),
+        ),
+        (
+            "write permission",
+            tracking.clone(),
+            workflow.replacen("contents: read", "contents: write", 1),
+        ),
+        (
+            "weakened native-host assertion",
+            tracking.clone(),
+            workflow.replacen("test \"$(uname -s)\" = Linux", "true", 1),
+        ),
+        (
+            "unlocked dependency fetch",
+            tracking.clone(),
+            workflow.replacen("run: cargo fetch --locked", "run: cargo fetch", 1),
+        ),
+        (
+            "online lifecycle probe",
+            tracking.clone(),
+            workflow.replacen(
+                "CARGO_NET_OFFLINE: \"true\"",
+                "CARGO_NET_OFFLINE: \"false\"",
+                1,
+            ),
+        ),
+        (
+            "substituted lifecycle driver",
+            tracking.clone(),
+            workflow.replacen(
+                "run: bash scripts/doctor-provisioned-linux-aarch64-local-lifecycle.sh",
+                "run: true",
+                1,
+            ),
+        ),
+        (
+            "masked host failure",
+            tracking.clone(),
+            format!("{workflow}\ncontinue-on-error: true\n"),
+        ),
+    ] {
+        assert!(
+            aarch64_tracking_contract_tripwires(
+                &hostile_tracking,
+                &hostile_workflow,
+                &local_driver,
+                &guard_policy,
+                &guard_tests,
+                &provisioner_admission,
+            )
+            .is_err(),
+            "hostile {name} mutation escaped the AArch64 tracking tripwire"
         );
     }
 }

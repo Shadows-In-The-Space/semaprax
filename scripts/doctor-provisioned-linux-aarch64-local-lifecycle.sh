@@ -15,14 +15,14 @@
 # docs/COMPLETION-MATRIX.md, changes docs/DOCTOR-PROVISIONED-LINUX-GATE-V1.md,
 # or may be cited as x86-64 evidence.
 #
-# What it DOES cover: the two `#[ignore]`d Rust suites that do not require a
-# signed release capsule or a packaged real-distribution bundle --
-#   cargo test -p semaprax-native-rust-interop-platform-sys --lib
-#   cargo test -p semaprax-doctor-collector --test provisioned
-# built and run as native AArch64 binaries, inside a real (non-emulated)
-# AArch64 Linux kernel, with the fixed namespace acknowledgements the
-# fixtures themselves assert on. It reuses the existing hostile fixtures
-# unmodified; it adds no fixture and weakens none.
+# What it DOES cover: a fixed, explicit twenty-four-test subset of the two
+# `#[ignore]`d Rust suites that does not require a signed release capsule or a
+# packaged real-distribution bundle. Every test name is supplied with
+# `--exact`; adding a matching ignored test cannot silently widen this probe.
+# The selected fixtures are built and run as native AArch64 binaries, inside a
+# real (non-emulated) AArch64 Linux kernel, with the fixed namespace
+# acknowledgements the fixtures themselves assert on. It reuses the existing
+# hostile fixtures unmodified; it adds no fixture and weakens none.
 #
 # What it does NOT cover: the two fixtures that need a provisioned real
 # Clang/Node/Rust distribution bundle and selector
@@ -83,10 +83,52 @@ require_cargo() {
 readonly REPOSITORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly TARGET_DIR="${CARGO_TARGET_DIR:-${REPOSITORY}/target-aarch64-local}"
 
+# This is deliberately an enumerated plan, rather than a broad libtest filter:
+# the local 24/26 historical result is meaningful only for this exact set.
+# Keep the two omitted real-distribution fixtures in their explicit --skip
+# positions below, even though --exact makes the list closed independently.
+readonly -a PLATFORM_LIFECYCLE_TESTS=(
+	"doctor::offline_root::linux::tests::provisioned_close_uncertainty_is_fail_stop"
+	"doctor::offline_root::linux::tests::provisioned_detached_root_bytes_modes_and_read_only"
+	"doctor::offline_root::linux::tests::provisioned_metadata_mismatches_feed_actual_admission"
+	"doctor::offline_root::linux::tests::provisioned_setup_and_exact_write_failures_return_no_root"
+	"doctor::offline_root::linux::tests::provisioned_wrong_page_cost_stops_before_tree_writes"
+	"doctor::offline_worker::tests::hostile::provisioned_capability_operations_and_process_creation_are_denied"
+	"doctor::offline_worker::tests::hostile::provisioned_root_hides_real_outside_file_and_rejects_write_opens"
+	"doctor::offline_worker::tests::hostile::provisioned_stdin_is_eof_and_nonstandard_descriptors_are_closed"
+	"doctor::offline_worker::tests::lifecycle::post_exec_capabilities_and_supervisor_death_are_observed_externally"
+	"doctor::offline_worker::tests::provisioned_materializer_exec_and_socket_denial"
+	"doctor::offline_worker::tests::provisioned_missing_role_bad_hash_and_invalid_request_emit_no_frame"
+	"doctor::offline_worker::tests::provisioned_overflow_and_timeout_publish_only_settled_failure"
+)
+readonly -a COLLECTOR_LIFECYCLE_TESTS=(
+	"actual_worker_materializes_executes_and_settles_before_canonical_report"
+	"complete_frame_and_capture_eof_each_still_require_worker_exit"
+	"complete_literal_frame_followed_by_nonzero_exit_never_becomes_a_report"
+	"created_handoff::production_created_native_and_all_files_reach_worker_and_reject_digest_drift"
+	"launched_handoff::production_launcher_rejects_both_image_defects_and_digest_drift"
+	"launched_handoff::production_launcher_rejects_structural_collector_with_missing_loader"
+	"launched_handoff::production_launcher_reports_native_and_all_from_literal_transport_files"
+	"literal_reply_surrogates_reject_cross_binding_and_malformed_frames"
+	"nonchild::nonchild_pidfd_rejects_without_killing_or_stopping_the_owned_sentinel"
+	"physical_reports::all_three_roles_settle_and_tool_failure_is_an_ordinary_exit_one_report"
+	"physical_reports::closed_report_sink_fails_after_collection_without_successful_delivery"
+	"prepared_handoff::prepared_native_and_all_role_handoffs_preserve_literal_wire_and_reject_transport_drift"
+)
+readonly TRACKING_FIXTURE_COUNT=24
+
+require_tracking_plan() {
+	[ "${#PLATFORM_LIFECYCLE_TESTS[@]}" -eq 12 ] || fail "platform lifecycle plan is not 12 fixtures"
+	[ "${#COLLECTOR_LIFECYCLE_TESTS[@]}" -eq 12 ] || fail "collector lifecycle plan is not 12 fixtures"
+	[ "$(( ${#PLATFORM_LIFECYCLE_TESTS[@]} + ${#COLLECTOR_LIFECYCLE_TESTS[@]} ))" -eq "${TRACKING_FIXTURE_COUNT}" ] || \
+		fail "AArch64 tracking plan is not ${TRACKING_FIXTURE_COUNT} fixtures"
+}
+
 main() {
 	require_host
 	require_user_namespaces
 	require_cargo
+	require_tracking_plan
 	cd "${REPOSITORY}"
 	export CARGO_TARGET_DIR="${TARGET_DIR}"
 
@@ -105,21 +147,23 @@ main() {
 	echo "   (excludes the real-distribution fixture, run separately below)"
 	unshare --user --map-root-user --mount --net --ipc --uts -- \
 		cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib -- \
-		--ignored --test-threads=1 doctor::offline_worker doctor::offline_root \
-		--skip doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions
+		--ignored --exact --test-threads=1 \
+		--skip doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions \
+		"${PLATFORM_LIFECYCLE_TESTS[@]}"
 	echo "== running the doctor-collector 'provisioned' ignored lifecycle suite =="
 	echo "   (excludes the two real-distribution fixtures; see the file header)"
 	unshare --user --map-root-user --mount --net --ipc --uts -- \
 		cargo test --locked --offline -p semaprax-doctor-collector --test provisioned -- \
-		--ignored --test-threads=1 \
-		--skip real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions
+		--ignored --exact --test-threads=1 \
+		--skip real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions \
+		"${COLLECTOR_LIFECYCLE_TESTS[@]}"
 
 	echo "== running the platform-sys real-distribution fixture explicitly =="
 	echo "   (expected to fail fast on the missing SEMAPRAX_DOCTOR_REAL_SELECTOR"
 	echo "    precondition unless the caller has provisioned a real bundle)"
 	unshare --user --map-root-user --mount --net --ipc --uts -- \
 		cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib -- \
-		--ignored --test-threads=1 doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions ||
+		--ignored --exact --test-threads=1 doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions ||
 		echo "   (nonzero exit expected without a provisioned real bundle -- not a confinement failure)"
 
 	echo "== done: this is AArch64-local exploratory evidence only =="

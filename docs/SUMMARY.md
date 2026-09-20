@@ -69,6 +69,7 @@ Audience: all documentation readers.
 - [macOS doctor confinement and settlement contract](DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1.md)
 - [Windows doctor confinement and settlement contract](DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1.md)
 - [Provisioned Linux doctor lifecycle gate](DOCTOR-PROVISIONED-LINUX-GATE-V1.md)
+- [AArch64 Linux doctor confinement tracking](DOCTOR-PROVISIONED-LINUX-AARCH64-V1.md)
 - [Signed doctor generation install and activation](DOCTOR-SIGNED-INSTALL-V1.md)
 - [Doctor active-generation-to-provisioner handoff](DOCTOR-GENERATION-ACTIVATION-HANDOFF-V1.md)
 - [Native compiler scratch](NATIVE-SCRATCH-V1.md)

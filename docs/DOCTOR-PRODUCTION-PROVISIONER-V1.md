@@ -261,54 +261,15 @@ Clippy are necessary but not promotion evidence. WP-05 remains Partial until the
 unpacked Linux distribution gate passes and equivalent separately specified
 native boundaries exist for every platform the product claims.
 
-## Local AArch64 exploratory note (non-promotional)
+## AArch64 tracking
 
-[Provisioned Linux gate v1](DOCTOR-PROVISIONED-LINUX-GATE-V1.md) admits
-exactly one target, x86-64, and its own `--self-test` asserts that AArch64
-must be rejected rather than generalized into it. Issue #61's own acceptance
-criteria require AArch64 to stay separately tracked from that gate. Nothing
-in this section changes that gate, changes WP-05 in
-[COMPLETION-MATRIX.md](COMPLETION-MATRIX.md), or may be cited as x86-64
-evidence.
-
-Separately, and only as supplementary information for whoever narrows the
-open x86-64 `child.rs::enter` pre-`execve` rejection: on 2026-09-18, the
-current-head `semaprax-doctor-worker`, `semaprax-doctor-launcher` and
-`semaprax-doctor-collector` binaries were built natively for AArch64 (no
-cross-compilation, no emulation -- a real AArch64 Linux 6.12 kernel, Docker
-Desktop's own native VM on Apple Silicon) and run locally with the same
-build-and-test sequence `scripts/doctor-provisioned-linux-aarch64-local-lifecycle.sh`
-now captures for reproducibility, bypassing the x86-64-only production
-release/capsule pipeline entirely. 24 of the 26
-`#[ignore]`d lifecycle fixtures enumerated in
-[Provisioned Linux gate v1 § Test selection](DOCTOR-PROVISIONED-LINUX-GATE-V1.md#test-selection)
-passed, including
-`doctor::offline_worker::tests::lifecycle::post_exec_capabilities_and_supervisor_death_are_observed_externally`
--- the zero-syscall "spin" sentinel that is the decisive x86-64 CI failure
-recorded in that document. The 2 fixtures that were not run
-(`provisioned_real_clang_node_rust_distributions` and
-`real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions`)
-need a provisioned real Clang/Node/Rust bundle and selector that this local
-run did not supply; both failed fast on that missing precondition, not on a
-confinement defect.
-
-This is local, re-runnable, non-hosted evidence for one architecture this
-contract's own text (`native 64-bit little-endian Linux x86-64 and AArch64`)
-already claims to support, gathered without modifying, weakening, or
-replacing any hostile fixture. It does not promote AArch64, does not
-substitute for the required x86-64 gate, does not investigate *why* the
-x86-64 rejection differs, and does not claim the untested 2 fixtures would
-pass. A maintainer with x86-64 access may still find it useful context that
-the identical sentinel fixture is not universally hostile to this
-implementation.
-
-One limit on the script itself, stated so nobody assumes otherwise: the run
-recorded above was performed as the explicit command sequence
-`scripts/doctor-provisioned-linux-aarch64-local-lifecycle.sh` captures, but
-that script has **not** itself been executed end to end after its final
-revision. It is syntax-checked only (`bash -n`). Treat it as a transcription
-of a run that happened, not as a gate that has been exercised, until someone
-runs it.
+The production boundary includes native 64-bit little-endian Linux AArch64,
+but the x86-64-only executable gate never supplies AArch64 evidence. The
+separate [AArch64 Linux confinement tracking contract](DOCTOR-PROVISIONED-LINUX-AARCH64-V1.md)
+owns the scope decision, the historical local Docker-VM 24/26 result, its two
+unresolved real-distribution exclusions, and the unexecuted dispatch-only
+hosted runner candidate. It does not promote AArch64 or WP-05 and must not be
+cited as x86-64 evidence.
 
 ## Nonclaims
 

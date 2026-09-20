@@ -872,7 +872,20 @@ fn render_value(
         }
         (ResolvedType::Usize, RetainedValue::Usize(item)) => Ok(format!("{item}usize")),
         (ResolvedType::U8, RetainedValue::U8(item)) => Ok(format!("{item}u8")),
-        (ResolvedType::I32, RetainedValue::I32(item)) if *item >= 0 => Ok(format!("{item}i32")),
+        (ResolvedType::I32, RetainedValue::I32(item)) => {
+            if *item >= 0 {
+                Ok(format!("{item}i32"))
+            } else if *item == i32::MIN {
+                // The signed minimum is one canonical literal: its positive
+                // magnitude is deliberately outside the `i32` literal domain.
+                Ok("-2147483648i32".to_owned())
+            } else {
+                let name = format!("spx_lit{next}");
+                *next += 1;
+                prelude.push_str(&format!("    let {name} = 0i32 - {}i32;\n", -*item));
+                Ok(name)
+            }
+        }
         (ResolvedType::Bytes, RetainedValue::Bytes(item)) => {
             if item.is_empty() {
                 // Bytes has no literal. Take the exact empty range of one

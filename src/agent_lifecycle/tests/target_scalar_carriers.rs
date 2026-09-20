@@ -36,6 +36,23 @@ record Report {
 }
 "#;
 
+const PROPOSAL: &str = r#"@id("fixture.agent.type.proposal")
+record Proposal {
+    @id("fixture.agent.type.proposal.budget") budget: i64,
+    @id("fixture.agent.type.proposal.urgent") urgent: bool,
+    @id("fixture.agent.type.proposal.sequence") sequence: usize,
+}
+"#;
+
+const I32_PROPOSAL: &str = r#"@id("fixture.agent.type.proposal")
+record Proposal {
+    @id("fixture.agent.type.proposal.budget") budget: i64,
+    @id("fixture.agent.type.proposal.urgent") urgent: bool,
+    @id("fixture.agent.type.proposal.sequence") sequence: usize,
+    @id("fixture.agent.type.proposal.phase") phase: i32,
+}
+"#;
+
 const REPORT_TAIL: &str = "        status: outcome.status + state.epoch,\n    }";
 
 fn source(report: &str, tail: &str) -> String {
@@ -56,6 +73,24 @@ fn unsupported_source() -> String {
         I32_REPORT,
         "        status: outcome.status + state.epoch,\n        phase: 7i32,\n    }",
     )
+}
+
+/// `ScalarKind::I32` is an admitted Proposal projection. Its signed minimum
+/// is deliberately exercised because neither target may route it through a
+/// positive magnitude or a lossy host number while rebuilding the stage call.
+fn i32_proposal_source() -> String {
+    MODULE
+        .replacen(PROPOSAL, I32_PROPOSAL, 1)
+        .replacen(
+            "fn authorize(state: borrow State, budget: i64, urgent: bool, sequence: usize) -> Decision",
+            "fn authorize(state: borrow State, budget: i64, urgent: bool, sequence: usize, phase: i32) -> Decision",
+            1,
+        )
+        .replacen(
+            "fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome: own Outcome) -> Report",
+            "fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, phase: i32, outcome: own Outcome) -> Report",
+            1,
+        )
 }
 
 fn compile(source: &str) -> CompiledAgentLifecycle {
@@ -206,6 +241,76 @@ fn all_target_stage_legs_preserve_bool_and_u64_usize_result_leaves() {
         field.field.as_str() == "fixture.agent.type.result.count"
             && field.value == RetainedValue::Usize(u64::MAX)
     }));
+}
+
+/// Negative `i32` Proposal fields are source-admitted. Exercise the exact
+/// signed minimum through authorize and reduce so the Core-Wasm driver and
+/// C11 caller cannot silently retain a nonnegative-only scalar vocabulary.
+#[test]
+fn all_target_stage_legs_preserve_negative_i32_proposal_fields() {
+    if !native_wasm_tools_available() {
+        eprintln!("skipping negative-i32 proposal parity: clang or node unavailable");
+        return;
+    }
+    let source = i32_proposal_source();
+    let compiled = compile(&source);
+    let task = payload(&compiled.binding.task, b"i32-minimum".to_vec(), 10);
+    let phase = RetainedValue::I32(i32::MIN);
+
+    let drive = |backend| {
+        let state = returned(
+            "initialize",
+            dispatch(
+                backend,
+                &compiled,
+                compiled.binding.initialize.prepared(),
+                std::slice::from_ref(&task),
+            ),
+        );
+        let proposal = [
+            state.clone(),
+            RetainedValue::I64(3),
+            RetainedValue::Bool(true),
+            RetainedValue::Usize(1),
+            phase.clone(),
+        ];
+        let decision = returned(
+            "authorize",
+            dispatch(
+                backend,
+                &compiled,
+                compiled.binding.authorize.stage().prepared(),
+                &proposal,
+            ),
+        );
+        let mut reduction = proposal.to_vec();
+        reduction.push(payload(&compiled.binding.outcome, b"observed".to_vec(), 4));
+        let report = returned(
+            "reduce",
+            dispatch(
+                backend,
+                &compiled,
+                compiled.binding.reduce.prepared(),
+                &reduction,
+            ),
+        );
+        vec![state, decision, report]
+    };
+
+    let expected = drive(authorization::StageBackend::Interpreter);
+    for (label, backend) in [
+        ("native -O0", authorization::StageBackend::Native),
+        (
+            "native -O2",
+            authorization::StageBackend::NativeAtOptimization("-O2"),
+        ),
+        (
+            "Core Wasm",
+            authorization::StageBackend::Wasm { source: &source },
+        ),
+    ] {
+        assert_eq!(drive(backend), expected, "{label}: negative i32 proposal");
+    }
 }
 
 #[test]

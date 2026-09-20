@@ -15,7 +15,7 @@
 //!
 //! The only values this executor can marshal across the C boundary are the
 //! closed vocabulary [`super::super::stages`] already restricts Agent stage
-//! signatures to: `i64`/`bool`/`u8`/`usize` scalars, one level of
+//! signatures to: `i32`/`i64`/`bool`/`u8`/`usize` scalars, one level of
 //! `own`/`borrow` record arguments built only from `Bytes`/`i64`/`bool` leaves
 //! (`Task`/`State`/`Observation`/`Outcome`), and record or two-/four-case
 //! variant results whose leaves are `Bytes`, `i64`, `bool`, or `u8`, plus record
@@ -171,6 +171,17 @@ fn c_i64(value: i64) -> String {
     }
 }
 
+fn c_i32(value: i32) -> String {
+    if value == i32::MIN {
+        // A positive `2147483648` cannot be named as an `int32_t` literal.
+        "(-INT32_C(2147483647) - INT32_C(1))".to_owned()
+    } else if value < 0 {
+        format!("-INT32_C({})", value.unsigned_abs())
+    } else {
+        format!("INT32_C({value})")
+    }
+}
+
 struct Emitter {
     body: String,
     byte_ordinal: usize,
@@ -258,6 +269,10 @@ fn prepare_argument(
     value: &RetainedValue,
 ) -> Result<PreparedArgument, Diagnostic> {
     match (ty, value) {
+        (ResolvedType::I32, RetainedValue::I32(scalar)) => Ok(PreparedArgument {
+            primary: c_i32(*scalar),
+            extra_borrow_pointers: Vec::new(),
+        }),
         (ResolvedType::I64, RetainedValue::I64(scalar)) => Ok(PreparedArgument {
             primary: c_i64(*scalar),
             extra_borrow_pointers: Vec::new(),

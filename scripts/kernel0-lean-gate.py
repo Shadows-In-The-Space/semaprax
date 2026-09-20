@@ -42,7 +42,7 @@ What it catches, and how
 4. A headline theorem is deleted, renamed, or its *statement* is weakened
    while the file still builds and still looks axiom-clean -- the failure
    mode a bare `lake build` gate misses entirely.
-   -> (a) Presence: each of the seven headline names must resolve to
+   -> (a) Presence: each of the eleven headline names must resolve to
           exactly one `#print axioms` info line in the build output
           (requires a toolchain -- an unresolvable name is also a hard
           `lake build` failure, so this is belt-and-suspenders with (1)).
@@ -103,6 +103,10 @@ HEADLINE_THEOREMS = [
     "subst_preserves_type_args",
     "hastype_weaken_right",
     "hastype_weaken_right_args",
+    "bool_equality_has_type",
+    "bool_equality_steps",
+    "bool_inequality_steps",
+    "bool_ordering_is_not_typed",
 ]
 
 # Frozen, byte-exact expected statement text for each headline theorem,
@@ -147,6 +151,22 @@ PINNED_SIGNATURES = {
         "theorem hastype_weaken_right_args {P : Program} (Γ1 Γ2 : List Ty) :\n"
         "    ∀ (args : List Expr) {Ts : List Ty},\n"
         "      ArgsHaveTypes P Γ1 args Ts → ArgsHaveTypes P (Γ1 ++ Γ2) args Ts"
+    ),
+    "bool_equality_has_type": (
+        "theorem bool_equality_has_type {P Γ a b} :\n"
+        "    HasType P Γ (.cmp .eq (.boolLit a) (.boolLit b)) .bool"
+    ),
+    "bool_equality_steps": (
+        "theorem bool_equality_steps {P} :\n"
+        "    Step P (.cmp .eq (.boolLit true) (.boolLit false)) (.boolLit false)"
+    ),
+    "bool_inequality_steps": (
+        "theorem bool_inequality_steps {P} :\n"
+        "    Step P (.cmp .ne (.boolLit true) (.boolLit false)) (.boolLit true)"
+    ),
+    "bool_ordering_is_not_typed": (
+        "theorem bool_ordering_is_not_typed {P Γ a b} :\n"
+        "    ¬ HasType P Γ (.cmp .lt (.boolLit a) (.boolLit b)) .bool"
     ),
 }
 

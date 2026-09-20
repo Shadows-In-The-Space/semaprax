@@ -17,15 +17,18 @@
   (`src/kernel_zero/{corpus,differential}.rs`, 86 programs after issue
   #188's later corpus-strengthening pass, up from 74) — see "Reification"
   and "Differential testing" below. This closes the reification predicate's
-  *faithfulness* gap only against a finite, non-exhaustive corpus and only
-  for the interpreter backend; it is evidence, not a proof, and it does not
-  cover the native or Wasm backends. The differential test run this session
-  found **zero disagreements**, and, independently of the compiler, found
+  *faithfulness* gap only against a finite, non-exhaustive corpus. The same
+  corpus now also runs against native C11 and Core Wasm; all three are
+  evidence, not a proof, and cover no program outside that corpus. The
+  differential test run this session found **zero disagreements**, and,
+  independently of the compiler, found
   that this document's own Progress theorem is incomplete as literally
-  stated for `i64` overflow and division/remainder by zero, and that its
-  typing table omits an operator combination (`bool == bool`/`bool !=
-  bool`) the real language and the reification predicate both admit — both
-  are recorded below rather than silently patched.
+  stated for `i64` overflow and division/remainder by zero. A later
+  mechanization pass also closed the formerly missing `bool == bool`/
+  `bool != bool` typing/evaluation rule, so the proved comparison fragment
+  now agrees with the real language and the reification predicate at that
+  boundary; the remaining arithmetic-fault gap is recorded below rather
+  than silently patched.
 
 ## Why this document exists
 
@@ -180,8 +183,12 @@ order invariant:
                      Γ ⊢ e1 BinOp e2 : i64
 
 Γ ⊢ e1 : i64  Γ ⊢ e2 : i64                    Γ ⊢ e1 : bool  Γ ⊢ e2 : bool
-─────────────────────────────── (== != < <= > >=)   ─────────────────────── (&& ||)
+─────────────────────────────── (== != < <= > >=)   ─────────────────────── (== !=)
 Γ ⊢ e1 BinOp e2 : bool                               Γ ⊢ e1 BinOp e2 : bool
+
+Γ ⊢ e1 : bool  Γ ⊢ e2 : bool
+─────────────────────────────── (&& ||)
+Γ ⊢ e1 BinOp e2 : bool
 
 Γ ⊢ c : bool  Γ ⊢ e1 : T  Γ ⊢ e2 : T          Γ ⊢ e1 : T1  Γ, x:T1 ⊢ e2 : T2
 ───────────────────────────────────── (if)    ─────────────────────────────── (let)
@@ -558,24 +565,22 @@ own convention).
    still total on well-typed terms) but are **not restated** here to cover
    the extended three-outcome calculus; doing so rigorously is future work,
    not claimed by this section.
-2. **Kernel-0's typing table does not state a rule for `bool == bool` /
-   `bool != bool`, but the real language and `reifies_into_kernel_zero` both
-   admit it.** "Static typing" gives `==`/`!=`/`<`/`<=`/`>`/`>=` only over
-   `i64` operands, and gives `bool` operands only to `&&`/`||`. Confirmed
-   against the built CLI: `fn f(a: bool, b: bool) -> bool { a == b }`
-   verifies (`bool < bool` correctly does not, with `SPX-T208`, matching the
-   stated table). `expr_reifies` in `src/kernel_zero.rs` admits `Binary`
-   generically once both operands reify and the result is a Kernel-0 scalar,
-   without checking which specific operator/operand-type pairs the typing
-   table states, so it already accepted this case before this session; the
-   reference interpreter and generated corpus (`src/kernel_zero/corpus.rs`)
-   both exercise it deliberately (case 12 above) rather than leaving it
-   untested. This is a documentation completeness gap, not a soundness one:
-   the missing rule (`Γ⊢e1:bool Γ⊢e2:bool` implies
-   `Γ⊢e1 BinOp e2:bool` for `BinOp ∈ {==, !=}`) has the identical shape the
-   Preservation proof already handles for the `i64` case, so extending the
-   proof sketch to cover it is routine, not attempted here, and not claimed
-   as done.
+2. **The former `bool == bool` / `bool != bool` specification and proof
+   mismatch is closed.** The real language and `reifies_into_kernel_zero`
+   admit these two boolean operations, while rejecting `bool < bool` with
+   `SPX-T208`. The table above now states the equality-only boolean rule.
+   `proofs/kernel0-lean/Kernel0.lean` matches it with a `BoolEquality`
+   premise on `HasType.cmpBool` and `Step.cmpBoolVal`; the Progress and
+   Preservation proofs both cover that constructor. Its four additional
+   headline theorems prove the admitted equality case, the exact equality
+   and inequality steps on representative values, and the rejected ordering
+   case; the no-holes gate pins every statement and audits every axiom set.
+   The `BoolEquality` premise is deliberate: it prevents the model from
+   accidentally widening boolean comparison to ordering merely because its
+   evaluator is total.
+   The existing reference interpreter and differential corpus still exercise
+   all four boolean equality outcomes independently; this Lean change does
+   not promote finite differential evidence into a backend theorem.
 
 ### Corpus strengthened (a later session, issue #188)
 
@@ -814,10 +819,11 @@ papering over:
    interpreter plus a differential test against the compiler's interpreter
    backend over a generated corpus: done, this session** (see "Differential
    testing" above; `src/kernel_zero/{term,value,eval,reify,corpus,
-   differential}.rs`), with two document-level gaps found and recorded
-   rather than silently patched (Progress's incompleteness at `i64`
-   overflow/division-by-zero, and the missing `bool == bool`/`bool != bool`
-   typing rule). **The differential comparison now also covers native C11
+   differential}.rs`), with the remaining document-level arithmetic-fault
+   gap recorded rather than silently patched (Progress's incompleteness at
+   `i64` overflow/division-by-zero). The `bool == bool`/`bool != bool`
+   typing/evaluation mismatch found by that corpus is now modeled and
+   mechanized. **The differential comparison now also covers native C11
    (`-O0`/`-O2`) and Core Wasm, done in a later session** (issue #188;
    `src/kernel_zero/differential/cross_backend.rs`): the same 74-program,
    197-comparison corpus run through `crate::codegen::emit_hir_c` compiled

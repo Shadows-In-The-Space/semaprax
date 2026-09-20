@@ -163,10 +163,12 @@ stop building.
 `scripts/kernel0-lean-gate.py` is that executable gate, and its own module
 doc comment is the source of truth for its exact behavior. Summary:
 
-- **Always runs, no Lean toolchain required**: re-locates each of the seven
+- **Always runs, no Lean toolchain required**: re-locates each of the eleven
   headline theorems (`progress_scalarIf`, `progress_scalarIf_closed`,
   `preservation`, `subst_preserves_type`, `subst_preserves_type_args`,
-  `hastype_weaken_right`, `hastype_weaken_right_args`) by name in the source
+  `hastype_weaken_right`, `hastype_weaken_right_args`,
+  `bool_equality_has_type`, `bool_equality_steps`, `bool_inequality_steps`,
+  `bool_ordering_is_not_typed`) by name in the source
   and fails if any is missing (deleted or renamed); compares each theorem's
   exact statement text against a frozen, byte-exact pin in the script and
   fails on any change (a weakened conclusion or hypothesis, kept name and

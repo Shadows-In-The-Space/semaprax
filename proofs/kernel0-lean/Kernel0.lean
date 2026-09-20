@@ -74,7 +74,8 @@ inductive ArithOp where
   | add | sub | mul | div | mod
 deriving DecidableEq, Repr
 
-/-- The six scalar comparison operators. -/
+/-- The six comparison operators. `eq`/`ne` apply to both Kernel-0 scalar
+types; ordering remains an `Int`-only operation. -/
 inductive CmpOp where
   | eq | ne | lt | le | gt | ge
 deriving DecidableEq, Repr
@@ -174,7 +175,15 @@ def evalArith (op : ArithOp) (a b : Int) : Option Int :=
 def evalNeg (n : Int) : Option Int :=
   if n = i64Min then none else some (-n)
 
-/-- The six comparison operators; total on `Int` (no overflow case). -/
+/-- Whether a comparison operator is admitted for boolean operands. The real
+Kernel-0 predicate admits only boolean equality/inequality -- not ordering --
+so this side condition keeps the mechanized calculus aligned with that
+boundary rather than making every `CmpOp` polymorphic by accident. -/
+def BoolEquality : CmpOp → Prop
+  | .eq | .ne => True
+  | .lt | .le | .gt | .ge => False
+
+/-- The six comparison operators on `Int`; total (no overflow case). -/
 def evalCmp : CmpOp → Int → Int → Bool
   | .eq, a, b => decide (a = b)
   | .ne, a, b => decide (a ≠ b)
@@ -182,6 +191,15 @@ def evalCmp : CmpOp → Int → Int → Bool
   | .le, a, b => decide (a ≤ b)
   | .gt, a, b => decide (a > b)
   | .ge, a, b => decide (a ≥ b)
+
+/-- The two comparison operators admitted for `Bool`; total by construction.
+The impossible ordering cases return `false` only to keep this evaluator
+total -- [`HasType.cmpBool`] and [`Step.cmpBoolVal`] both require
+[`BoolEquality`], so no well-typed term can observe those branches. -/
+def evalBoolCmp : CmpOp → Bool → Bool → Bool
+  | .eq, a, b => decide (a = b)
+  | .ne, a, b => decide (a ≠ b)
+  | .lt, _, _ | .le, _, _ | .gt, _, _ | .ge, _, _ => false
 
 /-! ## Static typing -/
 
@@ -193,8 +211,10 @@ mutual
     | var {P Γ i T} (h : Γ[i]? = some T) : HasType P Γ (.var i) T
     | arith {P Γ op e1 e2} (h1 : HasType P Γ e1 .int) (h2 : HasType P Γ e2 .int) :
         HasType P Γ (.arith op e1 e2) .int
-    | cmp {P Γ op e1 e2} (h1 : HasType P Γ e1 .int) (h2 : HasType P Γ e2 .int) :
+    | cmpInt {P Γ op e1 e2} (h1 : HasType P Γ e1 .int) (h2 : HasType P Γ e2 .int) :
         HasType P Γ (.cmp op e1 e2) .bool
+    | cmpBool {P Γ op e1 e2} (hop : BoolEquality op) (h1 : HasType P Γ e1 .bool)
+        (h2 : HasType P Γ e2 .bool) : HasType P Γ (.cmp op e1 e2) .bool
     | neg {P Γ e} (h : HasType P Γ e .int) : HasType P Γ (.neg e) .int
     | not {P Γ e} (h : HasType P Γ e .bool) : HasType P Γ (.not e) .bool
     | and {P Γ e1 e2} (h1 : HasType P Γ e1 .bool) (h2 : HasType P Γ e2 .bool) :
@@ -274,6 +294,8 @@ inductive Step (P : Program) : Expr → Expr → Prop where
   | cmpStep2 {op v1 e2 e2'} (h1 : IsValue v1) (h : Step P e2 e2') :
       Step P (.cmp op v1 e2) (.cmp op v1 e2')
   | cmpVal {op a b} : Step P (.cmp op (.intLit a) (.intLit b)) (.boolLit (evalCmp op a b))
+  | cmpBoolVal {op a b} (hop : BoolEquality op) :
+      Step P (.cmp op (.boolLit a) (.boolLit b)) (.boolLit (evalBoolCmp op a b))
   | negStep {e e'} (h : Step P e e') : Step P (.neg e) (.neg e')
   | negVal {n m} (h : evalNeg n = some m) : Step P (.neg (.intLit n)) (.intLit m)
   | notStep {e e'} (h : Step P e e') : Step P (.not e) (.not e')
@@ -334,6 +356,35 @@ theorem canonical_bool {P Γ v} (hv : IsValue v) (ht : HasType P Γ v .bool) :
   | intLit n => cases ht
   | boolLit b => exact ⟨b, rfl⟩
 
+/-! ## Boolean-comparison boundary
+
+The real Kernel-0 admission predicate permits equality and inequality on
+`bool`, but rejects ordering. These two compact boundary theorems make that
+alignment executable in the proof artifact itself: extending `CmpOp`,
+`HasType`, or the boolean evaluator must preserve both the admitted case and
+the refusal case, rather than silently treating every comparison as
+polymorphic. They are headline-gated at the bottom of this file alongside
+Progress and Preservation. -/
+
+theorem bool_equality_has_type {P Γ a b} :
+    HasType P Γ (.cmp .eq (.boolLit a) (.boolLit b)) .bool :=
+  HasType.cmpBool True.intro HasType.boolLit HasType.boolLit
+
+theorem bool_equality_steps {P} :
+    Step P (.cmp .eq (.boolLit true) (.boolLit false)) (.boolLit false) :=
+  Step.cmpBoolVal True.intro
+
+theorem bool_inequality_steps {P} :
+    Step P (.cmp .ne (.boolLit true) (.boolLit false)) (.boolLit true) :=
+  Step.cmpBoolVal True.intro
+
+theorem bool_ordering_is_not_typed {P Γ a b} :
+    ¬ HasType P Γ (.cmp .lt (.boolLit a) (.boolLit b)) .bool := by
+  intro h
+  cases h with
+  | cmpInt h1 _ => cases h1
+  | cmpBool hop _ _ => cases hop
+
 /-! ## Progress, for the scalar-and-`if` sub-fragment
 
 `ScalarIf` is literals, unary/binary scalar operators, and `if`, excluding
@@ -377,12 +428,22 @@ theorem progress_scalarIf {P Γ e T} (hs : ScalarIf e) (ht : HasType P Γ e T) :
         · exact Or.inr (Or.inr (.arithStep1 hf1))
   | cmp h1 h2 ih1 ih2 =>
       cases ht with
-      | cmp ht1 ht2 =>
+      | cmpInt ht1 ht2 =>
         rcases ih1 ht1 with hv1 | ⟨e1', hstep1⟩ | hf1
         · rcases ih2 ht2 with hv2 | ⟨e2', hstep2⟩ | hf2
           · obtain ⟨a, rfl⟩ := canonical_int hv1 ht1
             obtain ⟨b, rfl⟩ := canonical_int hv2 ht2
             exact Or.inr (Or.inl ⟨_, .cmpVal⟩)
+          · exact Or.inr (Or.inl ⟨_, .cmpStep2 hv1 hstep2⟩)
+          · exact Or.inr (Or.inr (.cmpStep2 hv1 hf2))
+        · exact Or.inr (Or.inl ⟨_, .cmpStep1 hstep1⟩)
+        · exact Or.inr (Or.inr (.cmpStep1 hf1))
+      | cmpBool hop ht1 ht2 =>
+        rcases ih1 ht1 with hv1 | ⟨e1', hstep1⟩ | hf1
+        · rcases ih2 ht2 with hv2 | ⟨e2', hstep2⟩ | hf2
+          · obtain ⟨a, rfl⟩ := canonical_bool hv1 ht1
+            obtain ⟨b, rfl⟩ := canonical_bool hv2 ht2
+            exact Or.inr (Or.inl ⟨_, .cmpBoolVal hop⟩)
           · exact Or.inr (Or.inl ⟨_, .cmpStep2 hv1 hstep2⟩)
           · exact Or.inr (Or.inr (.cmpStep2 hv1 hf2))
         · exact Or.inr (Or.inl ⟨_, .cmpStep1 hstep1⟩)
@@ -576,9 +637,13 @@ theorem subst_preserves_type {P : Program} (Γ1 ΓMid Γ2 : List Ty) (env : List
           (subst_preserves_type Γ1 ΓMid Γ2 env e2 henvVal henv h2)
   | .cmp op e1 e2, _, henvVal, henv, ht => by
       cases ht with
-      | cmp h1 h2 =>
+      | cmpInt h1 h2 =>
         simp only [substEnvAt]
-        exact HasType.cmp (subst_preserves_type Γ1 ΓMid Γ2 env e1 henvVal henv h1)
+        exact HasType.cmpInt (subst_preserves_type Γ1 ΓMid Γ2 env e1 henvVal henv h1)
+          (subst_preserves_type Γ1 ΓMid Γ2 env e2 henvVal henv h2)
+      | cmpBool hop h1 h2 =>
+        simp only [substEnvAt]
+        exact HasType.cmpBool hop (subst_preserves_type Γ1 ΓMid Γ2 env e1 henvVal henv h1)
           (subst_preserves_type Γ1 ΓMid Γ2 env e2 henvVal henv h2)
   | .neg e1, _, henvVal, henv, ht => by
       cases ht with
@@ -679,8 +744,12 @@ theorem hastype_weaken_right {P : Program} (Γ1 Γ2 : List Ty) :
         exact HasType.arith (hastype_weaken_right Γ1 Γ2 e1 h1) (hastype_weaken_right Γ1 Γ2 e2 h2)
   | .cmp op e1 e2, _, h => by
       cases h with
-      | cmp h1 h2 =>
-        exact HasType.cmp (hastype_weaken_right Γ1 Γ2 e1 h1) (hastype_weaken_right Γ1 Γ2 e2 h2)
+      | cmpInt h1 h2 =>
+        exact HasType.cmpInt (hastype_weaken_right Γ1 Γ2 e1 h1)
+          (hastype_weaken_right Γ1 Γ2 e2 h2)
+      | cmpBool hop h1 h2 =>
+        exact HasType.cmpBool hop (hastype_weaken_right Γ1 Γ2 e1 h1)
+          (hastype_weaken_right Γ1 Γ2 e2 h2)
   | .neg e1, _, h => by
       cases h with
       | neg h1 => exact HasType.neg (hastype_weaken_right Γ1 Γ2 e1 h1)
@@ -755,9 +824,22 @@ theorem preservation {P Γ e e' T} (hwf : WellFormedProgram P) (ht : HasType P �
   | arithStep1 h ih => cases ht with | arith h1 h2 => exact HasType.arith (ih h1) h2
   | arithStep2 hv h ih => cases ht with | arith h1 h2 => exact HasType.arith h1 (ih h2)
   | arithVal h => cases ht with | arith _ _ => exact HasType.intLit
-  | cmpStep1 h ih => cases ht with | cmp h1 h2 => exact HasType.cmp (ih h1) h2
-  | cmpStep2 hv h ih => cases ht with | cmp h1 h2 => exact HasType.cmp h1 (ih h2)
-  | cmpVal => cases ht with | cmp _ _ => exact HasType.boolLit
+  | cmpStep1 h ih =>
+      cases ht with
+      | cmpInt h1 h2 => exact HasType.cmpInt (ih h1) h2
+      | cmpBool hop h1 h2 => exact HasType.cmpBool hop (ih h1) h2
+  | cmpStep2 hv h ih =>
+      cases ht with
+      | cmpInt h1 h2 => exact HasType.cmpInt h1 (ih h2)
+      | cmpBool hop h1 h2 => exact HasType.cmpBool hop h1 (ih h2)
+  | cmpVal =>
+      cases ht with
+      | cmpInt _ _ => exact HasType.boolLit
+      | cmpBool _ h1 _ => cases h1
+  | cmpBoolVal hop =>
+      cases ht with
+      | cmpInt h1 _ => cases h1
+      | cmpBool _ _ _ => exact HasType.boolLit
   | negStep h ih => cases ht with | neg h1 => exact HasType.neg (ih h1)
   | negVal h => cases ht with | neg _ => exact HasType.intLit
   | notStep h ih => cases ht with | not h1 => exact HasType.not (ih h1)
@@ -818,3 +900,7 @@ the substring `sorryAx`). -/
 #print axioms Kernel0.subst_preserves_type_args
 #print axioms Kernel0.hastype_weaken_right
 #print axioms Kernel0.hastype_weaken_right_args
+#print axioms Kernel0.bool_equality_has_type
+#print axioms Kernel0.bool_equality_steps
+#print axioms Kernel0.bool_inequality_steps
+#print axioms Kernel0.bool_ordering_is_not_typed

@@ -425,7 +425,8 @@ present — see "Offline/hermetic story" above.
 same inventory in more detail):
 
 - **Full term/type syntax**: `Ty` (`int`/`bool`), the five arithmetic and
-  six comparison operators, and `Expr` with literals, variables (de Bruijn
+  six comparison operators (integer ordering plus equality/inequality on
+  either scalar type), and `Expr` with literals, variables (de Bruijn
   indices — chosen so substitution needs no capture-avoidance lemma, the
   same simplification PLFA's intrinsic-style chapter uses), unary/binary
   operators, `if`, `let`, and non-recursive `call` against a fixed function
@@ -454,6 +455,11 @@ same inventory in more detail):
   `sorry`**: a genuine three-way trichotomy — value, steps, or
   `FaultRedex` — replacing the source document's incomplete two-outcome
   statement.
+- **Boolean-comparison alignment, fully proved and headline-gated**:
+  `bool == bool` and `bool != bool` each reduce to the expected value on a
+  representative pair, while `bool < bool` is impossible to type. This is
+  intentionally a boundary suite, not a claim that every comparison operator
+  is polymorphic over scalars.
 - **Preservation, the *entire* language, fully proved, zero `sorry`**:
   `Let` and non-recursive `Call` included. This needed:
   - `WellFormedProgram`, an invariant this session's own first Lean encoding

@@ -63,6 +63,15 @@ different in kind:
   sites, and binds the result to the deterministic lowering identity. Its
   `verify()` path re-lowers rather than trusting stored strings. It creates no
   handler and grants no effect or resume authority.
+- `resumable_effects::source_driver` — a fresh, synchronous interpreter driver
+  for that admitted scalar source lane. The caller injects both an
+  `EffectHandler` and an explicit `CapabilityPolicy`; the driver derives the
+  source signature, checks every request and answer tag, and enforces
+  cancellation plus per-segment/cumulative fuel, call, request-byte and total
+  channel-byte budgets before each physical dispatch. Its bounded ordered
+  records retain exact scalar bits but no host error strings. They are inert
+  run evidence, not a journal, checkpoint, retry token, scheduler, target
+  runtime, or crash-safe exactly-once claim.
 
 What is still open is in [Scope boundary](#scope-boundary).
 
@@ -537,15 +546,17 @@ Explicitly **not** done in this slice, and why:
   nominal/authority surfaces anywhere in the source program still fail closed
   until their correlated dependency graphs can be pruned exactly. Widening any
   one of these constraints is its own tranche across the same seven layers.
-- **The admitted source channel now derives checked signature shapes, but the
-  general Rust API remains open-ended.**
+- **The admitted source channel now derives and enforces checked signature
+  shapes, but the general Rust API remains open-ended.**
   `source_signature` derives the selected stable function id and versioned
   request/answer `ResolvedType` identities into a one-row
   `EffectSignatureTable`, bound to the exact sequential lowering identity and
   site count. Reverification rejects changed source, types, dependencies, or
-  plan meaning rather than repairing the binding. This closes the scalar
-  source-to-table disconnect only; tagged multiple effect families, owned
-  aggregate channels, and a public handler/runtime integration remain open.
+  plan meaning rather than repairing the binding. The fresh synchronous source
+  driver reuses that exact table with an injected handler, explicit capability
+  policy, cancellation and bounded accounting. Tagged multiple effect families,
+  owned aggregate channels, durable recovery driving, asynchronous scheduling,
+  and public native/Wasm handler integration remain open.
 - **No compiler-checked owned suspension state.** `'static + Clone + Eq + Debug`
   is this reference module's own approximation of "plain owned, transferable
   data" — it rejects a borrow or a non-`'static` handle the same way a real
@@ -620,7 +631,7 @@ Explicitly **not** done in this slice, and why:
 | --- | --- |
 | A non-Agent function can yield typed requests and resume safely | **Met only for the bounded `.spx` slice.** A selected ordinary free function declares one typed channel and one to eight direct sequential `yield` sites; `interpreter::resumable` runs them through an opaque continuation, the public authority-free preparation API emits exact native C11/Core-Wasm projection inventories, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same staged projections. A public bounded checkpoint envelope HMAC-authenticates its private structural continuation with independently supplied ProgramRoot/invocation/policy facts and re-derives the binding from the current program/function/arguments; it is not a public runtime ABI or durable store. Resume checks answer types (`SPX-F113`), every replayed request (`SPX-F114`), and exact program/site/argument/prior-answer binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). Disconnected yielding functions are pruned; nested or control-dependent yields, owned state and effectful prefixes remain open. Distinct request/response types are admitted for direct `let`, mutable whole-binding assignment, and tail sites; assignment checks its target against the retagged response type rather than the request placeholder. |
 | Generated state machines are deterministic semantic projections | **Met only for the bounded ordered replay plan.** `SequentialResumablePlan` deterministically derives entry/per-site-suspended/complete identities and independently validated yield-free start/per-site-resume HIR projections while the original one-site `ResumablePlan` remains source-compatible. The interpreter consumes its identities and opaque history; the public preparation profile binds target artifacts to the plan/state/role/bytes and independently re-emits them during verification; private native and Wasm runners execute its projections. Live-frame/liveness lowering and control-dependent yields remain open. |
-| Ownership, effects, contracts and authority survive suspension correctly | For the `.spx` plan, only Copy scalars are admitted, ordinary effects and reachable yielding callees are refused, the start projection owns precondition evaluation, the resume projection owns the suffix/postcondition, and suspension bindings confer no authority. The checked source `yields` clause now derives its exact versioned runtime signature table and plan binding rather than relying on caller-authored shape strings. Owned values across suspension, effectful prefixes and durable/public resume authority remain **open**. At the separate Rust-reference level, `EffectHandler`, `CapabilityGatedHandler` and `SignatureCheckedHandler` prove the more general checking discipline. |
+| Ownership, effects, contracts and authority survive suspension correctly | For the `.spx` plan, only Copy scalars are admitted, ordinary effects and reachable yielding callees are refused, the start projection owns precondition evaluation, the resume projection owns the suffix/postcondition, and suspension bindings confer no authority. The checked source `yields` clause derives its exact versioned runtime signature table and plan binding rather than relying on caller-authored shape strings; the fresh synchronous driver checks that table and explicit capability policy before every injected host call and makes failures sticky without retry. Owned values across suspension, effectful prefixes, durable recovery driving, asynchronous scheduling, and public native/Wasm handler integration remain **open**. At the separate Rust-reference level, `EffectHandler`, `CapabilityGatedHandler` and `SignatureCheckedHandler` prove the more general checking discipline. |
 | Checkpoint/recovery never grants effect authority by itself | **Met** for the reference journal and the bounded source continuation proof. `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. Separately, the public sequential-source v1 envelope requires a caller-owned key to authenticate exact ProgramRoot/invocation/policy scope; the additive v2 envelope also authenticates compiler-derived request/answer shapes, lowering-plan identity, and yield count. Both recover through the same private structural codec, which re-derives plan/site/binding from caller-supplied checked program/function/arguments; neither performs source evaluation or dispatch while decoding. |
 | Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture requires a public external-await/runtime seam, durable source checkpointing and a broader state profile than this private scalar plan provides. |
 
@@ -643,6 +654,11 @@ distinct-type projection tests.
 runs 10 v1/v2 scope, signature-drift, canonicality, downgrade, corruption,
 bound and replay tests. The v2 cases exercise recovery through both suspension
 sites and preserve the unchanged v1 compatibility wire.
+
+`cargo test --locked -p semaprax --lib resumable_effects::source_driver::tests:: -- --nocapture`
+runs 10 fresh-run success and refusal tests for compiler-derived tags, exact
+scalar bits, explicit capability policy, cancellation, fuel/call/byte bounds,
+sticky host/language failures, and one physical dispatch per source site.
 
 ```sh
 SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 \

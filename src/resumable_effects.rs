@@ -105,6 +105,7 @@ pub(crate) mod lowering;
 pub mod migration;
 pub mod signature;
 pub mod source_checkpoint;
+pub mod source_driver;
 pub mod source_signature;
 pub mod target;
 #[cfg(test)]

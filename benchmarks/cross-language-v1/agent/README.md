@@ -26,6 +26,7 @@ build/test/leak-check/provenance machinery, unmodified.
 | `run_agent.py` | CLI entry point. Every model/sampling/budget/transport parameter is a flag; none has an environment-variable fallback. |
 | `fixtures/` | Committed replay fixtures. Each one is a hand-authored script, not a recorded model transcript (see its own `_non_claim` field). |
 | `tests/test_agent_driver.py` | Offline, credential-free self-tests (`python3 -m unittest discover -s benchmarks/cross-language-v1/agent/tests`). |
+| `specialization_protocol.py` | Input-only protocol validator and held-out schedule builder for #147. It never creates a transport or an outcome: all emitted rows remain `not_authorized` / `not_attempted`. |
 
 ## External baseline admission is not execution
 
@@ -142,3 +143,30 @@ usage, the rejected attempt still present in the transcript, and **no**
   not the subject) applies here unchanged, and doubly so: nothing here has
   even measured a real model's *output quality*, only the harness's own
   plumbing against a synthetic script.
+
+## Frozen specialization protocol (no spend)
+
+Issue #147 needs a controlled comparison of the same exact base model with
+no semantic guidance, versioned guidance, and versioned guidance plus a
+schema-constrained action surface. `specialization_protocol.py` freezes that
+comparison before it can run: its public task-inventory digest, model identity,
+resource ceiling, independent oracle digest, complete metric inventory, and
+every held-out task row are all digest-pinned in one canonical plan. A proposed
+adapter is optional, but may name only owner-declared `development` tasks and
+remains `proposed`; it cannot include a held-out task or claim to have trained
+anything.
+
+```sh
+python3 benchmarks/cross-language-v1/agent/specialization_protocol.py \
+  --protocol benchmarks/cross-language-v1/agent/specialization-protocol.example.json \
+  --tasks benchmarks/cross-language-v1/tasks.json \
+  --output /tmp/specialization-plan.json
+```
+
+This only validates supplied JSON and writes a plan. It does not load
+`LiveTransport`, a provider SDK, credentials, a candidate, hidden task bytes,
+or a toolchain. The output deliberately says `status: not_authorized` and
+`execution: not_attempted`; it is neither a training artifact nor a model
+evaluation. An actual run remains blocked on the explicit authorization list,
+and any outcome must still be scored by the same independent hidden-oracle
+path used by `run.py`.

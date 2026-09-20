@@ -38,11 +38,19 @@ from agent.contracts import Budget, ModelIdentity, PricingRates, SamplingParams 
 from agent.orchestrator import build_request, evaluate_agent_pair  # noqa: E402
 from agent.prompts import build_prompt  # noqa: E402
 from agent.replay_transport import ReplayTransport  # noqa: E402
+from agent.specialization_protocol import (  # noqa: E402
+    PLAN_SCHEMA,
+    ProtocolError,
+    REQUIRED_METRICS,
+    build_plan,
+    canonical_bytes,
+)
 from agent.live_transport import LiveTransport  # noqa: E402
 from agent.transport import CredentialsRequiredError, LiveTransportUnexercisedError  # noqa: E402
 
 FIXTURE_OK = _SUITE / "agent/fixtures/structured-input-error-handling-v1-rust-ok.json"
 TASK_DIR = _SUITE / "tasks/structured-input-error-handling-v1"
+SPECIALIZATION_PROTOCOL = _SUITE / "agent/specialization-protocol.example.json"
 
 
 def write_fixture(directory: pathlib.Path, attempts: list) -> pathlib.Path:
@@ -314,6 +322,90 @@ class BaselineAdmissionTests(unittest.TestCase):
                     admit_baseline_descriptor(malformed, self.owner_inventory())["reason"],
                     "invalid_port_provenance",
                 )
+
+
+class SpecializationProtocolTests(unittest.TestCase):
+    """The #147 preparation artifact is deliberately not an execution path."""
+
+    def protocol(self) -> dict:
+        return json.loads(SPECIALIZATION_PROTOCOL.read_text())
+
+    def inventory(self) -> bytes:
+        return (_SUITE / "tasks.json").read_bytes()
+
+    def test_canonical_plan_uses_every_held_out_task_and_never_claims_execution(self):
+        protocol = self.protocol()
+        first = build_plan(protocol, self.inventory())
+        second = build_plan(json.loads(canonical_bytes(protocol)), self.inventory())
+        self.assertEqual(first, second)
+        self.assertEqual(first["schema"], PLAN_SCHEMA)
+        self.assertEqual(first["status"], "not_authorized")
+        self.assertEqual(first["execution"], "not_attempted")
+        self.assertEqual(first["metrics"], list(REQUIRED_METRICS))
+        held_out = [
+            task["id"] for task in json.loads(self.inventory())["tasks"]
+            if task["split"] == "held_out" and "semaprax-project" in task["languages"]
+        ]
+        self.assertEqual(
+            [(row["variant"], row["task"], row["trial"]) for row in first["rows"]],
+            [
+                (variant, task, trial)
+                for variant in ("base", "guided", "constrained")
+                for task in held_out
+                for trial in range(1, 4)
+            ],
+        )
+        self.assertTrue(all(row["split"] == "held_out" for row in first["rows"]))
+        self.assertTrue(all(row["execution"] == "not_attempted" for row in first["rows"]))
+
+    def test_controls_cannot_change_model_budget_or_oracle(self):
+        protocol = self.protocol()
+        protocol["variants"][1]["model"]["revision"] = "different-model-snapshot"
+        with self.assertRaisesRegex(ProtocolError, "base model identity"):
+            build_plan(protocol, self.inventory())
+
+        protocol = self.protocol()
+        protocol["resource_policy"]["max_total_tokens"] = 47_999
+        with self.assertRaisesRegex(ProtocolError, "max_total_tokens"):
+            build_plan(protocol, self.inventory())
+
+        protocol = self.protocol()
+        protocol["variants"][2]["guidance"]["sha256"] = "sha256:" + "0" * 64
+        with self.assertRaisesRegex(ProtocolError, "same guidance bytes"):
+            build_plan(protocol, self.inventory())
+
+    def test_adaptation_is_optional_but_cannot_train_on_held_out_tasks(self):
+        protocol = self.protocol()
+        adapted = {
+            "id": "adapted",
+            "model": protocol["base_model"].copy(),
+            "guidance": protocol["variants"][2]["guidance"].copy(),
+            "action_constraint": protocol["variants"][2]["action_constraint"].copy(),
+            "adaptation": {
+                "status": "proposed",
+                "dataset_manifest_sha256": "sha256:" + "a" * 64,
+                "task_ids": ["bounded-counter-repair-v1"],
+            },
+        }
+        protocol["variants"].append(adapted)
+        with self.assertRaisesRegex(ProtocolError, "development tasks"):
+            build_plan(protocol, self.inventory())
+
+        adapted["adaptation"]["task_ids"] = ["sequence-digest-v1"]
+        plan = build_plan(protocol, self.inventory())
+        self.assertEqual(plan["variants"][-1]["adaptation"]["status"], "proposed")
+        self.assertEqual(plan["variants"][-1]["adaptation"]["task_ids"], ["sequence-digest-v1"])
+
+    def test_protocol_requires_the_full_measurement_inventory_and_explicit_authorization(self):
+        protocol = self.protocol()
+        protocol["metrics"] = protocol["metrics"][:-1]
+        with self.assertRaisesRegex(ProtocolError, "metric inventory"):
+            build_plan(protocol, self.inventory())
+
+        protocol = self.protocol()
+        protocol["authorization"]["status"] = "approved"
+        with self.assertRaisesRegex(ProtocolError, "not_authorized"):
+            build_plan(protocol, self.inventory())
 
 
 class BudgetLedgerTests(unittest.TestCase):

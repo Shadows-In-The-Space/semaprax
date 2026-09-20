@@ -347,17 +347,17 @@ pub fn malformed_trusted_descriptor_cases(
     cases
 }
 
-/// The five malformed-trusted documents used for executable mutation
-/// negatives of generated consumer envelope checks.  This intentionally
-/// excludes `stale_boundary_profile_version`: that branch remains covered by
-/// the closed six-case corpus, but it is not one of issue #173's requested
-/// mutation controls.  Keeping this selection next to the bytes prevents a
-/// renderer-specific test from silently choosing a different fixture.
+/// The six malformed-trusted documents used for executable mutation
+/// negatives of generated consumer envelope checks. Every frozen-envelope
+/// branch has one discriminating control: a renderer-specific test may not
+/// silently omit the boundary-profile literal merely because the ordinary
+/// corpus rejects its bytes at an earlier or unrelated layer.
 pub fn malformed_trusted_descriptor_mutation_cases(
 ) -> Vec<(&'static str, Vec<u8>, Option<&'static str>, &'static str)> {
-    const NAMES: [&str; 5] = [
+    const NAMES: [&str; 6] = [
         "truncated_final_frame",
         "unknown_descriptor_schema",
+        "stale_boundary_profile_version",
         "stale_type_grammar_version",
         "invalid_utf8_export_id",
         "trailing_bytes_after_final_frame",

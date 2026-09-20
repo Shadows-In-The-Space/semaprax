@@ -188,7 +188,7 @@ fn each_requested_descriptor_envelope_mutation_is_detected_by_typescript_consume
     let cases = malformed_trusted_descriptor_mutation_cases();
     assert_eq!(
         cases.len(),
-        5,
+        6,
         "the requested mutation-control set is closed"
     );
     for (name, bytes, _, _) in cases {
@@ -428,6 +428,12 @@ fn weaken_typescript_descriptor_branch(source: &mut String, case: &str) {
         "unknown_descriptor_schema" => replace_once(
             source,
             "\"semaprax.public-generic-descriptor.v1\",",
+            "undefined,",
+            case,
+        ),
+        "stale_boundary_profile_version" => replace_once(
+            source,
+            "\"semaprax.public-generic-boundary-profile.v1\",",
             "undefined,",
             case,
         ),

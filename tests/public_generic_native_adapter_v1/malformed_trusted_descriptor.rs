@@ -228,6 +228,12 @@ fn weaken_c11_descriptor_branch(source: &mut String, case: &str) {
             "if (field == 13u) { version = descriptor_schema; version_length = sizeof(descriptor_schema) - 1u; }",
             case,
         ),
+        "stale_boundary_profile_version" => replace_once(
+            source,
+            "if (field == 1u) { version = boundary_schema; version_length = sizeof(boundary_schema) - 1u; }",
+            "if (field == 13u) { version = boundary_schema; version_length = sizeof(boundary_schema) - 1u; }",
+            case,
+        ),
         "stale_type_grammar_version" => replace_once(
             source,
             "if (field == 2u) { version = grammar_schema; version_length = sizeof(grammar_schema) - 1u; }",
@@ -259,6 +265,12 @@ fn weaken_rust_descriptor_branch(source: &mut String, case: &str) {
             source,
             "0 => Some(b\"semaprax.public-generic-descriptor.v1\".as_slice()),",
             "13 => Some(b\"semaprax.public-generic-descriptor.v1\".as_slice()),",
+            case,
+        ),
+        "stale_boundary_profile_version" => replace_once(
+            source,
+            "1 => Some(b\"semaprax.public-generic-boundary-profile.v1\".as_slice()),",
+            "13 => Some(b\"semaprax.public-generic-boundary-profile.v1\".as_slice()),",
             case,
         ),
         "stale_type_grammar_version" => replace_once(
@@ -546,7 +558,7 @@ fn malformed_trusted_corpus_is_refused_by_the_rust_consumer() {
     }
 }
 
-/// Persistent executable mutation controls for the five #173 branches whose
+/// Persistent executable mutation controls for the six #173 branches whose
 /// hostile bytes are also the consumer's embedded trusted bytes.  Each
 /// temporary source mutation makes exactly one case reach the provider;
 /// without this check, merely listing/refusing the cases could leave a dead
@@ -556,7 +568,7 @@ fn each_requested_descriptor_envelope_mutation_is_detected_by_native_consumers()
     let cases = malformed_trusted_descriptor_mutation_cases();
     assert_eq!(
         cases.len(),
-        5,
+        6,
         "the requested mutation-control set is closed"
     );
     for (name, bytes, _, _) in cases {

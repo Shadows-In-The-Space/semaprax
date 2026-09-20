@@ -1,10 +1,17 @@
 use std::path::PathBuf;
+use std::process::Command;
 
 use crate::agent_runtime::AgentCancellation;
 use crate::hir::DeclarationId;
-use crate::interpreter::retained_call::{RetainedField, RetainedRecord, RetainedValue};
+use crate::interpreter::retained_call::{
+    PreparedRetainedCall, RetainedCallEvaluation, RetainedCallOutcome, RetainedField,
+    RetainedRecord, RetainedValue,
+};
 
-use super::{bind_rich_proposal_stages, run_rich_turn, RichProposalStages, RichTurnOutcome};
+use super::{
+    bind_rich_proposal_stages, run_rich_turn, run_rich_turn_on, RichProposalStages,
+    RichStageBackend, RichTurnOutcome,
+};
 
 // NOTE on scope: Proposal here is a genuinely multi-field record crossing
 // the checked `authorize`/`reduce` stages as ONE nominal argument -- not
@@ -73,7 +80,7 @@ variant Transition {
 
 @id("rich.fn.authorize")
 fn authorize(state: State, proposal: Proposal) -> Decision {
-    let seal = [1u8];
+    let seal = [1u8, 2u8];
     if proposal.urgent {
         Decision::Grant { flag: true, seal: bytes_copy(array_as_slice(seal)) }
     } else {
@@ -83,13 +90,17 @@ fn authorize(state: State, proposal: Proposal) -> Decision {
 
 @id("rich.fn.reduce")
 fn reduce(state: State, proposal: Proposal, outcome: own Bytes) -> Transition {
-    let marker = [1u8];
-    if proposal.weight < 0 {
-        Transition::Fail { code: 9u8 }
+    let marker = [3u8, 4u8];
+    if proposal.weight == -1 {
+        Transition::Fail { code: 0u8 }
     } else {
-        Transition::Continue {
-            next_count: state.count + proposal.weight,
-            marker: bytes_copy(array_as_slice(marker)),
+        if proposal.weight < 0 {
+            Transition::Fail { code: 255u8 }
+        } else {
+            Transition::Continue {
+                next_count: state.count + proposal.weight,
+                marker: bytes_copy(array_as_slice(marker)),
+            }
         }
     }
 }
@@ -171,6 +182,17 @@ fn state(count: i64) -> RetainedValue {
     })
 }
 
+fn target_tools_available() -> bool {
+    Command::new("clang")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+        && Command::new("node")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+}
+
 /// One canonical `semaprax.agent-interaction-value.v1` document for
 /// `rich.type.proposal`, built by hand in exact declared field order so it
 /// is admitted by the byte-exact canonical-replay decoder.
@@ -179,6 +201,253 @@ fn proposal_document(schema_digest: &str, urgent: bool, weight: i64) -> String {
     format!(
         "{{\"schema\":\"semaprax.agent-interaction-value.v1\",\"root_type_id\":\"rich.type.proposal\",\"schema_digest\":{digest},\"value\":{{\"fields\":{{\"rich.field.urgent\":{urgent},\"rich.field.weight\":\"{weight}\"}}}}}}\n"
     )
+}
+
+fn run_on(
+    stages: &RichProposalStages,
+    backend: RichStageBackend,
+    urgent: bool,
+    weight: i64,
+    cancellation: &AgentCancellation,
+) -> Result<RichTurnOutcome, crate::diagnostic::Diagnostic> {
+    let document = proposal_document(stages.schema().schema().digest(), urgent, weight);
+    run_rich_turn_on(
+        stages,
+        state(10),
+        document.as_bytes(),
+        Vec::new(),
+        10_000,
+        cancellation,
+        backend,
+    )
+}
+
+fn admitted_proposal(stages: &RichProposalStages, urgent: bool, weight: i64) -> RetainedValue {
+    let document = proposal_document(stages.schema().schema().digest(), urgent, weight);
+    let decoded = stages
+        .schema
+        .decode(document.as_bytes())
+        .expect("fixture proposal decodes");
+    let admitted = stages
+        .proposal_binding
+        .admit(decoded)
+        .expect("fixture proposal is admitted");
+    super::to_retained(&stages.proposal_graph, &admitted).expect("fixture proposal projects")
+}
+
+fn raw_stage(
+    stages: &RichProposalStages,
+    backend: RichStageBackend,
+    prepared: &PreparedRetainedCall,
+    arguments: &[RetainedValue],
+) -> RetainedCallEvaluation {
+    crate::agent_lifecycle::authorization::dispatch_on(
+        stages.backend(backend),
+        &stages.program,
+        prepared,
+        arguments,
+        10_000,
+    )
+    .unwrap_or_else(|error| panic!("{backend:?}: {error:?}"))
+}
+
+fn assert_raw_target_parity(
+    label: &str,
+    expected: &RetainedCallEvaluation,
+    actual: &RetainedCallEvaluation,
+) {
+    // This is deliberately before `run_rich_turn_on` reduces the variants to
+    // a turn outcome: raw grant seals and Continue markers must be equal as
+    // bytes, not merely as a matching branch label or scalar state.
+    assert_eq!(actual.outcome, expected.outcome, "{label}: raw outcome");
+    assert_eq!(actual.failure, expected.failure, "{label}: failure");
+    assert!(
+        actual.cleanup_events.is_empty(),
+        "{label}: target result harvesting exposes no interpreter cleanup events"
+    );
+}
+
+/// The turn facade intentionally reduces Decision/Transition into a small
+/// public outcome, so inspect the raw retained results here. This keeps the
+/// owned grant seal and Continue marker semantically observed through every
+/// target codec rather than letting matching scalar branches hide byte drift.
+#[test]
+fn rich_target_backends_preserve_raw_grant_and_continue_byte_payloads() {
+    if !target_tools_available() {
+        eprintln!("skipping rich target raw-byte parity: clang or node unavailable");
+        return;
+    }
+    let stages = bind("target-raw-payloads");
+    let proposal = admitted_proposal(&stages, true, 7);
+    let authorize_args = [state(10), proposal.clone()];
+    let decision = raw_stage(
+        &stages,
+        RichStageBackend::Interpreter,
+        &stages.authorize,
+        &authorize_args,
+    );
+    let RetainedCallOutcome::Returned(RetainedValue::Variant(decision_value)) = &decision.outcome
+    else {
+        panic!("fixture authorize did not return Decision::Grant");
+    };
+    assert_eq!(
+        decision_value.case,
+        DeclarationId::new("rich.decision.grant")
+    );
+    assert_eq!(
+        decision_value
+            .fields
+            .iter()
+            .find(|field| field.field == DeclarationId::new("rich.decision.grant.seal"))
+            .expect("Grant seal field")
+            .value,
+        RetainedValue::Bytes(vec![1, 2])
+    );
+
+    let reduce_args = [
+        state(10),
+        proposal,
+        // A non-empty owned argument exercises the target's direct Bytes ABI
+        // and its generated callee cleanup path, rather than a zero-length
+        // carrier which could conceal a pointer/length mismatch.
+        RetainedValue::Bytes(vec![0xa5, 0x5a]),
+    ];
+    let transition = raw_stage(
+        &stages,
+        RichStageBackend::Interpreter,
+        &stages.reduce,
+        &reduce_args,
+    );
+    let RetainedCallOutcome::Returned(RetainedValue::Variant(transition_value)) =
+        &transition.outcome
+    else {
+        panic!("fixture reduce did not return Transition::Continue");
+    };
+    assert_eq!(
+        transition_value.case,
+        DeclarationId::new("rich.transition.continue")
+    );
+    assert_eq!(
+        transition_value
+            .fields
+            .iter()
+            .find(|field| field.field == DeclarationId::new("rich.transition.continue.marker"))
+            .expect("Continue marker field")
+            .value,
+        RetainedValue::Bytes(vec![3, 4])
+    );
+
+    for (target, backend) in [
+        ("native -O0", RichStageBackend::Native),
+        ("native -O2", RichStageBackend::NativeOptimized),
+        ("Core Wasm", RichStageBackend::Wasm),
+    ] {
+        let actual_decision = raw_stage(&stages, backend, &stages.authorize, &authorize_args);
+        assert_raw_target_parity(&format!("{target}: authorize"), &decision, &actual_decision);
+        let actual_transition = raw_stage(&stages, backend, &stages.reduce, &reduce_args);
+        assert_raw_target_parity(
+            &format!("{target}: reduce"),
+            &transition,
+            &actual_transition,
+        );
+    }
+}
+
+/// Rich Proposal uses one nominal Proposal argument rather than the frozen
+/// scalar projection. This proves that the same checked proposal, grant
+/// branch, transition, and u8 failure carrier agree on the interpreter,
+/// native C11 at both optimization levels, and Core Wasm.
+#[test]
+fn every_target_backend_executes_rich_proposal_grant_refusal_and_fail_transitions() {
+    if !target_tools_available() {
+        eprintln!("skipping rich target parity: clang or node unavailable");
+        return;
+    }
+    let stages = bind("target-parity");
+    for (label, urgent, weight) in [
+        ("grant", true, 7),
+        ("refusal", false, 42),
+        ("fail-zero", true, -1),
+        ("fail-max", true, -3),
+    ] {
+        let expected = run_on(
+            &stages,
+            RichStageBackend::Interpreter,
+            urgent,
+            weight,
+            &AgentCancellation::new(),
+        )
+        .unwrap_or_else(|error| panic!("{label}: interpreter: {error:?}"));
+        for (target, backend) in [
+            ("native -O0", RichStageBackend::Native),
+            ("native -O2", RichStageBackend::NativeOptimized),
+            ("Core Wasm", RichStageBackend::Wasm),
+        ] {
+            assert_eq!(
+                run_on(&stages, backend, urgent, weight, &AgentCancellation::new(),)
+                    .unwrap_or_else(|error| panic!("{label}: {target}: {error:?}")),
+                expected,
+                "{label}: {target}"
+            );
+        }
+    }
+}
+
+/// Cancellation and malformed proposal bytes are rejected by the semantic
+/// kernel before target selection can build an artifact or execute either
+/// stage. The exact diagnostic stays backend-independent.
+#[test]
+fn rich_target_backends_keep_cancellation_and_malformed_proposals_pre_dispatch() {
+    let stages = bind("target-pre-dispatch");
+    for backend in [
+        RichStageBackend::Interpreter,
+        RichStageBackend::Native,
+        RichStageBackend::NativeOptimized,
+        RichStageBackend::Wasm,
+    ] {
+        let cancellation = AgentCancellation::new();
+        cancellation.cancel();
+        let cancelled = run_on(&stages, backend, true, 1, &cancellation)
+            .expect_err("a cancelled rich turn refuses before target execution");
+        assert_eq!(cancelled.code, "SPX-G588");
+        assert!(cancelled.message.contains("turn.cancelled"));
+
+        let malformed = run_rich_turn_on(
+            &stages,
+            state(10),
+            b"not json",
+            Vec::new(),
+            10_000,
+            &AgentCancellation::new(),
+            backend,
+        )
+        .expect_err("malformed proposal bytes refuse before target execution");
+        assert_eq!(malformed.code, "SPX-G588");
+        assert!(malformed.message.contains("turn.proposal_malformed"));
+
+        // A forged variant carrying State's nominal ID is not State: state
+        // is a record-only stage input. This check runs before decoding or
+        // selecting a target artifact, so its exact refusal is shared by all
+        // sealed backends.
+        let malformed_state =
+            RetainedValue::Variant(crate::interpreter::retained_call::RetainedVariant {
+                variant: DeclarationId::new("rich.type.state"),
+                case: DeclarationId::new("rich.state.not_a_record"),
+                fields: Vec::new(),
+            });
+        let malformed_state = run_rich_turn_on(
+            &stages,
+            malformed_state,
+            b"not json",
+            Vec::new(),
+            10_000,
+            &AgentCancellation::new(),
+            backend,
+        )
+        .expect_err("a variant is never admitted as a State record");
+        assert_eq!(malformed_state.code, "SPX-G588");
+        assert!(malformed_state.message.contains("turn.state_identity"));
+    }
 }
 
 #[test]
@@ -247,7 +516,7 @@ fn granted_proposal_with_a_negative_weight_reaches_reduce_and_fails_with_the_exa
         &AgentCancellation::new(),
     )
     .unwrap();
-    assert!(matches!(outcome, RichTurnOutcome::Fail(9)));
+    assert!(matches!(outcome, RichTurnOutcome::Fail(255)));
 }
 
 #[test]

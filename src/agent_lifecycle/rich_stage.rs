@@ -48,10 +48,10 @@
 //! [`crate::agent_lifecycle_typed_carrier`] carrier (`binding::StageBinding`,
 //! `projection::to_retained`) — both read-only dependencies of this module,
 //! neither edited here. Dispatch is the real
-//! [`crate::interpreter::retained_call::evaluate_retained_call`], the same
-//! evaluator every other stage in this crate uses. This module supplies only
-//! the missing glue: resolving exact persistent stage-function identities
-//! for the new single-argument convention, validating their signatures and
+//! [`super::authorization::dispatch_on`], the same sealed target-selection
+//! seam every other stage in this crate uses. This module supplies only the
+//! missing glue: resolving exact persistent stage-function identities for the
+//! new single-argument convention, validating their signatures and
 //! decision/transition shapes from real HIR facts, and sequencing
 //! decode -> admit -> project -> evaluate for one turn.
 //!
@@ -330,6 +330,10 @@ fn two_case_shape(
 /// genuine resource types); `outcome` stays a real owned `Bytes` resource.
 pub struct RichProposalStages {
     program: ResolvedProgram,
+    /// Exact source bytes checked into `program`. Core Wasm driver synthesis
+    /// re-resolves these bytes and rejects any divergence; this is not a path
+    /// lookup and grants no filesystem authority.
+    source: String,
     schema: CompiledInteractionSchema,
     proposal_graph: InteractionTypeGraph,
     proposal_binding: StageBinding,
@@ -357,6 +361,34 @@ impl RichProposalStages {
     #[must_use]
     pub fn schema(&self) -> &CompiledInteractionSchema {
         &self.schema
+    }
+}
+
+/// Which sealed backend evaluates Rich Proposal deterministic stages.
+///
+/// This does not expose arbitrary compiler flags or source bytes: the bound
+/// module owns both. `NativeOptimized` is the fixed `-O2` evidence leg, not a
+/// production policy selector.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RichStageBackend {
+    Interpreter,
+    Native,
+    NativeOptimized,
+    Wasm,
+}
+
+impl RichProposalStages {
+    fn backend(&self, backend: RichStageBackend) -> super::authorization::StageBackend<'_> {
+        match backend {
+            RichStageBackend::Interpreter => super::authorization::StageBackend::Interpreter,
+            RichStageBackend::Native => super::authorization::StageBackend::Native,
+            RichStageBackend::NativeOptimized => {
+                super::authorization::StageBackend::NativeAtOptimization("-O2")
+            }
+            RichStageBackend::Wasm => super::authorization::StageBackend::Wasm {
+                source: &self.source,
+            },
+        }
     }
 }
 
@@ -489,6 +521,7 @@ pub fn bind_rich_proposal_stages(
 
     Ok(RichProposalStages {
         program,
+        source: module_source.to_owned(),
         schema,
         proposal_graph,
         proposal_binding,
@@ -502,7 +535,7 @@ pub fn bind_rich_proposal_stages(
 }
 
 /// The closed outcome of one rich-Proposal turn.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum RichTurnOutcome {
     /// `reduce` selected its `continue` case; carries the next State value,
     /// harvested from the real interpreter, not merely digest-equal to it.
@@ -540,12 +573,34 @@ pub fn run_rich_turn(
     max_steps: usize,
     cancellation: &AgentCancellation,
 ) -> Result<RichTurnOutcome, Diagnostic> {
+    run_rich_turn_on(
+        stages,
+        state,
+        proposal_bytes,
+        outcome_bytes,
+        max_steps,
+        cancellation,
+        RichStageBackend::Interpreter,
+    )
+}
+
+/// Runs one rich-Proposal turn through one sealed deterministic-stage
+/// backend. The decoder, proposal admission, and branch ordering stay in the
+/// caller-side semantic kernel; only the two checked source stage bodies are
+/// selected. This gives C11/Core Wasm no host-effect or grant-minting route.
+pub fn run_rich_turn_on(
+    stages: &RichProposalStages,
+    state: RetainedValue,
+    proposal_bytes: &[u8],
+    outcome_bytes: Vec<u8>,
+    max_steps: usize,
+    cancellation: &AgentCancellation,
+    backend: RichStageBackend,
+) -> Result<RichTurnOutcome, Diagnostic> {
     if cancellation.is_cancelled() {
         return Err(refused("turn.cancelled"));
     }
-    if !matches!(&state, RetainedValue::Record(record) if record.record == stages.state_type)
-        && !matches!(&state, RetainedValue::Variant(variant) if variant.variant == stages.state_type)
-    {
+    if !matches!(&state, RetainedValue::Record(record) if record.record == stages.state_type) {
         return Err(refused("turn.state_identity"));
     }
     let decoded = stages
@@ -560,7 +615,8 @@ pub fn run_rich_turn(
         .map_err(|_| refused("turn.proposal_projection"))?;
 
     let authorize_args = [state.clone(), proposal_value.clone()];
-    let evaluation = super::authorization::dispatch(
+    let evaluation = super::authorization::dispatch_on(
+        stages.backend(backend),
         &stages.program,
         &stages.authorize,
         &authorize_args,
@@ -594,9 +650,14 @@ pub fn run_rich_turn(
     // module's "Known limitation").
 
     let reduce_args = [state, proposal_value, RetainedValue::Bytes(outcome_bytes)];
-    let evaluation =
-        super::authorization::dispatch(&stages.program, &stages.reduce, &reduce_args, max_steps)
-            .map_err(|_| refused("reduce.evaluate"))?;
+    let evaluation = super::authorization::dispatch_on(
+        stages.backend(backend),
+        &stages.program,
+        &stages.reduce,
+        &reduce_args,
+        max_steps,
+    )
+    .map_err(|_| refused("reduce.evaluate"))?;
     let RetainedCallOutcome::Returned(RetainedValue::Variant(transition)) = evaluation.outcome
     else {
         return Err(refused("reduce.did_not_return"));

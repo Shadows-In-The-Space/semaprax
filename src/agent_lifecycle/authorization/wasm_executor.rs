@@ -73,7 +73,7 @@
 //!
 //! This executor's closed result vocabulary is the same one
 //! `native_executor.rs` uses: a record or variant whose leaves are all
-//! `Bytes`, `i64`, or `bool`, or a record whose leaves may additionally be
+//! `Bytes`, `i64`, `bool`, or `u8`, or a record whose leaves may additionally be
 //! `usize`. A bare scalar result still takes the direct path (no driver
 //! needed); anything else -- a nested record leaf, a `Str`/`Float` leaf, a
 //! generic instantiation, a variant `usize` leaf, or a variant case with no
@@ -271,6 +271,7 @@ enum Leaf {
     I64,
     Bool,
     Usize,
+    U8,
     Bytes,
 }
 
@@ -280,6 +281,7 @@ impl Leaf {
             ResolvedType::I64 => Some(Self::I64),
             ResolvedType::Bool => Some(Self::Bool),
             ResolvedType::Usize => Some(Self::Usize),
+            ResolvedType::U8 => Some(Self::U8),
             ResolvedType::Bytes => Some(Self::Bytes),
             _ => None,
         }
@@ -303,6 +305,7 @@ enum Projection {
     I64,
     Bool,
     Usize,
+    U8,
     OwnedBytes,
     IndexedBytes,
 }
@@ -313,6 +316,10 @@ impl Projection {
             Self::I64 => format!("fn {name}() -> i64"),
             Self::Bool => format!("fn {name}() -> bool"),
             Self::Usize => format!("fn {name}() -> usize"),
+            // The public owned-data boundary has no `u8` result kind. A
+            // source-level helper widens the already-checked byte to its
+            // exact 0..=255 `i64` representation before it crosses.
+            Self::U8 => format!("fn {name}() -> i64"),
             Self::OwnedBytes => format!("fn {name}() -> Bytes"),
             Self::IndexedBytes => format!("fn {name}(spx_index: i64) -> i64"),
         }
@@ -511,9 +518,16 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
                         Leaf::I64 => Projection::I64,
                         Leaf::Bool => Projection::Bool,
                         Leaf::Usize => Projection::Usize,
+                        Leaf::U8 => Projection::U8,
                         Leaf::Bytes => Projection::OwnedBytes,
                     },
-                    tail: format!("    spx_call.{}\n", field.name),
+                    tail: match field.leaf {
+                        Leaf::U8 => format!(
+                            "    spx_wasm_stage_helper_byte_to_i64(spx_call.{})\n",
+                            field.name
+                        ),
+                        _ => format!("    spx_call.{}\n", field.name),
+                    },
                 });
             }
         }
@@ -537,6 +551,9 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
                             (true, Leaf::I64 | Leaf::Bool | Leaf::Usize) => {
                                 format!("spx_f{position}")
                             }
+                            (true, Leaf::U8) => {
+                                format!("spx_wasm_stage_helper_byte_to_i64(spx_f{position})")
+                            }
                             (true, Leaf::Bytes) => {
                                 format!("spx_wasm_stage_helper_byte_at(spx_f{position}, spx_index)")
                             }
@@ -549,6 +566,7 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
                             (false, Leaf::I64) => "0".to_owned(),
                             (false, Leaf::Bool) => "false".to_owned(),
                             (false, Leaf::Usize) => "0usize".to_owned(),
+                            (false, Leaf::U8) => "0".to_owned(),
                             (false, Leaf::Bytes) => "-1".to_owned(),
                         }
                     });
@@ -559,6 +577,7 @@ fn drivers_for(plan: &ResultPlan) -> Vec<Driver> {
                             Leaf::I64 => Projection::I64,
                             Leaf::Bool => Projection::Bool,
                             Leaf::Usize => Projection::Usize,
+                            Leaf::U8 => Projection::U8,
                             Leaf::Bytes => Projection::IndexedBytes,
                         },
                         tail: format!("    match own spx_call {{\n{arms}    }}\n"),
@@ -715,7 +734,7 @@ fn run_through_injected_driver(
     let mut injected = String::from("\n");
     if drivers
         .iter()
-        .any(|driver| driver.projection == Projection::IndexedBytes)
+        .any(|driver| matches!(driver.projection, Projection::IndexedBytes | Projection::U8))
     {
         injected.push_str(BYTE_HELPERS);
     }
@@ -763,7 +782,7 @@ fn run_through_injected_driver(
     let calls = drivers
         .iter()
         .map(|driver| match driver.projection {
-            Projection::I64 | Projection::Usize => {
+            Projection::I64 | Projection::Usize | Projection::U8 => {
                 format!("String(api.functions['{}']())", driver.id)
             }
             Projection::Bool => format!("(api.functions['{}']() ? 'true' : 'false')", driver.id),
@@ -808,6 +827,11 @@ fn run_through_injected_driver(
                 line.trim()
                     .parse()
                     .map_err(|_| invariant("wasm_executor.decode.usize"))?,
+            ),
+            Projection::U8 => RetainedValue::U8(
+                line.trim()
+                    .parse()
+                    .map_err(|_| invariant("wasm_executor.decode.u8"))?,
             ),
             Projection::OwnedBytes | Projection::IndexedBytes => {
                 RetainedValue::Bytes(decode_hex(line.trim())?)

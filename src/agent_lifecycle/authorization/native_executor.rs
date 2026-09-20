@@ -16,9 +16,9 @@
 //! The only values this executor can marshal across the C boundary are the
 //! closed vocabulary [`super::super::stages`] already restricts Agent stage
 //! signatures to: `i64`/`bool`/`u8`/`usize` scalars, one level of
-//! `own`/`borrow` record arguments built only from `Bytes`/`i64` leaves
+//! `own`/`borrow` record arguments built only from `Bytes`/`i64`/`bool` leaves
 //! (`Task`/`State`/`Observation`/`Outcome`), and record or two-/four-case
-//! variant results whose leaves are `Bytes`, `i64`, or `bool`, plus record
+//! variant results whose leaves are `Bytes`, `i64`, `bool`, or `u8`, plus record
 //! results that may additionally carry `usize` (`Decision`/`Report`/`Step`).
 //! Record
 //! and variant field/case C member names are recomputed here from each
@@ -220,6 +220,9 @@ impl Emitter {
             let expr = match (&field.ty, &value.value) {
                 (ResolvedType::Bytes, RetainedValue::Bytes(bytes)) => self.bytes_expr(bytes),
                 (ResolvedType::I64, RetainedValue::I64(scalar)) => c_i64(*scalar),
+                (ResolvedType::Bool, RetainedValue::Bool(flag)) => {
+                    (if *flag { "true" } else { "false" }).to_owned()
+                }
                 _ => return Err(invariant("native_executor.record.field_shape")),
             };
             inits.push(format!("        .{} = {expr},", field_symbol(&field.field)));
@@ -267,6 +270,14 @@ fn prepare_argument(
         }),
         (ResolvedType::Usize, RetainedValue::Usize(count)) => Ok(PreparedArgument {
             primary: format!("UINT64_C({count})"),
+            extra_borrow_pointers: Vec::new(),
+        }),
+        // An `own Bytes` parameter crosses the generated C ABI by value.
+        // `bytes_expr` creates the one C owner which the callee's checked
+        // cleanup plan consumes; it is deliberately not a borrowed slice or
+        // a pointer to a caller-owned temporary.
+        (ResolvedType::Bytes, RetainedValue::Bytes(bytes)) => Ok(PreparedArgument {
+            primary: emitter.bytes_expr(bytes),
             extra_borrow_pointers: Vec::new(),
         }),
         (ResolvedType::Nominal { .. }, RetainedValue::Record(record)) => {
@@ -337,6 +348,12 @@ fn emit_record_print(
                     member = field_symbol(&field.field)
                 ));
             }
+            ResolvedType::U8 => {
+                body.push_str(&format!(
+                    "    printf(\" {hex}=Q:%u\", (unsigned)({expr}).{member});\n",
+                    member = field_symbol(&field.field)
+                ));
+            }
             _ => return Err(invariant("native_executor.result.leaf")),
         }
     }
@@ -377,6 +394,11 @@ fn emit_variant_print(
                 ResolvedType::Bool => {
                     body.push_str(&format!(
                         "        printf(\" {hex}=T:%u\", (unsigned)({member} ? 1 : 0));\n"
+                    ));
+                }
+                ResolvedType::U8 => {
+                    body.push_str(&format!(
+                        "        printf(\" {hex}=Q:%u\", (unsigned)({member}));\n"
                     ));
                 }
                 _ => return Err(invariant("native_executor.result.leaf")),
@@ -600,6 +622,11 @@ fn decode_field(token: &str) -> Result<RetainedField, Diagnostic> {
             count
                 .parse()
                 .map_err(|_| invariant("native_executor.decode.usize"))?,
+        )
+    } else if let Some(byte) = value.strip_prefix("Q:") {
+        RetainedValue::U8(
+            byte.parse()
+                .map_err(|_| invariant("native_executor.decode.u8"))?,
         )
     } else {
         return Err(invariant("native_executor.decode.field_value"));

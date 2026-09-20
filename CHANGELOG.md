@@ -58,14 +58,24 @@ format: `Unreleased` then release buckets, grouped by impact.
 - Add a binding-first Lean-kernel certificate recheck that re-derives the
   source, exact obligation selector, Lean document, and Wasm artifact before
   consulting caller-supplied kernel authority, then requires exact recorded
-  axiom results. No process, filesystem, network, or tool-discovery authority
-  is added to the compiler (#186).
+  axiom results. Kernel-confirmed evidence can now be associated with one exact
+  retained Project `ProgramRoot` and appended to its assurance manifest through
+  an opaque verified token; sibling projects, altered source, subset
+  certificates, and replayed revisions fail before attachment. No process,
+  filesystem, network, or tool-discovery authority is added to the compiler
+  (#186).
 
 - Preserve every failing real-distribution role in the provisioned Linux
   doctor diagnostics instead of stopping at Node's first failure. Hosted run
   35472257722 remains red (12/13 in both suites): Clang passed, Node received
   `SIGSEGV`, and Rust's exact termination awaits the next instrumented run;
   confinement policy and WP-05 status are unchanged (#61).
+
+- Track AArch64 Linux doctor confinement separately with a dispatch-only native
+  Arm runner and an exact 24-case plan. The committed evidence is limited to a
+  historical local Docker Desktop Arm VM run (24/26); the two real-distribution
+  fixtures remain excluded for missing selector/bundle preconditions, and no
+  hosted, current-head, or physical-device support claim is made (#279).
 
 - Compose `std.tracing` trace-context field admission with the existing
   `std.log.redact` six-flag caller classification, preserving
@@ -104,8 +114,11 @@ format: `Unreleased` then release buckets, grouped by impact.
   workflow-v1 predicate structure, exact archive inventory, and aggregate
   manifest/provenance/claim bindings before invoking an explicit verifier
   capability. It does not perform certificate, Rekor-proof, predicate-semantic,
-  or signature verification itself, and no signed hosted release is claimed
-  yet (#168).
+  or signature verification itself. The CLI now exposes that verifier only as
+  an explicit host-injected capability, uses bounded held no-follow reads for
+  admitted release material, and makes the standalone binary refuse signed
+  input rather than imply built-in cryptographic verification. No signed hosted
+  release is claimed yet (#168).
 
 - Stop Universal Semantic Transaction v1 from refusing every project with a
   commented bundled dependency (#274). `ProjectCandidate::apply`'s

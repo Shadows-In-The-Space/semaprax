@@ -17,6 +17,10 @@ already-archived transport bytes actually contain: those trials never recorded a
 blinded review or an intervention ledger, so they remain ineligible.
 """
 import base64
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - the local pilot is POSIX-confined.
+    fcntl = None
 import hashlib
 import json
 import os
@@ -407,6 +411,68 @@ def stale_recovery_events(gateway_log_bytes, drift_declared):
 # --- 4. intervention ledger ---------------------------------------------------
 
 
+def _parse_intervention_ledger(body):
+    """Return the complete canonical event sequence, or one stable refusal.
+
+    Both readers and appenders use this parser.  In particular, an appender
+    validates the bytes while it holds the ledger lock, rather than deriving a
+    sequence from an unlocked prior read that another operator can overtake.
+    """
+    events = []
+    expected_sequence = 0
+    last_timestamp = -1
+    for line in body.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            return None, "intervention ledger is not JSONL"
+        if not isinstance(entry, dict) or set(entry) != INTERVENTION_KEYS:
+            return None, "intervention ledger entry has an unexpected shape"
+        if entry.get("schema") != INTERVENTION_SCHEMA:
+            return None, "intervention ledger entry schema differs"
+        expected_sequence += 1
+        if entry.get("sequence") != expected_sequence:
+            return None, "intervention ledger sequence is not append-only"
+        if entry.get("kind") not in INTERVENTION_KINDS:
+            return None, "intervention ledger kind is not a closed enum member"
+        target = entry.get("target")
+        if not isinstance(target, str) or not target:
+            return None, "intervention ledger target is missing"
+        timestamp = entry.get("timestamp_ns")
+        if isinstance(timestamp, bool) or not isinstance(timestamp, int) or timestamp < last_timestamp:
+            return None, "intervention ledger timestamps are not monotonic"
+        last_timestamp = timestamp
+        note = entry.get("note")
+        if note is not None and not isinstance(note, str):
+            return None, "intervention ledger note must be text or null"
+        events.append(entry)
+    return events, None
+
+
+def _locked_ledger_bytes(fd, path):
+    """Read one bounded, path-bound ledger snapshot while its fd is locked."""
+    before = os.fstat(fd)
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > MAX_INTERVENTION_LEDGER_BYTES:
+        raise ValueError("intervention ledger is not a bounded regular file")
+    current = os.stat(path, follow_symlinks=False)
+    if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+        raise ValueError("intervention ledger changed during append")
+    os.lseek(fd, 0, os.SEEK_SET)
+    chunks = []
+    remaining = before.st_size
+    while remaining:
+        block = os.read(fd, min(131072, remaining))
+        if not block:
+            raise ValueError("intervention ledger changed during append")
+        chunks.append(block)
+        remaining -= len(block)
+    body = b"".join(chunks)
+    after = os.fstat(fd)
+    if (before.st_dev, before.st_ino, before.st_size) != (after.st_dev, after.st_ino, after.st_size):
+        raise ValueError("intervention ledger changed during append")
+    return body, before
+
+
 def append_intervention(evidence_dir, kind, target, note=None, timestamp_ns=None):
     """Append one entry to a trial's append-only operator intervention ledger.
 
@@ -421,36 +487,35 @@ def append_intervention(evidence_dir, kind, target, note=None, timestamp_ns=None
         raise ValueError("intervention target is required")
     if note is not None and not isinstance(note, str):
         raise ValueError("intervention note must be text or absent")
+    if fcntl is None:
+        raise ValueError("safe intervention ledger locking is unavailable")
     evidence_dir = Path(evidence_dir)
     path = evidence_dir / "interventions.jsonl"
-    existing = intervention_ledger(evidence_dir) if path.exists() else {"status": "observed", "events": []}
-    if existing["status"] != "observed":
-        raise ValueError(f"cannot append to a malformed intervention ledger: {existing['reason']}")
-    prior_events = existing["events"]
-    last_timestamp = prior_events[-1]["timestamp_ns"] if prior_events else -1
-    when = timestamp_ns if timestamp_ns is not None else time.time_ns()
-    if isinstance(when, bool) or not isinstance(when, int) or when < 0:
-        raise ValueError("intervention timestamp must be a nonnegative integer")
-    if when < last_timestamp:
-        raise ValueError("intervention timestamp precedes the ledger's last recorded entry")
-    entry = {
-        "schema": INTERVENTION_SCHEMA,
-        "sequence": len(prior_events) + 1,
-        "kind": kind,
-        "target": target,
-        "timestamp_ns": when,
-        "note": note,
-    }
-    body = (json.dumps(entry, sort_keys=True) + "\n").encode("utf-8")
     fd = None
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0))
-        held = os.fstat(fd)
-        if not stat.S_ISREG(held.st_mode) or held.st_nlink != 1:
-            raise ValueError("intervention ledger is not a bounded regular file")
-        current = os.stat(path, follow_symlinks=False)
-        if (current.st_dev, current.st_ino) != (held.st_dev, held.st_ino):
-            raise ValueError("intervention ledger changed during append")
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise ValueError("safe intervention ledger writes are unavailable")
+        fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        prior_bytes, held = _locked_ledger_bytes(fd, path)
+        prior_events, reason = _parse_intervention_ledger(prior_bytes)
+        if reason is not None:
+            raise ValueError(f"cannot append to a malformed intervention ledger: {reason}")
+        last_timestamp = prior_events[-1]["timestamp_ns"] if prior_events else -1
+        when = timestamp_ns if timestamp_ns is not None else time.time_ns()
+        if isinstance(when, bool) or not isinstance(when, int) or when < 0:
+            raise ValueError("intervention timestamp must be a nonnegative integer")
+        if when < last_timestamp:
+            raise ValueError("intervention timestamp precedes the ledger's last recorded entry")
+        entry = {
+            "schema": INTERVENTION_SCHEMA,
+            "sequence": len(prior_events) + 1,
+            "kind": kind,
+            "target": target,
+            "timestamp_ns": when,
+            "note": note,
+        }
+        body = (json.dumps(entry, sort_keys=True) + "\n").encode("utf-8")
         written = 0
         while written < len(body):
             count = os.write(fd, body[written:])
@@ -459,10 +524,14 @@ def append_intervention(evidence_dir, kind, target, note=None, timestamp_ns=None
             written += count
         if os.fstat(fd).st_size != held.st_size + len(body):
             raise ValueError("intervention ledger append was incomplete")
+    except FileNotFoundError as error:
+        raise ValueError("intervention ledger must be initialized before append") from error
     except OSError as error:
         raise ValueError("intervention ledger is not safely appendable") from error
     finally:
         if fd is not None:
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
     return entry
 
@@ -485,34 +554,9 @@ def intervention_ledger(evidence_dir):
         body = _read_regular(path, MAX_INTERVENTION_LEDGER_BYTES)
     except (OSError, ValueError):
         return {"status": "unavailable", "reason": "intervention ledger is not readable"}
-    events = []
-    expected_sequence = 0
-    last_timestamp = -1
-    for line in body.splitlines():
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            return {"status": "unavailable", "reason": "intervention ledger is not JSONL"}
-        if not isinstance(entry, dict) or set(entry) != INTERVENTION_KEYS:
-            return {"status": "unavailable", "reason": "intervention ledger entry has an unexpected shape"}
-        if entry.get("schema") != INTERVENTION_SCHEMA:
-            return {"status": "unavailable", "reason": "intervention ledger entry schema differs"}
-        expected_sequence += 1
-        if entry.get("sequence") != expected_sequence:
-            return {"status": "unavailable", "reason": "intervention ledger sequence is not append-only"}
-        if entry.get("kind") not in INTERVENTION_KINDS:
-            return {"status": "unavailable", "reason": "intervention ledger kind is not a closed enum member"}
-        target = entry.get("target")
-        if not isinstance(target, str) or not target:
-            return {"status": "unavailable", "reason": "intervention ledger target is missing"}
-        timestamp = entry.get("timestamp_ns")
-        if isinstance(timestamp, bool) or not isinstance(timestamp, int) or timestamp < last_timestamp:
-            return {"status": "unavailable", "reason": "intervention ledger timestamps are not monotonic"}
-        last_timestamp = timestamp
-        note = entry.get("note")
-        if note is not None and not isinstance(note, str):
-            return {"status": "unavailable", "reason": "intervention ledger note must be text or null"}
-        events.append(entry)
+    events, reason = _parse_intervention_ledger(body)
+    if reason is not None:
+        return {"status": "unavailable", "reason": reason}
     return {
         "status": "observed",
         "human_interventions": len(events),
@@ -530,7 +574,19 @@ def initialize_intervention_ledger(evidence_dir):
     fact.
     """
     path = Path(evidence_dir) / "interventions.jsonl"
-    path.touch(exist_ok=False)
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("safe intervention ledger initialization is unavailable")
+    fd = None
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        held = os.fstat(fd)
+        if not stat.S_ISREG(held.st_mode) or held.st_nlink != 1 or held.st_size != 0:
+            raise ValueError("new intervention ledger is not an empty regular file")
+    except OSError as error:
+        raise ValueError("intervention ledger could not be initialized exclusively") from error
+    finally:
+        if fd is not None:
+            os.close(fd)
     return path
 
 

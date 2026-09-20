@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -710,6 +711,46 @@ class InterventionLedgerTests(unittest.TestCase):
             (Path(temp) / "interventions.jsonl").write_text("{not json\n")
             result = elig.intervention_ledger(temp)
             self.assertEqual(result["status"], "unavailable")
+
+    @unittest.skipUnless(elig.fcntl is not None, "POSIX advisory locks are required by the pilot")
+    def test_append_waits_for_the_ledger_lock_then_keeps_sequences_unique(self):
+        """A concurrent operator cannot derive a duplicate sequence from stale bytes."""
+        with tempfile.TemporaryDirectory() as temp:
+            path = elig.initialize_intervention_ledger(temp)
+            fd = os.open(path, os.O_RDWR)
+            elig.fcntl.flock(fd, elig.fcntl.LOCK_EX)
+            finished = threading.Event()
+            failure = []
+
+            def append():
+                try:
+                    elig.append_intervention(temp, "manual_process_kill", "pid-1", timestamp_ns=1)
+                except Exception as error:  # pragma: no cover - asserted below
+                    failure.append(error)
+                finally:
+                    finished.set()
+
+            worker = threading.Thread(target=append)
+            worker.start()
+            self.assertFalse(finished.wait(0.2), "append ignored the held ledger lock")
+            elig.fcntl.flock(fd, elig.fcntl.LOCK_UN)
+            os.close(fd)
+            worker.join(timeout=2)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(failure, [])
+            second = elig.append_intervention(temp, "timeout_extension", "trial-timeout", timestamp_ns=2)
+            self.assertEqual(second["sequence"], 2)
+            self.assertEqual(
+                [event["sequence"] for event in elig.intervention_ledger(temp)["events"]], [1, 2]
+            )
+
+    def test_initialize_ledger_refuses_a_preexisting_symlink(self):
+        with tempfile.TemporaryDirectory() as temp:
+            outside = Path(temp) / "outside"
+            outside.write_text("untrusted\n")
+            (Path(temp) / "interventions.jsonl").symlink_to(outside)
+            with self.assertRaises(ValueError):
+                elig.initialize_intervention_ledger(temp)
 
 
 class ComputeEligibilityTests(unittest.TestCase):

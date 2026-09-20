@@ -48,7 +48,11 @@ format: `Unreleased` then release buckets, grouped by impact.
   well-formed conditional write to the drifted source can count as recovery,
   and only the gateway's exact stale-precondition refusal can count as a
   rejected stale write. Reads, unrelated paths, malformed commands, and other
-  failures now fail closed instead of producing optimistic evidence (#105).
+  failures now fail closed instead of producing optimistic evidence. Fresh
+  cohorts now have a digest-bound reviewer packet and exact 18-tuple audit:
+  direct treatment labels are withheld, task content remains visible, and
+  hostile or drifted evidence fails closed without backfilling the historical
+  cohort (#105).
 
 - Preserve `i64::MIN` when source-native Agent stage arguments are synthesized
   for Core Wasm and native C11 execution. A four-leg regression now exercises

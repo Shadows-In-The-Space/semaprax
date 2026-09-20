@@ -25,6 +25,10 @@ from opencode_agent_task_pilot.eligibility import (
     record_blinded_review,
 )
 from opencode_agent_task_pilot.evidence import gateway_diagnostics, mcp_tool_metrics, provider_usage
+from opencode_agent_task_pilot.review_workflow import audit_cohort, prepare_review_packet
+from opencode_agent_task_pilot.review_workflow import (
+    _read_regular, FROZEN_MANIFEST_SHA256, FROZEN_TASK_SHA256, FROZEN_FIXTURE_SHA256,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = "opencode/muse-spark-1.3-contributor-free"
@@ -52,6 +56,57 @@ runner = load_runner()
 
 def sha(b):
     return hashlib.sha256(b).hexdigest()
+
+
+def exclusive_write(path, body, limit=8 * CAP):
+    if len(body) > limit:
+        raise PilotFailure("evidence output exceeds bound")
+    fd = None
+    created = False
+    try:
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise PilotFailure("safe no-follow evidence writes are unavailable")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        created = True
+        written = 0
+        while written < len(body):
+            count = os.write(fd, body[written:])
+            if count <= 0:
+                raise PilotFailure("evidence output made no progress")
+            written += count
+    except (OSError, PilotFailure) as error:
+        if created:
+            try:
+                held = os.fstat(fd)
+                current = os.stat(path, follow_symlinks=False)
+                if (held.st_dev, held.st_ino) == (current.st_dev, current.st_ino):
+                    os.unlink(path)
+            except OSError:
+                pass
+        raise PilotFailure("evidence output could not be created exclusively") from error
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def frozen_input_binding(binding):
+    manifest = ROOT / "benchmarks/agent-task-comparison-v1/manifest.json"
+    manifest_bytes = _read_regular(manifest, 256 * 1024)
+    if sha(manifest_bytes) != FROZEN_MANIFEST_SHA256:
+        raise PilotFailure("frozen pilot manifest changed")
+    task_path = (ROOT / binding["path"]).resolve()
+    task_bytes = _read_regular(task_path, 256 * 1024)
+    fixture = runner.fixture_root_for(binding)
+    inventory = collect_source_bytes(fixture)
+    inventory_json = json.dumps(
+        {name: sha(body) for name, body in sorted(inventory.items())},
+        sort_keys=True, separators=(",", ":"),
+    ).encode()
+    if sha(task_bytes) != FROZEN_TASK_SHA256.get(binding["id"]):
+        raise PilotFailure("frozen pilot task changed")
+    if sha(inventory_json) != FROZEN_FIXTURE_SHA256.get(binding["id"]):
+        raise PilotFailure("frozen pilot fixture changed")
+    return sha(manifest_bytes), sha(task_bytes), sha(inventory_json), inventory, task_bytes
 
 
 def snapshot(root):
@@ -629,13 +684,17 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             "evidence destination must be a new child of an existing directory"
         )
     evidence = evidence.parent.resolve(strict=True) / evidence.name
+    manifest_path = ROOT / "benchmarks/agent-task-comparison-v1/manifest.json"
+    if sha(_read_regular(manifest_path, 256 * 1024)) != FROZEN_MANIFEST_SHA256:
+        raise PilotFailure("frozen pilot manifest changed")
     _, _, tasks = runner.atc.load_manifest(
         "benchmarks/agent-task-comparison-v1/manifest.json"
     )
     binding = next((x for x in tasks if x["id"] == task), None)
     if binding is None:
         raise PilotFailure(f"unknown task: {task}")
-    prompt = json.loads((ROOT / binding["path"]).read_text(encoding="utf-8"))["prompt"]
+    manifest_digest, task_digest, fixture_digest, frozen_inventory, task_bytes = frozen_input_binding(binding)
+    prompt = json.loads(task_bytes.decode("utf-8"))["prompt"]
     original = original_repository_root()
     evidence.mkdir()
     initialize_intervention_ledger(evidence)
@@ -670,6 +729,10 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
         sandbox, candidate = runner.create_sandbox(binding)
         before = snapshot(candidate)
         baseline_sources = collect_source_bytes(candidate)
+        if {name: sha(body) for name, body in sorted(baseline_sources.items())} != {
+            name: sha(body) for name, body in sorted(frozen_inventory.items())
+        }:
+            raise PilotFailure("copied fixture inventory differs before dispatch")
         original_before = snapshot(runner.fixture_root_for(binding))
         with tempfile.TemporaryDirectory(prefix="spx-opencode-pilot-") as temp:
             host = Path(temp).resolve()
@@ -796,7 +859,7 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             ("gateway.jsonl", gateway_log), ("mcp-wire.jsonl", mcp_wire),
             ("seatbelt.sb", profile_bytes),
         ):
-            (evidence / name).write_bytes(body)
+            exclusive_write(evidence / name, body)
         if gateway_diagnostic["status"] == "unavailable" and gateway_log:
             try:
                 gateway_diagnostic = gateway_diagnostics(gateway_log)
@@ -808,7 +871,7 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             except ValueError as error:
                 mcp_metrics = {"status": "unavailable", "reason": str(error)}
         if review_package is not None:
-            (evidence / "review-package.json").write_text(json.dumps(review_package, sort_keys=True) + "\n")
+            exclusive_write(evidence / "review-package.json", (json.dumps(review_package, sort_keys=True) + "\n").encode())
         eligibility = compute_eligibility(
             prompt=prompt,
             mcp_metrics=mcp_metrics,
@@ -822,6 +885,8 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             "reason": None if eligibility["eligible"] else "; ".join(eligibility["reasons"]),
             "eligibility": eligibility,
             "task": task, "lane": lane, "trial": trial, "model": MODEL,
+            "manifest_sha256": manifest_digest, "task_sha256": task_digest,
+            "fixture_inventory_sha256": fixture_digest,
             "semaprax_sha256": compiler_digest, "session_id": session,
             "wall_ns": elapsed, "before": before, "after": after,
             "stdout_sha256": sha(out), "stderr_sha256": sha(err),
@@ -841,7 +906,7 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             "outcome": "failed" if failure else "completed",
             "failure": failure,
         }
-        (evidence / "record.json").write_text(json.dumps(record, sort_keys=True) + "\n")
+        exclusive_write(evidence / "record.json", (json.dumps(record, sort_keys=True) + "\n").encode())
         if sandbox is not None:
             shutil.rmtree(sandbox, ignore_errors=True)
         result = record
@@ -887,8 +952,19 @@ def main():
         "--blinded",
         action="store_true",
         required=True,
-        help="required attestation that the reviewer did not know which lane/model produced the diff",
+        help="required operator attestation that direct lane/model/runner labels were withheld",
     )
+    review.add_argument("--packet", help="blinded packet to bind this submission to the exact candidate")
+    review.add_argument("--candidate-digest", help="digest printed in the blinded packet")
+    review.add_argument("--verdict", choices=("accept", "reject"), help="reviewer's acceptance verdict")
+
+    packet = sub.add_parser("prepare-review", help="prepare a blinded packet from archived candidate evidence")
+    packet.add_argument("--evidence-dir", required=True)
+    packet.add_argument("--output", required=True)
+
+    audit = sub.add_parser("audit-cohort", help="audit exact tuple accounting without running a model")
+    audit.add_argument("--evidence-root", required=True)
+    audit.add_argument("--manifest", default=str(ROOT / "benchmarks/agent-task-comparison-v1/manifest.json"))
 
     n = a.parse_args()
     if n.command == "run":
@@ -897,11 +973,18 @@ def main():
         )
     elif n.command == "intervene":
         output = append_intervention(Path(n.evidence_dir), n.kind, n.target, n.note)
-    else:
+    elif n.command == "record-review":
         output = record_blinded_review(
             Path(n.evidence_dir), n.reviewer_id, n.started_monotonic_ns,
-            n.stopped_monotonic_ns, n.active_ms, n.blinded,
+            n.stopped_monotonic_ns, n.active_ms, n.blinded, n.packet, n.candidate_digest,
+            n.verdict,
         )
+    elif n.command == "prepare-review":
+        output = prepare_review_packet(Path(n.evidence_dir), Path(n.output))
+    else:
+        output = audit_cohort(Path(n.evidence_root), Path(n.manifest))
+        if not output["complete"]:
+            raise SystemExit(1)
     print(json.dumps(output, indent=2))
 
 

@@ -136,3 +136,24 @@ help without dispatching the compiler. Export counter extraction now includes
 cache and reasoning components. These corrections apply to a future separately
 frozen run; no original trial, counter record or candidate was rewritten, and
 no rerun is claimed here.
+
+## No-spend follow-up instrumentation
+
+The pilot now has a deterministic `prepare-review` command. It creates a
+canonical review packet from the archived candidate diff and evidence
+fingerprints, withholding direct lane, model, and runner labels. Task content
+and paths remain visible by design; blinding is an operator attestation. The packet's
+candidate digest covers every included byte; `record-review --packet ...
+--candidate-digest ...` rejects stale packets, wrong digests, malformed packets,
+and duplicate review files while recording the existing schema. Legacy review
+records remain readable for historical inspection but are lower-assurance and
+cannot satisfy fresh eligibility.
+This is an operator handoff mechanism, not evidence that a reviewer has acted.
+
+`audit-cohort` performs no model or network work. It accepts only the frozen
+canonical manifest and checks its exact 18-tuple available-lane × task ×
+repetition matrix, rejecting missing, duplicate, and extra records, requiring
+explicit reasons for ineligible records, and reporting retained failed/aborted
+outcomes. It does not backfill the 2026-09-13 cohort or make any
+historical observation eligible. A fresh authorized cohort and human blinded
+review remain required for closure.

@@ -15,6 +15,35 @@ MAX_FILES = 64
 MAX_BYTES = 8 * 1024 * 1024
 
 
+def _exclusive_bytes(path, body):
+    fd = None
+    created = False
+    try:
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise ValueError("safe no-follow archive writes are unavailable")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        created = True
+        written = 0
+        while written < len(body):
+            count = os.write(fd, body[written:])
+            if count <= 0:
+                raise ValueError("archive write made no progress")
+            written += count
+    except (OSError, ValueError):
+        if created:
+            try:
+                held = os.fstat(fd)
+                current = os.stat(path, follow_symlinks=False)
+                if (held.st_dev, held.st_ino) == (current.st_dev, current.st_ino):
+                    os.unlink(path)
+            except OSError:
+                pass
+        raise
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def collect_source_bytes(candidate):
     root = Path(candidate)
     result = {}
@@ -27,6 +56,8 @@ def collect_source_bytes(candidate):
         relative = path.relative_to(root).as_posix()
         if len(relative.encode()) > 512 or len(result) >= MAX_FILES:
             raise ValueError("candidate source inventory exceeds bound")
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise ValueError("safe no-follow source reads are unavailable")
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
@@ -35,6 +66,14 @@ def collect_source_bytes(candidate):
             if info.st_size > MAX_BYTES - total:
                 raise ValueError("candidate source bytes exceed bound")
             body = stream.read(MAX_BYTES - total + 1)
+            stream.seek(0)
+            confirmation = stream.read(MAX_BYTES - total + 1)
+            final = os.fstat(stream.fileno())
+            if body != confirmation or (info.st_dev, info.st_ino, info.st_size) != (final.st_dev, final.st_ino, final.st_size):
+                raise ValueError("candidate source changed during held read")
+            rebound = os.stat(path, follow_symlinks=False)
+            if (rebound.st_dev, rebound.st_ino) != (info.st_dev, info.st_ino):
+                raise ValueError("candidate source path changed during held read")
         total += len(body)
         if total > MAX_BYTES:
             raise ValueError("candidate source bytes exceed bound")
@@ -58,8 +97,7 @@ def archive_candidate(candidate, evidence_dir, baseline):
                "before": encoded(baseline), "after": encoded(after)}
     body = (json.dumps(archive, sort_keys=True, separators=(",", ":")) + "\n").encode()
     directory = Path(evidence_dir)
-    with (directory / "candidate-source.json").open("xb") as stream:
-        stream.write(body)
+    _exclusive_bytes(directory / "candidate-source.json", body)
     diff = []
     for name in sorted(set(baseline) | set(after)):
         old = baseline.get(name, b"").decode("utf-8", errors="replace")
@@ -67,8 +105,7 @@ def archive_candidate(candidate, evidence_dir, baseline):
         diff.extend(difflib.unified_diff(old.splitlines(keepends=True),
                                          new.splitlines(keepends=True),
                                          fromfile="before/" + name, tofile="after/" + name))
-    with (directory / "candidate.diff").open("x", encoding="utf-8") as stream:
-        stream.write("".join(diff))
+    _exclusive_bytes(directory / "candidate.diff", "".join(diff).encode("utf-8"))
     return {"path": "candidate-source.json", "bytes": len(body),
             "sha256": hashlib.sha256(body).hexdigest(),
             "diff": "candidate.diff", "review": "not_observed"}

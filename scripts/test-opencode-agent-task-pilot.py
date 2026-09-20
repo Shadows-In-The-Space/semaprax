@@ -15,6 +15,11 @@ from unittest import mock
 from opencode_agent_task_pilot import eligibility as elig
 from opencode_agent_task_pilot.evidence import stream_provider_usage
 from opencode_agent_task_pilot.replay import decode_sources
+from opencode_agent_task_pilot.review_workflow import (
+    audit_cohort, prepare_review_packet, FROZEN_MANIFEST_SHA256,
+    FROZEN_TASK_SHA256, FROZEN_FIXTURE_SHA256,
+)
+from opencode_agent_task_pilot import review_workflow as workflow
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location(
@@ -25,6 +30,19 @@ spec.loader.exec_module(pilot)
 
 
 class PilotTests(unittest.TestCase):
+    def test_frozen_pilot_input_constants_match_repository(self):
+        manifest = ROOT / "benchmarks/agent-task-comparison-v1/manifest.json"
+        self.assertEqual(hashlib.sha256(manifest.read_bytes()).hexdigest(), FROZEN_MANIFEST_SHA256)
+        for task_path in sorted((ROOT / "benchmarks/agent-task-comparison-v1/tasks").glob("*.json")):
+            task = json.loads(task_path.read_text())
+            self.assertEqual(hashlib.sha256(task_path.read_bytes()).hexdigest(), FROZEN_TASK_SHA256[task["id"]])
+        for fixture_name, task_id in (("fixture", "signature-migration-v1"), ("owned-fixture", "owned-signature-migration-v1")):
+            inventory = {}
+            fixture = ROOT / "benchmarks/agent-task-comparison-v1" / fixture_name
+            for path in sorted(p for p in fixture.rglob("*") if p.is_file()):
+                inventory[str(path.relative_to(fixture))] = hashlib.sha256(path.read_bytes()).hexdigest()
+            digest = hashlib.sha256(json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            self.assertEqual(digest, FROZEN_FIXTURE_SHA256[task_id])
     def test_replay_source_archive_rejects_escape_and_changed_bytes(self):
         body = b"fn main() {}"
         row = {"base64": base64.b64encode(body).decode(), "bytes": len(body),
@@ -698,8 +716,10 @@ class ComputeEligibilityTests(unittest.TestCase):
     def _complete_evidence(self, temp):
         evidence = Path(temp)
         (evidence / "candidate.diff").write_text("--- before\n+++ after\n")
+        packet = prepare_review_packet(evidence, evidence / "review-packet.json")
         elig.initialize_intervention_ledger(evidence)
-        elig.record_blinded_review(evidence, "reviewer-1", 0, 600_000_000_000, 400_000, True)
+        elig.record_blinded_review(evidence, "reviewer-1", 0, 600_000_000_000, 400_000, True,
+                                   evidence / "review-packet.json", packet["candidate_digest"], "accept")
         return evidence
 
     def _complete_kwargs(self, evidence, drift_declared=False, gateway_log_bytes=b""):
@@ -794,6 +814,7 @@ class RunTupleEligibilityCliTests(unittest.TestCase):
             evidence = Path(temp)
             elig.initialize_intervention_ledger(evidence)
             (evidence / "candidate.diff").write_text("--- a\n+++ b\n")
+            packet = prepare_review_packet(evidence, evidence / "review-packet.json")
             intervene = subprocess.run(
                 [sys.executable, str(ROOT / "scripts/opencode-agent-task-pilot.py"),
                  "intervene", "--evidence-dir", str(evidence),
@@ -807,7 +828,8 @@ class RunTupleEligibilityCliTests(unittest.TestCase):
                 [sys.executable, str(ROOT / "scripts/opencode-agent-task-pilot.py"),
                  "record-review", "--evidence-dir", str(evidence), "--reviewer-id", "r1",
                  "--started-monotonic-ns", "0", "--stopped-monotonic-ns", "600000000000",
-                 "--active-ms", "400000", "--blinded"],
+                 "--active-ms", "400000", "--blinded", "--packet", str(evidence / "review-packet.json"),
+                 "--candidate-digest", packet["candidate_digest"], "--verdict", "accept"],
                 capture_output=True, check=False,
             )
             self.assertEqual(review.returncode, 0, review.stderr)
@@ -830,6 +852,161 @@ class RunTupleEligibilityCliTests(unittest.TestCase):
             )
             self.assertNotEqual(review.returncode, 0)
             self.assertIn(b"--blinded", review.stderr)
+
+    def test_review_packet_withholds_identity_and_binds_submission(self):
+        with tempfile.TemporaryDirectory(prefix="spx-review-packet-") as temp:
+            evidence = Path(temp) / "evidence"
+            evidence.mkdir()
+            # Use committed pilot fixture bytes: the packet test is not a
+            # synthetic label-only check.
+            (evidence / "candidate.diff").write_bytes(
+                (ROOT / "benchmarks/agent-task-comparison-v1/fixture/src/core.spx").read_bytes()
+            )
+            (evidence / "candidate-source.json").write_bytes(
+                (ROOT / "benchmarks/agent-task-comparison-v1/fixture/semaprax.toml").read_bytes()
+            )
+            packet_path = evidence / "review-packet.json"
+            packet = prepare_review_packet(evidence, packet_path)
+            packet_text = packet_path.read_text()
+            for identity in ("semaprax-source-first", "semaprax-graph-operational", pilot.MODEL,
+                              "signature-migration-v1"):
+                self.assertNotIn(identity, packet_text)
+            digest = packet["candidate_digest"]
+            review = elig.record_blinded_review(
+                evidence, "reviewer", 0, 2_000_000_000, 1000, True,
+                packet_path, digest, "accept",
+            )
+            self.assertEqual(review["candidate_digest"], digest)
+            with self.assertRaises(ValueError):
+                elig.record_blinded_review(
+                    evidence, "reviewer-2", 0, 2_000_000_000, 1000, True,
+                    packet_path, "0" * 64, "accept",
+                )
+
+    def test_review_packet_rejects_stale_candidate(self):
+        with tempfile.TemporaryDirectory(prefix="spx-review-stale-") as temp:
+            evidence = Path(temp) / "evidence"
+            evidence.mkdir()
+            (evidence / "candidate.diff").write_text("old\n")
+            packet_path = evidence / "review-packet.json"
+            packet = prepare_review_packet(evidence, packet_path)
+            (evidence / "candidate.diff").write_text("new\n")
+            with self.assertRaises(ValueError):
+                elig.record_blinded_review(evidence, "reviewer", 0, 2_000_000_000, 1000, True,
+                                           packet_path, packet["candidate_digest"], "reject")
+
+    def test_every_non_diff_evidence_mutation_invalidates_packet_review(self):
+        with tempfile.TemporaryDirectory(prefix="spx-review-members-") as temp:
+            evidence = Path(temp) / "evidence"; evidence.mkdir()
+            (evidence / "candidate.diff").write_text("diff\n")
+            (evidence / "candidate-source.json").write_text("source\n")
+            packet = prepare_review_packet(evidence, evidence / "review-packet.json")
+            (evidence / "candidate-source.json").write_text("changed\n")
+            with self.assertRaises(ValueError):
+                elig.record_blinded_review(evidence, "r", 0, 2_000_000_000, 1, True,
+                                           evidence / "review-packet.json", packet["candidate_digest"])
+
+    def test_packet_deletion_replacement_and_corrupt_v2_are_unavailable(self):
+        with tempfile.TemporaryDirectory(prefix="spx-review-hostile-") as temp:
+            evidence = Path(temp) / "evidence"; evidence.mkdir()
+            (evidence / "candidate.diff").write_text("diff\n")
+            packet = prepare_review_packet(evidence, evidence / "review-packet.json")
+            elig.record_blinded_review(evidence, "r", 0, 2_000_000_000, 1, True,
+                                       evidence / "review-packet.json", packet["candidate_digest"], "reject")
+            (evidence / "review-packet.json").unlink()
+            self.assertEqual(elig.blinded_review_slot(evidence)["status"], "unavailable")
+            (evidence / "review-packet.json").write_text("{}\n")
+            self.assertEqual(elig.blinded_review_slot(evidence)["status"], "unavailable")
+            review = json.loads((evidence / "review.json").read_text())
+            review["candidate_digest"] = "g" * 64
+            (evidence / "review.json").write_text(json.dumps(review) + "\n")
+            self.assertEqual(elig.blinded_review_slot(evidence)["status"], "unavailable")
+
+    def test_embedded_diff_entry_tamper_and_invalid_lengths_fail_closed(self):
+        with tempfile.TemporaryDirectory(prefix="spx-review-tamper-") as temp:
+            evidence = Path(temp) / "evidence"; evidence.mkdir()
+            (evidence / "candidate.diff").write_text("diff\n")
+            prepare_review_packet(evidence, evidence / "review-packet.json")
+            packet = json.loads((evidence / "review-packet.json").read_text())
+            packet["evidence"][0]["bytes"] += 1
+            (evidence / "review-packet.json").write_text(json.dumps(packet, sort_keys=True, separators=(",", ":")) + "\n")
+            with self.assertRaises(ValueError):
+                workflow.load_review_packet(evidence / "review-packet.json")
+            packet["evidence"][0]["bytes"] = False
+            (evidence / "review-packet.json").write_text(json.dumps(packet, sort_keys=True, separators=(",", ":")) + "\n")
+            with self.assertRaises(ValueError):
+                workflow.load_review_packet(evidence / "review-packet.json")
+
+    def test_packet_short_write_removes_partial_target_and_allows_retry(self):
+        with tempfile.TemporaryDirectory(prefix="spx-review-write-") as temp:
+            evidence = Path(temp) / "evidence"; evidence.mkdir()
+            (evidence / "candidate.diff").write_text("diff\n")
+            real_write = workflow.os.write
+            calls = {"count": 0}
+            def fail_once(fd, body):
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    raise OSError("injected")
+                return real_write(fd, body[:1])
+            with mock.patch.object(workflow.os, "write", side_effect=fail_once):
+                with self.assertRaises(ValueError):
+                    prepare_review_packet(evidence, evidence / "review-packet.json")
+            self.assertFalse((evidence / "review-packet.json").exists())
+            prepare_review_packet(evidence, evidence / "review-packet.json")
+
+    def test_ledger_short_writes_are_completed(self):
+        with tempfile.TemporaryDirectory(prefix="spx-ledger-write-") as temp:
+            elig.initialize_intervention_ledger(temp)
+            real_write = elig.os.write
+            with mock.patch.object(elig.os, "write", side_effect=lambda fd, body: real_write(fd, body[:1])):
+                elig.append_intervention(temp, "other_operator_action", "target", timestamp_ns=0)
+            self.assertEqual(elig.intervention_ledger(temp)["status"], "observed")
+
+    def test_legacy_review_is_readable_but_not_eligible(self):
+        with tempfile.TemporaryDirectory(prefix="spx-review-legacy-") as temp:
+            evidence = Path(temp); (evidence / "candidate.diff").write_text("diff\n")
+            elig.record_blinded_review(evidence, "r", 0, 2_000_000_000, 1, True)
+            result = elig.blinded_review_slot(evidence)
+            self.assertEqual(result["assurance"], "legacy_unbound")
+            self.assertFalse(elig.compute_eligibility(
+                prompt="p", mcp_metrics={"status":"observed", "tool_response_bytes":1},
+                gateway_log_bytes=b"", drift_declared=False, evidence_dir=evidence)["eligible"])
+
+    def test_symlink_and_oversize_evidence_are_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="spx-review-files-") as temp:
+            evidence = Path(temp) / "evidence"; evidence.mkdir()
+            outside = Path(temp) / "outside"; outside.write_text("diff\n")
+            (evidence / "candidate.diff").symlink_to(outside)
+            with self.assertRaises(ValueError):
+                prepare_review_packet(evidence, evidence / "review-packet.json")
+            (evidence / "candidate.diff").unlink()
+            (evidence / "candidate.diff").write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+            with self.assertRaises(ValueError):
+                prepare_review_packet(evidence, evidence / "review-packet.json")
+
+    def test_cohort_audit_exact_accounting_and_failure_retention(self):
+        with tempfile.TemporaryDirectory(prefix="spx-cohort-audit-") as temp:
+            root = Path(temp) / "evidence"
+            root.mkdir()
+            manifest = Path(temp) / "manifest.json"
+            manifest.write_text('{"tasks":[],"repetitions":1,"lanes":[]}')
+            with self.assertRaises(ValueError):
+                audit_cohort(root, manifest)
+
+    def test_audit_cli_rejects_incomplete_cohort_nonzero(self):
+        with tempfile.TemporaryDirectory(prefix="spx-cohort-cli-") as temp:
+            result = subprocess.run([
+                sys.executable, str(ROOT / "scripts/opencode-agent-task-pilot.py"),
+                "audit-cohort", "--evidence-root", temp,
+            ], capture_output=True, check=False)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_review_and_audit_paths_do_not_open_network(self):
+        with mock.patch("socket.socket", side_effect=AssertionError("network")) as opened:
+            with tempfile.TemporaryDirectory() as temp:
+                evidence = Path(temp); (evidence / "candidate.diff").write_text("diff\n")
+                prepare_review_packet(evidence, evidence / "review-packet.json")
+            self.assertFalse(opened.called)
 
 
 if __name__ == "__main__":

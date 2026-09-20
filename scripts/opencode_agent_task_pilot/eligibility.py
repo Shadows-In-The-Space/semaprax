@@ -19,7 +19,9 @@ blinded review or an intervention ledger, so they remain ineligible.
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 import time
 
 from opencode_agent_task_pilot.evidence import _bytes as decode_base64
@@ -44,6 +46,7 @@ REVIEW_KEYS = frozenset(
     {"schema", "reviewer_id", "blinded", "diff_sha256", "started_monotonic_ns",
      "stopped_monotonic_ns", "active_ms"}
 )
+REVIEW_KEYS_V2 = REVIEW_KEYS | frozenset({"candidate_digest", "packet_sha256", "verdict"})
 MAX_REVIEW_BYTES = 65536
 
 INTERVENTION_SCHEMA = "semaprax.opencode-agent-task-pilot-intervention.v1"
@@ -99,21 +102,22 @@ def presented_context_bytes(prompt, mcp_metrics):
 # --- 2. blinded active review time -----------------------------------------
 
 
-def record_blinded_review(evidence_dir, reviewer_id, started_ns, stopped_ns, active_ms, blinded):
+def record_blinded_review(evidence_dir, reviewer_id, started_ns, stopped_ns, active_ms, blinded,
+                          packet_path=None, candidate_digest=None, verdict=None):
     """Write one operator-supplied blinded active review record, once.
 
-    The reviewer works only from the already-archived `candidate.diff` (which
-    carries no lane, task or model identity) and attests blinding explicitly by
-    passing `blinded=True`; any other value fails closed rather than being
-    coerced. Interval fields are milliseconds/nanoseconds; `active_ms` must be
+    The reviewer works from a packet whose direct lane, model, and runner
+    labels are withheld; task content and paths remain visible by design.
+    Blinding is an operator attestation via `blinded=True`; any other value
+    fails closed. Interval fields are milliseconds/nanoseconds; `active_ms` must be
     positive and no larger than the wall interval it was measured inside, so a
     fabricated or inconsistent number cannot be recorded. Exclusive file creation
     means a trial gets exactly one review record; a redo needs a fresh trial.
     """
     evidence_dir = Path(evidence_dir)
+    from opencode_agent_task_pilot.review_workflow import _read_regular
     diff = evidence_dir / "candidate.diff"
-    if not diff.is_file() or diff.is_symlink():
-        raise ValueError("blinded review requires an archived candidate diff")
+    diff_body = _read_regular(diff, 2 * 1024 * 1024)
     if blinded is not True:
         raise ValueError("a review record must attest blinded=True to be recorded")
     if not isinstance(reviewer_id, str) or not reviewer_id:
@@ -123,23 +127,72 @@ def record_blinded_review(evidence_dir, reviewer_id, started_ns, stopped_ns, act
         for value in (started_ns, stopped_ns, active_ms)
     ):
         raise ValueError("review interval fields must be plain integers")
+    if started_ns < 0 or stopped_ns < 0 or active_ms < 0:
+        raise ValueError("review interval fields must be nonnegative")
     if stopped_ns <= started_ns:
         raise ValueError("review stop must be strictly after review start")
     elapsed_ms = (stopped_ns - started_ns) // 1_000_000
     if not (0 < active_ms <= elapsed_ms):
         raise ValueError("active review time must be positive and within the elapsed interval")
+    packet_sha256 = None
+    if packet_path is not None:
+        from opencode_agent_task_pilot.review_workflow import candidate_digest_for_evidence, load_review_packet
+        fixed_packet = evidence_dir / "review-packet.json"
+        if Path(packet_path).resolve() != fixed_packet.resolve():
+            raise ValueError("review packet must be the fixed evidence packet")
+        packet_path = fixed_packet
+        packet = load_review_packet(packet_path)
+        live_digest = candidate_digest_for_evidence(evidence_dir)
+        if packet["candidate_digest"] != live_digest:
+            raise ValueError("review packet is stale for the archived candidate")
+        if candidate_digest != packet["candidate_digest"]:
+            raise ValueError("review submission candidate digest differs from packet")
+        if verdict not in ("accept", "reject"):
+            raise ValueError("packet-bound review requires verdict accept or reject")
+        packet_sha256 = hashlib.sha256(_read_regular(packet_path, 8 * 1024 * 1024)).hexdigest()
+    elif candidate_digest is not None:
+        raise ValueError("candidate digest requires a review packet")
     record = {
         "schema": REVIEW_SCHEMA,
         "reviewer_id": reviewer_id,
         "blinded": True,
-        "diff_sha256": hashlib.sha256(diff.read_bytes()).hexdigest(),
+        "diff_sha256": hashlib.sha256(diff_body).hexdigest(),
         "started_monotonic_ns": started_ns,
         "stopped_monotonic_ns": stopped_ns,
         "active_ms": active_ms,
     }
+    if packet_sha256 is not None:
+        record["candidate_digest"] = candidate_digest
+        record["packet_sha256"] = packet_sha256
+        record["verdict"] = verdict
     path = evidence_dir / "review.json"
-    with path.open("x", encoding="utf-8") as stream:
-        stream.write(json.dumps(record, sort_keys=True) + "\n")
+    body = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
+    fd = None
+    created = False
+    try:
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise ValueError("safe no-follow review writes are unavailable")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        created = True
+        written = 0
+        while written < len(body):
+            count = os.write(fd, body[written:])
+            if count <= 0:
+                raise ValueError("review write made no progress")
+            written += count
+    except (OSError, ValueError):
+        if created:
+            try:
+                held = os.fstat(fd)
+                current = os.stat(path, follow_symlinks=False)
+                if (held.st_dev, held.st_ino) == (current.st_dev, current.st_ino):
+                    os.unlink(path)
+            except OSError:
+                pass
+        raise
+    finally:
+        if fd is not None:
+            os.close(fd)
     return record
 
 
@@ -153,15 +206,16 @@ def blinded_review_slot(evidence_dir):
     """
     evidence_dir = Path(evidence_dir)
     path = evidence_dir / "review.json"
-    if not path.is_file() or path.is_symlink():
+    if not path.exists() or path.is_symlink():
         return {"status": "unavailable", "reason": "no blinded review record is present"}
     try:
-        if path.stat().st_nlink != 1 or path.stat().st_size > MAX_REVIEW_BYTES:
-            return {"status": "unavailable", "reason": "blinded review record is not bounded regular evidence"}
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        from opencode_agent_task_pilot.review_workflow import (
+            _read_regular, candidate_digest_for_evidence, load_review_packet,
+        )
+        value = json.loads(_read_regular(path, MAX_REVIEW_BYTES).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return {"status": "unavailable", "reason": "blinded review record is not readable JSON"}
-    if not isinstance(value, dict) or set(value) != REVIEW_KEYS:
+    if not isinstance(value, dict) or set(value) not in (REVIEW_KEYS, REVIEW_KEYS_V2):
         return {"status": "unavailable", "reason": "blinded review record has an unexpected shape"}
     if value.get("schema") != REVIEW_SCHEMA:
         return {"status": "unavailable", "reason": "blinded review record schema differs"}
@@ -183,13 +237,42 @@ def blinded_review_slot(evidence_dir):
     diff = evidence_dir / "candidate.diff"
     if not diff.is_file() or diff.is_symlink():
         return {"status": "unavailable", "reason": "candidate diff for blinded review binding is absent"}
-    if value.get("diff_sha256") != hashlib.sha256(diff.read_bytes()).hexdigest():
+    diff_body = _read_regular(diff, 2 * 1024 * 1024)
+    if value.get("diff_sha256") != hashlib.sha256(diff_body).hexdigest():
         return {"status": "unavailable", "reason": "blinded review binds a different candidate diff"}
+    if set(value) == REVIEW_KEYS:
+        return {
+            "status": "observed", "assurance": "legacy_unbound",
+            "review_wall_ms": active, "reviewer_id": reviewer_id,
+            "diff_sha256": value["diff_sha256"],
+        }
+    if set(value) != REVIEW_KEYS_V2:
+        return {"status": "unavailable", "reason": "review packet binding is malformed"}
+    if (not isinstance(value.get("candidate_digest"), str) or len(value["candidate_digest"]) != 64 or
+            any(c not in "0123456789abcdef" for c in value["candidate_digest"]) or
+            not isinstance(value.get("packet_sha256"), str) or len(value["packet_sha256"]) != 64 or
+            any(c not in "0123456789abcdef" for c in value["packet_sha256"])):
+        return {"status": "unavailable", "reason": "review packet binding is malformed"}
+    if value.get("verdict") not in ("accept", "reject"):
+        return {"status": "unavailable", "reason": "review verdict is invalid"}
+    packet_path = evidence_dir / "review-packet.json"
+    try:
+        packet_bytes = _read_regular(packet_path, 8 * 1024 * 1024)
+        packet = load_review_packet(packet_path)
+        live_digest = candidate_digest_for_evidence(evidence_dir)
+    except ValueError as error:
+        return {"status": "unavailable", "reason": str(error)}
+    if hashlib.sha256(packet_bytes).hexdigest() != value["packet_sha256"]:
+        return {"status": "unavailable", "reason": "review packet was deleted or replaced"}
+    if packet["candidate_digest"] != value["candidate_digest"] or live_digest != value["candidate_digest"]:
+        return {"status": "unavailable", "reason": "review packet candidate digest is stale"}
     return {
         "status": "observed",
+        "assurance": "packet_bound",
         "review_wall_ms": active,
         "reviewer_id": reviewer_id,
         "diff_sha256": value["diff_sha256"],
+        "verdict": value["verdict"],
     }
 
 
@@ -346,6 +429,8 @@ def append_intervention(evidence_dir, kind, target, note=None, timestamp_ns=None
     prior_events = existing["events"]
     last_timestamp = prior_events[-1]["timestamp_ns"] if prior_events else -1
     when = timestamp_ns if timestamp_ns is not None else time.time_ns()
+    if isinstance(when, bool) or not isinstance(when, int) or when < 0:
+        raise ValueError("intervention timestamp must be a nonnegative integer")
     if when < last_timestamp:
         raise ValueError("intervention timestamp precedes the ledger's last recorded entry")
     entry = {
@@ -356,8 +441,29 @@ def append_intervention(evidence_dir, kind, target, note=None, timestamp_ns=None
         "timestamp_ns": when,
         "note": note,
     }
-    with path.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(entry, sort_keys=True) + "\n")
+    body = (json.dumps(entry, sort_keys=True) + "\n").encode("utf-8")
+    fd = None
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0))
+        held = os.fstat(fd)
+        if not stat.S_ISREG(held.st_mode) or held.st_nlink != 1:
+            raise ValueError("intervention ledger is not a bounded regular file")
+        current = os.stat(path, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (held.st_dev, held.st_ino):
+            raise ValueError("intervention ledger changed during append")
+        written = 0
+        while written < len(body):
+            count = os.write(fd, body[written:])
+            if count <= 0:
+                raise ValueError("intervention ledger append made no progress")
+            written += count
+        if os.fstat(fd).st_size != held.st_size + len(body):
+            raise ValueError("intervention ledger append was incomplete")
+    except OSError as error:
+        raise ValueError("intervention ledger is not safely appendable") from error
+    finally:
+        if fd is not None:
+            os.close(fd)
     return entry
 
 
@@ -372,13 +478,12 @@ def intervention_ledger(evidence_dir):
     partially trusted.
     """
     path = Path(evidence_dir) / "interventions.jsonl"
-    if not path.is_file() or path.is_symlink():
+    if not path.exists() or path.is_symlink():
         return {"status": "unavailable", "reason": "intervention ledger file is absent"}
     try:
-        if path.stat().st_nlink != 1 or path.stat().st_size > MAX_INTERVENTION_LEDGER_BYTES:
-            return {"status": "unavailable", "reason": "intervention ledger is not bounded regular evidence"}
-        body = path.read_bytes()
-    except OSError:
+        from opencode_agent_task_pilot.review_workflow import _read_regular
+        body = _read_regular(path, MAX_INTERVENTION_LEDGER_BYTES)
+    except (OSError, ValueError):
         return {"status": "unavailable", "reason": "intervention ledger is not readable"}
     events = []
     expected_sequence = 0
@@ -461,6 +566,8 @@ def compute_eligibility(*, prompt, mcp_metrics, gateway_log_bytes, drift_declare
         review = {"status": "unavailable", "reason": f"blinded review computation failed: {error}"}
     if review.get("status") != "observed":
         reasons.append("blinded active review time: " + review.get("reason", "unavailable"))
+    elif review.get("assurance") != "packet_bound":
+        reasons.append("blinded active review time: legacy review lacks packet binding")
 
     try:
         interventions = intervention_ledger(evidence_dir)

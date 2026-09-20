@@ -192,6 +192,10 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
 
 #[test]
 fn model_boundary_refuses_fuel_and_malformed_response_before_effect_dispatch() {
+    if !target_backend_tools_available() {
+        eprintln!("skipping target model refusal parity: clang or node unavailable");
+        return;
+    }
     let module_source = typed_effect_source();
     let compiled = compile_from_source(&module_source);
     for (limits, malformed, expected) in [
@@ -210,24 +214,64 @@ fn model_boundary_refuses_fuel_and_malformed_response_before_effect_dispatch() {
         ),
     ] {
         let cancellation = AgentCancellation::new();
-        let run = model_target_run_on(
+        let reference = model_target_run_on(
             &compiled,
             crate::agent_lifecycle::authorization::StageBackend::Interpreter,
             limits,
             &cancellation,
             malformed,
         );
-        assert!(run.0.is_err());
-        assert_eq!(run.2.len(), 1);
-        assert_eq!(run.2[0].settlement(), expected);
-        assert_eq!(run.2[0].dispatched(), malformed);
-        assert_eq!(run.4, usize::from(malformed));
-        assert_eq!(run.5.calls, 0);
+        assert!(reference.0.is_err());
+        assert_eq!(reference.2.len(), 1);
+        assert_eq!(reference.2[0].settlement(), expected);
+        assert_eq!(reference.2[0].dispatched(), malformed);
+        assert_eq!(reference.4, usize::from(malformed));
+        assert_eq!(reference.5.calls, 0);
+
+        for (label, backend) in [
+            (
+                "native -O0",
+                crate::agent_lifecycle::authorization::StageBackend::Native,
+            ),
+            (
+                "native -O2",
+                crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+            ),
+            (
+                "Core Wasm",
+                crate::agent_lifecycle::authorization::StageBackend::Wasm {
+                    source: &module_source,
+                },
+            ),
+        ] {
+            let cancellation = AgentCancellation::new();
+            let actual = model_target_run_on(&compiled, backend, limits, &cancellation, malformed);
+            assert_eq!(
+                actual.0.as_ref().err().map(|errors| errors
+                    .iter()
+                    .map(|error| (&error.code, &error.message))
+                    .collect::<Vec<_>>()),
+                reference.0.as_ref().err().map(|errors| errors
+                    .iter()
+                    .map(|error| (&error.code, &error.message))
+                    .collect::<Vec<_>>()),
+                "{label}: model refusal"
+            );
+            assert_eq!(actual.1, reference.1, "{label}: model requests");
+            assert_eq!(actual.2, reference.2, "{label}: model evidence");
+            assert_eq!(actual.3, reference.3, "{label}: model accounting");
+            assert_eq!(actual.4, reference.4, "{label}: model calls");
+            assert_eq!(actual.5.calls, 0, "{label}: effects must not dispatch");
+            assert_eq!(
+                actual.5.request_wires, reference.5.request_wires,
+                "{label}: effect requests"
+            );
+        }
     }
 
     let cancellation = AgentCancellation::new();
     cancellation.cancel();
-    let cancelled = model_target_run_on(
+    let reference = model_target_run_on(
         &compiled,
         crate::agent_lifecycle::authorization::StageBackend::Interpreter,
         model_limits(),
@@ -235,11 +279,45 @@ fn model_boundary_refuses_fuel_and_malformed_response_before_effect_dispatch() {
         false,
     );
     assert_eq!(
-        cancelled.0.unwrap().lifecycle().status(),
+        reference.0.unwrap().lifecycle().status(),
         IterativeStatus::Cancelled
     );
-    assert!(cancelled.1.is_empty());
-    assert!(cancelled.2.is_empty());
-    assert_eq!(cancelled.3, Default::default());
-    assert_eq!((cancelled.4, cancelled.5.calls), (0, 0));
+    assert!(reference.1.is_empty());
+    assert!(reference.2.is_empty());
+    assert_eq!(reference.3, Default::default());
+    assert_eq!((reference.4, reference.5.calls), (0, 0));
+    for (label, backend) in [
+        (
+            "native -O0",
+            crate::agent_lifecycle::authorization::StageBackend::Native,
+        ),
+        (
+            "native -O2",
+            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+        ),
+        (
+            "Core Wasm",
+            crate::agent_lifecycle::authorization::StageBackend::Wasm {
+                source: &module_source,
+            },
+        ),
+    ] {
+        let cancellation = AgentCancellation::new();
+        cancellation.cancel();
+        let actual = model_target_run_on(&compiled, backend, model_limits(), &cancellation, false);
+        assert_eq!(
+            actual.0.unwrap().lifecycle().status(),
+            IterativeStatus::Cancelled,
+            "{label}"
+        );
+        assert_eq!(actual.1, reference.1, "{label}: model requests");
+        assert_eq!(actual.2, reference.2, "{label}: model evidence");
+        assert_eq!(actual.3, reference.3, "{label}: model accounting");
+        assert_eq!(actual.4, reference.4, "{label}: model calls");
+        assert_eq!(actual.5.calls, reference.5.calls, "{label}: effect calls");
+        assert_eq!(
+            actual.5.request_wires, reference.5.request_wires,
+            "{label}: effect requests"
+        );
+    }
 }

@@ -541,6 +541,7 @@ def _decode_gateway_events(gateway_log_bytes):
         argv = argv_bytes.decode("utf-8", "surrogateescape").split("\0")
         events.append({
             "argv": argv,
+            "stdout": decode_base64(event["stdout_b64"], "gateway stdout"),
             "stderr": decode_base64(event["stderr_b64"], "gateway stderr"),
             "returncode": event["returncode"],
         })
@@ -564,6 +565,48 @@ def _valid_pilot_write_source(argv):
     return len(body) <= MAX_PILOT_WRITE_SOURCE_BYTES and base64.b64encode(body).decode("ascii") == encoded
 
 
+def _sha256_text(value):
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _drift_observation(event):
+    """Decode the gateway's primary, canonical drift receipt.
+
+    The synthetic trigger is not a caller-provided metric marker. The gateway
+    records it only after verifying the old source bytes and writing the
+    manifest-bound replacement. Its receipt must therefore bind the trigger
+    command and both source revisions before a conditional write can count as
+    recovery evidence.
+    """
+    argv = event["argv"]
+    if len(argv) != 2 or argv[0] != "pilot-drift" or argv[1] not in {
+        "pilot-read", *STALE_IDENTIFYING_COMMANDS
+    }:
+        return None, "gateway drift trigger is malformed"
+    if event["returncode"] != 0 or event["stderr"]:
+        return None, "gateway drift trigger did not succeed cleanly"
+    try:
+        receipt = json.loads(event["stdout"].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, "gateway drift receipt is not JSON"
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != {"after_sha256", "before_sha256", "trigger"}
+        or receipt.get("trigger") != argv[1]
+        or not _sha256_text(receipt.get("before_sha256"))
+        or not _sha256_text(receipt.get("after_sha256"))
+        or receipt["before_sha256"] == receipt["after_sha256"]
+    ):
+        return None, "gateway drift receipt has an unexpected shape"
+    if event["stdout"] != json.dumps(receipt, sort_keys=True).encode("utf-8"):
+        return None, "gateway drift receipt is not canonical"
+    return receipt, None
+
+
 def stale_recovery_events(gateway_log_bytes, drift_declared):
     """Typed, mechanical classification of the drift trigger and its recovery.
 
@@ -573,14 +616,15 @@ def stale_recovery_events(gateway_log_bytes, drift_declared):
     anything else is internally inconsistent and reported unavailable rather than
     coerced.
 
-    For the one trigger (if any), the outcome is read from the first later
-    exactly shaped `pilot-write-source src/core.spx <lowercase-sha256>
-    <canonical-base64>` command, which is the sole admitted conditional
-    source-recovery action in the source-first lane:
-    `recovered_conditional_write` (that write succeeded),
-    `rejected_stale_write` (the gateway returned its exact stale-precondition
-    refusal),
-    or `no_recovery_attempt` (no such write occurred). A later read or an
+    For the one trigger (if any), a canonical primary receipt binds the
+    manifest drift's before/after source digests to the triggering command. The
+    outcome is read from the first later exactly shaped `pilot-write-source
+    src/core.spx <lowercase-sha256> <canonical-base64>` command, the sole
+    admitted conditional source-recovery action in the source-first lane:
+    `recovered_conditional_write` needs the post-drift digest and exact success
+    response; `rejected_stale_write` needs the pre-drift digest and the exact
+    stale-precondition refusal; or `no_recovery_attempt` when no such write
+    occurred. A later read or an
     unrelated command mentioning the path is *not* recovery and cannot turn
     this metric into a false success. A malformed source-write record or any
     other write failure is unavailable rather than being relabelled as stale.
@@ -595,9 +639,24 @@ def stale_recovery_events(gateway_log_bytes, drift_declared):
         argv = event["argv"]
         if argv[:1] != ["pilot-drift"]:
             continue
-        if len(argv) != 2 or argv[1] not in {"pilot-read", *STALE_IDENTIFYING_COMMANDS}:
-            return {"status": "unavailable", "reason": "gateway drift trigger is malformed"}
+        receipt, error = _drift_observation(event)
+        if error is not None:
+            return {"status": "unavailable", "reason": error}
         trigger_command = argv[1]
+        if trigger_command == "pilot-read":
+            prior_reads = [
+                prior for prior in events[:index]
+                if prior["argv"] == ["pilot-read", DRIFT_TARGET]
+            ]
+            if not prior_reads:
+                return {"status": "unavailable", "reason": "source-read drift lacks its primary source read"}
+            prior = prior_reads[-1]
+            if (
+                prior["returncode"] != 0
+                or prior["stderr"]
+                or hashlib.sha256(prior["stdout"]).hexdigest() != receipt["before_sha256"]
+            ):
+                return {"status": "unavailable", "reason": "source-read drift receipt differs from its primary source read"}
         trigger_kind = (
             "drift_on_source_read"
             if trigger_command == "pilot-read"
@@ -613,12 +672,18 @@ def stale_recovery_events(gateway_log_bytes, drift_declared):
             if later_argv[1] != DRIFT_TARGET:
                 continue
             if later["returncode"] == 0:
-                if later["stderr"]:
-                    return {"status": "unavailable", "reason": "successful source-recovery write wrote stderr"}
+                if (
+                    later["stderr"]
+                    or later["stdout"] != b"source written\n"
+                    or later_argv[2] != receipt["after_sha256"]
+                ):
+                    return {"status": "unavailable", "reason": "successful source-recovery write differs from the primary drift receipt"}
                 outcome = "recovered_conditional_write"
             elif (
                 later["returncode"] == STALE_WRITE_RETURN_CODE
                 and later["stderr"] == STALE_WRITE_REFUSAL
+                and later["stdout"] == b""
+                and later_argv[2] == receipt["before_sha256"]
             ):
                 outcome = "rejected_stale_write"
             else:

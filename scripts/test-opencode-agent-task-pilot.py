@@ -205,6 +205,47 @@ class SubprocessBoundaryTests(unittest.TestCase):
             self.assertEqual(target.read_text(), "module injected;\n")
             self.assertIn(b"precondition is stale", completed.stderr)
 
+    def test_gateway_primary_records_prove_a_rejected_stale_recovery(self):
+        with tempfile.TemporaryDirectory(prefix="spx-gateway-drift-test-") as temp:
+            state = Path(temp)
+            candidate = state / "candidate"
+            target = candidate / "src/core.spx"
+            target.parent.mkdir(parents=True)
+            before = b"module before;\n"
+            after = b"module after;\n"
+            target.write_bytes(before)
+            drift = state / "drift.json"
+            drift.write_text(json.dumps({
+                "target": "src/core.spx",
+                "before_b64": base64.b64encode(before).decode(),
+                "after_b64": base64.b64encode(after).decode(),
+                "before_sha256": hashlib.sha256(before).hexdigest(),
+                "after_sha256": hashlib.sha256(after).hexdigest(),
+                "applied": False,
+            }, sort_keys=True))
+            gateway, _, log, configuration = pilot.install_gateway(
+                pilot.provision_semaprax(Path(sys.executable).resolve(strict=True), state)[0],
+                state, candidate, "semaprax-source-first", drift,
+            )
+            environment = dict(os.environ, SEMAPRAX_PILOT_GATEWAY=configuration)
+            read = subprocess.run(
+                [gateway, "pilot-read", "src/core.spx"], env=environment,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            )
+            self.assertEqual(read.returncode, 0, read.stderr)
+            rejected = subprocess.run(
+                [gateway, "pilot-write-source", "src/core.spx", hashlib.sha256(before).hexdigest(),
+                 base64.b64encode(b"module replacement;\n").decode()],
+                env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            )
+            self.assertEqual(rejected.returncode, 126)
+            self.assertEqual(target.read_bytes(), after)
+            metric = elig.stale_recovery_events(log.read_bytes(), True)
+            self.assertEqual(metric["status"], "observed")
+            self.assertEqual(metric["events"], [{
+                "trigger": "drift_on_source_read", "recovery_outcome": "rejected_stale_write",
+            }])
+
     def test_output_cap_kills_continuous_writer(self):
         old = pilot.CAP
         pilot.CAP = 1024
@@ -431,6 +472,17 @@ def _gateway_log(*events):
     return ("\n".join(events) + "\n").encode() if events else b""
 
 
+def _drift_event(command, before=b"before", after=b"after"):
+    return _gateway_event(
+        ["pilot-drift", command],
+        out=json.dumps({
+            "after_sha256": hashlib.sha256(after).hexdigest(),
+            "before_sha256": hashlib.sha256(before).hexdigest(),
+            "trigger": command,
+        }, sort_keys=True).encode(),
+    )
+
+
 def _mcp_frame(response_bytes=100):
     request = json.dumps({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
@@ -514,9 +566,12 @@ class StaleRecoveryEventsTests(unittest.TestCase):
 
     def test_conditional_write_after_trigger_is_recovered(self):
         body = _gateway_log(
-            _gateway_event(["pilot-read", "src/core.spx"]),
-            _gateway_event(["pilot-drift", "pilot-read"]),
-            _gateway_event(["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"], code=0),
+            _gateway_event(["pilot-read", "src/core.spx"], out=b"before"),
+            _drift_event("pilot-read"),
+            _gateway_event(
+                ["pilot-write-source", "src/core.spx", hashlib.sha256(b"after").hexdigest(), "Zm9v"],
+                code=0, out=b"source written\n",
+            ),
         )
         result = elig.stale_recovery_events(body, True)
         self.assertEqual(result["status"], "observed")
@@ -527,10 +582,10 @@ class StaleRecoveryEventsTests(unittest.TestCase):
 
     def test_rejected_stale_write_after_identifying_trigger(self):
         body = _gateway_log(
-            _gateway_event(["pilot-drift", "graph"]),
+            _drift_event("graph"),
             _gateway_event(
-                ["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"],
-                code=126,
+                ["pilot-write-source", "src/core.spx", hashlib.sha256(b"before").hexdigest(), "Zm9v"],
+                code=126, out=b"",
                 err=b"pilot-write-source precondition is stale\n",
             ),
         )
@@ -539,14 +594,50 @@ class StaleRecoveryEventsTests(unittest.TestCase):
         self.assertEqual(result["events"][0]["recovery_outcome"], "rejected_stale_write")
         self.assertEqual(result["stale_recovery_actions"], 0)
 
+    def test_drift_receipt_and_source_read_are_primary_evidence(self):
+        receipt = json.loads(base64.b64decode(json.loads(_drift_event("pilot-read"))["stdout_b64"]))
+        receipt["before_sha256"] = hashlib.sha256(b"substituted").hexdigest()
+        malformed_receipt = _gateway_event(
+            ["pilot-drift", "pilot-read"], out=json.dumps(receipt, sort_keys=True).encode(),
+        )
+        for body in (
+            _gateway_log(_gateway_event(["pilot-read", "src/core.spx"], out=b"before"), malformed_receipt),
+            _gateway_log(_gateway_event(["pilot-read", "src/core.spx"], out=b"before"),
+                         _gateway_event(["pilot-drift", "graph"], code=126)),
+        ):
+            with self.subTest(body=body):
+                result = elig.stale_recovery_events(body, True)
+                self.assertEqual(result["status"], "unavailable")
+
+    def test_recovery_write_must_bind_the_drift_source_revisions(self):
+        for write in (
+            _gateway_event(
+                ["pilot-write-source", "src/core.spx", hashlib.sha256(b"before").hexdigest(), "Zm9v"],
+                out=b"source written\n",
+            ),
+            _gateway_event(
+                ["pilot-write-source", "src/core.spx", hashlib.sha256(b"after").hexdigest(), "Zm9v"],
+                code=126, err=b"pilot-write-source precondition is stale\n",
+            ),
+            _gateway_event(
+                ["pilot-write-source", "src/core.spx", hashlib.sha256(b"after").hexdigest(), "Zm9v"],
+                out=b"unexpected success\n",
+            ),
+        ):
+            with self.subTest(write=write):
+                body = _gateway_log(_drift_event("graph"), write)
+                result = elig.stale_recovery_events(body, True)
+                self.assertEqual(result["status"], "unavailable")
+
     def test_no_recovery_attempt_when_file_never_touched_again(self):
-        body = _gateway_log(_gateway_event(["pilot-drift", "graph"]))
+        body = _gateway_log(_drift_event("graph"))
         result = elig.stale_recovery_events(body, True)
         self.assertEqual(result["events"][0]["recovery_outcome"], "no_recovery_attempt")
 
     def test_later_read_of_drifted_file_is_not_a_false_recovery(self):
         body = _gateway_log(
-            _gateway_event(["pilot-drift", "pilot-read"]),
+            _gateway_event(["pilot-read", "src/core.spx"], out=b"before"),
+            _drift_event("pilot-read"),
             _gateway_event(["pilot-read", "src/core.spx"], code=0),
         )
         result = elig.stale_recovery_events(body, True)
@@ -574,7 +665,8 @@ class StaleRecoveryEventsTests(unittest.TestCase):
         for argv in malformed:
             with self.subTest(argv=argv):
                 body = _gateway_log(
-                    _gateway_event(["pilot-drift", "pilot-read"]),
+                    _gateway_event(["pilot-read", "src/core.spx"], out=b"before"),
+                    _drift_event("pilot-read"),
                     _gateway_event(argv, code=126),
                 )
                 result = elig.stale_recovery_events(body, True)
@@ -583,9 +675,10 @@ class StaleRecoveryEventsTests(unittest.TestCase):
 
     def test_non_stale_source_write_failure_is_unavailable(self):
         body = _gateway_log(
-            _gateway_event(["pilot-drift", "pilot-read"]),
+            _gateway_event(["pilot-read", "src/core.spx"], out=b"before"),
+            _drift_event("pilot-read"),
             _gateway_event(
-                ["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"],
+                ["pilot-write-source", "src/core.spx", hashlib.sha256(b"before").hexdigest(), "Zm9v"],
                 code=126,
                 err=b"pilot-write-source body exceeds cap\n",
             ),
@@ -596,7 +689,8 @@ class StaleRecoveryEventsTests(unittest.TestCase):
 
     def test_different_target_write_is_not_a_recovery_attempt(self):
         body = _gateway_log(
-            _gateway_event(["pilot-drift", "pilot-read"]),
+            _gateway_event(["pilot-read", "src/core.spx"], out=b"before"),
+            _drift_event("pilot-read"),
             _gateway_event(["pilot-write-source", "src/app.spx", "f" * 64, "Zm9v"], code=0),
         )
         result = elig.stale_recovery_events(body, True)
@@ -608,7 +702,7 @@ class StaleRecoveryEventsTests(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
 
     def test_inconsistent_trigger_but_not_declared_is_unavailable(self):
-        body = _gateway_log(_gateway_event(["pilot-drift", "graph"]))
+        body = _gateway_log(_drift_event("graph"))
         result = elig.stale_recovery_events(body, False)
         self.assertEqual(result["status"], "unavailable")
 

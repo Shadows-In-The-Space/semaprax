@@ -379,7 +379,7 @@ neither of which this tranche adds.
 `src/interpreter/resumable.rs` runs `.spx` suspensions. The exhaustively
 matchable legacy one-site `ResumableStep` and its start/resume functions remain
 unchanged and reject multi-site input. Multi-site programs use the additive
-`SequentialResumableStep`, an opaque in-memory `ResumableContinuation`, and
+`SequentialResumableStep`, an opaque `ResumableContinuation`, and
 explicit sequential start/resume functions:
 
 ```text
@@ -448,6 +448,25 @@ different request than the suspension recorded), and `SPX-F115` (the state
 or invocation binding is not for this exact program, yield site and original
 argument bits). All fail closed before a resumed result is produced.
 
+**Closed recovery bytes for the admitted source lane.** The crate-private
+`interpreter::resumable::checkpoint` module additionally encodes a sequential
+continuation as bounded (16 KiB), closed canonical JSON under
+`semaprax.source-resumable-sequential-checkpoint.v1`. It records only scalar
+request/answer history and the selected suspension state; float values carry
+their exact bits. On recovery the caller supplies the current checked program,
+function ID, and original arguments again. The decoder re-lowers that program,
+selects its exact site, derives the binding from the independently supplied
+arguments and decoded prior-answer bits, verifies every scalar type, checks a
+corruption-detecting self-digest, and rejects noncanonical, truncated, and
+oversize bytes. The digest is not a MAC: a deliberately rewritten canonical
+checkpoint can be decoded, but the ordinary resume path deterministically
+replays and rejects any forged historical/current request before publishing a
+result. Decode itself does not run source, dispatch an effect, or grant an
+answer authority. This is
+an internal recovery proof for the existing pure scalar sequential interpreter
+lane, not a public continuation ABI, durable production runtime, migration
+format, or target scheduler.
+
 ## Scope boundary
 
 Explicitly **not** done in this slice, and why:
@@ -492,8 +511,10 @@ Explicitly **not** done in this slice, and why:
   projections through real native and Core Wasm target paths, but ordinary
   emission still refuses a `yields`-declaring function outright —
   `SPX-B116` and `SPX-W126`. There is no public continuation ABI, external-
-  await runtime seam, durable source-level checkpoint, or target scheduler.
-  Migrating an Agent fixture onto the mechanism is untouched.
+  await runtime seam, durable production source checkpoint, or target
+  scheduler. The crate-private scalar continuation recovery codec above is
+  deliberately not any of those seams. Migrating an Agent fixture onto the
+  mechanism is untouched.
 - **A checkpoint byte-wire codec now exists, at reference level.**
   `src/resumable_effects/codec.rs` encodes a `Journal` bound to its
   `EffectScope` into closed, deterministic JSON bytes and back, matching
@@ -520,10 +541,10 @@ Explicitly **not** done in this slice, and why:
 
 | Criterion (from issue #204) | Status |
 | --- | --- |
-| A non-Agent function can yield typed requests and resume safely | **Met only for the bounded `.spx` slice.** A selected ordinary free function declares one typed channel and one to eight direct sequential `yield` sites; `interpreter::resumable` runs them through an opaque in-memory continuation, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same staged projections. Resume checks answer types (`SPX-F113`), every replayed request (`SPX-F114`), and exact program/site/argument/prior-answer binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). Disconnected yielding functions are pruned; nested or control-dependent yields, owned state and effectful prefixes remain open. Distinct request/response types are admitted for direct `let`, mutable whole-binding assignment, and tail sites; assignment checks its target against the retagged response type rather than the request placeholder. |
+| A non-Agent function can yield typed requests and resume safely | **Met only for the bounded `.spx` slice.** A selected ordinary free function declares one typed channel and one to eight direct sequential `yield` sites; `interpreter::resumable` runs them through an opaque continuation, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same staged projections. A crate-private closed recovery codec structurally validates the existing scalar continuation and re-derives its binding from independently supplied current program/function/arguments; it is not a public runtime ABI. Resume checks answer types (`SPX-F113`), every replayed request (`SPX-F114`), and exact program/site/argument/prior-answer binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). Disconnected yielding functions are pruned; nested or control-dependent yields, owned state and effectful prefixes remain open. Distinct request/response types are admitted for direct `let`, mutable whole-binding assignment, and tail sites; assignment checks its target against the retagged response type rather than the request placeholder. |
 | Generated state machines are deterministic semantic projections | **Met only for the bounded ordered replay plan.** `SequentialResumablePlan` deterministically derives entry/per-site-suspended/complete identities and independently validated yield-free start/per-site-resume HIR projections while the original one-site `ResumablePlan` remains source-compatible. The interpreter consumes its identities and opaque history; private native and Wasm runners consume its projections. Live-frame/liveness lowering and control-dependent yields remain open. |
 | Ownership, effects, contracts and authority survive suspension correctly | For the `.spx` plan, only Copy scalars are admitted, ordinary effects and reachable yielding callees are refused, the start projection owns precondition evaluation, the resume projection owns the suffix/postcondition, and suspension bindings confer no authority. Owned values across suspension, effectful prefixes and durable/public resume authority remain **open**. At the separate Rust-reference level, `EffectHandler`, `CapabilityGatedHandler` and `SignatureCheckedHandler` prove the more general checking discipline. |
-| Checkpoint/recovery never grants effect authority by itself | **Met**, including at the "reminted resume" level: `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. Extends through the byte-wire codec: `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. |
+| Checkpoint/recovery never grants effect authority by itself | **Met** for the reference journal and the bounded source continuation proof. `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. Separately, the crate-private sequential-source codec re-derives plan/site/binding from caller-supplied checked program/function/arguments and performs no source evaluation or dispatch while decoding. |
 | Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture requires a public external-await/runtime seam, durable source checkpointing and a broader state profile than this private scalar plan provides. |
 
 ## Gate

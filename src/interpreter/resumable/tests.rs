@@ -276,6 +276,200 @@ fn two_yields_replay_in_order_and_complete_through_the_opaque_continuation() {
 }
 
 #[test]
+fn sequential_checkpoint_recovers_only_the_exact_plan_arguments_and_history() {
+    use super::checkpoint::{decode, encode};
+
+    let program = resolved(TWO_YIELDS);
+    let arguments = [ArgumentValue::Int(4)];
+    let first = sequential_suspension(&program, &arguments);
+    let bytes = encode("app.ask", &first).unwrap();
+    let first = decode(&program, "app.ask", &arguments, &bytes).unwrap();
+    assert_eq!(first.request(), &ArgumentValue::Int(5));
+
+    let second = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &first,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: second,
+    } = second.step
+    else {
+        panic!("recovered first continuation did not reach the second site")
+    };
+    let bytes = encode("app.ask", &second).unwrap();
+    let second = decode(&program, "app.ask", &arguments, &bytes).unwrap();
+    assert_eq!(second.request(), &ArgumentValue::Int(12));
+
+    let mut wrong_shape = first.clone();
+    wrong_shape.state = second.state.clone();
+    assert_eq!(
+        decode(
+            &program,
+            "app.ask",
+            &arguments,
+            &encode("app.ask", &wrong_shape).unwrap(),
+        ),
+        Err(super::checkpoint::CheckpointError::SuspensionMismatch)
+    );
+
+    let complete = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &second,
+        &ArgumentValue::Int(20),
+        MAX_STEPS,
+    )
+    .unwrap();
+    assert!(matches!(
+        complete.step,
+        SequentialResumableStep::Completed {
+            result: ArgumentValue::Int(30),
+            ..
+        }
+    ));
+
+    assert!(decode(&program, "app.ask", &[ArgumentValue::Int(5)], &bytes).is_err());
+    assert!(decode(&program, "app.other", &arguments, &bytes).is_err());
+}
+
+#[test]
+fn sequential_checkpoint_keeps_float_bits_and_refuses_hostile_bytes() {
+    use super::checkpoint::{decode, encode, CheckpointError};
+
+    let program = resolved(TWO_FLOAT_YIELDS);
+    let arguments = [ArgumentValue::Float64(-0.0)];
+    let first = sequential_suspension(&program, &arguments);
+    let bytes = encode("app.ask", &first).unwrap();
+    let recovered = decode(&program, "app.ask", &arguments, &bytes).unwrap();
+    assert!(
+        matches!(recovered.request(), ArgumentValue::Float64(value) if value.to_bits() == (-0.0f64).to_bits())
+    );
+
+    let mut tampered = bytes.clone();
+    let digit = tampered
+        .iter()
+        .position(|byte| *byte == b'0')
+        .expect("canonical checkpoint has a digit");
+    tampered[digit] = b'1';
+    assert_eq!(
+        decode(&program, "app.ask", &arguments, &tampered),
+        Err(CheckpointError::DigestMismatch)
+    );
+    assert!(matches!(
+        decode(&program, "app.ask", &arguments, &bytes[..bytes.len() - 1]),
+        Err(CheckpointError::NonCanonical)
+    ));
+    let oversized = vec![b' '; 16 * 1024 + 1];
+    assert_eq!(
+        decode(&program, "app.ask", &arguments, &oversized),
+        Err(CheckpointError::TooLarge)
+    );
+
+    let noncanonical = [b" ".as_slice(), bytes.as_slice()].concat();
+    assert_eq!(
+        decode(&program, "app.ask", &arguments, &noncanonical),
+        Err(CheckpointError::NonCanonical)
+    );
+}
+
+#[test]
+fn recomputed_checkpoint_digest_cannot_bypass_request_replay() {
+    use super::checkpoint::{decode, encode};
+
+    let program = resolved(TWO_YIELDS);
+    let arguments = [ArgumentValue::Int(4)];
+    let first = sequential_suspension(&program, &arguments);
+    let second = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &first,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: second,
+    } = second.step
+    else {
+        panic!("expected the second suspension")
+    };
+
+    // Model a writer that can deliberately create fresh, internally
+    // consistent bytes instead of merely corrupting an existing document.
+    let mut forged = second.clone();
+    forged.history[0].request = ArgumentValue::Int(999);
+    let forged = decode(
+        &program,
+        "app.ask",
+        &arguments,
+        &encode("app.ask", &forged).unwrap(),
+    )
+    .expect("decode is structural and authority-free");
+    let diagnostics = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &forged,
+        &ArgumentValue::Int(20),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(diagnostics[0].code, REQUEST_DRIFT);
+
+    let mut forged = second;
+    forged.request = ArgumentValue::Int(998);
+    let forged = decode(
+        &program,
+        "app.ask",
+        &arguments,
+        &encode("app.ask", &forged).unwrap(),
+    )
+    .expect("current request is also a replay-checked proof claim");
+    let diagnostics = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &forged,
+        &ArgumentValue::Int(20),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(diagnostics[0].code, REQUEST_DRIFT);
+}
+
+#[test]
+fn sequential_checkpoint_encoding_is_bounded_and_closed() {
+    use super::checkpoint::{decode, encode, CheckpointError};
+
+    let program = resolved(TWO_YIELDS);
+    let arguments = [ArgumentValue::Int(4)];
+    let continuation = sequential_suspension(&program, &arguments);
+    assert_eq!(
+        encode(&"x".repeat(1025), &continuation),
+        Err(CheckpointError::TooLarge)
+    );
+
+    let bytes = encode("app.ask", &continuation).unwrap();
+    let text = std::str::from_utf8(&bytes).unwrap();
+    let duplicate = text.replacen(
+        "{\"binding\":",
+        "{\"schema\":\"semaprax.source-resumable-sequential-checkpoint.v1\",\"binding\":",
+        1,
+    );
+    assert_eq!(
+        decode(&program, "app.ask", &arguments, duplicate.as_bytes()),
+        Err(CheckpointError::NonCanonical)
+    );
+}
+
+#[test]
 fn legacy_one_site_surface_stays_exhaustive_and_refuses_multi_site_programs() {
     fn exhaustively_match_legacy(step: ResumableStep) {
         match step {

@@ -116,9 +116,12 @@ pub(super) struct ResumableYieldRecord {
     answer: ArgumentValue,
 }
 
-/// An opaque, in-memory Copy-scalar continuation for a sequential top-level
-/// `yield` program. It is proof data only: it grants neither authority to
-/// answer a request nor a durable/checkpoint representation.
+/// An opaque Copy-scalar continuation for a sequential top-level `yield`
+/// program. It is proof data only: it grants neither authority to answer a
+/// request nor a public continuation ABI. The crate-private checkpoint codec
+/// reconstructs this only after independently re-deriving its checked program,
+/// site, argument binding, and typed history. Request claims are authenticated
+/// by the ordinary deterministic replay during resume.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResumableContinuation {
     state: ResumableStateId,
@@ -911,3 +914,8 @@ fn scalar_values_equal(left: &Value, right: &Value) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+/// Closed recovery bytes for the admitted scalar sequential lane. This stays
+/// crate-private: it is not an external await protocol or a durable runtime
+/// guarantee.
+pub(crate) mod checkpoint;

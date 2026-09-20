@@ -5,8 +5,8 @@ use crate::cleanup_plan::StatusCase;
 use crate::conformance::NormalizedStatus;
 use crate::hir::{self, ResolvedProgram};
 use crate::interpreter::resumable::{
-    resume_resumable_effect, run_resumable_effect, run_sequential_resumable_effect, ResumableStep,
-    SequentialResumableStep,
+    checkpoint, resume_resumable_effect, run_resumable_effect, run_sequential_resumable_effect,
+    ResumableStep, SequentialResumableStep,
 };
 use crate::interpreter::ArgumentValue;
 use crate::resumable_effects::lowering::{self, ResumableScalar, SequentialResumablePlan};
@@ -317,6 +317,71 @@ fn two_yields_match_across_native_o0_o2_and_core_wasm() {
         };
         assert_eq!(second.request(), &ResumableScalar::I64(12));
         assert_ne!(second.state(), first.state());
+        assert_eq!(
+            resume_sequential(
+                backend,
+                &program,
+                &plan,
+                &[ResumableScalar::I64(4)],
+                &second,
+                ResumableScalar::I64(20),
+            )
+            .unwrap(),
+            BackendStep::Complete {
+                state: plan.complete.id.clone(),
+                result: ResumableScalar::I64(30),
+            }
+        );
+    }
+}
+
+#[test]
+fn recovered_sequential_checkpoint_stays_in_parity_with_every_backend() {
+    if !require_tools() {
+        return;
+    }
+    let program = sequential_program();
+    let plan = plan(&program);
+    let arguments = [ArgumentValue::Int(4)];
+    let interpreted =
+        run_sequential_resumable_effect(&program, "app.ask", &arguments, 10_000).unwrap();
+    let SequentialResumableStep::Suspended { continuation } = interpreted.step else {
+        panic!("checkpoint parity interpreter start did not suspend")
+    };
+    let bytes = checkpoint::encode("app.ask", &continuation).unwrap();
+    let recovered = checkpoint::decode(&program, "app.ask", &arguments, &bytes).unwrap();
+    let interpreted = crate::interpreter::resumable::resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &recovered,
+        &ArgumentValue::Int(10),
+        10_000,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended { continuation } = interpreted.step else {
+        panic!("recovered checkpoint did not park the second interpreter request")
+    };
+    assert_eq!(continuation.request(), &ArgumentValue::Int(12));
+
+    for backend in [Backend::NativeO0, Backend::NativeO2, Backend::CoreWasm] {
+        let BackendStep::SequentialSuspended(first) =
+            run(backend, &program, &plan, &[ResumableScalar::I64(4)]).unwrap()
+        else {
+            panic!("checkpoint parity backend start did not suspend")
+        };
+        let BackendStep::SequentialSuspended(second) = resume_sequential(
+            backend,
+            &program,
+            &plan,
+            &[ResumableScalar::I64(4)],
+            &first,
+            ResumableScalar::I64(10),
+        )
+        .unwrap() else {
+            panic!("checkpoint parity backend did not park its second request")
+        };
+        assert_eq!(second.request(), &ResumableScalar::I64(12));
         assert_eq!(
             resume_sequential(
                 backend,

@@ -1,0 +1,667 @@
+use super::*;
+
+#[derive(Default)]
+struct FixtureAdapter {
+    calls: Vec<PreparedRequest>,
+    next: Option<AdapterObservation>,
+}
+
+impl FixtureAdapter {
+    fn returning(observation: AdapterObservation) -> Self {
+        Self {
+            calls: Vec::new(),
+            next: Some(observation),
+        }
+    }
+}
+
+impl OutboundAdapter for FixtureAdapter {
+    fn send(&mut self, request: &PreparedRequest) -> AdapterObservation {
+        self.calls.push(request.clone());
+        self.next
+            .take()
+            .expect("the boundary invokes a fixture at most once")
+    }
+}
+
+fn policy() -> OutboundPolicy {
+    OutboundPolicy::new(
+        "deploy.outbound.v1",
+        ["https://hooks.example.test".to_owned()],
+        1_024,
+        512,
+        5_000,
+        4,
+        3,
+    )
+    .unwrap()
+}
+
+fn capability() -> OutboundCapability {
+    OutboundCapability::grant_for_trusted_host("sha256:deployment", "invocation-7", policy())
+        .unwrap()
+}
+
+fn webhook() -> WebhookRequest {
+    WebhookRequest {
+        endpoint: "https://hooks.example.test/events?tenant=one".into(),
+        delivery_id: "delivery-1".into(),
+        idempotency_key: "job-9:event-4".into(),
+        content_type: "application/json".into(),
+        body: br#"{"ok":true}"#.to_vec(),
+        deadline_ms: 2_000,
+    }
+}
+
+#[test]
+fn webhook_is_signed_once_and_evidence_replays_against_exact_request() {
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 202,
+        body: b"queued".to_vec(),
+    });
+    let result = deliver_webhook(
+        capability(),
+        WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+        webhook(),
+        &mut adapter,
+    )
+    .unwrap();
+    assert_eq!(adapter.calls.len(), 1);
+    let sent = &adapter.calls[0];
+    assert_eq!(sent.endpoint, webhook().endpoint);
+    assert_eq!(sent.body, webhook().body);
+    assert_eq!(sent.max_redirects, 0);
+    assert_eq!(sent.headers.len(), 4);
+    assert_eq!(
+        sent.headers[0],
+        ("content-type".into(), "application/json".into())
+    );
+    assert_eq!(
+        sent.headers[1],
+        ("idempotency-key".into(), "job-9:event-4".into())
+    );
+    assert_eq!(
+        sent.headers[2],
+        ("x-semaprax-delivery-id".into(), "delivery-1".into())
+    );
+    assert_eq!(sent.headers[3].0, "x-semaprax-signature-v2");
+    assert!(sent.headers[3].1.starts_with("hmac-sha256="));
+    assert_eq!(sent.headers[3].1.len(), "hmac-sha256=".len() + 64);
+    let debug_request = format!("{sent:?}");
+    assert!(!debug_request.contains("{\"ok\":true}"));
+    assert!(!debug_request.contains("tenant=one"));
+    assert!(!debug_request.contains("job-9:event-4"));
+    assert_eq!(result.response_body.as_deref(), Some(b"queued".as_slice()));
+    assert_eq!(
+        result.evidence.disposition(),
+        &DeliveryDisposition::Accepted { status: 202 }
+    );
+    result
+        .evidence
+        .replay(
+            "sha256:deployment",
+            "invocation-7",
+            "deploy.outbound.v1",
+            result.evidence.disposition(),
+            sent,
+        )
+        .unwrap();
+    let wire = result.evidence.render();
+    assert_eq!(
+        DeliveryEvidence::decode_and_replay(
+            wire.as_bytes(),
+            "sha256:deployment",
+            "invocation-7",
+            "deploy.outbound.v1",
+            result.evidence.disposition(),
+            sent,
+        )
+        .unwrap(),
+        result.evidence
+    );
+
+    let mut tampered = sent.clone();
+    tampered.body.push(b'!');
+    assert_eq!(
+        result.evidence.replay(
+            "sha256:deployment",
+            "invocation-7",
+            "deploy.outbound.v1",
+            result.evidence.disposition(),
+            &tampered,
+        ),
+        Err(EvidenceMismatch::Request)
+    );
+    assert_eq!(
+        result.evidence.replay(
+            "sha256:other",
+            "invocation-7",
+            "deploy.outbound.v1",
+            result.evidence.disposition(),
+            sent,
+        ),
+        Err(EvidenceMismatch::Binding)
+    );
+}
+
+#[test]
+fn every_policy_refusal_happens_before_adapter_dispatch() {
+    let cases = [
+        ("http://hooks.example.test/events", Refusal::InvalidEndpoint),
+        (
+            "https://hooks.example.test@evil.test/",
+            Refusal::InvalidEndpoint,
+        ),
+        (
+            "https://hooks.example.test/events#secret",
+            Refusal::InvalidEndpoint,
+        ),
+        (
+            "https://other.example.test/events",
+            Refusal::AuthorityDenied,
+        ),
+    ];
+    for (endpoint, expected) in cases {
+        let mut request = webhook();
+        request.endpoint = endpoint.into();
+        let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+        assert_eq!(
+            deliver_webhook(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                request,
+                &mut adapter,
+            ),
+            Err(expected),
+            "{endpoint}"
+        );
+        assert!(adapter.calls.is_empty(), "{endpoint} reached the adapter");
+    }
+
+    let mut bad = webhook();
+    bad.body = vec![0; 1_025];
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    assert_eq!(
+        deliver_webhook(
+            capability(),
+            WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+            bad,
+            &mut adapter,
+        ),
+        Err(Refusal::RequestTooLarge)
+    );
+    assert!(adapter.calls.is_empty());
+
+    for deadline_ms in [0, 5_001] {
+        let mut request = webhook();
+        request.deadline_ms = deadline_ms;
+        let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+        assert_eq!(
+            deliver_webhook(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                request,
+                &mut adapter,
+            ),
+            Err(Refusal::InvalidDeadline)
+        );
+        assert!(adapter.calls.is_empty());
+    }
+}
+
+#[test]
+fn header_injection_and_identity_injection_are_refused_before_signing_or_send() {
+    let mutations: Vec<(fn(&mut WebhookRequest), Refusal)> = vec![
+        (
+            |request| request.content_type = "application/json\r\nx-evil: yes".into(),
+            Refusal::InvalidContentType,
+        ),
+        (
+            |request| request.delivery_id = "delivery\nsecond".into(),
+            Refusal::InvalidIdentity,
+        ),
+        (
+            |request| request.idempotency_key = "key value".into(),
+            Refusal::InvalidIdentity,
+        ),
+    ];
+    for (mutate, expected) in mutations {
+        let mut request = webhook();
+        mutate(&mut request);
+        let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+        assert_eq!(
+            deliver_webhook(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([9; 32]),
+                request,
+                &mut adapter,
+            ),
+            Err(expected)
+        );
+        assert!(adapter.calls.is_empty());
+    }
+}
+
+#[test]
+fn post_start_failures_and_overbound_responses_are_sticky_uncertain() {
+    let observations = [
+        AdapterObservation::FailedAfterStart {
+            reason: AdapterFailure::Tls,
+        },
+        AdapterObservation::DeadlineAfterStart,
+        AdapterObservation::Response {
+            status: 200,
+            body: vec![0; 513],
+        },
+    ];
+    for observation in observations {
+        let mut adapter = FixtureAdapter::returning(observation);
+        let result = deliver_webhook(
+            capability(),
+            WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+            webhook(),
+            &mut adapter,
+        )
+        .unwrap();
+        assert!(matches!(
+            result.evidence.disposition(),
+            DeliveryDisposition::Uncertain { .. }
+                | DeliveryDisposition::DeadlineUncertain
+                | DeliveryDisposition::ResponseTooLargeUncertain
+        ));
+        assert!(result.response_body.is_none());
+        assert_eq!(adapter.calls.len(), 1);
+    }
+}
+
+#[test]
+fn exporter_sorts_fields_redacts_secrets_and_preserves_primary_failure() {
+    let event = ExportEvent {
+        stable_event_id: "app.payment.failed".into(),
+        labels: vec![
+            ("region".into(), "eu".into()),
+            ("kind".into(), "card".into()),
+        ],
+        fields: vec![
+            ExportField {
+                name: "token".into(),
+                value: ProtectedExportValue::from_host_bytes(b"actual-secret-token".to_vec())
+                    .unwrap()
+                    .into_redacted(true),
+            },
+            ExportField {
+                name: "message".into(),
+                value: ExportFieldValue::Public("declined".into()),
+            },
+        ],
+    };
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::FailedAfterStart {
+        reason: AdapterFailure::Transport,
+    });
+    let observed = export_after_primary(
+        Err::<(), _>("primary database failure"),
+        capability(),
+        "https://hooks.example.test/collect".into(),
+        1_000,
+        event,
+        &mut adapter,
+    );
+    assert_eq!(observed.primary, Err("primary database failure"));
+    let exported = observed.export.unwrap();
+    assert!(matches!(
+        exported.evidence.disposition(),
+        DeliveryDisposition::Uncertain { .. }
+    ));
+    let payload = std::str::from_utf8(&adapter.calls[0].body).unwrap();
+    assert!(payload.contains("[REDACTED]"));
+    assert!(!payload.contains("actual-secret-token"));
+    assert!(payload.contains("sha256:"));
+    assert!(payload.find("message").unwrap() < payload.find("token").unwrap());
+    assert!(payload.find("kind").unwrap() < payload.find("region").unwrap());
+}
+
+#[test]
+fn exporter_cardinality_and_duplicate_names_refuse_without_transport() {
+    let events = [
+        ExportEvent {
+            stable_event_id: "event".into(),
+            labels: vec![("same".into(), "one".into()), ("same".into(), "two".into())],
+            fields: Vec::new(),
+        },
+        ExportEvent {
+            stable_event_id: "event".into(),
+            labels: (0..4)
+                .map(|index| (format!("label{index}"), "x".into()))
+                .collect(),
+            fields: Vec::new(),
+        },
+        ExportEvent {
+            stable_event_id: "event".into(),
+            labels: Vec::new(),
+            fields: vec![
+                ExportField {
+                    name: "same".into(),
+                    value: ExportFieldValue::Public("a".into()),
+                },
+                ExportField {
+                    name: "same".into(),
+                    value: ExportFieldValue::Public("b".into()),
+                },
+            ],
+        },
+    ];
+    for event in events {
+        let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+        assert_eq!(
+            export_event(
+                capability(),
+                "https://hooks.example.test/collect".into(),
+                1_000,
+                event,
+                &mut adapter,
+            ),
+            Err(Refusal::CardinalityExceeded)
+        );
+        assert!(adapter.calls.is_empty());
+    }
+}
+
+#[test]
+fn exporter_refuses_member_and_aggregate_max_plus_one_before_dispatch() {
+    let cases = [
+        ExportEvent {
+            stable_event_id: "event.member-overflow".into(),
+            labels: Vec::new(),
+            fields: vec![ExportField {
+                name: "value".into(),
+                value: ExportFieldValue::Public("x".repeat(MAX_EXPORT_VALUE_BYTES + 1)),
+            }],
+        },
+        ExportEvent {
+            stable_event_id: "event.aggregate-overflow".into(),
+            labels: Vec::new(),
+            fields: vec![
+                ExportField {
+                    name: "first".into(),
+                    value: ExportFieldValue::Public("x".repeat(600)),
+                },
+                ExportField {
+                    name: "second".into(),
+                    value: ExportFieldValue::Public("y".repeat(600)),
+                },
+            ],
+        },
+        // Raw members fit the aggregate preflight, but JSON escaping would
+        // exceed the request budget. The capped writer must refuse without
+        // growing beyond that budget or calling the adapter.
+        ExportEvent {
+            stable_event_id: "event.escape-overflow".into(),
+            labels: Vec::new(),
+            fields: vec![ExportField {
+                name: "slashes".into(),
+                value: ExportFieldValue::Public("\\".repeat(900)),
+            }],
+        },
+    ];
+    for event in cases {
+        let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+        assert_eq!(
+            export_event(
+                capability(),
+                "https://hooks.example.test/collect".into(),
+                1_000,
+                event,
+                &mut adapter,
+            ),
+            Err(Refusal::RequestTooLarge)
+        );
+        assert!(adapter.calls.is_empty());
+    }
+}
+
+#[test]
+fn exact_body_deadline_and_cardinality_limits_remain_admitted() {
+    let mut request = webhook();
+    request.body = vec![b'x'; 1_024];
+    request.deadline_ms = 5_000;
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 200,
+        body: vec![b'y'; 512],
+    });
+    assert!(deliver_webhook(
+        capability(),
+        WebhookSigningSecret::from_trusted_host_bytes([8; 32]),
+        request,
+        &mut adapter,
+    )
+    .is_ok());
+
+    let event = ExportEvent {
+        stable_event_id: "event.maximum".into(),
+        labels: (0..3)
+            .map(|index| (format!("label{index}"), "x".into()))
+            .collect(),
+        fields: (0..4)
+            .map(|index| ExportField {
+                name: format!("field{index}"),
+                value: ExportFieldValue::Public("x".into()),
+            })
+            .collect(),
+    };
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 200,
+        body: Vec::new(),
+    });
+    assert!(export_event(
+        capability(),
+        "https://hooks.example.test/collect".into(),
+        5_000,
+        event,
+        &mut adapter,
+    )
+    .is_ok());
+}
+
+#[test]
+fn signature_binds_delivery_identity_and_payload_without_exposing_key() {
+    assert_eq!(
+        format!(
+            "{:?}",
+            WebhookSigningSecret::from_trusted_host_bytes([0x41; 32])
+        ),
+        "WebhookSigningSecret([REDACTED])"
+    );
+    let mut first = FixtureAdapter::returning(AdapterObservation::NotDispatched {
+        reason: AdapterFailure::PolicyRejected,
+    });
+    let mut second = FixtureAdapter::returning(AdapterObservation::NotDispatched {
+        reason: AdapterFailure::PolicyRejected,
+    });
+    let mut third = FixtureAdapter::returning(AdapterObservation::NotDispatched {
+        reason: AdapterFailure::PolicyRejected,
+    });
+    deliver_webhook(
+        capability(),
+        WebhookSigningSecret::from_trusted_host_bytes([3; 32]),
+        webhook(),
+        &mut first,
+    )
+    .unwrap();
+    let mut changed = webhook();
+    changed.delivery_id = "delivery-2".into();
+    deliver_webhook(
+        capability(),
+        WebhookSigningSecret::from_trusted_host_bytes([3; 32]),
+        changed,
+        &mut second,
+    )
+    .unwrap();
+    assert_ne!(first.calls[0].headers[3], second.calls[0].headers[3]);
+
+    let mut changed = webhook();
+    changed.idempotency_key = "job-9:event-5".into();
+    deliver_webhook(
+        capability(),
+        WebhookSigningSecret::from_trusted_host_bytes([3; 32]),
+        changed,
+        &mut third,
+    )
+    .unwrap();
+    assert_ne!(first.calls[0].headers[3], third.calls[0].headers[3]);
+}
+
+#[test]
+fn signature_binds_post_origin_target_and_deployment() {
+    fn authority(origin: &str, deployment: &str) -> OutboundCapability {
+        let policy = OutboundPolicy::new(
+            "deploy.outbound.v1",
+            [origin.to_owned()],
+            1_024,
+            512,
+            5_000,
+            4,
+            3,
+        )
+        .unwrap();
+        OutboundCapability::grant_for_trusted_host(deployment, "invocation-7", policy).unwrap()
+    }
+
+    let cases = [
+        (
+            authority("https://hooks.example.test", "sha256:deployment"),
+            "https://hooks.example.test/events?tenant=one",
+        ),
+        (
+            authority("https://hooks-two.example.test", "sha256:deployment"),
+            "https://hooks-two.example.test/events?tenant=one",
+        ),
+        (
+            authority("https://hooks.example.test", "sha256:deployment"),
+            "https://hooks.example.test/other?tenant=one",
+        ),
+        (
+            authority("https://hooks.example.test", "sha256:other-deployment"),
+            "https://hooks.example.test/events?tenant=one",
+        ),
+    ];
+    let mut signatures = Vec::new();
+    for (capability, endpoint) in cases {
+        let mut request = webhook();
+        request.endpoint = endpoint.into();
+        let mut adapter = FixtureAdapter::returning(AdapterObservation::NotDispatched {
+            reason: AdapterFailure::PolicyRejected,
+        });
+        deliver_webhook(
+            capability,
+            WebhookSigningSecret::from_trusted_host_bytes([3; 32]),
+            request,
+            &mut adapter,
+        )
+        .unwrap();
+        signatures.push(adapter.calls[0].headers[3].1.clone());
+    }
+    let distinct = signatures.iter().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(distinct.len(), signatures.len());
+}
+
+#[test]
+fn evidence_decoder_refuses_noncanonical_unknown_and_drifted_inputs() {
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 204,
+        body: Vec::new(),
+    });
+    let result = deliver_webhook(
+        capability(),
+        WebhookSigningSecret::from_trusted_host_bytes([4; 32]),
+        webhook(),
+        &mut adapter,
+    )
+    .unwrap();
+    let sent = &adapter.calls[0];
+    let wire = result.evidence.render();
+
+    let spaced = format!(" {wire}");
+    assert_eq!(
+        DeliveryEvidence::decode_and_replay(
+            spaced.as_bytes(),
+            "sha256:deployment",
+            "invocation-7",
+            "deploy.outbound.v1",
+            result.evidence.disposition(),
+            sent,
+        ),
+        Err(EvidenceMismatch::NonCanonical)
+    );
+    let mut extra: serde_json::Value = serde_json::from_str(&wire).unwrap();
+    extra["unexpected"] = serde_json::json!(true);
+    assert_eq!(
+        DeliveryEvidence::decode_and_replay(
+            serde_json::to_string(&extra).unwrap().as_bytes(),
+            "sha256:deployment",
+            "invocation-7",
+            "deploy.outbound.v1",
+            result.evidence.disposition(),
+            sent,
+        ),
+        Err(EvidenceMismatch::Malformed)
+    );
+    assert_eq!(
+        DeliveryEvidence::decode_and_replay(
+            wire.as_bytes(),
+            "sha256:deployment",
+            "invocation-7",
+            "different-policy",
+            result.evidence.disposition(),
+            sent,
+        ),
+        Err(EvidenceMismatch::Policy)
+    );
+    let mut drifted: serde_json::Value = serde_json::from_str(&wire).unwrap();
+    drifted["delivery_id"] = serde_json::json!("different-delivery");
+    let drifted = serde_json::to_string(&drifted).unwrap();
+    assert_eq!(
+        DeliveryEvidence::decode_and_replay(
+            drifted.as_bytes(),
+            "sha256:deployment",
+            "invocation-7",
+            "deploy.outbound.v1",
+            result.evidence.disposition(),
+            sent,
+        ),
+        Err(EvidenceMismatch::Settlement)
+    );
+    assert_eq!(
+        DeliveryEvidence::decode_and_replay(
+            &vec![b'x'; MAX_EVIDENCE_BYTES + 1],
+            "sha256:deployment",
+            "invocation-7",
+            "deploy.outbound.v1",
+            result.evidence.disposition(),
+            sent,
+        ),
+        Err(EvidenceMismatch::Malformed)
+    );
+}
+
+#[test]
+fn default_port_is_canonical_but_redirect_authority_is_never_inferred() {
+    assert_eq!(
+        canonical_origin("https://EXAMPLE.test:443/path"),
+        Some("https://example.test".into())
+    );
+    assert_eq!(canonical_origin("https://example.test:0443/path"), None);
+    assert_eq!(
+        canonical_origin("https://example.test:444/path"),
+        Some("https://example.test:444".into())
+    );
+    assert_eq!(canonical_origin("https://example.test/path#fragment"), None);
+    assert_eq!(canonical_origin("https://bad..example/path"), None);
+    assert_eq!(canonical_origin("https://-bad.example/path"), None);
+    assert_eq!(canonical_origin("https://[not-ipv6]/path"), None);
+    assert_eq!(canonical_origin("https://example.test/a/../b"), None);
+    assert_eq!(canonical_origin("https://example.test/%2e%2e/b"), None);
+    assert_eq!(
+        canonical_origin("https://example.test/%41"),
+        Some("https://example.test".into())
+    );
+}

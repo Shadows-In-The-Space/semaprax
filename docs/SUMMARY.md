@@ -324,6 +324,7 @@ Audience: all documentation readers.
 - [Bounded Network Services](BOUNDED-NETWORK-SERVICES-V1.md)
 - [HTTPS Client Runtime](HTTPS-CLIENT-RUNTIME-V1.md)
 - [HTTPS Client I/O](HTTPS-CLIENT-IO-V1.md)
+- [Outbound Host Adapter v1](OUTBOUND-HOST-ADAPTER-V1.md)
 - [HTTP Application Routing](HTTP-APPLICATION-ROUTING-V1.md)
 - [Database Access v1](DATABASE-ACCESS-V1.md)
 - [Durable Jobs v1](DURABLE-JOBS-V1.md)

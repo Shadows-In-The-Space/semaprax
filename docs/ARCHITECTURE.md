@@ -803,6 +803,13 @@ Runtime v1](HTTPS-CLIENT-RUNTIME-V1.md).
 boundaries described by [HTTPS Client I/O v1](HTTPS-CLIENT-IO-V1.md) and
 [v2](HTTPS-CLIENT-IO-V2.md). The POST destination policy remains host-owned;
 fixture v4 binds exact request bodies without granting physical network authority.
+`src/outbound_host_adapter/` owns the higher-level issue-#193 host boundary for
+structured operational exports and signed webhooks. It consumes one explicit
+deployment capability, validates bounded request policy before one injected
+adapter call, and emits authority-free replay evidence. Its native Reqwest
+adapter disables ambient proxies, redirects, and retries; custom Rust adapter
+implementations remain trusted host code rather than a sandbox boundary. See
+[Outbound Host Adapter v1](OUTBOUND-HOST-ADAPTER-V1.md).
 `src/wasm/http_io.rs` and `src/wasm/aggregate/http_io.rs` own its distinct
 Core-Wasm import/status boundary and owned-result authentication;
 `src/project/npm/https_command.rs` and `https_runtime.mjs` own the replayable

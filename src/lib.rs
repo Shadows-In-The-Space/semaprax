@@ -115,6 +115,7 @@ pub mod model_call_receipt;
 #[doc(hidden)]
 pub(crate) mod native_settlement;
 pub mod openapi;
+pub mod outbound_host_adapter;
 #[cfg(any(test, feature = "unstable-native-host-internal"))]
 #[doc(hidden)]
 pub mod owned_resource_corpus;

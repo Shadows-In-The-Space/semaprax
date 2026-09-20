@@ -164,13 +164,38 @@ pub(super) fn run_authorize_stage(
     state: &RetainedValue,
     proposal_canonical: &str,
 ) -> Result<(AuthorizationOutcome, StageRecord), Vec<Diagnostic>> {
+    run_authorize_stage_on(
+        StageBackend::Interpreter,
+        program,
+        stage,
+        arguments,
+        max_steps,
+        policy_digest,
+        state,
+        proposal_canonical,
+    )
+}
+
+/// Execute the same checked grant transition on an explicitly selected backend.
+/// Decoding, binding and the single mint site are shared by every selection.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_authorize_stage_on(
+    backend: StageBackend<'_>,
+    program: &hir::ResolvedProgram,
+    stage: &AuthorizeStage,
+    arguments: &[RetainedValue],
+    max_steps: usize,
+    policy_digest: &str,
+    state: &RetainedValue,
+    proposal_canonical: &str,
+) -> Result<(AuthorizationOutcome, StageRecord), Vec<Diagnostic>> {
     let prepared = stage.stage().prepared();
     if prepared.function_id() != stage.stage().function_id() {
         return Err(vec![super::stages::invariant(
             "authorize.retained_call.identity",
         )]);
     }
-    let evaluation = dispatch(program, prepared, arguments, max_steps)?;
+    let evaluation = dispatch_on(backend, program, prepared, arguments, max_steps)?;
     if evaluation.function_id.as_str() != stage.stage().function_id() {
         return Err(vec![super::stages::invariant(
             "authorize.retained_call.dispatch",
@@ -386,6 +411,7 @@ impl StageExecutor for InterpreterStageExecutor {
 /// lifecycle's own retained `.spx` text -- never something the executor
 /// reads from the filesystem, so selecting the Wasm backend grants no
 /// ambient authority the interpreter backend does not have.
+#[derive(Clone, Copy)]
 pub(super) enum StageBackend<'a> {
     Interpreter,
     Native,

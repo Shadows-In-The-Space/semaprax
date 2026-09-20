@@ -97,6 +97,16 @@ format: `Unreleased` then release buckets, grouped by impact.
   Exact-current-head hosted evidence, carrier-side consumer hostility, and real
   generated endpoints remain outstanding (#173).
 
+- Drive the private frozen iterative Agent loop through the existing sealed
+  interpreter, native C11 `-O0`/`-O2`, and Core Wasm stage backends. The local
+  parity gate covers proposal admission, fresh consumed grants, injected binary
+  reads, continued and terminal reductions, cancellation, malformed proposals,
+  lifecycle ceilings, and semantic evidence settlement while leaving production
+  wrappers interpreter-only. It also fixes canonical lexical selection of ten-
+  plus synthesized Wasm projection exports without reordering driver, decode, or
+  cleanup plans. Native/Wasm interpreter-fuel and hosted evidence remain open
+  (#182).
+
 - Extend the source-live repair preview with an explicitly selected OpenCode
   Provider-Adapter route, durable V2 receipts, a restart-stable absolute
   deadline, and checkpoint identity bound to the chosen executable and

@@ -724,10 +724,14 @@ fn run_through_injected_driver(
         return Err(invariant("wasm_executor.driver.entry_diverged"));
     }
 
-    let selected = drivers
+    let mut selected = drivers
         .iter()
         .map(|driver| driver.id.clone())
         .collect::<Vec<_>>();
+    // Public descriptors require lexical export identity order: `.10` sorts
+    // before `.2`. Canonicalize only that selection, leaving driver, call and
+    // decoded-leaf order untouched. This never changes a cleanup plan.
+    selected.sort();
     let calls = drivers
         .iter()
         .map(|driver| match driver.projection {

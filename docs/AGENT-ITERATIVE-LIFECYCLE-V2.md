@@ -57,6 +57,25 @@ agent_lifecycle::iterative::tests` (the original six-case focused corpus).
 The selector remains the executable reference; its earlier local run is not
 the current release's evidence ceiling.
 
+The private frozen-run parity selector
+`agent_lifecycle::tests::lifecycle_parity` additionally exercises this same
+driver kernel with interpreter, native C11 `-O0`/`-O2`, and Core Wasm stage
+dispatch. Its test-only entry supplies the backend explicitly, including the
+Wasm source text as data. Both production frozen-run entries (ordinary and
+migration-seeded) continue to select the interpreter. The live and checkpoint
+routes do not gain a backend selector.
+
+This authored local gate compares proposal admission, fresh authorization
+bindings and consumed requests, an injected read operation, continued State,
+terminal Result, stage order, turn/effect counters, cancellation and
+iteration/stage ceilings. It requires `clang` and `node`; a tool-absent skip
+is not execution evidence. Native and Wasm report no interpreter step or
+cleanup-event counts and do not enforce interpreter fuel. The gate compares
+the semantic evidence fields while excluding only stage step counts; it does
+not claim byte-identical cross-engine evidence or cross-engine fuel parity.
+Interpreter fuel exhaustion has a separate preservation case. This private
+selector does not extend the released production or hosted support claim.
+
 The canonical v2 document explicitly records initialize-once, the iteration
 order, Continue targeting observe, terminal cases, and exact Step case/field
 mappings. It does not embed the v1 lifecycle wire or acyclic-only nonclaims.

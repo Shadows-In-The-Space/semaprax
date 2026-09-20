@@ -235,7 +235,15 @@ impl CompiledIterativeLifecycle {
         budget: IterativeBudget,
         cancellation: &AgentCancellation,
     ) -> Result<IterativeRun, DriverFailure> {
-        self.run_with_driver_initial(task, proposals, driver, budget, cancellation, None)
+        self.run_with_driver_initial(
+            task,
+            proposals,
+            driver,
+            budget,
+            cancellation,
+            None,
+            authorization::StageBackend::Interpreter,
+        )
     }
 
     pub(crate) fn run_with_driver_seed(
@@ -247,9 +255,33 @@ impl CompiledIterativeLifecycle {
         cancellation: &AgentCancellation,
         seed: &crate::execution_revision::typed::migration::MigrationSeed,
     ) -> Result<IterativeRun, DriverFailure> {
-        self.run_with_driver_initial(task, proposals, driver, budget, cancellation, Some(seed))
+        self.run_with_driver_initial(
+            task,
+            proposals,
+            driver,
+            budget,
+            cancellation,
+            Some(seed),
+            authorization::StageBackend::Interpreter,
+        )
     }
 
+    /// Local frozen-run parity only. Production and seeded callers retain the
+    /// interpreter; explicit Wasm source is data, never a filesystem lookup.
+    #[cfg(test)]
+    pub(in crate::agent_lifecycle) fn run_with_driver_on(
+        &self,
+        task: &LifecycleTask,
+        proposals: &[String],
+        driver: &mut dyn IterativeDriver,
+        budget: IterativeBudget,
+        cancellation: &AgentCancellation,
+        backend: authorization::StageBackend<'_>,
+    ) -> Result<IterativeRun, DriverFailure> {
+        self.run_with_driver_initial(task, proposals, driver, budget, cancellation, None, backend)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn run_with_driver_initial(
         &self,
         task: &LifecycleTask,
@@ -258,6 +290,7 @@ impl CompiledIterativeLifecycle {
         budget: IterativeBudget,
         cancellation: &AgentCancellation,
         seed: Option<&crate::execution_revision::typed::migration::MigrationSeed>,
+        backend: authorization::StageBackend<'_>,
     ) -> Result<IterativeRun, DriverFailure> {
         if budget.max_iterations > 4096 || budget.max_stages > 12289 {
             return Err(vec![bad("budget.capacity")].into());
@@ -305,7 +338,8 @@ impl CompiledIterativeLifecycle {
             ($stage:expr, $arguments:expr) => {{
                 boundary!();
                 driver.before_stage($stage.role(), run.iterations, budget.max_steps_per_stage)?;
-                let evaluation = authorization::dispatch(
+                let evaluation = authorization::dispatch_on(
+                    backend,
                     &inner.program,
                     $stage.prepared(),
                     $arguments,
@@ -372,7 +406,8 @@ impl CompiledIterativeLifecycle {
             let mut args = vec![state.clone()];
             args.extend(projected.iter().cloned());
             driver.before_stage("authorize", run.iterations, budget.max_steps_per_stage)?;
-            let (decision, record) = authorization::run_authorize_stage(
+            let (decision, record) = authorization::run_authorize_stage_on(
+                backend,
                 &inner.program,
                 &inner.binding.authorize,
                 &args,

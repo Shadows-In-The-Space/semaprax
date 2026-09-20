@@ -10,6 +10,7 @@
 use super::*;
 use crate::interpreter::retained_call::evaluate_retained_call;
 
+mod lifecycle_parity;
 /// Multi-turn cross-engine conversation parity (#182/#143). Kept in its own
 /// submodule rather than appended here: this file is already near the
 /// repository's 1500-line module cap, and every gate in it that scans a
@@ -373,7 +374,12 @@ fn the_authorization_value_has_exactly_one_mint_site_in_the_crate() {
 
     // The value derives nothing: it is not `Clone`, not `Copy`, and has no
     // `Default`, so one grant admits at most one effect.
-    assert!(!authorization.contains("#[derive"));
+    // Audit the authorization carriers, not the copyable backend selector.
+    let carriers = authorization
+        .split_once("/// The single mint site")
+        .unwrap()
+        .0;
+    assert!(!carriers.contains("#[derive"));
     assert!(!authorization.contains("impl Clone for Authorized"));
     assert!(!authorization.contains("impl Default for Authorized"));
 

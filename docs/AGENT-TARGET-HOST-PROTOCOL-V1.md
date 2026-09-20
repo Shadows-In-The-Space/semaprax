@@ -53,11 +53,15 @@ may replace it.
 `TargetEvidence` records the opaque grant identity, authorization binding,
 operation facts, turn, request/result commitments, reservation accounting,
 dispatch bit, and normalized settlement. Its domain-separated digest is a
-common semantic observation for retained, C11, and Core-Wasm adapters. It is
-not authority: `replay` recomputes the request commitment and checks the
-retained observation digest without invoking a handler. It does not receive or
-independently replay result bytes, and cannot construct a grant, run target
-code, resume a checkpoint, or publish an artifact.
+common semantic observation for retained, C11, and Core-Wasm adapters. Both
+the request and observation have exact bounded length-framed v1 canonical
+wires. `TargetEvidence::decode` independently rejects malformed, noncanonical
+or internally inconsistent observations; `replay_wire` then rederives the
+request commitment from the retained request wire and checks the observation
+without invoking a handler. It does not receive or independently replay result
+bytes, and cannot construct a grant, run target code, resume a checkpoint, or
+publish an artifact. Decoding a request is deliberately private to replay, so
+request bytes cannot be converted into a dispatch capability.
 
 `TargetEffectRun` retains each complete `TargetEvidence` in execution order as
 well as its digest in the compact aggregate document. A caller that retained
@@ -84,6 +88,16 @@ production target support. Per #182, durable/distributed checkpoint transport,
 arbitrary nominal carrier ABI, native/Wasm backend selection, ambient
 providers, physical trap recovery, and hosted target evidence remain outside
 this tranche.
+
+The crate-internal parity selector additionally drives this same live target
+loop through the sealed interpreter, native C11 `-O0`/`-O2`, and Core-Wasm
+stage executors. It compares the terminal carrier, target accounting, each
+canonical host request and each canonical target observation, then decodes and
+replays every retained observation against its request wire without handler
+work. A pre-cancelled run reaches no handler on the interpreter, native and
+Wasm legs. This is local execution evidence only; it does not add a public
+backend selector, a deployed target adapter, durable target replay, or a
+claim that target artifacts themselves provide authority.
 
 Focused implementation gate (run by the coordinating agent):
 

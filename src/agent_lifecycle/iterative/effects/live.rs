@@ -407,6 +407,53 @@ impl CompiledTypedEffects {
         effects: EffectBudget,
         cancellation: &AgentCancellation,
     ) -> Result<TargetEffectRun, Vec<Diagnostic>> {
+        self.run_target_live_inner(
+            task,
+            source,
+            handler,
+            stages,
+            effects,
+            cancellation,
+            crate::agent_lifecycle::authorization::StageBackend::Interpreter,
+        )
+    }
+
+    /// Local parity-only entry. It does not select a production target: the
+    /// caller must supply one sealed stage executor backend and an explicitly
+    /// injected host handler, while the target protocol remains unchanged.
+    #[cfg(test)]
+    pub(in crate::agent_lifecycle) fn run_target_live_on(
+        &self,
+        task: &LifecycleTask,
+        source: &mut dyn ProposalSource,
+        handler: &mut dyn TargetHostHandler,
+        stages: IterativeBudget,
+        effects: EffectBudget,
+        cancellation: &AgentCancellation,
+        backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+    ) -> Result<TargetEffectRun, Vec<Diagnostic>> {
+        self.run_target_live_inner(
+            task,
+            source,
+            handler,
+            stages,
+            effects,
+            cancellation,
+            backend,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_target_live_inner(
+        &self,
+        task: &LifecycleTask,
+        source: &mut dyn ProposalSource,
+        handler: &mut dyn TargetHostHandler,
+        stages: IterativeBudget,
+        effects: EffectBudget,
+        cancellation: &AgentCancellation,
+        backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+    ) -> Result<TargetEffectRun, Vec<Diagnostic>> {
         let effects = EffectBudget {
             max_calls: effects.max_calls.min(self.limits.max_calls),
             max_argument_bytes: effects
@@ -442,7 +489,14 @@ impl CompiledTypedEffects {
         };
         let lifecycle = self
             .lifecycle
-            .run_with_target_driver_live(task, source, &mut dispatch, stages, cancellation)
+            .run_with_target_driver_live_on(
+                task,
+                source,
+                &mut dispatch,
+                stages,
+                cancellation,
+                backend,
+            )
             .map_err(crate::agent_lifecycle::iterative::driver::DriverFailure::into_diagnostics)?;
         let evidence = format!(
             "{{\"schema\":\"semaprax.agent-target-effects-evidence.v1\",\"registry\":{},\"lifecycle_evidence\":{},\"limits\":[{},{},{},{},{}],\"accounting\":[{},{},{},{}],\"target_evidence\":[{}],\"failure\":{}}}\n",

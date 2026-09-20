@@ -684,12 +684,18 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             }],
         }
     }
-    pub(crate) fn compile() -> CompiledTypedEffects {
-        let source = source("Step::Complete { summary: state.objective, budget: state.budget, status: state.epoch }").replace("sequence > 0usize", "sequence <= 1usize");
+    pub(crate) fn typed_effect_source() -> String {
+        source(
+            "Step::Complete { summary: state.objective, budget: state.budget, status: state.epoch }",
+        )
+        .replace("sequence > 0usize", "sequence <= 1usize")
+    }
+
+    pub(crate) fn compile_from_source(source: &str) -> CompiledTypedEffects {
         let mut second = operation();
         second.operation_id = "fixture.read.second".into();
         compile_typed_effects(
-            &source,
+            source,
             "typed-effects.spx",
             &deployment(),
             "fixture.agent.type.step",
@@ -697,6 +703,10 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             vec![operation(), second],
         )
         .unwrap_or_else(|e| panic!("{e:?}"))
+    }
+
+    pub(crate) fn compile() -> CompiledTypedEffects {
+        compile_from_source(&typed_effect_source())
     }
     struct Handler {
         calls: usize,
@@ -786,6 +796,181 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             })
         }
     }
+
+    struct ParityTargetHandler {
+        calls: usize,
+        request_wires: Vec<Vec<u8>>,
+    }
+
+    impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler
+        for ParityTargetHandler
+    {
+        fn dispatch(
+            &mut self,
+            request: &crate::agent_lifecycle::authorization::target_protocol::TargetHostRequest,
+            sink: &mut crate::agent_lifecycle::authorization::target_protocol::TargetResponseSink,
+        ) -> Result<(), crate::agent_lifecycle::authorization::target_protocol::TargetHostError>
+        {
+            self.calls += 1;
+            self.request_wires.push(request.canonical_wire());
+            let payload = encode_fields(&[("value".into(), RetainedValue::I64(8))]);
+            sink.write(
+                &crate::agent_lifecycle::authorization::target_protocol::TypedCarrier::new(
+                    request.operation().result_type(),
+                    payload.into_bytes(),
+                )
+                .map_err(|_| {
+                    crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
+                })?
+                .encode(),
+            )
+            .map_err(|_| {
+                crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
+            })
+        }
+    }
+
+    fn target_backend_tools_available() -> bool {
+        std::process::Command::new("clang")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+            && std::process::Command::new("node")
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+    }
+
+    fn target_run_on(
+        compiled: &CompiledTypedEffects,
+        module_source: &str,
+        backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+        cancellation: &AgentCancellation,
+    ) -> (TargetEffectRun, ParityTargetHandler) {
+        let proposal = crate::agent_lifecycle::tests::proposal(&compiled.lifecycle.inner, "1", "0");
+        let mut source = TargetSource {
+            proposals: vec![proposal; 4],
+            next: 0,
+        };
+        let mut handler = ParityTargetHandler {
+            calls: 0,
+            request_wires: Vec::new(),
+        };
+        let run = compiled
+            .run_target_live_on(
+                &LifecycleTask {
+                    objective: vec![],
+                    budget: 10,
+                },
+                &mut source,
+                &mut handler,
+                IterativeBudget::default(),
+                budgets(),
+                cancellation,
+                backend,
+            )
+            .unwrap_or_else(|errors| panic!("target {module_source:?}: {errors:?}"));
+        (run, handler)
+    }
+
+    #[test]
+    fn target_host_wires_and_settlement_match_across_stage_backends() {
+        if !target_backend_tools_available() {
+            eprintln!("skipping target stage bridge: clang or node unavailable");
+            return;
+        }
+        let module_source = typed_effect_source();
+        let compiled = compile_from_source(&module_source);
+        let cancellation = AgentCancellation::new();
+        let (expected, expected_handler) = target_run_on(
+            &compiled,
+            &module_source,
+            crate::agent_lifecycle::authorization::StageBackend::Interpreter,
+            &cancellation,
+        );
+        assert_eq!(expected.lifecycle().status(), IterativeStatus::Complete);
+        assert_eq!(expected_handler.calls, 3);
+        assert_eq!(expected.target_evidence().len(), 3);
+        for (evidence, request_wire) in expected
+            .target_evidence()
+            .iter()
+            .zip(&expected_handler.request_wires)
+        {
+            crate::agent_lifecycle::authorization::target_protocol::TargetEvidence::decode(
+                &evidence.canonical_wire(),
+            )
+            .unwrap()
+            .replay_wire(request_wire)
+            .unwrap();
+        }
+
+        for (label, backend) in [
+            (
+                "native -O0",
+                crate::agent_lifecycle::authorization::StageBackend::Native,
+            ),
+            (
+                "native -O2",
+                crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+            ),
+            (
+                "Core Wasm",
+                crate::agent_lifecycle::authorization::StageBackend::Wasm {
+                    source: &module_source,
+                },
+            ),
+        ] {
+            let cancellation = AgentCancellation::new();
+            let (actual, handler) =
+                target_run_on(&compiled, &module_source, backend, &cancellation);
+            assert_eq!(
+                actual.lifecycle().status(),
+                expected.lifecycle().status(),
+                "{label}"
+            );
+            assert_eq!(
+                actual.lifecycle().value(),
+                expected.lifecycle().value(),
+                "{label}"
+            );
+            assert_eq!(actual.accounting(), expected.accounting(), "{label}");
+            assert_eq!(actual.failure(), expected.failure(), "{label}");
+            assert_eq!(
+                handler.request_wires, expected_handler.request_wires,
+                "{label}"
+            );
+            assert_eq!(handler.calls, expected_handler.calls, "{label}");
+            assert_eq!(
+                actual
+                    .target_evidence()
+                    .iter()
+                    .map(crate::agent_lifecycle::authorization::target_protocol::TargetEvidence::canonical_wire)
+                    .collect::<Vec<_>>(),
+                expected
+                    .target_evidence()
+                    .iter()
+                    .map(crate::agent_lifecycle::authorization::target_protocol::TargetEvidence::canonical_wire)
+                    .collect::<Vec<_>>(),
+                "{label}"
+            );
+        }
+
+        for backend in [
+            crate::agent_lifecycle::authorization::StageBackend::Interpreter,
+            crate::agent_lifecycle::authorization::StageBackend::Native,
+            crate::agent_lifecycle::authorization::StageBackend::Wasm {
+                source: &module_source,
+            },
+        ] {
+            let cancellation = AgentCancellation::new();
+            cancellation.cancel();
+            let (run, handler) = target_run_on(&compiled, &module_source, backend, &cancellation);
+            assert_eq!(run.lifecycle().status(), IterativeStatus::Cancelled);
+            assert!(run.target_evidence().is_empty());
+            assert_eq!(handler.calls, 0);
+        }
+    }
+
     #[test]
     fn source_live_target_route_moves_the_checked_grant_into_the_injected_host() {
         let compiled = compile();

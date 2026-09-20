@@ -16,6 +16,8 @@ use crate::agent_runtime::AgentCancellation;
 
 /// Closed, length-framed schema for an admitted target result carrier.
 pub const CARRIER_SCHEMA: &str = "semaprax.agent-target-carrier.v1";
+/// Closed, length-framed schema for an authority-free target request.
+pub const REQUEST_SCHEMA: &str = "semaprax.agent-target-host-request.v1";
 /// Schema for an authority-free target execution observation.
 pub const EVIDENCE_SCHEMA: &str = "semaprax.agent-target-host-evidence.v1";
 
@@ -26,6 +28,13 @@ const RESULT_DOMAIN: &[u8] = b"semaprax.agent-target-host.result.v1\0";
 const EVIDENCE_DOMAIN: &[u8] = b"semaprax.agent-target-host.evidence.v1\0";
 const MAX_IDENTIFIER_BYTES: usize = 240;
 const MAX_CARRIER_BYTES: usize = 65_536;
+const SHA256_DIGEST_BYTES: usize = 71;
+const MAX_REQUEST_BYTES: usize = (9 * std::mem::size_of::<u64>())
+    + REQUEST_SCHEMA.len()
+    + SHA256_DIGEST_BYTES
+    + (4 * MAX_IDENTIFIER_BYTES)
+    + (2 * std::mem::size_of::<u64>())
+    + MAX_CARRIER_BYTES;
 
 /// Exact source-owned operation facts.  A grant is bound to both identities.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -329,15 +338,61 @@ impl TargetHostRequest {
         self.fuel
     }
 
-    fn encode(&self) -> Vec<u8> {
+    /// Canonical authority-free request bytes.  These bytes are diagnostic or
+    /// replay input only: this type has no public constructor and no decode
+    /// route, so they cannot be turned into a handler dispatch capability.
+    pub fn canonical_wire(&self) -> Vec<u8> {
         let argument = self.argument.encode();
         let mut bytes = Vec::with_capacity(argument.len() + 512);
+        frame(&mut bytes, REQUEST_SCHEMA.as_bytes());
         frame(&mut bytes, self.grant_id.as_bytes());
         self.operation.canonical(&mut bytes);
         frame(&mut bytes, &self.turn.to_be_bytes());
         frame(&mut bytes, &self.fuel.to_be_bytes());
         frame(&mut bytes, &argument);
         bytes
+    }
+
+    fn decode_for_replay(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.len() > MAX_REQUEST_BYTES {
+            return Err(ProtocolError::MalformedRequest);
+        }
+        let mut cursor = 0;
+        let schema = take_frame_request(bytes, &mut cursor)?;
+        let grant_id = take_frame_request(bytes, &mut cursor)?;
+        let operation_id = take_frame_request(bytes, &mut cursor)?;
+        let effect_id = take_frame_request(bytes, &mut cursor)?;
+        let argument_type = take_frame_request(bytes, &mut cursor)?;
+        let result_type = take_frame_request(bytes, &mut cursor)?;
+        let turn = take_u64_request(bytes, &mut cursor)?;
+        let fuel = take_u64_request(bytes, &mut cursor)?;
+        let argument = take_frame_request(bytes, &mut cursor)?;
+        if cursor != bytes.len() || schema != REQUEST_SCHEMA.as_bytes() {
+            return Err(ProtocolError::MalformedRequest);
+        }
+        let grant_id =
+            std::str::from_utf8(grant_id).map_err(|_| ProtocolError::MalformedRequest)?;
+        validate_digest(grant_id).map_err(|_| ProtocolError::MalformedRequest)?;
+        let operation = TargetOperation::new(
+            decode_identifier(operation_id, ProtocolError::MalformedRequest)?,
+            decode_identifier(effect_id, ProtocolError::MalformedRequest)?,
+            decode_identifier(argument_type, ProtocolError::MalformedRequest)?,
+            decode_identifier(result_type, ProtocolError::MalformedRequest)?,
+        )
+        .map_err(|_| ProtocolError::MalformedRequest)?;
+        let argument = TypedCarrier::decode(argument, operation.argument_type())
+            .map_err(|_| ProtocolError::MalformedRequest)?;
+        let request = Self {
+            grant_id: grant_id.to_owned(),
+            operation,
+            turn,
+            argument,
+            fuel,
+        };
+        if request.canonical_wire() != bytes {
+            return Err(ProtocolError::MalformedRequest);
+        }
+        Ok(request)
     }
 }
 
@@ -431,6 +486,25 @@ impl Settlement {
             Self::ResultTypeMismatch => "result_type_mismatch",
         }
     }
+
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "returned" => Self::Returned,
+            "cancelled" => Self::Cancelled,
+            "grant_budget" => Self::GrantBudget,
+            "call_budget" => Self::CallBudget,
+            "request_budget" => Self::RequestBudget,
+            "fuel_exhausted" => Self::FuelExhausted,
+            "result_budget" => Self::ResultBudget,
+            "host_failed" => Self::HostFailed,
+            "host_panicked" => Self::HostPanicked,
+            "argument_type_mismatch" => Self::ArgumentTypeMismatch,
+            "argument_binding_mismatch" => Self::ArgumentBindingMismatch,
+            "malformed_result" => Self::MalformedResult,
+            "result_type_mismatch" => Self::ResultTypeMismatch,
+            _ => return None,
+        })
+    }
 }
 
 /// The settled turn result.  A failure never carries a typed result.
@@ -482,30 +556,10 @@ impl TargetEvidence {
         &self.digest
     }
 
-    /// Independent no-dispatch replay.  It rederives the request commitment
-    /// from exact host-visible data and verifies the sealed observation.
-    pub fn replay(&self, request: &TargetHostRequest) -> Result<(), ProtocolError> {
-        if request.grant_id != self.grant_id
-            || request.operation != self.operation
-            || request.turn != self.turn
-        {
-            return Err(ProtocolError::ReplayMismatch);
-        }
-        if digest(REQUEST_DOMAIN, &request.encode()) != self.request_digest
-            || self.digest != self.compute_digest()
-        {
-            return Err(ProtocolError::ReplayMismatch);
-        }
-        if !self.dispatched && self.result_digest.is_some() {
-            return Err(ProtocolError::ReplayMismatch);
-        }
-        if self.settlement == Settlement::Returned && self.result_digest.is_none() {
-            return Err(ProtocolError::ReplayMismatch);
-        }
-        Ok(())
-    }
-
-    fn compute_digest(&self) -> String {
+    /// Canonical, bounded observation bytes for independent no-dispatch
+    /// replay.  The opaque grant identity remains data: decoding this wire
+    /// never creates a [`TargetGrant`] or an adapter capability.
+    pub fn canonical_wire(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         frame(&mut bytes, EVIDENCE_SCHEMA.as_bytes());
         frame(&mut bytes, self.grant_id.as_bytes());
@@ -523,7 +577,139 @@ impl TargetEvidence {
         frame(&mut bytes, &self.accounting.fuel.to_be_bytes());
         frame(&mut bytes, &[u8::from(self.dispatched)]);
         frame(&mut bytes, self.settlement.text().as_bytes());
-        digest(EVIDENCE_DOMAIN, &bytes)
+        bytes
+    }
+
+    /// Decodes an exact canonical target observation.  The reconstructed value
+    /// is descriptive only and must still be paired with an exact request for
+    /// replay; it has no route to host dispatch.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.len() > MAX_REQUEST_BYTES {
+            return Err(ProtocolError::MalformedEvidence);
+        }
+        let mut cursor = 0;
+        let schema = take_frame_evidence(bytes, &mut cursor)?;
+        let grant_id = take_frame_evidence(bytes, &mut cursor)?;
+        let authorization_binding = take_frame_evidence(bytes, &mut cursor)?;
+        let operation_id = take_frame_evidence(bytes, &mut cursor)?;
+        let effect_id = take_frame_evidence(bytes, &mut cursor)?;
+        let argument_type = take_frame_evidence(bytes, &mut cursor)?;
+        let result_type = take_frame_evidence(bytes, &mut cursor)?;
+        let turn = take_u64_evidence(bytes, &mut cursor)?;
+        let request_digest = take_frame_evidence(bytes, &mut cursor)?;
+        let result_digest = take_frame_evidence(bytes, &mut cursor)?;
+        let calls = take_u64_evidence(bytes, &mut cursor)?;
+        let request_bytes = take_u64_evidence(bytes, &mut cursor)?;
+        let result_bytes = take_u64_evidence(bytes, &mut cursor)?;
+        let fuel = take_u64_evidence(bytes, &mut cursor)?;
+        let dispatched = take_frame_evidence(bytes, &mut cursor)?;
+        let settlement = take_frame_evidence(bytes, &mut cursor)?;
+        if cursor != bytes.len() || schema != EVIDENCE_SCHEMA.as_bytes() || dispatched.len() != 1 {
+            return Err(ProtocolError::MalformedEvidence);
+        }
+        let grant_id = decode_digest(grant_id, ProtocolError::MalformedEvidence)?;
+        let authorization_binding =
+            decode_digest(authorization_binding, ProtocolError::MalformedEvidence)?;
+        let request_digest = decode_digest(request_digest, ProtocolError::MalformedEvidence)?;
+        let result_digest = if result_digest.is_empty() {
+            None
+        } else {
+            Some(decode_digest(
+                result_digest,
+                ProtocolError::MalformedEvidence,
+            )?)
+        };
+        let operation = TargetOperation::new(
+            decode_identifier(operation_id, ProtocolError::MalformedEvidence)?,
+            decode_identifier(effect_id, ProtocolError::MalformedEvidence)?,
+            decode_identifier(argument_type, ProtocolError::MalformedEvidence)?,
+            decode_identifier(result_type, ProtocolError::MalformedEvidence)?,
+        )
+        .map_err(|_| ProtocolError::MalformedEvidence)?;
+        let dispatched = match dispatched[0] {
+            0 => false,
+            1 => true,
+            _ => return Err(ProtocolError::MalformedEvidence),
+        };
+        let settlement = Settlement::parse(
+            std::str::from_utf8(settlement).map_err(|_| ProtocolError::MalformedEvidence)?,
+        )
+        .ok_or(ProtocolError::MalformedEvidence)?;
+        let mut evidence = Self {
+            grant_id,
+            authorization_binding,
+            operation,
+            turn,
+            request_digest,
+            result_digest,
+            accounting: TargetAccounting {
+                calls,
+                request_bytes,
+                result_bytes,
+                fuel,
+            },
+            dispatched,
+            settlement,
+            digest: String::new(),
+        };
+        evidence
+            .validate_observation()
+            .map_err(|_| ProtocolError::MalformedEvidence)?;
+        evidence.digest = evidence.compute_digest();
+        if evidence.canonical_wire() != bytes {
+            return Err(ProtocolError::MalformedEvidence);
+        }
+        Ok(evidence)
+    }
+
+    /// Parses an independently retained request wire and verifies the same
+    /// observation without invoking a host handler.
+    pub fn replay_wire(&self, request_wire: &[u8]) -> Result<(), ProtocolError> {
+        let request = TargetHostRequest::decode_for_replay(request_wire)?;
+        self.replay(&request)
+    }
+
+    /// Independent no-dispatch replay.  It rederives the request commitment
+    /// from exact host-visible data and verifies the sealed observation.
+    pub fn replay(&self, request: &TargetHostRequest) -> Result<(), ProtocolError> {
+        if request.grant_id != self.grant_id
+            || request.operation != self.operation
+            || request.turn != self.turn
+        {
+            return Err(ProtocolError::ReplayMismatch);
+        }
+        if digest(REQUEST_DOMAIN, &request.canonical_wire()) != self.request_digest
+            || self.digest != self.compute_digest()
+        {
+            return Err(ProtocolError::ReplayMismatch);
+        }
+        self.validate_observation()
+            .map_err(|_| ProtocolError::ReplayMismatch)?;
+        Ok(())
+    }
+
+    fn compute_digest(&self) -> String {
+        digest(EVIDENCE_DOMAIN, &self.canonical_wire())
+    }
+
+    fn validate_observation(&self) -> Result<(), ProtocolError> {
+        let pre_dispatch = matches!(
+            self.settlement,
+            Settlement::Cancelled
+                | Settlement::GrantBudget
+                | Settlement::CallBudget
+                | Settlement::RequestBudget
+                | Settlement::FuelExhausted
+                | Settlement::ArgumentTypeMismatch
+                | Settlement::ArgumentBindingMismatch
+        );
+        if pre_dispatch != !self.dispatched
+            || (!self.dispatched && self.result_digest.is_some())
+            || (self.settlement == Settlement::Returned && self.result_digest.is_none())
+        {
+            return Err(ProtocolError::ReplayMismatch);
+        }
+        Ok(())
     }
 }
 
@@ -545,7 +731,7 @@ pub(in crate::agent_lifecycle) fn dispatch(
         argument,
         fuel,
     };
-    let request_digest = digest(REQUEST_DOMAIN, &request.encode());
+    let request_digest = digest(REQUEST_DOMAIN, &request.canonical_wire());
     let baseline = *accounting;
     if cancellation.is_cancelled() {
         return settled(
@@ -591,7 +777,8 @@ pub(in crate::agent_lifecycle) fn dispatch(
             None,
         );
     }
-    if let Err(settlement) = accounting.reserve(request.encode().len() as u64, fuel, limits) {
+    if let Err(settlement) = accounting.reserve(request.canonical_wire().len() as u64, fuel, limits)
+    {
         return settled(
             grant,
             request_digest,
@@ -728,6 +915,8 @@ pub enum ProtocolError {
     InvalidDigest,
     CarrierTooLarge,
     MalformedCarrier,
+    MalformedRequest,
+    MalformedEvidence,
     ResultTypeMismatch,
     ReplayMismatch,
 }
@@ -785,6 +974,42 @@ fn take_frame<'a>(input: &'a [u8], cursor: &mut usize) -> Result<&'a [u8], Proto
         .ok_or(ProtocolError::MalformedCarrier)?;
     *cursor = end;
     Ok(value)
+}
+
+fn take_frame_request<'a>(input: &'a [u8], cursor: &mut usize) -> Result<&'a [u8], ProtocolError> {
+    take_frame(input, cursor).map_err(|_| ProtocolError::MalformedRequest)
+}
+
+fn take_frame_evidence<'a>(input: &'a [u8], cursor: &mut usize) -> Result<&'a [u8], ProtocolError> {
+    take_frame(input, cursor).map_err(|_| ProtocolError::MalformedEvidence)
+}
+
+fn take_u64_request(input: &[u8], cursor: &mut usize) -> Result<u64, ProtocolError> {
+    let bytes = take_frame_request(input, cursor)?;
+    bytes
+        .try_into()
+        .map(u64::from_be_bytes)
+        .map_err(|_| ProtocolError::MalformedRequest)
+}
+
+fn take_u64_evidence(input: &[u8], cursor: &mut usize) -> Result<u64, ProtocolError> {
+    let bytes = take_frame_evidence(input, cursor)?;
+    bytes
+        .try_into()
+        .map(u64::from_be_bytes)
+        .map_err(|_| ProtocolError::MalformedEvidence)
+}
+
+fn decode_identifier(bytes: &[u8], error: ProtocolError) -> Result<String, ProtocolError> {
+    let value = std::str::from_utf8(bytes).map_err(|_| error)?;
+    validate_identifier(value).map_err(|_| error)?;
+    Ok(value.to_owned())
+}
+
+fn decode_digest(bytes: &[u8], error: ProtocolError) -> Result<String, ProtocolError> {
+    let value = std::str::from_utf8(bytes).map_err(|_| error)?;
+    validate_digest(value).map_err(|_| error)?;
+    Ok(value.to_owned())
 }
 
 fn digest(domain: &[u8], bytes: &[u8]) -> String {
@@ -894,6 +1119,59 @@ mod tests {
         assert_eq!(
             handler.calls, 1,
             "evidence replay has no dispatch authority"
+        );
+    }
+
+    #[test]
+    fn canonical_request_and_evidence_wires_replay_without_dispatch_authority() {
+        let response = carrier("fixture.Result", b"ok").encode();
+        let mut handler = Handler {
+            calls: 0,
+            response: Ok(response),
+        };
+        let mut accounting = TargetAccounting::default();
+        let run = dispatch(
+            grant(),
+            carrier("fixture.Argument", b"request"),
+            4,
+            limits(),
+            &mut accounting,
+            &AgentCancellation::new(),
+            &mut handler,
+        );
+        let request = TargetHostRequest {
+            grant_id: run.evidence().grant_id.clone(),
+            operation: operation(),
+            turn: 3,
+            argument: carrier("fixture.Argument", b"request"),
+            fuel: 4,
+        };
+        let request_wire = request.canonical_wire();
+        let evidence_wire = run.evidence().canonical_wire();
+        let decoded = TargetEvidence::decode(&evidence_wire).expect("canonical evidence decodes");
+        assert_eq!(&decoded, run.evidence());
+        decoded
+            .replay_wire(&request_wire)
+            .expect("exact request wire replays");
+        assert_eq!(handler.calls, 1, "replay has no host-dispatch authority");
+
+        let mut substituted = request_wire.clone();
+        *substituted.last_mut().expect("request payload") ^= 1;
+        assert_eq!(
+            decoded.replay_wire(&substituted),
+            Err(ProtocolError::ReplayMismatch)
+        );
+        let mut trailing = request_wire;
+        trailing.push(0);
+        assert_eq!(
+            decoded.replay_wire(&trailing),
+            Err(ProtocolError::MalformedRequest)
+        );
+        let mut truncated = evidence_wire;
+        truncated.pop();
+        assert_eq!(
+            TargetEvidence::decode(&truncated),
+            Err(ProtocolError::MalformedEvidence)
         );
     }
 
@@ -1060,7 +1338,7 @@ mod tests {
             argument: carrier("fixture.Argument", b"request"),
             fuel: 4,
         }
-        .encode()
+        .canonical_wire()
         .len() as u64;
         let mut handler = Handler {
             calls: 0,

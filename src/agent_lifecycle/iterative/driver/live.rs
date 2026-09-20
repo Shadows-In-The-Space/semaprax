@@ -56,7 +56,42 @@ impl CompiledIterativeLifecycle {
         budget: IterativeBudget,
         cancellation: &AgentCancellation,
     ) -> Result<IterativeRun, DriverFailure> {
-        self.run_with_driver_live_seed(task, source, driver, budget, cancellation, None, None, true)
+        self.run_with_driver_live_seed_on(
+            task,
+            source,
+            driver,
+            budget,
+            cancellation,
+            None,
+            None,
+            true,
+            authorization::StageBackend::Interpreter,
+        )
+    }
+
+    /// Local parity-only target route. Production entry points retain the
+    /// interpreter selection above; this accepts only the sealed executor
+    /// selector and still uses the exact same live authorization/effect loop.
+    pub(in crate::agent_lifecycle) fn run_with_target_driver_live_on(
+        &self,
+        task: &LifecycleTask,
+        source: &mut dyn ProposalSource,
+        driver: &mut dyn IterativeDriver,
+        budget: IterativeBudget,
+        cancellation: &AgentCancellation,
+        backend: authorization::StageBackend<'_>,
+    ) -> Result<IterativeRun, DriverFailure> {
+        self.run_with_driver_live_seed_on(
+            task,
+            source,
+            driver,
+            budget,
+            cancellation,
+            None,
+            None,
+            true,
+            backend,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -70,6 +105,32 @@ impl CompiledIterativeLifecycle {
         mut session: Option<&mut source_live::SourceExecutionSession<'_>>,
         migrated: Option<&source_live::SourceMigrationSeed>,
         allow_target_effect: bool,
+    ) -> Result<IterativeRun, DriverFailure> {
+        self.run_with_driver_live_seed_on(
+            task,
+            source,
+            driver,
+            budget,
+            cancellation,
+            session,
+            migrated,
+            allow_target_effect,
+            authorization::StageBackend::Interpreter,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_with_driver_live_seed_on(
+        &self,
+        task: &LifecycleTask,
+        source: &mut dyn ProposalSource,
+        driver: &mut dyn IterativeDriver,
+        budget: IterativeBudget,
+        cancellation: &AgentCancellation,
+        mut session: Option<&mut source_live::SourceExecutionSession<'_>>,
+        migrated: Option<&source_live::SourceMigrationSeed>,
+        allow_target_effect: bool,
+        backend: authorization::StageBackend<'_>,
     ) -> Result<IterativeRun, DriverFailure> {
         if budget.max_iterations > 4096 || budget.max_stages > 12289 {
             return Err(vec![bad("budget.capacity")].into());
@@ -135,12 +196,22 @@ impl CompiledIterativeLifecycle {
                         budget.max_steps_per_stage,
                     )?;
                 }
-                let evaluation = authorization::dispatch(
-                    &inner.program,
-                    $stage.prepared(),
-                    $arguments,
-                    budget.max_steps_per_stage,
-                )?;
+                let evaluation = match backend {
+                    authorization::StageBackend::Interpreter => authorization::dispatch(
+                        &inner.program,
+                        $stage.prepared(),
+                        $arguments,
+                        budget.max_steps_per_stage,
+                    ),
+                    _ => authorization::dispatch_on_cancellable(
+                        backend,
+                        &inner.program,
+                        $stage.prepared(),
+                        $arguments,
+                        budget.max_steps_per_stage,
+                        cancellation,
+                    ),
+                }?;
                 run.stages.push(StageRecord::of($stage, &evaluation));
                 if let Some(session) = session.as_deref_mut() {
                     session.record_stage(run.stages.last().expect("stage just pushed"));
@@ -245,15 +316,28 @@ impl CompiledIterativeLifecycle {
                     budget.max_steps_per_stage,
                 )?;
             }
-            let (decision, record) = authorization::run_authorize_stage(
-                &inner.program,
-                &inner.binding.authorize,
-                &args,
-                budget.max_steps_per_stage,
-                &policy,
-                &state,
-                decoded.canonical_json(),
-            )?;
+            let (decision, record) = match backend {
+                authorization::StageBackend::Interpreter => authorization::run_authorize_stage(
+                    &inner.program,
+                    &inner.binding.authorize,
+                    &args,
+                    budget.max_steps_per_stage,
+                    &policy,
+                    &state,
+                    decoded.canonical_json(),
+                ),
+                _ => authorization::run_authorize_stage_on_cancellable(
+                    backend,
+                    &inner.program,
+                    &inner.binding.authorize,
+                    &args,
+                    budget.max_steps_per_stage,
+                    &policy,
+                    &state,
+                    decoded.canonical_json(),
+                    Some(cancellation),
+                ),
+            }?;
             if let Some(session) = session.as_deref_mut() {
                 session.record_stage(&record);
             }

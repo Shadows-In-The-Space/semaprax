@@ -406,20 +406,13 @@ fn every_backend_drives_the_same_multi_turn_conversation_to_the_same_transitions
     );
 }
 
-/// The refusal side of the same invariant: where the Core Wasm leg cannot
-/// carry an admitted argument shape it **refuses with a stable diagnostic**,
-/// and never silently returns a different answer than the other three legs.
-///
-/// An empty `Bytes` argument has no admitted `.spx` array-literal spelling in
-/// the synthesized driver, so `wasm_executor.rs` fails closed rather than
-/// synthesizing a value the stage never received. The interpreter and both
-/// native legs execute the same call and agree with each other, which is what
-/// makes this a *capability* difference that is announced rather than a
-/// parity break that is hidden.
+/// The empty-`Bytes` side of the same invariant: Core Wasm synthesizes the
+/// admitted exact zero-length range/copy construction and returns the same
+/// answer as the interpreter and both native legs.
 #[test]
-fn the_wasm_leg_refuses_an_argument_shape_it_cannot_carry_instead_of_differing_silently() {
+fn empty_bytes_are_equal_across_interpreter_native_and_wasm_legs() {
     if !native_wasm_tools_available() {
-        eprintln!("skipping refusal parity: clang or node unavailable");
+        eprintln!("skipping empty-Bytes parity: clang or node unavailable");
         return;
     }
     let compiled = lifecycle();
@@ -452,23 +445,18 @@ fn the_wasm_leg_refuses_an_argument_shape_it_cannot_carry_instead_of_differing_s
         assert_eq!(reference, native, "{}: empty objective", leg.label());
     }
 
-    let errors = dispatch(
+    let wasm = returned(
         Leg::Wasm,
-        source,
-        &compiled.program,
-        compiled.binding.initialize.prepared(),
-        std::slice::from_ref(&empty),
-    )
-    .expect_err("Core Wasm must refuse an argument shape it cannot carry");
-    assert_eq!(errors.len(), 1);
-    assert_eq!(errors[0].code, "SPX-G570");
-    assert!(
-        errors[0]
-            .message
-            .contains("wasm_executor.argument.empty_bytes"),
-        "the refusal names the exact unsupported shape: {}",
-        errors[0].message
+        "initialize",
+        dispatch(
+            Leg::Wasm,
+            source,
+            &compiled.program,
+            compiled.binding.initialize.prepared(),
+            std::slice::from_ref(&empty),
+        ),
     );
+    assert_eq!(reference, wasm, "{}: empty objective", Leg::Wasm.label());
 }
 
 /// #143's "recovery with a fresh instance" case, and #182's "the semantic

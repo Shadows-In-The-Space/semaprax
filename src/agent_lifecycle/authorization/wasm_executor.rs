@@ -74,8 +74,8 @@
 //! `native_executor.rs` uses: a record or variant whose leaves are all
 //! `Bytes` or `i64`. A bare scalar result still takes the direct path (no
 //! driver needed); anything else -- a nested record leaf, a `Str`/`Float`
-//! leaf, a generic instantiation, a variant case with no fields, an empty
-//! `Bytes` argument -- fails closed with an `SPX-G570`
+//! leaf, a generic instantiation, or a variant case with no fields -- fails
+//! closed with an `SPX-G570`
 //! diagnostic naming the unsupported shape rather than guessing.
 //!
 //! ## What this is not
@@ -578,9 +578,18 @@ fn render_value(
         (ResolvedType::I32, RetainedValue::I32(item)) if *item >= 0 => Ok(format!("{item}i32")),
         (ResolvedType::Bytes, RetainedValue::Bytes(item)) => {
             if item.is_empty() {
-                // An empty array literal has no admitted spelling here; refuse
-                // rather than synthesize a value the stage never received.
-                return Err(invariant("wasm_executor.argument.empty_bytes"));
+                // Bytes has no literal. Take the exact empty range of one
+                // fixed byte and copy it: this uses the existing owned-data
+                // export vocabulary (`bytes_copy`), preserving its normal
+                // checked allocation and cleanup rather than adding the
+                // separate bounded-buffer operation to this profile.
+                let name = format!("spx_lit{next}");
+                *next += 1;
+                prelude.push_str(&format!("    let {name} = [0u8];\n"));
+                let view = format!("spx_view{next}");
+                *next += 1;
+                prelude.push_str(&format!("    let {view} = array_as_slice({name});\n"));
+                return Ok(format!("bytes_copy(byte_range({view}, 0usize, 0usize))"));
             }
             let name = format!("spx_lit{next}");
             *next += 1;

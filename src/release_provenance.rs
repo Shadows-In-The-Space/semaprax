@@ -53,6 +53,19 @@ use sha2::{Digest as _, Sha256};
 
 use crate::diagnostic::Diagnostic;
 
+mod offline_bundle;
+pub use offline_bundle::{
+    parse_sigstore_archive_attestation_bundle, parse_sigstore_message_signature_bundle,
+    parse_sigstore_trusted_root_jsonl, verify_archive_attestation_binds_manifest,
+    verify_archive_attestation_with_offline_capability, verify_offline_release_with_capability,
+    verify_signature_claim_consumes_sigstore_bundle,
+    verify_signature_claim_with_offline_capability, ExpectedReleaseIdentity,
+    OfflineBundleVerificationCapability, OfflineReleaseArchive,
+    ParsedSigstoreArchiveAttestationBundle, ParsedSigstoreMessageSignatureBundle,
+    ParsedSigstoreTrustedRoot, DSSE_IN_TOTO_PAYLOAD_TYPE, IN_TOTO_STATEMENT_TYPE,
+    SIGSTORE_BUNDLE_MEDIA_TYPE, SLSA_PROVENANCE_V1_PREDICATE_TYPE,
+};
+
 pub const PROVENANCE_SCHEMA: &str = "semaprax.release-provenance.v1";
 pub const SIGNATURE_CLAIM_SCHEMA: &str = "semaprax.release-signature-claim.v1";
 const MANIFEST_SCHEMA: &str = "semaprax.release-manifest.v1";
@@ -93,11 +106,11 @@ pub const KNOWN_HOST_CLASSES: &[&str] = &[
 /// not a cryptographic endorsement of it; see the module doc.
 pub const KNOWN_CLAIM_ALGORITHMS: &[&str] = &["sigstore-cosign-bundle-v0.3"];
 
-fn shape_error(message: String) -> Diagnostic {
+pub(super) fn shape_error(message: String) -> Diagnostic {
     Diagnostic::io("SPX-Z701", message)
 }
 
-fn binding_error(message: String) -> Diagnostic {
+pub(super) fn binding_error(message: String) -> Diagnostic {
     Diagnostic::io("SPX-Z702", message)
 }
 
@@ -105,11 +118,11 @@ fn identity_error(message: String) -> Diagnostic {
     Diagnostic::io("SPX-Z703", message)
 }
 
-fn artifact_error(message: String) -> Diagnostic {
+pub(super) fn artifact_error(message: String) -> Diagnostic {
     Diagnostic::io("SPX-Z704", message)
 }
 
-fn sha256_digest(bytes: &[u8]) -> String {
+pub(super) fn sha256_digest(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!(
@@ -135,7 +148,7 @@ fn is_lowercase_commit(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn object<'a>(
+pub(super) fn object<'a>(
     value: &'a Value,
     context: &str,
 ) -> Result<&'a serde_json::Map<String, Value>, Diagnostic> {
@@ -144,7 +157,7 @@ fn object<'a>(
         .ok_or_else(|| shape_error(format!("{context} must be a JSON object")))
 }
 
-fn require_string<'a>(value: &'a Value, field: &str) -> Result<&'a str, Diagnostic> {
+pub(super) fn require_string<'a>(value: &'a Value, field: &str) -> Result<&'a str, Diagnostic> {
     value
         .as_str()
         .ok_or_else(|| shape_error(format!("`{field}` must be a string")))
@@ -162,13 +175,16 @@ fn require_u64(value: &Value, field: &str) -> Result<u64, Diagnostic> {
         .ok_or_else(|| shape_error(format!("`{field}` must be an unsigned integer")))
 }
 
-fn require_array<'a>(value: &'a Value, field: &str) -> Result<&'a Vec<Value>, Diagnostic> {
+pub(super) fn require_array<'a>(
+    value: &'a Value,
+    field: &str,
+) -> Result<&'a Vec<Value>, Diagnostic> {
     value
         .as_array()
         .ok_or_else(|| shape_error(format!("`{field}` must be an array")))
 }
 
-fn check_exact_keys(
+pub(super) fn check_exact_keys(
     map: &serde_json::Map<String, Value>,
     expected: &[&str],
     context: &str,
@@ -185,7 +201,7 @@ fn check_exact_keys(
     Ok(())
 }
 
-fn parse_json(bytes: &[u8], context: &str) -> Result<Value, Diagnostic> {
+pub(super) fn parse_json(bytes: &[u8], context: &str) -> Result<Value, Diagnostic> {
     serde_json::from_slice(bytes)
         .map_err(|error| shape_error(format!("{context} is not valid JSON: {error}")))
 }
@@ -734,6 +750,7 @@ pub trait SignatureVerificationCapability {
     /// filesystem, network, or process access, and no ambient state.
     fn verify_signature(
         &self,
+        expected_identity: &ExpectedReleaseIdentity,
         subject_bytes: &[u8],
         claim: &ParsedSignatureClaim,
     ) -> Result<(), Diagnostic>;
@@ -758,7 +775,9 @@ pub fn verify_release_binding_with_capability(
 ) -> Result<(), Diagnostic> {
     verify_release_binding(manifest_bytes, provenance_bytes, claim_bytes)?;
     let claim = parse_signature_claim(claim_bytes)?;
-    capability.verify_signature(provenance_bytes, &claim)
+    let expected_identity =
+        offline_bundle::expected_release_identity(manifest_bytes, provenance_bytes)?;
+    capability.verify_signature(&expected_identity, provenance_bytes, &claim)
 }
 
 /// Re-hash every artifact a manifest names, from a caller-supplied

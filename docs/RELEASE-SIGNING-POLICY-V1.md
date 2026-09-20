@@ -159,6 +159,76 @@ can point at an exact target shape for the day a real signer exists.
 | `signature` | string (opaque) | Never decoded or cryptographically verified by this repository's code -- see "What verification does and does not prove" below. |
 | `certificate` | string (opaque) | Same as `signature`. |
 
+### Bundled offline verification material (narrow v0.3 slice)
+
+The tag workflow publishes two intentionally different, exact Sigstore bundle
+shapes. They are not interchangeable and a verifier rejects either shape where
+the other is expected.
+
+- `release-attestation-<target>.json` is the GitHub
+  `actions/attest-build-provenance` output: one
+  `application/vnd.dev.sigstore.bundle.v0.3+json` **DSSE** envelope, carrying
+  one `application/vnd.in-toto+json` in-toto Statement v1 whose one SLSA
+  provenance v1 `subject` names that target archive and its lowercase SHA-256
+  digest. Its predicate is the closed GitHub workflow-v1 producer snapshot:
+  `buildDefinition` has the exact workflow build type, workflow external
+  parameters, GitHub internal parameters, and one through eight git-commit
+  dependencies; `runDetails` has exactly builder ID and invocation ID. The
+  aggregate verifier compares the subject's name and digest to the manifest
+  and to the actual archive bytes; an attestation for one target cannot be
+  replayed for another.
+- `release-provenance.bundle` is the `cosign sign-blob` v0.3
+  **`messageSignature`** bundle over the final `release-provenance.json`.
+  A `semaprax.release-signature-claim.v1` consumes it exactly: the bundle's
+  SHA2-256 message digest must be the digest of the exact provenance bytes,
+  and the claim's opaque `signature` and `certificate` strings must be the
+  exact strings in that bundle. A claim is therefore not an independently
+  editable second signature representation.
+
+The parser admits one through eight fully shaped v0.3 Rekor entries for the
+content kind being consumed: `hashedrekord` for the message-signature bundle and
+`dsse` for an archive attestation. Every such entry has canonical decimal
+indexes/times, the v0.0.1 kind/version pair, a signed-entry timestamp,
+inclusion proof, and canonicalized body. `logId.keyId`, the signed-entry
+timestamp, proof root/path hashes, and canonicalized body are canonical padded
+standard base64. `timestampVerificationData` is either the exact empty object
+(the protobuf JSON representation of zero RFC3161 timestamps) or one through
+eight exact `rfc3161Timestamps` records whose `signedTimestamp` fields are the same
+canonical base64. Thus an empty object never stands in for an unparsed
+timestamp record, and an empty `{}` tlog entry never admits.
+
+The certificate, `messageSignature.messageDigest.digest`,
+`messageSignature.signature`, DSSE payload/`sig`, and all admitted tlog and
+RFC3161 byte fields are canonical padded standard base64, not merely non-empty
+strings. The narrow parser rejects URL-safe, unpadded, non-canonical, or
+malformed alternatives before passing the exact bundle bytes to an external
+verifier.
+
+The admitted decimal JSON strings for every transparency-log index, integrated
+time, and proof tree size are canonical nonnegative signed-64-bit values
+(`0` through `9223372036854775807`); the parser rejects a sign, leading zero,
+or overflow. Predicate parsing establishes that one producer snapshot is
+well-formed, not that its workflow, commit, IDs, builder, or invocation is
+cryptographically trustworthy or semantically bound to this release. Those
+claims remain for the supplied offline capability and its explicit identity.
+
+Offline consumers import the exact `trusted_root.jsonl` emitted by
+`gh attestation trusted-root` alongside the archive/bundle, before crossing
+the air gap. The package is bounded UTF-8 JSON Lines with no empty record and
+is supplied by the caller as exact bytes; this repository never downloads,
+updates, or silently selects a trust root. GitHub recommends refreshing that
+root whenever new signed material is imported, because a stale offline root
+does not learn later key revocation or rotation.
+
+The parser deliberately admits only those v0.3, single-signature,
+single-archive-subject forms. It is not a general Sigstore, DSSE, in-toto,
+SLSA, X.509, certificate-chain, or Rekor client. The complete cryptographic
+replay (signature, certificate identity/chain, Rekor inclusion proof, and
+imported trusted-root relationship) is an explicit
+`OfflineBundleVerificationCapability` supplied by a caller that has a real
+offline verifier. The capability receives the exact subject, bundle, and root
+bytes only after all structural and digest bindings pass.
+
 ## The verification module
 
 `src/release_provenance.rs` (tested by its own `#[cfg(test)] mod tests` and
@@ -196,6 +266,37 @@ by `tests/offline_package/release_provenance.rs`) provides:
   on cryptographic verification and is not a no-op -- HMAC is a symmetric
   stand-in for wiring only, never a claim about the real algorithm, which
   stays Sigstore/cosign per this document.
+- `parse_sigstore_archive_attestation_bundle` /
+  `verify_archive_attestation_binds_manifest`: bounded, closed replay of the
+  published archive DSSE bundle's one SLSA subject against the exact manifest
+  entry and archive bytes. It validates the bounded structural snapshot of
+  GitHub's workflow-v1 predicate, but does not verify the predicate's semantics
+  or any signature.
+- `parse_sigstore_message_signature_bundle` /
+  `verify_signature_claim_consumes_sigstore_bundle`: bounded, closed replay
+  of the distinct `cosign sign-blob` message-signature bundle and exact claim
+  consumption. A changed bundle digest, signature, certificate, or provenance
+  byte rejects before any cryptographic capability runs.
+- `parse_sigstore_trusted_root_jsonl` plus
+  `OfflineBundleVerificationCapability`: accept caller-imported, exact,
+  bounded root-package bytes and hand them with the exact subject/bundle bytes
+  to a pure explicit verifier. The module has no built-in Sigstore verifier;
+  absent that supplied capability, these functions establish binding only.
+- `verify_offline_release_with_capability`: the only **aggregate** offline
+  release API. It requires the manifest/provenance/claim/message bundle,
+  one exact trusted-root package, and exactly one archive plus one DSSE
+  attestation per manifest entry. Missing, duplicate, or extra archive names
+  reject. It completes every structural, digest, claim, root-framing, and
+  inventory check before the first capability call, then invokes that
+  capability over provenance followed by archives in canonical manifest order.
+  Every call receives the exact input bytes and an
+  `ExpectedReleaseIdentity` derived from the bound trusted issuer,
+  repository, workflow path, and exact tag.
+
+`verify_archive_attestation_with_offline_capability` and
+`verify_signature_claim_with_offline_capability` remain explicitly partial
+helpers for an already-selected subject. They are not a complete release
+inventory check; callers verifying a downloaded release use the aggregate API.
 
 ### The one documented command
 
@@ -266,6 +367,16 @@ cosign verify-blob \
 
 run by a real signing CI step or by a maintainer, never by this repository's
 own compiler or scripts.
+
+The added offline material framing does **not** change that boundary. Parsing
+a bundle, matching its archive subject/digest, matching a claim's copied
+signature/certificate strings, or accepting a `trusted_root.jsonl` package is
+not cryptographic verification. No built-in implementation validates an X.509
+chain, Fulcio identity, DSSE/message signature, Rekor checkpoint/inclusion
+proof, or revocation state, and no test fixture is a real certificate,
+signature, Rekor proof, or trusted root. Only a supplied real offline
+capability may make those checks; its success remains separate from product
+support, reproducibility, notarization, or publication.
 
 Also not proved by anything in this document: reproducible builds (no
 cross-host byte-identical rebuild is claimed or attempted), notarization or

@@ -100,7 +100,11 @@ format: `Unreleased` then release buckets, grouped by impact.
   with pinned cosign tooling. Release publication now carries those bundles
   beside the manifest and provenance, while policy and tests distinguish the
   GitHub OIDC `sub` claim from the Fulcio workflow-URL certificate identity.
-  No signed hosted release or offline cryptographic verification is claimed
+  A bounded offline verifier now closes the Sigstore v0.3 framing, GitHub
+  workflow-v1 predicate structure, exact archive inventory, and aggregate
+  manifest/provenance/claim bindings before invoking an explicit verifier
+  capability. It does not perform certificate, Rekor-proof, predicate-semantic,
+  or signature verification itself, and no signed hosted release is claimed
   yet (#168).
 
 - Stop Universal Semantic Transaction v1 from refusing every project with a

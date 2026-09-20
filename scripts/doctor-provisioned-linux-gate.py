@@ -38,9 +38,12 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 # --------------------------------------------------------------------------
 # Admitted host, kernel, cgroup and fixture inventory
@@ -208,6 +211,54 @@ CAPTURE_LIMIT = 4 * 1024 * 1024
 
 # The two 60s deadline fixtures dominate; the rest are seconds.
 SUITE_TIMEOUT_SECONDS = 3600
+
+
+class EvidenceWriteError(Exception):
+    """The gate could not publish its own evidence without replacement."""
+
+
+def write_evidence(path, evidence):
+    """Publish one private evidence document without replacing prior evidence.
+
+    A failed gate is still evidence, so a caller must not be able to silently
+    overwrite an earlier document or redirect the evidence file through a
+    link. The output is deliberately create-new and owner-only. If a
+    partial write or sync fails, the incomplete create-new file is retained as
+    evidence of that failed publication rather than deleted by a path that may
+    have changed underneath us.
+    """
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise EvidenceWriteError("safe evidence publication is unavailable")
+    try:
+        body = (json.dumps(evidence, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise EvidenceWriteError("evidence cannot be encoded") from error
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    fd = None
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError as error:
+        raise EvidenceWriteError(
+            "evidence target already exists; refusing to overwrite prior evidence"
+        ) from error
+    except OSError as error:
+        raise EvidenceWriteError("evidence target cannot be created safely") from error
+    try:
+        held = os.fstat(fd)
+        if not stat.S_ISREG(held.st_mode) or held.st_nlink != 1:
+            raise EvidenceWriteError("new evidence target is not a private regular file")
+        written = 0
+        while written < len(body):
+            count = os.write(fd, body[written:])
+            if count <= 0:
+                raise EvidenceWriteError("evidence document write was incomplete")
+            written += count
+        os.fsync(fd)
+    except OSError as error:
+        raise EvidenceWriteError("evidence document could not be written durably") from error
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 # --------------------------------------------------------------------------
@@ -991,9 +1042,7 @@ def execute(root, probe, evidence_path):
         "verdict": "failed" if settlement.failed() else "passed",
     }
     if evidence_path:
-        with open(evidence_path, "w", encoding="utf-8") as handle:
-            json.dump(evidence, handle, indent=2, sort_keys=True)
-            handle.write("\n")
+        write_evidence(evidence_path, evidence)
     return evidence, settlement
 
 
@@ -1435,6 +1484,46 @@ def self_test(root=None):
         settlement_failures(before, None) != [],
     )
 
+    # Evidence is a one-shot publication too. A later failed run must never
+    # rewrite a previous run's evidence, and a symlink must not redirect the
+    # privileged provisioner to a file outside its chosen output path.
+    with tempfile.TemporaryDirectory(prefix="semaprax-doctor-evidence-") as directory:
+        evidence = {"schema": "test", "value": 7}
+        fresh = os.path.join(directory, "fresh.json")
+        write_evidence(fresh, evidence)
+        with open(fresh, encoding="utf-8") as handle:
+            fresh_evidence = json.load(handle)
+        check(
+            "fresh evidence publication is canonical and owner-only",
+            fresh_evidence == evidence
+            and stat.S_IMODE(os.stat(fresh).st_mode) == 0o600,
+        )
+        with open(fresh, "rb") as handle:
+            before_bytes = handle.read()
+        try:
+            write_evidence(fresh, {"replacement": True})
+            replacement_refused = False
+        except EvidenceWriteError:
+            replacement_refused = True
+        check(
+            "existing evidence is never overwritten",
+            replacement_refused and Path(fresh).read_bytes() == before_bytes,
+        )
+        target = os.path.join(directory, "target.json")
+        with open(target, "wb") as handle:
+            handle.write(b"preserve this target")
+        link = os.path.join(directory, "evidence-link.json")
+        os.symlink(target, link)
+        try:
+            write_evidence(link, evidence)
+            link_refused = False
+        except EvidenceWriteError:
+            link_refused = True
+        check(
+            "symlink evidence targets are refused without touching their target",
+            link_refused and Path(target).read_bytes() == b"preserve this target",
+        )
+
     sticky = Settlement()
     sticky.record("execute", ["worker never settled"])
     sticky.record("settle", ["cgroup kill uncertain"])
@@ -1675,7 +1764,15 @@ def main(argv=None):
         return 0
 
     probe = observe(arguments.root, sys.argv[1:])
-    evidence, settlement = execute(arguments.root, probe, arguments.evidence)
+    try:
+        evidence, settlement = execute(arguments.root, probe, arguments.evidence)
+    except EvidenceWriteError as error:
+        print(f"doctor provisioned Linux gate FAILED (evidence): {error}", file=sys.stderr)
+        print(
+            "This is a failure, not a skip. The gate could not publish its evidence safely.",
+            file=sys.stderr,
+        )
+        return 1
     json.dump(
         {
             key: evidence[key]

@@ -232,7 +232,10 @@ the full real toolchain, and WP-05 stays unpromoted on that basis.
 
 ## The gate
 
-`scripts/doctor-provisioned-linux-gate.py` is the whole gate.
+`scripts/doctor-provisioned-linux-gate.py` is the whole gate. Each evidence
+path is create-new, regular and owner-only: a later invocation refuses an
+existing target or link rather than overwriting prior evidence or following a
+redirected path.
 `.github/workflows/doctor-provisioned-linux.yml` is one dispatch-only job that
 invokes it on a GitHub-hosted ephemeral `ubuntu-24.04` runner, provisioning that
 runner in-job so nothing survives the VM.

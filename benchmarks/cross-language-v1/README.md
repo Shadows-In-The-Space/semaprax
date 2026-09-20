@@ -28,6 +28,7 @@ must do to produce real numbers.
 | --- | --- |
 | `run.py` | The toolchain-conformance harness: resolves tasks/adapters, builds and tests each task/language pair against a fixed, human-written source tree, records provenance, scores comparisons. No model involved. |
 | `agent/` | The agent-driver seam: explicit model/sampling/budget contracts, a deterministic offline replay transport, a declared-but-inert live transport, and an orchestrator that scores a transport-produced candidate through `run.py`'s own build/test/leak-check/provenance machinery. See `agent/README.md`. |
+| `reproduction_capsule.py` | An offline, input-only capsule builder/verifier. It binds the exact supplied task and adapter inventory bytes plus every declared public tree, hidden tree, equivalence contract, and adapter row. It invokes no toolchain or model; an `inputs_match` verification is explicitly not a benchmark result. It requires descriptor-relative no-follow traversal and returns unavailable rather than falling back to pathname traversal on hosts without it. |
 | `tasks.json` | Task inventory (schema `benchmark.cross_language.tasks.v1`). Each task declares a `split` — `development` (the frozen original pilot) or `held_out` (issue #106's contamination-protected extension; see that task's `EQUIVALENCE.md`) — and both its pre-existing five-value `category` and an additive `issue_211_category` naming which of issue #211's eleven task categories it demonstrates; see `docs/METHODOLOGY.md`'s "Taxonomy mapping" section for the full table and reasoning, including why `category` itself is never rewritten |
 | `adapters.json` | Per-language adapter inventory (schema `benchmark.cross_language.adapters.v1`): official toolchain invocation, version probe, success signal |
 | `tasks/<task-id>/EQUIVALENCE.md` | That task's fairness contract: inputs, outputs, measured boundary, allowed optimizations |
@@ -54,6 +55,21 @@ python3 benchmarks/cross-language-v1/run.py --semaprax target/debug/semaprax \
 # there is no timing field to compare in this schema version).
 python3 benchmarks/cross-language-v1/run.py --semaprax target/debug/semaprax \
   --output /tmp/local.json --compare benchmarks/cross-language-v1/results/prior.json
+
+# Bind the declared scoring inputs without invoking an adapter, toolchain, or model.
+python3 benchmarks/cross-language-v1/reproduction_capsule.py create \
+  --root "$PWD" \
+  --tasks benchmarks/cross-language-v1/tasks.json \
+  --adapters benchmarks/cross-language-v1/adapters.json \
+  --output /tmp/cross-language-inputs.json
+
+# On another checkout, verify that exactly those inputs still match. This does
+# not run the benchmark; `inputs_match` means only that the scoring inputs match.
+python3 benchmarks/cross-language-v1/reproduction_capsule.py verify \
+  --root "$PWD" \
+  --tasks benchmarks/cross-language-v1/tasks.json \
+  --adapters benchmarks/cross-language-v1/adapters.json \
+  --output /tmp/cross-language-inputs.json
 ```
 
 ## Languages
@@ -90,6 +106,12 @@ official toolchain is available in a pinned, network-free form (see
   runtime. The result schema (`benchmark.cross_language.v1`) has no field to
   receive one by accident — see `docs/METHODOLOGY.md`. Issues #85, #130, and
   #131 own adding a timing metric once an exclusive quiet host is available.
+- **A reproduction capsule is not a run receipt, environment lock, or result.**
+  It is a deterministic fingerprint of the scoring inputs supplied to it. It
+  deliberately has neither a model/provider interface nor an adapter/toolchain
+  invocation path, and it records `execution: not_attempted` even when all
+  inputs match. Existing agent replay and result/provenance documents retain
+  their separate schemas; this capsule does not reinterpret them.
 - The original pilot task (`sequence-digest-v1`, `split: development`) is
   real, small, and deliberately narrow (see its `EQUIVALENCE.md`). It is
   evidence that the harness works end to end for three real languages, not a

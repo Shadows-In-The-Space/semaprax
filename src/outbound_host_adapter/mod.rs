@@ -17,6 +17,7 @@ use zeroize::Zeroize;
 
 mod email;
 mod ledger;
+mod tracing;
 mod webhook;
 
 pub use email::{
@@ -29,6 +30,10 @@ pub use email::{
 pub use ledger::{
     DeliveryIdentity, HostDeliveryLedger, LedgerOutcome, LedgerRecord, LedgerRefusal,
     MAX_LEDGER_ENTRIES,
+};
+pub use tracing::{
+    prepare_export_event, ExportEventLedgerRefusal, ExportEventReceipt, ExportEventSession,
+    PreparedExportEvent,
 };
 pub use webhook::{
     prepare_webhook_delivery, PreparedWebhookDelivery, WebhookDeliveryReceipt,

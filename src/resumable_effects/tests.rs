@@ -1,4 +1,6 @@
+use super::codec::{encode_checkpoint, EffectCodec};
 use super::core::*;
+use serde_json::{json, Value};
 
 /// A small, non-Agent fixture program: it is not tied to any six-role
 /// AgentDefinition shape, and its `Request`/`Observation`/`CleanupOp` types
@@ -10,6 +12,34 @@ struct CounterState {
     /// A plain owned, non-`Copy` local (a growing log) that must transfer
     /// intact across every suspension boundary.
     log: Vec<String>,
+}
+
+impl EffectCodec for CounterState {
+    fn encode_effect(&self) -> Value {
+        json!({
+            "turn": self.turn,
+            "acc": self.acc,
+            "log": self.log.encode_effect(),
+        })
+    }
+
+    fn decode_effect(value: &Value) -> Result<Self, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "expected CounterState object".to_string())?;
+        if object.len() != 3
+            || !object.contains_key("turn")
+            || !object.contains_key("acc")
+            || !object.contains_key("log")
+        {
+            return Err("expected closed CounterState object".to_string());
+        }
+        Ok(Self {
+            turn: u32::decode_effect(&value["turn"])?,
+            acc: i64::decode_effect(&value["acc"])?,
+            log: Vec::<String>::decode_effect(&value["log"])?,
+        })
+    }
 }
 
 /// The host observation value a handler returns to signal "fail this run".
@@ -136,6 +166,14 @@ impl EffectHandler<i64, i64> for PanicIfCalledHandler {
 struct RecordingCleanup {
     order: Vec<String>,
     fail_on: Option<String>,
+}
+
+/// A cleanup boundary that proves replay never physically finalizes again.
+struct PanicCleanup;
+impl CleanupHandler<String> for PanicCleanup {
+    fn run(&mut self, op: &String) -> Result<(), String> {
+        panic!("replay or a refused resume must never run cleanup ({op})");
+    }
 }
 impl CleanupHandler<String> for RecordingCleanup {
     fn run(&mut self, op: &String) -> Result<(), String> {
@@ -292,10 +330,12 @@ fn replay_of_a_completed_run_makes_zero_new_effect_dispatches() {
     )
     .unwrap();
     assert_eq!(outcome1.dispatched, 3);
+    let encoded_before = encode_checkpoint(&scope("replay"), &journal1);
+    let entries_before = journal1.entries().to_vec();
 
     let mut panic_handler = PanicIfCalledHandler;
-    let mut cleanup2 = no_cleanup_failure();
-    let (outcome2, _journal2) = resume(
+    let mut cleanup2 = PanicCleanup;
+    let (outcome2, journal2) = resume(
         &program,
         scope("replay"),
         journal1,
@@ -309,6 +349,13 @@ fn replay_of_a_completed_run_makes_zero_new_effect_dispatches() {
 
     assert_eq!(outcome2.dispatched, 0);
     assert_eq!(outcome2.terminal, outcome1.terminal);
+    assert!(outcome2.cleanup.is_empty());
+    assert_eq!(journal2.entries(), entries_before.as_slice());
+    assert_eq!(
+        encode_checkpoint(&scope("replay"), &journal2),
+        encoded_before,
+        "pure terminal replay must preserve byte-identical v1 checkpoint encoding"
+    );
 }
 
 #[test]
@@ -369,9 +416,8 @@ fn resume_from_a_truncated_journal_only_dispatches_the_new_tail() {
     assert_eq!(outcome_full.dispatched, 3);
     assert_eq!(handler.calls, vec![0, 1, 2]);
 
-    // Simulate a crash immediately after turn 0's Transition was durably
-    // committed but before turn 1 ever began: only the first three entries
-    // (turn 0's Intent/Observed/Transition) survive.
+    // Supply the valid prefix ending after turn 0's Transition: only the
+    // first three entries (turn 0's Intent/Observed/Transition) are present.
     let truncated: Vec<_> = journal_full.entries().iter().take(3).cloned().collect();
     assert_eq!(truncated.len(), 3);
     let partial = Journal::from_entries(truncated);
@@ -395,6 +441,99 @@ fn resume_from_a_truncated_journal_only_dispatches_the_new_tail() {
     assert_eq!(resuming_handler.calls, vec![1, 2]);
     assert_eq!(outcome2.dispatched, 2);
     assert_eq!(outcome2.terminal, outcome_full.terminal);
+}
+
+#[test]
+fn observed_prefix_completes_transition_without_redispatch() {
+    let expected = scope("observed-prefix");
+    let partial = Journal::from_entries(vec![
+        JournalEntry::<CounterProgram>::Intent {
+            turn: 0,
+            scope: expected.clone(),
+            request: 0,
+        },
+        JournalEntry::<CounterProgram>::Observed {
+            turn: 0,
+            scope: expected.clone(),
+            request: 0,
+            observation: 17,
+        },
+    ]);
+    assert!(partial.validate(&expected).is_ok());
+
+    let program = CounterProgram {
+        total_turns: 1,
+        suspend_at: None,
+    };
+    let mut panic_handler = PanicIfCalledHandler;
+    let mut cleanup = no_cleanup_failure();
+    let (outcome, journal) = resume(
+        &program,
+        expected,
+        partial,
+        initial(),
+        10,
+        &mut panic_handler,
+        &mut cleanup,
+        &|| false,
+    )
+    .expect("a recorded observation needs only its deterministic transition");
+
+    assert_eq!(outcome.dispatched, 0);
+    assert_eq!(outcome.terminal, Step::Complete(17));
+    assert_eq!(journal.entries().len(), 3);
+    assert!(matches!(
+        journal.entries().last(),
+        Some(JournalEntry::Transition {
+            step: Step::Complete(17),
+            ..
+        })
+    ));
+    assert_eq!(
+        cleanup.order,
+        vec!["flush_log".to_string(), "close_session".to_string()]
+    );
+}
+
+#[test]
+fn observed_prefix_request_drift_is_refused_without_dispatch_or_cleanup() {
+    let expected = scope("observed-prefix-drift");
+    let entries = vec![
+        JournalEntry::<CounterProgram>::Intent {
+            turn: 0,
+            scope: expected.clone(),
+            request: 999,
+        },
+        JournalEntry::<CounterProgram>::Observed {
+            turn: 0,
+            scope: expected.clone(),
+            request: 999,
+            observation: 17,
+        },
+    ];
+    let partial = Journal::from_entries(entries.clone());
+    assert!(partial.validate(&expected).is_ok());
+
+    let program = CounterProgram {
+        total_turns: 1,
+        suspend_at: None,
+    };
+    let mut panic_handler = PanicIfCalledHandler;
+    let mut panic_cleanup = PanicCleanup;
+    let (error, returned) = resume(
+        &program,
+        expected,
+        partial,
+        initial(),
+        10,
+        &mut panic_handler,
+        &mut panic_cleanup,
+        &|| false,
+    )
+    .unwrap_err();
+
+    assert_eq!(error, DriverError::RequestDrift { turn: 0 });
+    assert_eq!(returned.entries(), entries.as_slice());
 }
 
 #[test]
@@ -439,6 +578,110 @@ fn replaying_a_recorded_failed_dispatch_never_recontacts_the_host() {
     )
     .unwrap_err();
     assert_eq!(err2, err);
+}
+
+#[test]
+fn observation_failure_cannot_be_followed_by_a_transition() {
+    let expected = scope("failed-prefix-with-transition");
+    let hostile = Journal::from_entries(vec![
+        JournalEntry::<CounterProgram>::Intent {
+            turn: 0,
+            scope: expected.clone(),
+            request: 0,
+        },
+        JournalEntry::<CounterProgram>::ObservationFailed {
+            turn: 0,
+            scope: expected.clone(),
+            request: 0,
+            reason: "host down".to_string(),
+        },
+        JournalEntry::<CounterProgram>::Transition {
+            turn: 0,
+            // Structural closure takes precedence over hostile trailing scope.
+            scope: scope("wrong-trailing-scope"),
+            step: Step::Complete(0),
+        },
+    ]);
+    assert_eq!(
+        hostile.validate(&expected),
+        Err(JournalError::EntryAfterObservationFailure { at: 2 })
+    );
+
+    let program = CounterProgram {
+        total_turns: 1,
+        suspend_at: None,
+    };
+    let mut panic_handler = PanicIfCalledHandler;
+    let mut panic_cleanup = PanicCleanup;
+    let (error, _journal) = resume(
+        &program,
+        expected,
+        hostile,
+        initial(),
+        10,
+        &mut panic_handler,
+        &mut panic_cleanup,
+        &|| false,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error,
+        DriverError::Journal(JournalError::EntryAfterObservationFailure { at: 2 })
+    );
+}
+
+#[test]
+fn replay_of_fail_does_not_retry_a_failed_cleanup_or_replace_the_terminal() {
+    let program = CounterProgram {
+        total_turns: 1,
+        suspend_at: None,
+    };
+    let mut handler = FailOnHandler {
+        calls: Vec::new(),
+        fail_on: 0,
+    };
+    let mut cleanup = RecordingCleanup {
+        order: Vec::new(),
+        fail_on: Some("flush_log".to_string()),
+    };
+    let (fresh, journal) = run(
+        &program,
+        scope("failed-cleanup-replay"),
+        initial(),
+        10,
+        &mut handler,
+        &mut cleanup,
+        &|| false,
+    )
+    .expect("cleanup failure must not replace Fail");
+    assert_eq!(fresh.terminal, Step::Fail(42));
+    assert_eq!(
+        fresh.cleanup,
+        vec![
+            ("flush_log".to_string(), Err("cleanup boom".to_string())),
+            ("close_session".to_string(), Ok(())),
+        ]
+    );
+    let entries_before = journal.entries().to_vec();
+
+    let mut panic_handler = PanicIfCalledHandler;
+    let mut panic_cleanup = PanicCleanup;
+    let (replayed, replayed_journal) = resume(
+        &program,
+        scope("failed-cleanup-replay"),
+        journal,
+        initial(),
+        10,
+        &mut panic_handler,
+        &mut panic_cleanup,
+        &|| false,
+    )
+    .expect("terminal replay must not retry cleanup");
+
+    assert_eq!(replayed.terminal, Step::Fail(42));
+    assert!(replayed.cleanup.is_empty());
+    assert_eq!(replayed.dispatched, 0);
+    assert_eq!(replayed_journal.entries(), entries_before.as_slice());
 }
 
 // ---------------------------------------------------------------------
@@ -607,7 +850,9 @@ fn validate_rejects_an_entry_after_terminal() {
         },
         JournalEntry::<CounterProgram>::Transition {
             turn: 1,
-            scope: scope("after"),
+            // Preserve the stable structural diagnostic even when the
+            // impossible trailing row also carries the wrong scope.
+            scope: scope("wrong-trailing-scope"),
             step: Step::Complete(0),
         },
     ];

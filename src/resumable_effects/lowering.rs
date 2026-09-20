@@ -4,11 +4,12 @@
 //! This module deliberately does not widen source admission. It accepts only
 //! the already-checked shape owned by `parser::yields` and
 //! `hir::resolve_yield`: one direct top-level `yield`, Copy-scalar state, no
-//! ordinary effects, and one explicitly identified free function. Because the
-//! current projections retain the rest of the resolved program, they also
-//! require this to be the program's only `yields`-declaring function. The
-//! module then derives one target-neutral three-state plan and two yield-free
-//! HIR projections for the interpreter and test-only backend parity lanes.
+//! ordinary effects, and one explicitly identified free function. Each
+//! projection retains only that function's direct-call closure and the valid
+//! entrypoint closure required by target validation, so disconnected yielding
+//! functions remain independent. The module then derives one target-neutral
+//! three-state plan and two yield-free HIR projections for the interpreter and
+//! test-only backend parity lanes.
 
 use crate::diagnostic::Diagnostic;
 use crate::hir::{
@@ -18,6 +19,9 @@ use crate::hir::{
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+
+mod projection;
+use projection::{projection_program, resume_projection, start_projection};
 
 const INVALID_RESUMABLE_PLAN: &str = "SPX-H006";
 const PLAN_IDENTITY_DOMAIN: &[u8] = b"semaprax.resumable-plan.v1\0";
@@ -259,9 +263,7 @@ pub fn lower(
         ));
     }
     require_scalar_expression_tree(&function.body)?;
-    reject_incoming_calls(program, &function.id)?;
     reject_reachable_resumable_callees(program, function)?;
-    reject_other_resumable_functions(program, &function.id)?;
 
     let identity = plan_identity(program, function, &yield_expression.id)?;
 
@@ -291,38 +293,6 @@ pub fn lower(
         start: ResumableProjection { function: start },
         resume: ResumableProjection { function: resume },
     })
-}
-
-/// The projection currently replaces one function inside an otherwise exact
-/// program clone. Any second `yields` function would therefore reach the
-/// ordinary native/Wasm admission gate even when disconnected from the
-/// selected call closure. Refuse that whole-program shape until projection
-/// isolation can retain and validate an exact closed declaration index.
-fn reject_other_resumable_functions(
-    program: &ResolvedProgram,
-    selected: &DeclarationId,
-) -> Result<(), Diagnostic> {
-    if let Some(other) = program
-        .functions
-        .iter()
-        .find(|function| function.id != *selected && function.yields.is_some())
-    {
-        return Err(invalid(format!(
-            "resumable projection requires exactly one yielding function in the whole program; additional function `{}` declares `yields`",
-            other.id
-        )));
-    }
-    if let Some(other) = program
-        .function_instances
-        .iter()
-        .find(|instance| instance.function.yields.is_some())
-    {
-        return Err(invalid(format!(
-            "resumable projection requires exactly one yielding function in the whole program; generic instance `{}` also declares `yields`",
-            other.id.as_str()
-        )));
-    }
-    Ok(())
 }
 
 fn plan_identity(
@@ -380,48 +350,6 @@ fn hash_scalar(hasher: &mut Sha256, value: &ResumableScalar) {
     }
 }
 
-fn reject_incoming_calls(
-    program: &ResolvedProgram,
-    function_id: &DeclarationId,
-) -> Result<(), Diagnostic> {
-    for caller in program
-        .functions
-        .iter()
-        .filter(|caller| caller.id != *function_id)
-    {
-        if function_calls(caller, function_id) {
-            return Err(invalid(format!(
-                "resumable function `{function_id}` has incoming call from `{}`; isolated projection requires no callers",
-                caller.id
-            )));
-        }
-    }
-    for instance in &program.function_instances {
-        if function_calls(&instance.function, function_id) {
-            return Err(invalid(format!(
-                "resumable function `{function_id}` has incoming call from generic instance `{}`",
-                instance.id.as_str()
-            )));
-        }
-    }
-    for template in &program.function_templates {
-        if expressions_call(
-            template
-                .requires
-                .iter()
-                .chain(std::iter::once(&template.body))
-                .chain(&template.ensures),
-            function_id,
-        ) {
-            return Err(invalid(format!(
-                "resumable function `{function_id}` has incoming call from generic template `{}`",
-                template.id
-            )));
-        }
-    }
-    Ok(())
-}
-
 fn reject_reachable_resumable_callees(
     program: &ResolvedProgram,
     entry: &ResolvedFunction,
@@ -453,33 +381,6 @@ fn reject_reachable_resumable_callees(
         }
     }
     Ok(())
-}
-
-fn function_calls(function: &ResolvedFunction, target: &DeclarationId) -> bool {
-    expressions_call(
-        function
-            .requires
-            .iter()
-            .chain(std::iter::once(&function.body))
-            .chain(&function.ensures),
-        target,
-    )
-}
-
-fn expressions_call<'a>(
-    expressions: impl Iterator<Item = &'a ResolvedExpr>,
-    target: &DeclarationId,
-) -> bool {
-    let mut pending = expressions.collect::<Vec<_>>();
-    while let Some(expression) = pending.pop() {
-        if matches!(&expression.kind, ResolvedExprKind::Call { callee, .. } if callee == target)
-            || matches!(&expression.kind, ResolvedExprKind::FunctionReference { target: reference } if reference == target)
-        {
-            return true;
-        }
-        hir::push_resolved_expression_children_in_authored_order(expression, &mut pending);
-    }
-    false
 }
 
 fn called_functions(function: &ResolvedFunction) -> Result<Vec<DeclarationId>, Diagnostic> {
@@ -900,149 +801,6 @@ fn relocate_record_pattern_fields(
     }
 }
 
-fn start_projection(
-    program: &ResolvedProgram,
-    function: &ResolvedFunction,
-    request: &ResolvedExpr,
-    position: ResumableYieldPosition,
-) -> Result<ResolvedFunction, Diagnostic> {
-    let mut projected = function.clone();
-    projected.yields = None;
-    projected.return_type = request.ty.clone();
-    projected.ensures.clear();
-    let ResolvedExprKind::Block { statements, .. } = &function.body.kind else {
-        return Err(invalid("resumable start projection requires a block body"));
-    };
-    let prefix_len = match position {
-        ResumableYieldPosition::Statement { index, .. } => index as usize,
-        ResumableYieldPosition::Tail => statements.len(),
-    };
-    let execution = FunctionExecutionId::Monomorphic(function.id.clone());
-    let mut relocated_request = request.clone();
-    relocate_expression(
-        &mut relocated_request,
-        &execution,
-        "body.tail",
-        &BTreeMap::new(),
-    )?;
-    projected.body = ResolvedExpr {
-        id: function.body.id.clone(),
-        ty: request.ty.clone(),
-        ownership: OwnershipMode::Value,
-        kind: ResolvedExprKind::Block {
-            statements: statements[..prefix_len].to_vec(),
-            tail: Box::new(relocated_request),
-        },
-        span: function.body.span,
-    };
-    rebuild_projection_plans(program, projected)
-}
-
-fn resume_projection(
-    program: &ResolvedProgram,
-    function: &ResolvedFunction,
-    yield_expression: &ResolvedExpr,
-    position: ResumableYieldPosition,
-) -> Result<ResolvedFunction, Diagnostic> {
-    let mut projected = function.clone();
-    projected.yields = None;
-    // The request/start projection has already replayed the prefix and checked
-    // the recorded request. Running requires a second time here would double
-    // the authored contract rather than resume from the checked suspension.
-    projected.requires.clear();
-    let execution = FunctionExecutionId::Monomorphic(function.id.clone());
-    let answer_id = ValueId::parameter(&execution, projected.params.len());
-    let answer = ResolvedParam {
-        id: answer_id.clone(),
-        name: "__semaprax_resumable_answer".to_owned(),
-        ownership: OwnershipMode::Value,
-        ty: yield_expression.ty.clone(),
-        span: yield_expression.span,
-    };
-    projected.params.push(answer.clone());
-    let answer_expression = ResolvedExpr {
-        // The answer occupies the exact authored yield slot, so the slot's
-        // canonical expression identity remains canonical after replacement.
-        id: yield_expression.id.clone(),
-        ty: yield_expression.ty.clone(),
-        ownership: OwnershipMode::Value,
-        kind: ResolvedExprKind::Place(Place {
-            root: answer_id,
-            projections: Vec::new(),
-        }),
-        span: yield_expression.span,
-    };
-    replace_direct_yield(&mut projected.body, position, answer_expression)?;
-    rebuild_projection_plans(program, projected)
-}
-
-fn replace_direct_yield(
-    body: &mut ResolvedExpr,
-    position: ResumableYieldPosition,
-    answer: ResolvedExpr,
-) -> Result<(), Diagnostic> {
-    let ResolvedExprKind::Block { statements, tail } = &mut body.kind else {
-        return Err(invalid("resumable resume projection requires a block body"));
-    };
-    let slot = match position {
-        ResumableYieldPosition::Statement { index, .. } => statements
-            .get_mut(index as usize)
-            .ok_or_else(|| invalid("resumable yield statement index is out of bounds"))?
-            .value_mut(),
-        ResumableYieldPosition::Tail => tail.as_mut(),
-    };
-    if !matches!(slot.kind, ResolvedExprKind::Yield { .. }) {
-        return Err(invalid(
-            "resumable projection position no longer names a yield expression",
-        ));
-    }
-    *slot = answer;
-    Ok(())
-}
-
-fn rebuild_projection_plans(
-    program: &ResolvedProgram,
-    mut function: ResolvedFunction,
-) -> Result<ResolvedFunction, Diagnostic> {
-    let mut projected = program.clone();
-    replace_function(&mut projected, &function)?;
-    function.loan_plan = crate::loan_plan::build_plan(&projected, &function)?;
-    replace_function(&mut projected, &function)?;
-    function.cleanup = crate::cleanup::build_inventory(&projected, &function)?;
-    replace_function(&mut projected, &function)?;
-    function.cleanup_plan = crate::cleanup_plan::build_plan(&projected, &function)?;
-    Ok(function)
-}
-
-fn projection_program(
-    program: &ResolvedProgram,
-    function_id: &DeclarationId,
-    function: &ResolvedFunction,
-) -> Result<ResolvedProgram, Diagnostic> {
-    let mut projected = program.clone();
-    let target = projected
-        .functions
-        .iter_mut()
-        .find(|candidate| candidate.id == *function_id)
-        .ok_or_else(|| invalid("projection target is absent from the resolved program"))?;
-    *target = function.clone();
-    hir::validate(&projected)?;
-    Ok(projected)
-}
-
-fn replace_function(
-    program: &mut ResolvedProgram,
-    function: &ResolvedFunction,
-) -> Result<(), Diagnostic> {
-    let target = program
-        .functions
-        .iter_mut()
-        .find(|candidate| candidate.id == function.id)
-        .ok_or_else(|| invalid("projection target is absent while rebuilding plans"))?;
-    *target = function.clone();
-    Ok(())
-}
-
 fn invalid(message: impl Into<String>) -> Diagnostic {
     Diagnostic::io(
         INVALID_RESUMABLE_PLAN,
@@ -1075,10 +833,14 @@ fn main() -> i64 { 0 }
     }
 
     fn plan(program: &ResolvedProgram) -> ResumablePlan {
+        plan_for(program, "app.ask")
+    }
+
+    fn plan_for(program: &ResolvedProgram, id: &str) -> ResumablePlan {
         let function = program
             .functions
             .iter()
-            .find(|function| function.id.as_str() == "app.ask")
+            .find(|function| function.id.as_str() == id)
             .unwrap();
         lower(program, function).unwrap()
     }
@@ -1288,7 +1050,7 @@ fn main() -> i64 { 0 }
     }
 
     #[test]
-    fn disconnected_second_yielding_function_is_rejected_before_projection() {
+    fn disconnected_yielding_functions_have_independent_closed_projections() {
         let source = r#"
 module test.resumable_disconnected;
 @id("app.other")
@@ -1305,32 +1067,275 @@ fn ask(seed: i64) -> i64
     let answer = yield seed + 1;
     answer * 2
 }
+@id("app.dropped_bytes")
+fn dropped_bytes(input: borrow Slice<u8>) -> usize { byte_len(input) }
 @id("app.main")
 fn main() -> i64 { 0 }
 "#;
         let program = program(source);
-        let function = program
-            .functions
-            .iter()
-            .find(|function| function.id.as_str() == "app.ask")
-            .unwrap();
-        let error = lower(&program, function).unwrap_err();
+        assert!(program
+            .declarations
+            .byte_slice_provenances()
+            .any(|(value, _)| value.as_str().contains("app.dropped_bytes")));
+        let other = plan_for(&program, "app.other");
+        let ask = plan_for(&program, "app.ask");
+
+        for (plan, retained, removed) in [
+            (&other, "app.other", "app.ask"),
+            (&ask, "app.ask", "app.other"),
+        ] {
+            let start = plan.start_program(&program).unwrap();
+            let resume = plan.resume_program(&program).unwrap();
+            assert_eq!(start, plan.start_program(&program).unwrap());
+            for projected in [&start, &resume] {
+                hir::validate(projected).unwrap();
+                assert_eq!(
+                    projected
+                        .functions
+                        .iter()
+                        .map(|function| function.id.as_str())
+                        .collect::<Vec<_>>(),
+                    vec![retained, "app.main"]
+                );
+                assert!(projected
+                    .declarations
+                    .declaration(&DeclarationId::new(removed))
+                    .is_none());
+                let removed_name = &program
+                    .declarations
+                    .declaration(&DeclarationId::new(removed))
+                    .unwrap()
+                    .name;
+                assert!(projected.declarations.function_id(removed_name).is_none());
+                assert!(projected
+                    .declarations
+                    .declaration(&DeclarationId::new("app.dropped_bytes"))
+                    .is_none());
+                assert!(projected
+                    .declarations
+                    .function_id("dropped_bytes")
+                    .is_none());
+                assert_eq!(projected.declarations.byte_slice_provenances().count(), 0);
+                for function in &projected.functions {
+                    assert_eq!(
+                        projected.declarations.declaration(&function.id),
+                        program.declarations.declaration(&function.id)
+                    );
+                    assert_eq!(
+                        projected.declarations.function_id(&function.name),
+                        Some(&function.id)
+                    );
+                }
+            }
+        }
+
+        let mut hostile = ask.start_program(&program).unwrap();
+        hostile.functions.push(
+            program
+                .functions
+                .iter()
+                .find(|function| function.id.as_str() == "app.other")
+                .unwrap()
+                .clone(),
+        );
+        let error = hir::validate(&hostile).unwrap_err();
         assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
-        assert!(error.message.contains("additional function `app.other`"));
+        assert!(error.message.contains("absent from the declaration index"));
+    }
+
+    #[test]
+    fn projection_retains_both_root_closures_in_authored_order() {
+        let source = r#"
+module test.resumable_projection_order;
+@id("app.entry_helper")
+fn entry_helper() -> i64 { 0 }
+@id("app.other")
+fn other(seed: i64) -> i64 yields i64 -> i64 {
+    let answer = yield seed;
+    answer
+}
+@id("app.selected_helper")
+fn selected_helper(seed: i64) -> i64 { seed + 1 }
+@id("app.ask")
+fn ask(seed: i64) -> i64 yields i64 -> i64 {
+    let answer = yield selected_helper(seed);
+    answer
+}
+@id("app.main")
+fn main() -> i64 { entry_helper() }
+"#;
+        let program = program(source);
+        let plan = plan(&program);
+        for projected in [
+            plan.start_program(&program).unwrap(),
+            plan.resume_program(&program).unwrap(),
+        ] {
+            assert_eq!(
+                projected
+                    .functions
+                    .iter()
+                    .map(|function| function.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![
+                    "app.entry_helper",
+                    "app.selected_helper",
+                    "app.ask",
+                    "app.main",
+                ]
+            );
+            hir::validate(&projected).unwrap();
+        }
     }
 
     #[test]
     fn projection_rejects_an_incoming_caller_before_signature_replacement() {
         let source = SOURCE.replace("fn main() -> i64 { 0 }", "fn main() -> i64 { ask(0) }");
         let program = program(&source);
-        let function = program
-            .functions
-            .iter()
-            .find(|function| function.id.as_str() == "app.ask")
-            .unwrap();
-        let error = lower(&program, function).unwrap_err();
+        let plan = plan(&program);
+        let error = plan.start_program(&program).unwrap_err();
         assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
-        assert!(error.message.contains("incoming call from `app.main`"));
+        assert!(error
+            .message
+            .contains("retained incoming caller `app.main`"));
+    }
+
+    #[test]
+    fn a_yielding_function_in_the_retained_entrypoint_closure_is_rejected() {
+        let source = r#"
+module test.resumable_entrypoint_yield;
+@id("app.ask")
+fn ask(seed: i64) -> i64 yields i64 -> i64 {
+    let answer = yield seed;
+    answer
+}
+@id("app.other")
+fn other(seed: i64) -> i64 yields i64 -> i64 {
+    let answer = yield seed + 1;
+    answer
+}
+@id("app.main")
+fn main() -> i64 { other(0) }
+"#;
+        let program = program(source);
+        let plan = plan(&program);
+        let error = plan.start_program(&program).unwrap_err();
+        assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
+        assert!(error
+            .message
+            .contains("retained projection closure reaches yielding function `app.other`"));
+    }
+
+    #[test]
+    fn retained_generic_calls_and_function_references_fail_closed() {
+        let generic = SOURCE.replace(
+            "@id(\"app.main\")\nfn main() -> i64 { 0 }",
+            r#"@id("app.identity")
+fn identity<T>(value: T) -> T { value }
+@id("app.main")
+fn main() -> i64 { identity<i64>(0) }"#,
+        );
+        let generic_program = program(&generic);
+        let error = plan(&generic_program)
+            .start_program(&generic_program)
+            .unwrap_err();
+        assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
+        assert!(error
+            .message
+            .contains("retained projection closure reaches generic call `app.identity`"));
+
+        let reference = SOURCE.replace(
+            "@id(\"app.main\")\nfn main() -> i64 { 0 }",
+            r#"@id("app.identity")
+fn identity(value: i64) -> i64 { value }
+@id("app.main")
+fn main() -> i64 { let callback = identity; callback(0) }"#,
+        );
+        let reference_program = program(&reference);
+        let error = plan(&reference_program)
+            .start_program(&reference_program)
+            .unwrap_err();
+        assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
+        assert!(error
+            .message
+            .contains("retained projection closure reaches function reference `app.identity`"));
+    }
+
+    #[test]
+    fn nominal_and_authority_surfaces_fail_before_partial_index_pruning() {
+        let class = SOURCE.replace(
+            "@id(\"app.main\")\nfn main() -> i64 { 0 }",
+            r#"@id("data.counter")
+class Counter {
+    @id("data.counter.value")
+    value: i64,
+    @id("data.counter.bumped")
+    fn bumped(self: Counter, amount: i64) -> Counter {
+        Counter { value: self.value + amount }
+    }
+}
+@id("app.main")
+fn main() -> i64 { 0 }"#,
+        );
+        let class_program = program(&class);
+        let error = plan(&class_program)
+            .start_program(&class_program)
+            .unwrap_err();
+        assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
+        assert!(error
+            .message
+            .contains("does not admit authored nominal or resource declarations"));
+
+        let authority = SOURCE.replace(
+            "module test.resumable_lowering;",
+            r#"module test.resumable_lowering;
+permit { host.echo }
+@id("host")
+interface Host permits { host.echo } {
+    @id("host.echo")
+    import rust fn echo(value: i64) -> i64
+        effects { host.echo } failure status "host.echo.v1";
+}"#,
+        );
+        let authority_program = program(&authority);
+        let error = plan(&authority_program)
+            .start_program(&authority_program)
+            .unwrap_err();
+        assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
+        assert!(error
+            .message
+            .contains("retained scalar projection does not admit module permits"));
+
+        let interface = SOURCE.replace(
+            "module test.resumable_lowering;",
+            r#"module test.resumable_lowering;
+@id("host")
+interface Host permits {} {
+    @id("host.echo")
+    import rust fn echo(value: i64) -> unit effects {} failure infallible;
+}"#,
+        );
+        let interface_program = program(&interface);
+        let error = plan(&interface_program)
+            .start_program(&interface_program)
+            .unwrap_err();
+        assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
+        assert!(error
+            .message
+            .contains("retained scalar projection does not admit interfaces or imports"));
+    }
+
+    #[test]
+    fn retained_entrypoint_must_stay_in_the_copy_scalar_profile() {
+        let source = SOURCE.replace(
+            "fn main() -> i64 { 0 }",
+            "fn main() -> i64 { let message = \"not scalar\"; 0 }",
+        );
+        let program = program(&source);
+        let error = plan(&program).start_program(&program).unwrap_err();
+        assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
+        assert!(error.message.contains(
+            "retained scalar function `app.main` contains an expression outside the value Copy-scalar profile"
+        ));
     }
 
     #[test]

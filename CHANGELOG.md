@@ -10,17 +10,25 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 - Add a deterministic compiler-owned three-state HIR plan for the existing
   single-top-level, Copy-scalar `yield` slice. Resume state now binds the exact
-  checked program, yield site, and bit-exact original arguments; a second
-  yielding function anywhere in the program, reachable yielding callees,
-  incoming callers, generic calls, forged projections, and stale bindings fail
-  closed. The interpreter consumes the plan identities, while `cfg(test)`-only
+  checked program, yield site, and bit-exact original arguments. Closed
+  projections now isolate disconnected yielding functions while retaining the
+  selected and authored-entrypoint direct-call closures; retained non-scalar,
+  effectful, owned-cleanup, generic and function-reference surfaces, all
+  authored nominal/authority surfaces, reachable yielding callees, retained
+  incoming callers, forged projections,
+  and stale bindings fail closed. The interpreter consumes the plan identities,
+  while `cfg(test)`-only
   native `-O0`/`-O2` and Core Wasm runners execute independently validated
   yield-free projections, preserving exact normalized prefix/suffix arithmetic
   and pre/postcondition failures. Ordinary native/Wasm emitters still refuse
   `yields`; arbitrary NaN-payload preservation across the JavaScript Wasm test
   adapter, public continuation ABI, external-await runtime seam, durable source
   checkpoint, Agent migration, and general multi-yield lowering are not
-  claimed (#204).
+  claimed. The reference v1 journal additionally completes an already-observed
+  partial turn without redispatch and never repeats cleanup for an in-memory
+  replayed terminal; its unchanged wire has no durable append or cleanup
+  settlement, so decoded terminal cleanup and crash recovery remain ambiguous
+  and unclaimed (#204).
 
 - Add a deterministic, non-executing cross-language benchmark reproduction
   capsule that binds exact task and adapter inventories, equivalence files,

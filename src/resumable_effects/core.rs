@@ -13,6 +13,11 @@
 //! `Observation`, `State`, `Result` and cleanup-op types are the caller's
 //! own, monomorphized per program the way `LiveInvocationHandlers` are
 //! monomorphized per deployment.
+//!
+//! This journal is an in-memory reference log. Appending to its `Vec` is not
+//! a durable commit boundary, so this module does not claim crash-safe
+//! exactly-once dispatch or cleanup. Its replay guarantees apply only to the
+//! complete journal value a caller actually supplies to [`resume`].
 
 use std::fmt::Debug;
 
@@ -101,8 +106,9 @@ pub trait ResumableEffectProgram {
     ) -> Step<Self::State, Self::Result>;
 
     /// The canonical, ordered cleanup inventory for a terminal state. This
-    /// vector is runtime order: the driver executes it front-to-back,
-    /// exactly once, and never sorts, reorders or repairs it.
+    /// vector is runtime order: a fresh terminal drive executes it
+    /// front-to-back and never sorts, reorders or repairs it. Replaying a
+    /// supplied v1 terminal conservatively performs no cleanup again.
     fn cleanup_plan(&self, state: &Self::State) -> Vec<Self::CleanupOp>;
 }
 
@@ -116,8 +122,9 @@ pub trait EffectHandler<Req, Obs> {
 }
 
 /// The injected cleanup boundary, called once per cleanup-plan entry in
-/// plan order. A cleanup failure is recorded, never silently discarded and
-/// never allowed to replace the already-selected terminal status.
+/// plan order for a fresh terminal drive. A cleanup failure is returned,
+/// never silently discarded and never allowed to replace the
+/// already-selected terminal status.
 pub trait CleanupHandler<Op> {
     fn run(&mut self, op: &Op) -> Result<(), String>;
 }
@@ -196,6 +203,9 @@ pub enum JournalError {
     NonSequentialTurn { at: usize },
     /// An entry followed an already-terminal `Transition`.
     EntryAfterTerminal { at: usize },
+    /// An `ObservationFailed` record is a settled driver failure and cannot
+    /// be followed by a transition or any other entry.
+    EntryAfterObservationFailure { at: usize },
     /// The journal's last entry is an `Intent` with no matching
     /// observation: whether the physical dispatch happened is uncertain,
     /// so the journal must not be trusted for replay or further resume
@@ -248,19 +258,25 @@ impl<P: ResumableEffectProgram> Journal<P> {
     /// journal: a journal cannot mint its own authority to be resumed.
     pub fn validate(&self, expected: &EffectScope) -> Result<(), JournalError> {
         let mut turn_expected = 0u32;
-        let mut terminal_seen = false;
         // Which phase of the current turn we expect next.
-        #[derive(PartialEq)]
+        #[derive(Clone, Copy, PartialEq)]
         enum Phase {
             FreshTurn,
             AfterIntent,
             AfterObservation,
+            AfterObservationFailure,
+            ClosedTerminal,
         }
         let mut phase = Phase::FreshTurn;
         let mut open_request: Option<&P::Request> = None;
 
         for (at, entry) in self.entries.iter().enumerate() {
-            if terminal_seen {
+            // Once the structure is closed, its structural diagnostic wins
+            // over any hostile fields carried by the impossible trailing row.
+            if phase == Phase::AfterObservationFailure {
+                return Err(JournalError::EntryAfterObservationFailure { at });
+            }
+            if phase == Phase::ClosedTerminal {
                 return Err(JournalError::EntryAfterTerminal { at });
             }
             if entry.scope().program_root != expected.program_root {
@@ -275,45 +291,68 @@ impl<P: ResumableEffectProgram> Journal<P> {
             if entry.turn() != turn_expected {
                 return Err(JournalError::NonSequentialTurn { at });
             }
-            match entry {
-                JournalEntry::Intent { request, .. } => {
-                    if phase != Phase::FreshTurn {
+            match phase {
+                Phase::FreshTurn => match entry {
+                    JournalEntry::Intent { request, .. } => {
+                        open_request = Some(request);
+                        phase = Phase::AfterIntent;
+                    }
+                    JournalEntry::Transition { step, .. } => {
+                        open_request = None;
+                        phase = match step {
+                            Step::Continue(_) => {
+                                turn_expected += 1;
+                                Phase::FreshTurn
+                            }
+                            Step::Complete(_) | Step::Suspend(_) | Step::Fail(_) => {
+                                Phase::ClosedTerminal
+                            }
+                        };
+                    }
+                    JournalEntry::Observed { .. } | JournalEntry::ObservationFailed { .. } => {
                         return Err(JournalError::OutOfOrder { at });
                     }
-                    open_request = Some(request);
-                    phase = Phase::AfterIntent;
-                }
-                JournalEntry::Observed { request, .. }
-                | JournalEntry::ObservationFailed { request, .. } => {
-                    if phase != Phase::AfterIntent {
-                        return Err(JournalError::OutOfOrder { at });
+                },
+                Phase::AfterIntent => match entry {
+                    JournalEntry::Observed { request, .. } => {
+                        if open_request != Some(request) {
+                            return Err(JournalError::RequestMismatch { at });
+                        }
+                        phase = Phase::AfterObservation;
                     }
-                    if open_request != Some(request) {
-                        return Err(JournalError::RequestMismatch { at });
+                    JournalEntry::ObservationFailed { request, .. } => {
+                        if open_request != Some(request) {
+                            return Err(JournalError::RequestMismatch { at });
+                        }
+                        phase = Phase::AfterObservationFailure;
                     }
-                    phase = Phase::AfterObservation;
-                }
-                JournalEntry::Transition { step, .. } => {
-                    if phase == Phase::AfterIntent {
-                        // an Intent with no Observed is never legally followed
-                        // by a Transition; that is caught by UnterminatedIntent
-                        // logic below instead of here.
-                        return Err(JournalError::OutOfOrder { at });
+                    _ => return Err(JournalError::OutOfOrder { at }),
+                },
+                Phase::AfterObservation => match entry {
+                    JournalEntry::Transition { step, .. } => {
+                        open_request = None;
+                        phase = match step {
+                            Step::Continue(_) => {
+                                turn_expected += 1;
+                                Phase::FreshTurn
+                            }
+                            Step::Complete(_) | Step::Suspend(_) | Step::Fail(_) => {
+                                Phase::ClosedTerminal
+                            }
+                        };
                     }
-                    phase = Phase::FreshTurn;
-                    open_request = None;
-                    if step.is_terminal() {
-                        terminal_seen = true;
-                    } else {
-                        turn_expected += 1;
-                    }
-                }
+                    _ => return Err(JournalError::OutOfOrder { at }),
+                },
+                Phase::AfterObservationFailure | Phase::ClosedTerminal => unreachable!(),
             }
         }
-        if phase == Phase::AfterIntent {
-            return Err(JournalError::UnterminatedIntent);
+        match phase {
+            Phase::AfterIntent => Err(JournalError::UnterminatedIntent),
+            Phase::FreshTurn
+            | Phase::AfterObservation
+            | Phase::AfterObservationFailure
+            | Phase::ClosedTerminal => Ok(()),
         }
-        Ok(())
     }
 }
 
@@ -322,9 +361,10 @@ impl<P: ResumableEffectProgram> Journal<P> {
 pub struct Outcome<P: ResumableEffectProgram> {
     /// The selected terminal step. Cleanup below never replaces this value.
     pub terminal: Step<P::State, P::Result>,
-    /// Cleanup-plan results in exact canonical plan order, run exactly
-    /// once. A failed entry is recorded here, never used to override
-    /// `terminal`.
+    /// Fresh cleanup-plan results in exact canonical plan order. A failed
+    /// entry is reported here, never used to override `terminal`. Terminal
+    /// replay performs no cleanup and returns this vector empty because the
+    /// v1 journal stores no prior cleanup outcomes.
     pub cleanup: Vec<(P::CleanupOp, Result<(), String>)>,
     /// How many *new* physical `EffectHandler::dispatch` calls this one
     /// call performed. Replaying trusted recorded observations never
@@ -362,15 +402,16 @@ pub enum DriverError {
 
 /// Run a fresh resumable computation to its first suspension or terminal
 /// step. Success carries the completed journal; failure carries the
-/// journal too (the latest durable checkpoint candidate), exactly as a
-/// caller needs it for a later authorized resume.
+/// journal too, exactly as a caller needs it for a later authorized resume.
 /// What a drive attempt yields: either the terminal outcome, or the error that
 /// stopped it — and in **both** cases the journal as it stands.
 ///
 /// The journal is returned on the error path deliberately. A run that fails
-/// part-way still produced durable entries up to that point, and a caller needs
-/// them to decide whether a later authorized resume is possible. Dropping the
-/// journal on failure would discard exactly the evidence recovery depends on.
+/// part-way still produced entries up to that point, and a caller needs them to
+/// decide whether a later authorized resume is possible. Dropping the journal
+/// on failure would discard exactly the evidence recovery depends on. A caller
+/// that needs durability must persist the returned value itself; this driver
+/// has no durable append sink.
 pub type DriveResult<P> = Result<(Outcome<P>, Journal<P>), (DriverError, Journal<P>)>;
 
 pub fn run<P: ResumableEffectProgram>(
@@ -397,9 +438,9 @@ pub fn run<P: ResumableEffectProgram>(
 /// Resume a computation from a (possibly empty) journal. Every entry the
 /// journal already carries is *replayed*: its recorded observation is
 /// reused and the handler is never called for it, so resuming a journal
-/// that already reached a terminal step performs zero physical dispatches.
-/// Only turns past the journal's recorded tail are new attempts with new
-/// accounting.
+/// that already reached a terminal step performs zero physical dispatches
+/// and zero physical cleanup calls. Only turns past the journal's recorded
+/// tail are new attempts with new accounting.
 #[allow(clippy::too_many_arguments)]
 pub fn resume<P: ResumableEffectProgram>(
     program: &P,
@@ -420,7 +461,7 @@ pub fn resume<P: ResumableEffectProgram>(
     let mut dispatched = 0u32;
     let mut cursor = 0usize;
 
-    let terminal = loop {
+    let (terminal, replayed_terminal) = loop {
         if turn >= max_turns {
             return Err((DriverError::BudgetExhausted, journal));
         }
@@ -449,7 +490,33 @@ pub fn resume<P: ResumableEffectProgram>(
                         turn += 1;
                         continue;
                     }
-                    terminal => break terminal,
+                    terminal => break (terminal, true),
+                }
+            }
+            Recorded::ObservedPendingTransition {
+                request,
+                observation,
+            } => {
+                // Dispatch completed and its observation is already known.
+                // Complete the deterministic half of the turn without ever
+                // contacting the physical handler again.
+                if program.request(&state).as_ref() != Some(&request) {
+                    return Err((DriverError::RequestDrift { turn }, journal));
+                }
+                let step = program.transition(&state, Some(&observation));
+                journal.push(JournalEntry::Transition {
+                    turn,
+                    scope: scope.clone(),
+                    step: step.clone(),
+                });
+                cursor = journal.entries().len();
+                match step {
+                    Step::Continue(next) => {
+                        state = next;
+                        turn += 1;
+                        continue;
+                    }
+                    terminal => break (terminal, false),
                 }
             }
             Recorded::Failure { reason } => {
@@ -513,15 +580,22 @@ pub fn resume<P: ResumableEffectProgram>(
                 state = next;
                 turn += 1;
             }
-            terminal => break terminal,
+            terminal => break (terminal, false),
         }
     };
 
     // Cleanup only runs for Complete/Fail; Suspend deliberately keeps the
     // computation's resources live for a later resume. Failure selection is
     // sticky: whatever cleanup reports, `terminal` below is never replaced.
-    let cleanup = match &terminal {
-        Step::Complete(_) | Step::Fail(_) => {
+    let cleanup = match (&terminal, replayed_terminal) {
+        // A v1 terminal returned by a completed in-memory drive has already
+        // crossed cleanup. A recovered or caller-constructed v1 terminal is
+        // cleanup-ambiguous because the journal stores no cleanup evidence;
+        // replay conservatively performs no cleanup again and reports no old
+        // outcomes. This prevents a repeat but does not prove cleanup ran and
+        // is not a crash-durability claim.
+        (Step::Complete(_) | Step::Fail(_), true) => Vec::new(),
+        (Step::Complete(_) | Step::Fail(_), false) => {
             let plan = program.cleanup_plan(&state);
             let mut results = Vec::with_capacity(plan.len());
             for op in plan {
@@ -530,7 +604,7 @@ pub fn resume<P: ResumableEffectProgram>(
             }
             results
         }
-        Step::Suspend(_) | Step::Continue(_) => Vec::new(),
+        (Step::Suspend(_) | Step::Continue(_), _) => Vec::new(),
     };
 
     Ok((
@@ -556,6 +630,12 @@ enum Recorded<P: ResumableEffectProgram> {
     /// A complete Intent/Observed/Transition (or bare Transition) group:
     /// replay it by recomputing, never dispatching.
     Group(RecordedGroup<P>),
+    /// Intent/Observed is a safe, completed physical observation boundary;
+    /// finish its deterministic transition without redispatching.
+    ObservedPendingTransition {
+        request: P::Request,
+        observation: P::Observation,
+    },
     /// A recorded Intent/ObservationFailed pair with nothing after it: the
     /// original attempt already failed and stopped before any transition.
     /// Replaying this reports the same failure again without recontacting
@@ -596,7 +676,10 @@ fn peek_recorded<P: ResumableEffectProgram>(
                 JournalEntry::Observed { observation, .. } => {
                     let observation = observation.clone();
                     let Some(third) = entries.get(cursor + 2) else {
-                        return Recorded::None;
+                        return Recorded::ObservedPendingTransition {
+                            request,
+                            observation,
+                        };
                     };
                     match third {
                         JournalEntry::Transition { step, .. } => Recorded::Group(RecordedGroup {

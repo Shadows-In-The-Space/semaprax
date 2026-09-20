@@ -118,8 +118,9 @@ failure case #204 names explicitly).
   `Journal::validate` rejects a journal before it is trusted for replay:
   `StaleProgramRoot`, `WrongInvocation`, `WrongPolicyEpoch` (three distinct
   scope-field mismatches, not one merged variant), `OutOfOrder`,
-  `RequestMismatch`, `NonSequentialTurn`, `EntryAfterTerminal`, and
-  `UnterminatedIntent` (a journal ending on a bare `Intent` is uncertain —
+  `RequestMismatch`, `NonSequentialTurn`, `EntryAfterTerminal`,
+  `EntryAfterObservationFailure`, and `UnterminatedIntent` (a journal ending
+  on a bare `Intent` is uncertain —
   whether the physical dispatch happened is unknown — and is rejected
   before any stage, mirroring `agent_runtime_v2::checkpoint`'s identical
   rule).
@@ -129,15 +130,19 @@ failure case #204 names explicitly).
   — without ever calling the injected handler for a replayed turn, then
   performs genuinely new turns past the journal's recorded tail as fresh
   dispatches with their own accounting. Both functions return the journal
-  on *every* path, including failure, so a caller keeps the latest durable
-  checkpoint candidate even when a call fails (mirroring
-  `DurableTypedFailure`).
+  on *every* path, including failure, so a caller can persist the latest
+  checkpoint candidate even when a call fails. `Journal` itself is only an
+  in-memory vector: this module supplies no durable append sink and makes no
+  crash-recovery claim.
 - Cleanup only runs for `Complete`/`Fail` (a `Suspend` deliberately keeps a
   computation's resources live for a later resume); cleanup ops run in
-  exact `cleanup_plan` order, exactly once, and a cleanup failure is
+  exact `cleanup_plan` order for a fresh terminal, and a cleanup failure is
   recorded in `Outcome::cleanup` but never replaces the already-selected
   `terminal` — failure selection is sticky by construction, not by a
-  downstream check.
+  downstream check. Replaying an in-memory returned terminal runs no cleanup
+  again. The v1 wire does not record cleanup settlement, so a decoded or
+  externally reconstructed terminal is cleanup-ambiguous and cannot support an
+  exactly-once crash-recovery claim.
 
 `src/resumable_effects/capability.rs`:
 
@@ -149,8 +154,8 @@ failure case #204 names explicitly).
   caller-supplied `capability_of` mapping names an id outside the current
   policy. A denial is reported through the driver's existing
   `HandlerFailed`/`ObservationFailed` path — the same one a genuine host
-  failure already takes — so it is durable journal evidence, not a silently
-  dropped decision, and replaying a denied journal reports the same denial
+  failure already takes — so it is explicit evidence in the returned journal,
+  not a silently dropped decision, and replaying a denied journal reports the same denial
   again without a second call to the wrapped handler (or the gate itself).
   This implements the "Effect declarations and capability requirements"
   scope bullet as a decorator at the existing effect-authority boundary,
@@ -204,7 +209,7 @@ failure case #204 names explicitly).
   the wrong shape, before that answer can become the observation a
   `transition` reads. Both refusals travel the driver's existing
   `HandlerFailed`/`ObservationFailed` path, so `run`/`resume` are unchanged,
-  the refusal is durable journal evidence, and it can never replace an
+  the refusal is explicit evidence in the returned journal, and it can never replace an
   already-selected terminal status. The answer check necessarily runs after
   the wrapped handler returns — an answer cannot be inspected before it
   exists — so a genuinely authorized physical effect may already have
@@ -304,7 +309,8 @@ failure case #204 names explicitly).
   `a_journal_recovered_under_a_table_that_no_longer_declares_its_effect_is_refused`
   is the "resuming after a code change can execute state under incompatible
   semantics" case. `a_refused_answer_is_replayed_as_the_same_refusal_without_a_second_dispatch`
-  proves the refusal is exactly-once: the replay wires a panicking handler.
+  proves non-redelivery for the supplied in-memory journal: the replay wires
+  a panicking handler. It is not a crash-safe exactly-once claim.
 
 
 ## Compiler-owned lowering and private backend parity
@@ -324,14 +330,14 @@ Both projections rebuild loan and cleanup proof attachments and pass ordinary
 HIR validation before any backend sees them. Moving a request subtree also
 rederives its structural expression and local identities at the new canonical
 path; copied HIR identities are not accepted as a shortcut. The plan refuses
-an entrypoint or any incoming caller because replacing a function's signature
-inside an otherwise callable program would be unsound. It walks the reachable
-call closure and diagnoses a `yields`-declaring callee specifically. Because
-the current projection retains the rest of the resolved program, it also
-conservatively requires exactly one `yields`-declaring function in the **whole
-program**, including disconnected functions and forged generic instances;
-otherwise the retained function would still trigger the ordinary backend
-refusal. Generic calls remain outside this projection.
+an entrypoint or any retained incoming caller because replacing a function's signature
+inside an otherwise callable program would be unsound. It walks the direct-call
+closure required by the selected function and authored entrypoint, retains only
+that closure, and diagnoses a retained `yields`-declaring callee specifically.
+Disconnected yielding functions are therefore isolated rather than rejected.
+The retained closure must itself stay inside the explicit, effect-free
+Copy-scalar profile with no owned cleanup; authored nominal/authority declarations,
+generic calls and function references remain outside this projection.
 
 The plan identity commits to deterministic checked-HIR bytes, the selected
 function and the yield site. A pending suspension additionally binds that
@@ -435,10 +441,12 @@ Explicitly **not** done in this slice, and why:
   only at the function's own top level (never in a loop, a conditional branch,
   a call argument or any nested expression), scalar request/response/
   parameter/local types, no `uses` effects, no generics, free functions only.
-  The current non-isolated projection additionally requires exactly one
-  `yields`-declaring function in the whole resolved program, even when a
-  second one is disconnected. Widening any one of these constraints is its
-  own tranche across the same seven layers.
+  The closed projection can isolate a selected function from disconnected
+  yielding functions, but every retained entrypoint/helper must satisfy the
+  same explicit, effect-free Copy-scalar target-neutral profile. Authored
+  nominal/authority surfaces anywhere in the source program still fail closed
+  until their correlated dependency graphs can be pruned exactly. Widening any
+  one of these constraints is its own tranche across the same seven layers.
 - **Shapes are opaque caller-supplied strings, not checked source types.**
   `EffectSignature`'s `request_shape`/`answer_shape` are compared for exact
   equality. The bounded compiler plan does carry its source-derived scalar
@@ -495,7 +503,7 @@ Explicitly **not** done in this slice, and why:
 
 | Criterion (from issue #204) | Status |
 | --- | --- |
-| A non-Agent function can yield typed requests and resume safely | **Met only for the minimal `.spx` slice.** One ordinary free function in the whole program declares `yields Request -> Response` and suspends at a single top-level `yield`; `interpreter::resumable` runs it, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same plan projections. Resume checks the answer type (`SPX-F113`), replayed request (`SPX-F114`), and exact program/site/argument binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). A second yielding function (even disconnected), multiple or nested yields, suspension in loops/branches/call arguments, owned state and effectful prefixes remain open. |
+| A non-Agent function can yield typed requests and resume safely | **Met only for the minimal `.spx` slice.** A selected ordinary free function declares `yields Request -> Response` and suspends at a single top-level `yield`; `interpreter::resumable` runs it, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same plan projections. Resume checks the answer type (`SPX-F113`), replayed request (`SPX-F114`), and exact program/site/argument binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). Disconnected yielding functions are pruned from the closed projection; multiple or nested yields, suspension in loops/branches/call arguments, owned state and effectful prefixes remain open. |
 | Generated state machines are deterministic semantic projections | **Met only for the bounded three-state plan.** `ResumablePlan` deterministically derives entry/suspended/complete identities and independently validated yield-free start/resume HIR projections. The interpreter consumes its identities/binding; private native and Wasm runners consume its projections. A general continuation/state-machine lowering for several or control-dependent yields is still open. |
 | Ownership, effects, contracts and authority survive suspension correctly | For the `.spx` plan, only Copy scalars are admitted, ordinary effects and reachable yielding callees are refused, the start projection owns precondition evaluation, the resume projection owns the suffix/postcondition, and suspension bindings confer no authority. Owned values across suspension, effectful prefixes and durable/public resume authority remain **open**. At the separate Rust-reference level, `EffectHandler`, `CapabilityGatedHandler` and `SignatureCheckedHandler` prove the more general checking discipline. |
 | Checkpoint/recovery never grants effect authority by itself | **Met**, including at the "reminted resume" level: `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. Extends through the byte-wire codec: `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. |
@@ -508,9 +516,9 @@ runs 14 unit tests driving real `.spx` source through parse, resolve, start,
 exactly bound resume and same-request/different-argument refusal.
 
 `cargo test --locked -p semaprax --lib resumable_effects::lowering::tests::`
-runs 10 deterministic-plan, HIR-projection, whole-program-isolation,
-canonical-identity and hostile-
-mutation tests. The required physical target selector is:
+runs 15 deterministic-plan, closed HIR-projection, provenance,
+canonical-identity and hostile-mutation tests. The required physical target
+selector is:
 
 ```sh
 SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 \
@@ -521,7 +529,8 @@ SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 \
 It runs 7 private parity tests and fails rather than skips if local `clang` or
 Node is absent. The combined
 `SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 cargo test --locked -p semaprax --lib resumable_effects::`
-selector runs 80 tests. `cargo test --locked -p semaprax --doc
+selector runs 89 tests, including the 23 reference-driver replay tests.
+`cargo test --locked -p semaprax --doc
 resumable_effects` retains the two `compile_fail` doctests proving the
 typed-resume and ownership compile-time refusals.
 

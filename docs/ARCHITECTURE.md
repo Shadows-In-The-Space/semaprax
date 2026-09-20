@@ -768,10 +768,13 @@ the sole status authority.
 plan for the existing single top-level, Copy-scalar source `yield` profile. It
 derives exactly bound suspension identities and independently validated,
 yield-free request and resume projections; `src/interpreter/resumable.rs`
-consumes the same plan identities for source execution. Until projection
-isolation exists, lowering refuses a second `yields`-declaring function
-anywhere in the resolved program, including a disconnected one. The
-crate-private `src/resumable_effects/backend/` runners compile only under
+consumes the same plan identities for source execution. Projection retains the
+selected function and authored-entrypoint direct-call closures in authored
+order, prunes disconnected functions and correlated declaration-index facts,
+and rederives byte provenance. Retained functions must remain explicit,
+effect-free and Copy-scalar with no owned cleanup; authored nominal/authority surfaces,
+generic calls, function references and retained yielding callees fail closed.
+The crate-private `src/resumable_effects/backend/` runners compile only under
 `cfg(test)` and send those projections through the ordinary native C11 and
 Core-Wasm generators as local parity evidence. Their test process explicitly
 owns its temporary storage and local `clang`/Node process use; production

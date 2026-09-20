@@ -4,6 +4,7 @@ use super::*;
 
 mod linked_owned_data;
 mod owned_builtin;
+mod projection;
 use owned_builtin::owned_builtin_facts;
 
 /// A deterministic, display-name-to-identity index.

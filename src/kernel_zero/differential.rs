@@ -5,8 +5,9 @@
 //! 1. Writes the program's `.spx` source to a temp file.
 //! 2. Independently `crate::parse`s and `hir::resolve`s that same source
 //!    (exactly as `super::kernel_zero.rs`'s own admission tests already do),
-//!    translates the entry function via `super::reify::translate_program`,
-//!    and evaluates it with `super::eval::eval_program` -- the from-scratch
+//!    derives and replays `super::reify::BoundTranslation` from the exact
+//!    source and entry, then evaluates the replayed term with
+//!    `super::eval::eval_program` -- the from-scratch
 //!    reference side.
 //! 3. Drives the compiler's real interpreter backend through its ordinary
 //!    public entry point, `crate::interpreter::interpret` (the same
@@ -32,7 +33,7 @@ use crate::interpreter::{self, InterpreterOptions};
 
 use super::corpus;
 use super::eval::eval_program;
-use super::reify::translate_program;
+use super::reify::BoundTranslation;
 use super::value::{Fault, Value};
 
 // Native C11 and Core Wasm extension of this module's own interpreter-only
@@ -192,8 +193,11 @@ fn run_case(case: &Case, failures: &mut Vec<String>, total: &mut usize) {
         case.entry_id,
         case.source
     );
-    let kernel_program = translate_program(&resolved, &entry_decl)
-        .expect("just confirmed reifies_into_kernel_zero above");
+    let binding = BoundTranslation::derive(&case.source, &entry_decl)
+        .expect("corpus source must admit a bounded translation");
+    let kernel_program = binding
+        .replay(&case.source, &entry_decl)
+        .expect("exact-source translation must replay before evaluation");
     let entry_fn = kernel_program
         .function(&entry_decl)
         .expect("translate_program always includes the entry it was given");
@@ -205,7 +209,7 @@ fn run_case(case: &Case, failures: &mut Vec<String>, total: &mut usize) {
     };
     for args in samples {
         *total += 1;
-        let reference = reference_outcome(eval_program(&kernel_program, entry_fn, args));
+        let reference = reference_outcome(eval_program(kernel_program, entry_fn, args));
 
         let argument_strings: Vec<String> = args.iter().map(render_argument).collect();
         let interpretation = interpreter::interpret(

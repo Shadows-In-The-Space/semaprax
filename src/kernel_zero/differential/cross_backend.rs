@@ -59,7 +59,7 @@ use crate::hir::{self, ResolvedType};
 use crate::{codegen, wasm};
 
 use super::super::eval::eval_program;
-use super::super::reify::translate_program;
+use super::super::reify::BoundTranslation;
 use super::super::value::Value;
 use super::{
     fault_from_status, generated_cases, hand_written_cases, reference_outcome, Case, Outcome,
@@ -414,12 +414,15 @@ fn run_case(case: &Case, failures: &mut Vec<String>, total: &mut usize) {
         .expect("just located this function above");
     let is_bool_result = matches!(entry_function.return_type, ResolvedType::Bool);
 
-    let kernel_program = translate_program(&resolved, &entry_decl).unwrap_or_else(|| {
+    let binding = BoundTranslation::derive(&case.source, &entry_decl).unwrap_or_else(|error| {
         panic!(
-            "corpus entry {} must reify into Kernel-0\nsource:\n{}",
+            "corpus entry {} must reify into Kernel-0: {error:?}\nsource:\n{}",
             case.entry_id, case.source
         )
     });
+    let kernel_program = binding
+        .replay(&case.source, &entry_decl)
+        .expect("exact-source translation must replay before target comparison");
     let entry_fn = kernel_program
         .function(&entry_decl)
         .expect("translate_program always includes the entry it was given");
@@ -431,7 +434,7 @@ fn run_case(case: &Case, failures: &mut Vec<String>, total: &mut usize) {
     };
     let references: Vec<Outcome> = samples
         .iter()
-        .map(|args| reference_outcome(eval_program(&kernel_program, entry_fn, args)))
+        .map(|args| reference_outcome(eval_program(kernel_program, entry_fn, args)))
         .collect();
 
     let root = temp_dir();

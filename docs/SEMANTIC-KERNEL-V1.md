@@ -434,6 +434,38 @@ found, in both directions (the compiler's behavior, and two gaps in this
 document's own stated grammar/semantics that a from-scratch reference
 implementation surfaced by simply needing to make every case computable).
 
+### Exact-source reification binding (issue #188)
+
+`src/kernel_zero/reify.rs` now also owns a private `BoundTranslation` boundary.
+Derivation parses the exact supplied source, resolves it, checks bounded
+Kernel-0 admission, and independently replays HIR validation before producing
+the term. Replay repeats this derivation and compares the complete translation,
+the selected stable entry identity, a domain-separated SHA-256 digest of the
+exact source bytes, and a separate digest of the canonical term structure.
+Neither digest is a signature or authority. Even whitespace-only source drift
+requires new evidence. Recomputing a digest on a substituted term cannot make
+it match the freshly translated source.
+
+The profile accepts at most 65,536 source bytes, 64 reachable functions, 8,192
+charged expression/let nodes, and 128 active traversal levels (root depth
+zero; depth 128 refuses, including traversal across call edges). The call walk memoizes completed functions and
+rejects a repeated function on the active path. Unsupported effects (including
+`yields`), contracts, non-scalar data, ownership modes, generic calls, mutation,
+and other control flow have explicit internal refusal categories. These are
+proof-profile refusals only; ordinary compiler admission stays unchanged.
+Only the reachable call closure is translated, ordered by stable declaration
+ID. Parameter, argument, operand, branch, and let order remain authored order.
+Term hashing uses explicit tags, fixed-width counts and integers, and
+length-prefixed UTF-8 identities, never Rust debug formatting.
+
+The interpreter and target differential routes replay this binding before
+evaluating the produced term. Their finite corpus remains the evidence for
+selected return values and sticky arithmetic faults; the binding authenticates
+which source and term were compared. It is not a mechanized translation or
+termination theorem, does not connect Rust HIR to the Lean syntax, and does
+not advance the self-hosting ladder. The existing Lean proofs and hosted
+evidence claims are unchanged.
+
 ## Differential testing: reference interpreter vs. the compiler's interpreter
 
 **What ran.** `src/kernel_zero/differential.rs`'s single test,
@@ -441,11 +473,10 @@ implementation surfaced by simply needing to make every case computable).
 runs every case below through two independent paths and asserts the two
 outcomes are identical:
 
-1. **Reference side:** `crate::parse` the case's `.spx` source, `hir::resolve`
-   it, translate the entry function via `reify::translate_program` (defined
-   only where `kernel_zero::reifies_into_kernel_zero` already admits the
-   function -- the predicate is the gate, the translator is total on what it
-   admits), and evaluate with `eval::eval_program`. This path shares no code
+1. **Reference side:** derive and replay `reify::BoundTranslation` from the
+   case's exact `.spx` source and selected stable entry ID (fresh parse,
+   resolution, bounded profile admission, and HIR validation), then evaluate
+   the replayed term with `eval::eval_program`. This path shares no evaluation code
    with `src/interpreter.rs`: no function, type, or constant from that module
    is imported anywhere under `src/kernel_zero/`.
 2. **Compiler side:** the same source, written to a temp file, run through

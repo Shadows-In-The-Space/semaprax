@@ -64,7 +64,7 @@ pub(crate) enum Term {
 }
 
 /// One Kernel-0 `Fn` declaration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct KernelFn {
     pub(crate) id: DeclarationId,
     /// Parameter identity and type, in authored, left-to-right order.
@@ -77,7 +77,7 @@ pub(crate) struct KernelFn {
 /// `super::reify::translate_program`, which only ever walks the reifying,
 /// acyclic subgraph `kernel_zero::reifies_into_kernel_zero` already
 /// verified) set of `Fn` declarations.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct KernelProgram {
     pub(crate) functions: Vec<KernelFn>,
 }

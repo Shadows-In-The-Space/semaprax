@@ -132,9 +132,11 @@ its reason is stated instead of a guess.
 
 ### 1.4 Calling consumers (four languages)
 
-All four share one hostile-corpus manifest (§1.6) and one canonical
-descriptor/binding trust model. **Every one of the four is local, proof-only
-evidence — no hosted CI run is recorded for any calling-consumer section.**
+All four share one hostile-corpus manifest (§1.5) and one canonical
+descriptor/binding trust model. Hosted job-level evidence exists for the
+widened calling-consumer scope at prior commits (see §2.16), but no hosted run
+at the exact current checkout head is recorded; this remains pending for the
+release-candidate freeze.
 
 | # | Contract | Generator (module) | Status quoted at | Verified at |
 | --- | --- | --- | --- | --- |
@@ -156,22 +158,28 @@ Verified at `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:62-64`.
 
 ### 1.5 Hostile corpus version(s)
 
-There is no single versioned schema string for "the hostile corpus" — it
-exists as two related, separately-scoped artifacts, neither carrying a
-`semaprax.*` schema identifier of its own:
+The composed hostile corpus has the versioned schema
+`semaprax.public-generic-hostile-corpus.v1` and the pinned outcome-manifest digest
+`sha256:8b9534dd79b5f4e6f3be06b76750d4586eb835b98a064430288f0c53d4fa5214`,
+defined by `tests/support/public_generic_hostile_corpus.rs` and checked by its
+`versioned_manifest_digest_is_stable` test. For PG-6's descriptor/carrier
+portion, it consists of two related, separately-scoped artifacts; the older
+metadata-format corpus remains a separate comparison row below:
 
 | Artifact | Scope | Case count | Verified at |
 | --- | --- | --- | --- |
-| Shared calling-consumer hostile corpus (issue #160, extended by #173) | Cross-checks Rust/C11/C++17/TypeScript-Wasm calling consumers against one manifest | 8 cases (`EXPECTED` table) | `tests/support/public_generic_hostile_corpus.rs:336-349`; case list in prose at `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:841-843` ("Six cases originally … now eight") |
+| Shared calling-consumer hostile corpus (issue #160, extended by #173) | Cross-checks Rust/C11/C++17/TypeScript-Wasm calling consumers against one manifest | 17 cases (`EXPECTED` table) | `tests/support/public_generic_hostile_corpus.rs:352-388`; case list in prose at `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:841-878` |
 | Reference-codec hostile replay (issue #173's own two closed gaps) | `descriptor.rs`/`carrier.rs`/`carrier/frame.rs`/`native/binding.rs`/`wasm/binding.rs` invalid-UTF-8 and unrecognized-`LeafKind`-tag cases | 6 cases | `tests/projections/public_generic_descriptor_carrier_hostile_replay.rs` (named at `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:990-1003`) |
 | Metadata-format hostile corpus (grammar half, hosted green) | Nine hostile documents against the four *metadata* consumers | 9 documents | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:169-176` |
 
-`unverified`: no file in this repository names a versioned schema string for
-"hostile corpus" itself (e.g. no `semaprax.public-generic-hostile-corpus.v1`
-constant exists) — `rg -n "public-generic-hostile-corpus"` against `src/` and
-`docs/` returns nothing. Treat "hostile corpus version" as the tuple of the
-three case counts and file paths above, not a single version string, unless a
-maintainer mints one.
+The schema and digest bind the canonical baseline, all 17 shared case ids and
+outcomes, the nine structured descriptor mutations, and all six
+malformed-trusted mutations (including the latter groups' expected
+replay/decode outcomes and exact byte digests). The native and Wasm harnesses'
+driver-local recipes for the 17 shared cases are not encoded in this manifest;
+their agreement remains execution evidence. A changed bound field must
+deliberately mint a new corpus version or update the pinned known-answer with
+review.
 
 ### 1.6 Settlement corpus version
 
@@ -385,9 +393,9 @@ diagnostic/reason range, CI job/step, and support/publication standing.
 - **Owning code module**: `tests/support/public_generic_hostile_corpus.rs` (pure data, `#[path]`-included into both harnesses below)
 - **Generator/verifier entry points**: `tests/public_generic_native_adapter_v1/shared_hostile_corpus.rs` (Rust/C11/C++17), `tests/public_generic_wasm_adapter_v1/shared_hostile_corpus.rs` (TypeScript/Wasm)
 - **Focused test selector**: `cargo test --locked -p semaprax --test public_generic_native_adapter_v1` and `--test public_generic_wasm_adapter_v1` (same selectors as §2.7-2.10; the shared-corpus tests live inside these binaries)
-- **Canonical golden fixture**: `EXPECTED` table in `tests/support/public_generic_hostile_corpus.rs:336` (8 cases)
+- **Canonical golden fixture**: `EXPECTED` table in `tests/support/public_generic_hostile_corpus.rs:352` (17 shared cases); the separate malformed-trusted descriptor manifest has 6 cases
 - **CI job/step**: `public-generic-ownership-milestone` job, "Callable-boundary corpus, generated consumers, settlement and hostile replay" step
-- **Support/publication standing**: Local, proof-only evidence — `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:801-802`
+- **Support/publication standing**: Hosted job-level evidence exists at prior commits, with local proof details; no exact-current-head run is recorded — `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:180-190`
 
 ### 2.12 Public Generic Settlement Obligations v1 (PG-7, specification half)
 
@@ -564,7 +572,6 @@ mistaken for the frozen #164 record. The following remain **entirely open**:
 
 | Item | Reason |
 | --- | --- |
-| A single versioned "hostile corpus" schema identifier | No `semaprax.public-generic-hostile-corpus.v*` (or similar) constant exists anywhere in `src/` or `docs/`; the corpus exists as three separately-scoped, unversioned case tables (§1.5) |
 | MSRV 1.88 pin for the generated Rust consumer building on a provisioned 1.88 toolchain *in a hosted run* | The workflow does provision it: `.github/workflows/ci.yml`'s "Install the generated Rust consumer's declared MSRV toolchain" step runs `rustup toolchain install "1.88"` so that `generated_rust_calling_consumer_builds_and_runs_on_the_declared_msrv_toolchain` resolves it through `rustup which cargo --toolchain 1.88`. What is unverified is only that a *hosted run has executed that step*, which is the same open item as every other row in §3 |
 | `HEAD` as a stable subject | This is a shared checkout; `HEAD` moved during this session's own reads (§3, item 1). Any single SHA cited elsewhere in this document names only what a specific fact was checked against, never a frozen candidate |
 | PG-8's hosted run job IDs mapping to the *current* job definition | **Resolved 2026-09-19**, no longer unverified: jobs 103248047092/103248046648/103248046983 map to the job as it existed at commit `2ef043ba…` (the narrower grammar/metadata scope), but jobs 105871581195/105871581214/105871581165 (run 35433295593, commit `7def8fb1…`) map to the widened job as it exists in source today, and all three are `success` (§2.16, §3 item 3, revised). A third run, 35407101886 at commit `3548dc9a…` (ubuntu-latest job `105799024571`), is likewise `success` on all three hosts and additionally exercises the `--lib public_generic_abi` selector (§2.16, §3 item 4) |

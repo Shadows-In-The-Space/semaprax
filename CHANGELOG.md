@@ -8,6 +8,24 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Preserve every failing real-distribution role in the provisioned Linux
+  doctor diagnostics instead of stopping at Node's first failure. Hosted run
+  35472257722 remains red (12/13 in both suites): Clang passed, Node received
+  `SIGSEGV`, and Rust's exact termination awaits the next instrumented run;
+  confinement policy and WP-05 status are unchanged (#61).
+
+- Compose `std.tracing` trace-context field admission with the existing
+  `std.log.redact` six-flag caller classification, preserving
+  malformed-context refusal and left-to-right lazy evaluation. It does not
+  inspect bytes or tracestate and remains a pure policy layer with no span
+  generator, exporter, sink, or transport authority (#193).
+
+- Version and digest the public-generic hostile corpus, pinning 17 shared case
+  outcomes plus exact bytes for 9 structured-descriptor and 6
+  malformed-trusted cases in one deterministic manifest while correcting
+  stale evidence counts. Exact-current-head hosted
+  evidence and real generated endpoints remain outstanding (#173).
+
 - Extend the source-live repair preview with an explicitly selected OpenCode
   Provider-Adapter route, durable V2 receipts, a restart-stable absolute
   deadline, and checkpoint identity bound to the chosen executable and

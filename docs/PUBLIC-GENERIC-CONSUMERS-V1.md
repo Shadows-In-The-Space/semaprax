@@ -182,6 +182,12 @@ and `windows-latest` for implementation commit `2ef043ba1b989f49b256e456f71fb6e8
 [run 34594793245](https://github.com/wavect/semaprax/actions/runs/34594793245). That is evidence for the corpus this document owns, not for the
 milestone's remaining gates.
 
+The widened calling-consumer corpus also passed at the job level on all three
+hosted operating systems in [run 35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593),
+at prior commit `7def8fb1…` (with the follow-up run at `3548dc9a…` recorded in
+the release-candidate evidence). Neither run is an exact-current-head run;
+fresh hosted evidence at the current checkout remains pending.
+
 ## Nonclaims (metadata consumers)
 
 The four metadata consumers described above define no calling convention,
@@ -838,12 +844,17 @@ consumer that quietly started accepting what the other three reject would
 not have failed anything, because every existing test only asserts against
 its own author's expectation. `tests/support/public_generic_hostile_corpus.rs`
 is the one shared manifest (one on-disk file, `#[path]`-included, unmodified,
-into both native and Wasm harnesses) naming six cases and their one expected
+into both native and Wasm harnesses) naming 17 cases and their one expected
 outcome; `tests/public_generic_native_adapter_v1/shared_hostile_corpus.rs`
 and `tests/public_generic_wasm_adapter_v1/shared_hostile_corpus.rs` generate
 all four consumers from the SAME canonical descriptor baseline, capture each
 one's REAL observed outcome (never assert-and-swallow), and check every one
-of them against that one manifest.
+of them against that one manifest. The composed corpus is identified as
+`semaprax.public-generic-hostile-corpus.v1` with outcome-manifest digest
+`sha256:8b9534dd79b5f4e6f3be06b76750d4586eb835b98a064430288f0c53d4fa5214`;
+the separate malformed-trusted descriptor manifest contains six additional
+cases. The digest binds the 17 shared case ids and expected outcomes, not the
+native/Wasm harness-local mutation recipes; those remain execution evidence.
 
 **Coverage audit — what already existed per consumer before this issue** (test
 names are exact, from the generator's own `ROUND_TRIP_BODY`/equivalent
@@ -864,15 +875,20 @@ Every cell above already passed before this issue; none of it is
 duplicated by the shared corpus. What none of it did is compare outcomes
 ACROSS languages — that is this section's actual contribution.
 
-**What the shared corpus adds, and how agreement is enforced.** Six cases
-originally (issue #160), now eight (issue #173 added two more — see below),
+**What the shared corpus adds, and how agreement is enforced.** Fifteen cases
+originally (issue #160), now seventeen (issue #173 added two more — see below),
 generated from ONE canonical descriptor baseline
 (`BASELINE_DESCRIPTOR_BYTES`) fed identically to all four
 `generate_*_calling_consumer` calls: `success_baseline`,
 `descriptor_first_byte_flipped`, `binding_last_byte_flipped`,
-`descriptor_names_different_document`, `exactly_per_leaf_bound_accepted`,
-`one_byte_over_per_leaf_bound_rejected`, `binding_wrong_target_profile`,
-`binding_valid_for_different_artifact`. Each generated consumer's own
+`descriptor_names_different_document`, `descriptor_unknown_schema`,
+`descriptor_invalid_utf8_export_id`, `descriptor_stale_program_root`,
+`descriptor_reordered_context`, `descriptor_duplicate_context`,
+`descriptor_truncated_final_frame`, `descriptor_extra_frame`,
+`descriptor_overlong_schema_claim`, `descriptor_presentation_rename`,
+`exactly_per_leaf_bound_accepted`, `one_byte_over_per_leaf_bound_rejected`,
+`binding_wrong_target_profile`, `binding_valid_for_different_artifact`.
+Each generated consumer's own
 `consumer.files()` output is left byte-for-byte untouched (the "byte for
 byte" claim above still holds); the harness instead splices one additional,
 hand-written test into the already-generated round-trip file at write time
@@ -947,16 +963,17 @@ no independent compiled provider exists yet to hold a separate counter.
 - Sanitizer variants remain `#[ignore]`d in every harness this section
   touches, for the same reason stated in every section above: no sanitizer
   toolchain is provisioned here.
-- Evidence in this section is local only, exactly like every consumer
-  section above; no hosted CI run is claimed or implied.
+- Hosted job-level evidence for this widened section exists at the prior
+  commits recorded above; no exact-current-head hosted run is claimed or
+  implied.
 
 ### Cross-runtime and cross-artifact additions (issue #173)
 
 Issue #173 asked, across the same four consumers, for hostility against
 stale target/artifact associations and "independent recomputation rather
 than trusting embedded digest fields." Two cases were added to
-`tests/support/public_generic_hostile_corpus.rs::EXPECTED` (now eight, not
-six) and to both harnesses: `binding_wrong_target_profile` and
+`tests/support/public_generic_hostile_corpus.rs::EXPECTED` (now seventeen, not
+fifteen) and to both harnesses: `binding_wrong_target_profile` and
 `binding_valid_for_different_artifact`. Both submit a FULLY well-formed
 alternate `NativeProviderBindingV1`/`WasmProviderBindingV1` — never a
 corrupted byte string, but a value a real decoder would happily accept as

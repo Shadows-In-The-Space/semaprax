@@ -316,6 +316,24 @@ pub fn malformed_trusted_descriptor_cases(
     cases
 }
 
+/// Versioned identity for the composed hostile corpus owned by issues #160 and
+/// #173. The outcome-manifest digest below covers the canonical baseline and
+/// every shared consumer case id/outcome. It additionally binds the exact bytes
+/// and refusal classes for the structured and malformed-trusted descriptor
+/// cases that this shared module itself constructs. Native/Wasm driver-local
+/// mutation recipes remain outside this digest and are checked by execution.
+pub const HOSTILE_CORPUS_SCHEMA: &str = "semaprax.public-generic-hostile-corpus.v1";
+
+/// SHA-256 of the deterministic manifest assembled by
+/// `versioned_manifest_digest_is_stable`. Keep this pinned when the corpus
+/// changes; a changed shared id/outcome, shared-module mutation, or baseline
+/// must deliberately mint a new corpus version or update this known-answer.
+pub const HOSTILE_CORPUS_MANIFEST_DIGEST: &str =
+    "sha256:8b9534dd79b5f4e6f3be06b76750d4586eb835b98a064430288f0c53d4fa5214";
+
+pub const HOSTILE_CORPUS_SHARED_CASE_COUNT: usize = 17;
+pub const HOSTILE_CORPUS_MALFORMED_TRUSTED_CASE_COUNT: usize = 6;
+
 /// Restates `src/public_generic_abi/boundary_profile.rs::MAX_BYTES_PER_LEAF`
 /// (64 KiB), exactly like every generated consumer already restates it
 /// rather than depending on the `semaprax` crate (a generated artifact must
@@ -449,6 +467,75 @@ pub fn assert_matches_expected(route: &str, actual: &[(String, String)]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn canonical_manifest_payload() -> Vec<u8> {
+        use sha2::{Digest as _, Sha256};
+
+        let mut manifest = String::new();
+        manifest.push_str(HOSTILE_CORPUS_SCHEMA);
+        manifest.push('\n');
+        manifest.push_str("baseline\t");
+        manifest.push_str(&format!(
+            "{:x}",
+            semaprax::digest_hex::LowerHex(Sha256::digest(baseline_descriptor_bytes()))
+        ));
+        manifest.push('\n');
+        for (name, status) in EXPECTED {
+            manifest.push_str("shared\t");
+            manifest.push_str(name);
+            manifest.push('\t');
+            manifest.push_str(status);
+            manifest.push('\n');
+        }
+        for (name, bytes, replay_refusal, expected_sha256) in structured_descriptor_cases() {
+            manifest.push_str("structured\t");
+            manifest.push_str(name);
+            manifest.push('\t');
+            manifest.push_str(replay_refusal);
+            manifest.push('\t');
+            manifest.push_str(expected_sha256);
+            manifest.push('\n');
+            assert_eq!(
+                format!(
+                    "{:x}",
+                    semaprax::digest_hex::LowerHex(Sha256::digest(&bytes))
+                ),
+                expected_sha256,
+                "{name}"
+            );
+        }
+        for (name, bytes, decode_refusal, replay_refusal) in malformed_trusted_descriptor_cases() {
+            manifest.push_str("malformed-trusted\t");
+            manifest.push_str(name);
+            manifest.push('\t');
+            manifest.push_str(decode_refusal.unwrap_or("ADMITTED"));
+            manifest.push('\t');
+            manifest.push_str(replay_refusal);
+            manifest.push('\t');
+            manifest.push_str(&format!(
+                "{:x}",
+                semaprax::digest_hex::LowerHex(Sha256::digest(&bytes))
+            ));
+            manifest.push('\n');
+        }
+        manifest.into_bytes()
+    }
+
+    #[test]
+    fn versioned_manifest_digest_is_stable() {
+        use sha2::{Digest as _, Sha256};
+
+        assert_eq!(EXPECTED.len(), HOSTILE_CORPUS_SHARED_CASE_COUNT);
+        assert_eq!(
+            malformed_trusted_descriptor_cases().len(),
+            HOSTILE_CORPUS_MALFORMED_TRUSTED_CASE_COUNT
+        );
+        let digest = format!(
+            "sha256:{:x}",
+            semaprax::digest_hex::LowerHex(Sha256::digest(canonical_manifest_payload()))
+        );
+        assert_eq!(digest, HOSTILE_CORPUS_MANIFEST_DIGEST);
+    }
 
     #[test]
     fn canonical_descriptor_mutations_have_exact_reference_refusals() {

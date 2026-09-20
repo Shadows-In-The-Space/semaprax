@@ -35,14 +35,17 @@
 //!   ambient process authority, and nothing here has ever executed a Lean
 //!   kernel of its own accord.
 //! - **A certificate is proof data, not authority.** It grants no
-//!   execution, publication, signing, or merge permission, and it is not
-//!   merged into the Assurance Manifest's obligation lattice.
+//!   execution, publication, signing, or merge permission. A separately
+//!   replayed ProgramRoot association may turn its selected postcondition
+//!   into one exact Assurance Manifest method attachment, but that remains
+//!   evidence data rather than a permission or candidate-acceptance grant.
 //! - **No ProgramRoot binding.** A managed-workspace `ProgramRoot`
 //!   ([`crate::project::ProgramRoot`]) is derived from a
 //!   `SemanticWorkspaceRevision`; this export binds a single source file's
-//!   semantic revision ([`graph::revision`]) instead, exactly as the
-//!   already-shipped SMT certificate does. That is a narrower binding and
-//!   is recorded as such in every certificate's `nonclaims`.
+//!   semantic revision ([`graph::revision`]) instead. That narrower fact is
+//!   recorded in every v1 certificate's `nonclaims`; it is deliberately not
+//!   rewritten. [`program_root`] adds an additive, independently replayed
+//!   association for callers that hold a retained Project revision.
 //! - **No claim about lowering.** Binding artifact bytes says the
 //!   certificate's source compiles to those exact bytes through this exact
 //!   compiler. It does not say the backend preserves the proved theorem.
@@ -68,6 +71,7 @@ pub mod certificate;
 pub mod kernel_report;
 pub mod lean;
 pub mod profile;
+pub mod program_root;
 pub mod verify;
 
 #[cfg(test)]
@@ -79,6 +83,12 @@ pub use certificate::{render_coverage, CERTIFICATE_SCHEMA, COVERAGE_SCHEMA};
 pub use kernel_report::{KernelVerdict, Rejection, KERNEL_IDENTITY, PINNED_TOOLCHAIN};
 pub use lean::{export_module, ModuleExport, ASSUMPTIONS, EXPORT_SCHEMA, NAMESPACE};
 pub use profile::{Excluded, PROFILE_V1};
+pub use program_root::{
+    assurance_method_attachment, bind_certificate_to_program_root,
+    verify_certificate_against_program_root, verify_certificate_against_project_source,
+    verify_certificate_with_kernel_against_program_root, verify_program_root_binding,
+    CheckedProgramRootBinding, PROGRAM_ROOT_BINDING_SCHEMA,
+};
 pub use verify::{
     verify_certificate, verify_certificate_against_artifact, verify_certificate_against_source,
     verify_certificate_with_capability, verify_certificate_with_kernel, CheckedCertificate,

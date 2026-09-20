@@ -9,6 +9,7 @@ Status: one tranche of [issue #186]. Owns three wire identities:
 | `semaprax.lean-obligation-export.v1` | `proof_export::lean::export_module` | a pinned Lean 4 toolchain |
 | `semaprax.lean-export-coverage.v1` | `proof_export::certificate::render_coverage` | a reader asking what was *not* covered |
 | `semaprax.lean-proof-certificate.v1` | `proof_export::export_obligation_certificate` | `proof_export::verify::*` and any independent replayer |
+| `semaprax.lean-proof-program-root-binding.v1` | `proof_export::bind_certificate_to_program_root` | `proof_export::verify_certificate_against_program_root` and the exact Assurance Manifest method attachment |
 
 Implementation: `src/proof_export/`. Specification precedence: this document
 owns the profile, the translation, the trusted base, the result grammar and
@@ -283,6 +284,67 @@ Lean document is embedded verbatim, so a third party can hand it to their
 own Lean toolchain without trusting this exporter; `unsupported[]` travels
 with the claim so a reader is always told what the export refused.
 
+### Additive ProgramRoot association
+
+The certificate wire above remains deliberately unchanged: it is a
+single-file artifact and its own `nonclaims` continue to say that it does not
+bind a managed-workspace `ProgramRoot`. A caller that holds one immutable,
+already admitted `ProjectRevision` may additionally render
+`semaprax.lean-proof-program-root-binding.v1` with
+`proof_export::bind_certificate_to_program_root`.
+
+That association has its own exact `{schema,digest,bytes,payload}` envelope
+and domain-separated payload digest. Its closed payload binds:
+
+- the exact complete v1 certificate bytes, length and domain-separated digest;
+- the retained Project's exact ProgramRoot identity, its exact canonical JSON
+  byte length and a domain-separated digest of those bytes; and
+- exactly one retained source row (`path`, source semantic revision and source
+  digest) whose revision must equal the certificate's own source revision.
+
+`verify_program_root_binding` validates the closed association and the exact
+certificate bytes without reopening a source. `verify_certificate_against_program_root`
+then replays the certificate against the already retained source bytes,
+rederives the compiler artifact, and rederives the Project's canonical
+workspace revision and ProgramRoot before comparing every association field.
+`verify_certificate_with_kernel_against_program_root` performs all of those
+checks first and only then invokes a caller-supplied `LeanKernel`; a wrong
+source row, sibling Project, certificate, artifact, or ProgramRoot therefore
+cannot dispatch a kernel check.
+
+The association is not a second compiler or proof pipeline. It has no
+filesystem, process, network, tool-discovery, target-execution, publication,
+signing, or candidate-acceptance authority. It says neither that the source
+theorem survives lowering nor that a candidate is accepted.
+
+### Assurance Manifest and candidate composition
+
+`proof_export::assurance_method_attachment` requires the exact certificate,
+association, retained revision **and a caller-supplied `LeanKernel`**. It first
+performs the complete binding replay, then invokes that explicit kernel, and
+returns opaque `VerifiedProjectProof` evidence only on the kernel-confirmed
+result. There is no public constructor or options field for this evidence.
+
+`project::generate_from_snapshot_with_verified_proofs` is the only composition
+route. Before it appends a `theorem_proved` method to the already-derived
+`ensure:<index>` obligation, it independently rederives and compares the exact
+retained Project revision, ProgramRoot, source row, certificate association,
+postcondition identity, declaration identity and source path. The existing
+`runtime_guarded` method stays present, and no duplicate obligation row is
+rendered. A sibling Project with the same stable id, a changed source row, an
+adjacent postcondition, or a stale certificate is a fail-closed `SPX-Z101`
+refusal. The certificate's checked-range theorems remain proof-chain
+prerequisites, not invented Assurance Manifest obligations.
+
+The resulting envelope remains the unchanged
+`semaprax.project-assurance-manifest.v1` schema, so existing Candidate
+Assurance composition rebinds and summarizes it in the ordinary path. As with
+all formal method records, the candidate summary requires a non-null
+`proof_ref`; here it is the exact ProgramRoot-association payload digest. This
+composition makes evidence available to the existing path; it does not give
+either the manifest or the candidate authority to run Lean or accept a
+candidate.
+
 ### Replay, fail-closed
 
 1. `verify_certificate` — filesystem-free. Recomputes the envelope digest
@@ -315,6 +377,11 @@ with the claim so a reader is always told what the export refused.
    removal of a non-headline range obligation, or a change from one standard axiom set to another,
    is therefore still refused; merely obtaining a second clean result is not
    enough.
+6. `verify_certificate_against_program_root` — association, certificate,
+   held source row, semantic revision, compiler artifact, canonical workspace
+   and exact ProgramRoot all replay together. This route is in-memory after
+   the Project is retained; it does not reopen a raw source path. The kernel
+   variant preserves the same binding-first ordering.
 
 Diagnostics: `SPX-Z110` nothing to certify, `SPX-Z111` certificate
 inconsistency, `SPX-Z112` drift.
@@ -326,10 +393,10 @@ written about this module:
 
 - Kernel-checked status covers only the listed obligations of the listed
   declaration. Declarations under `unsupported` are not proved.
-- **No ProgramRoot binding.** A managed-workspace `ProgramRoot` derives from
-  a `SemanticWorkspaceRevision`; this export binds a single source file's
-  semantic revision instead, exactly as the shipped SMT certificate does.
-  That is a narrower binding.
+- The v1 certificate itself has **no ProgramRoot binding**: a managed-workspace
+  `ProgramRoot` derives from a `SemanticWorkspaceRevision`, while that wire
+  binds a single source semantic revision. The optional, separately versioned
+  ProgramRoot association above is the only route that adds the wider binding.
 - Artifact binding covers only the `wasm-core-module-v1` target. No native
   artifact is bound: native codegen emits C11 source text needing an
   external, unpinned C toolchain this crate does not invoke.
@@ -338,9 +405,10 @@ written about this module:
 - The SEMAPRAX-to-Lean translation is trusted and unverified.
 - `requires` clauses are assumed, not proved.
 - No target execution, no project test discovery, no source writes.
-- Not merged into the Assurance Manifest obligation lattice. A certificate
-  is proof data, not authority: it grants no execution, publication,
-  signing, or merge permission.
+- A v1 certificate alone is not merged into the Assurance Manifest lattice.
+  Only a replayed ProgramRoot association can produce its one exact method
+  attachment. In either form proof data grants no execution, publication,
+  signing, merge, or candidate-acceptance permission.
 - **Kernel evidence is local-host only.** Hosted CI provisions no Lean
   toolchain, so a certificate records a result obtained on whichever host
   ran the kernel. It is not hosted, production, or current-head CI
@@ -360,9 +428,12 @@ written about this module:
 - The kernel has been run over exactly one module, the committed golden. No
   corpus, and no generated-source mutation ladder beyond the two seeds.
 - No CLI surface; the module is library-only.
-- No Assurance Manifest merge, and no `ObligationKind` for checked-range
-  obligations — they carry their own
-  `semaprax.lean-export.range.v1:...` ids precisely so they are not
+- No CLI surface or automatic certificate discovery: a caller explicitly
+  supplies certificate, retained revision, source path and Lean-kernel
+  capability, then passes the opaque kernel-confirmed proof only to the exact
+  Project assurance composition route.
+  There remains no `ObligationKind` for checked-range obligations — they carry
+  their own `semaprax.lean-export.range.v1:...` ids precisely so they are not
   mistaken for manifest obligations.
 - No mutation ladder over *target* changes (only source, revision,
   compiler, Lean document, and artifact are exercised).

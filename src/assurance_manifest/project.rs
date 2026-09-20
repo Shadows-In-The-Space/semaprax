@@ -9,9 +9,12 @@ use serde_json::{json, Value};
 
 use crate::architecture_claims::ArchitectureClaimSet;
 use crate::diagnostic::Diagnostic;
-use crate::project::{with_authenticated_project, ProjectRevision, ProjectSnapshot};
+use crate::project::{with_authenticated_project, ProgramRoot, ProjectRevision, ProjectSnapshot};
 
-use super::{AssuranceClass, AssuranceManifestOptions, MethodRecord, Obligation, ObligationKind};
+use super::{
+    AssuranceClass, AssuranceManifestOptions, MethodRecord, Obligation, ObligationKind,
+    VerifiedProjectProof,
+};
 
 pub const SCHEMA: &str = "semaprax.project-assurance-manifest.v1";
 const PAYLOAD_DOMAIN: &[u8] = b"semaprax.project-assurance-manifest.payload.v1\0";
@@ -74,8 +77,34 @@ pub fn generate_from_snapshot(
     snapshot.with_authenticated_request(|snapshot| derive(&snapshot.retain_revision(), options))
 }
 
+/// Generate Project assurance with opaque evidence that a proof backend has
+/// already kernel-confirmed against this exact retained Project. The evidence
+/// is rechecked against the current authenticated snapshot before it can add a
+/// method; it is never accepted through the public single-file options bag.
+pub fn generate_from_snapshot_with_verified_proofs(
+    snapshot: &mut ProjectSnapshot,
+    options: &ProjectAssuranceOptions,
+    proofs: &[VerifiedProjectProof],
+) -> Result<String> {
+    options.validate()?;
+    snapshot.with_authenticated_request(|snapshot| {
+        derive_with_verified_proofs(&snapshot.retain_revision(), options, proofs)
+    })
+}
+
 /// Derive from a retained immutable revision. This pure route does not claim current filesystem freshness.
 pub fn derive(revision: &ProjectRevision, options: &ProjectAssuranceOptions) -> Result<String> {
+    derive_with_verified_proofs(revision, options, &[])
+}
+
+/// Derive Project assurance and append only opaque kernel-confirmed proof
+/// evidence whose Project revision, ProgramRoot, source row and certificate
+/// association all still match this exact retained revision.
+pub fn derive_with_verified_proofs(
+    revision: &ProjectRevision,
+    options: &ProjectAssuranceOptions,
+    proofs: &[VerifiedProjectProof],
+) -> Result<String> {
     options.validate()?;
     let workspace = revision.canonical_workspace_revision()?;
     let root = workspace.program_root()?;
@@ -163,6 +192,7 @@ pub fn derive(revision: &ProjectRevision, options: &ProjectAssuranceOptions) -> 
             records.insert(obligation, Some(path), true)?;
         }
     }
+    records.attach_verified_proofs(proofs, revision, &root)?;
     let claims = match &options.claims {
         None => Value::Null,
         Some(claims) => {
@@ -336,6 +366,78 @@ impl<'a> Records<'a> {
             )));
         }
         self.rows.insert(obligation.id.clone(), (obligation, value));
+        Ok(())
+    }
+
+    fn attach_verified_proofs(
+        &mut self,
+        proofs: &[VerifiedProjectProof],
+        revision: &ProjectRevision,
+        root: &ProgramRoot,
+    ) -> Result<()> {
+        let mut seen_certificates = BTreeSet::new();
+        let mut seen_obligations = BTreeSet::new();
+        for proof in proofs {
+            if proof.project_revision != revision.project_revision()
+                || proof.program_root != root.program_root()
+            {
+                return Err(invalid(
+                    "kernel-confirmed proof belongs to a different retained Project revision or ProgramRoot",
+                ));
+            }
+            let source = revision
+                .sources()
+                .iter()
+                .find(|source| source.path() == proof.source_path)
+                .ok_or_else(|| {
+                    invalid("kernel-confirmed proof source is absent from the retained Project")
+                })?;
+            if source.source_revision() != proof.source_revision
+                || source.source_digest() != proof.source_digest
+            {
+                return Err(invalid(
+                    "kernel-confirmed proof source row differs from the retained Project",
+                ));
+            }
+            if !seen_certificates.insert(proof.certificate_digest.as_str())
+                || !seen_obligations.insert(proof.obligation_id.as_str())
+            {
+                return Err(invalid(
+                    "kernel-confirmed proof repeats a certificate or postcondition obligation",
+                ));
+            }
+            let (obligation, value) = self.rows.get_mut(&proof.obligation_id).ok_or_else(|| {
+                invalid("kernel-confirmed proof targets no derived Project assurance obligation")
+            })?;
+            if obligation.declaration_id != proof.declaration_id
+                || obligation.kind != ObligationKind::Postcondition
+                || value["source_path"].as_str() != Some(proof.source_path.as_str())
+            {
+                return Err(invalid(
+                    "kernel-confirmed proof does not match the exact Project source postcondition",
+                ));
+            }
+            obligation.methods.push(proof.method.clone());
+        }
+        self.rerender_rows()
+    }
+
+    fn rerender_rows(&mut self) -> Result<()> {
+        let rows: Vec<_> = self
+            .rows
+            .values()
+            .map(|(obligation, value)| {
+                (
+                    obligation.clone(),
+                    value["source_path"].as_str().map(str::to_owned),
+                )
+            })
+            .collect();
+        self.rows.clear();
+        self.encoded_bytes = 0;
+        for (obligation, source) in rows {
+            self.insert(obligation, source.as_deref(), false)?;
+        }
         Ok(())
     }
 }

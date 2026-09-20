@@ -126,6 +126,50 @@ impl Default for AssuranceManifestOptions {
     }
 }
 
+/// Opaque kernel-confirmed evidence for one exact Project assurance
+/// postcondition. Only in-crate proof binding code can construct it; callers
+/// can pass it to the Project assurance composition route but cannot forge or
+/// retarget its Project, source, certificate, or obligation facts.
+#[derive(Clone, Debug)]
+pub struct VerifiedProjectProof {
+    obligation_id: String,
+    declaration_id: String,
+    method: MethodRecord,
+    project_revision: String,
+    program_root: String,
+    source_path: String,
+    source_revision: String,
+    source_digest: String,
+    certificate_digest: String,
+}
+
+impl VerifiedProjectProof {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn kernel_confirmed(
+        obligation_id: String,
+        declaration_id: String,
+        method: MethodRecord,
+        project_revision: String,
+        program_root: String,
+        source_path: String,
+        source_revision: String,
+        source_digest: String,
+        certificate_digest: String,
+    ) -> Self {
+        Self {
+            obligation_id,
+            declaration_id,
+            method,
+            project_revision,
+            program_root,
+            source_path,
+            source_revision,
+            source_digest,
+            certificate_digest,
+        }
+    }
+}
+
 /// Generate the canonical `semaprax.assurance-manifest.v1` envelope JSON for
 /// one verified source file.
 ///
@@ -341,6 +385,16 @@ mod tests {
         assert!(AssuranceManifestOptions::new(DEFAULT_MAX_BYTES, 0).is_err());
         assert!(AssuranceManifestOptions::new(DEFAULT_MAX_BYTES, MAX_MAX_OBLIGATIONS + 1).is_err());
         assert!(AssuranceManifestOptions::new(DEFAULT_MAX_BYTES, 16).is_ok());
+    }
+
+    #[test]
+    fn public_options_literal_keeps_its_three_field_source_shape() {
+        let options = AssuranceManifestOptions {
+            max_bytes: DEFAULT_MAX_BYTES,
+            max_obligations: DEFAULT_MAX_OBLIGATIONS,
+            external_records: ExternalRecords::default(),
+        };
+        assert_eq!(options.max_bytes, DEFAULT_MAX_BYTES);
     }
 
     #[test]

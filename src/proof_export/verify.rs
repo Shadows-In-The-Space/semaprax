@@ -19,6 +19,10 @@
 //!    [`crate::assurance_manifest::proof_certificate::ExternalKernelCapability`],
 //!    the seam that module introduced *for this issue* rather than
 //!    introducing a second one.
+//! 4. [`super::program_root::verify_certificate_against_program_root`] —
+//!    additionally replays a separate exact-certificate-to-retained-Project
+//!    ProgramRoot association without reopening a raw source path. Its kernel
+//!    variant preserves the same binding-first ordering.
 //!
 //! Re-rendering rather than trusting the certificate's own embedded bytes is
 //! the whole point: a hand-edited Lean document that weakens a theorem
@@ -432,10 +436,12 @@ fn recheck_payload_facts(
     Ok((module, axioms))
 }
 
-/// Re-derive every source and artifact binding once, retaining the exact
-/// exported theorem set for a subsequent external-kernel replay.
-fn rebind_certificate_against_source(
+/// Rebind a certificate against already-held exact source bytes. Kept
+/// crate-visible so a Project/ProgramRoot association can replay the same
+/// source, compiler and artifact chain without re-opening a raw path.
+pub(crate) fn rebind_certificate_against_source_text(
     certificate: &str,
+    source: &str,
     source_path: &Path,
 ) -> Result<
     (
@@ -455,18 +461,12 @@ fn rebind_certificate_against_source(
             env!("CARGO_PKG_VERSION")
         )));
     }
-    let source = std::fs::read_to_string(source_path).map_err(|error| {
-        drift_error(format!(
-            "cannot read `{}` to rebind this certificate: {error}",
-            source_path.display()
-        ))
-    })?;
-    if source_digest(&source) != checked.source_sha256 {
+    if source_digest(source) != checked.source_sha256 {
         return Err(drift_error(
             "current source bytes do not match the certificate's `source.sha256`".to_owned(),
         ));
     }
-    let program = crate::parse(&source, source_path).map_err(|error| {
+    let program = crate::parse(source, source_path).map_err(|error| {
         drift_error(format!(
             "the bound source no longer parses: {}",
             error.message
@@ -562,6 +562,26 @@ fn rebind_certificate_against_source(
     Ok((checked, export, recorded_axioms))
 }
 
+fn rebind_certificate_against_source(
+    certificate: &str,
+    source_path: &Path,
+) -> Result<
+    (
+        CheckedCertificate,
+        super::ModuleExport,
+        Vec<(String, Vec<String>)>,
+    ),
+    Diagnostic,
+> {
+    let source = std::fs::read_to_string(source_path).map_err(|error| {
+        drift_error(format!(
+            "cannot read `{}` to rebind this certificate: {error}",
+            source_path.display()
+        ))
+    })?;
+    rebind_certificate_against_source_text(certificate, &source, source_path)
+}
+
 /// Everything [`verify_certificate`] checks, plus rebinding to the current
 /// bytes at `source_path`. Fails closed on any drift.
 pub fn verify_certificate_against_source(
@@ -621,6 +641,18 @@ pub fn verify_certificate_with_kernel(
 ) -> Result<CheckedCertificate, Diagnostic> {
     let (checked, export, recorded_axioms) =
         rebind_certificate_against_source(certificate, source_path)?;
+    verify_kernel_replay(checked, export, recorded_axioms, kernel)
+}
+
+/// Check an already rebound export with a supplied kernel. All byte, source,
+/// semantic-revision and artifact binding must have completed before this
+/// helper is reachable.
+pub(crate) fn verify_kernel_replay(
+    checked: CheckedCertificate,
+    export: super::ModuleExport,
+    recorded_axioms: Vec<(String, Vec<String>)>,
+    kernel: &dyn super::LeanKernel,
+) -> Result<CheckedCertificate, Diagnostic> {
     let run = kernel.check(&export.lean_source)?;
     let axioms = match parse_kernel_report(&export.theorem_names(), &run.toolchain, &run.output) {
         KernelVerdict::Checked { axioms } => axioms,

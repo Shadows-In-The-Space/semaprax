@@ -30,10 +30,19 @@ use super::verify::{
     verify_certificate, verify_certificate_against_artifact, verify_certificate_against_source,
     verify_certificate_with_capability, verify_certificate_with_kernel,
 };
-use super::{export_obligation_certificate, export_source, KernelRun, LeanKernel};
+use super::{
+    assurance_method_attachment, bind_certificate_to_program_root, export_obligation_certificate,
+    export_source, verify_certificate_against_program_root,
+    verify_certificate_with_kernel_against_program_root, verify_program_root_binding, KernelRun,
+    LeanKernel,
+};
 
-use crate::assurance_manifest::proof_certificate::ExternalKernelCapability;
+use crate::assurance_manifest::{
+    self, project::ProjectAssuranceOptions, proof_certificate::ExternalKernelCapability,
+    ObligationKind,
+};
 use crate::diagnostic::Diagnostic;
+use crate::project::with_authenticated_project;
 
 // ---------------------------------------------------------------------
 // Fixtures
@@ -139,6 +148,52 @@ impl LeanKernel for FixedKernel {
 fn certificate_for(path: &Path) -> String {
     export_obligation_certificate(path, "app.t.shifted", 0, &AcceptingKernel)
         .expect("fixture certificate")
+}
+
+/// A retained Project carrying the exact same canonical source bytes used by
+/// the certificate. The second name produces a distinct ProgramRoot without
+/// changing the source row, which is the hostile rebinding control below.
+fn project_fixture(label: &str, name: &str) -> (PathBuf, PathBuf) {
+    // Project admission rejects a lexical `/var/...` path whose ancestor is
+    // macOS's `/var -> /private/var` symlink. Start from the real canonical
+    // temporary directory so this fixture exercises proof binding rather
+    // than weakening that path-authentication invariant.
+    let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "semaprax-proof-export-project-{label}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let source_path = root.join("src/app.spx");
+    let canonical = crate::format::canonical(
+        &crate::parse(&with_main(FIXTURE), &source_path).expect("fixture source parses"),
+    );
+    std::fs::write(&source_path, canonical).unwrap();
+    // A Project v8 has at least two source roles: an entry module and its
+    // declared test module. Keep this deliberately tiny, but use the same
+    // admitted two-source shape as the Project fixtures rather than relying
+    // on a parser-only manifest lookalike.
+    let test_path = root.join("src/tests.spx");
+    let test_source = crate::format::canonical(
+        &crate::parse(
+            "module app.tests;\nuse function @id(\"app.t.shifted\") from app.t as shifted;\n@id(\"app.tests.main\")\nfn main() -> i64 { if shifted(0, 0) == 0 { 0 } else { 1 } }\n",
+            &test_path,
+        )
+        .expect("fixture test source parses"),
+    );
+    std::fs::write(test_path, test_source).unwrap();
+    let manifest = root.join("semaprax.toml");
+    std::fs::write(
+        &manifest,
+        format!(
+            "schema = \"semaprax.project.v8\"\nname = \"{name}\"\nversion = \"1.0.0\"\nprofile = \"owned-data-api.v1\"\nentry = \"app.t\"\nsources = [\"src/app.spx\", \"src/tests.spx\"]\nweb_exports = []\ntests = [\"app.tests\"]\n"
+        ),
+    )
+    .unwrap();
+    (manifest, source_path)
 }
 
 fn reseal_payload(certificate: &str) -> String {
@@ -569,6 +624,188 @@ fn artifact_binding_accepts_only_the_exact_bound_bytes() {
     mutated.push(0);
     assert!(verify_certificate_against_artifact(&certificate, &mutated).is_err());
     std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn program_root_association_binds_the_exact_project_and_integrates_one_postcondition_method() {
+    let (manifest, source_path) = project_fixture("program-root", "proof-root-a");
+    let certificate = certificate_for(&source_path);
+    let (binding, envelope) = with_authenticated_project(&manifest, |snapshot| {
+        let revision = snapshot.retain_revision();
+        let binding = bind_certificate_to_program_root(&certificate, &revision, "src/app.spx")
+            .map_err(|error| vec![error])?;
+        verify_certificate_against_program_root(&certificate, &binding, &revision)
+            .map_err(|error| vec![error])?;
+        let attachment =
+            assurance_method_attachment(&certificate, &binding, &revision, &AcceptingKernel)
+                .map_err(|error| vec![error])?;
+        let envelope = assurance_manifest::project::generate_from_snapshot_with_verified_proofs(
+            snapshot,
+            &ProjectAssuranceOptions::default(),
+            &[attachment],
+        )?;
+        Ok((binding, envelope))
+    })
+    .expect("exact retained Project binds proof evidence");
+    let association = verify_program_root_binding(&binding, &certificate).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&envelope).unwrap();
+    let obligation = value["payload"]["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|obligation| {
+            obligation["declaration_id"] == "app.t.shifted"
+                && obligation["kind"] == ObligationKind::Postcondition.token()
+        })
+        .expect("certified postcondition is present");
+    assert_eq!(obligation["classification"], "theorem_proved");
+    assert_eq!(
+        obligation["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|method| method["class"] == "theorem_proved")
+            .count(),
+        1,
+        "only the selected postcondition is promoted"
+    );
+    assert!(obligation["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|method| {
+            method["class"] == "theorem_proved" && method["proof_ref"] == association.binding_digest
+        }));
+    std::fs::remove_dir_all(manifest.parent().unwrap()).ok();
+}
+
+#[test]
+fn kernel_confirmed_proof_cannot_attach_to_a_sibling_project_with_the_same_stable_id() {
+    let (first_manifest, first_source) = project_fixture("proof-token-a", "proof-token-a");
+    let (second_manifest, _) = project_fixture("proof-token-b", "proof-token-b");
+    let certificate = certificate_for(&first_source);
+    let proof = with_authenticated_project(&first_manifest, |snapshot| {
+        let revision = snapshot.retain_revision();
+        let binding = bind_certificate_to_program_root(&certificate, &revision, "src/app.spx")
+            .map_err(|error| vec![error])?;
+        assurance_method_attachment(&certificate, &binding, &revision, &AcceptingKernel)
+            .map_err(|error| vec![error])
+    })
+    .expect("first Project creates kernel-confirmed proof evidence");
+    with_authenticated_project(&second_manifest, |snapshot| {
+        let error = assurance_manifest::project::generate_from_snapshot_with_verified_proofs(
+            snapshot,
+            &ProjectAssuranceOptions::default(),
+            &[proof.clone()],
+        )
+        .expect_err("same stable id under a sibling ProgramRoot must not receive proof evidence");
+        assert_eq!(error[0].code, "SPX-Z101");
+        assert!(error[0].message.contains("different retained Project"));
+        Ok(())
+    })
+    .expect("sibling Project remains admitted");
+    std::fs::remove_dir_all(first_manifest.parent().unwrap()).ok();
+    std::fs::remove_dir_all(second_manifest.parent().unwrap()).ok();
+}
+
+#[test]
+fn kernel_confirmed_proof_refuses_an_altered_project_source_before_manifest_append() {
+    let (first_manifest, first_source) = project_fixture("proof-token-source-a", "proof-source");
+    let certificate = certificate_for(&first_source);
+    let proof = with_authenticated_project(&first_manifest, |snapshot| {
+        let revision = snapshot.retain_revision();
+        let binding = bind_certificate_to_program_root(&certificate, &revision, "src/app.spx")
+            .map_err(|error| vec![error])?;
+        assurance_method_attachment(&certificate, &binding, &revision, &AcceptingKernel)
+            .map_err(|error| vec![error])
+    })
+    .expect("first Project creates kernel-confirmed proof evidence");
+
+    let (altered_manifest, altered_source) =
+        project_fixture("proof-token-source-b", "proof-source");
+    let altered = with_main(FIXTURE).replace("a <= 1000", "a <= 999");
+    let canonical = crate::format::canonical(
+        &crate::parse(&altered, &altered_source).expect("altered fixture parses"),
+    );
+    std::fs::write(&altered_source, canonical).unwrap();
+    with_authenticated_project(&altered_manifest, |snapshot| {
+        let error = assurance_manifest::project::generate_from_snapshot_with_verified_proofs(
+            snapshot,
+            &ProjectAssuranceOptions::default(),
+            &[proof],
+        )
+        .expect_err("altered source must not inherit a proof for the old source row");
+        assert_eq!(error[0].code, "SPX-Z101");
+        assert!(error[0].message.contains("different retained Project"));
+        Ok(())
+    })
+    .expect("altered Project remains admitted independently");
+    std::fs::remove_dir_all(first_manifest.parent().unwrap()).ok();
+    std::fs::remove_dir_all(altered_manifest.parent().unwrap()).ok();
+}
+
+#[test]
+fn program_root_rebinding_refuses_a_sibling_project_before_the_kernel_runs() {
+    let (first_manifest, first_source) = project_fixture("program-root-a", "proof-root-a");
+    let (second_manifest, _) = project_fixture("program-root-b", "proof-root-b");
+    let certificate = certificate_for(&first_source);
+    let binding = with_authenticated_project(&first_manifest, |snapshot| {
+        bind_certificate_to_program_root(&certificate, &snapshot.retain_revision(), "src/app.spx")
+            .map_err(|error| vec![error])
+    })
+    .expect("first Project binds");
+    with_authenticated_project(&second_manifest, |snapshot| {
+        let kernel = CountingKernel {
+            calls: Cell::new(0),
+        };
+        let error = verify_certificate_with_kernel_against_program_root(
+            &certificate,
+            &binding,
+            &snapshot.retain_revision(),
+            &kernel,
+        )
+        .expect_err("same source under another ProgramRoot must not rebind");
+        assert_eq!(error.code, "SPX-Z112");
+        assert_eq!(kernel.calls.get(), 0, "kernel must not see a wrong root");
+        Ok(())
+    })
+    .expect("hostile retained Project is admitted");
+    std::fs::remove_dir_all(first_manifest.parent().unwrap()).ok();
+    std::fs::remove_dir_all(second_manifest.parent().unwrap()).ok();
+}
+
+#[test]
+fn program_root_association_refuses_a_resealed_subset_certificate_before_manifest_attachment() {
+    let (manifest, source_path) = project_fixture("program-root-subset", "proof-root-subset");
+    let certificate = certificate_for(&source_path);
+    let mut value: serde_json::Value = serde_json::from_str(&certificate).unwrap();
+    let obligations = value["payload"]["obligations"].as_array_mut().unwrap();
+    let range = obligations
+        .iter()
+        .position(|obligation| {
+            obligation["declaration_id"] == "app.t.shifted"
+                && obligation["kind"] == "checked_arithmetic_range"
+        })
+        .expect("fixture has a range prerequisite");
+    obligations.remove(range);
+    let shortened_payload = serde_json::to_string(&value["payload"]).unwrap();
+    let shortened = format!(
+        "{{\"schema\":\"{CERTIFICATE_SCHEMA}\",\"digest\":\"{}\",\"bytes\":{},\"payload\":{shortened_payload}}}",
+        payload_digest(shortened_payload.as_bytes()),
+        shortened_payload.len(),
+    );
+    with_authenticated_project(&manifest, |snapshot| {
+        let error = bind_certificate_to_program_root(
+            &shortened,
+            &snapshot.retain_revision(),
+            "src/app.spx",
+        )
+        .expect_err("a missing range prerequisite cannot become manifest evidence");
+        assert_eq!(error.code, "SPX-Z112");
+        Ok(())
+    })
+    .expect("project admission is independent of malformed proof evidence");
+    std::fs::remove_dir_all(manifest.parent().unwrap()).ok();
 }
 
 #[test]

@@ -95,42 +95,26 @@ cache. See this repository's fast-restart measurement (in the issue #194
 worker report) for the exact reproduction and the calculator-project numbers
 measured in its place.
 
-**A third, independent ceiling blocks the write side of a semantic rename on
-this project.** `tests/useful_data/task_service_project.rs::stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precondition`
-walks issue #194 step 7's inspect/context/impact/preview chain against
-`task_service.core.identifier_byte_ok`: `available_operations` (inspect),
-`semantic_context`, and `semantic_impact` all succeed exactly as designed.
-`preview` -- validating a `rename_display_name` transaction -- fails closed
-with `SPX-G525` -- but no longer for the reason first recorded here.
+**The stable-ID semantic-change workflow is exercised end to end.**
+`tests/useful_data/task_service_project.rs::stable_id_rename_inspect_preview_apply_and_retest_preserve_the_service`
+discovers the legal rename operation for the public
+`task_service.core.identifier_is_valid` stable identity, renders its bounded
+context and impact, validates a `rename_display_name` preview, applies the
+result to an immutable `ProjectCandidate`, and retests both entry and the
+complete named-test closure. The candidate keeps the same stable ID and web
+export while changing only the human-facing declaration name and all checked
+call sites. The checked-in source remains unchanged: candidate application is
+authority-free and does not publish or write a source file.
 
-Universal Semantic Transaction v1 used to require the *entire* workspace to
-be comment-free canonical, and that workspace included every bundled
-dependency source actually reached, not only this project's own three
-modules. `std.auth` carries 253 `//` comment lines and `std.jobs` 34, and
-bundled dependency source is compiler-immutable, so no project declaring a
-`[dependencies]` edge on a commented bundled package could ever satisfy the
-precondition by editing its own source.
-
-Issue #274 fixed that at the structural cause. `ProjectCandidate::apply`'s
-`materialize` step now preserves an untouched program's exact base bytes
-instead of re-deriving every source through the comment-dropping canonical
-formatter, and `src/project/semantic_transaction/canonical_sources.rs`
-requires comment-free canonical source only of the sources a transaction
-actually rewrites. Checked directly: with this project's own three modules
-copied out and stripped of comments, `semaprax change preview <copy>
-rename-display-name task_service.core.identifier_byte_ok
-identifier_char_is_safe` succeeds against the same commented `std.auth` +
-`std.jobs` + `std.tracing` closure.
-
-What still refuses on the checked-in project is this project's **own**
-source. `src/core.spx` owns `task_service.core.identifier_byte_ok` and is
-therefore the source the rename rewrites, and it carries 31 comment lines.
-A rewritten source's comments would be dropped by the canonical formatter, so
-refusing is correct -- and, unlike the old whole-workspace scope, it is
-fixable here. Authoring `src/core.spx` comment-free would complete issue
-\#194 step 7's apply/retest half; the comments are kept deliberately because
-this file is reference documentation as much as it is code, so the write side
-of that demonstration stays open by choice rather than by construction.
+This works even though the selected bundled dependency closure carries
+comments (`std.auth` alone has 253 `//` lines and `std.jobs` 34). Issue #274
+made the v1 precondition differential: only sources an operation actually
+rewrites must be comment-free canonical, while untouched dependency bytes are
+preserved exactly. `src/core.spx` is intentionally authored comment-free so
+that it is eligible for this demonstration; the prose explaining its
+database, HTTP, authentication, job, trace, metric, and export-policy facts
+lives here rather than in source comments that a canonical rename would have
+to drop.
 
 **The observability policy closure now fits, but only as pure policy
 dependencies.** Its reached closure includes `std.encoding`, `std.log.redact`,

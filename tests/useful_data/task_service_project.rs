@@ -251,64 +251,40 @@ assert.equal(linked.instance.exports.semaprax_main(), 0n);
     let _ = std::fs::remove_dir_all(scratch);
 }
 
-/// Issue #194 step 7 asks for one stable-ID rename walked end to end --
-/// inspect, context, impact, preview, apply, retest -- against the reference
-/// application. Inspect/context/impact all work on this project exactly as
-/// designed: this test pins that. The write side does not, and this test
-/// pins that too, rather than routing around it or asserting only the parts
-/// that pass.
+/// Issue #194 step 7's complete stable-ID workflow: inspect, context,
+/// impact, preview, candidate apply, and retest. The target is the real
+/// public domain wrapper rather than an unused helper, so this proves that a
+/// human-facing rename preserves its web-export identity and migrates checked
+/// in-module callers without changing the service outcome.
 ///
-/// **Issue #274 narrowed the precondition, and this project still refuses --
-/// for a different, caller-actionable reason.** Universal Semantic
-/// Transaction v1 used to require the *entire* workspace, every bundled
-/// dependency source included, to be comment-free canonical, because
-/// `ProjectCandidate::apply`'s `materialize` step re-derived every source
-/// through the comment-dropping canonical formatter. `std.auth` carries 253
-/// `//` lines and `std.jobs` 34, and that source is compiler-bundled and
-/// immutable (`src/project/standard_dependencies.rs`), so the precondition
-/// was unsatisfiable by construction for any consumer of a commented bundled
-/// package. `materialize` now preserves an untouched source's exact base
-/// bytes, and `src/project/canonical_sources.rs` (shared by the v1 and v2
-/// transaction kernels since issue #277) requires comment-free canonical
-/// source only of the sources a transaction actually
-/// rewrites. Verified directly: with this project's own three modules copied
-/// out and stripped of comments, `semaprax change preview <copy>
-/// rename-display-name task_service.core.identifier_byte_ok
-/// identifier_char_is_safe` now succeeds against the same commented
-/// `std.auth` + `std.jobs` closure.
-///
-/// What still refuses here is this project's **own** source: `src/core.spx`,
-/// which owns `task_service.core.identifier_byte_ok` and is therefore the
-/// source the rename rewrites, carries 29 comment lines of its own (issue
-/// #274's summary asserted the project's three modules were comment-free;
-/// they are not). A rewritten source's comments would be dropped by the
-/// canonical formatter, so refusing is correct -- and now fixable by editing
-/// this project, which the old whole-workspace scope never was.
-///
-/// `SPX-G525` and `SPX-G171` (this project's README) remain two independent
-/// ceilings that both happen to bite the same two-dependency reference
-/// application.
-///
-/// This assertion is a stable regression, not a shrug: if this project's own
-/// `src/core.spx` is ever authored comment-free, this test starts failing on
-/// the `Err` match and must be revisited to demonstrate the full apply/retest
-/// steps issue #194 step 7's acceptance criterion actually asks for.
+/// `src/core.spx` is deliberately comment-free canonical because it is the
+/// source this operation rewrites. `src/app.spx`, `src/tests.spx`, and the
+/// bundled dependency closure retain their own comments; issue #274's
+/// differential precondition preserves every untouched source byte exactly.
+/// Applying here means producing an immutable `ProjectCandidate`, not writing
+/// or publishing any checked-in source.
 #[test]
-fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precondition() {
+fn stable_id_rename_inspect_preview_apply_and_retest_preserve_the_service() {
     project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
         let revision = snapshot.retain_revision();
-        let target = "task_service.core.identifier_byte_ok";
-        let old_name = "identifier_byte_ok";
+        let target = "task_service.core.identifier_is_valid";
+        let old_name = "identifier_is_valid";
+        let new_name = "identifier_name_is_valid";
+        let base_core = revision
+            .sources()
+            .iter()
+            .find(|source| source.path() == "src/core.spx")
+            .expect("the retained project must carry src/core.spx")
+            .source()
+            .to_owned();
+        let (_, core_comments) =
+            semaprax::parse_with_comments(&base_core, Path::new("src/core.spx")).unwrap();
+        assert!(
+            core_comments.items.is_empty(),
+            "the selected rename source must remain comment-free canonical"
+        );
 
-        // 1. Inspect: what operations are legal on this declaration, and its
-        // exact current display name, discovered rather than assumed. The
-        // selected revision comes from the service's own active generation
-        // (the same source `semaprax change preview` reads via its
-        // `selected_revision` helper), not the plain `ProjectRevision`'s own
-        // digest -- the two are computed differently and a query against the
-        // wrong one fails closed with `SPX-G533` ("stale") rather than
-        // silently matching.
         let service = SemanticWorkspaceService::open(revision.clone())?;
         let workspace_revision = service.active_generation().workspace_revision().to_owned();
         let discovery = SemanticQuery::available_operations(&workspace_revision, target)?;
@@ -329,7 +305,6 @@ fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precond
             "inspect must report this declaration's real current name"
         );
 
-        // 2. Context: bounded forward/reverse neighborhood of the target.
         let context = revision.semantic_context(
             WorkspaceAnalysisTargetKind::Declaration,
             target,
@@ -340,7 +315,6 @@ fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precond
             "context must mention the declaration under rename"
         );
 
-        // 3. Impact: what the workspace's reverse dependency closure is.
         let impact = revision.semantic_impact(
             WorkspaceAnalysisTargetKind::Declaration,
             target,
@@ -351,32 +325,64 @@ fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precond
             "impact must mention the declaration under rename"
         );
 
-        // 4. Preview: this is where the walk stops. Validating the exact
-        // rename transaction against the selected workspace revision fails
-        // closed on the comments in this project's own `src/core.spx` -- the
-        // source the rename rewrites -- no longer on the immutable bundled
-        // dependency source the project cannot edit (issue #274).
         let transaction = SemanticTransaction::rename_display_name(
             &workspace_revision,
-            SemanticTransactionRenameDisplayName::new(
-                target,
-                discovered_old_name,
-                "identifier_char_is_safe",
-            ),
+            SemanticTransactionRenameDisplayName::new(target, discovered_old_name, new_name),
         )?;
-        let outcome = service.validate_transaction(transaction.to_json().as_bytes());
-        let Err(diagnostics) = outcome else {
-            panic!(
-                "rename preview unexpectedly succeeded; if the comment-free-workspace \
-                 precondition was narrowed or lifted, replace this test with the full \
-                 apply/retest walk issue #194 step 7 actually asks for"
-            );
-        };
+        let artifacts = service.validate_transaction(transaction.to_json().as_bytes())?;
+        assert!(artifacts.impact().contains(target));
+        assert!(artifacts.review().contains(target));
+        let candidate = artifacts.candidate();
+        let candidate_revision = candidate.revision();
+        assert_ne!(
+            candidate_revision.project_revision(),
+            revision.project_revision()
+        );
+        assert!(candidate_revision.semantic_graph().contains(target));
         assert!(
-            diagnostics
+            candidate_revision
+                .manifest()
+                .web_exports()
                 .iter()
-                .any(|diagnostic| diagnostic.code == "SPX-G525"),
-            "expected SPX-G525 (comment-free canonical source), got {diagnostics:?}"
+                .any(|export| export.as_str() == target),
+            "the stable web-export identity must survive its display rename"
+        );
+        let candidate_core = candidate_revision
+            .sources()
+            .iter()
+            .find(|source| source.path() == "src/core.spx")
+            .expect("the candidate must retain src/core.spx")
+            .source();
+        assert!(candidate_core.contains("@id(\"task_service.core.identifier_is_valid\")"));
+        assert!(candidate_core.contains("fn identifier_name_is_valid("));
+        assert!(candidate_core.contains("identifier_name_is_valid(username)"));
+        assert!(candidate_core.contains("identifier_name_is_valid(array_as_slice(table_name))"));
+        assert!(
+            candidate_core.contains("!identifier_name_is_valid(array_as_slice(bad_identifier))")
+        );
+        assert_eq!(
+            candidate_revision
+                .execute_entry(&project::ProjectExecutionOptions::default())?
+                .outcome(),
+            &project::ProjectExecutionOutcome::Returned(0),
+            "the renamed candidate entry must preserve the acceptance scenario"
+        );
+        assert_eq!(
+            candidate_revision
+                .execute_test(&project::ProjectExecutionOptions::default())?
+                .outcome(),
+            &project::ProjectExecutionOutcome::Returned(0),
+            "the renamed candidate must preserve every named conformance case"
+        );
+        assert_eq!(
+            revision
+                .sources()
+                .iter()
+                .find(|source| source.path() == "src/core.spx")
+                .expect("the immutable base must retain src/core.spx")
+                .source(),
+            base_core,
+            "candidate application must not mutate the checked-in base source"
         );
         Ok(())
     })
@@ -388,18 +394,9 @@ fn stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precond
 /// `ReplaceExpression` v2 preview succeeds against a project whose own
 /// edited source is comment-free while its bundled dependency closure still
 /// carries comments (`std.auth` alone carries 253 `//` lines, `std.jobs`
-/// 34). This is the v2 counterpart of
-/// `stable_id_rename_inspect_and_context_succeed_preview_pins_the_comment_precondition`
-/// above, which pins the *same* comment precondition for v1's
-/// `rename_display_name` against the checked-in project (whose own
-/// `src/core.spx` still carries comments, so that v1 preview still refuses
-/// for a project-actionable reason). Here the project's own three modules
-/// are copied out and stripped of comments first -- `std.auth` and
-/// `std.jobs` are compiler-bundled and untouched either way -- so nothing
-/// about the source this transaction actually rewrites can trip `SPX-G525`,
-/// and only the ported #277 fix (`src/project/canonical_sources.rs`'s
-/// differential, rewrite-domain check, shared by v1 and v2) lets this
-/// succeed.
+/// 34). The v1 workflow above rewrites the checked-in comment-free
+/// `src/core.spx`; this v2 case separately proves that comments in all
+/// untouched own and bundled sources do not widen the rewrite domain.
 #[test]
 fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closure() {
     let scratch = scratch("v2-bundled-comments");
@@ -409,7 +406,7 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
         scratch.join("semaprax.toml"),
     )
     .unwrap();
-    for file in ["src/app.spx", "src/core.spx", "src/tests.spx"] {
+    for file in ["src/app.spx", "src/tests.spx"] {
         let source = std::fs::read_to_string(fixture().join(file)).unwrap();
         let (program, comments) = semaprax::parse_with_comments(&source, Path::new(file)).unwrap();
         assert!(
@@ -419,16 +416,24 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
         );
         std::fs::write(scratch.join(file), semaprax::format::canonical(&program)).unwrap();
     }
+    std::fs::copy(fixture().join("src/core.spx"), scratch.join("src/core.spx")).unwrap();
 
     project::with_authenticated_project(&scratch.join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
         let revision = snapshot.retain_revision();
 
-        // The fixture really is non-vacuous: this project's own three
-        // modules are now comment-free, but the bundled `std.auth` and
-        // `std.jobs` closure this project depends on still carries its
-        // checked-in comments untouched.
-        for path in ["src/app.spx", "src/core.spx", "src/tests.spx"] {
+        let core_source = revision
+            .sources()
+            .iter()
+            .find(|source| source.path() == "src/core.spx")
+            .expect("revision must carry src/core.spx");
+        let (_, core_comments) =
+            semaprax::parse_with_comments(core_source.source(), Path::new("src/core.spx")).unwrap();
+        assert!(
+            core_comments.items.is_empty(),
+            "src/core.spx must be comment-free"
+        );
+        for path in ["src/app.spx", "src/tests.spx"] {
             let own_source = revision
                 .sources()
                 .iter()
@@ -437,8 +442,8 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
             let (_, comments) =
                 semaprax::parse_with_comments(own_source.source(), Path::new(path)).unwrap();
             assert!(
-                comments.items.is_empty(),
-                "{path} must be comment-free after the strip"
+                !comments.items.is_empty(),
+                "{path} must retain comments because v2 does not rewrite it"
             );
         }
         for (dependency, path) in [

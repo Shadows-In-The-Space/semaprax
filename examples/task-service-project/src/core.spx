@@ -22,18 +22,6 @@ use function @id("std.metrics.try-admit-labeled-series-guarded") from std.metric
 use function @id("std.tracing.trace_context_fields_admitted_guarded") from std.tracing as trace_context_fields_admitted_guarded;
 use function @id("std.export.policy.export_admitted") from std.export.policy as export_admitted;
 
-// This module models the domain record (a task) and its background job as
-// plain scalar facts -- an id, an owner account id, a status -- rather than
-// an authored `record`, deliberately: `Public Useful Data Export v1` (the
-// `[exports].web` gate every `semaprax.manifest.v1` project must satisfy)
-// admits no authored aggregate anywhere in a project that also declares a
-// web export, and every dependency-consuming project needs the manifest.v1
-// schema.
-// The public domain wrapper keeps this service's stable API while delegating
-// the closed identifier grammar to the bundled database decision layer.
-// This retained stable helper is deliberately no longer on the admission path:
-// the semantic-change demonstration below targets it as a comment-preserving
-// source edit witness, while actual service decisions call `std.db`.
 @id("task_service.core.identifier_byte_ok")
 fn identifier_byte_ok(byte: u8) -> bool
 {
@@ -46,8 +34,6 @@ fn identifier_is_valid(name: borrow Slice<u8>) -> bool
     db_identifier_is_valid(name)
 }
 
-// This stable service wrapper preserves the web-export surface while using
-// the bundled HTTP method grammar rather than a copied implementation.
 @id("task_service.core.method_is_valid")
 fn method_is_valid(method: borrow Slice<u8>) -> bool
 {
@@ -60,18 +46,12 @@ fn method_is_rejected(method: borrow Slice<u8>) -> bool
     !method_is_valid(method)
 }
 
-// Routing is a pure admission decision. `std.http` refuses malformed methods,
-// unsafe targets, and authority/userinfo ambiguity before a deployment's host
-// adapter can select storage or network authority.
 @id("task_service.core.request_is_admitted")
 fn request_is_admitted(method: borrow Slice<u8>, target: borrow Slice<u8>) -> bool
 {
     request_line_admitted(method, target)
 }
 
-// The migration and transaction transitions are database facts, not an
-// implicit database capability: a host performs storage only after these
-// checked decisions admit a next version and a legal commit state.
 @id("task_service.core.migration_is_admitted")
 fn migration_is_admitted(last_applied: u8, applied: borrow Slice<u8>, candidate: u8) -> bool
 {
@@ -96,19 +76,12 @@ fn platform_decisions_admit() -> bool
     route && migration && update_is_committed(0usize)
 }
 
-// Registration is a pure admission decision over caller-supplied facts: no
-// password is hashed here (see `docs/AUTHENTICATION-SESSIONS-V1.md`'s
-// non-claims -- this bounded interpreter has no hashing host capability),
-// and no row is written. A deployment's own host code performs both after
-// this decision admits the request.
 @id("task_service.core.registration_admitted")
 fn registration_admitted(username: borrow Slice<u8>, active_count: usize, max_accounts: usize, password_memory_cost_kib: usize, password_time_cost: usize, password_parallelism: usize) -> bool
 {
     identifier_is_valid(username) && active_count < max_accounts && password_policy_within_bounds(password_memory_cost_kib, password_time_cost, password_parallelism)
 }
 
-// Row-level authorization: a usable session is necessary but not
-// sufficient -- the session's own account must also own the row.
 @id("task_service.core.task_owner_authorized")
 fn task_owner_authorized(task_owner_account_id: i64, session_account_id: i64, session_usable: bool) -> bool
 {
@@ -121,9 +94,6 @@ fn enqueue_is_legal(pending_state: usize, now_tick: usize, next_run_tick: usize)
     claim_is_legal(pending_state, schedule_is_due(now_tick, next_run_tick))
 }
 
-// A caller-supplied idempotency key decides whether a retried enqueue
-// request is fresh (0), a harmless duplicate (1), or a conflicting reuse of
-// the same key for different work (2) -- see `std.jobs.idempotency`.
 @id("task_service.core.enqueue_outcome")
 fn enqueue_outcome(key_exists: bool, existing_descriptor: borrow Slice<u8>, candidate_descriptor: borrow Slice<u8>) -> usize
 {
@@ -142,37 +112,24 @@ fn job_status_is_complete(state: usize) -> bool
     state_is_terminal(state)
 }
 
-// Trace metadata is admitted only after the adapter has classified whether
-// the event carries a secret. This is a pure validation/redaction decision:
-// it neither reads headers nor emits a log or span.
 @id("task_service.core.trace_context_is_admitted")
 fn trace_context_is_admitted(trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>, carries_secret: bool) -> bool
 {
     trace_context_fields_admitted_guarded(trace_id, parent_id, trace_flags, carries_secret, false, false, false, false, false)
 }
 
-// A completed job may produce a bounded, caller-classified metric series.
-// This records only the admission decision: it neither retains metric bytes
-// nor sends them to a collector. A secret-classified label is refused before
-// a host adapter can register or export the series.
 @id("task_service.core.completed_job_metric_is_admitted")
 fn completed_job_metric_is_admitted(label: borrow Slice<u8>, value: borrow Slice<u8>, carries_secret: bool) -> bool
 {
     counter_increment(0, 1) == 1 && try_admit_labeled_series_guarded(0, label, value, carries_secret, false, false, false, false, false) == 1
 }
 
-// Export policy bounds an adapter-owned batch before it can emit telemetry.
-// A successful decision is not a queue mutation, connection, or delivery.
 @id("task_service.core.completed_job_export_is_admitted")
 fn completed_job_export_is_admitted(existing_depth: i64, batch_count: usize, batch_bytes: usize, target: borrow Slice<u8>) -> bool
 {
     export_admitted(existing_depth, batch_count, batch_bytes, target)
 }
 
-// The full acceptance scenario: register, log in, create/update the domain
-// record, enqueue and complete a background job, query its status, log out,
-// then confirm both an unauthorized access and an invalid request are
-// rejected. Returns 0 on success, 1 otherwise.
 @id("task_service.core.run_scenario")
 fn run_scenario() -> i64
 {

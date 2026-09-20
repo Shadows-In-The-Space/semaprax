@@ -1,7 +1,9 @@
 //! Bounded provider-neutral email delivery and authority-free envelope replay.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+
+use sha2::{Digest as _, Sha256};
 
 use super::*;
 
@@ -103,6 +105,187 @@ pub enum EmailEnvelopeMismatch {
     PreparedRequest,
 }
 
+/// An admitted email request that has not reached an adapter. It owns the
+/// single-use capability until the session either dispatches or exactly
+/// replays the host-owned ledger result.
+pub struct PreparedEmailDelivery {
+    capability: OutboundCapability,
+    origin: String,
+    delivery_id: String,
+    idempotency_key: String,
+    identity: DeliveryIdentity,
+    session_identity_digest: String,
+    policy_digest: String,
+    request: PreparedRequest,
+}
+
+impl fmt::Debug for PreparedEmailDelivery {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PreparedEmailDelivery")
+            .field("origin", &self.origin)
+            .field("request", &self.request)
+            .field("bindings", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// A disposition-only result from a host-owned email reconciliation session.
+/// It intentionally has no provider response body: the session drops even a
+/// bounded accepted body before committing local replay state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailDeliveryReceipt {
+    evidence: DeliveryEvidence,
+    replayed: bool,
+}
+
+impl EmailDeliveryReceipt {
+    pub fn evidence(&self) -> &DeliveryEvidence {
+        &self.evidence
+    }
+
+    pub fn was_replayed(&self) -> bool {
+        self.replayed
+    }
+}
+
+/// Refusal from the additive host-owned, disposition-only email session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EmailLedgerRefusal {
+    Ledger(LedgerRefusal),
+    PolicyChanged,
+    ReplayBindingUnavailable,
+}
+
+impl From<LedgerRefusal> for EmailLedgerRefusal {
+    fn from(value: LedgerRefusal) -> Self {
+        Self::Ledger(value)
+    }
+}
+
+/// Process-local integration of [`HostDeliveryLedger`] at the provider-neutral
+/// email boundary. Only SHA-256 commitments are retained alongside the ledger;
+/// no request, identity, credential, or provider response bytes are stored.
+pub struct EmailDeliverySession {
+    ledger: HostDeliveryLedger,
+    policy_commitments: BTreeMap<String, String>,
+}
+
+impl EmailDeliverySession {
+    pub fn new(capacity: usize) -> Result<Self, EmailLedgerRefusal> {
+        Ok(Self {
+            ledger: HostDeliveryLedger::new(capacity)?,
+            policy_commitments: BTreeMap::new(),
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.ledger.len()
+    }
+
+    /// Reconcile one prepared email request before adapter dispatch.
+    ///
+    /// A matching replay never enters `adapter.send`. This mode settles only
+    /// the closed disposition, so nonempty provider response bytes are dropped
+    /// on the original attempt and are not required to reconstruct a replay.
+    /// A panic after adapter entry leaves the underlying ledger's provisional
+    /// uncertainty intact; this wrapper deliberately writes no replacement.
+    pub fn reconcile(
+        &mut self,
+        prepared: PreparedEmailDelivery,
+        adapter: &mut impl OutboundAdapter,
+    ) -> Result<EmailDeliveryReceipt, EmailLedgerRefusal> {
+        if let Some(existing) = self
+            .policy_commitments
+            .get(&prepared.session_identity_digest)
+        {
+            if existing != &prepared.policy_digest {
+                return Err(EmailLedgerRefusal::PolicyChanged);
+            }
+        }
+
+        let outcome =
+            self.ledger
+                .reconcile(prepared.identity.clone(), &prepared.request, |request| {
+                    let observation = adapter.send(request);
+                    settlement_disposition(request, &observation)
+                })?;
+        let replayed = !outcome.was_dispatched();
+        if replayed
+            && !self
+                .policy_commitments
+                .contains_key(&prepared.session_identity_digest)
+        {
+            return Err(EmailLedgerRefusal::ReplayBindingUnavailable);
+        }
+        if !replayed {
+            self.policy_commitments.insert(
+                prepared.session_identity_digest.clone(),
+                prepared.policy_digest.clone(),
+            );
+        }
+        let disposition = outcome.record().disposition().clone();
+        Ok(EmailDeliveryReceipt {
+            evidence: delivery_evidence(
+                prepared.capability,
+                prepared.origin,
+                prepared.delivery_id,
+                prepared.idempotency_key,
+                prepared.request,
+                disposition,
+            ),
+            replayed,
+        })
+    }
+}
+
+/// Validate and construct the exact email request that a reconciliation
+/// session may physically dispatch once. No adapter is called here.
+pub fn prepare_email_delivery(
+    capability: OutboundCapability,
+    request: EmailRequest,
+) -> Result<PreparedEmailDelivery, Refusal> {
+    let origin = validate_email(&capability.policy, &request)?;
+    let body = request.encode(capability.policy.max_request_bytes)?;
+    let identity = DeliveryIdentity::new(
+        capability.deployment_binding.clone(),
+        capability.invocation_id.clone(),
+        request.idempotency_key.clone(),
+    )
+    .map_err(|_| Refusal::InvalidIdentity)?;
+    let session_identity_digest = email_session_identity_digest(
+        &capability.deployment_binding,
+        &capability.invocation_id,
+        &request.idempotency_key,
+    );
+    let policy_digest = email_policy_digest(&capability.policy);
+    let max_response_bytes = capability.policy.max_response_bytes;
+    Ok(PreparedEmailDelivery {
+        capability,
+        origin,
+        delivery_id: request.delivery_id.clone(),
+        idempotency_key: request.idempotency_key.clone(),
+        identity,
+        session_identity_digest,
+        policy_digest,
+        request: PreparedRequest {
+            endpoint: request.endpoint,
+            headers: vec![
+                (
+                    "content-type".into(),
+                    "application/vnd.semaprax.email.v1+json".into(),
+                ),
+                ("idempotency-key".into(), request.idempotency_key),
+                ("x-semaprax-delivery-id".into(), request.delivery_id),
+            ],
+            body,
+            deadline_ms: request.deadline_ms,
+            max_redirects: 0,
+            max_response_bytes,
+        },
+    })
+}
+
 /// Validate and attempt one provider-neutral email delivery.
 pub fn deliver_email(
     capability: OutboundCapability,
@@ -135,6 +318,43 @@ pub fn deliver_email(
         prepared,
         observation,
     ))
+}
+
+fn email_session_identity_digest(
+    deployment_binding: &str,
+    invocation_id: &str,
+    idempotency_key: &str,
+) -> String {
+    let mut hash = Sha256::new();
+    hash.update(b"semaprax.outbound.email-session.identity.v1\0");
+    for part in [
+        deployment_binding.as_bytes(),
+        invocation_id.as_bytes(),
+        idempotency_key.as_bytes(),
+    ] {
+        hash.update((part.len() as u64).to_le_bytes());
+        hash.update(part);
+    }
+    format!("sha256:{:x}", crate::digest_hex::LowerHex(hash.finalize()))
+}
+
+/// Bind the complete effective policy, rather than trusting the policy label
+/// to be content-addressed by a host. `allowed_origins` is a `BTreeSet`, so its
+/// canonical iteration order is part of this deterministic commitment.
+fn email_policy_digest(policy: &OutboundPolicy) -> String {
+    let mut hash = Sha256::new();
+    hash.update(b"semaprax.outbound.email-session.policy.v1\0");
+    digest_part(&mut hash, policy.policy_id.as_bytes());
+    hash.update((policy.allowed_origins.len() as u64).to_le_bytes());
+    for origin in &policy.allowed_origins {
+        digest_part(&mut hash, origin.as_bytes());
+    }
+    hash.update((policy.max_request_bytes as u64).to_le_bytes());
+    hash.update((policy.max_response_bytes as u64).to_le_bytes());
+    hash.update(policy.max_deadline_ms.to_le_bytes());
+    hash.update((policy.max_export_fields as u64).to_le_bytes());
+    hash.update((policy.max_export_labels as u64).to_le_bytes());
+    format!("sha256:{:x}", crate::digest_hex::LowerHex(hash.finalize()))
 }
 
 /// Strictly decode a canonical email envelope and bind it to one prepared

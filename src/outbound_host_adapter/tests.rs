@@ -1108,3 +1108,131 @@ fn email_exact_limits_are_admitted_once_and_started_failures_stay_uncertain() {
     );
     assert_eq!(adapter.calls.len(), 1);
 }
+
+#[test]
+fn email_ledger_session_replays_exact_disposition_without_provider_response_bytes() {
+    let mut session = EmailDeliverySession::new(2).unwrap();
+    let mut first_adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 202,
+        body: b"provider-private-queued-token".to_vec(),
+    });
+    let first = session
+        .reconcile(
+            prepare_email_delivery(email_capability(), email()).unwrap(),
+            &mut first_adapter,
+        )
+        .unwrap();
+    assert_eq!(first_adapter.calls.len(), 1);
+    assert!(!first.was_replayed());
+    assert_eq!(
+        first.evidence().disposition(),
+        &DeliveryDisposition::Accepted { status: 202 }
+    );
+    let first_wire = first.evidence().render();
+    assert!(!format!("{first:?}").contains("provider-private-queued-token"));
+
+    let mut replay_adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    let replay = session
+        .reconcile(
+            prepare_email_delivery(email_capability(), email()).unwrap(),
+            &mut replay_adapter,
+        )
+        .unwrap();
+    assert!(replay.was_replayed());
+    assert!(replay_adapter.calls.is_empty());
+    assert_eq!(replay.evidence().render(), first_wire);
+    assert_eq!(session.len(), 1);
+}
+
+#[test]
+fn email_ledger_session_refuses_changed_requests_and_policy_drift_before_dispatch() {
+    let mut session = EmailDeliverySession::new(2).unwrap();
+    let mut first_adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 204,
+        body: Vec::new(),
+    });
+    session
+        .reconcile(
+            prepare_email_delivery(email_capability(), email()).unwrap(),
+            &mut first_adapter,
+        )
+        .unwrap();
+
+    let mut changed = email();
+    changed.body.push(b'!');
+    let mut changed_adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    assert_eq!(
+        session.reconcile(
+            prepare_email_delivery(email_capability(), changed).unwrap(),
+            &mut changed_adapter,
+        ),
+        Err(EmailLedgerRefusal::Ledger(
+            LedgerRefusal::ConflictingRequest
+        ))
+    );
+    assert!(changed_adapter.calls.is_empty());
+
+    // A host-owned policy label is not assumed content-addressed. This changes
+    // an effective policy field while retaining the exact same label and
+    // prepared request, so only the complete policy commitment can reject it.
+    let drifted_policy = OutboundPolicy::new(
+        "deploy.email.v1",
+        ["https://email-provider.example.test".to_owned()],
+        MAX_REQUEST_BODY_BYTES,
+        MAX_RESPONSE_BODY_BYTES,
+        MAX_DEADLINE_MS,
+        MAX_EXPORT_FIELDS - 1,
+        MAX_EXPORT_LABELS,
+    )
+    .unwrap();
+    let drifted_capability = OutboundCapability::grant_for_trusted_host(
+        "sha256:deployment",
+        "invocation-7",
+        drifted_policy,
+    )
+    .unwrap();
+    let mut drifted_adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    assert_eq!(
+        session.reconcile(
+            prepare_email_delivery(drifted_capability, email()).unwrap(),
+            &mut drifted_adapter,
+        ),
+        Err(EmailLedgerRefusal::PolicyChanged)
+    );
+    assert!(drifted_adapter.calls.is_empty());
+}
+
+struct PanickingEmailAdapter;
+
+impl OutboundAdapter for PanickingEmailAdapter {
+    fn send(&mut self, _request: &PreparedRequest) -> AdapterObservation {
+        panic!("simulated adapter unwind after physical start")
+    }
+}
+
+#[test]
+fn email_ledger_session_keeps_an_unwinding_attempt_sticky_without_retry() {
+    let mut session = EmailDeliverySession::new(1).unwrap();
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut adapter = PanickingEmailAdapter;
+        let _ = session.reconcile(
+            prepare_email_delivery(email_capability(), email()).unwrap(),
+            &mut adapter,
+        );
+    }));
+    assert!(unwind.is_err());
+    assert_eq!(session.len(), 1);
+
+    let mut retry_adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 204,
+        body: Vec::new(),
+    });
+    assert_eq!(
+        session.reconcile(
+            prepare_email_delivery(email_capability(), email()).unwrap(),
+            &mut retry_adapter,
+        ),
+        Err(EmailLedgerRefusal::ReplayBindingUnavailable)
+    );
+    assert!(retry_adapter.calls.is_empty());
+}

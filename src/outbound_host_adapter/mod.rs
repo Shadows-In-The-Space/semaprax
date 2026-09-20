@@ -19,9 +19,11 @@ mod email;
 mod ledger;
 
 pub use email::{
-    deliver_email, verify_email_envelope, EmailAttachment, EmailEnvelopeMismatch, EmailRequest,
-    MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENT_BYTES, MAX_EMAIL_ATTACHMENT_NAME_BYTES,
-    MAX_EMAIL_BODY_BYTES, MAX_EMAIL_RECIPIENTS, MAX_EMAIL_SUBJECT_BYTES,
+    deliver_email, prepare_email_delivery, verify_email_envelope, EmailAttachment,
+    EmailDeliveryReceipt, EmailDeliverySession, EmailEnvelopeMismatch, EmailLedgerRefusal,
+    EmailRequest, PreparedEmailDelivery, MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENT_BYTES,
+    MAX_EMAIL_ATTACHMENT_NAME_BYTES, MAX_EMAIL_BODY_BYTES, MAX_EMAIL_RECIPIENTS,
+    MAX_EMAIL_SUBJECT_BYTES,
 };
 pub use ledger::{
     DeliveryIdentity, HostDeliveryLedger, LedgerOutcome, LedgerRecord, LedgerRefusal,
@@ -1026,49 +1028,81 @@ fn settle(
     prepared: PreparedRequest,
     observation: AdapterObservation,
 ) -> DeliveryResult {
-    let (disposition, response_body) = match observation {
-        AdapterObservation::NotDispatched { reason } => {
-            (DeliveryDisposition::NotDispatched { reason }, None)
-        }
-        AdapterObservation::Response { status: _, body }
-            if body.len() > prepared.max_response_bytes =>
+    let disposition = settlement_disposition(&prepared, &observation);
+    let response_body = match observation {
+        AdapterObservation::Response { status, body }
+            if body.len() <= prepared.max_response_bytes && (200..300).contains(&status) =>
         {
-            (DeliveryDisposition::ResponseTooLargeUncertain, None)
+            Some(body)
         }
-        AdapterObservation::Response { status, body } if !(100..600).contains(&status) => (
-            DeliveryDisposition::Uncertain {
-                reason: AdapterFailure::Protocol,
-            },
-            None,
-        ),
-        AdapterObservation::Response { status, body } if (200..300).contains(&status) => {
-            (DeliveryDisposition::Accepted { status }, Some(body))
-        }
-        AdapterObservation::Response { status, body } => {
-            let _ = body;
-            (DeliveryDisposition::Rejected { status }, None)
-        }
-        AdapterObservation::FailedAfterStart { reason } => {
-            (DeliveryDisposition::Uncertain { reason }, None)
-        }
-        AdapterObservation::DeadlineAfterStart => (DeliveryDisposition::DeadlineUncertain, None),
-        AdapterObservation::ResponseTooLargeAfterStart => {
-            (DeliveryDisposition::ResponseTooLargeUncertain, None)
-        }
+        _ => None,
     };
     DeliveryResult {
         response_body,
-        evidence: DeliveryEvidence {
-            schema: "semaprax.outbound-delivery-evidence.v1",
-            deployment_binding: capability.deployment_binding,
-            invocation_id: capability.invocation_id,
-            policy_id: capability.policy.policy_id,
-            endpoint_origin: origin,
-            request_digest: request_digest(&prepared),
+        evidence: delivery_evidence(
+            capability,
+            origin,
             delivery_id,
             idempotency_key,
+            prepared,
             disposition,
-        },
+        ),
+    }
+}
+
+/// Classify a completed adapter observation without retaining a response body.
+/// Reconciliation modes that settle disposition-only use this before dropping
+/// provider response bytes.
+fn settlement_disposition(
+    prepared: &PreparedRequest,
+    observation: &AdapterObservation,
+) -> DeliveryDisposition {
+    match observation {
+        AdapterObservation::NotDispatched { reason } => {
+            DeliveryDisposition::NotDispatched { reason: *reason }
+        }
+        AdapterObservation::Response { body, .. } if body.len() > prepared.max_response_bytes => {
+            DeliveryDisposition::ResponseTooLargeUncertain
+        }
+        AdapterObservation::Response { status, .. } if !(100..600).contains(status) => {
+            DeliveryDisposition::Uncertain {
+                reason: AdapterFailure::Protocol,
+            }
+        }
+        AdapterObservation::Response { status, .. } if (200..300).contains(status) => {
+            DeliveryDisposition::Accepted { status: *status }
+        }
+        AdapterObservation::Response { status, .. } => {
+            DeliveryDisposition::Rejected { status: *status }
+        }
+        AdapterObservation::FailedAfterStart { reason } => {
+            DeliveryDisposition::Uncertain { reason: *reason }
+        }
+        AdapterObservation::DeadlineAfterStart => DeliveryDisposition::DeadlineUncertain,
+        AdapterObservation::ResponseTooLargeAfterStart => {
+            DeliveryDisposition::ResponseTooLargeUncertain
+        }
+    }
+}
+
+fn delivery_evidence(
+    capability: OutboundCapability,
+    origin: String,
+    delivery_id: String,
+    idempotency_key: String,
+    prepared: PreparedRequest,
+    disposition: DeliveryDisposition,
+) -> DeliveryEvidence {
+    DeliveryEvidence {
+        schema: "semaprax.outbound-delivery-evidence.v1",
+        deployment_binding: capability.deployment_binding,
+        invocation_id: capability.invocation_id,
+        policy_id: capability.policy.policy_id,
+        endpoint_origin: origin,
+        request_digest: request_digest(&prepared),
+        delivery_id,
+        idempotency_key,
+        disposition,
     }
 }
 

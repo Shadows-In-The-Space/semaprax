@@ -65,12 +65,29 @@ requires its idempotency component to be the one exact boundary-owned
 `idempotency-key` header. It records only the digest plus the closed local
 disposition.
 
-The existing `deliver_*` convenience calls remain stateless, one-shot helpers;
-there is no production caller of this optional primitive yet. A host adopting
-it selects `reconcile` at its own prepared-request dispatch boundary. The
-primitive remembers a disposition only, not a `DeliveryResult` or response
-body, so it does not offer response replay. Adding it does not silently change
-legacy helper behavior or invent a cross-process recovery route.
+The existing `deliver_*` convenience calls remain stateless, one-shot helpers.
+The additive `prepare_email_delivery` plus `EmailDeliverySession::reconcile`
+route is the first in-tree family integration: it validates and constructs the
+exact request before entering the ledger, then lets only a fresh exact identity
+enter the injected adapter closure. A matching request gets a newly derived
+authority-free receipt and never calls `send`; a changed request conflicts
+before dispatch. Fresh physical work still requires the injected capability
+inside `PreparedEmailDelivery`.
+
+This email session deliberately settles **disposition-only**. It discards even
+a bounded nonempty accepted provider response before it writes replay state and
+its receipt type exposes no response bytes. Therefore exact replay needs the
+canonical request, identity/idempotency, policy commitment, and closed
+disposition only; it neither pretends to replay provider payloads nor retains
+them in process memory. A panic after adapter entry writes no session-side
+state, leaving the ledger's pre-reserved `Uncertain { Transport }` terminal
+record sticky. The policy commitment domain-separates the policy ID, sorted
+allowed origins, and every request/response/deadline/export limit, so a host
+cannot silently replay through a changed policy with the same policy ID.
+Policy commitments and session identities are SHA-256 values;
+no request, raw identity, credential, or response bytes are stored. This does
+not silently change legacy helper behavior or invent a cross-process recovery
+route.
 
 For an exact identity and request digest, a later `reconcile` call returns the
 remembered disposition and never enters its dispatch closure. A different
@@ -173,7 +190,11 @@ cardinality and duplicate-name refusal, and preservation of primary failure.
 The email cases add canonical replay, header and address injection, recipient
 and attachment cardinality, member maximum-plus-one, exact boundary admission,
 noncanonical/unknown/duplicate/malformed-hex envelope hostility, and
-after-start uncertainty. The reconciliation cases add bounded-capacity refusal,
+after-start uncertainty. The integrated email session cases add a nonempty
+accepted provider response that is intentionally not retained, exact replay
+with zero adapter calls, changed-request and policy-commitment refusal before
+dispatch, and an unwinding adapter attempt whose reserved uncertainty cannot be
+retried. The reconciliation cases add bounded-capacity refusal,
 duplicate exact replay without redispatch, changed-payload conflict refusal,
 idempotency/header mismatch refusal, sticky uncertainty after an unwinding
 dispatch closure, and deterministic commitment state. It performs no live

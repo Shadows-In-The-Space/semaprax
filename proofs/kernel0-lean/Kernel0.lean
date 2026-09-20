@@ -1148,6 +1148,336 @@ theorem preservation {P Γ e e' T} (hwf : WellFormedProgram P) (ht : HasType P �
       have hsub := subst_preserves_type (P := P) [] fd'.params Γ args fd'.body hargs hargs' hbody'
       simpa using hsub
 
+/-! ## Structural decrease and ranked beta expansion
+
+A plain syntax-size measure cannot prove normalization for `Step`: call beta
+may replace one small call node with an arbitrarily large function body.  This
+section isolates that *only* source of structural growth and connects it to the
+strict call-rank certificate.  Crucially, it also closes the substitution gap
+left by the earlier call-chain theorem: substituting scalar values changes
+neither syntax-node count nor the syntactically derived call targets.
+
+The resulting dichotomy is the foundation needed by a future multiset or
+weighted-potential normalization proof.  It is not itself that final proof:
+unrelated calls elsewhere in an evaluation context prevent the pair
+`(maximum call rank, node count)` from decreasing lexicographically on every
+step.
+-/
+
+mutual
+  /-- Number of expression nodes, counting a call as one node plus its args. -/
+  def nodeCount : Expr → Nat
+    | .intLit _ | .boolLit _ | .var _ => 1
+    | .arith _ a b | .cmp _ a b | .and a b | .or a b | .letIn a b =>
+        nodeCount a + nodeCount b + 1
+    | .neg e | .not e => nodeCount e + 1
+    | .ite c a b => nodeCount c + nodeCount a + nodeCount b + 1
+    | .call _ args => argsNodeCount args + 1
+
+  /-- Sum of [`nodeCount`] over an argument list. -/
+  def argsNodeCount : List Expr → Nat
+    | [] => 0
+    | e :: es => nodeCount e + argsNodeCount es
+end
+
+theorem nodeCount_value {v} (hv : IsValue v) : nodeCount v = 1 := by
+  cases hv <;> rfl
+
+theorem callTargets_value {v} (hv : IsValue v) : callTargets v = [] := by
+  cases hv <;> rfl
+
+theorem argsNodeCount_append (left right : List Expr) :
+    argsNodeCount (left ++ right) = argsNodeCount left + argsNodeCount right := by
+  induction left with
+  | nil => simp [argsNodeCount]
+  | cons e es ih => simp only [List.cons_append, argsNodeCount, ih, Nat.add_assoc]
+
+mutual
+
+/-- Substitution of Kernel-0 values is node-count neutral: every substituted
+value and every variable occupy exactly one expression node. -/
+theorem nodeCount_substEnvAt_values (base : Nat) (env : List Expr) :
+    (∀ v ∈ env, IsValue v) → ∀ e,
+      nodeCount (substEnvAt base env e) = nodeCount e
+  | henv, .intLit _ => by simp [substEnvAt, nodeCount]
+  | henv, .boolLit _ => by simp [substEnvAt, nodeCount]
+  | henv, .var i => by
+      simp only [substEnvAt]
+      split
+      · rfl
+      · split
+        · rename_i h
+          exact nodeCount_value (henv _ (List.getElem_mem h))
+        · rfl
+  | henv, .arith op a b => by
+      simp only [substEnvAt, nodeCount]
+      rw [nodeCount_substEnvAt_values base env henv a,
+        nodeCount_substEnvAt_values base env henv b]
+  | henv, .cmp op a b => by
+      simp only [substEnvAt, nodeCount]
+      rw [nodeCount_substEnvAt_values base env henv a,
+        nodeCount_substEnvAt_values base env henv b]
+  | henv, .neg e => by
+      simp only [substEnvAt, nodeCount]
+      rw [nodeCount_substEnvAt_values base env henv e]
+  | henv, .not e => by
+      simp only [substEnvAt, nodeCount]
+      rw [nodeCount_substEnvAt_values base env henv e]
+  | henv, .and a b => by
+      simp only [substEnvAt, nodeCount]
+      rw [nodeCount_substEnvAt_values base env henv a,
+        nodeCount_substEnvAt_values base env henv b]
+  | henv, .or a b => by
+      simp only [substEnvAt, nodeCount]
+      rw [nodeCount_substEnvAt_values base env henv a,
+        nodeCount_substEnvAt_values base env henv b]
+  | henv, .ite c a b => by
+      simp only [substEnvAt, nodeCount]
+      rw [nodeCount_substEnvAt_values base env henv c,
+        nodeCount_substEnvAt_values base env henv a,
+        nodeCount_substEnvAt_values base env henv b]
+  | henv, .letIn a b => by
+      simp only [substEnvAt, nodeCount]
+      rw [nodeCount_substEnvAt_values base env henv a,
+        nodeCount_substEnvAt_values (base + 1) env henv b]
+  | henv, .call f args => by
+      simp only [substEnvAt, nodeCount]
+      rw [argsNodeCount_substEnvAt_values base env henv args]
+
+/-- Argument-list half of [`nodeCount_substEnvAt_values`]. -/
+theorem argsNodeCount_substEnvAt_values (base : Nat) (env : List Expr) :
+    (∀ v ∈ env, IsValue v) → ∀ args,
+      argsNodeCount (args.map (substEnvAt base env)) = argsNodeCount args
+  | henv, [] => rfl
+  | henv, e :: es => by
+      simp only [List.map_cons, argsNodeCount]
+      rw [nodeCount_substEnvAt_values base env henv e,
+        argsNodeCount_substEnvAt_values base env henv es]
+
+end
+
+
+mutual
+
+/-- Value substitution cannot hide, add, or reorder any syntactic call. -/
+theorem callTargets_substEnvAt_values (base : Nat) (env : List Expr) :
+    (∀ v ∈ env, IsValue v) → ∀ e,
+      callTargets (substEnvAt base env e) = callTargets e
+  | henv, .intLit _ => by simp [substEnvAt, callTargets]
+  | henv, .boolLit _ => by simp [substEnvAt, callTargets]
+  | henv, .var i => by
+      simp only [substEnvAt]
+      split
+      · rfl
+      · split
+        · rename_i h
+          exact callTargets_value (henv _ (List.getElem_mem h))
+        · rfl
+  | henv, .arith op a b => by
+      simp only [substEnvAt, callTargets]
+      rw [callTargets_substEnvAt_values base env henv a,
+        callTargets_substEnvAt_values base env henv b]
+  | henv, .cmp op a b => by
+      simp only [substEnvAt, callTargets]
+      rw [callTargets_substEnvAt_values base env henv a,
+        callTargets_substEnvAt_values base env henv b]
+  | henv, .neg e => by
+      simp only [substEnvAt, callTargets]
+      rw [callTargets_substEnvAt_values base env henv e]
+  | henv, .not e => by
+      simp only [substEnvAt, callTargets]
+      rw [callTargets_substEnvAt_values base env henv e]
+  | henv, .and a b => by
+      simp only [substEnvAt, callTargets]
+      rw [callTargets_substEnvAt_values base env henv a,
+        callTargets_substEnvAt_values base env henv b]
+  | henv, .or a b => by
+      simp only [substEnvAt, callTargets]
+      rw [callTargets_substEnvAt_values base env henv a,
+        callTargets_substEnvAt_values base env henv b]
+  | henv, .ite c a b => by
+      simp only [substEnvAt, callTargets]
+      rw [callTargets_substEnvAt_values base env henv c,
+        callTargets_substEnvAt_values base env henv a,
+        callTargets_substEnvAt_values base env henv b]
+  | henv, .letIn a b => by
+      simp only [substEnvAt, callTargets]
+      rw [callTargets_substEnvAt_values base env henv a,
+        callTargets_substEnvAt_values (base + 1) env henv b]
+  | henv, .call f args => by
+      simp only [substEnvAt, callTargets]
+      rw [argsCallTargets_substEnvAt_values base env henv args]
+
+/-- Argument-list half of [`callTargets_substEnvAt_values`]. -/
+theorem argsCallTargets_substEnvAt_values (base : Nat) (env : List Expr) :
+    (∀ v ∈ env, IsValue v) → ∀ args,
+      argsCallTargets (args.map (substEnvAt base env)) = argsCallTargets args
+  | henv, [] => rfl
+  | henv, e :: es => by
+      simp only [List.map_cons, argsCallTargets]
+      rw [callTargets_substEnvAt_values base env henv e,
+        argsCallTargets_substEnvAt_values base env henv es]
+
+end
+
+
+/-- Every call exposed by a beta-expanded body is strictly below its caller's
+certified rank. This is the first theorem connecting the derived call graph to
+the *post-substitution* expression that `Step.callBeta` actually produces. -/
+theorem call_beta_substitution_targets_lower {P rank f args fd}
+    (hr : CallGraphRanked P rank) (hf : P[f]? = some fd)
+    (hargs : ∀ v ∈ args, IsValue v) :
+    ∀ g ∈ callTargets (substEnvAt 0 args fd.body), rank g < rank f := by
+  intro g hg
+  rw [callTargets_substEnvAt_values 0 args hargs fd.body] at hg
+  exact hr f g ⟨fd, hf, hg⟩
+
+/-- A call-beta reduction at the unique active left-to-right evaluation
+position, closed under exactly the congruence contexts admitted by `Step`. -/
+inductive ContextualCallBeta (P : Program) : Expr → Expr → Nat → Prop where
+  | here {f args fd} (hargs : ∀ v ∈ args, IsValue v) (hf : P[f]? = some fd) :
+      ContextualCallBeta P (.call f args) (substEnvAt 0 args fd.body) f
+  | arithStep1 {f op e e' other} : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.arith op e other) (.arith op e' other) f
+  | arithStep2 {f op v e e'} (hv : IsValue v) : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.arith op v e) (.arith op v e') f
+  | cmpStep1 {f op e e' other} : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.cmp op e other) (.cmp op e' other) f
+  | cmpStep2 {f op v e e'} (hv : IsValue v) : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.cmp op v e) (.cmp op v e') f
+  | negStep {f e e'} : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.neg e) (.neg e') f
+  | notStep {f e e'} : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.not e) (.not e') f
+  | andStep {f e e' other} : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.and e other) (.and e' other) f
+  | orStep {f e e' other} : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.or e other) (.or e' other) f
+  | iteStep {f c c' yes no} : ContextualCallBeta P c c' f →
+      ContextualCallBeta P (.ite c yes no) (.ite c' yes no) f
+  | letStep {f e e' body} : ContextualCallBeta P e e' f →
+      ContextualCallBeta P (.letIn e body) (.letIn e' body) f
+  | callArgs {callee target vs e e' es} (hvs : ∀ v ∈ vs, IsValue v) :
+      ContextualCallBeta P e e' callee →
+      ContextualCallBeta P (.call target (vs ++ e :: es))
+        (.call target (vs ++ e' :: es)) callee
+
+/-- Every contextual call-beta identifies a real callee body and its value
+arguments. Under a ranked call graph, every call exposed by substituting those
+arguments into that body is strictly below the callee's rank. -/
+theorem contextual_call_beta_has_ranked_expansion {P rank e e' f}
+    (hr : CallGraphRanked P rank) (hb : ContextualCallBeta P e e' f) :
+    ∃ args fd, P[f]? = some fd ∧ (∀ v ∈ args, IsValue v) ∧
+      ∀ g ∈ callTargets (substEnvAt 0 args fd.body), rank g < rank f := by
+  induction hb with
+  | here hargs hf =>
+      exact ⟨_, _, hf, hargs, call_beta_substitution_targets_lower hr hf hargs⟩
+  | arithStep1 _ ih => exact ih
+  | arithStep2 _ _ ih => exact ih
+  | cmpStep1 _ ih => exact ih
+  | cmpStep2 _ _ ih => exact ih
+  | negStep _ ih => exact ih
+  | notStep _ ih => exact ih
+  | andStep _ ih => exact ih
+  | orStep _ ih => exact ih
+  | iteStep _ ih => exact ih
+  | letStep _ ih => exact ih
+  | callArgs _ _ ih => exact ih
+
+/-- Every real small step either strictly decreases raw syntax size or is a
+contextual call-beta. Thus call beta is the only obstruction to a structural
+normalization proof; it is handled separately by strict ranks above. -/
+theorem step_decreases_nodes_or_contextual_call_beta {P e e'} (hs : Step P e e') :
+    nodeCount e' < nodeCount e ∨ ∃ f, ContextualCallBeta P e e' f := by
+  induction hs with
+  | arithStep1 h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .arithStep1 hbeta⟩
+  | arithStep2 hv h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .arithStep2 hv hbeta⟩
+  | arithVal h => left; simp [nodeCount]
+  | cmpStep1 h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .cmpStep1 hbeta⟩
+  | cmpStep2 hv h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .cmpStep2 hv hbeta⟩
+  | cmpVal => left; simp [nodeCount]
+  | cmpBoolVal hop => left; simp [nodeCount]
+  | negStep h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .negStep hbeta⟩
+  | negVal h => left; simp [nodeCount]
+  | notStep h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .notStep hbeta⟩
+  | notVal => left; simp [nodeCount]
+  | andStep h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .andStep hbeta⟩
+  | andTrue => left; simp [nodeCount]; omega
+  | andFalse => left; simp [nodeCount]; omega
+  | orStep h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .orStep hbeta⟩
+  | orTrue => left; simp [nodeCount]; omega
+  | orFalse => left; simp [nodeCount]; omega
+  | iteStep h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .iteStep hbeta⟩
+  | iteTrue => left; simp [nodeCount]; omega
+  | iteFalse => left; simp [nodeCount]; omega
+  | letStep h ih =>
+      rcases ih with hsize | ⟨f, hbeta⟩
+      · left; simp only [nodeCount] at hsize ⊢; omega
+      · exact Or.inr ⟨f, .letStep hbeta⟩
+  | letBeta hv =>
+      left
+      simp only [substAt]
+      rw [nodeCount_substEnvAt_values 0 [_] (by simpa using hv)]
+      simp only [nodeCount]
+      rw [nodeCount_value hv]
+      omega
+  | callArgs hvs h ih =>
+      rcases ih with hsize | ⟨callee, hbeta⟩
+      · left
+        simp only [nodeCount, argsNodeCount_append, argsNodeCount] at hsize ⊢
+        omega
+      · exact Or.inr ⟨callee, .callArgs hvs hbeta⟩
+  | callBeta hargs hf => exact Or.inr ⟨_, .here hargs hf⟩
+
+/-- The helper fixture's first beta step is deliberately *not* a raw syntax
+decrease: both source and target are one call node. The dichotomy classifies it
+as the ranked-beta branch instead of hiding it behind a false size claim. -/
+theorem helper_first_step_is_contextual_call_beta :
+    ContextualCallBeta acyclicCallFixture (.call 0 []) (.call 1 []) 0 := by
+  simpa [substEnvAt] using
+    (ContextualCallBeta.here (P := acyclicCallFixture) (f := 0) (args := [])
+      (fd := ⟨[], .int, .call 1 []⟩) (by simp) (by simp [acyclicCallFixture]))
+
+theorem helper_first_step_not_node_decrease :
+    ¬ nodeCount (.call 1 []) < nodeCount (.call 0 []) := by
+  simp [nodeCount, argsNodeCount]
+
+theorem helper_first_beta_targets_have_lower_rank :
+    ∀ g ∈ callTargets (substEnvAt 0 [] (Expr.call 1 [])),
+      (if g = 0 then 1 else 0) < (if (0 : Nat) = 0 then 1 else 0) := by
+  apply call_beta_substitution_targets_lower acyclic_call_fixture_ranked
+    (P := acyclicCallFixture) (f := 0) (args := [])
+    (fd := ⟨[], .int, .call 1 []⟩)
+  · simp [acyclicCallFixture]
+  · simp
+
 /-! ## Fuel-bounded small-step progress
 
 This section composes full-language Progress with Preservation.  It does not
@@ -1248,3 +1578,11 @@ the substring `sorryAx`). -/
 #print axioms Kernel0.bounded_step_progress
 #print axioms Kernel0.helper_call_takes_two_steps
 #print axioms Kernel0.helper_call_normalizes_within_two_steps
+#print axioms Kernel0.nodeCount_substEnvAt_values
+#print axioms Kernel0.callTargets_substEnvAt_values
+#print axioms Kernel0.call_beta_substitution_targets_lower
+#print axioms Kernel0.contextual_call_beta_has_ranked_expansion
+#print axioms Kernel0.step_decreases_nodes_or_contextual_call_beta
+#print axioms Kernel0.helper_first_step_is_contextual_call_beta
+#print axioms Kernel0.helper_first_step_not_node_decrease
+#print axioms Kernel0.helper_first_beta_targets_have_lower_rank

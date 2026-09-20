@@ -34,7 +34,7 @@ What it catches, and how
 3. A headline theorem starts depending on a custom axiom, or on `sorryAx`
    (Lean's marker for an admitted hole).
    -> After `lake build`, the gate writes an unpredictable-marker audit
-      driver that imports `Kernel0` and issues all 21 `#print axioms`
+      driver that imports `Kernel0` and issues all 29 `#print axioms`
       commands itself. Only reports inside that invocation's owned marker
       interval are parsed; missing, duplicate, forged source-owned, or
       unexpected reports fail. Each set must be a subset of `propext`,
@@ -57,7 +57,7 @@ What it catches, and how
    constructor, a zero-cost `Steps.teleport` constructor, or a local notation
    that rebinds `FaultRedex` to `fun _ => True` for later declarations.
    -> The SHA-256 pin of the complete comment/string-stripped live source
-      authenticates every command and every gap between declarations. Twelve
+      authenticates every command and every gap between declarations. Thirteen
       narrower exact pins identify changes to the main semantic regions. Any
       live command or proof-body change therefore requires a deliberate full
       source repin. Always-run hostile self-tests inject all three attacks and
@@ -104,6 +104,7 @@ PROOF_DIR = REPO_ROOT / "proofs" / "kernel0-lean"
 SOURCE = PROOF_DIR / "Kernel0.lean"
 RECURSIVE_CONTROL = PROOF_DIR / "negative" / "RecursiveCallGraph.lean"
 FUEL_CONTROL = PROOF_DIR / "negative" / "InsufficientNormalizationFuel.lean"
+STRUCTURAL_CONTROL = PROOF_DIR / "negative" / "ForgedStructuralDecrease.lean"
 
 # Fully-qualified headline theorem names this gate certifies are present,
 # axiom-clean, and unchanged. This gate owns the audit driver; proof-source
@@ -130,6 +131,14 @@ HEADLINE_THEOREMS = [
     "bounded_step_progress",
     "helper_call_takes_two_steps",
     "helper_call_normalizes_within_two_steps",
+    "nodeCount_substEnvAt_values",
+    "callTargets_substEnvAt_values",
+    "call_beta_substitution_targets_lower",
+    "contextual_call_beta_has_ranked_expansion",
+    "step_decreases_nodes_or_contextual_call_beta",
+    "helper_first_step_is_contextual_call_beta",
+    "helper_first_step_not_node_decrease",
+    "helper_first_beta_targets_have_lower_rank",
 ]
 
 # Frozen, byte-exact expected statement text for each headline theorem,
@@ -234,6 +243,45 @@ PINNED_SIGNATURES = {
         "theorem helper_call_takes_two_steps :\n"
         "    Steps acyclicCallFixture (.call 0 []) (.intLit 42) 2"
     ),
+    "nodeCount_substEnvAt_values": (
+        "theorem nodeCount_substEnvAt_values (base : Nat) (env : List Expr) :\n"
+        "    (∀ v ∈ env, IsValue v) → ∀ e,\n"
+        "      nodeCount (substEnvAt base env e) = nodeCount e"
+    ),
+    "callTargets_substEnvAt_values": (
+        "theorem callTargets_substEnvAt_values (base : Nat) (env : List Expr) :\n"
+        "    (∀ v ∈ env, IsValue v) → ∀ e,\n"
+        "      callTargets (substEnvAt base env e) = callTargets e"
+    ),
+    "call_beta_substitution_targets_lower": (
+        "theorem call_beta_substitution_targets_lower {P rank f args fd}\n"
+        "    (hr : CallGraphRanked P rank) (hf : P[f]? = some fd)\n"
+        "    (hargs : ∀ v ∈ args, IsValue v) :\n"
+        "    ∀ g ∈ callTargets (substEnvAt 0 args fd.body), rank g < rank f"
+    ),
+    "contextual_call_beta_has_ranked_expansion": (
+        "theorem contextual_call_beta_has_ranked_expansion {P rank e e' f}\n"
+        "    (hr : CallGraphRanked P rank) (hb : ContextualCallBeta P e e' f) :\n"
+        "    ∃ args fd, P[f]? = some fd ∧ (∀ v ∈ args, IsValue v) ∧\n"
+        "      ∀ g ∈ callTargets (substEnvAt 0 args fd.body), rank g < rank f"
+    ),
+    "step_decreases_nodes_or_contextual_call_beta": (
+        "theorem step_decreases_nodes_or_contextual_call_beta {P e e'} (hs : Step P e e') :\n"
+        "    nodeCount e' < nodeCount e ∨ ∃ f, ContextualCallBeta P e e' f"
+    ),
+    "helper_first_step_is_contextual_call_beta": (
+        "theorem helper_first_step_is_contextual_call_beta :\n"
+        "    ContextualCallBeta acyclicCallFixture (.call 0 []) (.call 1 []) 0"
+    ),
+    "helper_first_step_not_node_decrease": (
+        "theorem helper_first_step_not_node_decrease :\n"
+        "    ¬ nodeCount (.call 1 []) < nodeCount (.call 0 [])"
+    ),
+    "helper_first_beta_targets_have_lower_rank": (
+        "theorem helper_first_beta_targets_have_lower_rank :\n"
+        "    ∀ g ∈ callTargets (substEnvAt 0 [] (Expr.call 1 [])),\n"
+        "      (if g = 0 then 1 else 0) < (if (0 : Nat) = 0 then 1 else 0)"
+    ),
 }
 
 # Comment/string-stripped exact code regions that define the judgments named
@@ -263,6 +311,8 @@ SEMANTIC_REGION_PINS = [
      "22ccb6ec2c8b7147092e193369028f385b355f71ffdcfa76c4751b2502fa43f7"),
     ("args_progress", "inductive ArgsProgress", "theorem progress_full",
      "99cf370b72cdeab1b541f46a3f766c27ceff9ec050e13c7ca718adc989ca1ae5"),
+    ("structural_decrease", "  def nodeCount : Expr → Nat", "inductive Steps",
+     "0c2b4ab8f2cd5a275d894a42158bb8b27f87e539facfce1d84be6f838f78e5ee"),
     ("bounded_steps", "inductive Steps", "theorem bounded_step_progress",
      "d37830caa89da3799719efc5842d0a6566498ff3c00ada15faee6297ac2c0edc"),
 ]
@@ -276,7 +326,7 @@ SEMANTIC_REGION_PINS = [
 # by the same lexer used for signatures and token checks. Do not update this
 # value merely to make the gate green: every live-source change needs review.
 PINNED_LIVE_SOURCE_SHA256 = (
-    "a23a2cf3a88ed91d2b23ad6714b349f46caffd433fe8f27c83a1d13057707fb0"
+    "faa63bb11f828768d9382c8bd21ae3537435757c2749aa97917ef0e86692aad8"
 )
 
 PINNED_RECURSIVE_CONTROL = """import Kernel0
@@ -292,6 +342,13 @@ theorem forged_one_step_normalization :
 NormalizesWithin acyclicCallFixture (.call 0 []) 1 := by
 refine ⟨.intLit 42, 2, ?_, helper_call_takes_two_steps, Or.inl (.intLit 42)⟩
 exact Nat.le_refl 2"""
+
+PINNED_STRUCTURAL_CONTROL = """import Kernel0
+open Kernel0
+theorem forged_helper_beta_structural_decrease :
+nodeCount (.call 1 []) < nodeCount (.call 0 []) := by
+show 1 < 1
+exact Nat.lt_succ_self 0"""
 
 ALLOWED_AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
 
@@ -533,6 +590,14 @@ def check_source_level(source_text: str) -> list[str]:
         normalized = "\n".join(line.strip() for line in control.splitlines() if line.strip())
         if normalized != PINNED_FUEL_CONTROL:
             failures.append("normalization-fuel negative control changed from its pinned forged certificate")
+
+    if not STRUCTURAL_CONTROL.is_file():
+        failures.append("structural-decrease negative control is missing")
+    else:
+        control = strip_comments_and_strings(STRUCTURAL_CONTROL.read_text(encoding="utf-8"))
+        normalized = "\n".join(line.strip() for line in control.splitlines() if line.strip())
+        if normalized != PINNED_STRUCTURAL_CONTROL:
+            failures.append("structural-decrease negative control changed from its pinned forged certificate")
 
     return failures
 
@@ -798,6 +863,33 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
             )
         else:
             print(f"{TAG}: normalization-fuel negative control OK (one-step forgery rejected)")
+
+    # Raw syntax size alone cannot orient call beta: the positive helper's
+    # first real step maps one call node to one call node. A forged strict
+    # decrease must fail exactly at the normalized 1 < 1 obligation.
+    if not failures:
+        control = subprocess.run(
+            [lake, "env", "lean", str(STRUCTURAL_CONTROL.relative_to(PROOF_DIR))],
+            cwd=str(PROOF_DIR), capture_output=True, text=True,
+        )
+        output = control.stdout + control.stderr
+        errors = [line for line in output.splitlines() if "error:" in line]
+        normalized_output = re.sub(r"\s+", " ", output)
+        if (
+            control.returncode == 0
+            or len(errors) != 1
+            or "Type mismatch" not in errors[0]
+            or "Nat.lt_succ_self 0" not in normalized_output
+            or "has type 0 < Nat.succ 0" not in normalized_output
+            or "expected to have type 1 < 1" not in normalized_output
+            or "sorryAx" in output
+        ):
+            failures.append(
+                "structural-decrease negative control did not fail at the expected "
+                "1 < 1 type mismatch:\n" + output
+            )
+        else:
+            print(f"{TAG}: structural-decrease negative control OK (false size decrease rejected)")
 
     return failures, True
 

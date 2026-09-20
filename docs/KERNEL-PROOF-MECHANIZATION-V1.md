@@ -27,8 +27,12 @@ Read this before citing this document elsewhere.
   *entire* language (`Let` and non-recursive `Call` included). It also iterates
   that real `Step` relation for every caller-supplied fuel budget. The ranked
   call-graph extension proves call-chain termination and acyclicity under an
-  explicit strict-rank certificate; a universal small-step normalization bound
-  and connection to the compiler's HIR remain open. The existing
+  explicit strict-rank certificate. A further measure tranche proves that
+  value substitution preserves exact call targets and syntax size, and that
+  every real step either strictly shrinks syntax or is a contextual call beta
+  whose expanded body's calls have lower rank. It does not yet compose these
+  facts into a global well-founded measure or universal fuel bound, and a
+  connection to the compiler's HIR remains open. The existing
   `kernel0-lean-proof-gate` CI job runs the proof
   gate; a wired job does not establish a hosted verdict for an unrun commit.
 - **The recommendation (Lean 4) is evidence-based on this host, not a
@@ -388,20 +392,30 @@ This extension is **call-chain termination**, not full normalization of
 `Step`. The subsequent bounded-step tranche proves full-language Progress and
 iterates Progress plus Preservation for any supplied fuel: evaluation either
 reaches a value/fault within the budget or consumes it exactly with a witnessed
-next `Step`. It still does not show that substitution preserves the extracted
-call graph or construct a universal evaluation decrease measure. It does not emit or
-verify a certificate from Rust HIR. The Rust bounded reifier's active-path
+next `Step`. The structural-decrease tranche now proves that substitution of
+the only values in Kernel-0 preserves both `nodeCount` and exact `callTargets`;
+every real `Step` either decreases `nodeCount` or is a `ContextualCallBeta` at
+the unique active evaluation position; and every such beta exposes an actual
+callee body whose post-substitution call targets have strictly smaller rank.
+The positive helper deliberately takes a first beta step from one call node to
+one call node, demonstrating the ranked branch rather than hiding it behind a
+false size decrease. The committed hostile control tries that false strict
+decrease and must fail specifically at `1 < 1`.
+
+These facts still do not construct the global multiset or weighted
+well-founded measure needed to account for an expanding callee body beside
+unrelated pending calls, so they do not derive a universal evaluation bound.
+They also do not emit or verify a certificate from Rust HIR. The Rust bounded reifier's active-path
 cycle refusal is the corresponding implementation discipline, with finite
 differential evidence and independent exact-source replay; no theorem connects
 the two. The finite scalar Kernel-0 scope, pinned Lean toolchain, zero external
 Lean packages, backend non-claims, and self-hosting rung remain unchanged.
 
 An exact-current-worktree local run of
-`python3 scripts/kernel0-lean-gate.py --require-kernel` passed all 21 pinned
+`python3 scripts/kernel0-lean-gate.py --require-kernel` passed all 29 pinned
 theorem signatures, the no-hole scan, `lake build`, every theorem's axiom-set
-audit, the forged recursive-certificate rejection control, and a hostile
-control that reuses the genuine two-step fixture while forging a one-step
-budget. This is local
+audit, the forged recursive-certificate rejection control, the hostile
+one-step budget control, and the false structural-decrease control. This is local
 proof-build evidence, not a hosted verdict; the older transcripts above remain
 historical evidence for their original theorem set.
 
@@ -409,13 +423,13 @@ The gate's trust boundary is now adversarially pinned as well. Signature
 lookup runs on comment/string-stripped Lean, so a commented copy cannot shadow
 a changed live theorem. The source scan rejects both `axiom` and Lean's
 equivalent top-level `constant` declarations. A fresh gate-owned audit driver,
-not `Kernel0.lean` output, imports the built module and emits all 21 reports
+not `Kernel0.lean` output, imports the built module and emits all 29 reports
 between unpredictable markers; missing, duplicate, unexpected, or source-
 forged reports fail closed. The authoritative environment pin hashes the
 complete comment/string-stripped live source: every command, gap between
 declarations, and proof body. Thus a notation, macro, syntax/scope command,
 attribute, instance, or any other live elaboration change requires deliberate
-review and repinning. Twelve narrower exact regions remain for precise
+review and repinning. Thirteen narrower exact regions remain for precise
 diagnostics over `Expr`, `Step`, `FaultRedex`, `ArgsProgress`, `Steps`,
 `Terminal`, `NormalizesWithin`, and their semantic dependencies. Always-run
 hostile self-tests exercise the commented-signature, forged-report/removal,
@@ -578,12 +592,20 @@ same inventory in more detail):
   whose frontier has a next real `Step`. A two-beta-step helper fixture is the
   positive control; the gate rejects a forged one-step budget for those same
   two steps at the expected `2 ≤ 1` type mismatch.
-- **Explicitly not covered**: a universal small-step normalization bound, any connection
+- **Added after the bounded-step tranche**: value substitution preserves raw
+  node count and exact extracted call targets; all real steps are classified
+  as either strict node-count decreases or contextual call betas; and each
+  classified beta exposes a real function lookup whose substituted-body calls
+  have strictly lower rank. The equal-size helper beta is the positive control,
+  while a compiled hostile proof of its strict size decrease fails at `1 < 1`.
+- **Explicitly not covered**: the global multiset/weighted measure and derived
+  universal small-step normalization bound, any connection
   to the compiler's real HIR (`src/kernel_zero.rs` or otherwise), and the
   native/Wasm backends.
 
 **Verified, not claimed**: every transcript in "Question 2" above was run
-this session against the committed file, from a genuine cold rebuild. The
+against the then-current file. The latest local evidence is an incremental
+`lake build`; no clean/cold rebuild is claimed. The
 file contains no `sorry`, `admit`, or custom `axiom` — verified both by
 `#print axioms` (see above) and by direct inspection (`grep -n sorry`
 returns six hits, all inside doc comments discussing the topic in English

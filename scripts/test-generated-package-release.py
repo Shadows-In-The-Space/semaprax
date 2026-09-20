@@ -509,6 +509,77 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         run_closed.assert_called_once()
         self.assertTrue(any("npm pack --dry-run succeeded" in line for line in report))
 
+    def test_tarball_consumer_uses_only_the_private_packed_artifact(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        calls = []
+        consumer_dependencies = None
+
+        def closed(command, cwd, path_dirs, extra_env, **_kwargs):
+            nonlocal consumer_dependencies
+            command = list(command)
+            cwd = Path(cwd)
+            calls.append((command, cwd, list(path_dirs), dict(extra_env)))
+            if command[1:3] == ["pack", "--json"]:
+                (cwd / "frame-payload-0.1.0.tgz").write_bytes(b"packed-tarball")
+            elif command[1:3] == ["install", "--package-lock-only"]:
+                consumer_dependencies = json.loads(
+                    (cwd / "package.json").read_text(encoding="utf-8")
+                )["dependencies"]
+                lock = {
+                    "lockfileVersion": 3,
+                    "packages": {
+                        "": {"dependencies": {"frame-payload": "file:../payload/frame-payload-0.1.0.tgz"}},
+                    },
+                }
+                (cwd / "package-lock.json").write_text(json.dumps(lock), encoding="utf-8")
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(gpr, "run_closed", side_effect=closed):
+            report = gpr.check(
+                "npm",
+                prepared,
+                publish=False,
+                npm_bin=Path("/tools/npm"),
+                npm_tarball_consumer=True,
+                node_bin=Path("/tools/node"),
+            )
+
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(calls[0][0][1:3], ["pack", "--json"])
+        self.assertEqual(calls[1][0][1:3], ["install", "--package-lock-only"])
+        self.assertEqual(calls[2][0][1], "ci")
+        self.assertEqual(calls[3][0][0], "/tools/node")
+        self.assertEqual(calls[3][0][1:3], ["--input-type=module", "--eval"])
+        self.assertIn('await import("frame-payload")', calls[3][0][3])
+        consumer = calls[1][1]
+        self.assertEqual(calls[2][1], consumer)
+        self.assertEqual(calls[3][1], consumer)
+        self.assertEqual(consumer_dependencies, {"frame-payload": "file:../payload/frame-payload-0.1.0.tgz"})
+        for _command, cwd, _paths, _environment in calls:
+            self.assertNotIn(str(package_dir), str(cwd))
+            self.assertNotIn(str(prepared), str(cwd))
+        self.assertTrue(any("packed artifact offline" in line for line in report))
+
+    def test_tarball_consumer_refuses_when_pack_does_not_create_one_regular_tarball(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        with mock.patch.object(
+            gpr, "run_closed", return_value=SimpleNamespace(returncode=0, stderr=b"")
+        ) as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"exactly one tarball"):
+                gpr.check(
+                    "npm",
+                    prepared,
+                    publish=False,
+                    npm_bin=Path("/tools/npm"),
+                    npm_tarball_consumer=True,
+                    node_bin=Path("/tools/node"),
+                )
+        run_closed.assert_called_once()
+
     def test_rustup_proxy_cargo_is_refused_before_snapshot_or_tool_run(self):
         package_dir = self.rust_package_dir(self.root)
         prepared = self.root / "prepared"

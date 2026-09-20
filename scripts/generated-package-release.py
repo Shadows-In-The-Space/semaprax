@@ -28,14 +28,18 @@ Two subcommands:
       never invokes npm or cargo and never calls the network.
 
   check --kind {npm,rust} --prepared-dir DIR [--publish] \\
-      [--npm-bin PATH] [--cargo-bin PATH]
+      [--npm-bin PATH] [--cargo-bin PATH] \\
+      [--npm-tarball-consumer --node-bin PATH]
       Recomputes and diffs `<DIR>/package-preview-manifest.json` against a
       flat physical-file payload on disk (tamper detection; links and special
       entries are refused). Only then, in the default dry-run mode, it copies
       the verified bytes into a fresh private snapshot before optionally
       exercising a real `npm pack --dry-run` or
       `cargo publish --dry-run` if an explicit absolute tool path is supplied
-      (never discovered from PATH). `--publish` is always refused: this tool
+      (never discovered from PATH). `--npm-tarball-consumer` additionally
+      installs a newly packed tarball into a fresh private consumer offline,
+      with lifecycle scripts disabled, then imports the installed package with
+      an explicit Node binary. `--publish` is always refused: this tool
       implements no live-publish code path, by design -- registry writes and
       signing require separate maintainer approval (issue #145 step 6,
       #168's signing policy) that this repository does not grant here.
@@ -75,6 +79,8 @@ MAX_PREVIEW_WRAPPER_BYTES = 1024 * 1024
 MAX_PREVIEW_MANIFEST_BYTES = 64 * 1024
 MAX_PREVIEW_MANIFEST_DEPTH = 32
 MAX_PREVIEW_MANIFEST_NODES = 256
+MAX_PACKED_NPM_TARBALL_BYTES = MAX_PACKAGE_TOTAL_BYTES + 1024 * 1024
+MAX_NPM_CONSUMER_LOCK_BYTES = 1024 * 1024
 PREVIEW_MANIFEST_KEYS = frozenset(
     (
         "schema",
@@ -100,6 +106,7 @@ NPM_OWNED_DATA_FILES = (
 )
 NPM_DESCRIPTOR_FILE = "semaprax.api.json"
 NPM_FORBIDDEN_PACKAGE_JSON_KEYS = ("dependencies", "devDependencies", "scripts", "private")
+NPM_PACKAGE_NAME = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$")
 
 RUST_OWNED_DATA_FIXED_FILES = (
     "Cargo.toml",
@@ -452,8 +459,12 @@ def validate_npm_package_json(text):
     for key in NPM_FORBIDDEN_PACKAGE_JSON_KEYS:
         if key in parsed:
             reject(f"package.json must not declare {key!r}")
-    if "name" not in parsed or "version" not in parsed:
-        reject("package.json must declare name and version")
+    if not isinstance(parsed.get("name"), str) or not parsed["name"]:
+        reject("package.json must declare a nonempty string name")
+    if not NPM_PACKAGE_NAME.fullmatch(parsed["name"]):
+        reject("package.json declares an unsupported package name")
+    if not isinstance(parsed.get("version"), str) or not parsed["version"]:
+        reject("package.json must declare a nonempty string version")
     return parsed
 
 
@@ -894,6 +905,85 @@ def _write_verified_snapshot(root, payload):
     return snapshot_payload
 
 
+def _packed_npm_tarball(snapshot_payload, expected_payload):
+    """Return the sole regular `.tgz` npm created in a clean snapshot.
+
+    Do not trust npm's JSON output as a pathname. The snapshot starts with an
+    exact compiler-generated inventory, so immediately after `npm pack` the
+    only additional entry allowed is one bounded regular tarball.
+    """
+    directory = Path(snapshot_payload)
+    expected = set(expected_payload)
+    tarballs = []
+    seen_expected = set()
+    try:
+        entries = list(os.scandir(directory))
+    except OSError as error:
+        reject(f"cannot enumerate packed npm snapshot: {error}")
+    if len(entries) > len(expected) + 1:
+        reject("npm pack wrote more than one additional snapshot entry")
+    for entry in entries:
+        name = entry.name
+        if name in expected:
+            seen_expected.add(name)
+            copied = _read_regular_file_fallback(
+                directory / name,
+                f"packed npm snapshot/{name}",
+                len(expected_payload[name]),
+            )
+            if copied != expected_payload[name]:
+                reject(f"npm pack changed checked snapshot payload {name!r}")
+            continue
+        if not name.endswith(".tgz"):
+            reject(f"npm pack wrote unexpected snapshot entry {name!r}")
+        try:
+            info = entry.stat(follow_symlinks=False)
+        except OSError as error:
+            reject(f"cannot inspect npm tarball {name!r}: {error}")
+        if not stat.S_ISREG(info.st_mode):
+            reject(f"npm tarball {name!r} is not a regular file")
+        if info.st_size == 0:
+            reject(f"npm tarball {name!r} is empty")
+        if info.st_size > MAX_PACKED_NPM_TARBALL_BYTES:
+            reject(f"npm tarball {name!r} exceeds its admitted byte limit")
+        tarballs.append(Path(entry.path))
+    if seen_expected != expected:
+        reject("npm pack removed an entry from the checked snapshot payload")
+    if len(tarballs) != 1:
+        reject(f"npm pack must write exactly one tarball, found {len(tarballs)}")
+    return tarballs[0]
+
+
+def _write_npm_tarball_consumer(snapshot_root, package_name, tarball):
+    """Create a fresh external consumer whose sole dependency is the tarball."""
+    consumer = Path(snapshot_root) / "consumer"
+    consumer.mkdir(mode=0o700)
+    manifest = {
+        "name": "semaprax-generated-package-preview-consumer",
+        "version": "0.0.0",
+        "private": True,
+        "type": "module",
+        "dependencies": {package_name: f"file:../payload/{tarball.name}"},
+    }
+    (consumer / "package.json").write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    return consumer
+
+
+def _require_tarball_lockfile(consumer, tarball):
+    """Require npm's generated lockfile to retain the relative tarball route."""
+    data = _read_regular_file_fallback(
+        Path(consumer) / "package-lock.json",
+        "npm tarball consumer package-lock.json",
+        MAX_NPM_CONSUMER_LOCK_BYTES,
+    )
+    required = f"file:../payload/{tarball.name}".encode("utf-8")
+    if required not in data:
+        reject("npm tarball consumer lockfile does not bind the packed tarball")
+
+
 def _private_tool_environment(snapshot_root):
     """Return fresh tool homes rooted under the private verified snapshot.
 
@@ -1004,7 +1094,15 @@ def run_closed(command, cwd, path_dirs, extra_env=None, timeout=120):
     )
 
 
-def check(kind, prepared_dir, publish, npm_bin=None, cargo_bin=None):
+def check(
+    kind,
+    prepared_dir,
+    publish,
+    npm_bin=None,
+    cargo_bin=None,
+    npm_tarball_consumer=False,
+    node_bin=None,
+):
     if publish:
         reject(
             "live publish is not implemented by this tool: it requires a "
@@ -1018,6 +1116,10 @@ def check(kind, prepared_dir, publish, npm_bin=None, cargo_bin=None):
 
     report = ["generated-package-release check: manifest and on-disk digests agree"]
     if kind == "npm":
+        if npm_tarball_consumer and npm_bin is None:
+            reject("--npm-tarball-consumer requires --npm-bin")
+        if npm_tarball_consumer and node_bin is None:
+            reject("--npm-tarball-consumer requires --node-bin")
         if npm_bin is None:
             report.append("npm dry-run skipped: no --npm-bin supplied")
         else:
@@ -1029,18 +1131,92 @@ def check(kind, prepared_dir, publish, npm_bin=None, cargo_bin=None):
             if not npm_bin.is_absolute():
                 reject("--npm-bin must be an absolute path")
             npm_bin = str(npm_bin)
+            if node_bin is not None:
+                node_bin = Path(node_bin)
+                if not node_bin.is_absolute():
+                    reject("--node-bin must be an absolute path")
+                node_bin = str(node_bin)
             with tempfile.TemporaryDirectory(prefix="semaprax-generated-package-verified-") as snapshot:
                 snapshot_payload = _write_verified_snapshot(snapshot, payload)
                 private_env = _private_tool_environment(snapshot)
-                result = run_closed(
-                    [npm_bin, "pack", "--dry-run", "--json"],
-                    cwd=snapshot_payload,
-                    path_dirs=[str(Path(npm_bin).parent)],
-                    extra_env=private_env,
+                tool_dirs = [str(Path(npm_bin).parent)]
+                if npm_tarball_consumer:
+                    node_parent = str(Path(node_bin).parent)
+                    if node_parent not in tool_dirs:
+                        tool_dirs.append(node_parent)
+                    result = run_closed(
+                        [npm_bin, "pack", "--json"],
+                        cwd=snapshot_payload,
+                        path_dirs=tool_dirs,
+                        extra_env=private_env,
+                    )
+                    if result.returncode != 0:
+                        reject(f"npm pack failed: {result.stderr.decode(errors='replace')}")
+                    tarball = _packed_npm_tarball(snapshot_payload, payload)
+                    package_json = validate_npm_package_json(payload["package.json"].decode("utf-8"))
+                    consumer = _write_npm_tarball_consumer(snapshot, package_json["name"], tarball)
+                    lock_result = run_closed(
+                        [
+                            npm_bin,
+                            "install",
+                            "--package-lock-only",
+                            "--ignore-scripts",
+                            "--offline",
+                            "--no-audit",
+                            "--no-fund",
+                        ],
+                        cwd=consumer,
+                        path_dirs=tool_dirs,
+                        extra_env=private_env,
+                    )
+                    if lock_result.returncode != 0:
+                        reject(
+                            "npm tarball consumer lockfile generation failed: "
+                            f"{lock_result.stderr.decode(errors='replace')}"
+                        )
+                    _require_tarball_lockfile(consumer, tarball)
+                    install_result = run_closed(
+                        [npm_bin, "ci", "--ignore-scripts", "--offline", "--no-audit", "--no-fund"],
+                        cwd=consumer,
+                        path_dirs=tool_dirs,
+                        extra_env=private_env,
+                    )
+                    if install_result.returncode != 0:
+                        reject(
+                            "npm tarball consumer install failed: "
+                            f"{install_result.stderr.decode(errors='replace')}"
+                        )
+                    execute_result = run_closed(
+                        [
+                            node_bin,
+                            "--input-type=module",
+                            "--eval",
+                            f"await import({json.dumps(package_json['name'])});",
+                        ],
+                        cwd=consumer,
+                        path_dirs=tool_dirs,
+                        extra_env=private_env,
+                    )
+                    if execute_result.returncode != 0:
+                        reject(
+                            "installed npm tarball import failed: "
+                            f"{execute_result.stderr.decode(errors='replace')}"
+                        )
+                else:
+                    result = run_closed(
+                        [npm_bin, "pack", "--dry-run", "--json"],
+                        cwd=snapshot_payload,
+                        path_dirs=tool_dirs,
+                        extra_env=private_env,
+                    )
+                    if result.returncode != 0:
+                        reject(f"npm pack --dry-run failed: {result.stderr.decode(errors='replace')}")
+            if npm_tarball_consumer:
+                report.append(
+                    "npm tarball consumer installed and imported the private packed artifact offline"
                 )
-            if result.returncode != 0:
-                reject(f"npm pack --dry-run failed: {result.stderr.decode(errors='replace')}")
-            report.append("npm pack --dry-run succeeded (no file was written, no network used)")
+            else:
+                report.append("npm pack --dry-run succeeded (no file was written, no network used)")
     else:
         if cargo_bin is None:
             report.append("cargo dry-run skipped: no --cargo-bin supplied")
@@ -1099,6 +1275,8 @@ def main(argv=None):
     check_parser.add_argument("--publish", action="store_true")
     check_parser.add_argument("--npm-bin", type=Path, default=None)
     check_parser.add_argument("--cargo-bin", type=Path, default=None)
+    check_parser.add_argument("--npm-tarball-consumer", action="store_true")
+    check_parser.add_argument("--node-bin", type=Path, default=None)
 
     args = parser.parse_args(argv)
 
@@ -1120,6 +1298,8 @@ def main(argv=None):
         args.publish,
         npm_bin=args.npm_bin,
         cargo_bin=args.cargo_bin,
+        npm_tarball_consumer=args.npm_tarball_consumer,
+        node_bin=args.node_bin,
     )
     for line in report:
         print(f"generated-package-release: {line}")

@@ -17,6 +17,7 @@ use function @id("std.tracing.tracestate_member_count_admitted") from std.tracin
 use function @id("std.tracing.tracestate_combined_length_admitted") from std.tracing as tracestate_combined_length_admitted;
 use function @id("std.tracing.slice_equal") from std.tracing as slice_equal;
 use function @id("std.tracing.trace_context_fields_admitted") from std.tracing as trace_context_fields_admitted;
+use function @id("std.tracing.trace_context_fields_admitted_guarded") from std.tracing as trace_context_fields_admitted_guarded;
 use function @id("std.tracing.outbound_traceparent_fields_admitted") from std.tracing as outbound_traceparent_fields_admitted;
 use function @id("std.tracing.child_context_admitted") from std.tracing as child_context_admitted;
 use function @id("std.tracing.trace_flags_sampled") from std.tracing as trace_flags_sampled;
@@ -25,6 +26,44 @@ use function @id("std.tracing.tracestate_key_shape_admitted") from std.tracing a
 use function @id("std.tracing.tracestate_value_shape_admitted") from std.tracing as tracestate_value_shape_admitted;
 use function @id("std.tracing.tracestate_member_admitted") from std.tracing as tracestate_member_admitted;
 use function @id("std.tracing.tracestate_mutation_admitted") from std.tracing as tracestate_mutation_admitted;
+
+// The trace context's shape and the caller's six secret-bearing
+// classifications are independent gates. Every flag is exercised alone so a
+// guard that forgets one field cannot hide behind the other five.
+@id("std.tracing.tests.trace_context_guarded_refuses_each_secret_flag")
+fn trace_context_guarded_refuses_each_secret_flag() -> bool
+{
+    let trace_id = [97u8; 32];
+    let parent_id = [98u8; 16];
+    let trace_flags = [48u8, 49u8];
+    let trace = array_as_slice(trace_id);
+    let parent = array_as_slice(parent_id);
+    let flags = array_as_slice(trace_flags);
+    let clean = trace_context_fields_admitted_guarded(trace, parent, flags, false, false, false, false, false, false);
+    let password = !trace_context_fields_admitted_guarded(trace, parent, flags, true, false, false, false, false, false);
+    let api_key = !trace_context_fields_admitted_guarded(trace, parent, flags, false, true, false, false, false, false);
+    let bearer_token = !trace_context_fields_admitted_guarded(trace, parent, flags, false, false, true, false, false, false);
+    let session_token = !trace_context_fields_admitted_guarded(trace, parent, flags, false, false, false, true, false, false);
+    let webhook_secret = !trace_context_fields_admitted_guarded(trace, parent, flags, false, false, false, false, true, false);
+    let smtp_credential = !trace_context_fields_admitted_guarded(trace, parent, flags, false, false, false, false, false, true);
+    clean && password && api_key && bearer_token && session_token && webhook_secret && smtp_credential
+}
+
+// Redaction must not turn a malformed trace context into an admitted one. The
+// all-zero trace-id is otherwise the same shape and is refused by the
+// unguarded predicate; the guarded form must preserve that refusal with clean
+// classification flags as well.
+@id("std.tracing.tests.trace_context_guarded_preserves_shape_refusal")
+fn trace_context_guarded_preserves_shape_refusal() -> bool
+{
+    let zero_trace_id = [48u8; 32];
+    let parent_id = [98u8; 16];
+    let trace_flags = [48u8, 49u8];
+    let trace = array_as_slice(zero_trace_id);
+    let parent = array_as_slice(parent_id);
+    let flags = array_as_slice(trace_flags);
+    !trace_context_fields_admitted(trace, parent, flags) && !trace_context_fields_admitted_guarded(trace, parent, flags, false, false, false, false, false, false)
+}
 
 // Shared buffer-construction helpers for the cases below. `bytes_zeroed`
 // only admits a literal capacity at its own call site (`SPX-T271`), so a
@@ -472,8 +511,19 @@ fn outbound_conformance_failures() -> i64
     failed
 }
 
+// The redaction-guard conformance sum uses its own bit range so a failure in
+// the policy wrapper cannot be confused with the shape/propagation cases.
+@id("std.tracing.tests.redaction_guard_failures")
+fn redaction_guard_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if trace_context_guarded_refuses_each_secret_flag() { 0 } else { 1 };
+    failed = failed + if trace_context_guarded_preserves_shape_refusal() { 0 } else { 2 };
+    failed
+}
+
 @id("std.tracing.tests.main")
 fn main() -> i64
 {
-    inbound_conformance_failures() + outbound_conformance_failures() * 8192
+    inbound_conformance_failures() + outbound_conformance_failures() * 8192 + redaction_guard_failures() * 16384
 }

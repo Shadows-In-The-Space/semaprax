@@ -9878,6 +9878,22 @@
         },
         {
           "description": [
+            "Composes trace-context shape with the caller's classification of six",
+            "secret-bearing categories. It does not inspect secret bytes or tracestate;",
+            "adapters must classify those before calling this pure policy predicate."
+          ],
+          "effects": [],
+          "ensures": 0,
+          "head": [
+            "fn trace_context_fields_admitted_guarded(trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool"
+          ],
+          "id": "std.tracing.trace_context_fields_admitted_guarded",
+          "kind": "function",
+          "name": "trace_context_fields_admitted_guarded",
+          "requires": 0
+        },
+        {
+          "description": [
             "The judgement an adapter assembling an outbound header actually calls",
             "before joining `version \"-\" trace_id \"-\" parent_id \"-\" trace_flags` with",
             "dashes and sending it. `version_field_admitted` is reused unchanged: its",

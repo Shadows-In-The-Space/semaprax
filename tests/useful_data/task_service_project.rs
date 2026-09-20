@@ -507,41 +507,15 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
     .unwrap();
 }
 
-/// `docs/COMPLETION-MATRIX.md`'s reference-application row names two
-/// concrete, checkable follow-ons: whether `std.log` and `std.tracing` can
-/// be wired into this project so it emits structured log events and trace
-/// context, and whether this project's manifest qualifies for `semaprax
-/// build --target oci`. This test pins the first: adding `std.tracing` --
-/// the lighter of the two candidates, since `std.encoding` is its only
-/// transitive dependency, against `std.log`'s four (`std.data.json.utf8`,
-/// `std.data.json.write`, `std.io`, `std.log.redact`) -- to this project's
-/// existing `std.auth` + `std.jobs` closure is refused by `SPX-G171` before
-/// this project's own three source files are even resolved: the static
-/// admission pre-charge sums only the five dependency modules reached
-/// (`std.auth`, `std.bytes`, `std.encoding`, `std.jobs`, `std.tracing`, in
-/// canonical path order) to 19,160,008 bytes against the 18,874,368-byte
-/// cap -- 101.5%, over before a single byte of this project's own source is
-/// counted. `std.log`'s heavier five-package closure was independently
-/// confirmed refused the same way in this session (manual reproduction, not
-/// committed as a second test to avoid duplicating this one's shape): its
-/// pre-charge reaches 19,080,680 bytes from only the first five
-/// alphabetically-ordered dependency modules, before `std.jobs`, `std.log`,
-/// or `std.log.redact` are even reached. Because the pre-charge sums whole
-/// reachable *modules* regardless of which functions this project's own
-/// source calls (`docs/COMPLETION-MATRIX.md`'s own recorded measurement),
-/// no reduction of this project's own three files -- which this test does
-/// not even need to touch, since the probe module below is one trivial
-/// extra function -- can close this gap: the project's checked-in baseline
-/// (`std.auth` + `std.jobs`) alone already sits at roughly 92.7% of the cap
-/// (this project's own README), leaving no room for either candidate
-/// package's whole-file charge. This is why neither package is wired into
-/// the checked-in project today, and it is a stable regression: if a future
-/// change to `SPX-G171`'s accounting (or to the baseline closure) ever
-/// admits this composition, this test starts failing on the `Err` match and
-/// must be replaced with the real `std.log`/`std.tracing` wiring issue #194
-/// asks for.
+/// The reachability-based bundled-dependency pruning introduced for issue
+/// #124 removed the former SPX-G171 blocker for the reference application's
+/// `std.auth` + `std.jobs` closure. Pin that improvement with `std.tracing`'s
+/// real transitive closure (`std.encoding` and `std.log.redact`) rather than
+/// retaining the old expected-failure regression. This is an admission gate,
+/// not a claim that the application already emits or exports spans; #194 owns
+/// that product wiring.
 #[test]
-fn adding_std_tracing_to_the_dependency_closure_exceeds_the_builder_bytes_cap() {
+fn std_tracing_and_its_redaction_dependency_fit_the_reference_application() {
     let scratch = scratch("tracing-overflow");
     std::fs::create_dir_all(scratch.join("src")).unwrap();
 
@@ -564,38 +538,23 @@ fn adding_std_tracing_to_the_dependency_closure_exceeds_the_builder_bytes_cap() 
     )
     .unwrap();
 
-    // A single trivial probe function is enough: `SPX-G171`'s pre-charge
-    // (see the doc comment above) sums whole reachable dependency modules
-    // before this project's own source is resolved at all, so the probe's
-    // own size plays no role in the refusal this test pins.
+    // A small real import keeps both the selected package and its transitive
+    // redaction dependency inside the authenticated workspace closure.
     let core = std::fs::read_to_string(fixture().join("src/core.spx")).unwrap();
     let augmented_core = core.replacen(
         "module task_service.core;\n",
-        "module task_service.core;\nuse function @id(\"std.tracing.traceparent_shape_admitted\") from std.tracing as traceparent_shape_admitted;\n",
+        "module task_service.core;\nuse function @id(\"std.tracing.trace_context_fields_admitted_guarded\") from std.tracing as trace_context_fields_admitted_guarded;\n",
         1,
-    ) + "\n@id(\"task_service.core.trace_header_probe\")\nfn trace_header_probe(header: borrow Slice<u8>) -> bool\n{\n    traceparent_shape_admitted(header)\n}\n";
+    ) + "\n@id(\"task_service.core.trace_header_probe\")\nfn trace_header_probe(header: borrow Slice<u8>) -> bool\n{\n    trace_context_fields_admitted_guarded(header, header, header, false, false, false, false, false, false)\n}\n";
     assert_ne!(
         augmented_core, core,
         "the module header must still be present to patch"
     );
     std::fs::write(scratch.join("src/core.spx"), augmented_core).unwrap();
 
-    let outcome = project::with_authenticated_project(&scratch.join("semaprax.toml"), |snapshot| {
+    project::with_authenticated_project(&scratch.join("semaprax.toml"), |snapshot| {
         snapshot.check()
-    });
-    let Err(diagnostics) = outcome else {
-        panic!(
-            "adding std.tracing to this project's dependency closure unexpectedly fit under \
-             SPX-G171; if the builder_bytes accounting was narrowed or the baseline closure's \
-             own charge dropped, replace this test with the real std.log/std.tracing wiring \
-             issue #194 asks for"
-        );
-    };
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "SPX-G171"),
-        "expected SPX-G171 (builder_bytes cap), got {diagnostics:?}"
-    );
+    })
+    .expect("std.tracing and its transitive redaction policy must fit under SPX-G171");
     let _ = std::fs::remove_dir_all(scratch);
 }

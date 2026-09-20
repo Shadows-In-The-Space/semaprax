@@ -242,7 +242,7 @@ const PACKAGES: &[BundledPackage] = &[
         name: "std.tracing",
         path: "dependencies/std.tracing/0.1.0/policy.spx",
         source: include_str!("../../std/tracing/src/policy.spx"),
-        dependencies: &["std.encoding"],
+        dependencies: &["std.encoding", "std.log.redact"],
     },
     BundledPackage {
         name: "std.url",
@@ -412,6 +412,16 @@ mod tests {
         // imports `std.bytes.equals`), which must already be bundled.
         assert_eq!(package("std.jobs").unwrap().dependencies, &["std.bytes"]);
         assert!(is_bundled("std.bytes"));
+    }
+
+    #[test]
+    fn tracing_bundles_its_encoding_and_redaction_dependencies() {
+        assert_eq!(
+            package("std.tracing").unwrap().dependencies,
+            &["std.encoding", "std.log.redact"]
+        );
+        assert!(is_bundled("std.encoding"));
+        assert!(is_bundled("std.log.redact"));
     }
 
     #[test]

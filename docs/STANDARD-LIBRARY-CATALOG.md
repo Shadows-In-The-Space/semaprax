@@ -5638,6 +5638,16 @@ site is one opaque unit to that replay instead of a dozen more branches.
 fn trace_context_fields_admitted(trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>) -> bool
 ```
 
+### `std.tracing.trace_context_fields_admitted_guarded`
+
+Composes trace-context shape with the caller's classification of six
+secret-bearing categories. It does not inspect secret bytes or tracestate;
+adapters must classify those before calling this pure policy predicate.
+
+```semaprax
+fn trace_context_fields_admitted_guarded(trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+```
+
 ### `std.tracing.outbound_traceparent_fields_admitted`
 
 The judgement an adapter assembling an outbound header actually calls

@@ -1,5 +1,6 @@
 module std.tracing;
 use function @id("std.encoding.decode_hex_byte") from std.encoding as decode_hex_byte;
+use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 
 // Issue #193's tracing slice: the pure, effect-free decision layer that
 // admits or refuses a W3C Trace Context `traceparent`/`tracestate` header,
@@ -262,6 +263,15 @@ fn trace_context_fields_admitted(trace_id: borrow Slice<u8>, parent_id: borrow S
     let parent_id_ok = byte_len(parent_id) == 16usize && hex_run_admitted(parent_id, 0usize, 16usize) && !field_is_all_zero(parent_id, 0usize, 16usize);
     let flags_ok = byte_len(trace_flags) == 2usize && hex_run_admitted(trace_flags, 0usize, 2usize);
     trace_id_ok && parent_id_ok && flags_ok
+}
+
+// Composes trace-context shape with the caller's classification of six
+// secret-bearing categories. It does not inspect secret bytes or tracestate;
+// adapters must classify those before calling this pure policy predicate.
+@id("std.tracing.trace_context_fields_admitted_guarded")
+fn trace_context_fields_admitted_guarded(trace_id: borrow Slice<u8>, parent_id: borrow Slice<u8>, trace_flags: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+{
+    trace_context_fields_admitted(trace_id, parent_id, trace_flags) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
 }
 
 // The judgement an adapter assembling an outbound header actually calls

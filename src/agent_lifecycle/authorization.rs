@@ -33,6 +33,9 @@ use super::stages::AuthorizeStage;
 use super::{encode_value, StageRecord};
 
 mod native_executor;
+/// Private target-neutral model/effect boundary for #182.  It intentionally
+/// has no production caller until the iterative executor selects it.
+pub(in crate::agent_lifecycle) mod target_protocol;
 mod wasm_executor;
 
 use native_executor::NativeStageExecutor;

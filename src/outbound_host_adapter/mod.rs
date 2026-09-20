@@ -1,4 +1,5 @@
-//! Capability-gated outbound host adapters for operational exports and webhooks.
+//! Capability-gated outbound host adapters for operational exports, webhooks,
+//! and provider-neutral email.
 //!
 //! The policy boundary is deliberately transport-injected: it reads no
 //! environment variables and creates no threads or timers. A host supplies an
@@ -13,6 +14,14 @@ use std::fmt;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroize;
+
+mod email;
+
+pub use email::{
+    deliver_email, verify_email_envelope, EmailAttachment, EmailEnvelopeMismatch, EmailRequest,
+    MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENT_BYTES, MAX_EMAIL_ATTACHMENT_NAME_BYTES,
+    MAX_EMAIL_BODY_BYTES, MAX_EMAIL_RECIPIENTS, MAX_EMAIL_SUBJECT_BYTES,
+};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -42,6 +51,7 @@ pub enum Refusal {
     InvalidContentType,
     CardinalityExceeded,
     SecretUnavailable,
+    InvalidEmail,
 }
 
 /// Exact deployment-owned limits and destinations for one outbound effect.

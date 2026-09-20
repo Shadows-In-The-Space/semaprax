@@ -7,11 +7,12 @@ Audience: runtime integrators and reviewers of outbound application effects.
 
 `src/outbound_host_adapter/` joins the existing pure `std` policy packages and
 bounded HTTPS POST runtime at one injected host boundary. It covers structured
-operational export and signed webhook delivery. The policy layer reads no
-environment and creates no threads or timers. `NativeHttpsAdapter` is the
-explicit physical HTTPS implementation: its host supplies TLS policy, while it
-disables ambient proxies, redirects, and retries. Tests use a deterministic
-recording fixture and perform no network I/O.
+operational export, signed webhook delivery, and a provider-neutral email
+envelope. The policy layer reads no environment and creates no threads or
+timers. `NativeHttpsAdapter` is the explicit physical HTTPS implementation: its
+host supplies TLS policy, while it disables ambient proxies, redirects, and
+retries. Tests use a deterministic recording fixture and perform no network
+I/O.
 
 ## Authority and admission
 
@@ -51,6 +52,48 @@ deduplication ledger and cannot prove the receiver honored it. A restart loses
 all local fixture/adapter memory. Uncertain settlement therefore remains
 uncertain and never authorizes an automatic retry, even when a key was sent.
 
+## Email envelope
+
+`deliver_email` accepts one explicit `EmailRequest` and consumes the same
+single-use capability before handing an `application/vnd.semaprax.email.v1+json`
+request to the injected adapter. The body is a canonical, bounded envelope with
+the sender, authored-order recipient and attachment vectors, optional Reply-To,
+subject, and body bytes. Duplicate recipients and attachment names are refused;
+the boundary never reorders caller-authored vectors because their order can be
+meaningful to a provider. Raw body and attachment bytes use lowercase hex in
+that envelope, so the host adapter receives an exact byte sequence without a
+text-decoding ambiguity. They are omitted from request debug output and from
+delivery evidence, which retains only the prepared-request digest.
+
+Admission tightens the pure `std.email` policy boundary at the host seam:
+sender, recipients, and Reply-To require an ASCII mailbox with exactly one `@`,
+safe local atoms with no leading/trailing/consecutive dots, and dotted domain
+labels of ASCII alphanumeric/hyphen bytes (1 through 63 bytes, no edge hyphen).
+Recipients are 1 through 64. Subject is required, refuses every ASCII control,
+and is at most 256 bytes. Bodies are at most 8 KiB; there may be at most four
+attachments, each with a closed safe file name, a one-slash media type, and at
+most 2 KiB of bytes. The JSON writer is capped by the deployment's existing
+request limit as well, so escaping/encoding cannot turn admitted members into an
+unbounded wire body.
+
+`verify_email_envelope` is the authority-free replay side: it bounds input
+before allocating member vectors, requires the closed schema/key/type shape,
+lowercase-even hex, admitted mailbox and attachment members, and byte-exact
+canonical JSON re-rendering. It then requires the decoded bytes to be the exact
+body of a prepared email request with the boundary-owned content type and
+delivery headers. Unknown, duplicate, reordered, malformed-hex, and
+over-bound encodings refuse. This verifies one request representation only; it
+does not recover a capability, prove provider receipt, or authorize a retry.
+
+This is **not SMTP** and it neither resolves MX records nor manages an SMTP or
+provider credential. A deployment selects a provider endpoint and trusted
+adapter implementation; that adapter may apply deployment-owned authentication
+outside the caller-controlled request. The request value and evidence never
+grant that authority. Email content is intentionally delivered to the selected
+provider adapter, so callers must apply the pure `std.email`/redaction policy to
+their source data before constructing an email request; this Rust host boundary
+does not infer secret classification from arbitrary bytes.
+
 ## Settlement and evidence
 
 A response is `Accepted` only for 2xx. Other complete responses are `Rejected`.
@@ -85,4 +128,7 @@ The corpus covers exact signing and replay binding, pre-dispatch refusal,
 origin/userinfo/fragment checks, deadline/body maximum-plus-one, header and
 identity injection, response maximum-plus-one, sticky uncertainty, redaction,
 cardinality and duplicate-name refusal, and preservation of primary failure.
-It performs no live network operation.
+The email cases add canonical replay, header and address injection, recipient
+and attachment cardinality, member maximum-plus-one, exact boundary admission,
+noncanonical/unknown/duplicate/malformed-hex envelope hostility, and
+after-start uncertainty. It performs no live network operation.

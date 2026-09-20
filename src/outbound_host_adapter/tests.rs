@@ -53,6 +53,50 @@ fn webhook() -> WebhookRequest {
     }
 }
 
+fn email_policy() -> OutboundPolicy {
+    OutboundPolicy::new(
+        "deploy.email.v1",
+        ["https://email-provider.example.test".to_owned()],
+        MAX_REQUEST_BODY_BYTES,
+        MAX_RESPONSE_BODY_BYTES,
+        MAX_DEADLINE_MS,
+        MAX_EXPORT_FIELDS,
+        MAX_EXPORT_LABELS,
+    )
+    .unwrap()
+}
+
+fn email_capability() -> OutboundCapability {
+    OutboundCapability::grant_for_trusted_host("sha256:deployment", "invocation-7", email_policy())
+        .unwrap()
+}
+
+fn email() -> EmailRequest {
+    EmailRequest {
+        endpoint: "https://email-provider.example.test/v1/send".into(),
+        delivery_id: "mail-42".into(),
+        idempotency_key: "job-9:mail-42".into(),
+        sender: "sender@example.test".into(),
+        recipients: vec!["zoe@example.test".into(), "amy@example.test".into()],
+        reply_to: Some("reply@example.test".into()),
+        subject: "Task complete".into(),
+        body: b"done".to_vec(),
+        attachments: vec![
+            EmailAttachment {
+                name: "z-last.txt".into(),
+                media_type: "text/plain".into(),
+                body: b"z".to_vec(),
+            },
+            EmailAttachment {
+                name: "a-first.txt".into(),
+                media_type: "text/plain".into(),
+                body: b"a".to_vec(),
+            },
+        ],
+        deadline_ms: 2_000,
+    }
+}
+
 #[test]
 fn webhook_is_signed_once_and_evidence_replays_against_exact_request() {
     let mut adapter = FixtureAdapter::returning(AdapterObservation::Response {
@@ -664,4 +708,403 @@ fn default_port_is_canonical_but_redirect_authority_is_never_inferred() {
         canonical_origin("https://example.test/%41"),
         Some("https://example.test".into())
     );
+}
+
+#[test]
+fn email_envelope_is_canonical_replayable_and_redacted_from_debug() {
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 202,
+        body: b"queued".to_vec(),
+    });
+    let result = deliver_email(email_capability(), email(), &mut adapter).unwrap();
+    assert_eq!(adapter.calls.len(), 1);
+    let sent = &adapter.calls[0];
+    assert_eq!(sent.endpoint, "https://email-provider.example.test/v1/send");
+    assert_eq!(sent.max_redirects, 0);
+    assert_eq!(
+        sent.headers,
+        vec![
+            (
+                "content-type".into(),
+                "application/vnd.semaprax.email.v1+json".into(),
+            ),
+            ("idempotency-key".into(), "job-9:mail-42".into()),
+            ("x-semaprax-delivery-id".into(), "mail-42".into()),
+        ]
+    );
+    let envelope: serde_json::Value = serde_json::from_slice(&sent.body).unwrap();
+    assert_eq!(
+        envelope,
+        serde_json::json!({
+            "attachments": [
+                {"body_hex": "7a", "media_type": "text/plain", "name": "z-last.txt"},
+                {"body_hex": "61", "media_type": "text/plain", "name": "a-first.txt"},
+            ],
+            "body_hex": "646f6e65",
+            "recipients": ["zoe@example.test", "amy@example.test"],
+            "reply_to": "reply@example.test",
+            "schema": "semaprax.outbound.email-request.v1",
+            "sender": "sender@example.test",
+            "subject": "Task complete",
+        })
+    );
+    let request_debug = format!("{:?}", email());
+    assert!(!request_debug.contains("sender@example.test"));
+    assert!(!request_debug.contains("Task complete"));
+    assert!(!request_debug.contains("done"));
+    let evidence_debug = format!("{:?}", result.evidence);
+    assert!(!evidence_debug.contains("sender@example.test"));
+    assert!(!evidence_debug.contains("Task complete"));
+    assert_eq!(
+        DeliveryEvidence::decode_and_replay(
+            result.evidence.render().as_bytes(),
+            "sha256:deployment",
+            "invocation-7",
+            "deploy.email.v1",
+            result.evidence.disposition(),
+            sent,
+        ),
+        Ok(result.evidence.clone())
+    );
+    assert_eq!(verify_email_envelope(&sent.body, sent), Ok(()));
+
+    let canonical = String::from_utf8(sent.body.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&canonical).unwrap();
+    let reordered = format!(
+        r#"{{"schema":{},"attachments":{},"body_hex":{},"recipients":{},"reply_to":{},"sender":{},"subject":{}}}"#,
+        serde_json::to_string(&value["schema"]).unwrap(),
+        serde_json::to_string(&value["attachments"]).unwrap(),
+        serde_json::to_string(&value["body_hex"]).unwrap(),
+        serde_json::to_string(&value["recipients"]).unwrap(),
+        serde_json::to_string(&value["reply_to"]).unwrap(),
+        serde_json::to_string(&value["sender"]).unwrap(),
+        serde_json::to_string(&value["subject"]).unwrap(),
+    );
+    assert_eq!(
+        verify_email_envelope(reordered.as_bytes(), sent),
+        Err(EmailEnvelopeMismatch::NonCanonical)
+    );
+    let duplicate_schema = format!(
+        r#"{{"schema":"semaprax.outbound.email-request.v1",{}"#,
+        &canonical[1..]
+    );
+    assert_eq!(
+        verify_email_envelope(duplicate_schema.as_bytes(), sent),
+        Err(EmailEnvelopeMismatch::NonCanonical)
+    );
+    let mut unknown = value.clone();
+    unknown["unknown"] = serde_json::json!(true);
+    assert_eq!(
+        verify_email_envelope(&serde_json::to_vec(&unknown).unwrap(), sent),
+        Err(EmailEnvelopeMismatch::Malformed)
+    );
+    let mut uppercase_hex = value.clone();
+    uppercase_hex["body_hex"] = serde_json::json!("646F6E65");
+    assert_eq!(
+        verify_email_envelope(&serde_json::to_vec(&uppercase_hex).unwrap(), sent),
+        Err(EmailEnvelopeMismatch::Malformed)
+    );
+    let mut short_hex = serde_json::from_str::<serde_json::Value>(&canonical).unwrap();
+    short_hex["body_hex"] = serde_json::json!("0");
+    assert_eq!(
+        verify_email_envelope(&serde_json::to_vec(&short_hex).unwrap(), sent),
+        Err(EmailEnvelopeMismatch::Bound)
+    );
+    let mut nonhex = short_hex;
+    nonhex["body_hex"] = serde_json::json!("gg");
+    assert_eq!(
+        verify_email_envelope(&serde_json::to_vec(&nonhex).unwrap(), sent),
+        Err(EmailEnvelopeMismatch::Malformed)
+    );
+    let mut overbound_hex = value;
+    overbound_hex["body_hex"] = serde_json::json!("00".repeat(MAX_EMAIL_BODY_BYTES + 1));
+    assert_eq!(
+        verify_email_envelope(&serde_json::to_vec(&overbound_hex).unwrap(), sent),
+        Err(EmailEnvelopeMismatch::Bound)
+    );
+    let mut wrong_prepared = sent.clone();
+    wrong_prepared.headers[0].1 = "application/json".into();
+    assert_eq!(
+        verify_email_envelope(&sent.body, &wrong_prepared),
+        Err(EmailEnvelopeMismatch::PreparedRequest)
+    );
+}
+
+#[test]
+fn email_refuses_every_unadmitted_envelope_part_before_dispatch() {
+    let cases: Vec<(EmailRequest, Refusal)> = vec![
+        (
+            EmailRequest {
+                sender: "sender@localhost".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: "sender name@example.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: "first..last@example.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: ".first@example.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: "first.@example.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: "first@example..test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: "first@-example.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: "first@example-.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: "first@exam_ple.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                sender: "fïrst@example.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                recipients: Vec::new(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                recipients: (0..MAX_EMAIL_RECIPIENTS + 1)
+                    .map(|index| format!("recipient-{index}@example.test"))
+                    .collect(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                recipients: vec!["same@example.test".into(), "same@example.test".into()],
+                ..email()
+            },
+            Refusal::CardinalityExceeded,
+        ),
+        (
+            EmailRequest {
+                recipients: vec!["recipient@example.test\r\nBcc: other@example.test".into()],
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                reply_to: Some("reply@example.test\0hidden".into()),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                subject: "ok\r\nBcc: other@example.test".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                subject: "ok\u{001f}hidden".into(),
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                body: vec![0; MAX_EMAIL_BODY_BYTES + 1],
+                ..email()
+            },
+            Refusal::RequestTooLarge,
+        ),
+        (
+            EmailRequest {
+                attachments: (0..MAX_EMAIL_ATTACHMENTS + 1)
+                    .map(|index| EmailAttachment {
+                        name: format!("file-{index}.txt"),
+                        media_type: "text/plain".into(),
+                        body: Vec::new(),
+                    })
+                    .collect(),
+                ..email()
+            },
+            Refusal::RequestTooLarge,
+        ),
+        // Aggregate bounds precede member grammar: an overlarge hostile list
+        // must not spend time evaluating every bad member first.
+        (
+            EmailRequest {
+                attachments: (0..MAX_EMAIL_ATTACHMENTS + 1)
+                    .map(|_| EmailAttachment {
+                        name: "../poison".into(),
+                        media_type: "not a media type".into(),
+                        body: Vec::new(),
+                    })
+                    .collect(),
+                ..email()
+            },
+            Refusal::RequestTooLarge,
+        ),
+        (
+            EmailRequest {
+                attachments: vec![EmailAttachment {
+                    name: "../escape.txt".into(),
+                    media_type: "text/plain".into(),
+                    body: Vec::new(),
+                }],
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                attachments: vec![EmailAttachment {
+                    name: "body.txt".into(),
+                    media_type: "text/plain\r\nX-Evil: yes".into(),
+                    body: Vec::new(),
+                }],
+                ..email()
+            },
+            Refusal::InvalidEmail,
+        ),
+        (
+            EmailRequest {
+                attachments: vec![EmailAttachment {
+                    name: "body.txt".into(),
+                    media_type: "text/plain".into(),
+                    body: vec![0; MAX_EMAIL_ATTACHMENT_BYTES + 1],
+                }],
+                ..email()
+            },
+            Refusal::RequestTooLarge,
+        ),
+        (
+            EmailRequest {
+                attachments: vec![
+                    EmailAttachment {
+                        name: "same.txt".into(),
+                        media_type: "text/plain".into(),
+                        body: Vec::new(),
+                    },
+                    EmailAttachment {
+                        name: "same.txt".into(),
+                        media_type: "text/plain".into(),
+                        body: Vec::new(),
+                    },
+                ],
+                ..email()
+            },
+            Refusal::CardinalityExceeded,
+        ),
+    ];
+    for (request, expected) in cases {
+        let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+        assert_eq!(
+            deliver_email(email_capability(), request, &mut adapter),
+            Err(expected)
+        );
+        assert!(adapter.calls.is_empty());
+    }
+}
+
+#[test]
+fn email_exact_limits_are_admitted_once_and_started_failures_stay_uncertain() {
+    let mut exact = email();
+    exact.subject = "s".repeat(MAX_EMAIL_SUBJECT_BYTES);
+    exact.body = vec![b'b'; MAX_EMAIL_BODY_BYTES];
+    exact.recipients = (0..MAX_EMAIL_RECIPIENTS)
+        .map(|index| format!("recipient-{index}@example.test"))
+        .collect();
+    exact.attachments = (0..MAX_EMAIL_ATTACHMENTS)
+        .map(|index| EmailAttachment {
+            name: format!("attachment-{index}.txt"),
+            media_type: "text/plain".into(),
+            body: vec![b'a'; MAX_EMAIL_ATTACHMENT_BYTES],
+        })
+        .collect();
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 200,
+        body: vec![b'o'; MAX_RESPONSE_BODY_BYTES],
+    });
+    let result = deliver_email(email_capability(), exact, &mut adapter).unwrap();
+    assert!(matches!(
+        result.evidence.disposition(),
+        DeliveryDisposition::Accepted { status: 200 }
+    ));
+    assert_eq!(adapter.calls.len(), 1);
+
+    let tiny_policy = OutboundPolicy::new(
+        "deploy.email.tiny",
+        ["https://email-provider.example.test".to_owned()],
+        64,
+        MAX_RESPONSE_BODY_BYTES,
+        MAX_DEADLINE_MS,
+        MAX_EXPORT_FIELDS,
+        MAX_EXPORT_LABELS,
+    )
+    .unwrap();
+    let tiny_capability = OutboundCapability::grant_for_trusted_host(
+        "sha256:deployment",
+        "invocation-7",
+        tiny_policy,
+    )
+    .unwrap();
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    assert_eq!(
+        deliver_email(tiny_capability, email(), &mut adapter),
+        Err(Refusal::RequestTooLarge)
+    );
+    assert!(adapter.calls.is_empty());
+
+    let mut adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    let result = deliver_email(email_capability(), email(), &mut adapter).unwrap();
+    assert_eq!(
+        result.evidence.disposition(),
+        &DeliveryDisposition::DeadlineUncertain
+    );
+    assert_eq!(adapter.calls.len(), 1);
 }

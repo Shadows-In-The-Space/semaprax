@@ -50,6 +50,31 @@ pub(crate) struct EffectContext<'a> {
     pub(crate) authorization: &'a AuthorizedRequest,
 }
 
+/// The one point where an iterative executor may elect to spend the freshly
+/// minted authorization on a more constrained target boundary.  The kernel
+/// owns every value here: a driver can neither substitute a model proposal nor
+/// choose a different invocation root.
+pub(crate) struct TargetEffectContext<'a> {
+    pub(crate) invocation_root: &'a str,
+    pub(crate) turn: usize,
+    pub(crate) max_steps: usize,
+    pub(crate) proposal_canonical: &'a str,
+    pub(crate) projected: &'a [RetainedValue],
+    pub(crate) cancellation: &'a AgentCancellation,
+}
+
+/// A target driver either returns the still-unspent authorization to the
+/// ordinary effect route, or consumes it at its own bounded protocol edge.
+/// This keeps the default driver behavior byte-for-byte unchanged while
+/// making a target route prove that it received the real move-only value.
+pub(crate) enum TargetEffect {
+    Ordinary(Authorized),
+    Dispatched {
+        dispatch: authorization::target_protocol::TargetDispatch,
+        result: Option<Vec<u8>>,
+    },
+}
+
 /// One owner coordinates stage reservations, effect persistence and transitions.
 /// Reservations run before every stage, including the new tail after replay.
 /// A driver failure propagates before subsequent stage or host execution.
@@ -64,6 +89,16 @@ pub(crate) trait IterativeDriver {
     }
     fn before_effect(&mut self, _context: EffectContext<'_>) -> Result<(), Vec<Diagnostic>> {
         Ok(())
+    }
+    /// Target execution is opt-in.  The default returns the original moved
+    /// authorization unchanged, so ordinary AgentRead and typed-effect routes
+    /// retain their existing `AuthorizedRequest` boundary.
+    fn target_effect(
+        &mut self,
+        _context: TargetEffectContext<'_>,
+        authorization: Authorized,
+    ) -> Result<TargetEffect, Vec<Diagnostic>> {
+        Ok(TargetEffect::Ordinary(authorization))
     }
     /// A checked dispatcher may bind its own operation and exact request to
     /// the existing source journal. None preserves the AgentRead v2 identity.
@@ -436,28 +471,60 @@ impl CompiledIterativeLifecycle {
             if run.stages.len() >= budget.max_stages {
                 stop!(IterativeStatus::BudgetExhausted, None);
             }
-            let request = authorized.consume();
             let expected = authorization::binding(
                 &policy,
                 &state,
                 decoded.canonical_json(),
                 inner.binding.authorize.grant_case(),
-                request.seal(),
+                authorized.seal(),
             );
-            if expected != request.binding() {
+            let authorization_binding = authorized.binding().to_owned();
+            if expected != authorization_binding {
                 return Err(vec![bad("authorization.binding")].into());
             }
-            driver.before_effect(EffectContext {
-                turn: run.iterations,
-                policy: &policy,
-                state: &state,
-                proposal_canonical: decoded.canonical_json(),
-                authorization: &request,
-            })?;
-            run.authorization_bindings
-                .push(request.binding().to_owned());
-            run.effects += 1;
-            let Some(bytes) = driver.read(&request)? else {
+            let read = match driver.target_effect(
+                TargetEffectContext {
+                    invocation_root: &run.invocation_digest,
+                    turn: run.iterations,
+                    max_steps: budget.max_steps_per_stage,
+                    proposal_canonical: decoded.canonical_json(),
+                    projected: &projected,
+                    cancellation,
+                },
+                authorized,
+            )? {
+                TargetEffect::Ordinary(authorized) => {
+                    let request = authorized.consume();
+                    driver.before_effect(EffectContext {
+                        turn: run.iterations,
+                        policy: &policy,
+                        state: &state,
+                        proposal_canonical: decoded.canonical_json(),
+                        authorization: &request,
+                    })?;
+                    run.authorization_bindings
+                        .push(request.binding().to_owned());
+                    run.effects += 1;
+                    driver.read(&request)?
+                }
+                TargetEffect::Dispatched { dispatch, result } => {
+                    if dispatch.authorization_binding() != authorization_binding {
+                        return Err(vec![bad("target.authorization.binding")].into());
+                    }
+                    if result.as_deref()
+                        != dispatch
+                            .result()
+                            .map(authorization::target_protocol::TypedCarrier::payload)
+                        && result.is_some()
+                    {
+                        return Err(vec![bad("target.result.binding")].into());
+                    }
+                    run.authorization_bindings.push(authorization_binding);
+                    run.effects += 1;
+                    result
+                }
+            };
+            let Some(bytes) = read else {
                 stop!(IterativeStatus::EffectFailed, None);
             };
             if bytes.len() > MAX_READ_BYTES {
@@ -504,6 +571,7 @@ mod tests {
     struct Driver {
         events: Vec<String>,
         calls: usize,
+        target_calls: usize,
         reject_stage: Option<&'static str>,
         reject_transition: Option<usize>,
         advance_stage: Option<(&'static str, std::rc::Rc<std::cell::Cell<i64>>)>,
@@ -542,6 +610,14 @@ mod tests {
             }
             Ok(())
         }
+        fn target_effect(
+            &mut self,
+            _: TargetEffectContext<'_>,
+            authorization: Authorized,
+        ) -> Result<TargetEffect, Vec<Diagnostic>> {
+            self.target_calls += 1;
+            Ok(TargetEffect::Ordinary(authorization))
+        }
         fn read(&mut self, _: &AuthorizedRequest) -> Result<Option<Vec<u8>>, Vec<Diagnostic>> {
             self.events.push(format!("{}:read", self.calls));
             self.calls += 1;
@@ -570,6 +646,7 @@ mod tests {
         Driver {
             events: Vec::new(),
             calls: 0,
+            target_calls: 0,
             reject_stage: None,
             reject_transition: None,
             advance_stage: None,
@@ -918,6 +995,7 @@ mod tests {
             .expect("an expired effect callback must stop before host dispatch");
         assert!(matches!(effect_error, DriverFailure::Diagnostics(_)));
         assert_eq!(effect_driver.calls, 0);
+        assert_eq!(effect_driver.target_calls, 0);
         assert_eq!(
             effect_driver.events,
             [

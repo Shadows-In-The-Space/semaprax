@@ -974,6 +974,7 @@ impl<'a> PreparedSourceLiveMigration<'a> {
             cancellation,
             Some(&mut session),
             Some(&seed),
+            false,
         ) {
             Ok(run) => session.complete(Some(run), None, Vec::new()),
             Err(driver::DriverFailure::Diagnostics(errors)) => session.complete(None, None, errors),

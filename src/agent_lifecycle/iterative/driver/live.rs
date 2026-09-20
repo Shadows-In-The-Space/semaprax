@@ -36,7 +36,27 @@ impl CompiledIterativeLifecycle {
         cancellation: &AgentCancellation,
         session: Option<&mut source_live::SourceExecutionSession<'_>>,
     ) -> Result<IterativeRun, DriverFailure> {
-        self.run_with_driver_live_seed(task, source, driver, budget, cancellation, session, None)
+        self.run_with_driver_live_seed(
+            task,
+            source,
+            driver,
+            budget,
+            cancellation,
+            session,
+            None,
+            false,
+        )
+    }
+
+    pub(crate) fn run_with_target_driver_live(
+        &self,
+        task: &LifecycleTask,
+        source: &mut dyn ProposalSource,
+        driver: &mut dyn IterativeDriver,
+        budget: IterativeBudget,
+        cancellation: &AgentCancellation,
+    ) -> Result<IterativeRun, DriverFailure> {
+        self.run_with_driver_live_seed(task, source, driver, budget, cancellation, None, None, true)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -49,6 +69,7 @@ impl CompiledIterativeLifecycle {
         cancellation: &AgentCancellation,
         mut session: Option<&mut source_live::SourceExecutionSession<'_>>,
         migrated: Option<&source_live::SourceMigrationSeed>,
+        allow_target_effect: bool,
     ) -> Result<IterativeRun, DriverFailure> {
         if budget.max_iterations > 4096 || budget.max_stages > 12289 {
             return Err(vec![bad("budget.capacity")].into());
@@ -265,36 +286,73 @@ impl CompiledIterativeLifecycle {
             if prior_stages.saturating_add(run.stages.len()) >= budget.max_stages {
                 stop!(IterativeStatus::BudgetExhausted, None);
             }
-            let request = authorized.consume();
             let expected = authorization::binding(
                 &policy,
                 &state,
                 decoded.canonical_json(),
                 inner.binding.authorize.grant_case(),
-                request.seal(),
+                authorized.seal(),
             );
-            if expected != request.binding() {
+            let authorization_binding = authorized.binding().to_owned();
+            if expected != authorization_binding {
                 return Err(vec![bad("authorization.binding")].into());
             }
-            if let Some(session) = session.as_deref_mut() {
-                session.authorized(run.iterations, attempt, &request)?;
-            }
             live_guard!();
-            driver.before_effect(EffectContext {
-                turn: run.iterations,
-                policy: &policy,
-                state: &state,
-                proposal_canonical: decoded.canonical_json(),
-                authorization: &request,
-            })?;
-            live_guard!();
-            run.authorization_bindings
-                .push(request.binding().to_owned());
-            run.effects += 1;
-            let read = if let Some(session) = session.as_deref_mut() {
-                session.read(run.iterations, attempt, &request, driver)?
+            let target_effect = if allow_target_effect {
+                driver.target_effect(
+                    TargetEffectContext {
+                        invocation_root: &run.invocation_digest,
+                        turn: run.iterations,
+                        max_steps: budget.max_steps_per_stage,
+                        proposal_canonical: decoded.canonical_json(),
+                        projected: &projected,
+                        cancellation,
+                    },
+                    authorized,
+                )?
             } else {
-                driver.read(&request)?
+                TargetEffect::Ordinary(authorized)
+            };
+            let read = match target_effect {
+                TargetEffect::Ordinary(authorized) => {
+                    let request = authorized.consume();
+                    if let Some(session) = session.as_deref_mut() {
+                        session.authorized(run.iterations, attempt, &request)?;
+                    }
+                    live_guard!();
+                    driver.before_effect(EffectContext {
+                        turn: run.iterations,
+                        policy: &policy,
+                        state: &state,
+                        proposal_canonical: decoded.canonical_json(),
+                        authorization: &request,
+                    })?;
+                    live_guard!();
+                    run.authorization_bindings
+                        .push(request.binding().to_owned());
+                    run.effects += 1;
+                    if let Some(session) = session.as_deref_mut() {
+                        session.read(run.iterations, attempt, &request, driver)?
+                    } else {
+                        driver.read(&request)?
+                    }
+                }
+                TargetEffect::Dispatched { dispatch, result } => {
+                    if dispatch.authorization_binding() != authorization_binding {
+                        return Err(vec![bad("target.authorization.binding")].into());
+                    }
+                    if result.as_deref()
+                        != dispatch
+                            .result()
+                            .map(authorization::target_protocol::TypedCarrier::payload)
+                        && result.is_some()
+                    {
+                        return Err(vec![bad("target.result.binding")].into());
+                    }
+                    run.authorization_bindings.push(authorization_binding);
+                    run.effects += 1;
+                    result
+                }
             };
             let Some(bytes) = read else {
                 stop!(IterativeStatus::EffectFailed, None);

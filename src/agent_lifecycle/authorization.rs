@@ -33,9 +33,10 @@ use super::stages::AuthorizeStage;
 use super::{encode_value, StageRecord};
 
 mod native_executor;
-/// Private target-neutral model/effect boundary for #182.  It intentionally
-/// has no production caller until the iterative executor selects it.
-pub(in crate::agent_lifecycle) mod target_protocol;
+/// Target-neutral model/effect boundary for explicitly injected host adapters.
+/// Grant construction and dispatch remain crate-owned so callers cannot mint
+/// or spend authorization outside the lifecycle kernel.
+pub mod target_protocol;
 mod wasm_executor;
 
 use native_executor::NativeStageExecutor;
@@ -70,6 +71,13 @@ impl Authorized {
     /// it in place of an authorization.
     pub(in crate::agent_lifecycle) const fn granted_budget(&self) -> i64 {
         self.budget
+    }
+
+    /// Read-only access for the lifecycle kernel's final binding check before
+    /// it moves this value into either the ordinary or target effect boundary.
+    /// The seal is never copied into a target request or evidence document.
+    pub(in crate::agent_lifecycle) fn seal(&self) -> &[u8] {
+        &self.seal
     }
 
     /// Spends the authorization. The value is moved, so it authorizes at most

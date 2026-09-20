@@ -1,7 +1,8 @@
 # Agent target host-call protocol v1
 
-Status: **private authored implementation for #182; not yet selected by a
-production lifecycle driver.**
+Status: **authored implementation for #182; publicly selectable through the
+source-live typed-effect target adapter with an explicitly injected host.** It
+is not deployed native or Wasm target support.
 
 This document owns the target-neutral host-call boundary in
 `agent_lifecycle::authorization::target_protocol`. It is additive to the
@@ -21,13 +22,13 @@ be accepted in place of that moved value.
 
 Before the host receives a request, the boundary checks cancellation, the
 argument type identity, the grant's budget, and the cumulative call,
-request-byte, and fuel ceilings. It reserves call/request/fuel accounting
-atomically before dispatch. Therefore cancellation, exhausted budget/fuel,
-wrong argument identity, and invalid grant material reach no host adapter. The
-future trusted driver remains responsible for supplying the exact deployed
-operation and invocation root when it binds the grant; this private tranche is
-not yet independent evidence that those wiring facts are current. A dispatched
-call remains charged if the host
+request-byte, aggregate-byte, and fuel ceilings. It reserves call/request/fuel
+accounting atomically before dispatch. Therefore cancellation, exhausted
+budget/fuel, wrong argument identity, and invalid grant material reach no host adapter. The
+source-live typed-effect adapter derives its selected operation from checked
+registry facts and supplies the live invocation root and turn when it binds
+the grant. This remains in-process evidence only. A dispatched call remains
+charged if the host
 fails, panics, returns an oversized carrier, or returns malformed/wrongly typed
 bytes.
 
@@ -38,7 +39,9 @@ source pointer, Wasm linear-memory pointer, mutable accounting handle, or a
 way to dispatch another operation. A target adapter is injected by the caller;
 the protocol creates no provider or ambient authority.
 
-Host result bytes are independently decoded as
+The injected handler writes through a protocol-owned bounded response sink; it
+cannot make the boundary allocate or hash beyond the effective result,
+aggregate, and carrier ceilings. Host result bytes are independently decoded as
 `semaprax.agent-target-carrier.v1`: schema frame, exact result type identity,
 payload frame, and no trailing bytes. The result-size ceiling is applied before
 carrier parsing. Every terminal outcome normalizes into the closed `Settlement`
@@ -56,24 +59,31 @@ retained observation digest without invoking a handler. It does not receive or
 independently replay result bytes, and cannot construct a grant, run target
 code, resume a checkpoint, or publish an artifact.
 
-## Required future wiring
+`TargetEffectRun` retains each complete `TargetEvidence` in execution order as
+well as its digest in the compact aggregate document. A caller that retained
+the exact host-visible request can therefore invoke the independent replay;
+the aggregate is not a substitute for those request bytes.
 
-The iterative target executor must, after its current checked authorization
-stage and before an injected model/effect callback:
+## Current wiring and remaining work
+
+The source-live typed-effect target adapter now, after its current
+checked authorization stage and before its injected target handler:
 
 1. move the fresh `Authorized` into `TargetGrant::bind` using the exact
    invocation root, turn, and deployed operation;
 2. construct the argument `TypedCarrier` from the checked Proposal projection;
 3. pass the existing cancellation and lifecycle/effect ceiling ledger to
-   `target_protocol::dispatch`; and
+   `target_protocol::dispatch`, with independent request, result, aggregate,
+   and fuel ceilings; and
 4. use `TargetEvidence` for parity comparison while retaining existing
    lifecycle/effect evidence and failure selection.
 
 It must not deserialize grants, call the host before this boundary, treat a
-target artifact as proof of execution, or describe this private protocol as
+target artifact as proof of execution, or describe this selectable protocol as
 production target support. Per #182, durable/distributed checkpoint transport,
-arbitrary nominal carrier ABI, ambient providers, physical trap recovery, and
-hosted target evidence remain outside this tranche.
+arbitrary nominal carrier ABI, native/Wasm backend selection, ambient
+providers, physical trap recovery, and hosted target evidence remain outside
+this tranche.
 
 Focused implementation gate (run by the coordinating agent):
 

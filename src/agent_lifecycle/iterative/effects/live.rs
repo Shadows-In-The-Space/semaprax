@@ -5,12 +5,17 @@
 //! its `before_effect` boundary, then uses the same Dispatch as frozen input.
 
 use super::*;
+use crate::agent_lifecycle::authorization::target_protocol::{
+    self, TargetAccounting, TargetGrant, TargetHostHandler, TargetLimits, TargetOperation,
+    TypedCarrier,
+};
 use crate::agent_lifecycle::iterative::driver::{EffectContext, IterativeDriver, ProposalSource};
 use crate::agent_lifecycle::iterative::source_live::{
     PreparedSourceLiveMigration, SourceLiveFailure, SourceLiveOutcome, SourceLiveRequest,
 };
 use crate::agent_lifecycle::CheckpointStore;
 use crate::live_invocation::source_journal::{SourceIoLimits, SourcePolicyBindingV6};
+use serde_json::Value;
 
 struct LiveDispatch<'a> {
     dispatch: Dispatch<'a>,
@@ -21,6 +26,198 @@ struct LiveEffectPlan {
     operation: String,
     request_digest: String,
     argument_bytes: usize,
+}
+
+/// Private #182 adapter for the already checked source-live typed-effect
+/// route.  It has no host discovery or provider construction: the only host
+/// is the caller-injected protocol handler, and it sees the protocol's closed
+/// request rather than a lifecycle or source handle.
+struct TargetLiveDispatch<'a> {
+    compiled: &'a CompiledTypedEffects,
+    handler: &'a mut dyn TargetHostHandler,
+    limits: TargetLimits,
+    accounting: TargetAccounting,
+    evidence: Vec<target_protocol::TargetEvidence>,
+    failure: Option<&'static str>,
+}
+
+impl TargetLiveDispatch<'_> {
+    fn carrier_type(operation: &EffectOperation, role: &str) -> String {
+        let fields = match role {
+            "argument" => operation
+                .arguments
+                .iter()
+                .map(|field| format!("{}:{}", field.argument_id, field.kind.name()))
+                .collect::<Vec<_>>(),
+            "result" => operation
+                .results
+                .iter()
+                .map(|field| format!("{}:{}", field.result_id, field.kind.name()))
+                .collect::<Vec<_>>(),
+            _ => unreachable!("closed target carrier role"),
+        };
+        let identity = digest(
+            b"semaprax.agent-typed-effect.target-carrier.v1\0",
+            format!(
+                "{}\0{}\0{}\0{}",
+                operation.operation_id,
+                operation.effect_id,
+                role,
+                fields.join("\0")
+            )
+            .as_bytes(),
+        );
+        let suffix = identity.strip_prefix("sha256:").unwrap_or(&identity);
+        format!("semaprax.agent-typed-effect.{role}.{suffix}")
+    }
+
+    fn planned_call(
+        &self,
+        proposal: &str,
+        projected: &[RetainedValue],
+    ) -> Result<(usize, TargetOperation, TypedCarrier), Vec<Diagnostic>> {
+        let lifecycle = &self.compiled.lifecycle;
+        let decoded = lifecycle
+            .inner
+            .proposal
+            .decode(proposal)
+            .map_err(|_| error("target.proposal_decode"))?;
+        let Some(ProposalValue::Unsigned(selector)) = decoded.field(&self.compiled.selector) else {
+            return Err(error("target.selector_type"));
+        };
+        let index = usize::try_from(*selector).map_err(|_| error("target.selector_range"))?;
+        let operation = self
+            .compiled
+            .operations
+            .get(index)
+            .ok_or_else(|| error("target.selector_range"))?;
+        let mut arguments = Vec::new();
+        for argument in &operation.arguments {
+            let position = lifecycle
+                .inner
+                .binding
+                .proposal
+                .iter()
+                .position(|field| field.field.as_str() == argument.proposal_field_id)
+                .ok_or_else(|| error("target.argument_identity"))?;
+            let value = projected
+                .get(position)
+                .ok_or_else(|| error("target.argument_index"))?;
+            if !argument.kind.accepts(value) {
+                return Err(error("target.argument_type"));
+            }
+            arguments.push((argument.argument_id.clone(), value.clone()));
+        }
+        for ((_, value), limit) in arguments.iter().zip(&self.compiled.field_limits[index].0) {
+            if scalar_bytes(value).is_none_or(|size| size > *limit) {
+                return Err(error("target.argument_field_budget"));
+            }
+        }
+        let argument_type = Self::carrier_type(operation, "argument");
+        let result_type = Self::carrier_type(operation, "result");
+        let operation = TargetOperation::new(
+            operation.operation_id.clone(),
+            operation.effect_id.clone(),
+            argument_type.clone(),
+            result_type,
+        )
+        .map_err(|_| error("target.operation"))?;
+        let carrier = TypedCarrier::new(argument_type, encode_fields(&arguments).into_bytes())
+            .map_err(|_| error("target.argument_carrier"))?;
+        Ok((index, operation, carrier))
+    }
+
+    fn accepted_result(&self, index: usize, payload: &[u8]) -> Option<Vec<u8>> {
+        let operation = self.compiled.operations.get(index)?;
+        let value: Value = serde_json::from_slice(payload).ok()?;
+        let object = value.as_object()?;
+        if object.get("schema")?.as_str()? != "semaprax.agent-effect-fields.v1" {
+            return None;
+        }
+        let fields = object.get("fields")?.as_array()?;
+        if fields.len() != operation.results.len() {
+            return None;
+        }
+        let mut decoded = Vec::new();
+        for (field, expected) in fields.iter().zip(&operation.results) {
+            let pair = field.as_array()?;
+            if pair.len() != 2 || pair.first()?.as_str()? != expected.result_id {
+                return None;
+            }
+            let value = match expected.kind {
+                EffectScalar::Bool => RetainedValue::Bool(pair.get(1)?.as_bool()?),
+                EffectScalar::I32 => RetainedValue::I32(pair.get(1)?.as_str()?.parse().ok()?),
+                EffectScalar::I64 => RetainedValue::I64(pair.get(1)?.as_str()?.parse().ok()?),
+                EffectScalar::U8 => RetainedValue::U8(pair.get(1)?.as_str()?.parse().ok()?),
+                EffectScalar::Usize => RetainedValue::Usize(pair.get(1)?.as_str()?.parse().ok()?),
+            };
+            decoded.push((expected.result_id.clone(), value));
+        }
+        let canonical = encode_fields(&decoded);
+        if canonical.as_bytes() != payload
+            || decoded
+                .iter()
+                .zip(&self.compiled.field_limits[index].1)
+                .any(|((_, value), limit)| scalar_bytes(value).is_none_or(|size| size > *limit))
+        {
+            return None;
+        }
+        Some(canonical.into_bytes())
+    }
+}
+
+impl IterativeDriver for TargetLiveDispatch<'_> {
+    fn read(&mut self, _: &AuthorizedRequest) -> Result<Option<Vec<u8>>, Vec<Diagnostic>> {
+        Err(error("target.read_bypass"))
+    }
+
+    fn target_effect(
+        &mut self,
+        context: crate::agent_lifecycle::iterative::driver::TargetEffectContext<'_>,
+        authorization: Authorized,
+    ) -> Result<crate::agent_lifecycle::iterative::driver::TargetEffect, Vec<Diagnostic>> {
+        let (index, operation, argument) =
+            self.planned_call(context.proposal_canonical, context.projected)?;
+        let turn = u64::try_from(context.turn).map_err(|_| error("target.turn"))?;
+        // Source-stage evaluator steps are already bounded by the outer
+        // lifecycle. The target protocol meters one additional host-call work
+        // unit here; treating the stage-step ceiling as grant spend would
+        // conflate two independent budgets and refuse every ordinary grant.
+        let fuel = u64::from(context.max_steps > 0);
+        let grant = TargetGrant::bind(
+            authorization,
+            context.invocation_root,
+            turn,
+            operation,
+            &argument,
+        )
+        .map_err(|_| error("target.grant"))?;
+        let dispatched = target_protocol::dispatch(
+            grant,
+            argument,
+            fuel,
+            self.limits,
+            &mut self.accounting,
+            context.cancellation,
+            self.handler,
+        );
+        let settlement = dispatched.evidence().settlement();
+        self.evidence.push(dispatched.evidence().clone());
+        let result = dispatched
+            .result()
+            .and_then(|carrier| self.accepted_result(index, carrier.payload()));
+        if settlement != target_protocol::Settlement::Returned {
+            self.failure = Some(settlement.text());
+        } else if dispatched.result().is_some() && result.is_none() {
+            self.failure = Some("target_result_shape");
+        }
+        Ok(
+            crate::agent_lifecycle::iterative::driver::TargetEffect::Dispatched {
+                dispatch: dispatched,
+                result,
+            },
+        )
+    }
 }
 
 impl LiveDispatch<'_> {
@@ -198,6 +395,85 @@ impl IterativeDriver for LiveDispatch<'_> {
 }
 
 impl CompiledTypedEffects {
+    /// Execute the checked source-live typed-effect route through the #182
+    /// target protocol. The supplied handler is the sole target host;
+    /// this method neither discovers a provider nor serializes a grant.
+    pub fn run_target_live(
+        &self,
+        task: &LifecycleTask,
+        source: &mut dyn ProposalSource,
+        handler: &mut dyn TargetHostHandler,
+        stages: IterativeBudget,
+        effects: EffectBudget,
+        cancellation: &AgentCancellation,
+    ) -> Result<TargetEffectRun, Vec<Diagnostic>> {
+        let effects = EffectBudget {
+            max_calls: effects.max_calls.min(self.limits.max_calls),
+            max_argument_bytes: effects
+                .max_argument_bytes
+                .min(self.limits.max_argument_bytes),
+            max_result_bytes: effects.max_result_bytes.min(self.limits.max_result_bytes),
+            max_total_bytes: effects.max_total_bytes.min(self.limits.max_total_bytes),
+        };
+        let max_calls = u64::try_from(effects.max_calls).map_err(|_| error("target.calls"))?;
+        let limits = TargetLimits {
+            max_calls,
+            // Target protocol meters its complete framed request/result wire,
+            // including the nominal carrier identities and request metadata.
+            max_request_bytes: u64::try_from(effects.max_argument_bytes)
+                .map_err(|_| error("target.request_budget"))?,
+            max_result_bytes: u64::try_from(effects.max_result_bytes)
+                .map_err(|_| error("target.result_budget"))?,
+            max_total_bytes: u64::try_from(effects.max_total_bytes)
+                .map_err(|_| error("target.total_budget"))?,
+            max_fuel: max_calls,
+        };
+        let mut dispatch = TargetLiveDispatch {
+            compiled: self,
+            handler,
+            limits,
+            accounting: TargetAccounting::default(),
+            evidence: Vec::new(),
+            failure: None,
+        };
+        let stages = IterativeBudget {
+            max_iterations: stages.max_iterations.min(self.max_iterations),
+            ..stages
+        };
+        let lifecycle = self
+            .lifecycle
+            .run_with_target_driver_live(task, source, &mut dispatch, stages, cancellation)
+            .map_err(crate::agent_lifecycle::iterative::driver::DriverFailure::into_diagnostics)?;
+        let evidence = format!(
+            "{{\"schema\":\"semaprax.agent-target-effects-evidence.v1\",\"registry\":{},\"lifecycle_evidence\":{},\"limits\":[{},{},{},{},{}],\"accounting\":[{},{},{},{}],\"target_evidence\":[{}],\"failure\":{}}}\n",
+            quote_json(self.digest()),
+            quote_json(lifecycle.evidence_digest()),
+            limits.max_calls,
+            limits.max_request_bytes,
+            limits.max_result_bytes,
+            limits.max_total_bytes,
+            limits.max_fuel,
+            dispatch.accounting.calls(),
+            dispatch.accounting.request_bytes(),
+            dispatch.accounting.result_bytes(),
+            dispatch.accounting.fuel(),
+            dispatch.evidence.iter().map(|evidence| quote_json(evidence.digest())).collect::<Vec<_>>().join(","),
+            dispatch.failure.map(quote_json).unwrap_or_else(|| "null".into()),
+        );
+        let digest = digest(
+            b"semaprax.agent-target-effects-evidence.v1\0",
+            evidence.as_bytes(),
+        );
+        Ok(TargetEffectRun {
+            lifecycle,
+            accounting: dispatch.accounting,
+            target_evidence: dispatch.evidence,
+            failure: dispatch.failure,
+            evidence,
+            digest,
+        })
+    }
+
     /// Execute with an injected source proposal stream instead of a submitted
     /// proposal inventory. The lifecycle still authorizes before `Dispatch`
     /// can invoke any typed effect.

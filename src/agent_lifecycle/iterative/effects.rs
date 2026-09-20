@@ -5,6 +5,7 @@ mod live;
 use super::*;
 pub mod durable;
 use crate::agent_deployment::BoundAgentDeployment;
+use crate::agent_lifecycle::authorization::target_protocol::{TargetAccounting, TargetEvidence};
 pub use durable::{DurableTypedFailure, DurableTypedRun};
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -105,6 +106,38 @@ pub struct TypedEffectRun {
     failure: Option<&'static str>,
     evidence: String,
     digest: String,
+}
+
+/// Target-protocol execution evidence for an explicitly injected host adapter.
+/// This route neither serializes a grant nor claims a deployed native/Wasm
+/// target artifact.
+pub struct TargetEffectRun {
+    lifecycle: IterativeRun,
+    accounting: TargetAccounting,
+    target_evidence: Vec<TargetEvidence>,
+    failure: Option<&'static str>,
+    evidence: String,
+    digest: String,
+}
+impl TargetEffectRun {
+    pub fn lifecycle(&self) -> &IterativeRun {
+        &self.lifecycle
+    }
+    pub fn accounting(&self) -> TargetAccounting {
+        self.accounting
+    }
+    pub fn target_evidence(&self) -> &[TargetEvidence] {
+        &self.target_evidence
+    }
+    pub fn failure(&self) -> Option<&str> {
+        self.failure
+    }
+    pub fn evidence(&self) -> &str {
+        &self.evidence
+    }
+    pub fn evidence_digest(&self) -> &str {
+        &self.digest
+    }
 }
 impl TypedEffectRun {
     pub fn lifecycle(&self) -> &IterativeRun {
@@ -701,6 +734,172 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             max_result_bytes: 4096,
             max_total_bytes: 8192,
         }
+    }
+    struct TargetSource {
+        proposals: Vec<String>,
+        next: usize,
+    }
+    impl crate::agent_lifecycle::iterative::driver::ProposalSource for TargetSource {
+        fn propose(
+            &mut self,
+            _: crate::agent_lifecycle::iterative::driver::ProposalRequest<'_>,
+        ) -> Result<String, Vec<Diagnostic>> {
+            let proposal = self
+                .proposals
+                .get(self.next)
+                .cloned()
+                .ok_or_else(|| error("target.test.proposal"))?;
+            self.next += 1;
+            Ok(proposal)
+        }
+    }
+    struct TargetHandler {
+        calls: usize,
+        turns: Vec<u64>,
+        grants: Vec<String>,
+    }
+    impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler for TargetHandler {
+        fn dispatch(
+            &mut self,
+            request: &crate::agent_lifecycle::authorization::target_protocol::TargetHostRequest,
+            sink: &mut crate::agent_lifecycle::authorization::target_protocol::TargetResponseSink,
+        ) -> Result<(), crate::agent_lifecycle::authorization::target_protocol::TargetHostError>
+        {
+            self.calls += 1;
+            assert!(matches!(request.operation().operation_id(), "fixture.read"));
+            assert_eq!(request.operation().effect_id(), "read");
+            assert!(request.fuel() > 0);
+            assert!(!request.argument().payload().is_empty());
+            self.turns.push(request.turn());
+            self.grants.push(request.grant_id().to_owned());
+            let payload = encode_fields(&[("value".into(), RetainedValue::I64(8))]);
+            sink.write(
+                &crate::agent_lifecycle::authorization::target_protocol::TypedCarrier::new(
+                    request.operation().result_type(),
+                    payload.into_bytes(),
+                )
+                .unwrap()
+                .encode(),
+            )
+            .map_err(|_| {
+                crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
+            })
+        }
+    }
+    #[test]
+    fn source_live_target_route_moves_the_checked_grant_into_the_injected_host() {
+        let compiled = compile();
+        let proposal = crate::agent_lifecycle::tests::proposal(&compiled.lifecycle.inner, "1", "0");
+        let mut source = TargetSource {
+            proposals: vec![proposal; 4],
+            next: 0,
+        };
+        let mut handler = TargetHandler {
+            calls: 0,
+            turns: Vec::new(),
+            grants: Vec::new(),
+        };
+        let run = compiled
+            .run_target_live(
+                &LifecycleTask {
+                    objective: vec![],
+                    budget: 10,
+                },
+                &mut source,
+                &mut handler,
+                IterativeBudget::default(),
+                budgets(),
+                &AgentCancellation::new(),
+            )
+            .unwrap();
+        assert_eq!(
+            run.lifecycle().status(),
+            IterativeStatus::Complete,
+            "{}",
+            run.evidence()
+        );
+        assert_eq!(run.lifecycle().effects(), 3);
+        assert_eq!(handler.calls, 3);
+        assert_eq!(run.accounting().calls(), handler.calls as u64);
+        assert_eq!(handler.turns, [0, 1, 2]);
+        assert_eq!(
+            handler
+                .grants
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            3
+        );
+        assert_eq!(run.failure(), None);
+        assert_eq!(run.target_evidence().len(), 3);
+        assert!(run
+            .target_evidence()
+            .iter()
+            .all(|evidence| evidence.settlement()
+                == crate::agent_lifecycle::authorization::target_protocol::Settlement::Returned));
+        assert!(run.evidence().contains("target_evidence"));
+        assert!(run.evidence().contains("\"failure\":null"));
+        assert!(!run.evidence_digest().is_empty());
+    }
+
+    struct NoncanonicalTargetHandler {
+        calls: usize,
+    }
+    impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler
+        for NoncanonicalTargetHandler
+    {
+        fn dispatch(
+            &mut self,
+            request: &crate::agent_lifecycle::authorization::target_protocol::TargetHostRequest,
+            sink: &mut crate::agent_lifecycle::authorization::target_protocol::TargetResponseSink,
+        ) -> Result<(), crate::agent_lifecycle::authorization::target_protocol::TargetHostError>
+        {
+            self.calls += 1;
+            let payload =
+                b"{\"schema\":\"semaprax.agent-effect-fields.v1\",\"fields\":[[\"value\",8]]}\n";
+            sink.write(
+                &crate::agent_lifecycle::authorization::target_protocol::TypedCarrier::new(
+                    request.operation().result_type(),
+                    payload.to_vec(),
+                )
+                .unwrap()
+                .encode(),
+            )
+            .map_err(|_| {
+                crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
+            })
+        }
+    }
+    #[test]
+    fn target_route_rejects_a_noncanonical_inner_scalar_after_protocol_settlement() {
+        let compiled = compile();
+        let proposal = crate::agent_lifecycle::tests::proposal(&compiled.lifecycle.inner, "1", "0");
+        let mut source = TargetSource {
+            proposals: vec![proposal],
+            next: 0,
+        };
+        let mut handler = NoncanonicalTargetHandler { calls: 0 };
+        let run = compiled
+            .run_target_live(
+                &LifecycleTask {
+                    objective: vec![],
+                    budget: 10,
+                },
+                &mut source,
+                &mut handler,
+                IterativeBudget::default(),
+                budgets(),
+                &AgentCancellation::new(),
+            )
+            .unwrap();
+        assert_eq!(handler.calls, 1);
+        assert_eq!(run.lifecycle().status(), IterativeStatus::EffectFailed);
+        assert_eq!(run.failure(), Some("target_result_shape"));
+        assert_eq!(run.target_evidence().len(), 1);
+        assert_eq!(
+            run.target_evidence()[0].settlement(),
+            crate::agent_lifecycle::authorization::target_protocol::Settlement::Returned
+        );
     }
     #[test]
     fn typed_registry_dispatches_fresh_authorized_checked_scalar_results() {

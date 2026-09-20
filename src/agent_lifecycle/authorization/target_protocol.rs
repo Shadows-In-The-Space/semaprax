@@ -2,11 +2,10 @@
 //!
 //! This module is deliberately below `authorization`: construction takes the
 //! real, opaque [`super::Authorized`] value, so source code, a decoded
-//! proposal, and a C/Wasm adapter cannot forge a turn grant.  It is not wired
-//! into the iterative driver yet.  That single future adapter must transfer
-//! the freshly minted `Authorized` into [`TargetGrant::bind`] and route its
-//! injected handler through [`dispatch`]; it must not deserialize a grant or
-//! call the handler directly.
+//! proposal, and a C/Wasm adapter cannot forge a turn grant.  The iterative
+//! typed-effect adapter transfers the freshly minted `Authorized` into
+//! [`TargetGrant::bind`] and routes its injected handler through [`dispatch`];
+//! it never deserializes a grant or calls the handler directly.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -160,6 +159,7 @@ pub struct TargetLimits {
     pub max_calls: u64,
     pub max_request_bytes: u64,
     pub max_result_bytes: u64,
+    pub max_total_bytes: u64,
     pub max_fuel: u64,
 }
 
@@ -208,6 +208,12 @@ impl TargetAccounting {
         if bytes > limits.max_request_bytes {
             return Err(Settlement::RequestBudget);
         }
+        if bytes
+            .checked_add(self.result_bytes)
+            .is_none_or(|total| total > limits.max_total_bytes)
+        {
+            return Err(Settlement::RequestBudget);
+        }
         if total_fuel > limits.max_fuel {
             return Err(Settlement::FuelExhausted);
         }
@@ -224,6 +230,10 @@ impl TargetAccounting {
         self.result_bytes = self.result_bytes.saturating_add(charged);
         if raw_bytes > usize::try_from(limits.max_result_bytes).unwrap_or(usize::MAX)
             || self.result_bytes > limits.max_result_bytes
+            || self
+                .request_bytes
+                .checked_add(self.result_bytes)
+                .is_none_or(|total| total > limits.max_total_bytes)
         {
             Err(Settlement::ResultBudget)
         } else {
@@ -332,10 +342,52 @@ impl TargetHostRequest {
 }
 
 /// The only target-specific capability.  Implementations receive a closed
-/// request and may return untrusted carrier bytes or a normalized host error.
+/// request and may write untrusted carrier bytes only through the bounded
+/// response sink. The host can allocate its own memory, but it cannot force
+/// the protocol boundary to allocate or hash beyond the declared ceiling.
 pub trait TargetHostHandler {
-    fn dispatch(&mut self, request: &TargetHostRequest) -> Result<Vec<u8>, TargetHostError>;
+    fn dispatch(
+        &mut self,
+        request: &TargetHostRequest,
+        response: &mut TargetResponseSink,
+    ) -> Result<(), TargetHostError>;
 }
+
+/// Protocol-owned bounded response buffer. Once any write crosses the ceiling,
+/// the sink stays overflowed and retains no bytes beyond that ceiling.
+pub struct TargetResponseSink {
+    bytes: Vec<u8>,
+    limit: usize,
+    overflowed: bool,
+}
+
+impl TargetResponseSink {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(limit.min(4096)),
+            limit,
+            overflowed: false,
+        }
+    }
+
+    pub fn write(&mut self, bytes: &[u8]) -> Result<(), TargetResponseOverflow> {
+        if self.overflowed
+            || self
+                .bytes
+                .len()
+                .checked_add(bytes.len())
+                .is_none_or(|length| length > self.limit)
+        {
+            self.overflowed = true;
+            return Err(TargetResponseOverflow);
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TargetResponseOverflow;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TargetHostError {
@@ -362,7 +414,7 @@ pub enum Settlement {
 }
 
 impl Settlement {
-    fn text(self) -> &'static str {
+    pub(in crate::agent_lifecycle) fn text(self) -> &'static str {
         match self {
             Self::Returned => "returned",
             Self::Cancelled => "cancelled",
@@ -382,7 +434,7 @@ impl Settlement {
 }
 
 /// The settled turn result.  A failure never carries a typed result.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct TargetDispatch {
     result: Option<TypedCarrier>,
     evidence: TargetEvidence,
@@ -394,6 +446,9 @@ impl TargetDispatch {
     }
     pub fn evidence(&self) -> &TargetEvidence {
         &self.evidence
+    }
+    pub(in crate::agent_lifecycle) fn authorization_binding(&self) -> &str {
+        &self.evidence.authorization_binding
     }
 }
 
@@ -547,33 +602,32 @@ pub(in crate::agent_lifecycle) fn dispatch(
             None,
         );
     }
-    let charged = *accounting;
-    let raw = match catch_unwind(AssertUnwindSafe(|| handler.dispatch(&request))) {
-        Ok(Ok(bytes)) => bytes,
-        Ok(Err(_)) => {
-            return settled(
-                grant,
-                request_digest,
-                charged,
-                true,
-                Settlement::HostFailed,
-                None,
-                None,
-            )
-        }
-        Err(_) => {
-            return settled(
-                grant,
-                request_digest,
-                charged,
-                true,
-                Settlement::HostPanicked,
-                None,
-                None,
-            )
-        }
-    };
-    let result_digest = digest(RESULT_DOMAIN, &raw);
+    let remaining_total = limits
+        .max_total_bytes
+        .saturating_sub(accounting.request_bytes);
+    let response_limit = limits
+        .max_result_bytes
+        .min(remaining_total)
+        .min(MAX_CARRIER_BYTES as u64);
+    let response_limit = usize::try_from(response_limit).unwrap_or(MAX_CARRIER_BYTES);
+    let mut response = TargetResponseSink::new(response_limit);
+    let host_outcome = catch_unwind(AssertUnwindSafe(|| {
+        handler.dispatch(&request, &mut response)
+    }));
+    if response.overflowed {
+        let charged_bytes = response_limit.saturating_add(1);
+        let _ = accounting.charge_result(charged_bytes, limits);
+        return settled(
+            grant,
+            request_digest,
+            *accounting,
+            true,
+            Settlement::ResultBudget,
+            None,
+            None,
+        );
+    }
+    let raw = response.bytes;
     if let Err(settlement) = accounting.charge_result(raw.len(), limits) {
         return settled(
             grant,
@@ -582,9 +636,36 @@ pub(in crate::agent_lifecycle) fn dispatch(
             true,
             settlement,
             None,
-            Some(result_digest),
+            None,
         );
     }
+    let result_digest = (!raw.is_empty()).then(|| digest(RESULT_DOMAIN, &raw));
+    match host_outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => {
+            return settled(
+                grant,
+                request_digest,
+                *accounting,
+                true,
+                Settlement::HostFailed,
+                None,
+                result_digest,
+            )
+        }
+        Err(_) => {
+            return settled(
+                grant,
+                request_digest,
+                *accounting,
+                true,
+                Settlement::HostPanicked,
+                None,
+                result_digest,
+            )
+        }
+    }
+    let result_digest = result_digest.or_else(|| Some(digest(RESULT_DOMAIN, &raw)));
     match TypedCarrier::decode(&raw, request.operation.result_type()) {
         Ok(result) => settled(
             grant,
@@ -593,7 +674,7 @@ pub(in crate::agent_lifecycle) fn dispatch(
             true,
             Settlement::Returned,
             Some(result),
-            Some(result_digest),
+            result_digest,
         ),
         Err(ProtocolError::ResultTypeMismatch) => settled(
             grant,
@@ -602,7 +683,7 @@ pub(in crate::agent_lifecycle) fn dispatch(
             true,
             Settlement::ResultTypeMismatch,
             None,
-            Some(result_digest),
+            result_digest,
         ),
         Err(_) => settled(
             grant,
@@ -611,7 +692,7 @@ pub(in crate::agent_lifecycle) fn dispatch(
             true,
             Settlement::MalformedResult,
             None,
-            Some(result_digest),
+            result_digest,
         ),
     }
 }
@@ -736,6 +817,7 @@ mod tests {
             max_calls: 1,
             max_request_bytes: 4096,
             max_result_bytes: 1024,
+            max_total_bytes: 5120,
             max_fuel: 20,
         }
     }
@@ -764,9 +846,19 @@ mod tests {
         response: Result<Vec<u8>, TargetHostError>,
     }
     impl TargetHostHandler for Handler {
-        fn dispatch(&mut self, _: &TargetHostRequest) -> Result<Vec<u8>, TargetHostError> {
+        fn dispatch(
+            &mut self,
+            _: &TargetHostRequest,
+            sink: &mut TargetResponseSink,
+        ) -> Result<(), TargetHostError> {
             self.calls += 1;
-            self.response.clone()
+            match &self.response {
+                Ok(bytes) => {
+                    let _ = sink.write(bytes);
+                    Ok(())
+                }
+                Err(error) => Err(*error),
+            }
         }
     }
 
@@ -833,6 +925,16 @@ mod tests {
                 false,
                 TargetLimits {
                     max_request_bytes: 1,
+                    ..limits()
+                },
+                4,
+                10,
+                Settlement::RequestBudget,
+            ),
+            (
+                false,
+                TargetLimits {
+                    max_total_bytes: 1,
                     ..limits()
                 },
                 4,
@@ -946,6 +1048,40 @@ mod tests {
                 "host work remains charged"
             );
         }
+    }
+
+    #[test]
+    fn aggregate_wire_ceiling_rejects_a_result_that_fits_its_individual_ceiling() {
+        let response = carrier("fixture.Result", b"ok").encode();
+        let request_bytes = TargetHostRequest {
+            grant_id: grant().grant_id.clone(),
+            operation: operation(),
+            turn: 3,
+            argument: carrier("fixture.Argument", b"request"),
+            fuel: 4,
+        }
+        .encode()
+        .len() as u64;
+        let mut handler = Handler {
+            calls: 0,
+            response: Ok(response.clone()),
+        };
+        let mut accounting = TargetAccounting::default();
+        let run = dispatch(
+            grant(),
+            carrier("fixture.Argument", b"request"),
+            4,
+            TargetLimits {
+                max_total_bytes: request_bytes + response.len() as u64 - 1,
+                ..limits()
+            },
+            &mut accounting,
+            &AgentCancellation::new(),
+            &mut handler,
+        );
+        assert_eq!(handler.calls, 1);
+        assert_eq!(run.evidence().settlement(), Settlement::ResultBudget);
+        assert!(run.result().is_none());
     }
 
     #[test]

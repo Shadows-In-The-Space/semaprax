@@ -4,10 +4,13 @@ use function @id("task_service.core.identifier_is_valid") from task_service.core
 use function @id("task_service.core.job_status_is_complete") from task_service.core as job_status_is_complete;
 use function @id("task_service.core.mark_job_succeeded") from task_service.core as mark_job_succeeded;
 use function @id("task_service.core.method_is_rejected") from task_service.core as method_is_rejected;
+use function @id("task_service.core.migration_is_admitted") from task_service.core as migration_is_admitted;
 use function @id("task_service.core.registration_admitted") from task_service.core as registration_admitted;
+use function @id("task_service.core.request_is_admitted") from task_service.core as request_is_admitted;
 use function @id("task_service.core.run_scenario") from task_service.core as run_scenario;
 use function @id("task_service.core.task_owner_authorized") from task_service.core as task_owner_authorized;
 use function @id("task_service.core.trace_context_is_admitted") from task_service.core as trace_context_is_admitted;
+use function @id("task_service.core.update_is_committed") from task_service.core as update_is_committed;
 
 // The whole acceptance scenario succeeds end to end.
 @id("task_service.tests.scenario_succeeds")
@@ -42,7 +45,18 @@ fn invalid_is_rejected() -> bool
 {
     let bad_method = [103u8, 101u8, 116u8];
     let bad_identifier = [57u8, 120u8];
-    method_is_rejected(array_as_slice(bad_method)) && !identifier_is_valid(array_as_slice(bad_identifier))
+    let get = [71u8, 69u8, 84u8];
+    let userinfo_target = [104u8, 116u8, 116u8, 112u8, 58u8, 47u8, 47u8, 117u8, 115u8, 101u8, 114u8, 64u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8, 47u8, 116u8, 97u8, 115u8, 107u8, 115u8];
+    method_is_rejected(array_as_slice(bad_method)) && !identifier_is_valid(array_as_slice(bad_identifier)) && !request_is_admitted(array_as_slice(get), array_as_slice(userinfo_target))
+}
+
+// The next migration must be the unique successor and a task update starts
+// from an idle transaction state. Replays or skipped versions stay refused.
+@id("task_service.tests.migration_and_transaction_are_checked")
+fn migration_and_transaction_are_checked() -> bool
+{
+    let applied = [1u8, 2u8];
+    migration_is_admitted(2u8, array_as_slice(applied), 3u8) && !migration_is_admitted(2u8, array_as_slice(applied), 2u8) && !migration_is_admitted(2u8, array_as_slice(applied), 4u8) && update_is_committed(0usize)
 }
 
 // A retried enqueue with the same idempotency key is a harmless duplicate
@@ -85,5 +99,5 @@ fn trace_context_is_refused_test() -> bool
 @id("task_service.tests.main")
 fn main() -> i64
 {
-    if scenario_succeeds() && success_path() && unauthorized_is_rejected() && invalid_is_rejected() && duplicate_enqueue_is_idempotent() && trace_context_is_admitted_test() && trace_context_is_refused_test() { 0 } else { 1 }
+    if scenario_succeeds() && success_path() && unauthorized_is_rejected() && invalid_is_rejected() && migration_and_transaction_are_checked() && duplicate_enqueue_is_idempotent() && trace_context_is_admitted_test() && trace_context_is_refused_test() { 0 } else { 1 }
 }

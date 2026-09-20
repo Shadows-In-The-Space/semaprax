@@ -507,18 +507,20 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
     .unwrap();
 }
 
-/// The real reference application carries `std.tracing` after the
-/// reachability-based pruning from issue #124 removed the former SPX-G171
-/// blocker. Pin its selected package and transitive redaction closure; the
-/// source-level tests cover valid and refused trace contexts, while the
-/// cross-backend gate below executes them. This is still only a pure policy
-/// dependency, not an emission, export, or span-support claim.
+/// The real reference application composes database, HTTP, and tracing
+/// decision layers after reachability pruning removed the former SPX-G171
+/// blocker. Pin the direct packages and tracing's transitive redaction
+/// closure; source-level tests cover request, migration, and trace refusals,
+/// while the cross-backend gate below executes them. These remain pure policy
+/// dependencies, not database, transport, emission, export, or span support.
 #[test]
-fn std_tracing_and_its_redaction_dependency_fit_the_real_reference_application() {
+fn std_db_http_and_tracing_fit_the_real_reference_application() {
     project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
         let manifest = snapshot.workspace_manifest();
         for package in [
+            "dependencies/std.db/0.1.0",
+            "dependencies/std.http/0.1.0",
             "dependencies/std.tracing/0.1.0",
             "dependencies/std.encoding/0.1.0",
             "dependencies/std.log.redact/0.1.0",

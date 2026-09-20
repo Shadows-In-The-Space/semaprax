@@ -14,11 +14,13 @@ semaprax run   examples/task-service-project
 
 ## What it demonstrates
 
-- **Three `[dependencies]` edges on bundled standard-library packages**:
+- **Five `[dependencies]` edges on bundled standard-library packages**:
   `std.auth = "=0.1.0"` (session lifecycle and password-policy bounds),
+  `std.db = "=0.1.0"` (identifier, migration, and transaction decisions),
+  `std.http = "=0.1.0"` (request-line admission),
   `std.jobs = "=0.1.0"` (claim/lease/retry/idempotency state machines), and
   `std.tracing = "=0.1.0"` (pure W3C trace-context shape and caller-classified
-  secret policy). The first two packages became project-selectable when
+  secret policy). The first four packages became project-selectable when
   `std.auth`, `std.db`, `std.http`, and `std.jobs` joined the compiler's
   closed bundled-dependency registry; `std.tracing` was already selectable.
   The tracing dependency contributes no telemetry emission authority.
@@ -29,11 +31,11 @@ semaprax run   examples/task-service-project
 - **Idempotent job enqueue**: a retried request carrying the same
   idempotency key is a harmless duplicate (`std.jobs.idempotency`'s outcome
   `1`), never a second job.
-- **The full acceptance scenario and both rejection paths** are exercised
-  twice: once end to end in `task_service.core.run_scenario` (driven by
-  `task_service.app.main`), and once as four independent, narrower
-  assertions in `task_service.tests` (success path, unauthorized access,
-  invalid input, duplicate enqueue).
+- **The full acceptance scenario and rejection paths** are exercised twice:
+  once end to end in `task_service.core.run_scenario` (driven by
+  `task_service.app.main`), and once as focused assertions in
+  `task_service.tests` (success, unauthorized access, malformed HTTP target,
+  migration replay/skip, and duplicate enqueue).
 - **Three execution lanes, not only the interpreter**:
   `tests/useful_data/task_service_project.rs::entry_and_conformance_return_zero_on_interpreter_native_and_wasm`
   runs entry and conformance on the interpreter and native C11 at `-O0`/`-O2`;
@@ -58,25 +60,20 @@ semaprax run   examples/task-service-project
   `Public Useful Data Export v1` -- the `[exports].web` gate every
   `semaprax.manifest.v1` project must satisfy -- admits no authored aggregate
   anywhere in a project that also declares a web export (`SPX-W121`).
-- The identifier and HTTP-method grammars are small local reimplementations
-  of `std.db.identifier.is_valid` and `std.http.method_is_valid`, not those
-  packages themselves -- see the ceiling below.
+- `std.db` and `std.http` are pure decision layers only. The reference checks
+  identifier grammar, migration order, transaction state, and request-line
+  safety, but it does not open a database, bind a listener, or send a request.
 
 ## Limits this example is shaped by
 
-**`SPX-G171`** (the workspace semantic graph's 18,874,368-byte
-`builder_bytes` pre-bound) is charged against the reached link closure -- own
-source plus the selected dependency declarations -- exactly as
-`examples/agent-response-project/README.md` documents. Before issue #124's
-reachability pruning, composing the four candidate domain packages
-(`std.auth`, `std.jobs`, `std.http`, and `std.db`) with roughly ten distinct
-functions exceeded the bound even after this project was consolidated from
-six modules to three. The current three-dependency closure instead selects
-only the declarations reached from `std.auth`, `std.jobs`, and `std.tracing`
-(including `std.bytes`, `std.encoding`, and `std.log.redact`) and admits
-cleanly. Adding real `std.http` and `std.db` behavior remains outside this
-fixture and must be measured against that same reached-closure bound rather
-than inferred from raw source byte counts.
+**`SPX-G171`** is charged against the reached link closure -- own source plus
+the selected dependency declarations -- exactly as
+`examples/agent-response-project/README.md` documents. Reachability pruning
+keeps unused bundled declarations out of the builder charge, letting this
+reference compose `std.auth`, `std.db`, `std.http`, `std.jobs`, and
+`std.tracing` as real dependencies. The application still makes only pure
+decision calls: it does not turn a successful check into database, network,
+or telemetry authority.
 
 Separately, the built-in persistent semantic cache (`semaprax
 semantic-cache-persist`/`-load`, `docs/PERSISTENT-SEMANTIC-CACHE-V1.md`) could
@@ -84,7 +81,7 @@ semantic-cache-persist`/`-load`, `docs/PERSISTENT-SEMANTIC-CACHE-V1.md`) could
 (`std.auth` + `std.jobs`) configuration exceeds `SPX-G256`'s separate,
 smaller 16,777,216-byte (`MAX_PROJECT_CHECKED_MODULE_CACHE_PREBOUND` in
 `src/project/incremental.rs`) checked-module-cache construction pre-bound,
-even though the same project fits under `SPX-G171`'s larger 18 MB workspace
+even though the same project fits under `SPX-G171`'s larger 48 MiB workspace
 graph bound for plain `check`/`test`/`run`. This is new evidence for issue
 #241: the persistent-cache path has a tighter ceiling than plain checking,
 so a project that compiles today may still be unable to use the semantic

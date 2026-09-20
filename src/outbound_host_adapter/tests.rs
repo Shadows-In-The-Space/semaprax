@@ -1,5 +1,28 @@
 use super::*;
 
+#[test]
+fn legacy_post_request_digest_is_a_fixed_v1_known_answer() {
+    let request = PreparedRequest {
+        method: HttpMethod::Post,
+        endpoint: "https://fixture.example.test/v1/events".into(),
+        headers: vec![
+            ("content-type".into(), "application/json".into()),
+            ("idempotency-key".into(), "fixture-key-1".into()),
+        ],
+        body: br#"{"ok":true}"#.to_vec(),
+        deadline_ms: 1_000,
+        max_redirects: 0,
+        max_response_bytes: 4_096,
+    };
+    assert_eq!(
+        request_digest(&request),
+        "sha256:a7492c353b236c2b7df6408dfff3a29f82d1da5d279deb5901f8b67ad05b07e5"
+    );
+    let mut non_post = request.clone();
+    non_post.method = HttpMethod::Put;
+    assert_ne!(request_digest(&non_post), request_digest(&request));
+}
+
 #[derive(Default)]
 struct FixtureAdapter {
     calls: Vec<PreparedRequest>,
@@ -1227,12 +1250,18 @@ fn email_ledger_session_keeps_an_unwinding_attempt_sticky_without_retry() {
         status: 204,
         body: Vec::new(),
     });
-    assert_eq!(
-        session.reconcile(
+    let replay = session
+        .reconcile(
             prepare_email_delivery(email_capability(), email()).unwrap(),
             &mut retry_adapter,
-        ),
-        Err(EmailLedgerRefusal::ReplayBindingUnavailable)
+        )
+        .unwrap();
+    assert!(replay.was_replayed());
+    assert_eq!(
+        replay.evidence().disposition(),
+        &DeliveryDisposition::Uncertain {
+            reason: AdapterFailure::Transport,
+        }
     );
     assert!(retry_adapter.calls.is_empty());
 }
@@ -1401,8 +1430,8 @@ fn webhook_ledger_keeps_unwind_sticky_and_capacity_precedes_dispatch() {
         status: 204,
         body: Vec::new(),
     });
-    assert_eq!(
-        session.reconcile(
+    let replay = session
+        .reconcile(
             prepare_webhook_delivery(
                 capability(),
                 WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
@@ -1410,8 +1439,14 @@ fn webhook_ledger_keeps_unwind_sticky_and_capacity_precedes_dispatch() {
             )
             .unwrap(),
             &mut retry_adapter,
-        ),
-        Err(WebhookLedgerRefusal::ReplayBindingUnavailable)
+        )
+        .unwrap();
+    assert!(replay.was_replayed());
+    assert_eq!(
+        replay.evidence().disposition(),
+        &DeliveryDisposition::Uncertain {
+            reason: AdapterFailure::Transport,
+        }
     );
     assert!(retry_adapter.calls.is_empty());
 

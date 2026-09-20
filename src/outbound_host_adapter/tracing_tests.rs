@@ -350,12 +350,18 @@ fn panic_is_sticky_and_capacity_refuses_before_adapter_entry() {
         status: 204,
         body: Vec::new(),
     });
-    assert_eq!(
-        session.reconcile(
+    let replay = session
+        .reconcile(
             prepare("invocation-panic", event("31", b"panic-secret")),
             &mut retry_adapter,
-        ),
-        Err(ExportEventLedgerRefusal::ReplayBindingUnavailable)
+        )
+        .unwrap();
+    assert!(replay.was_replayed());
+    assert_eq!(
+        replay.evidence().disposition(),
+        &DeliveryDisposition::Uncertain {
+            reason: AdapterFailure::Transport,
+        }
     );
     assert!(retry_adapter.calls.is_empty());
 

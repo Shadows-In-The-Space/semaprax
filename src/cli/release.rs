@@ -5,8 +5,8 @@
 //! documents `docs/RELEASE-SIGNING-POLICY-V1.md` names, then hands their
 //! exact bytes to `semaprax::release_provenance`, the independent decoder
 //! and binding verifier that owns every rule. Everything is re-derived from
-//! what is on disk: the manifest digest is recomputed from the manifest's
-//! real bytes, each named archive is re-hashed from its real bytes, and a
+//! held, no-follow reads: the manifest digest is recomputed from the
+//! manifest's real bytes, each named archive is re-hashed from its real bytes, and a
 //! signature claim's subject digest is recomputed from the provenance
 //! statement's real bytes. Nothing the documents say about themselves is
 //! trusted.
@@ -19,21 +19,26 @@
 //! property for the verifier, and this adapter preserves it. It publishes
 //! nothing, signs nothing, and creates no key or identity material.
 //!
-//! **No SEMAPRAX release is signed today** and no signing key or keyless
-//! identity exists for this repository, so a successful run reports
-//! `VERIFIED UNSIGNED RELEASE` -- a successful verification of an *unsigned*
-//! release, never evidence that one was signed. Even when a
-//! `semaprax.release-signature-claim.v1` document is present, this command
-//! verifies only its *binding* (subject digest and pinned trusted identity);
-//! its `signature`/`certificate` bytes are never decoded or cryptographically
-//! checked, so the status stays `VERIFIED UNSIGNED RELEASE` either way.
+//! **No SEMAPRAX release is signed today** and the standalone CLI carries no
+//! cryptographic verifier. Its successful unsigned path reports
+//! `VERIFIED UNSIGNED RELEASE` -- never evidence that one was signed. A host
+//! with real offline verification authority can inject an
+//! [`OfflineBundleVerificationCapability`]; only that path consumes the
+//! bounded bundle/root/attestation material. If signed material is present
+//! without that explicit authority, this front refuses rather than treating
+//! structural framing as cryptographic verification.
 
+use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
+
+use sha2::{Digest as _, Sha256};
 
 use semaprax::diagnostic::Diagnostic;
 use semaprax::release_provenance::{
-    parse_manifest, verify_manifest_artifacts_on_disk, verify_provenance_binds_manifest,
-    verify_signature_claim_binds_provenance,
+    parse_manifest, parse_sigstore_trusted_root_jsonl, verify_offline_release_with_capability,
+    verify_provenance_binds_manifest, verify_release_binding,
+    verify_signature_claim_binds_provenance, verify_signature_claim_consumes_sigstore_bundle,
+    OfflineBundleVerificationCapability, OfflineReleaseArchive,
 };
 
 const USAGE: &str = "release accepts exactly `verify <release-dir>`; see `semaprax help release`";
@@ -43,12 +48,23 @@ const USAGE: &str = "release accepts exactly `verify <release-dir>`; see `semapr
 pub(crate) const MANIFEST_FILE: &str = "release-manifest.json";
 pub(crate) const PROVENANCE_FILE: &str = "release-provenance.json";
 pub(crate) const SIGNATURE_CLAIM_FILE: &str = "release-signature-claim.json";
+pub(crate) const MESSAGE_BUNDLE_FILE: &str = "release-provenance.bundle";
+pub(crate) const TRUSTED_ROOT_FILE: &str = "trusted_root.jsonl";
+const ATTESTATION_PREFIX: &str = "release-attestation-";
+const ATTESTATION_SUFFIX: &str = ".json";
 
 /// Largest release *document* this front reads. The real documents are a few
 /// kilobytes; this bound only keeps a hostile directory from being read into
-/// memory before the owning verifier ever sees it. Release *archives* are not
-/// read here at all -- `verify_manifest_artifacts_on_disk` re-hashes those.
+/// memory before the owning verifier ever sees it. Archive bytes use their
+/// separate held-reader bounds below.
 const MAX_DOCUMENT_BYTES: u64 = 4 * 1024 * 1024;
+
+/// The aggregate verifier needs the exact archive bytes alive through its
+/// caller-supplied capability. Bound both each allocation and their combined
+/// footprint before opening an archive, rather than letting a hostile
+/// manifest turn this CLI adapter into an unbounded in-memory reader.
+const MAX_OFFLINE_ARCHIVE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_OFFLINE_ARCHIVE_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 
 /// This front's own code, for "the release directory does not present a
 /// readable document at all". Every *verification* failure keeps the owning
@@ -56,6 +72,13 @@ const MAX_DOCUMENT_BYTES: u64 = 4 * 1024 * 1024;
 /// identity, SPX-Z704 artifact), because this front decides none of them.
 fn document_error(message: String) -> Diagnostic {
     Diagnostic::io("SPX-Z705", message)
+}
+
+/// The structural verifier has no ambient cryptographic authority. This code
+/// makes the missing authority explicit instead of falling through to the
+/// unsigned report when a directory presents signed release material.
+fn capability_error(message: String) -> Diagnostic {
+    Diagnostic::io("SPX-Z706", message)
 }
 
 /// `release verify <dir>` and nothing else. An unknown subcommand, a missing
@@ -77,31 +100,479 @@ pub(crate) fn parse(args: &[String]) -> Result<PathBuf, u8> {
     Err(2)
 }
 
-/// Read one release document from the directory, bounded, failing closed if
-/// it is absent, unreadable, or larger than [`MAX_DOCUMENT_BYTES`].
-fn read_document(directory: &Path, name: &str) -> Result<Vec<u8>, Diagnostic> {
-    let path = directory.join(name);
-    let metadata = std::fs::metadata(&path).map_err(|error| {
-        document_error(format!(
-            "release directory {} does not contain a readable {name}: {error}",
-            directory.display()
+#[cfg(unix)]
+fn open_regular_no_follow(path: &Path) -> Result<std::fs::File, ()> {
+    use rustix::fs::{open, Mode, OFlags};
+    open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map(std::fs::File::from)
+    .map_err(|_| ())
+}
+
+#[cfg(windows)]
+fn open_regular_no_follow(path: &Path) -> Result<std::fs::File, ()> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|_| ())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_regular_no_follow(_path: &Path) -> Result<std::fs::File, ()> {
+    Err(())
+}
+
+#[cfg(unix)]
+fn regular_identity(file: &std::fs::File, metadata: &std::fs::Metadata) -> Result<(u64, u64), ()> {
+    use std::os::unix::fs::MetadataExt as _;
+    let _ = file;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn regular_identity(file: &std::fs::File, _metadata: &std::fs::Metadata) -> Result<(u64, u64), ()> {
+    let information = winapi_util::file::information(file).map_err(|_| ())?;
+    Ok((information.volume_serial_number(), information.file_index()))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn regular_identity(
+    _file: &std::fs::File,
+    _metadata: &std::fs::Metadata,
+) -> Result<(u64, u64), ()> {
+    Err(())
+}
+
+fn held_regular_metadata(
+    file: &std::fs::File,
+    error: &impl Fn(String) -> Diagnostic,
+    path: &Path,
+) -> Result<std::fs::Metadata, Diagnostic> {
+    let metadata = file
+        .metadata()
+        .map_err(|source| error(format!("cannot inspect held {}: {source}", path.display())))?;
+    if !metadata.file_type().is_file() {
+        return Err(error(format!(
+            "{} is not a held regular file",
+            path.display()
+        )));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(error(format!("{} is a held reparse point", path.display())));
+        }
+    }
+    Ok(metadata)
+}
+
+fn recheck_path_identity(
+    path: &Path,
+    expected: (u64, u64),
+    error: &impl Fn(String) -> Diagnostic,
+) -> Result<(), Diagnostic> {
+    let path_metadata = std::fs::symlink_metadata(path)
+        .map_err(|source| error(format!("cannot re-inspect {}: {source}", path.display())))?;
+    if !path_metadata.file_type().is_file() || path_metadata.file_type().is_symlink() {
+        return Err(error(format!(
+            "{} is not a regular non-link path",
+            path.display()
+        )));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        if path_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(error(format!("{} is a reparse-point path", path.display())));
+        }
+    }
+    let rebound = open_regular_no_follow(path).map_err(|_| {
+        error(format!(
+            "cannot re-open {} without following links or preserving identity",
+            path.display()
         ))
     })?;
-    if metadata.len() > MAX_DOCUMENT_BYTES {
-        return Err(document_error(format!(
-            "{name} is {} bytes, over the {MAX_DOCUMENT_BYTES}-byte bound for a release document",
+    let metadata = held_regular_metadata(&rebound, error, path)?;
+    if regular_identity(&rebound, &metadata).map_err(|_| {
+        error(format!(
+            "held identity is unsupported for {} on this host",
+            path.display()
+        ))
+    })? != expected
+    {
+        return Err(error(format!(
+            "{} changed identity while being read",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Read one no-follow held regular file into a bounded stable snapshot. The
+/// held file is read twice without duplicating the bounded buffer; those reads
+/// must agree. Both before and after, the pathname is rebound and compared to
+/// the held file. A path replacement, reparse point, link, content mutation
+/// observed across the two reads, or unsupported identity guarantee fails
+/// closed rather than changing the held bytes this adapter authenticates.
+fn read_bounded_regular_with_hook(
+    path: &Path,
+    name: &str,
+    limit: u64,
+    error: impl Fn(String) -> Diagnostic,
+    before_read: impl FnOnce(),
+    after_initial_read: impl FnOnce(),
+) -> Result<Vec<u8>, Diagnostic> {
+    let file = open_regular_no_follow(path).map_err(|_| {
+        error(format!(
+            "cannot open {} without following links or preserving identity",
+            path.display()
+        ))
+    })?;
+    let metadata = held_regular_metadata(&file, &error, path)?;
+    if metadata.len() > limit {
+        return Err(error(format!(
+            "{name} is {} bytes, over the {limit}-byte bound",
             metadata.len()
         )));
     }
-    std::fs::read(&path)
-        .map_err(|error| document_error(format!("cannot read {}: {error}", path.display())))
+    let capacity = usize::try_from(metadata.len())
+        .map_err(|_| error(format!("{name} does not fit this platform's address space")))?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(capacity)
+        .map_err(|_| error(format!("cannot reserve {capacity} bytes to read {name}")))?;
+    let identity = regular_identity(&file, &metadata).map_err(|_| {
+        error(format!(
+            "held identity is unsupported for {} on this host",
+            path.display()
+        ))
+    })?;
+    recheck_path_identity(path, identity, &error)?;
+    before_read();
+    let read_limit = limit
+        .checked_add(1)
+        .ok_or_else(|| error(format!("{name} read bound is unsupported")))?;
+    (&file)
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|source| error(format!("cannot read {}: {source}", path.display())))?;
+    if bytes.len() as u64 > limit {
+        return Err(error(format!(
+            "{name} grew over the {limit}-byte bound while reading"
+        )));
+    }
+    after_initial_read();
+    (&file)
+        .seek(SeekFrom::Start(0))
+        .map_err(|source| error(format!("cannot rewind {}: {source}", path.display())))?;
+    let mut reread = (&file).take(read_limit);
+    let mut compared = 0usize;
+    let mut chunk = [0u8; 8192];
+    loop {
+        let read = reread
+            .read(&mut chunk)
+            .map_err(|source| error(format!("cannot re-read {}: {source}", path.display())))?;
+        if read == 0 {
+            break;
+        }
+        let end = compared
+            .checked_add(read)
+            .ok_or_else(|| error(format!("{name} is too large to compare")))?;
+        if end > bytes.len() || bytes[compared..end] != chunk[..read] {
+            return Err(error(format!("{name} changed while reading")));
+        }
+        compared = end;
+    }
+    if compared != bytes.len() {
+        return Err(error(format!("{name} changed while reading")));
+    }
+    let after = held_regular_metadata(&file, &error, path)?;
+    if regular_identity(&file, &after).map_err(|_| {
+        error(format!(
+            "held identity is unsupported for {} on this host",
+            path.display()
+        ))
+    })? != identity
+        || after.len() != metadata.len()
+    {
+        return Err(error(format!("{name} changed while reading")));
+    }
+    recheck_path_identity(path, identity, &error)?;
+    Ok(bytes)
+}
+
+fn read_bounded_regular(
+    path: &Path,
+    name: &str,
+    limit: u64,
+    error: impl Fn(String) -> Diagnostic,
+) -> Result<Vec<u8>, Diagnostic> {
+    read_bounded_regular_with_hook(path, name, limit, error, || {}, || {})
+}
+
+/// Read one release document from the directory, bounded, failing closed if
+/// it is absent, unreadable, not a regular file, or larger than the document
+/// bound. The names are fixed by this adapter rather than derived from input.
+fn read_document(directory: &Path, name: &str) -> Result<Vec<u8>, Diagnostic> {
+    let path = directory.join(name);
+    read_bounded_regular(&path, name, MAX_DOCUMENT_BYTES, |message| {
+        document_error(format!(
+            "release directory {} does not contain a readable {name}: {message}",
+            directory.display()
+        ))
+    })
+}
+
+fn attestation_name(platform: &str) -> String {
+    format!("{ATTESTATION_PREFIX}{platform}{ATTESTATION_SUFFIX}")
+}
+
+/// Manifest artifact names are untrusted JSON. The aggregate reader supports
+/// only one file immediately below the caller-supplied release directory;
+/// neither a parent traversal nor an absolute path can select another file.
+fn require_leaf_name(name: &str) -> Result<(), Diagnostic> {
+    if name.is_empty() || Path::new(name).file_name().and_then(|leaf| leaf.to_str()) != Some(name) {
+        return Err(Diagnostic::io(
+            "SPX-Z704",
+            format!("manifest artifact name {name:?} is not one plain file name"),
+        ));
+    }
+    Ok(())
+}
+
+fn read_archive(directory: &Path, name: &str, expected_size: u64) -> Result<Vec<u8>, Diagnostic> {
+    require_leaf_name(name)?;
+    if expected_size > MAX_OFFLINE_ARCHIVE_BYTES {
+        return Err(Diagnostic::io(
+            "SPX-Z704",
+            format!(
+                "manifest artifact {name:?} is {expected_size} bytes, over the {MAX_OFFLINE_ARCHIVE_BYTES}-byte offline verification bound"
+            ),
+        ));
+    }
+    let path = directory.join(name);
+    let bytes = read_bounded_regular(&path, name, expected_size, |message| {
+        Diagnostic::io(
+            "SPX-Z704",
+            format!("cannot read manifest artifact {name:?}: {message}"),
+        )
+    })?;
+    if bytes.len() as u64 != expected_size {
+        return Err(Diagnostic::io(
+            "SPX-Z704",
+            format!(
+                "manifest artifact {name:?} is {} bytes from its held read but the manifest records {expected_size}",
+                bytes.len()
+            ),
+        ));
+    }
+    Ok(bytes)
+}
+
+/// Re-hash exactly the files the manifest names, through the held no-follow
+/// reader. It deliberately does not enumerate the directory or reject files
+/// not named by the manifest; that wider inventory claim belongs to a release
+/// package contract, not this read-only verifier.
+fn verify_manifest_archives_from_held(
+    manifest: &semaprax::release_provenance::ParsedManifest,
+    directory: &Path,
+) -> Result<(), Diagnostic> {
+    let mut total = 0u64;
+    for artifact in &manifest.artifacts {
+        total = total.checked_add(artifact.size).ok_or_else(|| {
+            Diagnostic::io(
+                "SPX-Z704",
+                "manifest artifact sizes overflow the held-read aggregate bound".to_owned(),
+            )
+        })?;
+        if total > MAX_OFFLINE_ARCHIVE_TOTAL_BYTES {
+            return Err(Diagnostic::io(
+                "SPX-Z704",
+                format!(
+                    "manifest artifacts total {total} bytes, over the {MAX_OFFLINE_ARCHIVE_TOTAL_BYTES}-byte held-read aggregate bound"
+                ),
+            ));
+        }
+        let bytes = read_archive(directory, &artifact.name, artifact.size)?;
+        let digest = format!(
+            "sha256:{:x}",
+            semaprax::digest_hex::LowerHex(Sha256::digest(&bytes))
+        );
+        if digest != artifact.digest {
+            return Err(Diagnostic::io(
+                "SPX-Z704",
+                format!(
+                    "manifest artifact {:?} digest disagrees with bytes read from its held file",
+                    artifact.name
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn material_is_present(directory: &Path) -> Result<bool, Diagnostic> {
+    let fixed = [MESSAGE_BUNDLE_FILE, TRUSTED_ROOT_FILE];
+    for name in fixed {
+        let path = directory.join(name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(document_error(format!(
+                    "cannot inspect {}: {error}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    for platform in semaprax::release_provenance::ARCHIVE_PLATFORMS {
+        let path = directory.join(attestation_name(platform));
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(document_error(format!(
+                    "cannot inspect {}: {error}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(false)
+}
+
+struct OfflineArchive {
+    name: String,
+    bytes: Vec<u8>,
+    attestation: Vec<u8>,
+}
+
+/// Load the complete closed release inventory for the aggregate verifier.
+/// The non-archive binding/root checks run before any archive is allocated,
+/// and archive bytes have an explicit combined memory bound.
+fn load_offline_release(
+    directory: &Path,
+) -> Result<
+    (
+        Vec<u8>,
+        Vec<u8>,
+        Vec<u8>,
+        Vec<u8>,
+        Vec<u8>,
+        Vec<OfflineArchive>,
+    ),
+    Diagnostic,
+> {
+    let manifest = read_document(directory, MANIFEST_FILE)?;
+    let provenance = read_document(directory, PROVENANCE_FILE)?;
+    let claim = read_document(directory, SIGNATURE_CLAIM_FILE)?;
+    let message_bundle = read_document(directory, MESSAGE_BUNDLE_FILE)?;
+    let trusted_root = read_document(directory, TRUSTED_ROOT_FILE)?;
+
+    // These cheap checks are deliberately repeated by the aggregate API. They
+    // prevent an invalid document/root/bundle from causing archive allocation
+    // and retain the aggregate API as the sole gate before capability use.
+    verify_release_binding(&manifest, &provenance, &claim)?;
+    verify_signature_claim_consumes_sigstore_bundle(&claim, &provenance, &message_bundle)?;
+    parse_sigstore_trusted_root_jsonl(&trusted_root)?;
+    let parsed_manifest = parse_manifest(&manifest)?;
+
+    let mut total = 0u64;
+    let mut archives = Vec::with_capacity(parsed_manifest.artifacts.len());
+    for artifact in &parsed_manifest.artifacts {
+        total = total.checked_add(artifact.size).ok_or_else(|| {
+            Diagnostic::io(
+                "SPX-Z704",
+                "manifest artifact sizes overflow the offline verification bound".to_owned(),
+            )
+        })?;
+        if total > MAX_OFFLINE_ARCHIVE_TOTAL_BYTES {
+            return Err(Diagnostic::io(
+                "SPX-Z704",
+                format!(
+                    "manifest artifacts total {total} bytes, over the {MAX_OFFLINE_ARCHIVE_TOTAL_BYTES}-byte offline verification bound"
+                ),
+            ));
+        }
+        let name = artifact.name.clone();
+        let bytes = read_archive(directory, &name, artifact.size)?;
+        let attestation_name = attestation_name(&artifact.platform);
+        let attestation = read_document(directory, &attestation_name)?;
+        archives.push(OfflineArchive {
+            name,
+            bytes,
+            attestation,
+        });
+    }
+    Ok((
+        manifest,
+        provenance,
+        claim,
+        message_bundle,
+        trusted_root,
+        archives,
+    ))
+}
+
+/// Verify signed offline material only through an authority the embedding host
+/// explicitly supplied. This adapter never manufactures a verifier, opens a
+/// network connection, or launches `cosign`; the capability alone decides
+/// cryptographic validity after the aggregate verifier's structural gates.
+pub(crate) fn run_with_offline_capability(
+    directory: &Path,
+    capability: &dyn OfflineBundleVerificationCapability,
+) -> Result<String, Diagnostic> {
+    let (manifest, provenance, claim, message_bundle, trusted_root, archives) =
+        load_offline_release(directory)?;
+    let borrowed_archives = archives
+        .iter()
+        .map(|archive| OfflineReleaseArchive {
+            name: &archive.name,
+            bytes: &archive.bytes,
+            attestation_bundle_bytes: &archive.attestation,
+        })
+        .collect::<Vec<_>>();
+    verify_offline_release_with_capability(
+        &manifest,
+        &provenance,
+        &claim,
+        &message_bundle,
+        &trusted_root,
+        &borrowed_archives,
+        capability,
+    )?;
+    let parsed_manifest = parse_manifest(&manifest)?;
+    Ok(format!(
+        "release verify: {directory}\n\
+         manifest: {MANIFEST_FILE} (version {version}, tag {tag}, commit {commit})\n\
+         offline material: {MESSAGE_BUNDLE_FILE}, {TRUSTED_ROOT_FILE}, and {artifacts} archive attestations\n\
+         status: OFFLINE RELEASE ACCEPTED BY CALLER-SUPPLIED VERIFICATION CAPABILITY\n\
+         This command made no independent cryptographic claim: the embedding host supplied\n\
+         the verifier and accepted the exact bounded subjects, bundles, and trusted root.\n\
+         Nothing was published, signed, executed, installed, or fetched.\n",
+        directory = directory.display(),
+        version = parsed_manifest.version,
+        tag = parsed_manifest.tag,
+        commit = parsed_manifest.commit,
+        artifacts = parsed_manifest.artifacts.len(),
+    ))
 }
 
 /// What the directory says about signing. A missing claim document is the
 /// ordinary case today and is *not* an error; any other read failure is.
 fn signature_lines(directory: &Path, provenance_bytes: &[u8]) -> Result<String, Diagnostic> {
     let path = directory.join(SIGNATURE_CLAIM_FILE);
-    match std::fs::metadata(&path) {
+    match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(format!(
             "signature: absent; this directory carries no {SIGNATURE_CLAIM_FILE}\n"
         )),
@@ -125,35 +596,50 @@ fn signature_lines(directory: &Path, provenance_bytes: &[u8]) -> Result<String, 
 /// The nonclaims every run prints, signed or not. Kept one constant so the
 /// two status paths cannot drift on what was and was not established.
 const NONCLAIMS: &str = "\
-Verified: integrity (the bytes on disk are the bytes the manifest and the\n\
-provenance statement recorded) and provenance binding (version, tag, commit,\n\
-builder workflow identity, and the complete artifact inventory agree).\n\
+Verified: integrity (the held bytes read during this verification match the manifest and\n\
+provenance statement's recorded values) and provenance binding (version, tag, commit,\n\
+builder workflow identity, and the manifest-declared artifact inventory agree).\n\
+The release directory was not listed; unrelated files are outside this check.\n\
 Not verified and not claimed: authenticity. No cryptographic signature is\n\
 checked by this command, this repository holds no signing key or keyless\n\
 identity, and no SEMAPRAX release is signed today. Reproducibility,\n\
 notarization, and production support are separate claims this command does\n\
 not make. Nothing was published, signed, executed, or installed.\n";
 
-/// Verify one release directory and render its deterministic report.
-pub(crate) fn run(directory: &Path) -> Result<String, Diagnostic> {
+/// Verify one release directory and render its deterministic report. Signed
+/// material requires an explicit verifier supplied by the embedding host;
+/// the standalone command intentionally has none.
+pub(crate) fn run(
+    directory: &Path,
+    capability: Option<&(dyn OfflineBundleVerificationCapability + Sync)>,
+) -> Result<String, Diagnostic> {
+    if material_is_present(directory)? {
+        let capability = capability.ok_or_else(|| {
+            capability_error(
+                "release directory contains offline Sigstore material, but this CLI invocation has no caller-supplied offline verification capability".to_owned(),
+            )
+        })?;
+        return run_with_offline_capability(directory, capability);
+    }
     let manifest_bytes = read_document(directory, MANIFEST_FILE)?;
     let provenance_bytes = read_document(directory, PROVENANCE_FILE)?;
+    let manifest = parse_manifest(&manifest_bytes)?;
+    for artifact in &manifest.artifacts {
+        require_leaf_name(&artifact.name)?;
+    }
 
     // The owning module decides every rule below; this front only orders the
     // checks and stops at the first failure.
     verify_provenance_binds_manifest(&provenance_bytes, &manifest_bytes)?;
-    verify_manifest_artifacts_on_disk(&manifest_bytes, directory)?;
+    verify_manifest_archives_from_held(&manifest, directory)?;
     let signature = signature_lines(directory, &provenance_bytes)?;
 
-    // Re-parsed, not carried out of the checks above: the report names only
-    // fields an independent decode of the same bytes produced.
-    let manifest = parse_manifest(&manifest_bytes)?;
     let artifacts = manifest.artifacts.len();
     Ok(format!(
         "release verify: {directory}\n\
          manifest: {MANIFEST_FILE} (version {version}, tag {tag}, commit {commit})\n\
          provenance: {PROVENANCE_FILE} binds this manifest byte for byte\n\
-         artifacts: {artifacts} of {artifacts} re-hashed from disk; every size and digest matches \
+         artifacts: {artifacts} of {artifacts} re-hashed from held reads; every size and digest matches \
          the manifest\n\
          {signature}\
          status: VERIFIED UNSIGNED RELEASE\n\
@@ -167,7 +653,156 @@ pub(crate) fn run(directory: &Path) -> Result<String, Diagnostic> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
+    use sha2::Sha256;
+
     use super::*;
+
+    const TAG: &str = "v9.9.9";
+    const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+    const CLAIM_SIGNATURE: &str = "RklYVFVSRS1TSUdTVE9SRS1TSUdOQVRVUkU=";
+    const CLAIM_CERTIFICATE: &str = "RklYVFVSRS1TSUdTVE9SRS1DRVJUSUZJQ0FURQ==";
+
+    fn sha256(bytes: &[u8]) -> String {
+        format!(
+            "sha256:{:x}",
+            semaprax::digest_hex::LowerHex(Sha256::digest(bytes))
+        )
+    }
+
+    fn base64(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut output = String::with_capacity((bytes.len() + 2) / 3 * 4);
+        for chunk in bytes.chunks(3) {
+            let first = chunk[0];
+            let second = *chunk.get(1).unwrap_or(&0);
+            let third = *chunk.get(2).unwrap_or(&0);
+            output.push(ALPHABET[(first >> 2) as usize] as char);
+            output.push(ALPHABET[((first & 3) << 4 | second >> 4) as usize] as char);
+            output.push(if chunk.len() > 1 {
+                ALPHABET[((second & 15) << 2 | third >> 6) as usize] as char
+            } else {
+                '='
+            });
+            output.push(if chunk.len() > 2 {
+                ALPHABET[(third & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+        output
+    }
+
+    fn verification_material(kind: &str, certificate: &str) -> String {
+        format!(
+            r#"{{"certificate":{{"rawBytes":"{certificate}"}},"tlogEntries":[{{"logIndex":"1","logId":{{"keyId":"RklYVFVSRS1SRUtPUi1LRVk="}},"kindVersion":{{"kind":"{kind}","version":"0.0.1"}},"integratedTime":"1","inclusionPromise":{{"signedEntryTimestamp":"RklYVFVSRS1TRVQ="}},"inclusionProof":{{"logIndex":"1","rootHash":"RklYVFVSRS1ST09U","treeSize":"1","hashes":["RklYVFVSRS1IQVNI"],"checkpoint":{{"envelope":"fixture checkpoint"}}}},"canonicalizedBody":"RklYVFVSRS1SRUtPUi1CT0RZ"}}],"timestampVerificationData":{{"rfc3161Timestamps":[{{"signedTimestamp":"RklYVFVSRS1SRkMzMTYx"}}]}}}}"#
+        )
+    }
+
+    fn message_bundle(provenance: &[u8]) -> String {
+        let digest = sha256(provenance);
+        let raw = digest.strip_prefix("sha256:").unwrap();
+        let bytes = (0..raw.len())
+            .step_by(2)
+            .map(|offset| u8::from_str_radix(&raw[offset..offset + 2], 16).unwrap())
+            .collect::<Vec<_>>();
+        format!(
+            r#"{{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json","verificationMaterial":{},"messageSignature":{{"messageDigest":{{"algorithm":"SHA2_256","digest":"{}"}},"signature":"{CLAIM_SIGNATURE}"}}}}"#,
+            verification_material("hashedrekord", CLAIM_CERTIFICATE),
+            base64(&bytes),
+        )
+    }
+
+    fn archive_bundle(name: &str, bytes: &[u8]) -> String {
+        let digest = sha256(bytes);
+        let predicate = format!(
+            r#"{{"buildDefinition":{{"buildType":"https://actions.github.io/buildtypes/workflow/v1","externalParameters":{{"workflow":{{"path":".github/workflows/ci.yml","ref":"refs/tags/{TAG}","repository":"https://github.com/wavect/semaprax"}}}},"internalParameters":{{"github":{{"event_name":"push","repository_id":"1","repository_owner_id":"1","runner_environment":"github-hosted"}}}},"resolvedDependencies":[{{"digest":{{"gitCommit":"{COMMIT}"}},"uri":"git+https://github.com/wavect/semaprax@refs/tags/{TAG}"}}]}},"runDetails":{{"builder":{{"id":"https://github.com/actions/runner/github-hosted"}},"metadata":{{"invocationId":"https://github.com/wavect/semaprax/actions/runs/1/attempts/1"}}}}}}"#
+        );
+        let statement = format!(
+            r#"{{"_type":"https://in-toto.io/Statement/v1","subject":[{{"name":"{name}","digest":{{"sha256":"{}"}}}}],"predicateType":"https://slsa.dev/provenance/v1","predicate":{predicate}}}"#,
+            digest.strip_prefix("sha256:").unwrap(),
+        );
+        format!(
+            r#"{{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json","verificationMaterial":{},"dsseEnvelope":{{"payload":"{}","payloadType":"application/vnd.in-toto+json","signatures":[{{"sig":"RklYVFVSRS1EU1NFLVNJR05BVFVSRQ=="}}]}}}}"#,
+            verification_material("dsse", "RklYVFVSRS1BVFRFU1RBVElPTi1DRVJUSUZJQ0FURQ=="),
+            base64(statement.as_bytes()),
+        )
+    }
+
+    fn signed_directory(label: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "semaprax-release-offline-{label}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut artifacts = Vec::new();
+        for platform in semaprax::release_provenance::ARCHIVE_PLATFORMS {
+            let extension = if platform.contains("windows") {
+                "zip"
+            } else {
+                "tar.gz"
+            };
+            let name = format!("semaprax-{TAG}-{platform}.{extension}");
+            let bytes = format!("fixture archive for {platform}\n").into_bytes();
+            std::fs::write(directory.join(&name), &bytes).unwrap();
+            std::fs::write(
+                directory.join(attestation_name(platform)),
+                archive_bundle(&name, &bytes),
+            )
+            .unwrap();
+            artifacts.push(format!(
+                r#"{{"name":"{name}","platform":"{platform}","size":{},"digest":"{}"}}"#,
+                bytes.len(),
+                sha256(&bytes)
+            ));
+        }
+        let artifacts = artifacts.join(",");
+        let manifest = format!(
+            r#"{{"schema":"semaprax.release-manifest.v1","version":"9.9.9","tag":"{TAG}","commit":"{COMMIT}","prerelease":true,"required_checks":["alpha"],"changelog_section_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","artifacts":[{artifacts}]}}"#
+        );
+        let provenance = format!(
+            r#"{{"schema":"semaprax.release-provenance.v1","version":"9.9.9","tag":"{TAG}","commit":"{COMMIT}","prerelease":true,"required_checks":["alpha"],"artifacts":[{artifacts}],"manifest_digest":"{}","source":{{"repository":"wavect/semaprax","commit":"{COMMIT}","tag":"{TAG}"}},"builder":{{"workflow_identity":"wavect/semaprax/.github/workflows/ci.yml@refs/tags/{TAG}","run_id":"1","run_attempt":"1"}},"toolchain":{{"rustc_version":"1.88.0","cargo_locked":true}},"build_host_class":"github-hosted-ubuntu-24.04","nonclaims":["unsigned_without_a_paired_signature_claim"]}}"#,
+            sha256(manifest.as_bytes())
+        );
+        let claim = format!(
+            r#"{{"schema":"semaprax.release-signature-claim.v1","subject_digest":"{}","subject_name":"release-provenance.json","identity":{{"issuer":"https://token.actions.githubusercontent.com","subject":"repo:wavect/semaprax:ref:refs/tags/{TAG}","workflow_ref":"wavect/semaprax/.github/workflows/ci.yml@refs/tags/{TAG}"}},"algorithm":"sigstore-cosign-bundle-v0.3","signature":"{CLAIM_SIGNATURE}","certificate":"{CLAIM_CERTIFICATE}"}}"#,
+            sha256(provenance.as_bytes())
+        );
+        std::fs::write(directory.join(MANIFEST_FILE), &manifest).unwrap();
+        std::fs::write(directory.join(PROVENANCE_FILE), &provenance).unwrap();
+        std::fs::write(directory.join(SIGNATURE_CLAIM_FILE), &claim).unwrap();
+        std::fs::write(
+            directory.join(MESSAGE_BUNDLE_FILE),
+            message_bundle(provenance.as_bytes()),
+        )
+        .unwrap();
+        std::fs::write(
+            directory.join(TRUSTED_ROOT_FILE),
+            b"{\"trustedRoot\":\"fixture\"}\n",
+        )
+        .unwrap();
+        directory
+    }
+
+    /// This is a transport probe, not a cryptographic implementation. Its
+    /// acceptance proves the CLI passes exact bounded inputs to an explicitly
+    /// supplied capability; it must never be described as Sigstore success.
+    struct RecordingCapability(Cell<usize>);
+
+    impl OfflineBundleVerificationCapability for RecordingCapability {
+        fn verify_offline_bundle(
+            &self,
+            _identity: &semaprax::release_provenance::ExpectedReleaseIdentity,
+            _subject: &[u8],
+            _bundle: &[u8],
+            _root: &[u8],
+        ) -> Result<(), Diagnostic> {
+            self.0.set(self.0.get() + 1);
+            Ok(())
+        }
+    }
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
@@ -200,7 +835,8 @@ mod tests {
             "semaprax-release-verify-absent-{}",
             std::process::id()
         ));
-        let error = run(&directory).expect_err("an absent release directory must fail closed");
+        let error =
+            run(&directory, None).expect_err("an absent release directory must fail closed");
         assert_eq!(error.code, "SPX-Z705");
         assert!(error.message.contains(MANIFEST_FILE), "{}", error.message);
     }
@@ -210,5 +846,128 @@ mod tests {
     fn the_report_template_never_claims_a_signature() {
         assert!(NONCLAIMS.contains("no SEMAPRAX release is signed today"));
         assert!(NONCLAIMS.contains("Not verified and not claimed: authenticity."));
+    }
+
+    #[test]
+    fn signed_material_without_explicit_capability_refuses_before_unsigned_reporting() {
+        let directory = std::env::temp_dir().join(format!(
+            "semaprax-release-capability-required-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(MESSAGE_BUNDLE_FILE), b"present").unwrap();
+        let error = run(&directory, None).expect_err("signed material needs explicit authority");
+        assert_eq!(error.code, "SPX-Z706");
+        assert!(error.message.contains("no caller-supplied"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn explicit_capability_receives_complete_bounded_offline_release() {
+        let directory = signed_directory("capability");
+        let capability = RecordingCapability(Cell::new(0));
+        let report = run_with_offline_capability(&directory, &capability)
+            .expect("only the explicit transport probe may accept this fixture");
+        assert_eq!(capability.0.get(), 4, "provenance plus three archives");
+        assert!(report.contains("CALLER-SUPPLIED VERIFICATION CAPABILITY"));
+        assert!(report.contains("no independent cryptographic claim"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn malformed_root_refuses_before_capability_or_archive_reading() {
+        let directory = signed_directory("bad-root");
+        std::fs::write(directory.join(TRUSTED_ROOT_FILE), b"{\"root\":true}").unwrap();
+        let capability = RecordingCapability(Cell::new(0));
+        let error = run_with_offline_capability(&directory, &capability)
+            .expect_err("unframed trusted root must fail before authority use");
+        assert_eq!(error.code, "SPX-Z701");
+        assert_eq!(capability.0.get(), 0);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn aggregate_adapter_rejects_path_traversal_before_opening_an_archive() {
+        for name in ["../outside", "/outside", "nested/archive", ""] {
+            let error = require_leaf_name(name).expect_err("not a one-file release inventory");
+            assert_eq!(error.code, "SPX-Z704");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_reader_refuses_a_symlink_without_reading_its_target() {
+        let directory = std::env::temp_dir().join(format!(
+            "semaprax-release-no-follow-symlink-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let target = directory.join("target");
+        let link = directory.join("document");
+        std::fs::write(&target, b"outside bytes").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let error = read_bounded_regular(&link, "document", 1024, document_error)
+            .expect_err("a symlink must not become a release input");
+        assert_eq!(error.code, "SPX-Z705");
+        assert!(error.message.contains("without following links"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_reader_refuses_a_path_replaced_after_the_held_identity_check() {
+        let directory = std::env::temp_dir().join(format!(
+            "semaprax-release-held-identity-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("document");
+        let replacement = directory.join("replacement");
+        std::fs::write(&path, b"held original").unwrap();
+        std::fs::write(&replacement, b"replacement").unwrap();
+        let path_for_hook = path.clone();
+        let replacement_for_hook = replacement.clone();
+        let error = read_bounded_regular_with_hook(
+            &path,
+            "document",
+            1024,
+            document_error,
+            move || {
+                std::fs::rename(&replacement_for_hook, &path_for_hook).unwrap();
+            },
+            || {},
+        )
+        .expect_err("a path rebound away from the held file must fail closed");
+        assert_eq!(error.code, "SPX-Z705");
+        assert!(error.message.contains("changed identity"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_reader_refuses_same_inode_same_length_mutation_after_first_read() {
+        let directory = std::env::temp_dir().join(format!(
+            "semaprax-release-held-content-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("document");
+        let original = b"held bytes";
+        let replacement = b"mutatebyte";
+        assert_eq!(original.len(), replacement.len());
+        std::fs::write(&path, original).unwrap();
+        let path_for_hook = path.clone();
+        let error = read_bounded_regular_with_hook(
+            &path,
+            "document",
+            1024,
+            document_error,
+            || {},
+            move || std::fs::write(&path_for_hook, replacement).unwrap(),
+        )
+        .expect_err("a same-inode same-length mutation must fail closed");
+        assert_eq!(error.code, "SPX-Z705");
+        assert!(error.message.contains("changed while reading"));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

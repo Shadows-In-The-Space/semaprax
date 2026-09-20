@@ -51,12 +51,18 @@ mod native_scratch_tests;
 /// Creates a project and returns the destination as spelled plus the
 /// template it published.
 pub type NewProjectHook = fn(&[String]) -> Result<(PathBuf, &'static str), (String, u8)>;
+/// An embedding host's explicit authority for cryptographically verifying
+/// bounded offline release material. The standalone compiler provides none;
+/// structural release parsing must never synthesize this authority.
+pub type OfflineReleaseVerifier =
+    &'static (dyn semaprax::release_provenance::OfflineBundleVerificationCapability + Sync);
 
 #[allow(clippy::type_complexity)]
 pub struct PrivateHost {
     pub new_project: NewProjectHook,
     pub source_live: fn(&[String]) -> Result<String, (String, u8)>,
     pub build_rust: fn(&mut project::ProjectSnapshot, &Path) -> Result<(), Vec<Diagnostic>>,
+    pub offline_release_verifier: Option<OfflineReleaseVerifier>,
     #[cfg(windows)]
     pub build_owned_npm: fn(&mut project::ProjectSnapshot, &Path) -> Result<(), Vec<Diagnostic>>,
 }
@@ -389,7 +395,9 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
         }
         CommandId::Release => {
             let directory = cli::release::parse(&args[1..])?;
-            let receipt = cli::release::run(&directory).map_err(|error| report(&[error], false))?;
+            let capability = host.and_then(|host| host.offline_release_verifier);
+            let receipt = cli::release::run(&directory, capability)
+                .map_err(|error| report(&[error], false))?;
             print!("{receipt}");
             Ok(())
         }

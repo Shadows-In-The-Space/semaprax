@@ -2,8 +2,8 @@
 //! a downloader runs over an unpacked release directory.
 //!
 //! The route is a thin front over `semaprax::release_provenance`, so these
-//! cases assert the *command's* contract: it re-derives every digest from the
-//! bytes on disk, fails closed with the owning module's exact stable
+//! cases assert the *command's* contract: it re-derives every digest from
+//! held, no-follow bytes, fails closed with the owning module's exact stable
 //! diagnostic code on each disagreement, changes nothing in the directory it
 //! reads, and -- because no SEMAPRAX release is signed and no signing key or
 //! keyless identity exists -- reports a successful run as a verification of an
@@ -215,7 +215,7 @@ fn release_verify_reports_a_verified_unsigned_release() {
     assert!(report.contains(&format!("commit {COMMIT}")), "{report}");
     assert!(
         report.contains(&format!(
-            "artifacts: {count} of {count} re-hashed from disk",
+            "artifacts: {count} of {count} re-hashed from held reads",
             count = ARCHIVE_PLATFORMS.len()
         )),
         "{report}"
@@ -242,6 +242,68 @@ fn release_verify_rejects_a_substituted_artifact() {
     let last = bytes.len() - 1;
     bytes[last] = b'X';
     fs::write(&target, &bytes).unwrap();
+
+    assert_rejected(&verify(&directory), "SPX-Z704");
+    fs::remove_dir_all(&directory).ok();
+}
+
+/// The actual standalone route opens manifest archives with no-follow held
+/// handles. A final-component symlink cannot redirect its digest check to an
+/// unrelated file outside the manifest inventory.
+#[cfg(unix)]
+#[test]
+fn release_verify_rejects_a_symlinked_manifest_artifact() {
+    let directory = release_directory("symlink-artifact");
+    let archive = directory.join(archive_name(ARCHIVE_PLATFORMS[0]));
+    let target = directory.join("unrelated-target");
+    fs::write(&target, b"unrelated target bytes").unwrap();
+    fs::remove_file(&archive).unwrap();
+    std::os::unix::fs::symlink(&target, &archive).unwrap();
+
+    assert_rejected(&verify(&directory), "SPX-Z704");
+    fs::remove_dir_all(&directory).ok();
+}
+
+/// A different regular file moved into a manifest name is still re-hashed
+/// from the held bytes and rejected; replacing a symlink with a plain file
+/// cannot evade the digest check.
+#[test]
+fn release_verify_rejects_a_replaced_manifest_artifact() {
+    let directory = release_directory("replaced-artifact");
+    let archive = directory.join(archive_name(ARCHIVE_PLATFORMS[0]));
+    let replacement = directory.join("replacement");
+    fs::write(&replacement, b"replacement archive bytes").unwrap();
+    fs::remove_file(&archive).unwrap();
+    fs::rename(&replacement, &archive).unwrap();
+
+    assert_rejected(&verify(&directory), "SPX-Z704");
+    fs::remove_dir_all(&directory).ok();
+}
+
+/// The unsigned CLI uses the same explicit aggregate cap as the offline
+/// capability route, before reserving or reading a manifest-sized archive.
+#[test]
+fn release_verify_rejects_an_oversized_manifest_archive_before_reading_it() {
+    let directory = release_directory("oversized-artifact");
+    let manifest_path = directory.join("release-manifest.json");
+    let mut manifest = fs::read_to_string(&manifest_path).unwrap();
+    let marker = "\"size\": ";
+    let size_start = manifest.find(marker).unwrap() + marker.len();
+    let size_end = manifest[size_start..]
+        .find(|character: char| !character.is_ascii_digit())
+        .map(|offset| size_start + offset)
+        .unwrap();
+    manifest.replace_range(size_start..size_end, "134217729");
+    let artifacts_start =
+        manifest.find("  \"artifacts\": [\n").unwrap() + "  \"artifacts\": [\n".len();
+    let artifacts_end = artifacts_start + manifest[artifacts_start..].find("\n  ]").unwrap();
+    let provenance = provenance_json(
+        &manifest[artifacts_start..artifacts_end],
+        COMMIT,
+        manifest.as_bytes(),
+    );
+    fs::write(&manifest_path, &manifest).unwrap();
+    fs::write(directory.join("release-provenance.json"), provenance).unwrap();
 
     assert_rejected(&verify(&directory), "SPX-Z704");
     fs::remove_dir_all(&directory).ok();
@@ -312,6 +374,25 @@ fn release_verify_rejects_a_directory_without_a_provenance_document() {
     fs::remove_dir_all(&directory).ok();
 }
 
+/// An entry at the fixed claim name is not absence. In particular, a dangling
+/// link must flow into the CLI's no-follow document reader and fail closed.
+#[cfg(unix)]
+#[test]
+fn release_verify_rejects_a_dangling_signature_claim_link() {
+    let directory = release_directory("dangling-claim-link");
+    let claim = directory.join("release-signature-claim.json");
+    std::os::unix::fs::symlink(directory.join("missing-claim-target"), &claim).unwrap();
+
+    let output = verify(&directory);
+    assert_rejected(&output, "SPX-Z705");
+    assert!(
+        stderr(&output).contains("release-signature-claim.json"),
+        "{}",
+        stderr(&output)
+    );
+    fs::remove_dir_all(&directory).ok();
+}
+
 /// A claim lifted from a different release is rejected: its `subject_digest`
 /// was computed over other provenance bytes.
 #[test]
@@ -373,6 +454,34 @@ fn a_bound_signature_claim_is_still_reported_as_an_unsigned_release() {
     assert!(
         report.contains("no SEMAPRAX release is signed today"),
         "{report}"
+    );
+    fs::remove_dir_all(&directory).ok();
+}
+
+/// The standalone executable has no Sigstore/cosign authority. Once a
+/// directory presents signed offline material it must refuse rather than
+/// continuing down the unsigned, binding-only report path; an embedding host
+/// must supply the explicit offline verification capability instead.
+#[test]
+fn release_verify_refuses_offline_bundle_material_without_a_capability() {
+    let directory = release_directory("offline-material-without-capability");
+    fs::write(
+        directory.join("release-provenance.bundle"),
+        b"untrusted fixture bundle",
+    )
+    .unwrap();
+
+    let output = verify(&directory);
+    assert_rejected(&output, "SPX-Z706");
+    assert!(
+        stderr(&output).contains("no caller-supplied offline verification capability"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        !stderr(&output).contains("VERIFIED UNSIGNED RELEASE"),
+        "{}",
+        stderr(&output)
     );
     fs::remove_dir_all(&directory).ok();
 }

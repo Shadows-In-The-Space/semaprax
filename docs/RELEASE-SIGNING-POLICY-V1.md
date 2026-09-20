@@ -306,12 +306,27 @@ above and adds no verification of its own: it reads
 `release-manifest.json`, `release-provenance.json`, and -- if present --
 `release-signature-claim.json` from that directory, then hands their exact
 bytes to `verify_provenance_binds_manifest`,
-`verify_manifest_artifacts_on_disk`, and
+the CLI adapter's held no-follow archive reader, and
 `verify_signature_claim_binds_provenance`. Everything is re-derived from
 what is on disk: the manifest digest is recomputed from the manifest's real
 bytes, every archive the manifest names is re-hashed from its real bytes,
 and a claim's subject digest is recomputed from the provenance statement's
-real bytes. Nothing a document says about itself is trusted.
+real bytes. The adapter does not list the directory or reject unrelated files;
+it checks only the exact regular files the admitted manifest names. Nothing a
+document says about itself is trusted.
+
+The standalone binary deliberately has no Sigstore/cosign verifier authority.
+If the directory presents any v0.3 offline material --
+`release-provenance.bundle`, `trusted_root.jsonl`, or a
+`release-attestation-<admitted-target>.json` for one of this policy's three
+closed archive targets -- it refuses with `SPX-Z706` instead of
+continuing into the unsigned report. An embedding host that holds a real
+offline verifier may explicitly provide its
+`OfflineBundleVerificationCapability`; the CLI adapter then reads the complete
+bounded inventory and passes its exact bytes to
+`verify_offline_release_with_capability`. A partial inventory still fails as a
+missing document (`SPX-Z705`), and structural bundle framing alone is never a
+cryptographic success claim.
 
 ```sh
 semaprax release verify dist
@@ -322,11 +337,14 @@ module's stable code -- `SPX-Z701` (document shape), `SPX-Z702` (binding:
 altered manifest, provenance for another commit or tag, replayed claim),
 `SPX-Z703` (identity policy: unapproved issuer, repository, or workflow),
 `SPX-Z704` (artifact: missing, resized, or substituted archive) -- plus its
-own `SPX-Z705` when the directory presents no readable document at all. It
+own `SPX-Z705` when the directory presents no readable document at all, and
+`SPX-Z706` when signed offline material is present without a caller-supplied
+verification capability. It
 opens only the exact paths the manifest names, lists no directory, touches
 no network, spawns no process, and never executes or unpacks an artifact.
 
-A successful run prints `status: VERIFIED UNSIGNED RELEASE`. That is a
+A successful run over a directory with no offline bundle material prints
+`status: VERIFIED UNSIGNED RELEASE`. That is a
 successful verification of an **unsigned** release, never evidence that a
 release was signed: no SEMAPRAX release is signed today and no signing key
 or keyless identity exists for this repository. The status is unchanged when

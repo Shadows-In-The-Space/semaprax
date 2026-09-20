@@ -17,6 +17,7 @@ the real dry-run tool invocations.
 """
 
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -212,8 +213,18 @@ class PrepareRefusalTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
     def test_refuses_an_extra_unexpected_file(self):
         package_dir = self.npm_package_dir(self.root)
         (package_dir / "node_modules_cache.bin").write_bytes(b"cache")
-        with self.assertRaises(gpr.Rejected):
-            gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, self.root / "out")
+        output = self.root / "out"
+        with self.assertRaisesRegex(gpr.Rejected, r"non-admitted entry"):
+            gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, output)
+        self.assertFalse(output.exists(), "unadmitted names must fail before creating a preview")
+
+    def test_refuses_too_many_admitted_rust_entries_before_creating_output(self):
+        package_dir = self.rust_package_dir(self.root)
+        (package_dir / "semaprax_native_rust_owned_data_sdk.lib").write_bytes(b"alternate archive")
+        output = self.root / "out"
+        with self.assertRaisesRegex(gpr.Rejected, r"more than 7 admitted entries"):
+            gpr.prepare("rust", package_dir, "frame-payload", "0.1.0", None, output)
+        self.assertFalse(output.exists(), "over-count input must fail before creating a preview")
 
     def test_refuses_a_missing_file(self):
         package_dir = self.npm_package_dir(self.root)
@@ -248,6 +259,64 @@ class PrepareRefusalTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         (package_dir / "nested").mkdir()
         with self.assertRaises(gpr.Rejected):
             gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, self.root / "out")
+
+    def test_bounded_reader_refuses_the_max_plus_one_race_case(self):
+        # A pre-read stat can become stale when an input regular file grows.
+        # The actual read must still take no more than max+1 bytes and refuse.
+        with self.assertRaisesRegex(gpr.Rejected, r"exceeds its admitted byte limit"):
+            gpr._read_bounded(io.BytesIO(b"ab"), 1, "hostile regular file")
+
+    def test_refuses_an_oversized_payload_file_before_creating_output(self):
+        package_dir = self.npm_package_dir(self.root)
+        payload = max(package_dir.iterdir(), key=lambda path: path.stat().st_size)
+        original = payload.read_bytes()
+        payload.write_bytes(original + b"x")
+        output = self.root / "out"
+        with mock.patch.object(gpr, "MAX_PACKAGE_FILE_BYTES", len(original)):
+            with self.assertRaisesRegex(gpr.Rejected, r"exceeds its admitted byte limit"):
+                gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, output)
+        self.assertFalse(output.exists(), "oversized input must fail before creating a preview")
+
+    def test_refuses_a_payload_total_over_its_bounded_budget_before_creating_output(self):
+        package_dir = self.npm_package_dir(self.root)
+        total = sum(path.stat().st_size for path in package_dir.iterdir())
+        output = self.root / "out"
+        with mock.patch.object(gpr, "MAX_PACKAGE_FILE_BYTES", total):
+            with mock.patch.object(gpr, "MAX_PACKAGE_TOTAL_BYTES", total - 1):
+                with self.assertRaisesRegex(gpr.Rejected, r"exceeds its admitted byte limit"):
+                    gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, output)
+        self.assertFalse(output.exists(), "over-budget input must not leave a partial preview")
+
+    def test_refuses_an_oversized_repository_license_before_creating_output(self):
+        package_dir = self.npm_package_dir(self.root)
+        repository = self.root / "repository"
+        repository.mkdir()
+        (repository / "LICENSE").write_bytes(b"xx")
+        output = self.root / "out"
+        with mock.patch.object(gpr, "ROOT", repository):
+            with mock.patch.object(gpr, "MAX_PREVIEW_WRAPPER_BYTES", 1):
+                with self.assertRaisesRegex(gpr.Rejected, r"repository LICENSE exceeds its admitted byte limit"):
+                    gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, output)
+        self.assertFalse(output.exists(), "oversized wrapper input must fail before creating a preview")
+
+    def test_refuses_a_symlinked_repository_license_before_creating_output(self):
+        package_dir = self.npm_package_dir(self.root)
+        repository = self.root / "repository"
+        repository.mkdir()
+        replacement = self.root / "replacement-license"
+        replacement.write_bytes(b"license\n")
+        try:
+            (repository / "LICENSE").symlink_to(replacement)
+        except OSError as error:
+            self.skipTest(f"symlink fixtures are unavailable on this host: {error}")
+        output = self.root / "out"
+        with mock.patch.object(gpr, "ROOT", repository):
+            with self.assertRaisesRegex(
+                gpr.Rejected,
+                r"repository LICENSE (?:cannot be opened without following links|is a symlink)",
+            ):
+                gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, output)
+        self.assertFalse(output.exists(), "linked wrapper input must fail before creating a preview")
 
 
 class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
@@ -295,6 +364,81 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         with self.assertRaises(gpr.Rejected):
             gpr.check("rust", prepared, publish=False)
 
+    def test_check_refuses_an_oversized_prepared_payload_before_tool_dispatch(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        payload = max((prepared / "payload").iterdir(), key=lambda path: path.stat().st_size)
+        original = payload.read_bytes()
+        payload.write_bytes(original + b"x")
+        with mock.patch.object(gpr, "MAX_PACKAGE_FILE_BYTES", len(original)):
+            with mock.patch.object(gpr, "run_closed") as run_closed:
+                with self.assertRaisesRegex(gpr.Rejected, r"exceeds its admitted byte limit"):
+                    gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        run_closed.assert_not_called()
+
+    def test_check_refuses_a_nonadmitted_prepared_payload_name_before_tool_dispatch(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        (prepared / "payload" / "unadmitted-cache").write_bytes(b"x")
+        with mock.patch.object(gpr, "run_closed") as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"non-admitted entry"):
+                gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        run_closed.assert_not_called()
+
+    def test_check_refuses_an_oversized_prepared_wrapper_before_tool_dispatch(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        (prepared / "README.md").write_bytes(b"xx")
+        with mock.patch.object(gpr, "MAX_PREVIEW_WRAPPER_BYTES", 1):
+            with mock.patch.object(gpr, "run_closed") as run_closed:
+                with self.assertRaisesRegex(gpr.Rejected, r"exceeds its admitted byte limit"):
+                    gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        run_closed.assert_not_called()
+
+    def test_check_refuses_an_oversized_prepared_manifest_before_json_parsing(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        (prepared / "package-preview-manifest.json").write_bytes(b"xx")
+        with mock.patch.object(gpr, "MAX_PREVIEW_MANIFEST_BYTES", 1):
+            with mock.patch.object(gpr, "run_closed") as run_closed:
+                with self.assertRaisesRegex(gpr.Rejected, r"exceeds its admitted byte limit"):
+                    gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        run_closed.assert_not_called()
+
+    def test_check_refuses_a_deep_prepared_manifest_before_json_or_tool_dispatch(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        depth = gpr.MAX_PREVIEW_MANIFEST_DEPTH + 1
+        (prepared / "package-preview-manifest.json").write_bytes(
+            b"[" * depth + b"0" + b"]" * depth
+        )
+        with mock.patch.object(gpr.json, "loads") as loads:
+            with mock.patch.object(gpr, "run_closed") as run_closed:
+                with self.assertRaisesRegex(gpr.Rejected, r"JSON nesting depth"):
+                    gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        loads.assert_not_called()
+        run_closed.assert_not_called()
+
+    def test_check_refuses_a_many_node_prepared_manifest_before_json_or_tool_dispatch(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        values = gpr.MAX_PREVIEW_MANIFEST_NODES
+        (prepared / "package-preview-manifest.json").write_bytes(
+            b"[" + b"0," * values + b"0]"
+        )
+        with mock.patch.object(gpr.json, "loads") as loads:
+            with mock.patch.object(gpr, "run_closed") as run_closed:
+                with self.assertRaisesRegex(gpr.Rejected, r"JSON value count"):
+                    gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
+        loads.assert_not_called()
+        run_closed.assert_not_called()
+
     def test_resealed_npm_prepack_payload_is_refused_before_pack_tool(self):
         """A matching attacker-written checksum is not tool-run authority."""
         package_dir = self.npm_package_dir(self.root)
@@ -306,7 +450,7 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         package_json_path.write_text(json.dumps(package_json) + "\n", encoding="utf-8")
         manifest_path = prepared / "package-preview-manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["files"] = gpr.describe_prepared(prepared)
+        manifest["files"] = gpr.describe_prepared(prepared, "npm")
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
         with mock.patch.object(gpr, "run_closed") as run_closed:
@@ -446,7 +590,7 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         (prepared / "payload" / "generated-cache").mkdir()
 
         with mock.patch.object(gpr, "run_closed") as run_closed:
-            with self.assertRaisesRegex(gpr.Rejected, r"generated-cache is not a plain file"):
+            with self.assertRaisesRegex(gpr.Rejected, r"non-admitted entry 'generated-cache'"):
                 gpr.check(
                     "npm",
                     prepared,
@@ -492,7 +636,7 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
         os.mkfifo(prepared / "payload" / "named-pipe")
         with mock.patch.object(gpr, "run_closed") as run_closed:
-            with self.assertRaisesRegex(gpr.Rejected, r"named-pipe is not a plain file"):
+            with self.assertRaisesRegex(gpr.Rejected, r"non-admitted entry 'named-pipe'"):
                 gpr.check("npm", prepared, publish=False, npm_bin=Path("/not-reached/npm"))
         run_closed.assert_not_called()
 

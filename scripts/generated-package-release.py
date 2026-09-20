@@ -17,6 +17,8 @@ Two subcommands:
       Validates DIR's inventory is exactly the closed set of files the chosen
       profile produces (see NPM_OWNED_DATA_FILES / RUST_OWNED_DATA_*), scans
       every byte for secret-shaped and local-host-path-shaped substrings,
+      admits at most 16 MiB per payload file and 32 MiB total before allocating
+      a payload byte buffer,
       checks the Rust crate cannot be published by `cargo publish` (`publish
       = false`, no path/private dependency) and the npm package carries none
       of the supply-chain-risk keys the compiler itself already forbids
@@ -57,6 +59,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PREVIEW_SCHEMA = "semaprax.generated-package-preview.v1"
 _OPEN_SUPPORTS_DIR_FD = os.open in os.supports_dir_fd
+_SCANDIR_SUPPORTS_FD = os.scandir in os.supports_fd
+# Generated packages are untrusted filesystem input until their closed
+# inventory and byte bindings have been verified.  Keep the preview tool's
+# transient memory bounded even when a hostile caller substitutes a large
+# regular file for one of the expected paths.  These are admission limits for
+# the deliberately narrow Project-v8 preview, not claims about a registry
+# package-size policy.
+MAX_PACKAGE_FILE_BYTES = 16 * 1024 * 1024
+MAX_PACKAGE_TOTAL_BYTES = 32 * 1024 * 1024
+MAX_PREVIEW_WRAPPER_BYTES = 1024 * 1024
+# A normal preview manifest is only a few KiB. Keep the hostile-input cap
+# deliberately small, then constrain its syntactic shape before allocating the
+# Python object graph required by json.loads.
+MAX_PREVIEW_MANIFEST_BYTES = 64 * 1024
+MAX_PREVIEW_MANIFEST_DEPTH = 32
+MAX_PREVIEW_MANIFEST_NODES = 256
 PREVIEW_MANIFEST_KEYS = frozenset(
     (
         "schema",
@@ -96,6 +114,27 @@ RUST_OWNED_DATA_ARCHIVE_NAMES = (
 )
 RUST_OWNED_DATA_MANIFEST_NAMES = ("semaprax.native-rust-owned-data-sdk.json",)
 RUST_DESCRIPTOR_FILE = "descriptor.json"
+
+
+def package_inventory_admission(kind):
+    """Return the only payload names and count admitted for one preview kind.
+
+    This admission happens while enumerating a directory, before retaining a
+    caller-controlled name list or opening any child.  The Rust archive name
+    is target-dependent, so both spellings are allowed at this boundary while
+    the exact one-archive inventory is checked after the bounded read.
+    """
+    if kind == "npm":
+        names = frozenset(NPM_OWNED_DATA_FILES)
+        return names, len(names)
+    if kind == "rust":
+        names = frozenset(
+            RUST_OWNED_DATA_FIXED_FILES
+            + RUST_OWNED_DATA_ARCHIVE_NAMES
+            + RUST_OWNED_DATA_MANIFEST_NAMES
+        )
+        return names, len(RUST_OWNED_DATA_FIXED_FILES) + 2
+    reject(f"unknown --kind: {kind!r}")
 
 # This tool must never run near a live publish credential: it has no
 # legitimate use for one, so its presence alone is refused before any file is
@@ -180,6 +219,7 @@ def _descriptor_reads_available():
         hasattr(os, "O_NOFOLLOW")
         and hasattr(os, "O_DIRECTORY")
         and _OPEN_SUPPORTS_DIR_FD
+        and _SCANDIR_SUPPORTS_FD
     )
 
 
@@ -220,7 +260,17 @@ def _lstat_directory(path, label):
     return info
 
 
-def _read_regular_file_fallback(path, label):
+def _read_bounded(source, maximum, label):
+    """Read at most ``maximum`` bytes, refusing instead of allocating more."""
+    if maximum < 0:
+        reject(f"{label} exceeds the remaining package byte budget")
+    data = source.read(maximum + 1)
+    if len(data) > maximum:
+        reject(f"{label} exceeds its admitted byte limit of {maximum} bytes")
+    return data
+
+
+def _read_regular_file_fallback(path, label, maximum):
     """Portable regular-file read with pre/open/post identity checks.
 
     Platforms without descriptor-relative no-follow opens cannot provide the
@@ -229,12 +279,14 @@ def _read_regular_file_fallback(path, label):
     before any optional external tool starts.
     """
     before = _lstat_regular(path, label)
+    if before.st_size > maximum:
+        reject(f"{label} exceeds its admitted byte limit of {maximum} bytes")
     try:
         with open(path, "rb") as source:
             opened = os.fstat(source.fileno())
             if not stat.S_ISREG(opened.st_mode) or _identity(opened) != _identity(before):
                 reject(f"{label} changed while it was opened")
-            data = source.read()
+            data = _read_bounded(source, maximum, label)
     except OSError as error:
         reject(f"{label} cannot be read: {error.strerror}")
     after = _lstat_regular(path, label)
@@ -243,22 +295,38 @@ def _read_regular_file_fallback(path, label):
     return data
 
 
-def _read_flat_directory_fallback(directory, label):
-    """Portable flat-directory read with child and directory identity checks."""
-    before = _lstat_directory(directory, label)
+def _admitted_directory_names(directory, label, allowed_names, maximum_entries):
+    """Stream a flat directory's finite admitted inventory into a small list."""
+    names = []
     try:
-        names = sorted(os.listdir(directory))
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                name = entry.name
+                if name not in allowed_names:
+                    reject(f"{label} inventory contains non-admitted entry {name!r}")
+                if len(names) >= maximum_entries:
+                    reject(f"{label} inventory has more than {maximum_entries} admitted entries")
+                names.append(name)
     except OSError as error:
         reject(f"{label} cannot be listed: {error.strerror}")
-    contents = {
-        name: _read_regular_file_fallback(Path(directory) / name, f"{label}/{name}")
-        for name in names
-    }
+    return sorted(names)
+
+
+def _read_flat_directory_fallback(directory, label, allowed_names, maximum_entries, total_limit=None):
+    """Portable flat-directory read with child and directory identity checks."""
+    if total_limit is None:
+        total_limit = MAX_PACKAGE_TOTAL_BYTES
+    before = _lstat_directory(directory, label)
+    names = _admitted_directory_names(directory, label, allowed_names, maximum_entries)
+    contents = {}
+    total = 0
+    for name in names:
+        maximum = min(MAX_PACKAGE_FILE_BYTES, total_limit - total)
+        data = _read_regular_file_fallback(Path(directory) / name, f"{label}/{name}", maximum)
+        total += len(data)
+        contents[name] = data
     after = _lstat_directory(directory, label)
-    try:
-        names_after = sorted(os.listdir(directory))
-    except OSError as error:
-        reject(f"{label} cannot be listed after read: {error.strerror}")
+    names_after = _admitted_directory_names(directory, label, allowed_names, maximum_entries)
     if _identity(after) != _identity(before) or names_after != names:
         reject(f"{label} changed while its inventory was read")
     return contents
@@ -284,7 +352,7 @@ def _open_directory(path, label, *, directory_fd=None):
         raise
 
 
-def _read_regular_file_at(directory_fd, name, label):
+def _read_regular_file_at(directory_fd, name, label, maximum):
     """Read one regular child through an already-held directory descriptor."""
     _require_descriptor_reads()
     flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
@@ -293,37 +361,46 @@ def _read_regular_file_at(directory_fd, name, label):
     except OSError as error:
         reject(f"{label} cannot be opened without following links: {error.strerror}")
     try:
-        if not stat.S_ISREG(os.fstat(opened).st_mode):
+        info = os.fstat(opened)
+        if not stat.S_ISREG(info.st_mode):
             reject(f"{label} is not a plain file; package inventories admit none")
+        if info.st_size > maximum:
+            reject(f"{label} exceeds its admitted byte limit of {maximum} bytes")
         with os.fdopen(opened, "rb", closefd=False) as source:
-            return source.read()
+            data = _read_bounded(source, maximum, label)
+        if _identity(os.fstat(opened)) != _identity(info):
+            reject(f"{label} changed while it was read")
+        return data
     finally:
         os.close(opened)
 
 
-def _read_flat_directory_at(directory_fd, label):
+def _read_flat_directory_at(directory_fd, label, allowed_names, maximum_entries, total_limit=None):
     """Return exact child bytes from a held flat directory.
 
     Names are enumerated and each file is opened relative to the held
     directory with ``O_NOFOLLOW``. A rename after one file is opened changes
     neither the held descriptor nor the bytes that will be verified.
     """
-    try:
-        names = sorted(os.listdir(directory_fd))
-    except OSError as error:
-        reject(f"{label} cannot be listed through its held descriptor: {error.strerror}")
-    return {
-        name: _read_regular_file_at(directory_fd, name, f"{label}/{name}")
-        for name in names
-    }
+    if total_limit is None:
+        total_limit = MAX_PACKAGE_TOTAL_BYTES
+    names = _admitted_directory_names(directory_fd, label, allowed_names, maximum_entries)
+    contents = {}
+    total = 0
+    for name in names:
+        maximum = min(MAX_PACKAGE_FILE_BYTES, total_limit - total)
+        data = _read_regular_file_at(directory_fd, name, f"{label}/{name}", maximum)
+        total += len(data)
+        contents[name] = data
+    return contents
 
 
-def _read_flat_directory(directory, label):
+def _read_flat_directory(directory, label, allowed_names, maximum_entries, total_limit=None):
     if not _descriptor_reads_available():
-        return _read_flat_directory_fallback(directory, label)
+        return _read_flat_directory_fallback(directory, label, allowed_names, maximum_entries, total_limit)
     directory_fd = _open_directory(directory, label)
     try:
-        return _read_flat_directory_at(directory_fd, label)
+        return _read_flat_directory_at(directory_fd, label, allowed_names, maximum_entries, total_limit)
     finally:
         os.close(directory_fd)
 
@@ -437,10 +514,6 @@ def render_readme(kind, project_name, project_version, commit, descriptor_sha256
     )
 
 
-def payload_manifest(payload_dir):
-    return payload_manifest_from_contents(_read_flat_directory(payload_dir, "payload"))
-
-
 def payload_manifest_from_contents(contents):
     return [
         {"path": f"payload/{name}", "sha256": sha256_hex(data), "size": len(data)}
@@ -448,13 +521,85 @@ def payload_manifest_from_contents(contents):
     ]
 
 
+def _admit_json_complexity(data, label):
+    """Bound JSON parser depth and node fanout before object allocation.
+
+    This intentionally is not a second JSON parser: ``json.loads`` remains
+    authoritative for syntax. It only counts JSON-shaped lexical values and
+    nesting while correctly skipping quoted strings, so a small byte document
+    cannot amplify into an unbounded Python container graph before the exact
+    preview schema is checked.
+    """
+    depth = 0
+    nodes = 0
+    index = 0
+    whitespace = b" \t\r\n"
+    delimiters = b"{}[],:"
+    while index < len(data):
+        byte = data[index]
+        if byte in whitespace or byte in b",:":
+            index += 1
+            continue
+        if byte in b"[{":
+            depth += 1
+            nodes += 1
+            if depth > MAX_PREVIEW_MANIFEST_DEPTH:
+                reject(f"{label} exceeds the admitted JSON nesting depth")
+            if nodes > MAX_PREVIEW_MANIFEST_NODES:
+                reject(f"{label} exceeds the admitted JSON value count")
+            index += 1
+            continue
+        if byte in b"]}":
+            if depth:
+                depth -= 1
+            index += 1
+            continue
+        nodes += 1
+        if nodes > MAX_PREVIEW_MANIFEST_NODES:
+            reject(f"{label} exceeds the admitted JSON value count")
+        if byte == ord('"'):
+            index += 1
+            while index < len(data):
+                byte = data[index]
+                if byte == ord("\\"):
+                    index += 2
+                    continue
+                index += 1
+                if byte == ord('"'):
+                    break
+            continue
+        while (
+            index < len(data)
+            and data[index] not in whitespace
+            and data[index] not in delimiters
+            and data[index] != ord('"')
+        ):
+            index += 1
+
+
 def _parse_json_bytes(data, label):
+    _admit_json_complexity(data, label)
     try:
         return json.loads(data.decode("utf-8"))
     except UnicodeDecodeError:
         reject(f"{label} is not valid UTF-8")
     except json.JSONDecodeError as error:
         reject(f"{label} is not valid JSON: {error}")
+
+
+def _read_repository_license():
+    """Read the checked-in wrapper license under the same bounded rules."""
+    if not _descriptor_reads_available():
+        return _read_regular_file_fallback(
+            ROOT / "LICENSE", "repository LICENSE", MAX_PREVIEW_WRAPPER_BYTES
+        )
+    root_fd = _open_directory(ROOT, "repository root")
+    try:
+        return _read_regular_file_at(
+            root_fd, "LICENSE", "repository LICENSE", MAX_PREVIEW_WRAPPER_BYTES
+        )
+    finally:
+        os.close(root_fd)
 
 
 def prepare(kind, package_dir, project_name, project_version, commit, output_dir):
@@ -468,7 +613,10 @@ def prepare(kind, package_dir, project_name, project_version, commit, output_dir
     if not project_name or not project_version:
         reject("--project-name and --project-version must not be empty")
 
-    contents = _read_flat_directory(package_dir, "package directory")
+    allowed_names, maximum_entries = package_inventory_admission(kind)
+    contents = _read_flat_directory(
+        package_dir, "package directory", allowed_names, maximum_entries
+    )
     names = sorted(contents)
     forbidden_substrings = local_path_substrings(package_dir)
 
@@ -482,9 +630,6 @@ def prepare(kind, package_dir, project_name, project_version, commit, output_dir
     elif kind == "rust":
         expected_rust_inventory(names)
         descriptor_file = RUST_DESCRIPTOR_FILE
-    else:
-        reject(f"unknown --kind: {kind!r}")
-
     for name in names:
         data = contents[name]
         scan_bytes(name, data, forbidden_substrings)
@@ -499,6 +644,7 @@ def prepare(kind, package_dir, project_name, project_version, commit, output_dir
         toolchain = f"node {node_engine_requirement(package_json)}"
 
     descriptor_sha256 = sha256_hex(contents[descriptor_file])
+    license_bytes = _read_repository_license()
 
     payload_dir = output_dir / "payload"
     output_dir.mkdir(parents=True)
@@ -509,7 +655,6 @@ def prepare(kind, package_dir, project_name, project_version, commit, output_dir
     readme = render_readme(kind, project_name, project_version, commit, descriptor_sha256, toolchain)
     (output_dir / "README.md").write_text(readme, encoding="utf-8")
     scan_bytes("README.md", readme.encode("utf-8"), forbidden_substrings)
-    license_bytes = (ROOT / "LICENSE").read_bytes()
     (output_dir / "LICENSE").write_bytes(license_bytes)
 
     manifest = {
@@ -523,7 +668,7 @@ def prepare(kind, package_dir, project_name, project_version, commit, output_dir
         "status": "preview-unpublished",
         "registry_write_performed": False,
         "files": sorted(
-            payload_manifest(payload_dir)
+            payload_manifest_from_contents(contents)
             + [
                 {"path": "README.md", "sha256": sha256_hex(readme.encode("utf-8")), "size": len(readme.encode("utf-8"))},
                 {"path": "LICENSE", "sha256": sha256_hex(license_bytes), "size": len(license_bytes)},
@@ -537,10 +682,11 @@ def prepare(kind, package_dir, project_name, project_version, commit, output_dir
     return manifest
 
 
-def _read_prepared(prepared_dir):
+def _read_prepared(prepared_dir, kind):
     """Read a prepared bundle once through held, no-follow descriptors."""
+    allowed_names, maximum_entries = package_inventory_admission(kind)
     if not _descriptor_reads_available():
-        return _read_prepared_fallback(prepared_dir)
+        return _read_prepared_fallback(prepared_dir, allowed_names, maximum_entries)
     root_fd = _open_directory(prepared_dir, "--prepared-dir")
     try:
         manifest = _parse_json_bytes(
@@ -548,16 +694,24 @@ def _read_prepared(prepared_dir):
                 root_fd,
                 "package-preview-manifest.json",
                 "prepared package-preview-manifest.json",
+                MAX_PREVIEW_MANIFEST_BYTES,
             ),
             "prepared package-preview-manifest.json",
         )
         wrappers = {
-            name: _read_regular_file_at(root_fd, name, f"prepared {name}")
+            name: _read_regular_file_at(
+                root_fd,
+                name,
+                f"prepared {name}",
+                MAX_PREVIEW_WRAPPER_BYTES,
+            )
             for name in ("README.md", "LICENSE")
         }
         payload_fd = _open_directory("payload", "prepared payload/", directory_fd=root_fd)
         try:
-            payload = _read_flat_directory_at(payload_fd, "prepared payload")
+            payload = _read_flat_directory_at(
+                payload_fd, "prepared payload", allowed_names, maximum_entries
+            )
         finally:
             os.close(payload_fd)
     finally:
@@ -570,21 +724,28 @@ def _read_prepared(prepared_dir):
     return manifest, sorted(entries, key=lambda entry: entry["path"]), payload
 
 
-def _read_prepared_fallback(prepared_dir):
+def _read_prepared_fallback(prepared_dir, allowed_names, maximum_entries):
     """Read one prepared view using the portable identity-checked fallback."""
     root_before = _lstat_directory(prepared_dir, "--prepared-dir")
     manifest = _parse_json_bytes(
         _read_regular_file_fallback(
             Path(prepared_dir) / "package-preview-manifest.json",
             "prepared package-preview-manifest.json",
+            MAX_PREVIEW_MANIFEST_BYTES,
         ),
         "prepared package-preview-manifest.json",
     )
     wrappers = {
-        name: _read_regular_file_fallback(Path(prepared_dir) / name, f"prepared {name}")
+        name: _read_regular_file_fallback(
+            Path(prepared_dir) / name,
+            f"prepared {name}",
+            MAX_PREVIEW_WRAPPER_BYTES,
+        )
         for name in ("README.md", "LICENSE")
     }
-    payload = _read_flat_directory_fallback(Path(prepared_dir) / "payload", "prepared payload")
+    payload = _read_flat_directory_fallback(
+        Path(prepared_dir) / "payload", "prepared payload", allowed_names, maximum_entries
+    )
     root_after = _lstat_directory(prepared_dir, "--prepared-dir")
     if _identity(root_after) != _identity(root_before):
         reject("--prepared-dir changed while it was read")
@@ -655,9 +816,9 @@ def _validate_prepared_manifest(kind, manifest, recomputed, payload, prepared_di
         validate_rust_cargo_toml(cargo_toml_text)
 
 
-def describe_prepared(prepared_dir):
+def describe_prepared(prepared_dir, kind):
     """Recompute digests from one held physical prepared-directory view."""
-    _, entries, _ = _read_prepared(prepared_dir)
+    _, entries, _ = _read_prepared(prepared_dir, kind)
     return entries
 
 
@@ -668,6 +829,54 @@ def _write_all(file_descriptor, data):
         if written <= 0:
             reject("private verified snapshot write did not make progress")
         view = view[written:]
+
+
+def _verify_snapshot_payload(snapshot_payload, expected):
+    """Re-read a private snapshot one bounded file at a time.
+
+    ``expected`` already holds the verified payload. Retaining a second
+    directory-sized mapping while checking the snapshot would double the
+    32 MiB admission budget, so retain only one file's bounded read at once.
+    Both directory-read variants retain their usual no-follow/identity rules.
+    """
+    label = "private verified snapshot payload"
+    allowed_names = frozenset(expected)
+    expected_names = sorted(expected)
+    maximum_entries = len(expected_names)
+    if _descriptor_reads_available():
+        directory_fd = _open_directory(snapshot_payload, label)
+        try:
+            names = _admitted_directory_names(
+                directory_fd, label, allowed_names, maximum_entries
+            )
+            if names != expected_names:
+                reject("private verified snapshot inventory disagrees with the checked payload")
+            for name in names:
+                copied = _read_regular_file_at(
+                    directory_fd, name, f"{label}/{name}", len(expected[name])
+                )
+                if copied != expected[name]:
+                    reject("private verified snapshot bytes disagree with the checked payload")
+        finally:
+            os.close(directory_fd)
+        return
+
+    before = _lstat_directory(snapshot_payload, label)
+    names = _admitted_directory_names(snapshot_payload, label, allowed_names, maximum_entries)
+    if names != expected_names:
+        reject("private verified snapshot inventory disagrees with the checked payload")
+    for name in names:
+        copied = _read_regular_file_fallback(
+            Path(snapshot_payload) / name, f"{label}/{name}", len(expected[name])
+        )
+        if copied != expected[name]:
+            reject("private verified snapshot bytes disagree with the checked payload")
+    after = _lstat_directory(snapshot_payload, label)
+    names_after = _admitted_directory_names(
+        snapshot_payload, label, allowed_names, maximum_entries
+    )
+    if _identity(after) != _identity(before) or names_after != names:
+        reject("private verified snapshot changed while it was read")
 
 
 def _write_verified_snapshot(root, payload):
@@ -681,9 +890,7 @@ def _write_verified_snapshot(root, payload):
             _write_all(descriptor, data)
         finally:
             os.close(descriptor)
-    copied = _read_flat_directory(snapshot_payload, "private verified snapshot payload")
-    if copied != payload:
-        reject("private verified snapshot bytes disagree with the checked payload")
+    _verify_snapshot_payload(snapshot_payload, payload)
     return snapshot_payload
 
 
@@ -806,7 +1013,7 @@ def check(kind, prepared_dir, publish, npm_bin=None, cargo_bin=None):
         )
     assert_no_credential_env(os.environ)
     prepared_dir = Path(prepared_dir)
-    on_disk, recomputed, payload = _read_prepared(prepared_dir)
+    on_disk, recomputed, payload = _read_prepared(prepared_dir, kind)
     _validate_prepared_manifest(kind, on_disk, recomputed, payload, prepared_dir)
 
     report = ["generated-package-release check: manifest and on-disk digests agree"]

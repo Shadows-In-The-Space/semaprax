@@ -129,18 +129,17 @@ adapter, span export, or a claim that any observability profile is supported.
 `std.log` remains deliberately absent and is not represented as a supported
 fallback by this reference application.
 
-**This project's manifest does not qualify for `semaprax build --target
-oci`.** [OCI Deployable Artifact v1](OCI-DEPLOYABLE-ARTIFACT-V1.md) is
-implemented only for a Project manifest carrying the frozen
-`semaprax.project.v1` schema under the `ScalarV1` profile. This project uses
-`schema = "semaprax.manifest.v1"` (the extensible Useful Data Export v1
-table-format manifest, required by its `[dependencies]`/`[exports]` sections)
-under the `useful-data.v1` profile -- a different schema and profile
-entirely. Running `semaprax build --target oci examples/task-service-project`
-refuses closed with `SPX-J142` ("the oci target requires the Project v1
-scalar profile; no other profile is wired to OCI packaging"), exactly as
-documented. Qualifying would mean rewriting this project onto the older
-flat `semaprax.project.v1` schema, which has no `[dependencies]` table and
-therefore cannot express this project's `std.auth`/`std.jobs` composition at
-all -- the two are mutually exclusive today, not a gap in this project's
-authoring.
+**This project's manifest qualifies for a deterministic local OCI artifact.**
+`semaprax build --target oci examples/task-service-project --output <new-dir>`
+replays this Project v3 Useful Data package's exact carrier, then writes an
+OCI Image Layout whose sole layer is its verified `app.wasm`. The layout is
+bound to this manifest's project/workspace/graph revisions and selected entry
+module. It is an OCI artifact, not a runnable container image: it has no base
+image, root filesystem, entrypoint, database adapter, network configuration,
+registry push, signature, or publication claim. The fixture-mode service
+remains a source-level policy product; packaging it never grants host
+authority to run a database, bind a socket, read a secret, or start a job.
+
+This support is exact to `useful-data.v1` on the Project v3 route used by this
+manifest. It does not make the generic npm target, Useful Data v2, or another
+Project profile an OCI input.

@@ -1,8 +1,9 @@
 # OCI Deployable Artifact v1
 
-Status: implemented for the Project v1 scalar profile only; not wired to any
-other Project profile, not signed, and not published anywhere. Local evidence
-only -- see [Evidence and nonclaims](#evidence-and-nonclaims).
+Status: implemented for exactly the Project v1 scalar and Project v3 Useful
+Data v1 profiles; not wired to any other Project profile, not signed, and not
+published anywhere. Local evidence only -- see [Evidence and
+nonclaims](#evidence-and-nonclaims).
 
 GitHub issue [#194](https://github.com/wavect/semaprax/issues/194) asks for a
 deployable-artifact route out of a checked SEMAPRAX project. Before this
@@ -57,14 +58,22 @@ semaprax build --target oci <project-manifest-or-directory> [--output <dir>]
 ```
 
 `--output` must not already exist; this route never overwrites or merges into
-an existing directory. Today this target only accepts a Project manifest
-carrying the default (frozen) `semaprax.project.v1` schema under the
-`ScalarV1` profile -- the same profile
-[`build_web_inline`](AGENT-QUICK-REFERENCE.md) already restricts its pathless
-route to. Every other Project profile (the npm/owned-data/command profiles,
-v2 through v19) is refused with `SPX-J142` rather than silently downgraded to
-a partial artifact; extending this route to them is open follow-up scope, not
-implemented here.
+an existing directory. Today it admits exactly two source-carrier routes:
+
+- the default frozen `semaprax.project.v1` schema under `ScalarV1`, replayed
+  from its pathless scalar-Web carrier; and
+- `semaprax.project.v3` under `UsefulDataV1`, replayed from its exact
+  schema-selected Useful Data npm carrier.
+
+The latter is an exact profile seam, not a generic npm-to-OCI conversion. Its
+carrier replay rechecks the closed artifact inventory, every artifact byte and
+digest, the canonical package metadata, and the retained Project v3 subject
+before its first `app.wasm` artifact can become the OCI layer. The selected
+entry module comes from the authenticated snapshot; the recovered project
+revision commits to the manifest that selected it. Every other Project profile
+(including Useful Data v2 and the other npm/owned-data/command profiles) is
+refused with `SPX-J142` rather than silently downgraded to a partial artifact;
+extending this route to them is open follow-up scope, not implemented here.
 
 ## Layout
 
@@ -174,11 +183,13 @@ under any name.
 ```
 
 The five identity fields (`project`, `project_revision`, `workspace_revision`,
-`project_graph_digest`, `entry_module`) are exactly the identity fields
-already carried in the Project v1 Web build envelope
-(`semaprax.project-web-build.v1`, see `src/wasm.rs`); this capsule derives its
-config from that envelope rather than recomputing them, so the OCI artifact's
-identity and the Web build's identity can never silently drift apart.
+`project_graph_digest`, `entry_module`) come from one completely replayed
+profile-selected carrier: the Project v1 scalar Web-build carrier or the
+Project v3 Useful Data npm carrier. In the latter case the snapshot provides
+the entry module, while the carrier's recovered project revision commits to
+the manifest that selected that entry. This keeps the OCI artifact identity
+bound to the exact checked Project subject rather than recomputing identity
+from loosely parsed source.
 
 ## Determinism
 
@@ -259,7 +270,8 @@ build tests.
 
 This capsule makes no claim about:
 
-- any Project profile other than `ScalarV1` (Project v1);
+- any Project profile other than `ScalarV1` (Project v1) and `UsefulDataV1`
+  (Project v3);
 - native-executable packaging (only the Wasm module is ever packaged: native
   code generation is not documented as deterministic the way Wasm bytes are,
   see `AGENTS.md`'s invariant list, so this route never packages it);

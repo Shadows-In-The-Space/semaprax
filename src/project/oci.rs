@@ -1,18 +1,21 @@
-//! Glue between the compiler's Project v1 scalar Web build envelope and the
-//! standalone, dependency-inverted `semaprax-oci-package` crate.
+//! Glue between the compiler's selected, replayable scalar-Web or Useful Data
+//! npm build envelope and the standalone, dependency-inverted
+//! `semaprax-oci-package` crate.
 //!
 //! This module owns no OCI rendering or publication logic itself -- that
 //! authority lives entirely in `semaprax-oci-package`, which knows neither
 //! HIR nor Project manifests. This module's only job is to independently
-//! replay an already-produced [`ProjectWebBuild`] envelope, extract its
-//! identity and `app.wasm` artifact, and hand them across that boundary
-//! exactly as received. See `docs/OCI-DEPLOYABLE-ARTIFACT-V1.md`.
+//! replay an already-produced carrier, extract its identity and `app.wasm`
+//! artifact, and hand them across that boundary exactly as received. The npm
+//! route is deliberately an exact Project v3 Useful Data seam, not a general
+//! npm-to-OCI converter. See `docs/OCI-DEPLOYABLE-ARTIFACT-V1.md`.
 
 use std::path::Path;
 
 use serde_json::Value;
 
 use crate::diagnostic::Diagnostic;
+use crate::project::ProjectNpmBuild;
 use crate::wasm::ProjectWebBuild;
 
 fn error(code: &'static str, message: impl Into<String>) -> Diagnostic {
@@ -113,6 +116,40 @@ pub(super) fn build_and_publish(
         wasm_bytes,
         wasm_sha256,
     };
+    publish(plan, output)
+}
+
+/// Independently replay the one admitted Project v3 Useful Data package
+/// carrier and publish its already-verified `app.wasm` as the OCI artifact's
+/// sole content layer. The snapshot supplies `entry_module`; the recovered
+/// project revision commits to the manifest that selected it.
+pub(super) fn build_and_publish_useful_data_v1(
+    build: &ProjectNpmBuild,
+    entry_module: &str,
+    output: &Path,
+) -> Result<semaprax_oci_package::OciBundle, Diagnostic> {
+    let subject = build.useful_data_v1_oci_subject().map_err(|_| {
+        error(
+            "SPX-J145",
+            "OCI packaging input failed independent Useful Data package replay",
+        )
+    })?;
+    let plan = semaprax_oci_package::OciPlan {
+        project_name: subject.project_name,
+        project_revision: subject.project_revision,
+        workspace_revision: subject.workspace_revision,
+        project_graph_digest: subject.project_graph_digest,
+        entry_module: entry_module.to_owned(),
+        wasm_bytes: subject.wasm_bytes,
+        wasm_sha256: subject.wasm_sha256,
+    };
+    publish(plan, output)
+}
+
+fn publish(
+    plan: semaprax_oci_package::OciPlan,
+    output: &Path,
+) -> Result<semaprax_oci_package::OciBundle, Diagnostic> {
     semaprax_oci_package::build_and_publish(plan, output)
         .map_err(|_| error("SPX-J144", "OCI artifact publication failed"))
 }

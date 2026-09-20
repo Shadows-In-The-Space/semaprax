@@ -221,7 +221,10 @@ fn build_product(target: &str, profile: project::ProjectProfile) -> &'static str
         ("npm", project::ProjectProfile::NetworkCommandIoV1) => "Project v12 network npm package",
         ("npm", project::ProjectProfile::HttpsCommandIoV1) => "Project v13 HTTPS npm package",
         ("npm", _) => "Project v2 npm package",
-        ("oci", _) => "Project v1 OCI deployable artifact",
+        ("oci", project::ProjectProfile::UsefulDataV1) => {
+            "Project v3 Useful Data OCI deployable artifact"
+        }
+        ("oci", _) => "Project v1 scalar OCI deployable artifact",
         _ => "project web package",
     }
 }

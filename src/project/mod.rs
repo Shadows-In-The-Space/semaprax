@@ -934,19 +934,31 @@ impl ProjectSnapshot {
             .map_err(|drift| self.publication_uncertainty(drift))
     }
 
-    /// Build and publish the Project v1 scalar profile as one deterministic,
-    /// offline OCI Image Layout carrying the project's Wasm module as its
-    /// sole content artifact. See `docs/OCI-DEPLOYABLE-ARTIFACT-V1.md`.
+    /// Build and publish one admitted profile as a deterministic, offline OCI
+    /// Image Layout carrying the project's already-verified Wasm module as its
+    /// sole content artifact. Project v1 scalar and Project v3 Useful Data
+    /// have separate replayed carrier bridges; no other profile is admitted.
+    /// See `docs/OCI-DEPLOYABLE-ARTIFACT-V1.md`.
     pub fn build_oci(&mut self, output: &Path) -> Result<(), Vec<Diagnostic>> {
-        if self.manifest.project_profile() != ProjectProfile::ScalarV1 {
-            return Err(vec![Diagnostic::io(
-                "SPX-J142",
-                "the oci target requires the Project v1 scalar profile; no other profile is wired to OCI packaging",
-            )]);
+        match self.manifest.project_profile() {
+            ProjectProfile::ScalarV1 => {
+                let build = self.build_web_inline(MAX_PROJECT_WEB_BUILD_BYTES)?;
+                self.recheck()?;
+                oci::build_and_publish(&build, output).map_err(|error| vec![error])?;
+            }
+            ProjectProfile::UsefulDataV1 => {
+                let build = self.build_npm_inline(MAX_PROJECT_NPM_BUILD_BYTES)?;
+                self.recheck()?;
+                oci::build_and_publish_useful_data_v1(&build, self.manifest.entry(), output)
+                    .map_err(|error| vec![error])?;
+            }
+            _ => {
+                return Err(vec![Diagnostic::io(
+                    "SPX-J142",
+                    "the oci target requires the Project v1 scalar or Project v3 Useful Data profile; no other profile is wired to OCI packaging",
+                )]);
+            }
         }
-        let build = self.build_web_inline(MAX_PROJECT_WEB_BUILD_BYTES)?;
-        self.recheck()?;
-        oci::build_and_publish(&build, output).map_err(|error| vec![error])?;
         self.published_subject = Some(OCI_PUBLICATION_SUBJECT);
         self.recheck()
             .map_err(|drift| self.publication_uncertainty(drift))

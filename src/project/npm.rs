@@ -31,6 +31,7 @@ use crate::diagnostic::{quote_json, Diagnostic};
 
 use super::{ProjectManifest, PROJECT_PROFILE_USEFUL_TEXT_CONSUMER_V1};
 
+pub(in crate::project) use carrier::UsefulDataOciSubject;
 use carrier::{
     artifact, json_string, payload_digest, payload_digest_artifacts_v11,
     payload_digest_artifacts_v12, payload_digest_artifacts_v2, payload_digest_artifacts_v3,

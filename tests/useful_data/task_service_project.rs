@@ -137,6 +137,71 @@ fn check_test_and_run_pass_on_the_interpreter() {
     .unwrap();
 }
 
+/// The real Useful Data reference application is an admitted OCI input only
+/// through its exact replayed Project v3 npm carrier. This checks the service
+/// route itself rather than inferring support from the older scalar OCI test:
+/// the resulting layout has exactly the service's verified Wasm layer and
+/// declares every non-runnable/non-publishing boundary in its config.
+#[test]
+fn useful_data_service_publishes_an_oci_artifact_from_its_replayed_package() {
+    let scratch = scratch("oci");
+    let output = scratch.join("layout");
+    project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
+        snapshot.check()?;
+        snapshot.build_oci(&output)?;
+        Ok(())
+    })
+    .expect("the Project v3 Useful Data service must publish its exact OCI artifact");
+
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output.join("index.json")).unwrap()).unwrap();
+    let manifest_digest = index["manifests"][0]["digest"]
+        .as_str()
+        .expect("the OCI index must contain one manifest digest");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            output
+                .join("blobs")
+                .join("sha256")
+                .join(manifest_digest.trim_start_matches("sha256:")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let config_digest = manifest["config"]["digest"]
+        .as_str()
+        .expect("the OCI manifest must bind its config");
+    let config: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            output
+                .join("blobs")
+                .join("sha256")
+                .join(config_digest.trim_start_matches("sha256:")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(config["project"], "task-service");
+    assert_eq!(config["entry_module"], "task_service.app");
+    assert_eq!(manifest["layers"].as_array().unwrap().len(), 1);
+    let nonclaims = config["nonclaims"].as_array().unwrap();
+    for nonclaim in [
+        "not_a_runnable_container_image",
+        "no_base_layer",
+        "no_operating_system_rootfs",
+        "unsigned",
+        "not_published",
+    ] {
+        assert!(
+            nonclaims
+                .iter()
+                .any(|value| value.as_str() == Some(nonclaim)),
+            "OCI config must retain `{nonclaim}`"
+        );
+    }
+    let _ = std::fs::remove_dir_all(scratch);
+}
+
 /// The manifest's declared `[exports].web` roots are real public functions
 /// reachable in the retained revision's semantic graph, the same shape
 /// `tests/useful_data/agent_response_project.rs` asserts for its sibling

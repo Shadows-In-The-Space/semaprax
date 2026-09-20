@@ -682,8 +682,9 @@ module test.resumable_effects_yield;
 fn ask(seed: i64) -> i64
     yields i64 -> i64
 {
-    let answer = yield seed + 1;
-    answer * 2
+    let first = yield seed + 1;
+    let second = yield first + 2;
+    first + second
 }
 @id("app.main")
 fn main() -> i64 { 0 }
@@ -705,14 +706,14 @@ fn main() -> i64 { 0 }
     // `yields` clause plus the `yield` expression both survive it.
     let once = crate::format::canonical(&program);
     assert!(once.contains("yields i64 -> i64"));
-    assert!(once.contains("yield "));
+    assert_eq!(once.matches("yield ").count(), 2);
     let reparsed = parse(&once, Path::new("resumable-effects-yield.spx")).unwrap();
     let twice = crate::format::canonical(&reparsed);
     assert_eq!(once, twice, "canonical formatting must be idempotent");
 
     // Semantic graph carries the new construct.
     let graph_json = crate::graph::to_json(&program).expect("graph projection succeeds");
-    assert!(graph_json.contains("\"kind\":\"yield\""));
+    assert_eq!(graph_json.matches("\"kind\":\"yield\"").count(), 2);
     assert!(graph_json.contains("\"request_type_id\""));
 
     // Both codegen backends refuse explicitly, with a dedicated diagnostic

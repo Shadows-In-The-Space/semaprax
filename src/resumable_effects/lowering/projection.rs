@@ -44,39 +44,74 @@ pub(super) fn start_projection(
 pub(super) fn resume_projection(
     program: &ResolvedProgram,
     function: &ResolvedFunction,
-    yield_expression: &ResolvedExpr,
-    position: ResumableYieldPosition,
+    sites: &[YieldSite<'_>],
+    index: usize,
 ) -> Result<ResolvedFunction, Diagnostic> {
     let mut projected = function.clone();
     projected.yields = None;
-    // The request/start projection has already replayed the prefix and checked
-    // the recorded request. Running requires a second time here would double
-    // the authored contract rather than resume from the checked suspension.
+    // The start projection owns the authored precondition. Each intermediate
+    // projection replays pure scalar history and returns the next request.
     projected.requires.clear();
     let execution = FunctionExecutionId::Monomorphic(function.id.clone());
-    let answer_id = ValueId::parameter(&execution, projected.params.len());
-    let answer = ResolvedParam {
-        id: answer_id.clone(),
-        name: "__semaprax_resumable_answer".to_owned(),
-        ownership: OwnershipMode::Value,
-        ty: yield_expression.ty.clone(),
-        span: yield_expression.span,
-    };
-    projected.params.push(answer.clone());
-    let answer_expression = ResolvedExpr {
-        // The answer occupies the exact authored yield slot, so the slot's
-        // canonical expression identity remains canonical after replacement.
-        id: yield_expression.id.clone(),
-        ty: yield_expression.ty.clone(),
-        ownership: OwnershipMode::Value,
-        kind: ResolvedExprKind::Place(Place {
-            root: answer_id,
-            projections: Vec::new(),
-        }),
-        span: yield_expression.span,
-    };
-    replace_direct_yield(&mut projected.body, position, answer_expression)?;
-    rebuild_projection_plans(program, projected)
+    for (answer_index, (yield_expression, request, position)) in sites[..=index].iter().enumerate()
+    {
+        let answer_id = ValueId::parameter(&execution, projected.params.len());
+        projected.params.push(ResolvedParam {
+            id: answer_id.clone(),
+            name: if answer_index == 0 {
+                "__semaprax_resumable_answer".to_owned()
+            } else {
+                format!("__semaprax_resumable_answer_{answer_index}")
+            },
+            ownership: OwnershipMode::Value,
+            ty: yield_expression.ty.clone(),
+            span: yield_expression.span,
+        });
+        let answer_expression = ResolvedExpr {
+            id: yield_expression.id.clone(),
+            ty: yield_expression.ty.clone(),
+            ownership: OwnershipMode::Value,
+            kind: ResolvedExprKind::Place(Place {
+                root: answer_id,
+                projections: Vec::new(),
+            }),
+            span: yield_expression.span,
+        };
+        // Request evaluation can mutate Copy locals. Replaying its value is
+        // necessary even though the already supplied answer replaces yield.
+        let path = match position {
+            ResumableYieldPosition::Statement { index, .. } => format!("body.s{index}.value"),
+            ResumableYieldPosition::Tail => "body.tail".to_owned(),
+        };
+        let mut replacement = ResolvedExpr {
+            id: yield_expression.id.clone(),
+            ty: yield_expression.ty.clone(),
+            ownership: OwnershipMode::Value,
+            kind: ResolvedExprKind::Block {
+                statements: vec![ResolvedStatement::Let {
+                    binding: hir::ResolvedBinding {
+                        id: ValueId::local(&execution, &format!("{path}.s0")),
+                        name: "__semaprax_resumable_request".to_owned(),
+                        ownership: OwnershipMode::Value,
+                        ty: request.ty.clone(),
+                        span: request.span,
+                    },
+                    mutable: false,
+                    value: (*request).clone(),
+                    span: request.span,
+                }],
+                tail: Box::new(answer_expression),
+            },
+            span: yield_expression.span,
+        };
+        relocate_expression(&mut replacement, &execution, &path, &BTreeMap::new())?;
+        replace_direct_yield(&mut projected.body, *position, replacement)?;
+    }
+    if let Some((_, request, position)) = sites.get(index + 1) {
+        start_projection(program, &projected, request, *position)
+    } else {
+        rebuild_projection_plans(program, projected)
+    }
 }
 
 fn replace_direct_yield(

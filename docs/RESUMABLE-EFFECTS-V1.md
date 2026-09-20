@@ -18,9 +18,9 @@ different in kind:
 - The admitted `.spx` `yields`/`yield` slice — parser, canonical formatter,
   resolver/HIR, verifier, semantic graph, native backend and Wasm backend,
   landed together.
-- `resumable_effects::lowering` — one deterministic three-state HIR plan for
-  that existing slice, including independently validated yield-free request
-  and resume projections. It does not widen source admission.
+- `resumable_effects::lowering` — one deterministic ordered-state HIR plan for
+  one to eight direct sequential yield sites, including independently
+  validated yield-free start and per-site resume projections.
 - `interpreter::resumable` — the public compiler engine that executes the
   source suspension and consumes the plan's state and invocation identities.
 - `resumable_effects::backend` — `cfg(test)`-only, crate-private parity runners
@@ -315,16 +315,19 @@ failure case #204 names explicitly).
 
 ## Compiler-owned lowering and private backend parity
 
-`src/resumable_effects/lowering.rs` derives one `ResumablePlan` from the exact
-checked HIR program. The plan has explicit `entry`, `suspended` and `complete`
-state identities, the authored yield-site identity and type pair, and two
-yield-free HIR programs:
+`src/resumable_effects/lowering.rs` derives a `SequentialResumablePlan` from
+the exact checked HIR program. The plan has explicit `entry`, per-site
+`suspended` and `complete` state identities, every authored yield-site identity
+and type pair, and an ordered family of yield-free HIR programs. The original
+one-site `ResumablePlan` shape and `lower` entry point remain intact;
+`lower_sequential` is the additive multi-site surface:
 
 - the **start/request projection** evaluates the authored precondition and
   prefix, then returns the request instead of crossing the yield;
-- the **resume projection** adds one compiler-owned answer parameter, replays
-  the pure scalar prefix with that answer in the authored yield slot, and
-  evaluates the authored suffix and postcondition.
+- each **resume projection** adds the ordered compiler-owned answers through
+  one site, replays the pure scalar prefix (including request evaluation), and
+  either returns the next request or evaluates the final suffix and
+  postcondition. The bound is eight sites to cap the precomputed HIR family.
 
 Both projections rebuild loan and cleanup proof attachments and pass ordinary
 HIR validation before any backend sees them. Moving a request subtree also
@@ -340,16 +343,16 @@ Copy-scalar profile with no owned cleanup; authored nominal/authority declaratio
 generic calls and function references remain outside this projection.
 
 The plan identity commits to deterministic checked-HIR bytes, the selected
-function and the yield site. A pending suspension additionally binds that
-identity, the suspended-state and yield-site identities, and the exact tagged
-bits of every original scalar argument. Request equality is insufficient:
+function and the ordered yield sites. A pending suspension additionally binds
+that identity, its suspended-state/site identity, the exact tagged bits of
+every original scalar argument, and every prior answer. Request equality is insufficient:
 `yield 0; answer + seed` can produce the same request for two invocations whose
 suffix result differs. A state or binding mismatch fails closed with
 `SPX-F115`; the digest is proof data and confers no authority.
 
 `src/resumable_effects/backend/` is compiled only under `cfg(test)` and is
-crate-private. Its runners replay the request projection and compare exact
-request bits before executing the resume projection through the real C/native
+crate-private. Its runners replay each recorded request projection and compare
+exact request bits before executing the current resume projection through the real C/native
 and Core Wasm generators. The test process explicitly uses local temporary
 storage plus `clang`/Node from its environment; none of that ambient authority
 is present in a production library build or granted to generated code. This
@@ -373,8 +376,11 @@ neither of which this tranche adds.
 
 ## Interpreter execution
 
-`src/interpreter/resumable.rs` is the first engine that runs an `.spx`
-suspension. Its whole public surface is two functions:
+`src/interpreter/resumable.rs` runs `.spx` suspensions. The exhaustively
+matchable legacy one-site `ResumableStep` and its start/resume functions remain
+unchanged and reject multi-site input. Multi-site programs use the additive
+`SequentialResumableStep`, an opaque in-memory `ResumableContinuation`, and
+explicit sequential start/resume functions:
 
 ```text
 run_resumable_effect(program, function_id, arguments, max_steps)
@@ -384,6 +390,14 @@ resume_resumable_effect(
     program, function_id, arguments, state, binding, request, answer, max_steps
 )
     -> Completed { state, result } | ...
+run_sequential_resumable_effect(program, function_id, arguments, max_steps)
+    -> Suspended { continuation }
+     | Completed { state, result } | LanguageFailure | ...
+resume_sequential_resumable_effect(
+    program, function_id, arguments, continuation, answer, max_steps
+)
+    -> Suspended { continuation }
+     | Completed { state, result } | LanguageFailure | ...
 ```
 
 **How a resume works, and why it is sound here.** A suspension is resumed by
@@ -395,9 +409,11 @@ original prefix: a `yields`-declaring function may declare no `uses` effects
 (`SPX-T302`), so the replayed prefix contacts no host and can redispatch
 nothing; every parameter and intermediate value is an admitted Copy scalar
 (`SPX-T301`/`SPX-T303`), so nothing owned is live across the suspension and
-the replay allocates and frees nothing; and exactly one `yield` exists, at the
-function's own top level (`SPX-T297`/`SPX-T298`), so control cannot branch
-around or repeat the yield site. Finally, lowering rejects a reachable
+the replay allocates and frees nothing; and one to eight `yield` sites execute
+in authored top-level sequence (`SPX-T297`/`SPX-T298`), so control cannot branch
+around or repeat a site. The opaque continuation carries prior scalar
+request/answer pairs; its binding commits prior answer bits, and replay checks
+every historical request before consuming the current answer. Finally, lowering rejects a reachable
 `yields` callee, so the call closure cannot hide a second suspension. Widening
 any of those restrictions invalidates this execution model and requires a
 general continuation lowering.
@@ -409,8 +425,8 @@ same `RequestDrift` discipline `resumable_effects::core` enforces at the
 reference level, now applied to real source. Request comparison is the second
 check, not the identity check: before replay, the suspension's `state` and
 `binding` must match the exact checked program, yield site and bit-exact
-original arguments (`SPX-F115`). This rejects different arguments even when
-they deliberately compute the same request.
+original arguments and prior answer bits (`SPX-F115`). This rejects different
+arguments or histories even when they deliberately compute the same request.
 
 **A resumed computation is checked, not trusted.** Both the recorded request
 and the supplied answer are checked against the function's declared
@@ -436,9 +452,9 @@ argument bits). All fail closed before a resumed result is produced.
 
 Explicitly **not** done in this slice, and why:
 
-- **The `.spx` slice is minimal by construction, not by accident.** Every
-  restriction it was admitted under is still in force: exactly one `yield`,
-  only at the function's own top level (never in a loop, a conditional branch,
+- **The `.spx` slice is minimal by construction, not by accident.** It admits
+  one to eight `yield` sites only in authored sequence at the function's own
+  top level (never in a loop, a conditional branch,
   a call argument or any nested expression), scalar request/response/
   parameter/local types, no `uses` effects, no generics, free functions only.
   The closed projection can isolate a selected function from disconnected
@@ -459,8 +475,9 @@ Explicitly **not** done in this slice, and why:
   ownership checker would reject an escaping reference, but it is not the
   compiler's alias/uniqueness analysis over real HIR locals. The bounded plan
   independently rebuilds loan and cleanup attachments, but admits only Copy
-  scalars and therefore proves that no owned local crosses its one suspension.
-  Computing and carrying a real owned suspension frame remains follow-up work.
+  scalars. Sequential suspension replays authenticated scalar answer history;
+  it does not compute liveness or carry a live local frame. Computing and
+  carrying a real owned suspension frame remains follow-up work.
 - **State migration exists only at the reference level.**
   `src/resumable_effects/migration.rs`'s `migrate_suspended` now proves the
   checked-migration *pattern* (`execution_revision::typed_migration` and
@@ -503,8 +520,8 @@ Explicitly **not** done in this slice, and why:
 
 | Criterion (from issue #204) | Status |
 | --- | --- |
-| A non-Agent function can yield typed requests and resume safely | **Met only for the minimal `.spx` slice.** A selected ordinary free function declares `yields Request -> Response` and suspends at a single top-level `yield`; `interpreter::resumable` runs it, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same plan projections. Resume checks the answer type (`SPX-F113`), replayed request (`SPX-F114`), and exact program/site/argument binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). Disconnected yielding functions are pruned from the closed projection; multiple or nested yields, suspension in loops/branches/call arguments, owned state and effectful prefixes remain open. |
-| Generated state machines are deterministic semantic projections | **Met only for the bounded three-state plan.** `ResumablePlan` deterministically derives entry/suspended/complete identities and independently validated yield-free start/resume HIR projections. The interpreter consumes its identities/binding; private native and Wasm runners consume its projections. A general continuation/state-machine lowering for several or control-dependent yields is still open. |
+| A non-Agent function can yield typed requests and resume safely | **Met only for the bounded `.spx` slice.** A selected ordinary free function declares one typed channel and one to eight direct sequential `yield` sites; `interpreter::resumable` runs them through an opaque in-memory continuation, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same staged projections. Resume checks answer types (`SPX-F113`), every replayed request (`SPX-F114`), and exact program/site/argument/prior-answer binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). Disconnected yielding functions are pruned; nested or control-dependent yields, owned state and effectful prefixes remain open. Distinct request/response types are admitted for `let` and tail sites; a direct assignment site currently requires equal request/response types and otherwise fails `SPX-T299`. |
+| Generated state machines are deterministic semantic projections | **Met only for the bounded ordered replay plan.** `SequentialResumablePlan` deterministically derives entry/per-site-suspended/complete identities and independently validated yield-free start/per-site-resume HIR projections while the original one-site `ResumablePlan` remains source-compatible. The interpreter consumes its identities and opaque history; private native and Wasm runners consume its projections. Live-frame/liveness lowering and control-dependent yields remain open. |
 | Ownership, effects, contracts and authority survive suspension correctly | For the `.spx` plan, only Copy scalars are admitted, ordinary effects and reachable yielding callees are refused, the start projection owns precondition evaluation, the resume projection owns the suffix/postcondition, and suspension bindings confer no authority. Owned values across suspension, effectful prefixes and durable/public resume authority remain **open**. At the separate Rust-reference level, `EffectHandler`, `CapabilityGatedHandler` and `SignatureCheckedHandler` prove the more general checking discipline. |
 | Checkpoint/recovery never grants effect authority by itself | **Met**, including at the "reminted resume" level: `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. Extends through the byte-wire codec: `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. |
 | Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture requires a public external-await/runtime seam, durable source checkpointing and a broader state profile than this private scalar plan provides. |
@@ -512,7 +529,7 @@ Explicitly **not** done in this slice, and why:
 ## Gate
 
 `cargo test --locked -p semaprax --lib interpreter::resumable::tests::`
-runs 14 unit tests driving real `.spx` source through parse, resolve, start,
+runs 20 unit tests driving real `.spx` source through parse, resolve, start,
 exactly bound resume and same-request/different-argument refusal.
 
 `cargo test --locked -p semaprax --lib resumable_effects::lowering::tests::`
@@ -520,16 +537,20 @@ runs 15 deterministic-plan, closed HIR-projection, provenance,
 canonical-identity and hostile-mutation tests. The required physical target
 selector is:
 
+`cargo test --locked -p semaprax --lib resumable_effects::lowering::sequential_tests::`
+runs 5 ordered-site, eight-site-bound, history-binding, contract-placement and
+distinct-type projection tests.
+
 ```sh
 SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 \
   cargo test --locked -p semaprax --lib \
   resumable_effects::backend::tests:: -- --nocapture
 ```
 
-It runs 7 private parity tests and fails rather than skips if local `clang` or
+It runs 10 private parity tests and fails rather than skips if local `clang` or
 Node is absent. The combined
 `SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 cargo test --locked -p semaprax --lib resumable_effects::`
-selector runs 89 tests, including the 23 reference-driver replay tests.
+selector runs 97 tests, including the 23 reference-driver replay tests.
 `cargo test --locked -p semaprax --doc
 resumable_effects` retains the two `compile_fail` doctests proving the
 typed-resume and ownership compile-time refusals.

@@ -2,8 +2,8 @@
 //! `yields Request -> Response` clause and its body's `yield` expression.
 //!
 //! `parser::yields` already guarantees, purely syntactically, that an
-//! admitted function contains at most one `yield`, and only as a direct
-//! top-level `let`/assignment value or tail expression of its own body
+//! admitted function contains one or more `yield` expressions, only as direct
+//! top-level `let`/assignment values or a tail expression of its own body
 //! block, never nested. This module adds the type-level half:
 //!
 //! - The declared request and response types must be admitted Copy
@@ -28,6 +28,7 @@
 
 use crate::ast;
 use crate::diagnostic::Diagnostic;
+use std::collections::BTreeMap;
 
 use super::expr_nodes::{
     ResolvedExpr, ResolvedExprKind, ResolvedFieldInitializer, ResolvedMatchArm,
@@ -52,7 +53,7 @@ impl Resolver<'_> {
     /// request/response types and every parameter type scalar. A generic
     /// function declaring `yields` is refused before this ever runs:
     /// `parser::yields` guarantees a `yields`-declaring function's body
-    /// contains exactly one `yield`, and `source_verify::declared_type`
+    /// contains one or more direct sequential yields, and `source_verify::declared_type`
     /// already refuses any generic function whose body reaches a `Yield`
     /// node (`SPX-T226`, "outside the direct-scalar slice") as part of
     /// `hir::resolve`'s existing source-verification gate -- generic
@@ -105,6 +106,32 @@ impl Resolver<'_> {
                 offender.span,
             ));
         }
+        if request_type != response_type {
+            if let ast::ExprKind::Block { statements, .. } = &function.body.kind {
+                if statements.iter().any(|statement| {
+                    matches!(
+                        statement,
+                        ast::Statement::Assign {
+                            value: ast::Expr {
+                                kind: ast::ExprKind::Yield { .. },
+                                ..
+                            },
+                            ..
+                        }
+                    )
+                }) {
+                    return Err(self.error(
+                        ILL_TYPED_YIELD,
+                        format!(
+                            "function `{}` assigns a yielded response whose type differs from its request; \
+                             this bounded profile admits distinct response types only through `let` or tail yields",
+                            function.name
+                        ),
+                        yields.span,
+                    ));
+                }
+            }
+        }
         Ok(Some(ResolvedYieldsClause {
             request_type,
             response_type,
@@ -112,9 +139,9 @@ impl Resolver<'_> {
         }))
     }
 
-    /// Locates the function's single top-level `yield` (guaranteed to exist
-    /// exactly once by the parser-level check), checks its operand's
-    /// resolved type against the declared request type, and rewrites its
+    /// Checks every direct top-level `yield` (the parser guarantees at least
+    /// one), verifies each operand against the declared request type, and
+    /// rewrites each node's
     /// placeholder `ty` (the operand's own type, set when `resolve_expr`
     /// first built the node with no signature context available) to the
     /// declared response type. Also verifies every other resolved value in
@@ -125,9 +152,18 @@ impl Resolver<'_> {
         yields: &ResolvedYieldsClause,
         body: &mut ResolvedExpr,
     ) -> Result<(), Diagnostic> {
-        let mut found = false;
-        scan_expr(self, function_name, yields, body, true, &mut found)?;
-        if !found {
+        let mut found = 0usize;
+        let mut yielded_bindings = BTreeMap::new();
+        scan_expr(
+            self,
+            function_name,
+            yields,
+            body,
+            true,
+            &mut found,
+            &mut yielded_bindings,
+        )?;
+        if found == 0 {
             // Unreachable given the parser-level guarantee; kept as a
             // defensive check rather than trusted silently.
             return Err(self.error(
@@ -169,11 +205,33 @@ fn scan_expr(
     yields: &ResolvedYieldsClause,
     expr: &mut ResolvedExpr,
     top_level: bool,
-    found: &mut bool,
+    found: &mut usize,
+    yielded_bindings: &mut BTreeMap<super::ValueId, ResolvedType>,
 ) -> Result<(), Diagnostic> {
+    // The general expression resolver initially gives `yield <request>` its
+    // request type because that API does not receive the already-resolved
+    // enclosing `yields` clause. A direct yielded
+    // `let` is subsequently retagged to the declared response type below;
+    // rewrite every later use of that exact value identity before validation
+    // sees the binding and its places disagree.
+    if let ResolvedExprKind::Place(place) = &expr.kind {
+        if place.projections.is_empty() {
+            if let Some(ty) = yielded_bindings.get(&place.root) {
+                expr.ty = ty.clone();
+            }
+        }
+    }
     match &mut expr.kind {
         ResolvedExprKind::Yield { request } => {
-            scan_expr(resolver, function_name, yields, request, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                request,
+                false,
+                found,
+                yielded_bindings,
+            )?;
             if !top_level {
                 // Unreachable: `parser::yields` already refuses a nested
                 // `yield` before resolution ever runs. Defensive.
@@ -198,7 +256,7 @@ fn scan_expr(
                 ));
             }
             expr.ty = yields.response_type.clone();
-            *found = true;
+            *found += 1;
         }
         ResolvedExprKind::Closure { captures, body, .. } => {
             for capture in captures.iter_mut() {
@@ -209,9 +267,18 @@ fn scan_expr(
                     &mut capture.value,
                     false,
                     found,
+                    yielded_bindings,
                 )?;
             }
-            scan_expr(resolver, function_name, yields, body, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                body,
+                false,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::FunctionReference { .. }
         | ResolvedExprKind::Int(_)
@@ -230,66 +297,246 @@ fn scan_expr(
         ResolvedExprKind::ByteRange {
             source, start, end, ..
         } => {
-            scan_expr(resolver, function_name, yields, source, false, found)?;
-            scan_expr(resolver, function_name, yields, start, false, found)?;
-            scan_expr(resolver, function_name, yields, end, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                source,
+                false,
+                found,
+                yielded_bindings,
+            )?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                start,
+                false,
+                found,
+                yielded_bindings,
+            )?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                end,
+                false,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::Invoke { callable, args } => {
-            scan_expr(resolver, function_name, yields, callable, false, found)?;
-            scan_children(resolver, function_name, yields, args, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                callable,
+                false,
+                found,
+                yielded_bindings,
+            )?;
+            scan_children(
+                resolver,
+                function_name,
+                yields,
+                args,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::Call { args, .. } => {
-            scan_children(resolver, function_name, yields, args, found)?;
+            scan_children(
+                resolver,
+                function_name,
+                yields,
+                args,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::NativeRustImportCall(call) => {
-            scan_children(resolver, function_name, yields, &mut call.args, found)?;
+            scan_children(
+                resolver,
+                function_name,
+                yields,
+                &mut call.args,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::HostCommandCall(call) => {
-            scan_children(resolver, function_name, yields, &mut call.args, found)?;
+            scan_children(
+                resolver,
+                function_name,
+                yields,
+                &mut call.args,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::Unary { value, .. } => {
-            scan_expr(resolver, function_name, yields, value, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                value,
+                false,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::Binary { left, right, .. } => {
-            scan_expr(resolver, function_name, yields, left, false, found)?;
-            scan_expr(resolver, function_name, yields, right, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                left,
+                false,
+                found,
+                yielded_bindings,
+            )?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                right,
+                false,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::Block { statements, tail } => {
             for statement in statements.iter_mut() {
-                scan_statement(resolver, function_name, yields, statement, top_level, found)?;
+                scan_statement(
+                    resolver,
+                    function_name,
+                    yields,
+                    statement,
+                    top_level,
+                    found,
+                    yielded_bindings,
+                )?;
             }
-            scan_expr(resolver, function_name, yields, tail, top_level, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                tail,
+                top_level,
+                found,
+                yielded_bindings,
+            )?;
+            if top_level && matches!(tail.kind, ResolvedExprKind::Yield { .. }) {
+                expr.ty = tail.ty.clone();
+            }
         }
         ResolvedExprKind::If {
             condition,
             then_branch,
             else_branch,
         } => {
-            scan_expr(resolver, function_name, yields, condition, false, found)?;
-            scan_expr(resolver, function_name, yields, then_branch, false, found)?;
-            scan_expr(resolver, function_name, yields, else_branch, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                condition,
+                false,
+                found,
+                yielded_bindings,
+            )?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                then_branch,
+                false,
+                found,
+                yielded_bindings,
+            )?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                else_branch,
+                false,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::ConstructRecord { fields, .. }
         | ResolvedExprKind::ConstructVariant { fields, .. } => {
-            scan_fields(resolver, function_name, yields, fields, found)?;
+            scan_fields(
+                resolver,
+                function_name,
+                yields,
+                fields,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::Match {
             scrutinee, arms, ..
         } => {
-            scan_expr(resolver, function_name, yields, scrutinee, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                scrutinee,
+                false,
+                found,
+                yielded_bindings,
+            )?;
             for arm in arms.iter_mut() {
-                scan_arm(resolver, function_name, yields, arm, found)?;
+                scan_arm(
+                    resolver,
+                    function_name,
+                    yields,
+                    arm,
+                    found,
+                    yielded_bindings,
+                )?;
             }
         }
         ResolvedExprKind::Try { operand, .. } | ResolvedExprKind::TryOption { operand, .. } => {
-            scan_expr(resolver, function_name, yields, operand, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                operand,
+                false,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::UpdateRecord { base, fields, .. } => {
-            scan_expr(resolver, function_name, yields, base, false, found)?;
-            scan_fields(resolver, function_name, yields, fields, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                base,
+                false,
+                found,
+                yielded_bindings,
+            )?;
+            scan_fields(
+                resolver,
+                function_name,
+                yields,
+                fields,
+                found,
+                yielded_bindings,
+            )?;
         }
         ResolvedExprKind::Project { base, .. } | ResolvedExprKind::Upcast { source: base } => {
-            scan_expr(resolver, function_name, yields, base, false, found)?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                base,
+                false,
+                found,
+                yielded_bindings,
+            )?;
         }
     }
     check_scalar(resolver, function_name, expr)
@@ -300,10 +547,19 @@ fn scan_children(
     function_name: &str,
     yields: &ResolvedYieldsClause,
     children: &mut [ResolvedExpr],
-    found: &mut bool,
+    found: &mut usize,
+    yielded_bindings: &mut BTreeMap<super::ValueId, ResolvedType>,
 ) -> Result<(), Diagnostic> {
     for child in children.iter_mut() {
-        scan_expr(resolver, function_name, yields, child, false, found)?;
+        scan_expr(
+            resolver,
+            function_name,
+            yields,
+            child,
+            false,
+            found,
+            yielded_bindings,
+        )?;
     }
     Ok(())
 }
@@ -313,7 +569,8 @@ fn scan_fields(
     function_name: &str,
     yields: &ResolvedYieldsClause,
     fields: &mut [ResolvedFieldInitializer],
-    found: &mut bool,
+    found: &mut usize,
+    yielded_bindings: &mut BTreeMap<super::ValueId, ResolvedType>,
 ) -> Result<(), Diagnostic> {
     for field in fields.iter_mut() {
         scan_expr(
@@ -323,6 +580,7 @@ fn scan_fields(
             &mut field.value,
             false,
             found,
+            yielded_bindings,
         )?;
     }
     Ok(())
@@ -333,10 +591,19 @@ fn scan_arm(
     function_name: &str,
     yields: &ResolvedYieldsClause,
     arm: &mut ResolvedMatchArm,
-    found: &mut bool,
+    found: &mut usize,
+    yielded_bindings: &mut BTreeMap<super::ValueId, ResolvedType>,
 ) -> Result<(), Diagnostic> {
     if let Some(guard) = &mut arm.guard {
-        scan_expr(resolver, function_name, yields, guard, false, found)?;
+        scan_expr(
+            resolver,
+            function_name,
+            yields,
+            guard,
+            false,
+            found,
+            yielded_bindings,
+        )?;
     }
     scan_expr(
         resolver,
@@ -345,6 +612,7 @@ fn scan_arm(
         &mut arm.value,
         false,
         found,
+        yielded_bindings,
     )
 }
 
@@ -354,21 +622,71 @@ fn scan_statement(
     yields: &ResolvedYieldsClause,
     statement: &mut super::expr_nodes::ResolvedStatement,
     top_level: bool,
-    found: &mut bool,
+    found: &mut usize,
+    yielded_bindings: &mut BTreeMap<super::ValueId, ResolvedType>,
 ) -> Result<(), Diagnostic> {
     use super::expr_nodes::ResolvedStatement;
     match statement {
-        ResolvedStatement::Let { value, .. } | ResolvedStatement::Assign { value, .. } => {
-            scan_expr(resolver, function_name, yields, value, top_level, found)
+        ResolvedStatement::Let { binding, value, .. } => {
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                value,
+                top_level,
+                found,
+                yielded_bindings,
+            )?;
+            if top_level && matches!(&value.kind, ResolvedExprKind::Yield { .. }) {
+                binding.ty = value.ty.clone();
+                yielded_bindings.insert(binding.id.clone(), binding.ty.clone());
+            }
+            Ok(())
         }
-        ResolvedStatement::Unsafe { body, .. } => {
-            scan_expr(resolver, function_name, yields, body, false, found)
+        ResolvedStatement::Assign { binding, value, .. } => {
+            if let Some(ty) = yielded_bindings.get(&binding.id) {
+                binding.ty = ty.clone();
+            }
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                value,
+                top_level,
+                found,
+                yielded_bindings,
+            )
         }
+        ResolvedStatement::Unsafe { body, .. } => scan_expr(
+            resolver,
+            function_name,
+            yields,
+            body,
+            false,
+            found,
+            yielded_bindings,
+        ),
         ResolvedStatement::While {
             condition, body, ..
         } => {
-            scan_expr(resolver, function_name, yields, condition, false, found)?;
-            scan_expr(resolver, function_name, yields, body, false, found)
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                condition,
+                false,
+                found,
+                yielded_bindings,
+            )?;
+            scan_expr(
+                resolver,
+                function_name,
+                yields,
+                body,
+                false,
+                found,
+                yielded_bindings,
+            )
         }
     }
 }
@@ -411,6 +729,70 @@ fn main() -> i64 { 0 }
     }
 
     #[test]
+    fn sequential_yields_share_the_declared_response_type() {
+        let source = r#"
+module test.resolve_sequential_yields;
+@id("app.ask")
+fn ask() -> bool
+    yields i64 -> bool
+{
+    let first = yield 1;
+    let second = yield 2;
+    first && second
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+        let resolved = resolve(source).expect("sequential scalar yields resolve");
+        let ask = resolved
+            .functions
+            .iter()
+            .find(|function| function.id.as_str() == "app.ask")
+            .unwrap();
+        let hir::ResolvedExprKind::Block { statements, .. } = &ask.body.kind else {
+            panic!("resumable function body is a block")
+        };
+        assert_eq!(statements.len(), 2);
+        for statement in statements {
+            let hir::ResolvedStatement::Let { value, .. } = statement else {
+                panic!("fixture contains only let statements")
+            };
+            assert!(matches!(&value.kind, hir::ResolvedExprKind::Yield { .. }));
+            assert_eq!(value.ty, hir::ResolvedType::Bool);
+        }
+    }
+
+    #[test]
+    fn a_distinct_response_type_assignment_fails_with_the_stable_profile_diagnostic() {
+        let source = r#"
+module test.resolve_yield_assignment_response;
+@id("app.ask")
+fn ask(seed: i64) -> bool yields i64 -> bool {
+    let mut answer = false;
+    answer = yield seed;
+    answer
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+        let error = resolve(source).unwrap_err();
+        assert_eq!(error.code, ILL_TYPED_YIELD);
+    }
+
+    #[test]
+    fn a_distinct_response_type_can_be_the_function_tail() {
+        let source = r#"
+module test.resolve_yield_tail_response;
+@id("app.ask")
+fn ask(seed: i64) -> bool yields i64 -> bool { yield seed }
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+        let resolved = resolve(source).expect("yield response types the function tail");
+        hir::validate(&resolved).unwrap();
+    }
+
+    #[test]
     fn a_yield_operand_of_the_wrong_type_is_refused() {
         let source = r#"
 module test.resolve_yield_ill_typed;
@@ -420,6 +802,25 @@ fn ask() -> i64
 {
     let answer = yield true;
     answer
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+        let error = resolve(source).unwrap_err();
+        assert_eq!(error.code, ILL_TYPED_YIELD);
+    }
+
+    #[test]
+    fn a_later_yield_operand_of_the_wrong_type_is_refused() {
+        let source = r#"
+module test.resolve_sequential_yield_ill_typed;
+@id("app.ask")
+fn ask() -> i64
+    yields i64 -> i64
+{
+    let first = yield 1;
+    let second = yield false;
+    first + second
 }
 @id("app.main")
 fn main() -> i64 { 0 }

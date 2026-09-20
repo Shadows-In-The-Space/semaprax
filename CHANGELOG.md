@@ -8,8 +8,23 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
-- Add a deterministic compiler-owned three-state HIR plan for the existing
-  single-top-level, Copy-scalar `yield` slice. Resume state now binds the exact
+- Extend the bounded resumable-effect source profile from one site to one to
+  eight direct sequential Copy-scalar `yield` sites. The deterministic plan now
+  carries ordered per-site states and yield-free resume projections; the public
+  interpreter uses an opaque in-memory request/answer history, while private
+  native `-O0`/`-O2` and Core Wasm runners replay the same projections. Every
+  historical request is checked, and bindings commit exact arguments plus
+  prior answer bits. This remains pure replay, not live-frame/liveness
+  lowering: control-dependent yields, owned state, durability, scheduling and
+  public target ABIs remain open. Distinct request/response assignment sites
+  fail closed with `SPX-T299`; `let` and tail sites retain distinct types
+  (#204). The original one-site `ResumablePlan`, exhaustive `ResumableStep`
+  and start/resume functions remain source-compatible; sequential lowering and
+  execution use additive plan, step and start/resume surfaces.
+
+- Add the initial deterministic compiler-owned three-state HIR plan for the
+  single-top-level, Copy-scalar `yield` slice (subsequently widened above).
+  Resume state now binds the exact
   checked program, yield site, and bit-exact original arguments. Closed
   projections now isolate disconnected yielding functions while retaining the
   selected and authored-entrypoint direct-call closures; retained non-scalar,
@@ -23,9 +38,9 @@ format: `Unreleased` then release buckets, grouped by impact.
   and pre/postcondition failures. Ordinary native/Wasm emitters still refuse
   `yields`; arbitrary NaN-payload preservation across the JavaScript Wasm test
   adapter, public continuation ABI, external-await runtime seam, durable source
-  checkpoint, Agent migration, and general multi-yield lowering are not
-  claimed. The reference v1 journal additionally completes an already-observed
-  partial turn without redispatch and never repeats cleanup for an in-memory
+  checkpoint, Agent migration, and general live-frame/control-dependent yield
+  lowering are not claimed. The reference v1 journal additionally completes
+  an already-observed partial turn without redispatch and never repeats cleanup for an in-memory
   replayed terminal; its unchanged wire has no durable append or cleanup
   settlement, so decoded terminal cleanup and crash recovery remain ambiguous
   and unclaimed (#204).

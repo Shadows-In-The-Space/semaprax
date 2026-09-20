@@ -18,19 +18,19 @@
 //!
 //! # Status: bounded source lowering, not a general runtime
 //!
-//! The compiler admits one existing `.spx` slice: an explicitly identified
-//! free function with one direct top-level `yield`, Copy-scalar state and no
-//! ordinary effects. [`lowering`] derives deterministic entry/suspended/
+//! The compiler admits one bounded `.spx` slice: an explicitly identified free
+//! function with one to eight direct sequential top-level `yield` sites,
+//! Copy-scalar state and no ordinary effects. [`lowering`] isolates its closed
+//! reachable projection and derives deterministic entry/per-site-suspended/
 //! complete identities plus independently validated yield-free start and
-//! resume HIR projections. `interpreter::resumable` consumes the plan's state
-//! and invocation binding. Until closed-program projection exists, lowering
-//! requires exactly one `yields` function in the whole resolved program. The
-//! crate-private, `cfg(test)`-only `backend` module exercises its projections
+//! per-site resume HIR projections. `interpreter::resumable` consumes the
+//! plan's state, invocation binding and opaque in-memory replay history. The
+//! crate-private, `cfg(test)`-only `backend` module exercises those projections
 //! through real native `-O0`/`-O2` and Core Wasm target paths; its temporary
 //! storage and local tool processes are test-harness authority only. Ordinary
 //! native/Wasm emission still refuses a `yields` function; there is no public
 //! continuation ABI, external-await scheduler, durable source checkpoint,
-//! Agent migration, or general multi-yield lowering.
+//! Agent migration, owned live-frame lowering or control-dependent yield.
 //!
 //! [`docs/RESUMABLE-EFFECTS-V1.md`](../../docs/RESUMABLE-EFFECTS-V1.md)
 //! records the full design and exactly this scope boundary.

@@ -24,7 +24,7 @@ use crate::conformance::{
 use crate::diagnostic::Diagnostic;
 use crate::hir::{ResolvedProgram, ResolvedType};
 use crate::resumable_effects::lowering::{
-    ResumablePlan, ResumableScalar, ResumableStateId, ResumableSuspensionBinding,
+    ResumableScalar, ResumableStateId, ResumableSuspensionBinding, SequentialResumablePlan,
 };
 
 mod native;
@@ -62,8 +62,35 @@ impl BackendSuspension {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct BackendYieldRecord {
+    request: ResumableScalar,
+    answer: ResumableScalar,
+}
+
+/// Opaque in-memory carrier for the private sequential parity lane. It has no
+/// wire representation and grants no authority to answer the current request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BackendContinuation {
+    state: ResumableStateId,
+    request: ResumableScalar,
+    binding: ResumableSuspensionBinding,
+    history: Vec<BackendYieldRecord>,
+}
+
+impl BackendContinuation {
+    pub fn state(&self) -> &ResumableStateId {
+        &self.state
+    }
+
+    pub fn request(&self) -> &ResumableScalar {
+        &self.request
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BackendStep {
     Suspended(BackendSuspension),
+    SequentialSuspended(BackendContinuation),
     Complete {
         state: ResumableStateId,
         result: ResumableScalar,
@@ -80,26 +107,40 @@ enum TargetOutcome {
 pub fn run(
     backend: Backend,
     program: &ResolvedProgram,
-    plan: &ResumablePlan,
+    plan: &SequentialResumablePlan,
     arguments: &[ResumableScalar],
 ) -> Result<BackendStep, Diagnostic> {
     validate_arguments(&plan.start.function, arguments)?;
+    let first = plan
+        .suspensions
+        .first()
+        .ok_or_else(|| suspension_mismatch("resumable plan has no suspension sites"))?;
     let projected = plan.start_program(program)?;
     let request = match execute(
         backend,
         &projected,
         plan.function_id.as_str(),
         arguments,
-        &plan.suspension.request_type,
+        &first.request_type,
     )? {
         TargetOutcome::Success(request) => request,
         TargetOutcome::LanguageFailure(status) => return Ok(BackendStep::LanguageFailure(status)),
     };
-    Ok(BackendStep::Suspended(BackendSuspension {
-        state: plan.suspension.state.id.clone(),
-        request,
-        binding: plan.suspension_binding(arguments),
-    }))
+    let binding = plan.suspension_binding(arguments);
+    if plan.suspensions.len() == 1 {
+        Ok(BackendStep::Suspended(BackendSuspension {
+            state: first.state.id.clone(),
+            request,
+            binding,
+        }))
+    } else {
+        Ok(BackendStep::SequentialSuspended(BackendContinuation {
+            state: first.state.id.clone(),
+            request,
+            binding,
+            history: Vec::new(),
+        }))
+    }
 }
 
 /// Replay the request projection and, only after its exact bits agree with the
@@ -107,20 +148,29 @@ pub fn run(
 pub fn resume(
     backend: Backend,
     program: &ResolvedProgram,
-    plan: &ResumablePlan,
+    plan: &SequentialResumablePlan,
     arguments: &[ResumableScalar],
     suspension: &BackendSuspension,
     answer: ResumableScalar,
 ) -> Result<BackendStep, Diagnostic> {
     validate_arguments(&plan.start.function, arguments)?;
-    if !scalar_matches_type(&answer, &plan.suspension.response_type) {
+    let first = plan
+        .suspensions
+        .first()
+        .ok_or_else(|| suspension_mismatch("resumable plan has no suspension sites"))?;
+    if plan.suspensions.len() != 1 {
+        return Err(suspension_mismatch(
+            "a multi-site plan must be resumed through its opaque sequential continuation",
+        ));
+    }
+    if !scalar_matches_type(&answer, &first.response_type) {
         return Err(type_mismatch(format!(
             "resume value has type {}, but this suspension requires {}",
             scalar_type_text(&answer),
-            resolved_type_text(&plan.suspension.response_type),
+            resolved_type_text(&first.response_type),
         )));
     }
-    if suspension.state != plan.suspension.state.id
+    if suspension.state != first.state.id
         || suspension.binding != plan.suspension_binding(arguments)
     {
         return Err(suspension_mismatch(
@@ -134,7 +184,7 @@ pub fn resume(
         &start,
         plan.function_id.as_str(),
         arguments,
-        &plan.suspension.request_type,
+        &first.request_type,
     )? {
         TargetOutcome::Success(request) => request,
         TargetOutcome::LanguageFailure(status) => return Ok(BackendStep::LanguageFailure(status)),
@@ -147,16 +197,16 @@ pub fn resume(
         )));
     }
 
-    let resume = plan.resume_program(program)?;
+    let resume = plan.resume_program_at(program, 0)?;
     let mut resumed_arguments = arguments.to_vec();
     resumed_arguments.push(answer);
-    validate_arguments(&plan.resume.function, &resumed_arguments)?;
+    validate_arguments(&plan.resumes[0].function, &resumed_arguments)?;
     let result = match execute(
         backend,
         &resume,
         plan.function_id.as_str(),
         &resumed_arguments,
-        &plan.resume.function.return_type,
+        &plan.resumes[0].function.return_type,
     )? {
         TargetOutcome::Success(result) => result,
         TargetOutcome::LanguageFailure(status) => return Ok(BackendStep::LanguageFailure(status)),
@@ -165,6 +215,162 @@ pub fn resume(
         state: plan.complete.id.clone(),
         result,
     })
+}
+
+/// Replay every recorded request in order, consume one newly supplied answer,
+/// and either park the next request or return the final result.
+pub fn resume_sequential(
+    backend: Backend,
+    program: &ResolvedProgram,
+    plan: &SequentialResumablePlan,
+    arguments: &[ResumableScalar],
+    continuation: &BackendContinuation,
+    answer: ResumableScalar,
+) -> Result<BackendStep, Diagnostic> {
+    validate_arguments(&plan.start.function, arguments)?;
+    let Some(index) = plan.suspension_index(&continuation.state) else {
+        return Err(suspension_mismatch(
+            "sequential continuation state does not belong to this exact checked plan",
+        ));
+    };
+    if plan.suspensions.len() == 1 || continuation.history.len() != index {
+        return Err(suspension_mismatch(
+            "sequential continuation history length does not match its suspension state",
+        ));
+    }
+    let prior_answers = continuation
+        .history
+        .iter()
+        .map(|record| record.answer.clone())
+        .collect::<Vec<_>>();
+    let expected_binding = plan.suspension_binding_at(index, arguments, &prior_answers)?;
+    if continuation.binding != expected_binding {
+        return Err(suspension_mismatch(
+            "sequential continuation does not match this exact plan, site, invocation, and answer history",
+        ));
+    }
+
+    for (record_index, record) in continuation.history.iter().enumerate() {
+        let site = &plan.suspensions[record_index];
+        require_scalar_type(&record.request, &site.request_type, "historical request")?;
+        require_scalar_type(&record.answer, &site.response_type, "historical answer")?;
+    }
+    let current = &plan.suspensions[index];
+    require_scalar_type(&continuation.request, &current.request_type, "request")?;
+    require_scalar_type(&answer, &current.response_type, "answer")?;
+
+    let start = plan.start_program(program)?;
+    let mut replayed = match execute(
+        backend,
+        &start,
+        plan.function_id.as_str(),
+        arguments,
+        &plan.suspensions[0].request_type,
+    )? {
+        TargetOutcome::Success(request) => request,
+        TargetOutcome::LanguageFailure(status) => return Ok(BackendStep::LanguageFailure(status)),
+    };
+    let expected_first = continuation
+        .history
+        .first()
+        .map_or(&continuation.request, |record| &record.request);
+    require_replayed_request(expected_first, &replayed)?;
+
+    let mut resumed_arguments = arguments.to_vec();
+    for (record_index, record) in continuation.history.iter().enumerate() {
+        resumed_arguments.push(record.answer.clone());
+        let projection = plan.resume_program_at(program, record_index)?;
+        let next_site = &plan.suspensions[record_index + 1];
+        replayed = match execute(
+            backend,
+            &projection,
+            plan.function_id.as_str(),
+            &resumed_arguments,
+            &next_site.request_type,
+        )? {
+            TargetOutcome::Success(request) => request,
+            TargetOutcome::LanguageFailure(status) => {
+                return Ok(BackendStep::LanguageFailure(status));
+            }
+        };
+        let expected = continuation
+            .history
+            .get(record_index + 1)
+            .map_or(&continuation.request, |next| &next.request);
+        require_replayed_request(expected, &replayed)?;
+    }
+
+    resumed_arguments.push(answer.clone());
+    let projection = plan.resume_program_at(program, index)?;
+    validate_arguments(&plan.resumes[index].function, &resumed_arguments)?;
+    let value = match execute(
+        backend,
+        &projection,
+        plan.function_id.as_str(),
+        &resumed_arguments,
+        &plan.resumes[index].function.return_type,
+    )? {
+        TargetOutcome::Success(value) => value,
+        TargetOutcome::LanguageFailure(status) => {
+            return Ok(BackendStep::LanguageFailure(status));
+        }
+    };
+
+    let next_index = index + 1;
+    if let Some(next) = plan.suspensions.get(next_index) {
+        require_scalar_type(&value, &next.request_type, "next request")?;
+        let mut history = continuation.history.clone();
+        history.push(BackendYieldRecord {
+            request: continuation.request.clone(),
+            answer,
+        });
+        let prior_answers = history
+            .iter()
+            .map(|record| record.answer.clone())
+            .collect::<Vec<_>>();
+        Ok(BackendStep::SequentialSuspended(BackendContinuation {
+            state: next.state.id.clone(),
+            request: value,
+            binding: plan.suspension_binding_at(next_index, arguments, &prior_answers)?,
+            history,
+        }))
+    } else {
+        Ok(BackendStep::Complete {
+            state: plan.complete.id.clone(),
+            result: value,
+        })
+    }
+}
+
+fn require_scalar_type(
+    value: &ResumableScalar,
+    expected: &ResolvedType,
+    role: &str,
+) -> Result<(), Diagnostic> {
+    if scalar_matches_type(value, expected) {
+        Ok(())
+    } else {
+        Err(type_mismatch(format!(
+            "resumable {role} has type {}, but the declared type is {}",
+            scalar_type_text(value),
+            resolved_type_text(expected),
+        )))
+    }
+}
+
+fn require_replayed_request(
+    recorded: &ResumableScalar,
+    replayed: &ResumableScalar,
+) -> Result<(), Diagnostic> {
+    if recorded == replayed {
+        Ok(())
+    } else {
+        Err(drift(format!(
+            "resumable request changed during replay: recorded {}, replayed {}",
+            scalar_debug(recorded),
+            scalar_debug(replayed),
+        )))
+    }
 }
 
 fn execute(

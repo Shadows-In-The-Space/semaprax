@@ -24,13 +24,13 @@
 //! - every parameter and intermediate value is an admitted Copy scalar
 //!   (`SPX-T301`/`SPX-T303`), so nothing owned is live across the
 //!   suspension and the replay allocates and frees nothing;
-//! - `parser::yields` admits exactly one `yield`, only at the function's own
-//!   top level (`SPX-T297`/`SPX-T298`), so control cannot branch around or
-//!   repeat the yield site.
+//! - `parser::yields` admits only a function's direct top-level sequence
+//!   (`SPX-T297`/`SPX-T298`), so control cannot branch around or repeat a site;
+//!   `resumable_effects::lowering` narrows that sequence to one to eight sites;
 //! - `resumable_effects::lowering` rejects a call closure that reaches any
-//!   other `yields`-declaring function. The one-site proof is therefore over
-//!   the complete reachable computation, not merely the selected function's
-//!   source body.
+//!   other `yields`-declaring function. The ordered replay proof is therefore
+//!   over the complete reachable computation, not merely the selected
+//!   function's source body.
 //!
 //! Replay is therefore a *re-use* of an already-computed prefix, not a
 //! second, possibly divergent execution -- and this module proves that
@@ -70,7 +70,7 @@ use crate::conformance::NormalizedStatus;
 use crate::diagnostic::Diagnostic;
 use crate::hir::{self, ResolvedFunction, ResolvedType};
 use crate::resumable_effects::lowering::{
-    self, ResumablePlan, ResumableScalar, ResumableStateId, ResumableSuspensionBinding,
+    self, ResumableScalar, ResumableStateId, ResumableSuspensionBinding, SequentialResumablePlan,
 };
 
 use super::prepared::PreparedCancellation;
@@ -96,38 +96,89 @@ const SUSPENSION_MISMATCH: &str = "SPX-F115";
 
 /// The `Flow::Guard` detail a fresh suspension travels on. It never escapes
 /// this module: [`evaluate_resumable`] converts it into
-/// [`ResumableStep::Suspended`] using the request parked in [`Resumption`].
+/// the legacy or sequential public step using the request parked in
+/// [`Resumption`].
 pub(super) const SUSPENDED_AT_YIELD: &str = "resumable-effect invocation suspended at its `yield`";
 /// The `Flow::Guard` detail every *ordinary* interpreter lane keeps for a
 /// `yield`. Those lanes refuse a `yields`-declaring function at admission
 /// long before its body is evaluated, so this is an unreachable-in-practice
 /// refusal that stays explicit rather than becoming a silent fallthrough.
 const YIELD_REFUSED: &str = "`yield` is not yet evaluated by the interpreter";
-/// Structurally impossible: `parser::yields` admits exactly one `yield` per
-/// function, so no single invocation can reach a second one.
-const SECOND_YIELD: &str = "a resumable-effect invocation reached a second `yield`";
+/// A fresh/replayed invocation reached another site after it had already
+/// parked. The sequential lane parks exactly once per call, so this remains a
+/// guard rather than an alternate continuation path.
+const SECOND_YIELD: &str =
+    "a resumable-effect invocation reached a second `yield` after suspension";
 
-/// How one `Evaluator` treats the single `yield` its function may contain.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct ResumableYieldRecord {
+    request: ArgumentValue,
+    answer: ArgumentValue,
+}
+
+/// An opaque, in-memory Copy-scalar continuation for a sequential top-level
+/// `yield` program. It is proof data only: it grants neither authority to
+/// answer a request nor a durable/checkpoint representation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResumableContinuation {
+    state: ResumableStateId,
+    binding: ResumableSuspensionBinding,
+    request: ArgumentValue,
+    history: Vec<ResumableYieldRecord>,
+}
+
+impl ResumableContinuation {
+    pub fn state(&self) -> &ResumableStateId {
+        &self.state
+    }
+
+    pub fn binding(&self) -> &ResumableSuspensionBinding {
+        &self.binding
+    }
+
+    pub fn request(&self) -> &ArgumentValue {
+        &self.request
+    }
+}
+
+/// How one `Evaluator` treats the ordered top-level `yield` sites its function
+/// may contain.
 pub(super) enum Resumption {
     /// Every ordinary interpreter lane. `yield` is refused outright.
     Refused,
     /// A fresh resumable invocation: the first `yield` parks its request
     /// here and suspends.
-    Fresh(Option<Value>),
-    /// A replayed resumable invocation: the `yield` recomputes its request,
-    /// must agree with `expected`, and then evaluates to `answer`.
+    Fresh { parked: Option<Value> },
+    /// A replayed resumable invocation replays every completed request in
+    /// order, then consumes one new answer. If another direct site is
+    /// reached, it parks it for the next explicit continuation call.
     Replay {
-        expected: Value,
-        answer: Value,
-        observed: bool,
+        expected: Vec<Value>,
+        answers: Vec<Value>,
+        observed: usize,
+        parked: Option<Value>,
+        history: Vec<ResumableYieldRecord>,
     },
 }
 
-/// The one `yield` site's whole runtime behaviour, in one place.
+enum ResumeInput {
+    Legacy {
+        state: ResumableStateId,
+        binding: ResumableSuspensionBinding,
+        request: ArgumentValue,
+        answer: ArgumentValue,
+    },
+    Sequential {
+        continuation: ResumableContinuation,
+        answer: ArgumentValue,
+    },
+}
+
+/// The ordered `yield` sites' whole runtime behaviour, in one place.
 pub(super) fn settle_yield(state: &mut Resumption, request: Value) -> Result<Value, Flow> {
     match state {
         Resumption::Refused => Err(Flow::Guard(YIELD_REFUSED)),
-        Resumption::Fresh(parked) => {
+        Resumption::Fresh { parked } => {
             if parked.is_some() {
                 return Err(Flow::Guard(SECOND_YIELD));
             }
@@ -136,16 +187,28 @@ pub(super) fn settle_yield(state: &mut Resumption, request: Value) -> Result<Val
         }
         Resumption::Replay {
             expected,
-            answer,
+            answers,
             observed,
+            parked,
+            ..
         } => {
-            if *observed {
-                return Err(Flow::Guard(SECOND_YIELD));
+            if *observed == expected.len() {
+                if parked.is_some() {
+                    return Err(Flow::Guard(SECOND_YIELD));
+                }
+                *parked = Some(request);
+                return Err(Flow::Guard(SUSPENDED_AT_YIELD));
             }
+            let Some(expected) = expected.get(*observed) else {
+                return Err(Flow::Guard(SECOND_YIELD));
+            };
             if !scalar_values_equal(&request, expected) {
                 return Err(Flow::Guard(REQUEST_DRIFT));
             }
-            *observed = true;
+            let Some(answer) = answers.get(*observed) else {
+                return Err(Flow::Guard(SECOND_YIELD));
+            };
+            *observed += 1;
             clone_scalar(answer).ok_or(Flow::Guard("resume answer is not an admitted scalar"))
         }
     }
@@ -181,6 +244,57 @@ pub struct ResumableEvaluation {
     pub max_steps: usize,
 }
 
+/// One settled outcome from the explicitly multi-site resumable lane.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SequentialResumableStep {
+    /// The function reached its next direct top-level `yield`.
+    Suspended {
+        continuation: ResumableContinuation,
+    },
+    Completed {
+        state: ResumableStateId,
+        result: ArgumentValue,
+    },
+    LanguageFailure(NormalizedStatus),
+    FuelExhausted,
+    CallDepthExceeded,
+    GuardError(String),
+}
+
+/// Deterministic facts from one explicitly multi-site start or resume.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SequentialResumableEvaluation {
+    pub step: SequentialResumableStep,
+    pub steps_used: usize,
+    pub max_steps: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum EvaluatedStep {
+    Suspended {
+        state: ResumableStateId,
+        binding: ResumableSuspensionBinding,
+        request: ArgumentValue,
+    },
+    SequentialSuspended {
+        continuation: ResumableContinuation,
+    },
+    Completed {
+        state: ResumableStateId,
+        result: ArgumentValue,
+    },
+    LanguageFailure(NormalizedStatus),
+    FuelExhausted,
+    CallDepthExceeded,
+    GuardError(String),
+}
+
+struct Evaluated {
+    step: EvaluatedStep,
+    steps_used: usize,
+    max_steps: usize,
+}
+
 /// Run `function_id` until its single suspension, or to completion.
 pub fn run_resumable_effect(
     program: &hir::ResolvedProgram,
@@ -188,7 +302,14 @@ pub fn run_resumable_effect(
     arguments: &[ArgumentValue],
     max_steps: usize,
 ) -> Result<ResumableEvaluation, Vec<Diagnostic>> {
-    evaluate_resumable(program, function_id, arguments, None, max_steps)
+    into_legacy(evaluate_resumable(
+        program,
+        function_id,
+        arguments,
+        None,
+        false,
+        max_steps,
+    )?)
 }
 
 /// Resume a suspension of `function_id` by replaying its prefix under the
@@ -210,32 +331,72 @@ pub fn resume_resumable_effect(
     answer: &ArgumentValue,
     max_steps: usize,
 ) -> Result<ResumableEvaluation, Vec<Diagnostic>> {
-    evaluate_resumable(
+    into_legacy(evaluate_resumable(
         program,
         function_id,
         arguments,
-        Some((
-            state.clone(),
-            binding.clone(),
-            request.clone(),
-            answer.clone(),
-        )),
+        Some(ResumeInput::Legacy {
+            state: state.clone(),
+            binding: binding.clone(),
+            request: request.clone(),
+            answer: answer.clone(),
+        }),
+        false,
         max_steps,
-    )
+    )?)
+}
+
+/// Run a function with multiple direct sequential `yield` sites until its
+/// first suspension. The legacy one-site API remains source-compatible and
+/// deliberately refuses this lane.
+pub fn run_sequential_resumable_effect(
+    program: &hir::ResolvedProgram,
+    function_id: &str,
+    arguments: &[ArgumentValue],
+    max_steps: usize,
+) -> Result<SequentialResumableEvaluation, Vec<Diagnostic>> {
+    Ok(into_sequential(evaluate_resumable(
+        program,
+        function_id,
+        arguments,
+        None,
+        true,
+        max_steps,
+    )?))
+}
+
+/// Resume an opaque sequential continuation. The carrier is deliberately
+/// in-memory and non-serializing; it supplies the previous request/answer
+/// trace solely so replay can re-check it under the exact current program.
+pub fn resume_sequential_resumable_effect(
+    program: &hir::ResolvedProgram,
+    function_id: &str,
+    arguments: &[ArgumentValue],
+    continuation: &ResumableContinuation,
+    answer: &ArgumentValue,
+    max_steps: usize,
+) -> Result<SequentialResumableEvaluation, Vec<Diagnostic>> {
+    Ok(into_sequential(evaluate_resumable(
+        program,
+        function_id,
+        arguments,
+        Some(ResumeInput::Sequential {
+            continuation: continuation.clone(),
+            answer: answer.clone(),
+        }),
+        true,
+        max_steps,
+    )?))
 }
 
 fn evaluate_resumable(
     program: &hir::ResolvedProgram,
     function_id: &str,
     arguments: &[ArgumentValue],
-    resume: Option<(
-        ResumableStateId,
-        ResumableSuspensionBinding,
-        ArgumentValue,
-        ArgumentValue,
-    )>,
+    resume: Option<ResumeInput>,
+    sequential: bool,
     max_steps: usize,
-) -> Result<ResumableEvaluation, Vec<Diagnostic>> {
+) -> Result<Evaluated, Vec<Diagnostic>> {
     if !(1..=MAX_STEPS_LIMIT).contains(&max_steps) {
         return Err(vec![option_error(format!(
             "resumable-effect evaluation max_steps must be between 1 and {MAX_STEPS_LIMIT}"
@@ -277,17 +438,45 @@ fn evaluate_resumable(
     let admitted = admitted_resolved_functions(program);
     scan_closure(function_id, &admitted, program)?;
     hir::validate(program).map_err(|error| vec![error])?;
-    let plan = lowering::lower(program, entry).map_err(|error| vec![error])?;
+    let plan = lowering::lower_sequential(program, entry).map_err(|error| vec![error])?;
+    if sequential == (plan.suspensions.len() == 1) {
+        let detail = if sequential {
+            format!(
+                "sequential resumable entry `{function_id}` has only one yield site; use the legacy one-site API"
+            )
+        } else {
+            format!(
+                "resumable entry `{function_id}` has multiple yield sites; use the explicit sequential API"
+            )
+        };
+        return Err(vec![Diagnostic::io(SUSPENSION_MISMATCH, detail)]);
+    }
     let scalar_arguments = resumable_scalars(arguments).ok_or_else(|| {
         vec![argument_error(
             "resumable invocation contains a non-scalar argument".to_owned(),
         )]
     })?;
-    let expected_binding = plan.suspension_binding(&scalar_arguments);
-    let resumption = match resume {
-        None => Resumption::Fresh(None),
-        Some((state, binding, request, answer)) => {
-            if state != plan.suspension.state.id || binding != expected_binding {
+    let (resumption, next_binding) = match resume {
+        None => (
+            Resumption::Fresh { parked: None },
+            Some(plan.suspension_binding(&scalar_arguments)),
+        ),
+        Some(ResumeInput::Legacy {
+            state,
+            binding,
+            request,
+            answer,
+        }) => {
+            if plan.suspensions.len() != 1 {
+                return Err(vec![Diagnostic::io(
+                    SUSPENSION_MISMATCH,
+                    format!(
+                        "resuming `{function_id}` has multiple yield sites; use its opaque sequential continuation"
+                    ),
+                )]);
+            }
+            let expected_binding = plan.suspension_binding(&scalar_arguments);
+            if state != plan.suspensions[0].state.id || binding != expected_binding {
                 return Err(vec![Diagnostic::io(
                     SUSPENSION_MISMATCH,
                     format!(
@@ -295,11 +484,110 @@ fn evaluate_resumable(
                     ),
                 )]);
             }
-            Resumption::Replay {
-                expected: typed_resume_value(&yields.request_type, &request, "request")?,
-                answer: typed_resume_value(&yields.response_type, &answer, "answer")?,
-                observed: false,
+            let request = typed_resume_value(&yields.request_type, &request, "request")?;
+            let answer_value = typed_resume_value(&yields.response_type, &answer, "answer")?;
+            (
+                Resumption::Replay {
+                    expected: vec![request],
+                    answers: vec![answer_value],
+                    observed: 0,
+                    parked: None,
+                    history: Vec::new(),
+                },
+                None,
+            )
+        }
+        Some(ResumeInput::Sequential {
+            continuation,
+            answer,
+        }) => {
+            let Some(index) = plan.suspension_index(&continuation.state) else {
+                return Err(vec![Diagnostic::io(
+                    SUSPENSION_MISMATCH,
+                    "sequential continuation state does not belong to this exact checked plan",
+                )]);
+            };
+            if plan.suspensions.len() == 1 || continuation.history.len() != index {
+                return Err(vec![Diagnostic::io(
+                    SUSPENSION_MISMATCH,
+                    "sequential continuation history length does not match its suspension state",
+                )]);
             }
+            let prior_answers = continuation
+                .history
+                .iter()
+                .map(|record| record.answer.clone())
+                .collect::<Vec<_>>();
+            let prior_scalars = resumable_scalars(&prior_answers).ok_or_else(|| {
+                vec![Diagnostic::io(
+                    SUSPENSION_MISMATCH,
+                    "sequential continuation carries a non-scalar answer history",
+                )]
+            })?;
+            let expected_binding = plan
+                .suspension_binding_at(index, &scalar_arguments, &prior_scalars)
+                .map_err(|error| vec![error])?;
+            if continuation.binding != expected_binding {
+                return Err(vec![Diagnostic::io(
+                    SUSPENSION_MISMATCH,
+                    "sequential continuation binding does not match this exact program, site, arguments, and prior answer bits",
+                )]);
+            }
+            let mut expected = Vec::with_capacity(index + 1);
+            let mut answers = Vec::with_capacity(index + 1);
+            for record in &continuation.history {
+                expected.push(typed_resume_value(
+                    &yields.request_type,
+                    &record.request,
+                    "historical request",
+                )?);
+                answers.push(typed_resume_value(
+                    &yields.response_type,
+                    &record.answer,
+                    "historical answer",
+                )?);
+            }
+            expected.push(typed_resume_value(
+                &yields.request_type,
+                &continuation.request,
+                "request",
+            )?);
+            answers.push(typed_resume_value(
+                &yields.response_type,
+                &answer,
+                "answer",
+            )?);
+            let mut history = continuation.history.clone();
+            history.push(ResumableYieldRecord {
+                request: continuation.request,
+                answer,
+            });
+            let next_index = index + 1;
+            let next_binding = plan
+                .suspensions
+                .get(next_index)
+                .map(|_| {
+                    let mut answer_scalars = prior_scalars;
+                    answer_scalars.push(
+                        resumable_scalars(&[history.last().expect("just appended").answer.clone()])
+                            .expect("typed sequential answer is scalar")
+                            .pop()
+                            .expect("one scalar answer"),
+                    );
+                    plan.suspension_binding_at(next_index, &scalar_arguments, &answer_scalars)
+                })
+                .transpose()
+                .map_err(|error| vec![error])?;
+            (
+                Resumption::Replay {
+                    expected,
+                    answers,
+                    observed: 0,
+                    parked: None,
+                    history,
+                },
+                next_binding,
+            )
         }
     };
     let closure_functions =
@@ -320,9 +608,8 @@ fn evaluate_resumable(
                 );
                 evaluator.resumption = resumption;
                 let settled = evaluator.evaluate_entry(entry, &bound);
-                let step =
-                    settle_step(settled, &mut evaluator.resumption, &plan, &expected_binding);
-                ResumableEvaluation {
+                let step = settle_step(settled, &mut evaluator.resumption, &plan, next_binding);
+                Evaluated {
                     step,
                     steps_used: evaluator.steps,
                     max_steps,
@@ -340,7 +627,7 @@ fn evaluate_resumable(
         })
     })?;
 
-    if evaluated.step == ResumableStep::GuardError(REQUEST_DRIFT.to_owned()) {
+    if evaluated.step == EvaluatedStep::GuardError(REQUEST_DRIFT.to_owned()) {
         return Err(vec![Diagnostic::io(
             REQUEST_DRIFT,
             format!(
@@ -352,52 +639,150 @@ fn evaluate_resumable(
     Ok(evaluated)
 }
 
+fn into_legacy(evaluated: Evaluated) -> Result<ResumableEvaluation, Vec<Diagnostic>> {
+    let step = match evaluated.step {
+        EvaluatedStep::Suspended {
+            state,
+            binding,
+            request,
+        } => ResumableStep::Suspended {
+            state,
+            binding,
+            request,
+        },
+        EvaluatedStep::Completed { state, result } => ResumableStep::Completed { state, result },
+        EvaluatedStep::LanguageFailure(status) => ResumableStep::LanguageFailure(status),
+        EvaluatedStep::FuelExhausted => ResumableStep::FuelExhausted,
+        EvaluatedStep::CallDepthExceeded => ResumableStep::CallDepthExceeded,
+        EvaluatedStep::GuardError(detail) => ResumableStep::GuardError(detail),
+        EvaluatedStep::SequentialSuspended { .. } => {
+            return Err(vec![Diagnostic::io(
+                SUSPENSION_MISMATCH,
+                "a sequential suspension escaped through the legacy one-site API",
+            )]);
+        }
+    };
+    Ok(ResumableEvaluation {
+        step,
+        steps_used: evaluated.steps_used,
+        max_steps: evaluated.max_steps,
+    })
+}
+
+fn into_sequential(evaluated: Evaluated) -> SequentialResumableEvaluation {
+    let step = match evaluated.step {
+        EvaluatedStep::SequentialSuspended { continuation } => {
+            SequentialResumableStep::Suspended { continuation }
+        }
+        EvaluatedStep::Completed { state, result } => {
+            SequentialResumableStep::Completed { state, result }
+        }
+        EvaluatedStep::LanguageFailure(status) => SequentialResumableStep::LanguageFailure(status),
+        EvaluatedStep::FuelExhausted => SequentialResumableStep::FuelExhausted,
+        EvaluatedStep::CallDepthExceeded => SequentialResumableStep::CallDepthExceeded,
+        EvaluatedStep::GuardError(detail) => SequentialResumableStep::GuardError(detail),
+        EvaluatedStep::Suspended { .. } => SequentialResumableStep::GuardError(
+            "a legacy one-site suspension escaped through the sequential API".to_owned(),
+        ),
+    };
+    SequentialResumableEvaluation {
+        step,
+        steps_used: evaluated.steps_used,
+        max_steps: evaluated.max_steps,
+    }
+}
+
 /// Turn the evaluator's settled `Result` into one closed step, reading the
 /// parked request for the suspension case.
 fn settle_step(
     settled: Result<Value, Flow>,
     resumption: &mut Resumption,
-    plan: &ResumablePlan,
-    binding: &ResumableSuspensionBinding,
-) -> ResumableStep {
+    plan: &SequentialResumablePlan,
+    binding: Option<ResumableSuspensionBinding>,
+) -> EvaluatedStep {
     match settled {
         Ok(value) => match argument_of(&value) {
-            Some(result) => ResumableStep::Completed {
+            Some(result) => EvaluatedStep::Completed {
                 state: plan.complete.id.clone(),
                 result,
             },
-            None => ResumableStep::GuardError(
+            None => EvaluatedStep::GuardError(
                 "resumable-effect entry returned a non-scalar value".to_owned(),
             ),
         },
         Err(Flow::Guard(SUSPENDED_AT_YIELD)) => {
-            let Resumption::Fresh(Some(request)) = resumption else {
-                return ResumableStep::GuardError(
-                    "a suspension escaped without parking its request".to_owned(),
+            let Some(binding) = binding else {
+                return EvaluatedStep::GuardError(
+                    "a suspension escaped without its exact invocation binding".to_owned(),
                 );
             };
-            match argument_of(request) {
-                Some(request) => ResumableStep::Suspended {
-                    state: plan.suspension.state.id.clone(),
-                    binding: binding.clone(),
-                    request,
-                },
-                None => {
-                    ResumableStep::GuardError("`yield` produced a non-scalar request".to_owned())
+            match resumption {
+                Resumption::Fresh {
+                    parked: Some(request),
+                } => {
+                    let Some(request) = argument_of(request) else {
+                        return EvaluatedStep::GuardError(
+                            "`yield` produced a non-scalar request".to_owned(),
+                        );
+                    };
+                    if plan.suspensions.len() == 1 {
+                        EvaluatedStep::Suspended {
+                            state: plan.suspensions[0].state.id.clone(),
+                            binding,
+                            request,
+                        }
+                    } else {
+                        EvaluatedStep::SequentialSuspended {
+                            continuation: ResumableContinuation {
+                                state: plan.suspensions[0].state.id.clone(),
+                                binding,
+                                request,
+                                history: Vec::new(),
+                            },
+                        }
+                    }
                 }
+                Resumption::Replay {
+                    parked: Some(request),
+                    history,
+                    ..
+                } => {
+                    let index = history.len();
+                    let Some(suspension) = plan.suspensions.get(index) else {
+                        return EvaluatedStep::GuardError(
+                            "a replay parked beyond the plan's final suspension".to_owned(),
+                        );
+                    };
+                    let Some(request) = argument_of(request) else {
+                        return EvaluatedStep::GuardError(
+                            "`yield` produced a non-scalar request".to_owned(),
+                        );
+                    };
+                    EvaluatedStep::SequentialSuspended {
+                        continuation: ResumableContinuation {
+                            state: suspension.state.id.clone(),
+                            binding,
+                            request,
+                            history: history.clone(),
+                        },
+                    }
+                }
+                _ => EvaluatedStep::GuardError(
+                    "a suspension escaped without parking its request".to_owned(),
+                ),
             }
         }
-        Err(Flow::Failure(status)) => ResumableStep::LanguageFailure(status),
-        Err(Flow::Exhausted) => ResumableStep::FuelExhausted,
-        Err(Flow::DepthExceeded) => ResumableStep::CallDepthExceeded,
-        Err(Flow::Guard(detail)) => ResumableStep::GuardError(detail.to_owned()),
-        Err(Flow::Residual(_)) => ResumableStep::GuardError(
+        Err(Flow::Failure(status)) => EvaluatedStep::LanguageFailure(status),
+        Err(Flow::Exhausted) => EvaluatedStep::FuelExhausted,
+        Err(Flow::DepthExceeded) => EvaluatedStep::CallDepthExceeded,
+        Err(Flow::Guard(detail)) => EvaluatedStep::GuardError(detail.to_owned()),
+        Err(Flow::Residual(_)) => EvaluatedStep::GuardError(
             "owned postfix `?` residual escaped its function frame".to_owned(),
         ),
         Err(Flow::Cancelled { .. }) => {
-            ResumableStep::GuardError("unexpected cancellation in resumable evaluation".to_owned())
+            EvaluatedStep::GuardError("unexpected cancellation in resumable evaluation".to_owned())
         }
-        Err(Flow::Utf8MaterializationLimitExceeded { .. }) => ResumableStep::GuardError(
+        Err(Flow::Utf8MaterializationLimitExceeded { .. }) => EvaluatedStep::GuardError(
             "unexpected UTF-8 materialization limit in resumable evaluation".to_owned(),
         ),
     }

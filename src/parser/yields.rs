@@ -17,7 +17,8 @@
 //! `docs/RESUMABLE-EFFECTS-V1.md` names: no loop can contain a `yield`
 //! (`while` bodies are always nested blocks), no owned call's argument
 //! staging can observe a suspension (call arguments are always nested
-//! sub-expressions), and at most one `yield` site exists per function.
+//! sub-expressions), and yield sites execute only in authored top-level
+//! sequence.
 //! See `docs/RESUMABLE-EFFECTS-V1.md`.
 
 use crate::ast::{Expr, ExprKind, FieldInitializer, Function, MatchArm, Statement};
@@ -27,8 +28,8 @@ use crate::diagnostic::Diagnostic;
 /// body block does not admit it: nested inside another expression, a
 /// loop, a conditional branch, or a function with no `yields` clause.
 const MISPLACED_YIELD: &str = "SPX-T297";
-/// A `yields`-declaring function's body contains zero, or more than one,
-/// top-level `yield` expression.
+/// A `yields`-declaring function's body contains no top-level `yield`
+/// expression.
 const YIELD_ARITY: &str = "SPX-T298";
 
 pub(super) fn check_function_yield_placement(
@@ -39,7 +40,7 @@ pub(super) fn check_function_yield_placement(
     scan_top_level(&function.body, &mut top_level_yields, path)?;
 
     match (&function.yields, top_level_yields.len()) {
-        (Some(_), 1) => Ok(()),
+        (Some(_), 1..) => Ok(()),
         (Some(clause), 0) => Err(Diagnostic::error(
             YIELD_ARITY,
             format!(
@@ -47,16 +48,6 @@ pub(super) fn check_function_yield_placement(
                 function.name
             ),
             clause.span,
-        )
-        .at_path(path)),
-        (Some(_), _) => Err(Diagnostic::error(
-            YIELD_ARITY,
-            format!(
-                "function `{}` yields more than once; multiple yield points per function are \
-                 not yet admitted",
-                function.name
-            ),
-            function.body.span,
         )
         .at_path(path)),
         (None, 0) => Ok(()),
@@ -262,7 +253,7 @@ fn ask(seed: i64) -> i64
 @id("app.main")
 fn main() -> i64 { 0 }
 "#;
-        parse(source).expect("a single top-level yield is admitted");
+        parse(source).expect("a direct top-level yield is admitted");
     }
 
     #[test]
@@ -353,7 +344,7 @@ fn main() -> i64 { 0 }
     }
 
     #[test]
-    fn a_yields_declaring_function_that_yields_twice_is_refused() {
+    fn sequential_top_level_yields_in_a_declaring_function_parse() {
         let source = r#"
 module test.yields_twice;
 @id("app.ask")
@@ -367,8 +358,7 @@ fn ask() -> i64
 @id("app.main")
 fn main() -> i64 { 0 }
 "#;
-        let error = parse(source).unwrap_err();
-        assert_eq!(error.code, YIELD_ARITY);
+        parse(source).expect("sequential top-level yields are admitted");
     }
 
     #[test]

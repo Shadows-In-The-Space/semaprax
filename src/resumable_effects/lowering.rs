@@ -1,14 +1,14 @@
 //! Deterministic compiler-owned lowering for the admitted `.spx` resumable
 //! effect slice.
 //!
-//! This module deliberately does not widen source admission. It accepts only
-//! the already-checked shape owned by `parser::yields` and
-//! `hir::resolve_yield`: one direct top-level `yield`, Copy-scalar state, no
+//! This module implements bounded pure Copy-scalar replay history, not live
+//! frames or liveness-based continuation lowering. It accepts at most eight
+//! direct top-level `yield` sites, Copy-scalar state, no
 //! ordinary effects, and one explicitly identified free function. Each
 //! projection retains only that function's direct-call closure and the valid
 //! entrypoint closure required by target validation, so disconnected yielding
 //! functions remain independent. The module then derives one target-neutral
-//! three-state plan and two yield-free HIR projections for the interpreter and
+//! ordered-state plan and yield-free HIR projections for the interpreter and
 //! test-only backend parity lanes.
 
 use crate::diagnostic::Diagnostic;
@@ -21,11 +21,14 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod projection;
+#[cfg(test)]
+mod sequential_tests;
 use projection::{projection_program, resume_projection, start_projection};
 
 const INVALID_RESUMABLE_PLAN: &str = "SPX-H006";
-const PLAN_IDENTITY_DOMAIN: &[u8] = b"semaprax.resumable-plan.v1\0";
-const SUSPENSION_BINDING_DOMAIN: &[u8] = b"semaprax.resumable-suspension-binding.v1\0";
+const PLAN_IDENTITY_DOMAIN: &[u8] = b"semaprax.resumable-plan.v2\0";
+const SUSPENSION_BINDING_DOMAIN: &[u8] = b"semaprax.resumable-suspension-binding.v2\0";
+pub const MAX_RESUMABLE_YIELDS: usize = 8;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ResumablePlanIdentity([u8; 32]);
@@ -106,10 +109,6 @@ pub struct ResumableSuspension {
     pub response_type: ResolvedType,
 }
 
-/// One yield-free compiler projection. The function keeps the authored
-/// function identity because each projection lives in its own isolated
-/// `ResolvedProgram`; the enclosing [`ResumablePlan`] and its state identities
-/// distinguish the entry/request and resume meanings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResumableProjection {
     pub function: ResolvedFunction,
@@ -126,32 +125,27 @@ pub struct ResumablePlan {
     pub resume: ResumableProjection,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SequentialResumablePlan {
+    pub function_id: DeclarationId,
+    pub identity: ResumablePlanIdentity,
+    pub entry: ResumableState,
+    pub suspensions: Vec<ResumableSuspension>,
+    pub complete: ResumableState,
+    pub start: ResumableProjection,
+    pub resumes: Vec<ResumableProjection>,
+}
+
 impl ResumablePlan {
-    /// Bind a pending suspension to this exact checked program/plan, yield
-    /// site, and invocation arguments. The digest is proof data only and
-    /// grants no authority to answer or resume the suspension.
     pub fn suspension_binding(&self, arguments: &[ResumableScalar]) -> ResumableSuspensionBinding {
-        let mut hasher = Sha256::new();
-        hasher.update(SUSPENSION_BINDING_DOMAIN);
-        frame(&mut hasher, self.identity.as_bytes());
-        frame(&mut hasher, self.suspension.state.id.as_str().as_bytes());
-        frame(&mut hasher, self.suspension.expression.as_str().as_bytes());
-        hasher.update((arguments.len() as u64).to_le_bytes());
-        for argument in arguments {
-            hash_scalar(&mut hasher, argument);
-        }
-        ResumableSuspensionBinding(hasher.finalize().into())
+        suspension_binding(&self.identity, &self.suspension, arguments, &[])
     }
 
-    /// Replace the authored resumable function with the yield-free request
-    /// projection and validate the resulting HIR before returning it.
     pub fn start_program(&self, program: &ResolvedProgram) -> Result<ResolvedProgram, Diagnostic> {
         self.authenticate_program(program)?;
         projection_program(program, &self.function_id, &self.start.function)
     }
 
-    /// Replace the authored resumable function with the yield-free resume
-    /// projection and validate the resulting HIR before returning it.
     pub fn resume_program(&self, program: &ResolvedProgram) -> Result<ResolvedProgram, Diagnostic> {
         self.authenticate_program(program)?;
         projection_program(program, &self.function_id, &self.resume.function)
@@ -163,7 +157,8 @@ impl ResumablePlan {
             .iter()
             .find(|function| function.id == self.function_id)
             .ok_or_else(|| invalid("projection program lacks the plan's function"))?;
-        let observed = plan_identity(program, function, &self.suspension.expression)?;
+        let sites = locate_direct_yields(function)?;
+        let observed = plan_identity(program, function, &sites)?;
         if observed != self.identity {
             return Err(invalid(
                 "projection program does not match the plan's checked-program identity",
@@ -179,16 +174,136 @@ impl ResumablePlan {
     }
 }
 
-/// Lower one already-admitted resumable function into a deterministic plan.
-///
-/// The checks here intentionally rederive the load-bearing profile from HIR
-/// rather than trusting parser/resolver provenance. Forged nested or multiple
-/// yields, non-scalar state, cleanup-bearing values, an automatic function
-/// identity, or a mismatched request/response type fail closed.
+impl SequentialResumablePlan {
+    pub fn suspension_binding(&self, arguments: &[ResumableScalar]) -> ResumableSuspensionBinding {
+        self.suspension_binding_at(0, arguments, &[])
+            .expect("a lowered resumable plan has its first suspension")
+    }
+
+    /// Bind a site to the exact original arguments and preceding answer bits.
+    pub fn suspension_binding_at(
+        &self,
+        index: usize,
+        arguments: &[ResumableScalar],
+        prior_answers: &[ResumableScalar],
+    ) -> Result<ResumableSuspensionBinding, Diagnostic> {
+        let suspension = self
+            .suspensions
+            .get(index)
+            .ok_or_else(|| invalid("resumable suspension index is out of bounds"))?;
+        if prior_answers.len() != index {
+            return Err(invalid(
+                "resumable suspension answer history length disagrees with its site",
+            ));
+        }
+        Ok(suspension_binding(
+            &self.identity,
+            suspension,
+            arguments,
+            prior_answers,
+        ))
+    }
+
+    pub fn suspension_index(&self, state: &ResumableStateId) -> Option<usize> {
+        self.suspensions
+            .iter()
+            .position(|site| site.state.id == *state)
+    }
+
+    pub fn start_program(&self, program: &ResolvedProgram) -> Result<ResolvedProgram, Diagnostic> {
+        self.authenticate_program(program)?;
+        projection_program(program, &self.function_id, &self.start.function)
+    }
+
+    pub fn resume_program(&self, program: &ResolvedProgram) -> Result<ResolvedProgram, Diagnostic> {
+        self.resume_program_at(program, 0)
+    }
+
+    pub fn resume_program_at(
+        &self,
+        program: &ResolvedProgram,
+        index: usize,
+    ) -> Result<ResolvedProgram, Diagnostic> {
+        self.authenticate_program(program)?;
+        let resume = self
+            .resumes
+            .get(index)
+            .ok_or_else(|| invalid("resumable resume index is out of bounds"))?;
+        projection_program(program, &self.function_id, &resume.function)
+    }
+
+    fn authenticate_program(&self, program: &ResolvedProgram) -> Result<(), Diagnostic> {
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.id == self.function_id)
+            .ok_or_else(|| invalid("projection program lacks the plan's function"))?;
+        let sites = locate_direct_yields(function)?;
+        let observed = plan_identity(program, function, &sites)?;
+        if observed != self.identity {
+            return Err(invalid(
+                "projection program does not match the plan's checked-program identity",
+            ));
+        }
+        let expected = lower_sequential(program, function)?;
+        if expected != *self {
+            return Err(invalid(
+                "resumable plan is not the exact deterministic lowering of the checked program",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn suspension_binding(
+    identity: &ResumablePlanIdentity,
+    suspension: &ResumableSuspension,
+    arguments: &[ResumableScalar],
+    prior_answers: &[ResumableScalar],
+) -> ResumableSuspensionBinding {
+    let mut hasher = Sha256::new();
+    hasher.update(SUSPENSION_BINDING_DOMAIN);
+    frame(&mut hasher, identity.as_bytes());
+    frame(&mut hasher, suspension.state.id.as_str().as_bytes());
+    frame(&mut hasher, suspension.expression.as_str().as_bytes());
+    hasher.update((arguments.len() as u64).to_le_bytes());
+    for argument in arguments {
+        hash_scalar(&mut hasher, argument);
+    }
+    hasher.update((prior_answers.len() as u64).to_le_bytes());
+    for answer in prior_answers {
+        hash_scalar(&mut hasher, answer);
+    }
+    ResumableSuspensionBinding(hasher.finalize().into())
+}
+
+/// Lower the original one-site profile into its source-compatible plan.
 pub fn lower(
     program: &ResolvedProgram,
     function: &ResolvedFunction,
 ) -> Result<ResumablePlan, Diagnostic> {
+    let plan = lower_sequential(program, function)?;
+    if plan.suspensions.len() != 1 {
+        return Err(invalid(
+            "legacy resumable lowering requires exactly one yield site; use `lower_sequential`",
+        ));
+    }
+    Ok(ResumablePlan {
+        function_id: plan.function_id,
+        identity: plan.identity,
+        entry: plan.entry,
+        suspension: plan.suspensions.into_iter().next().expect("one suspension"),
+        complete: plan.complete,
+        start: plan.start,
+        resume: plan.resumes.into_iter().next().expect("one resume"),
+    })
+}
+
+/// Lower the bounded sequential profile into an ordered plan.
+pub fn lower_sequential(
+    program: &ResolvedProgram,
+    function: &ResolvedFunction,
+) -> Result<SequentialResumablePlan, Diagnostic> {
     let canonical = program
         .functions
         .iter()
@@ -252,53 +367,61 @@ pub fn lower(
     }
 
     reject_yield_in_contracts(function)?;
-    let (yield_expression, request, position) = locate_single_direct_yield(function)?;
-    if request.ty != yields.request_type
-        || yield_expression.ty != yields.response_type
-        || request.ownership != OwnershipMode::Value
-        || yield_expression.ownership != OwnershipMode::Value
-    {
-        return Err(invalid(
-            "resumable yield request/response types or ownership disagree with its declaration",
-        ));
+    let sites = locate_direct_yields(function)?;
+    for (yield_expression, request, _) in &sites {
+        if request.ty != yields.request_type
+            || yield_expression.ty != yields.response_type
+            || request.ownership != OwnershipMode::Value
+            || yield_expression.ownership != OwnershipMode::Value
+        {
+            return Err(invalid(
+                "resumable yield request/response types or ownership disagree with its declaration",
+            ));
+        }
     }
     require_scalar_expression_tree(&function.body)?;
     reject_reachable_resumable_callees(program, function)?;
 
-    let identity = plan_identity(program, function, &yield_expression.id)?;
+    let identity = plan_identity(program, function, &sites)?;
 
     let entry = state(&function.id, ResumableStateKind::Entry, None);
-    let suspended = state(
-        &function.id,
-        ResumableStateKind::Suspended,
-        Some(&yield_expression.id),
-    );
     let complete = state(&function.id, ResumableStateKind::Complete, None);
-    let start = start_projection(program, function, request, position)?;
-    let resume = resume_projection(program, function, yield_expression, position)?;
+    let start = start_projection(program, function, sites[0].1, sites[0].2)?;
+    let mut suspensions = Vec::with_capacity(sites.len());
+    let mut resumes = Vec::with_capacity(sites.len());
+    for (index, (yield_expression, request, position)) in sites.iter().enumerate() {
+        suspensions.push(ResumableSuspension {
+            state: state(
+                &function.id,
+                ResumableStateKind::Suspended,
+                Some(&yield_expression.id),
+            ),
+            expression: yield_expression.id.clone(),
+            request_expression: request.id.clone(),
+            position: *position,
+            request_type: yields.request_type.clone(),
+            response_type: yields.response_type.clone(),
+        });
+        resumes.push(ResumableProjection {
+            function: resume_projection(program, function, &sites, index)?,
+        });
+    }
 
-    Ok(ResumablePlan {
+    Ok(SequentialResumablePlan {
         function_id: function.id.clone(),
         identity,
         entry,
-        suspension: ResumableSuspension {
-            state: suspended,
-            expression: yield_expression.id.clone(),
-            request_expression: request.id.clone(),
-            position,
-            request_type: yields.request_type.clone(),
-            response_type: yields.response_type.clone(),
-        },
+        suspensions,
         complete,
         start: ResumableProjection { function: start },
-        resume: ResumableProjection { function: resume },
+        resumes,
     })
 }
 
 fn plan_identity(
     program: &ResolvedProgram,
     function: &ResolvedFunction,
-    yield_expression: &ExpressionId,
+    sites: &[YieldSite<'_>],
 ) -> Result<ResumablePlanIdentity, Diagnostic> {
     let encoded = crate::cache_codec::encode(program).map_err(|diagnostics| {
         diagnostics
@@ -310,7 +433,10 @@ fn plan_identity(
     hasher.update(PLAN_IDENTITY_DOMAIN);
     frame(&mut hasher, &encoded);
     frame(&mut hasher, function.id.as_str().as_bytes());
-    frame(&mut hasher, yield_expression.as_str().as_bytes());
+    hasher.update((sites.len() as u64).to_le_bytes());
+    for (expression, _, _) in sites {
+        frame(&mut hasher, expression.id.as_str().as_bytes());
+    }
     Ok(ResumablePlanIdentity(hasher.finalize().into()))
 }
 
@@ -437,9 +563,9 @@ fn state(
     }
 }
 
-fn locate_single_direct_yield<'a>(
-    function: &'a ResolvedFunction,
-) -> Result<(&'a ResolvedExpr, &'a ResolvedExpr, ResumableYieldPosition), Diagnostic> {
+type YieldSite<'a> = (&'a ResolvedExpr, &'a ResolvedExpr, ResumableYieldPosition);
+
+fn locate_direct_yields(function: &ResolvedFunction) -> Result<Vec<YieldSite<'_>>, Diagnostic> {
     let mut all_yields = Vec::new();
     let mut pending = vec![&function.body];
     while let Some(expression) = pending.pop() {
@@ -448,9 +574,9 @@ fn locate_single_direct_yield<'a>(
         }
         hir::push_resolved_expression_children_in_authored_order(expression, &mut pending);
     }
-    if all_yields.len() != 1 {
+    if !(1..=MAX_RESUMABLE_YIELDS).contains(&all_yields.len()) {
         return Err(invalid(format!(
-            "resumable lowering requires exactly one yield; found {}",
+            "resumable lowering requires between 1 and {MAX_RESUMABLE_YIELDS} yields; found {}",
             all_yields.len()
         )));
     }
@@ -460,7 +586,8 @@ fn locate_single_direct_yield<'a>(
             "resumable function body is not its expected top-level block",
         ));
     };
-    let mut direct = None;
+    let mut direct = Vec::new();
+    let execution = FunctionExecutionId::Monomorphic(function.id.clone());
     for (index, statement) in statements.iter().enumerate() {
         let (value, kind) = match statement {
             ResolvedStatement::Let { value, .. } => (value, ResumableStatementKind::Let),
@@ -470,7 +597,13 @@ fn locate_single_direct_yield<'a>(
         if let ResolvedExprKind::Yield { request } = &value.kind {
             let index = u32::try_from(index)
                 .map_err(|_| invalid("resumable statement index exceeds u32"))?;
-            direct = Some((
+            if value.id != ExpressionId::new(&execution, &format!("body.s{index}.value"))
+                || request.id
+                    != ExpressionId::new(&execution, &format!("body.s{index}.value.request"))
+            {
+                return Err(invalid("resumable yield has a non-canonical identity"));
+            }
+            direct.push((
                 value,
                 request.as_ref(),
                 ResumableYieldPosition::Statement { index, kind },
@@ -478,20 +611,20 @@ fn locate_single_direct_yield<'a>(
         }
     }
     if let ResolvedExprKind::Yield { request } = &tail.kind {
-        direct = Some((
+        if tail.id != ExpressionId::new(&execution, "body.tail")
+            || request.id != ExpressionId::new(&execution, "body.tail.request")
+        {
+            return Err(invalid("resumable yield has a non-canonical identity"));
+        }
+        direct.push((
             tail.as_ref(),
             request.as_ref(),
             ResumableYieldPosition::Tail,
         ));
     }
-    let Some(direct) = direct else {
+    if direct.len() != all_yields.len() {
         return Err(invalid(
-            "resumable yield is nested instead of occupying one direct top-level slot",
-        ));
-    };
-    if direct.0.id != all_yields[0].id {
-        return Err(invalid(
-            "resumable direct yield does not equal the function's sole yield expression",
+            "resumable yield is nested instead of occupying a direct top-level slot",
         ));
     }
     Ok(direct)
@@ -971,7 +1104,7 @@ fn main() -> i64 { 0 }
     }
 
     #[test]
-    fn a_forged_second_or_nested_yield_is_rejected_by_lowering_itself() {
+    fn a_forged_duplicate_yield_identity_is_rejected_by_lowering_itself() {
         let mut program = program(SOURCE);
         {
             let function = program
@@ -994,7 +1127,7 @@ fn main() -> i64 { 0 }
             .unwrap();
         let error = lower(&program, function).unwrap_err();
         assert_eq!(error.code, INVALID_RESUMABLE_PLAN);
-        assert!(error.message.contains("exactly one yield"));
+        assert!(error.message.contains("non-canonical identity"));
     }
 
     #[test]

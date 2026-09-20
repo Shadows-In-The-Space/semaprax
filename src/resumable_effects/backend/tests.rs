@@ -4,11 +4,14 @@ use std::process::Command;
 use crate::cleanup_plan::StatusCase;
 use crate::conformance::NormalizedStatus;
 use crate::hir::{self, ResolvedProgram};
-use crate::interpreter::resumable::{resume_resumable_effect, run_resumable_effect, ResumableStep};
+use crate::interpreter::resumable::{
+    resume_resumable_effect, run_resumable_effect, run_sequential_resumable_effect, ResumableStep,
+    SequentialResumableStep,
+};
 use crate::interpreter::ArgumentValue;
-use crate::resumable_effects::lowering::{self, ResumablePlan, ResumableScalar};
+use crate::resumable_effects::lowering::{self, ResumableScalar, SequentialResumablePlan};
 
-use super::{resume, run, Backend, BackendStep};
+use super::{resume, resume_sequential, run, Backend, BackendStep};
 
 fn program(type_name: &str, request: &str, result: &str) -> ResolvedProgram {
     let source = format!(
@@ -49,13 +52,88 @@ fn main() -> i64 { 0 }
     hir::resolve(&ast).unwrap()
 }
 
-fn plan(program: &ResolvedProgram) -> ResumablePlan {
+fn sequential_program() -> ResolvedProgram {
+    let source = r#"
+module test.sequential_resumable_backend;
+@id("app.ask")
+fn ask(seed: i64) -> i64
+    yields i64 -> i64
+{
+    let first = yield seed + 1;
+    let second = yield first + 2;
+    first + second
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let ast = crate::parse(source, Path::new("sequential-resumable-backend.spx")).unwrap();
+    hir::resolve(&ast).unwrap()
+}
+
+fn bounded_eight_site_program() -> ResolvedProgram {
+    let source = r#"
+module test.bounded_eight_site_resumable_backend;
+@id("app.ask")
+fn ask() -> i64
+    yields i64 -> i64
+{
+    let a0 = yield 4;
+    let a1 = yield a0 + 1;
+    let a2 = yield a1 + 1;
+    let a3 = yield a2 + 1;
+    let a4 = yield a3 + 1;
+    let a5 = yield a4 + 1;
+    let a6 = yield a5 + 1;
+    let a7 = yield a6 + 1;
+    a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let ast = crate::parse(
+        source,
+        Path::new("bounded-eight-site-resumable-backend.spx"),
+    )
+    .unwrap();
+    hir::resolve(&ast).unwrap()
+}
+
+fn sequential_failure_program(
+    second_request: &str,
+    result: &str,
+    ensures: &str,
+) -> ResolvedProgram {
+    let source = format!(
+        r#"
+module test.sequential_resumable_backend_failure;
+@id("app.ask")
+fn ask(seed: i64) -> i64
+    yields i64 -> i64
+    {ensures}
+{{
+    let first = yield seed;
+    let second = yield {second_request};
+    {result}
+}}
+@id("app.main")
+fn main() -> i64 {{ 0 }}
+"#
+    );
+    let ast = crate::parse(
+        &source,
+        Path::new("sequential-resumable-backend-failure.spx"),
+    )
+    .unwrap();
+    hir::resolve(&ast).unwrap()
+}
+
+fn plan(program: &ResolvedProgram) -> SequentialResumablePlan {
     let function = program
         .functions
         .iter()
         .find(|function| function.id.as_str() == "app.ask")
         .unwrap();
-    lowering::lower(program, function).unwrap()
+    lowering::lower_sequential(program, function).unwrap()
 }
 
 fn require_tools() -> bool {
@@ -125,6 +203,372 @@ fn native_o0_o2_and_core_wasm_preserve_signed_zero_bits() {
                 },
             );
         }
+    }
+}
+
+#[test]
+fn two_yields_match_across_native_o0_o2_and_core_wasm() {
+    if !require_tools() {
+        return;
+    }
+    let program = sequential_program();
+    let plan = plan(&program);
+    for backend in [Backend::NativeO0, Backend::NativeO2, Backend::CoreWasm] {
+        let BackendStep::SequentialSuspended(first) =
+            run(backend, &program, &plan, &[ResumableScalar::I64(4)]).unwrap()
+        else {
+            panic!("two-site backend start did not suspend sequentially")
+        };
+        assert_eq!(first.request(), &ResumableScalar::I64(5));
+        let BackendStep::SequentialSuspended(second) = resume_sequential(
+            backend,
+            &program,
+            &plan,
+            &[ResumableScalar::I64(4)],
+            &first,
+            ResumableScalar::I64(10),
+        )
+        .unwrap() else {
+            panic!("first backend answer did not park the second request")
+        };
+        assert_eq!(second.request(), &ResumableScalar::I64(12));
+        assert_ne!(second.state(), first.state());
+        assert_eq!(
+            resume_sequential(
+                backend,
+                &program,
+                &plan,
+                &[ResumableScalar::I64(4)],
+                &second,
+                ResumableScalar::I64(20),
+            )
+            .unwrap(),
+            BackendStep::Complete {
+                state: plan.complete.id.clone(),
+                result: ResumableScalar::I64(30),
+            }
+        );
+    }
+}
+
+#[test]
+fn eight_sites_replay_full_history_across_interpreter_and_every_backend() {
+    if !require_tools() {
+        return;
+    }
+    let program = bounded_eight_site_program();
+    let plan = plan(&program);
+    let arguments = [];
+
+    let interpreted = run_sequential_resumable_effect(&program, "app.ask", &[], 10_000).unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: mut interpreted,
+    } = interpreted.step
+    else {
+        panic!("eight-site interpreter start did not suspend")
+    };
+    assert_eq!(interpreted.request(), &ArgumentValue::Int(4));
+    for answer in [10_i64, 20, 30, 40, 50, 60, 70] {
+        let resumed = crate::interpreter::resumable::resume_sequential_resumable_effect(
+            &program,
+            "app.ask",
+            &[],
+            &interpreted,
+            &ArgumentValue::Int(answer),
+            10_000,
+        )
+        .unwrap();
+        let SequentialResumableStep::Suspended { continuation } = resumed.step else {
+            panic!("eight-site interpreter completed before its final site")
+        };
+        assert_eq!(continuation.request(), &ArgumentValue::Int(answer + 1));
+        interpreted = continuation;
+    }
+    assert!(matches!(
+        crate::interpreter::resumable::resume_sequential_resumable_effect(
+            &program,
+            "app.ask",
+            &[],
+            &interpreted,
+            &ArgumentValue::Int(80),
+            10_000,
+        )
+        .unwrap()
+        .step,
+        SequentialResumableStep::Completed {
+            result: ArgumentValue::Int(360),
+            ..
+        }
+    ));
+
+    for backend in [Backend::NativeO0, Backend::NativeO2, Backend::CoreWasm] {
+        let BackendStep::SequentialSuspended(mut continuation) =
+            run(backend, &program, &plan, &arguments).unwrap()
+        else {
+            panic!("eight-site backend start did not suspend")
+        };
+        assert_eq!(continuation.request(), &ResumableScalar::I64(4));
+        for answer in [10_i64, 20, 30, 40, 50, 60, 70] {
+            let resumed = resume_sequential(
+                backend,
+                &program,
+                &plan,
+                &arguments,
+                &continuation,
+                ResumableScalar::I64(answer),
+            )
+            .unwrap();
+            let BackendStep::SequentialSuspended(next) = resumed else {
+                panic!("eight-site backend completed before its final site")
+            };
+            assert_eq!(next.request(), &ResumableScalar::I64(answer + 1));
+            continuation = next;
+            if answer == 30 {
+                let mut changed_history = continuation.clone();
+                changed_history.history[1].request = ResumableScalar::I64(999);
+                assert_eq!(
+                    resume_sequential(
+                        backend,
+                        &program,
+                        &plan,
+                        &arguments,
+                        &changed_history,
+                        ResumableScalar::I64(40),
+                    )
+                    .unwrap_err()
+                    .code,
+                    "SPX-F114"
+                );
+            }
+        }
+        assert_eq!(
+            resume_sequential(
+                backend,
+                &program,
+                &plan,
+                &arguments,
+                &continuation,
+                ResumableScalar::I64(80),
+            )
+            .unwrap(),
+            BackendStep::Complete {
+                state: plan.complete.id.clone(),
+                result: ResumableScalar::I64(360),
+            }
+        );
+    }
+}
+
+#[test]
+fn sequential_intermediate_final_and_postcondition_failures_match_every_backend() {
+    if !require_tools() {
+        return;
+    }
+    let overflow = NormalizedStatus::arithmetic(StatusCase::AddOverflow);
+    let ensures = NormalizedStatus::contract(crate::cleanup_plan::ContractPhase::Ensures);
+
+    let intermediate = sequential_failure_program("first + 1", "second", "");
+    let intermediate_plan = plan(&intermediate);
+    let interpreted =
+        run_sequential_resumable_effect(&intermediate, "app.ask", &[ArgumentValue::Int(7)], 10_000)
+            .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: interpreted,
+    } = interpreted.step
+    else {
+        panic!("intermediate-failure interpreter start did not suspend")
+    };
+    assert_eq!(
+        crate::interpreter::resumable::resume_sequential_resumable_effect(
+            &intermediate,
+            "app.ask",
+            &[ArgumentValue::Int(7)],
+            &interpreted,
+            &ArgumentValue::Int(i64::MAX),
+            10_000,
+        )
+        .unwrap()
+        .step,
+        SequentialResumableStep::LanguageFailure(overflow.clone())
+    );
+    for backend in [Backend::NativeO0, Backend::NativeO2, Backend::CoreWasm] {
+        let BackendStep::SequentialSuspended(first) = run(
+            backend,
+            &intermediate,
+            &intermediate_plan,
+            &[ResumableScalar::I64(7)],
+        )
+        .unwrap() else {
+            panic!("intermediate-failure backend start did not suspend")
+        };
+        assert_eq!(
+            resume_sequential(
+                backend,
+                &intermediate,
+                &intermediate_plan,
+                &[ResumableScalar::I64(7)],
+                &first,
+                ResumableScalar::I64(i64::MAX),
+            )
+            .unwrap(),
+            BackendStep::LanguageFailure(overflow.clone())
+        );
+    }
+
+    let final_failure = sequential_failure_program("first", "second + 1", "");
+    let final_plan = plan(&final_failure);
+    let interpreted = run_sequential_resumable_effect(
+        &final_failure,
+        "app.ask",
+        &[ArgumentValue::Int(7)],
+        10_000,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: first,
+    } = interpreted.step
+    else {
+        panic!("final-failure interpreter start did not suspend")
+    };
+    let interpreted = crate::interpreter::resumable::resume_sequential_resumable_effect(
+        &final_failure,
+        "app.ask",
+        &[ArgumentValue::Int(7)],
+        &first,
+        &ArgumentValue::Int(1),
+        10_000,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: second,
+    } = interpreted.step
+    else {
+        panic!("final-failure interpreter did not reach its second site")
+    };
+    assert_eq!(
+        crate::interpreter::resumable::resume_sequential_resumable_effect(
+            &final_failure,
+            "app.ask",
+            &[ArgumentValue::Int(7)],
+            &second,
+            &ArgumentValue::Int(i64::MAX),
+            10_000,
+        )
+        .unwrap()
+        .step,
+        SequentialResumableStep::LanguageFailure(overflow.clone())
+    );
+    for backend in [Backend::NativeO0, Backend::NativeO2, Backend::CoreWasm] {
+        let BackendStep::SequentialSuspended(first) = run(
+            backend,
+            &final_failure,
+            &final_plan,
+            &[ResumableScalar::I64(7)],
+        )
+        .unwrap() else {
+            panic!("final-failure backend start did not suspend")
+        };
+        let BackendStep::SequentialSuspended(second) = resume_sequential(
+            backend,
+            &final_failure,
+            &final_plan,
+            &[ResumableScalar::I64(7)],
+            &first,
+            ResumableScalar::I64(1),
+        )
+        .unwrap() else {
+            panic!("final-failure backend did not reach its second site")
+        };
+        assert_eq!(
+            resume_sequential(
+                backend,
+                &final_failure,
+                &final_plan,
+                &[ResumableScalar::I64(7)],
+                &second,
+                ResumableScalar::I64(i64::MAX),
+            )
+            .unwrap(),
+            BackendStep::LanguageFailure(overflow.clone())
+        );
+    }
+
+    let postcondition = sequential_failure_program("first", "second", "ensures result >= 0");
+    let postcondition_plan = plan(&postcondition);
+    let interpreted = run_sequential_resumable_effect(
+        &postcondition,
+        "app.ask",
+        &[ArgumentValue::Int(7)],
+        10_000,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: first,
+    } = interpreted.step
+    else {
+        panic!("postcondition interpreter start did not suspend")
+    };
+    let interpreted = crate::interpreter::resumable::resume_sequential_resumable_effect(
+        &postcondition,
+        "app.ask",
+        &[ArgumentValue::Int(7)],
+        &first,
+        &ArgumentValue::Int(1),
+        10_000,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: second,
+    } = interpreted.step
+    else {
+        panic!("postcondition interpreter did not reach its second site")
+    };
+    assert_eq!(
+        crate::interpreter::resumable::resume_sequential_resumable_effect(
+            &postcondition,
+            "app.ask",
+            &[ArgumentValue::Int(7)],
+            &second,
+            &ArgumentValue::Int(-1),
+            10_000,
+        )
+        .unwrap()
+        .step,
+        SequentialResumableStep::LanguageFailure(ensures.clone())
+    );
+    for backend in [Backend::NativeO0, Backend::NativeO2, Backend::CoreWasm] {
+        let BackendStep::SequentialSuspended(first) = run(
+            backend,
+            &postcondition,
+            &postcondition_plan,
+            &[ResumableScalar::I64(7)],
+        )
+        .unwrap() else {
+            panic!("postcondition backend start did not suspend")
+        };
+        let BackendStep::SequentialSuspended(second) = resume_sequential(
+            backend,
+            &postcondition,
+            &postcondition_plan,
+            &[ResumableScalar::I64(7)],
+            &first,
+            ResumableScalar::I64(1),
+        )
+        .unwrap() else {
+            panic!("postcondition backend did not reach its second site")
+        };
+        assert_eq!(
+            resume_sequential(
+                backend,
+                &postcondition,
+                &postcondition_plan,
+                &[ResumableScalar::I64(7)],
+                &second,
+                ResumableScalar::I64(-1),
+            )
+            .unwrap(),
+            BackendStep::LanguageFailure(ensures.clone())
+        );
     }
 }
 
@@ -292,7 +736,7 @@ fn suspension_binding_refuses_same_request_with_different_arguments_before_targe
     // No tool availability prerequisite: the binding refusal occurs before
     // either clang or node can be invoked.
     let suspension = super::BackendSuspension {
-        state: plan.suspension.state.id.clone(),
+        state: plan.suspensions[0].state.id.clone(),
         request: ResumableScalar::I64(7),
         binding: plan.suspension_binding(&[ResumableScalar::I64(11)]),
     };
@@ -362,7 +806,7 @@ fn wrong_typed_resume_is_refused_before_target_execution() {
     let program = program("i64", "seed", "answer");
     let plan = plan(&program);
     let suspension = super::BackendSuspension {
-        state: plan.suspension.state.id.clone(),
+        state: plan.suspensions[0].state.id.clone(),
         request: ResumableScalar::I64(9),
         binding: plan.suspension_binding(&[ResumableScalar::I64(9)]),
     };

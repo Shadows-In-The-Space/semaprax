@@ -25,6 +25,48 @@ fn ask(seed: i64) -> i64
 fn main() -> i64 { 0 }
 "#;
 
+const TWO_YIELDS: &str = r#"
+module test.sequential_resumable_effects_interpreter;
+@id("app.ask")
+fn ask(seed: i64) -> i64
+    yields i64 -> i64
+{
+    let first = yield seed + 1;
+    let second = yield first + 2;
+    first + second
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+
+const THREE_YIELDS: &str = r#"
+module test.three_sequential_resumable_effects_interpreter;
+@id("app.ask")
+fn ask(seed: i64) -> i64
+    yields i64 -> i64
+{
+    let first = yield seed;
+    let second = yield first + 1;
+    let third = yield second + 1;
+    first + second + third
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+
+const TWO_FLOAT_YIELDS: &str = r#"
+module test.float_sequential_resumable_effects_interpreter;
+@id("app.ask")
+fn ask(seed: f64) -> f64
+    yields f64 -> f64
+{
+    let first = yield seed;
+    yield first
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+
 fn resolved(source: &str) -> hir::ResolvedProgram {
     let program = crate::parse(source, Path::new("resumable-effects-interpreter.spx"))
         .expect("the slice source parses");
@@ -46,6 +88,18 @@ fn suspension(
         } => (state, binding, request),
         other => panic!("expected suspension, got {other:?}"),
     }
+}
+
+fn sequential_suspension(
+    program: &hir::ResolvedProgram,
+    arguments: &[ArgumentValue],
+) -> ResumableContinuation {
+    let evaluated =
+        run_sequential_resumable_effect(program, "app.ask", arguments, MAX_STEPS).unwrap();
+    let SequentialResumableStep::Suspended { continuation } = evaluated.step else {
+        panic!("expected sequential suspension")
+    };
+    continuation
 }
 
 #[test]
@@ -115,6 +169,286 @@ fn resuming_substitutes_the_answer_at_the_yield_and_runs_the_suffix() {
         }
     ));
     assert_ne!(other.step, evaluated.step);
+}
+
+#[test]
+fn two_yields_replay_in_order_and_complete_through_the_opaque_continuation() {
+    let program = resolved(TWO_YIELDS);
+    let first =
+        run_sequential_resumable_effect(&program, "app.ask", &[ArgumentValue::Int(4)], MAX_STEPS)
+            .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: first,
+    } = first.step
+    else {
+        panic!("two-site start did not produce a sequential continuation")
+    };
+    assert_eq!(first.request(), &ArgumentValue::Int(5));
+
+    let second = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &[ArgumentValue::Int(4)],
+        &first,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: second,
+    } = second.step
+    else {
+        panic!("first answer did not park the second request")
+    };
+    assert_eq!(second.request(), &ArgumentValue::Int(12));
+    assert_ne!(second.state(), first.state());
+    assert_ne!(second.binding(), first.binding());
+
+    let complete = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &[ArgumentValue::Int(4)],
+        &second,
+        &ArgumentValue::Int(20),
+        MAX_STEPS,
+    )
+    .unwrap();
+    assert!(matches!(
+        complete.step,
+        SequentialResumableStep::Completed {
+            result: ArgumentValue::Int(30),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn legacy_one_site_surface_stays_exhaustive_and_refuses_multi_site_programs() {
+    fn exhaustively_match_legacy(step: ResumableStep) {
+        match step {
+            ResumableStep::Suspended { .. }
+            | ResumableStep::Completed { .. }
+            | ResumableStep::LanguageFailure(_)
+            | ResumableStep::FuelExhausted
+            | ResumableStep::CallDepthExceeded
+            | ResumableStep::GuardError(_) => {}
+        }
+    }
+
+    exhaustively_match_legacy(ResumableStep::FuelExhausted);
+    let multi = resolved(TWO_YIELDS);
+    let error =
+        run_resumable_effect(&multi, "app.ask", &[ArgumentValue::Int(4)], MAX_STEPS).unwrap_err();
+    assert_eq!(error[0].code, "SPX-F115");
+    assert!(error[0].message.contains("explicit sequential API"));
+
+    let single = resolved(ASK);
+    let error =
+        run_sequential_resumable_effect(&single, "app.ask", &[ArgumentValue::Int(4)], MAX_STEPS)
+            .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F115");
+    assert!(error[0].message.contains("legacy one-site API"));
+}
+
+#[test]
+fn three_yields_replay_every_request_and_complete_in_authored_order() {
+    let program = resolved(THREE_YIELDS);
+    let first = sequential_suspension(&program, &[ArgumentValue::Int(4)]);
+    assert_eq!(first.request(), &ArgumentValue::Int(4));
+
+    let second = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &[ArgumentValue::Int(4)],
+        &first,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: second,
+    } = second.step
+    else {
+        panic!("first answer did not reach the second site")
+    };
+    assert_eq!(second.request(), &ArgumentValue::Int(11));
+
+    let third = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &[ArgumentValue::Int(4)],
+        &second,
+        &ArgumentValue::Int(20),
+        MAX_STEPS,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: third,
+    } = third.step
+    else {
+        panic!("second answer did not reach the third site")
+    };
+    assert_eq!(third.request(), &ArgumentValue::Int(21));
+
+    let complete = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &[ArgumentValue::Int(4)],
+        &third,
+        &ArgumentValue::Int(30),
+        MAX_STEPS,
+    )
+    .unwrap();
+    assert!(matches!(
+        complete.step,
+        SequentialResumableStep::Completed {
+            result: ArgumentValue::Int(60),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn sequential_state_history_binding_and_current_answer_type_fail_closed() {
+    let program = resolved(TWO_YIELDS);
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.id.as_str() == "app.ask")
+        .unwrap();
+    let plan = lowering::lower_sequential(&program, function).unwrap();
+    let arguments = [ArgumentValue::Int(4)];
+    let first = sequential_suspension(&program, &arguments);
+
+    let mut wrong_state = first.clone();
+    wrong_state.state = plan.complete.id.clone();
+    let error = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &wrong_state,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F115");
+
+    let mut wrong_history_length = first.clone();
+    wrong_history_length.state = plan.suspensions[1].state.id.clone();
+    let error = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &wrong_history_length,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F115");
+
+    let mut wrong_binding = first.clone();
+    wrong_binding.binding = plan.suspension_binding(&[ResumableScalar::I64(99)]);
+    let error = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &wrong_binding,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F115");
+
+    let error = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &first,
+        &ArgumentValue::Bool(true),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F113");
+}
+
+#[test]
+fn sequential_current_and_historical_request_drift_are_both_refused() {
+    let program = resolved(TWO_YIELDS);
+    let arguments = [ArgumentValue::Int(4)];
+    let first = sequential_suspension(&program, &arguments);
+
+    let mut changed_current = first.clone();
+    changed_current.request = ArgumentValue::Int(99);
+    let error = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &changed_current,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F114");
+
+    let second = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &first,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: mut second,
+    } = second.step
+    else {
+        panic!("first answer did not reach the second site")
+    };
+    second.history[0].request = ArgumentValue::Int(99);
+    let error = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &second,
+        &ArgumentValue::Int(20),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F114");
+}
+
+#[test]
+fn sequential_binding_commits_prior_float_answer_bits() {
+    let program = resolved(TWO_FLOAT_YIELDS);
+    let arguments = [ArgumentValue::Float64(1.0)];
+    let first = sequential_suspension(&program, &arguments);
+    let second = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &first,
+        &ArgumentValue::Float64(-0.0),
+        MAX_STEPS,
+    )
+    .unwrap();
+    let SequentialResumableStep::Suspended {
+        continuation: mut second,
+    } = second.step
+    else {
+        panic!("first float answer did not reach the second site")
+    };
+    second.history[0].answer = ArgumentValue::Float64(0.0);
+    let error = resume_sequential_resumable_effect(
+        &program,
+        "app.ask",
+        &arguments,
+        &second,
+        &ArgumentValue::Float64(2.0),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F115");
 }
 
 #[test]

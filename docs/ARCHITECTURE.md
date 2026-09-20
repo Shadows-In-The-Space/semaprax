@@ -764,11 +764,13 @@ closed-wire replay plus revision-bound closure/source checks. This split and
 its focused evidence are authored but unpromoted; the completion matrix remains
 the sole status authority.
 
-`src/resumable_effects/lowering.rs` owns the deterministic three-state HIR
-plan for the existing single top-level, Copy-scalar source `yield` profile. It
-derives exactly bound suspension identities and independently validated,
-yield-free request and resume projections; `src/interpreter/resumable.rs`
-consumes the same plan identities for source execution. Projection retains the
+`src/resumable_effects/lowering.rs` owns the deterministic ordered-state HIR
+plan for one to eight direct sequential, Copy-scalar source `yield` sites. It
+derives exactly bound per-site suspension identities and independently
+validated, yield-free start and per-site resume projections;
+`src/interpreter/resumable.rs` consumes the same plan identities plus an opaque
+in-memory scalar request/answer history for source replay. This is not live
+frame or liveness lowering. Projection retains the
 selected function and authored-entrypoint direct-call closures in authored
 order, prunes disconnected functions and correlated declaration-index facts,
 and rederives byte provenance. Retained functions must remain explicit,

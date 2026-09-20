@@ -2524,6 +2524,29 @@ jobs:
             --bundle dist/release-provenance.bundle \
             dist/release-provenance.json
           test -s dist/release-provenance.bundle
+      - name: Derive the signature claim and package offline trust roots
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/release-provenance.json
+          test -s dist/release-provenance.bundle
+          test ! -e dist/release-signature-claim.json
+          test ! -e dist/trusted_root.jsonl
+          python3 scripts/release-signature-claim.py \
+            --provenance dist/release-provenance.json \
+            --bundle dist/release-provenance.bundle \
+            --output dist/release-signature-claim.json
+          python3 scripts/release-signature-claim.py \
+            --provenance dist/release-provenance.json \
+            --bundle dist/release-provenance.bundle \
+            --check dist/release-signature-claim.json
+          gh attestation trusted-root \
+            | head -c 4194305 > dist/trusted_root.jsonl
+          test -s dist/release-signature-claim.json
+          test -s dist/trusted_root.jsonl
+          test "$(wc -c < dist/trusted_root.jsonl | tr -d ' ')" -le 4194304
       - name: Publish the alpha archives only after complete aggregation
         env:
           GH_TOKEN: ${{ github.token }}
@@ -2538,13 +2561,16 @@ jobs:
           test -s dist/release-manifest.json
           test -s dist/release-provenance.json
           test -s dist/release-provenance.bundle
+          test -s dist/release-signature-claim.json
+          test -s dist/trusted_root.jsonl
           test -s dist/release-attestation-x86_64-unknown-linux-gnu.json
           test -s dist/release-attestation-aarch64-apple-darwin.json
           test -s dist/release-attestation-x86_64-pc-windows-msvc.json
           gh release create "$GITHUB_REF_NAME" \
             dist/semaprax-* dist/SHA256SUMS \
             dist/release-manifest.json dist/release-provenance.json \
-            dist/release-provenance.bundle \
+            dist/release-provenance.bundle dist/release-signature-claim.json \
+            dist/trusted_root.jsonl \
             dist/release-attestation-x86_64-unknown-linux-gnu.json \
             dist/release-attestation-aarch64-apple-darwin.json \
             dist/release-attestation-x86_64-pc-windows-msvc.json \

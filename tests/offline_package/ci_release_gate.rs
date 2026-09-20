@@ -106,7 +106,7 @@ fn named_step_positions(job: &str, names: &[&str]) -> Result<Vec<usize>, String>
 }
 
 #[test]
-fn release_artifacts_are_attested_and_the_final_inventory_is_keylessly_signed_before_uploading() {
+fn release_artifacts_are_attested_signed_and_packaged_for_offline_replay_before_uploading() {
     let workflow = workflow();
     let publisher = job(&workflow, "publish-release");
     let producers = job(&workflow, "release-artifacts");
@@ -125,7 +125,14 @@ fn release_artifacts_are_attested_and_the_final_inventory_is_keylessly_signed_be
         "--run-attempt \"$GITHUB_RUN_ATTEMPT\"",
         "--host-class github-hosted-ubuntu-24.04",
         "cosign sign-blob --yes \\\n            --bundle dist/release-provenance.bundle \\\n            dist/release-provenance.json",
-        "dist/release-manifest.json dist/release-provenance.json \\\n            dist/release-provenance.bundle",
+        "python3 scripts/release-signature-claim.py",
+        "--output dist/release-signature-claim.json",
+        "--check dist/release-signature-claim.json",
+        "test ! -e dist/release-signature-claim.json",
+        "test ! -e dist/trusted_root.jsonl",
+        "gh attestation trusted-root \\\n+            | head -c 4194305 > dist/trusted_root.jsonl",
+        "test \"$(wc -c < dist/trusted_root.jsonl | tr -d ' ')\" -le 4194304",
+        "dist/release-manifest.json dist/release-provenance.json \\\n            dist/release-provenance.bundle dist/release-signature-claim.json \\\n            dist/trusted_root.jsonl",
         "dist/release-attestation-x86_64-unknown-linux-gnu.json \\\n            dist/release-attestation-aarch64-apple-darwin.json \\\n            dist/release-attestation-x86_64-pc-windows-msvc.json",
         "find dist -maxdepth 1 -type f -name 'release-attestation-*.json'",
     ] {
@@ -144,6 +151,18 @@ fn release_artifacts_are_attested_and_the_final_inventory_is_keylessly_signed_be
             "the final publisher must build exactly one {script} document"
         );
     }
+    assert_eq!(
+        publisher
+            .matches("scripts/release-signature-claim.py")
+            .count(),
+        2,
+        "the publisher must build and byte-replay exactly one signature claim"
+    );
+    assert_eq!(
+        publisher.matches("gh attestation trusted-root").count(),
+        1,
+        "the publisher must package exactly one explicit offline trusted-root set"
+    );
     assert_eq!(publisher.matches("id-token: write").count(), 1);
     for exact in [
         "attestations: write",
@@ -201,13 +220,14 @@ fn release_artifacts_are_attested_and_the_final_inventory_is_keylessly_signed_be
             "Generate release provenance from the final manifest",
             "Install pinned cosign",
             "Sign final release provenance with keyless Sigstore",
+            "Derive the signature claim and package offline trust roots",
             "Publish the alpha archives only after complete aggregation",
         ],
     )
     .expect("each final-inventory/signing step must be present once");
     assert!(
         positions.windows(2).all(|pair| pair[0] < pair[1]),
-        "a release may only sign after final inventory and provenance, then upload the exact signed set"
+        "a release may only sign after final inventory and provenance, derive replay material, then upload the exact signed set"
     );
 
     // Mutation control: changing the signing step into a second provenance

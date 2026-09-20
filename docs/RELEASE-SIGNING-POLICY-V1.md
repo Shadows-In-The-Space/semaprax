@@ -479,11 +479,26 @@ historical evidence are changed.
      --output dist/release-provenance.json
    cosign sign-blob --yes --bundle dist/release-provenance.bundle \
      dist/release-provenance.json
+   python3 scripts/release-signature-claim.py \
+     --provenance dist/release-provenance.json \
+     --bundle dist/release-provenance.bundle \
+     --output dist/release-signature-claim.json
+   python3 scripts/release-signature-claim.py \
+     --provenance dist/release-provenance.json \
+     --bundle dist/release-provenance.bundle \
+     --check dist/release-signature-claim.json
+   gh attestation trusted-root \
+     | head -c 4194305 > dist/trusted_root.jsonl
    ```
    followed by uploading `release-manifest.json`, `release-provenance.json`,
-   and `release-provenance.bundle` as release assets alongside the three
-   archives. The source-locked CI contract requires this order and exact asset
-   set.
+   `release-provenance.bundle`, `release-signature-claim.json`, and
+   `trusted_root.jsonl` as release assets alongside the three archives and
+   their attestations. The source-locked CI contract requires this order and
+   exact asset set. The trusted root is fetched while the publisher is online;
+   later offline verification receives those exact bytes explicitly and never
+   updates them through an ambient network. The pipeline caps the snapshot at
+   the verifier's 4 MiB input limit while streaming it, so a remote response
+   cannot grow the release workspace without bound.
 5. **Publish verification instructions with the one documented command.**
    The command itself now exists: `semaprax release verify <release-dir>`
    (see "The one documented command" above) performs the binding, artifact,
@@ -501,7 +516,8 @@ historical evidence are changed.
    what review is required before that edit merges. This document does not
    itself grant that authority to anyone.
 
-Items 1-4 are configuration now present in the workflow; items 5-7 remain
+Items 1-4 are configuration now present in the workflow, including the
+deterministic claim and offline-root release assets; items 5-7 remain
 human-owned. The schemas, identity policy, binding verifier, and source-locked
 workflow contract make a real hosted signature mechanically checkable rather
 than a fact trusted only from prose. They do not substitute for that hosted

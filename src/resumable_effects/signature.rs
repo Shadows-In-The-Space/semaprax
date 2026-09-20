@@ -52,12 +52,12 @@
 //! anything to produce one -- the wrapped handler must still be genuinely
 //! injected by the caller for any effect to happen at all.
 //!
-//! Shapes are caller-supplied opaque strings compared for exact equality,
-//! not nominal HIR type identities; the mapping from a real checked source
-//! type to a shape string is exactly what the syntax/HIR tranche described
-//! in `docs/RESUMABLE-EFFECTS-V1.md` would own. This module is the checking
-//! discipline that tranche lowers into, kept deliberately independent of it
-//! so it is testable now.
+//! Shapes in this general Rust-level API are caller-supplied opaque strings
+//! compared for exact equality. Source callers must not invent that mapping:
+//! [`super::source_signature`] derives a versioned shape and table from the
+//! checked `.spx` `yields` clause and binds it to the exact resumable lowering
+//! identity. This module remains the representation-independent checking
+//! discipline that derivation lowers into.
 //!
 //! [`SignatureCheckedHandler`] and [`super::capability::CapabilityGatedHandler`]
 //! are independent decorators over the same `EffectHandler` seam and compose

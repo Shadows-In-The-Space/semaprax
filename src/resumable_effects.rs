@@ -105,6 +105,7 @@ pub(crate) mod lowering;
 pub mod migration;
 pub mod signature;
 pub mod source_checkpoint;
+pub mod source_signature;
 pub mod target;
 #[cfg(test)]
 mod tests;
@@ -125,4 +126,7 @@ pub use migration::{migrate_suspended, MigratedState, MigrationError, StateMigra
 pub use signature::{
     validate_journal_signatures, EffectSignature, EffectSignatureTable, EffectTag,
     JournalSignatureError, SignatureCheckedHandler, SignatureMismatch, SignatureTableError,
+};
+pub use source_signature::{
+    derive_source_effect_signature, SourceEffectSignature, SOURCE_TYPE_SHAPE_PREFIX,
 };

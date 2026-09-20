@@ -322,6 +322,16 @@ local fixture additionally injects a bounded candidate-test observer: it proves
 failed-test feedback reaches a later recorded provider request,
 malformed/oversized/withheld observation data is refused, terminal resume does
 not redispatch either provider or observer, and capability-binding drift fails
-closed. This is local injected-host evidence only; it is neither a real
+closed. Its V2 hostile-recovery corpus additionally covers malformed settled
+response wire, stale checked source, and changed task binding. Those three
+mutations have exact local stable refusal assertions before a provider, effect,
+or candidate-test handler can be constructed. The implementation also maps its
+other closed journal recovery classes (clock, capacity, uncertain delivery, or
+unavailable store) to diagnostics, but this corpus does not claim a hostile
+fixture for each of them. The clean terminal V2 replay remains an exact
+positive control, so rejection alone cannot satisfy the corpus. These labels
+are diagnostic-only and do not authenticate freshness, grant provider
+authority, or approve a candidate. This is local injected-host evidence only;
+it is neither a real
 test-command execution claim nor the operator-approved live-provider smoke
 required by issue #116.

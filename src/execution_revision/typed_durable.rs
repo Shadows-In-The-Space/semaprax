@@ -10,8 +10,11 @@ use crate::agent_lifecycle::iterative::source_live::{
 use crate::agent_lifecycle::CheckpointStore;
 use crate::agent_runtime_v2::{SourceModelEvidence, SourceModelPolicyBinding};
 use crate::diagnostic::Diagnostic;
-use crate::live_invocation::source_journal::{SourceInvocationBinding, SourcePolicyBindingV6};
-use crate::live_invocation::SourceInvocationClock;
+use crate::live_invocation::source_journal::{
+    recover_source_checkpoint, RecoveredSourceCheckpoint, SourceInvocationBinding,
+    SourceJournalEntry, SourceJournalError, SourcePolicyBindingV6,
+};
+use crate::live_invocation::{CumulativeBudgetLedger, SourceInvocationClock};
 use crate::provider_adapter_sdk::StreamingSourceProposalAdapter;
 
 #[path = "typed_durable/migration.rs"]
@@ -19,6 +22,69 @@ mod migration;
 pub use migration::PreparedAgentRuntimeV2SourceMigration;
 
 impl AgentRuntimeV2 {
+    /// Derives the exact unpriced durable checkpoint binding before a caller
+    /// constructs a provider adapter or grants provider invocation authority.
+    /// This is a read-only recovery preflight; it neither opens the retained
+    /// journal nor creates a source capability.
+    fn source_live_checkpoint_binding(
+        &self,
+        binding: &crate::agent_runtime_v2::SourceModelBinding,
+        mut policy: SourceLivePolicy,
+    ) -> std::result::Result<SourceInvocationBinding, SourceJournalError> {
+        if !binding.runtime_matches(
+            self.deployment.digest(),
+            self.instance.digest(),
+            self.lifecycle.proposal_schema().source_revision(),
+            self.lifecycle.proposal_schema().schema().digest(),
+        ) || policy.deployment_binding != binding.digest()
+            || policy.response_limit != binding.max_response_bytes()
+            || policy.reservation_units <= 0
+        {
+            return Err(SourceJournalError::Binding);
+        }
+        policy.program_root = Some(typed_source_program_root(
+            &self.program_root,
+            self.lifecycle.digest(),
+            self.effects,
+        ));
+        policy.binding(self.lifecycle.source_lifecycle(), &self.task, self.budget)
+    }
+
+    /// Authenticates and checks every initial unpriced recovery refusal before
+    /// a host needs to construct a provider adapter. A valid nonterminal
+    /// checkpoint is returned as read-only state; this method cannot resume,
+    /// append, dispatch, or mint provider authority.
+    pub fn preflight_source_live_checkpoint(
+        &self,
+        model_binding: &crate::agent_runtime_v2::SourceModelBinding,
+        policy: SourceLivePolicy,
+        document: &str,
+        clock: &dyn SourceInvocationClock,
+    ) -> std::result::Result<RecoveredSourceCheckpoint, SourceJournalError> {
+        let binding = self.source_live_checkpoint_binding(model_binding, policy)?;
+        let recovered = recover_source_checkpoint(document, &binding)?;
+        if recovered.terminal_snapshot().is_some() {
+            return Ok(recovered);
+        }
+        if matches!(
+            recovered.entries().last(),
+            Some(SourceJournalEntry::Stop { .. })
+        ) {
+            if clock.clock_domain() != recovered.clock_domain()
+                || clock.now_millis() < recovered.last_checked_millis()
+            {
+                return Err(SourceJournalError::Time);
+            }
+            return Ok(recovered);
+        }
+        if recovered.is_uncertain() {
+            return Err(SourceJournalError::Uncertain);
+        }
+        CumulativeBudgetLedger::resume_source_shared(&recovered, clock)
+            .map_err(|_| SourceJournalError::Time)?;
+        Ok(recovered)
+    }
+
     /// Produces the exact durable source-policy facts for this typed runtime.
     /// The returned value binds the typed effect registry and narrowed effect
     /// budget into the journal root; callers can retain it for a later checked

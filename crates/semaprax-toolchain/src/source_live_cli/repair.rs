@@ -36,6 +36,7 @@ use semaprax::agent_runtime_v2::{
 };
 use semaprax::execution_revision::ProgramRootRef;
 use semaprax::interpreter::retained_call::RetainedValue;
+use semaprax::live_invocation::source_journal::SourceJournalError;
 use semaprax::live_invocation::{InvocationClock, SourceInvocationClock};
 use semaprax::project::{with_authenticated_project, ProjectRevision};
 use semaprax::provider_adapter_sdk::fixture_adapters::{usage, ScriptedStreamingAdapter};
@@ -66,6 +67,21 @@ const RECEIPT_SCHEMA_V2: &str = "semaprax.source-live-cli.repair-receipt.v2";
 const CONFIG_SCHEMA_V1: &str = "semaprax.source-live-cli.repair-config.v1";
 const CONFIG_SCHEMA_V2: &str = "semaprax.source-live-cli.repair-config.v2";
 const MAX_ONE_PROVIDER_CALL_MS: i64 = 30_000;
+
+#[cfg(test)]
+std::thread_local! {
+    static TEST_EFFECT_HANDLER_CALLS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_test_effect_handler_calls() {
+    TEST_EFFECT_HANDLER_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+fn test_effect_handler_calls() -> usize {
+    TEST_EFFECT_HANDLER_CALLS.with(|calls| calls.get())
+}
 
 use super::candidate_test::{
     candidate_test_bound_identity, candidate_test_evidence, candidate_test_subject,
@@ -496,6 +512,28 @@ fn diagnostic_error(context: &str, diagnostics: Vec<semaprax::diagnostic::Diagno
     CliError::detail(format!("{context}: {diagnostics:?}"))
 }
 
+/// Classify a retained V2 journal with the closed recovery error, rather than
+/// exposing compiler-internal diagnostic formatting to an operator. This is
+/// deliberately a refusal only: the journal is still authenticated by the
+/// checked runtime, and this host-side label grants no replay or provider
+/// authority.
+fn v2_replay_refusal(error: SourceJournalError) -> CliError {
+    let reason = match error {
+        SourceJournalError::Malformed
+        | SourceJournalError::Chain
+        | SourceJournalError::Generation
+        | SourceJournalError::Order => "repair V2 retained checkpoint is malformed",
+        SourceJournalError::Binding => "repair V2 checkpoint binding is stale or mismatched",
+        SourceJournalError::Time => "repair V2 checkpoint clock is stale",
+        SourceJournalError::Capacity => "repair V2 checkpoint exceeds replay capacity",
+        SourceJournalError::Uncertain => "repair V2 checkpoint has an uncertain provider delivery",
+        SourceJournalError::Store(_) | SourceJournalError::Poisoned => {
+            "repair V2 checkpoint replay is unavailable"
+        }
+    };
+    CliError::refused(reason)
+}
+
 fn checked_value(document: &str, field: &'static str) -> Result<Value, CliError> {
     serde_json::from_str(document).map_err(|_| CliError::refused(field))
 }
@@ -668,6 +706,8 @@ impl TypedEffectHandler for FeedbackRecordingHandler<'_, '_> {
         &mut self,
         request: &TypedEffectRequest<'_>,
     ) -> Option<Vec<(String, RetainedValue)>> {
+        #[cfg(test)]
+        TEST_EFFECT_HANDLER_CALLS.with(|calls| calls.set(calls.get() + 1));
         let mut result = self.inner.execute(request)?;
         if let (Some(candidate_test), Some(preview)) = (
             self.candidate_test.as_deref_mut(),
@@ -939,6 +979,44 @@ pub(super) fn execute_with_runner_and_candidate_test<
         return Err(CliError::refused(
             "checkpoint mode does not match latest journal",
         ));
+    }
+
+    // V2 recovery is deliberately completed before this function creates an
+    // OpenCode host, grants the adapter capability, or creates the candidate
+    // and effect handlers. The exact binding is derived by the existing typed
+    // runtime and the retained document is admitted by the existing journal
+    // decoder; this preflight neither recreates either trust calculation nor
+    // treats the evidence as authority.
+    if !fresh && matches!(&config.provider, RepairProvider::OpenCode) {
+        let recovered = runtime
+            .preflight_source_live_checkpoint(
+                &model_binding,
+                source_policy.clone(),
+                latest.as_deref().expect("resume mode has a latest journal"),
+                clock.as_ref(),
+            )
+            .map_err(v2_replay_refusal)?;
+        store.set_generation(recovered.generation());
+        if recovered.terminal_snapshot().is_some() {
+            let replayed_candidate_test_evidence = replayed_candidate_test_evidence(
+                &recovered,
+                &config.corrected_operation_id,
+                &config.result_id,
+                candidate_test_selected,
+            );
+            return receipt_with_preview(
+                &config,
+                None,
+                0,
+                None,
+                replayed_candidate_test_evidence,
+                candidate_test_selected,
+                receipt_context.as_ref(),
+                &recovered,
+                0,
+                0,
+            );
+        }
     }
 
     let envelope = OfflineRepairEnvelope::new(Arc::clone(&project), config.target.clone())

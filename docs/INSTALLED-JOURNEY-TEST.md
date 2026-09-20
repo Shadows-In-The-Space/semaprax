@@ -21,6 +21,11 @@ closes that gap: it runs the exact documented install command into a scratch
 prefix, then drives the resulting binary from a working directory and `HOME`
 outside this checkout through discover (`--help`, `help new`), create
 (`semaprax new … --template service`), `check`, `test`, `run`, and `build`.
+It exercises both the browser package and the local `--target oci` route: the
+latter must contain exactly one replayed Wasm layer and retain explicit
+nonclaims for a runnable container, base layer, operating-system rootfs,
+signature, and publication. It is an offline OCI artifact assertion, not a
+registry, signing, or deployment claim.
 
 ## Run it
 

@@ -270,6 +270,76 @@ fn clean_installed_toolchain_walks_the_documented_journey() {
         );
     }
 
+    // Package the same generated service through the installed binary's
+    // offline OCI route. This is deliberately a structural artifact check:
+    // it proves the install -> scaffold -> authenticated Project v3 carrier
+    // -> independently replayed Wasm -> local OCI-layout path, without
+    // claiming a runnable container, a registry upload, or a signature.
+    let oci = run(
+        &project,
+        &["build", ".", "--target", "oci", "-o", "dist/oci"],
+    );
+    assert!(oci.status.success(), "{}", stderr(&oci));
+    let oci_root = project.join("dist/oci");
+    assert!(oci_root.join("oci-layout").is_file());
+    let oci_index: Value =
+        serde_json::from_slice(&std::fs::read(oci_root.join("index.json")).unwrap())
+            .expect("the installed OCI route must write a JSON index");
+    let manifests = oci_index["manifests"]
+        .as_array()
+        .expect("the OCI index must list its manifest");
+    assert_eq!(manifests.len(), 1, "the OCI index must bind one manifest");
+    let manifest_digest = manifests[0]["digest"]
+        .as_str()
+        .expect("the OCI index manifest must name its digest");
+    let manifest: Value = serde_json::from_slice(
+        &std::fs::read(
+            oci_root
+                .join("blobs")
+                .join("sha256")
+                .join(manifest_digest.trim_start_matches("sha256:")),
+        )
+        .unwrap(),
+    )
+    .expect("the OCI index digest must resolve to a JSON manifest");
+    assert_eq!(
+        manifest["layers"].as_array().map(Vec::len),
+        Some(1),
+        "the service OCI artifact must carry exactly its replayed Wasm layer"
+    );
+    let config_digest = manifest["config"]["digest"]
+        .as_str()
+        .expect("the OCI manifest must name its config digest");
+    let config: Value = serde_json::from_slice(
+        &std::fs::read(
+            oci_root
+                .join("blobs")
+                .join("sha256")
+                .join(config_digest.trim_start_matches("sha256:")),
+        )
+        .unwrap(),
+    )
+    .expect("the OCI config digest must resolve to JSON");
+    assert_eq!(config["project"], "clean-install-service");
+    assert_eq!(config["entry_module"], "clean_install_service.app");
+    let nonclaims = config["nonclaims"]
+        .as_array()
+        .expect("the OCI config must name its nonclaims");
+    for nonclaim in [
+        "not_a_runnable_container_image",
+        "no_base_layer",
+        "no_operating_system_rootfs",
+        "unsigned",
+        "not_published",
+    ] {
+        assert!(
+            nonclaims
+                .iter()
+                .any(|value| value.as_str() == Some(nonclaim)),
+            "the installed OCI route must retain `{nonclaim}`"
+        );
+    }
+
     // Inspect evidence. `project-assurance-manifest` is a public command of
     // the same installed binary, over the same manifest `check` just
     // verified; assert it reports real, source-derived facts (this project's

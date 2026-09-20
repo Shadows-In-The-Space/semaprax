@@ -56,7 +56,8 @@ mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
     assert_matches_expected, baseline_descriptor_bytes, malformed_result_carrier_cases,
     malformed_trusted_descriptor_cases, malformed_trusted_descriptor_mutation_cases,
-    parse_shared_corpus_lines, structured_descriptor_cases, MAX_BYTES_PER_LEAF,
+    parse_shared_corpus_lines, structured_descriptor_cases, valid_result_carrier_cases,
+    MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -643,7 +644,10 @@ fn ts_structured_cases() -> String {
 
 fn ts_malformed_result_carrier_cases() -> String {
     let mut result = String::new();
-    for (name, bytes) in malformed_result_carrier_cases() {
+    for (name, bytes) in malformed_result_carrier_cases()
+        .into_iter()
+        .chain(valid_result_carrier_cases())
+    {
         write!(
             &mut result,
             r#"

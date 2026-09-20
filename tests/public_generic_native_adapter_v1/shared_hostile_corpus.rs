@@ -56,7 +56,8 @@ use semaprax::public_generic_consumer::rust_calling::{
 pub(crate) mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
     assert_matches_expected, baseline_descriptor_bytes, malformed_result_carrier_cases,
-    parse_shared_corpus_lines, structured_descriptor_cases, MAX_BYTES_PER_LEAF,
+    parse_shared_corpus_lines, structured_descriptor_cases, valid_result_carrier_cases,
+    MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -909,7 +910,10 @@ fn cxx_structured_cases() -> String {
 
 fn rust_malformed_result_carrier_cases() -> String {
     let mut result = String::new();
-    for (name, bytes) in malformed_result_carrier_cases() {
+    for (name, bytes) in malformed_result_carrier_cases()
+        .into_iter()
+        .chain(valid_result_carrier_cases())
+    {
         write!(
             &mut result,
             r#"
@@ -934,7 +938,10 @@ fn rust_malformed_result_carrier_cases() -> String {
 
 fn c_malformed_result_carrier_cases() -> String {
     let mut result = String::new();
-    for (name, bytes) in malformed_result_carrier_cases() {
+    for (name, bytes) in malformed_result_carrier_cases()
+        .into_iter()
+        .chain(valid_result_carrier_cases())
+    {
         write!(
             &mut result,
             r#"
@@ -943,9 +950,9 @@ fn c_malformed_result_carrier_cases() -> String {
         size_t before = spx_pg_consumer_test_live_allocations();
         spx_pg_consumer_status rc = spx_pg_consumer_test_validate_result_carrier(
             candidate, sizeof(candidate));
-        REQUIRE(rc == SPX_PG_CONSUMER_RESULT_REJECTED);
         REQUIRE(spx_pg_consumer_test_live_allocations() == before);
-        printf("SHARED_CORPUS {name} RESULT_REJECTED\n");
+        printf("SHARED_CORPUS {name} %s\n", rc == SPX_PG_CONSUMER_OK ? "ACCEPTED" :
+            rc == SPX_PG_CONSUMER_RESULT_REJECTED ? "RESULT_REJECTED" : "OTHER");
     }}
 "#,
             c_byte_array_literal(&bytes)
@@ -957,7 +964,10 @@ fn c_malformed_result_carrier_cases() -> String {
 
 fn cxx_malformed_result_carrier_cases() -> String {
     let mut result = String::new();
-    for (name, bytes) in malformed_result_carrier_cases() {
+    for (name, bytes) in malformed_result_carrier_cases()
+        .into_iter()
+        .chain(valid_result_carrier_cases())
+    {
         write!(
             &mut result,
             r#"
@@ -966,9 +976,9 @@ fn cxx_malformed_result_carrier_cases() -> String {
         std::size_t before = ::spx_pg_consumer_test_live_allocations();
         const auto rc = ::spx_pg_consumer_test_validate_result_carrier(
             candidate.data(), candidate.size());
-        REQUIRE(rc == SPX_PG_CONSUMER_RESULT_REJECTED);
         REQUIRE(::spx_pg_consumer_test_live_allocations() == before);
-        std::printf("SHARED_CORPUS {name} RESULT_REJECTED\n");
+        std::printf("SHARED_CORPUS {name} %s\n", rc == SPX_PG_CONSUMER_OK ? "ACCEPTED" :
+            rc == SPX_PG_CONSUMER_RESULT_REJECTED ? "RESULT_REJECTED" : "OTHER");
     }}
 "#,
             c_byte_array_literal(&bytes)

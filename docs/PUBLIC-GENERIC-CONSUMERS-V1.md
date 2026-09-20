@@ -844,17 +844,17 @@ consumer that quietly started accepting what the other three reject would
 not have failed anything, because every existing test only asserts against
 its own author's expectation. `tests/support/public_generic_hostile_corpus.rs`
 is the one shared manifest (one on-disk file, `#[path]`-included, unmodified,
-into both native and Wasm harnesses) naming 21 cases and their one expected
+into both native and Wasm harnesses) naming 27 cases and their one expected
 outcome; `tests/public_generic_native_adapter_v1/shared_hostile_corpus.rs`
 and `tests/public_generic_wasm_adapter_v1/shared_hostile_corpus.rs` generate
 all four consumers from the SAME canonical descriptor baseline, capture each
 one's REAL observed outcome (never assert-and-swallow), and check every one
 of them against that one manifest. The composed corpus is identified as
 `semaprax.public-generic-hostile-corpus.v1` with outcome-manifest digest
-`sha256:0e2550a84551d17515b8453f711d8be8d86ba56f76b2a0956480bef7c3c7b2be`;
+`sha256:79ae641c8b3274fcb87e8cd314f028052f6cdcd5ccdea66f0ae524ccca89008f`;
 the separate malformed-trusted descriptor manifest contains six additional
-cases. The digest binds the 21 shared case ids and expected outcomes, the
-exact bytes of the four malformed result-carrier cases, and the existing
+cases. The digest binds the 27 shared case ids and expected outcomes, the
+exact bytes of the seven malformed and three valid result-carrier cases, and the existing
 descriptor material; it does not bind native/Wasm harness-local mutation
 recipes, which remain execution evidence.
 
@@ -878,7 +878,7 @@ duplicated by the shared corpus. What none of it did is compare outcomes
 ACROSS languages — that is this section's actual contribution.
 
 **What the shared corpus adds, and how agreement is enforced.** Fifteen cases
-originally (issue #160), now seventeen (issue #173 added two more — see below),
+originally (issue #160), then seventeen with the cross-binding cases below,
 generated from ONE canonical descriptor baseline
 (`BASELINE_DESCRIPTOR_BYTES`) fed identically to all four
 `generate_*_calling_consumer` calls: `success_baseline`,
@@ -890,6 +890,13 @@ generated from ONE canonical descriptor baseline
 `descriptor_overlong_schema_claim`, `descriptor_presentation_rename`,
 `exactly_per_leaf_bound_accepted`, `one_byte_over_per_leaf_bound_rejected`,
 `binding_wrong_target_profile`, `binding_valid_for_different_artifact`.
+The result-decoder family brings the total to 27: truncated width, wrong
+leaf count, `u64::MAX` width, trailing byte, a complete 65,537-byte leaf,
+declared length greater or smaller than the available payload, and accepted
+empty, binary and exact-65,536-byte leaves. All ten use the generated
+consumer's result-validator entry point. The positive controls prevent an
+always-rejecting decoder from satisfying the hostile corpus; the complete
+max-plus-one payload makes its capacity refusal independent of truncation.
 Each generated consumer's own
 `consumer.files()` output is left byte-for-byte untouched (the "byte for
 byte" claim above still holds); the harness instead splices one additional,
@@ -941,8 +948,7 @@ no independent compiled provider exists yet to hold a separate counter.
 
 **Known gaps, not fixed here, not duplicated:**
 
-- **#229**: no compiled `.wasm` artifact implements the Core Wasm provider
-  ABI. The Wasm shared-corpus test runs against the SAME hand-assembled,
+- **#229**: this Wasm shared-corpus test runs against the SAME hand-assembled,
   clearly test-only `reference_wasm_module` the sibling TypeScript harness
   uses — one real endpoint export over real `WebAssembly.Memory`, never a
   second provider implementation — so the TypeScript route in this shared
@@ -992,33 +998,31 @@ either expected status in `EXPECTED` failed both the native and the
 TypeScript harness with the exact case and the exact (correct) status
 observed, then was reverted.
 
-**What #173's wider descriptor categories were NOT added, and why.** #173
-also asked for hostility across "extra fields, reordering, duplicates,
-unknown version, wrong schema" at the descriptor level, and staleness of
-"Project, ProgramRoot, source, export, type grammar, surface, ... artifact"
-associations. Those are already covered, but only at the single-route
-reference-codec level, never through these four generated consumers:
-`src/public_generic_abi/descriptor.rs`'s `DescriptorV1` is a structured,
-framed-field wire format with its own independent hostile tests
-(`src/public_generic_abi/descriptor/tests.rs`) for truncation, trailing
-bytes, reordering, an oversized length claim, an unknown schema literal, a
-stale `boundary_profile`/`type_grammar_schema` version, and cross-paired
-staleness on every one of `export_id`/`program_root_digest`/
-`source_projection_digest`/`public_surface_digest`/`input.term`/
-`input.instance_digest`/`result.term`/`result.instance_digest`. But the
-descriptor and binding bytes these four generated consumers and the
-native/Wasm provider ABI actually exchange are opaque, exact-equality-
-compared byte strings (see `spx_pg_provider_open_v1` in
-`src/public_generic_abi/native/provider_body.c` and
-`verifyDescriptorAndBinding` in
-`src/public_generic_consumer/typescript_calling/render.rs`) — `DescriptorV1`'s
-structured fields are not yet threaded through this layer. At the
-calling-consumer layer, "reorder a field"/"duplicate a field"/"unknown
-version" therefore collapse to exactly the same observable outcome the
-existing byte-mutation cases already prove (any byte difference is
-rejected), rather than being independently meaningful new cases here.
-Widening that requires the flat owned-`Bytes` calling-consumer type model
-(issue #119) to carry real descriptor structure first.
+**Descriptor branch reachability.** The nine structured descriptor cases
+above pass through all four generated consumers, but exact-byte pairing can
+mask their structural checks. The separate six-case malformed-trusted
+manifest therefore embeds each hostile document as the consumer's own
+trusted bytes, then submits identical bytes. It exercises truncation,
+descriptor schema, boundary-profile version, type-grammar version, UTF-8,
+and trailing bytes. Executable mutation controls weaken one specific
+generated check at a time and require its corresponding document to reach
+the provider. C11, Rust and TypeScript have their own decoder mutations;
+C++17 executes its generated facade over the same mutated C decoder. C++
+reachability is checked by executing its facade, including provider cleanup,
+rather than inferred from delegation. These mutations occur only in temporary
+test artifacts and never weaken the committed generators.
+
+**Carrier categories still outside this shared wire.** A generated flat
+result carrier consists of a leaf count and length-prefixed byte payloads.
+It has no generation, ownership flag, field path, variant tag or cleanup-plan
+field to substitute. Generation belongs to the provider handle registry;
+ownership and cleanup ordering belong to the call state machine and
+settlement plan; leaf paths and the closed leaf-kind tag belong to
+`LogicalCarrierFrame`. Their existing reference-codec, provider lifecycle
+and settlement tests remain separate evidence. The 27-case consumer corpus
+does not claim four-language equivalence for those categories or connect
+the logical frame to physical provider authority. That integration and the
+#229 compiled-provider lane require their own implementation and evidence.
 
 **Two reference-codec gaps #173's audit found and closed directly.**
 Auditing every hostile case already listed above against the five wire

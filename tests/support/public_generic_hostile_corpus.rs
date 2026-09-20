@@ -207,12 +207,48 @@ pub fn malformed_result_carrier_cases() -> Vec<(&'static str, Vec<u8>)> {
     trailing.extend_from_slice(&0u64.to_le_bytes());
     trailing.push(0xff);
 
+    // These differ from valid controls by only the declared width. In
+    // particular max+1 includes the complete payload, so truncation cannot
+    // mask a missing capacity check.
+    let mut over_bound = 1u64.to_le_bytes().to_vec();
+    over_bound.extend_from_slice(&((MAX_BYTES_PER_LEAF + 1) as u64).to_le_bytes());
+    over_bound.resize(16 + MAX_BYTES_PER_LEAF + 1, 0xa5);
+    let mut declared_long = 1u64.to_le_bytes().to_vec();
+    declared_long.extend_from_slice(&4u64.to_le_bytes());
+    declared_long.extend_from_slice(&[0, 0x80, 0xff]);
+    let mut declared_short = declared_long.clone();
+    declared_short[8..16].copy_from_slice(&2u64.to_le_bytes());
+
     vec![
         ("result_carrier_truncated_length", truncated),
         ("result_carrier_wrong_leaf_count", wrong_count),
         ("result_carrier_u64_max_leaf_length", max_width),
         ("result_carrier_trailing_byte", trailing),
+        ("result_carrier_complete_max_plus_one", over_bound),
+        ("result_carrier_declared_length_too_long", declared_long),
+        ("result_carrier_declared_length_too_short", declared_short),
     ]
+}
+
+/// Positive controls use the same result-decoder entry point as the hostile
+/// cases. A decoder that refuses every input must fail the shared corpus.
+pub fn valid_result_carrier_cases() -> Vec<(&'static str, Vec<u8>)> {
+    [
+        ("result_carrier_empty_leaf_accepted", Vec::new()),
+        ("result_carrier_binary_leaf_accepted", vec![0, 0x80, 0xff]),
+        (
+            "result_carrier_exact_max_accepted",
+            vec![0xa5; MAX_BYTES_PER_LEAF],
+        ),
+    ]
+    .into_iter()
+    .map(|(name, payload)| {
+        let mut bytes = 1u64.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        (name, bytes)
+    })
+    .collect()
 }
 
 /// The twelve canonical Descriptor-v1 frame ranges of
@@ -391,9 +427,9 @@ pub const HOSTILE_CORPUS_SCHEMA: &str = "semaprax.public-generic-hostile-corpus.
 /// changes; a changed shared id/outcome, shared-module mutation, or baseline
 /// must deliberately mint a new corpus version or update this known-answer.
 pub const HOSTILE_CORPUS_MANIFEST_DIGEST: &str =
-    "sha256:0e2550a84551d17515b8453f711d8be8d86ba56f76b2a0956480bef7c3c7b2be";
+    "sha256:79ae641c8b3274fcb87e8cd314f028052f6cdcd5ccdea66f0ae524ccca89008f";
 
-pub const HOSTILE_CORPUS_SHARED_CASE_COUNT: usize = 21;
+pub const HOSTILE_CORPUS_SHARED_CASE_COUNT: usize = 27;
 pub const HOSTILE_CORPUS_MALFORMED_TRUSTED_CASE_COUNT: usize = 6;
 
 /// Restates `src/public_generic_abi/boundary_profile.rs::MAX_BYTES_PER_LEAF`
@@ -454,6 +490,15 @@ pub const EXPECTED: &[(&str, &str)] = &[
     ("result_carrier_wrong_leaf_count", "RESULT_REJECTED"),
     ("result_carrier_u64_max_leaf_length", "RESULT_REJECTED"),
     ("result_carrier_trailing_byte", "RESULT_REJECTED"),
+    ("result_carrier_complete_max_plus_one", "RESULT_REJECTED"),
+    ("result_carrier_declared_length_too_long", "RESULT_REJECTED"),
+    (
+        "result_carrier_declared_length_too_short",
+        "RESULT_REJECTED",
+    ),
+    ("result_carrier_empty_leaf_accepted", "ACCEPTED"),
+    ("result_carrier_binary_leaf_accepted", "ACCEPTED"),
+    ("result_carrier_exact_max_accepted", "ACCEPTED"),
 ];
 
 /// Parse every `SHARED_CORPUS <case_id> <STATUS>` line a spliced driver
@@ -594,6 +639,16 @@ mod tests {
             ));
             manifest.push('\n');
         }
+        for (name, bytes) in valid_result_carrier_cases() {
+            manifest.push_str("valid-result-carrier\t");
+            manifest.push_str(name);
+            manifest.push('\t');
+            manifest.push_str(&format!(
+                "{:x}",
+                semaprax::digest_hex::LowerHex(Sha256::digest(&bytes))
+            ));
+            manifest.push('\n');
+        }
         manifest.into_bytes()
     }
 
@@ -652,7 +707,7 @@ mod tests {
         use sha2::{Digest as _, Sha256};
 
         let cases = malformed_result_carrier_cases();
-        assert_eq!(cases.len(), 4);
+        assert_eq!(cases.len(), 7);
         let mut digests = std::collections::BTreeSet::new();
         for (name, bytes) in cases {
             assert!(

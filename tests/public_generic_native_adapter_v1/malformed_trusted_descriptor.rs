@@ -201,6 +201,18 @@ int main(void) {
 }
 "#;
 
+const CXX_MUTANT_DRIVER: &str = r#"#include "include/semaprax_public_generic_v1.hpp"
+int main() {
+    const auto before = spx_pg_consumer_test_live_allocations();
+    {
+        auto opened = semaprax::public_generic::v1::Provider::open();
+        if (!opened.has_value()) return 1;
+        if (spx_pg_consumer_test_live_allocations() <= before) return 2;
+    }
+    return spx_pg_consumer_test_live_allocations() == before ? 0 : 3;
+}
+"#;
+
 fn replace_once(source: &mut String, old: &str, new: &str, label: &str) {
     assert_eq!(
         source.matches(old).count(),
@@ -211,9 +223,8 @@ fn replace_once(source: &mut String, old: &str, new: &str, label: &str) {
 }
 
 /// Mutate precisely one C11 descriptor-envelope refusal branch.  The C++17
-/// wrapper delegates to this same generated C11 implementation, so one
-/// compiled C11 negative control covers both native language facades without
-/// inventing a second decoder.
+/// wrapper delegates to this same generated C11 implementation. Both native
+/// language facades execute each weakened branch below.
 fn weaken_c11_descriptor_branch(source: &mut String, case: &str) {
     match case {
         "truncated_final_frame" => replace_once(
@@ -385,7 +396,7 @@ fn assert_c11_mutation_is_detected(label: &str, bytes: &[u8], binding: &NativePr
     let source_path = root.join("spx_pg_calling_consumer.c");
     let mut source = fs::read_to_string(&source_path).unwrap();
     weaken_c11_descriptor_branch(&mut source, label);
-    fs::write(&source_path, source).unwrap();
+    fs::write(&source_path, &source).unwrap();
     fs::write(root.join("mutant.c"), C_MUTANT_DRIVER).unwrap();
     let binary = root.join(format!("mutant{}", env::consts::EXE_SUFFIX));
     run(
@@ -401,6 +412,55 @@ fn assert_c11_mutation_is_detected(label: &str, bytes: &[u8], binding: &NativePr
     run(
         Command::new(&binary).current_dir(&root),
         &format!("[{label}] run C11 descriptor-envelope mutant"),
+    );
+
+    // Execute the generated C++ facade too: sharing its C decoder does not
+    // prove the C++ wrapper has no independent masking refusal.
+    let cxx = generate_cxx_calling_consumer(bytes, binding, &input, &output).unwrap();
+    let cxx_root = workspace.0.join("cxx");
+    write_files(&cxx_root, cxx.files());
+    let cxx_source_path = cxx_root.join("spx_pg_calling_consumer.c");
+    let mut cxx_source = fs::read_to_string(&cxx_source_path).unwrap();
+    weaken_c11_descriptor_branch(&mut cxx_source, label);
+    assert_eq!(
+        source, cxx_source,
+        "{label}: C and C++ must exercise the same decoder"
+    );
+    fs::write(&cxx_source_path, cxx_source).unwrap();
+    fs::write(cxx_root.join("mutant.cpp"), CXX_MUTANT_DRIVER).unwrap();
+    let c_object = cxx_root.join("consumer.o");
+    run(
+        Command::new(tool("CLANG", "clang"))
+            .current_dir(&cxx_root)
+            .args(["-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-c"])
+            .arg("spx_pg_calling_consumer.c")
+            .arg("-o")
+            .arg(&c_object),
+        &format!("[{label}] compile C++ descriptor-envelope decoder mutant"),
+    );
+    let cxx_binary = cxx_root.join(format!("mutant{}", env::consts::EXE_SUFFIX));
+    run(
+        Command::new(tool("CLANGXX", "clang++"))
+            .current_dir(&cxx_root)
+            .args([
+                "-std=c++17",
+                "-O1",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-I.",
+                "-Iinclude",
+            ])
+            .arg("mutant.cpp")
+            .arg(&c_object)
+            .arg(&provider)
+            .arg("-o")
+            .arg(&cxx_binary),
+        &format!("[{label}] build C++17 descriptor-envelope mutant"),
+    );
+    run(
+        Command::new(&cxx_binary).current_dir(&cxx_root),
+        &format!("[{label}] run C++17 descriptor-envelope mutant"),
     );
 }
 

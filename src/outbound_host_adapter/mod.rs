@@ -16,11 +16,16 @@ use sha2::{Digest as _, Sha256};
 use zeroize::Zeroize;
 
 mod email;
+mod ledger;
 
 pub use email::{
     deliver_email, verify_email_envelope, EmailAttachment, EmailEnvelopeMismatch, EmailRequest,
     MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENT_BYTES, MAX_EMAIL_ATTACHMENT_NAME_BYTES,
     MAX_EMAIL_BODY_BYTES, MAX_EMAIL_RECIPIENTS, MAX_EMAIL_SUBJECT_BYTES,
+};
+pub use ledger::{
+    DeliveryIdentity, HostDeliveryLedger, LedgerOutcome, LedgerRecord, LedgerRefusal,
+    MAX_LEDGER_ENTRIES,
 };
 
 type HmacSha256 = Hmac<Sha256>;

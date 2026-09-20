@@ -52,6 +52,48 @@ deduplication ledger and cannot prove the receiver honored it. A restart loses
 all local fixture/adapter memory. Uncertain settlement therefore remains
 uncertain and never authorizes an automatic retry, even when a key was sent.
 
+## Host-owned reconciliation ledger
+
+`HostDeliveryLedger` is an optional, process-local reconciliation primitive for
+host code that owns a prepared-request dispatch boundary. It is deliberately
+separate from `OutboundCapability` and `DeliveryEvidence`: a trusted host
+chooses to invoke `reconcile` *before* its one-shot adapter action, supplying
+its bounded deployment/invocation/idempotency identity and the exact
+`PreparedRequest`.
+The ledger independently derives the existing canonical request digest and
+requires its idempotency component to be the one exact boundary-owned
+`idempotency-key` header. It records only the digest plus the closed local
+disposition.
+
+The existing `deliver_*` convenience calls remain stateless, one-shot helpers;
+there is no production caller of this optional primitive yet. A host adopting
+it selects `reconcile` at its own prepared-request dispatch boundary. The
+primitive remembers a disposition only, not a `DeliveryResult` or response
+body, so it does not offer response replay. Adding it does not silently change
+legacy helper behavior or invent a cross-process recovery route.
+
+For an exact identity and request digest, a later `reconcile` call returns the
+remembered disposition and never enters its dispatch closure. A different
+digest under the same identity refuses before dispatch. `Accepted`, `Rejected`,
+and every `Uncertain` observation are sticky; uncertainty is specifically never
+auto-retried. `NotDispatched` is also retained for the same exact-pair
+non-redispatch rule, so an explicit new host attempt must use a distinct
+invocation identity rather than quietly reuse the first attempt. The ledger
+reserves a conservative `Uncertain { Transport }` disposition immediately
+before it invokes the host closure; if that closure unwinds after a physical
+start, normal Rust unwinding leaves the reservation intact and a caught caller
+still cannot retry through the ledger.
+
+The ledger has a fixed maximum of 256 entries, rejects a full ledger before
+dispatch, stores no request body, endpoint, headers, response body, or raw
+identity components, and renders a deterministic diagnostic snapshot using
+only SHA-256 identity and request commitments. Those hashes are not
+confidential redaction: low-entropy inputs can be guessed and tested offline.
+It has no restore API and intentionally
+forgets all knowledge when dropped or after a process restart. Consequently it
+is neither durable delivery state nor an exactly-once protocol; it cannot prove
+remote receipt, turn evidence into a capability, or authorize a retry.
+
 ## Email envelope
 
 `deliver_email` accepts one explicit `EmailRequest` and consumes the same
@@ -131,4 +173,8 @@ cardinality and duplicate-name refusal, and preservation of primary failure.
 The email cases add canonical replay, header and address injection, recipient
 and attachment cardinality, member maximum-plus-one, exact boundary admission,
 noncanonical/unknown/duplicate/malformed-hex envelope hostility, and
-after-start uncertainty. It performs no live network operation.
+after-start uncertainty. The reconciliation cases add bounded-capacity refusal,
+duplicate exact replay without redispatch, changed-payload conflict refusal,
+idempotency/header mismatch refusal, sticky uncertainty after an unwinding
+dispatch closure, and deterministic commitment state. It performs no live
+network operation.

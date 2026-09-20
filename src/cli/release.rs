@@ -457,22 +457,19 @@ struct OfflineArchive {
     attestation: Vec<u8>,
 }
 
+struct OfflineRelease {
+    manifest: Vec<u8>,
+    provenance: Vec<u8>,
+    claim: Vec<u8>,
+    message_bundle: Vec<u8>,
+    trusted_root: Vec<u8>,
+    archives: Vec<OfflineArchive>,
+}
+
 /// Load the complete closed release inventory for the aggregate verifier.
 /// The non-archive binding/root checks run before any archive is allocated,
 /// and archive bytes have an explicit combined memory bound.
-fn load_offline_release(
-    directory: &Path,
-) -> Result<
-    (
-        Vec<u8>,
-        Vec<u8>,
-        Vec<u8>,
-        Vec<u8>,
-        Vec<u8>,
-        Vec<OfflineArchive>,
-    ),
-    Diagnostic,
-> {
+fn load_offline_release(directory: &Path) -> Result<OfflineRelease, Diagnostic> {
     let manifest = read_document(directory, MANIFEST_FILE)?;
     let provenance = read_document(directory, PROVENANCE_FILE)?;
     let claim = read_document(directory, SIGNATURE_CLAIM_FILE)?;
@@ -514,14 +511,14 @@ fn load_offline_release(
             attestation,
         });
     }
-    Ok((
+    Ok(OfflineRelease {
         manifest,
         provenance,
         claim,
         message_bundle,
         trusted_root,
         archives,
-    ))
+    })
 }
 
 /// Verify signed offline material only through an authority the embedding host
@@ -532,8 +529,15 @@ pub(crate) fn run_with_offline_capability(
     directory: &Path,
     capability: &dyn OfflineBundleVerificationCapability,
 ) -> Result<String, Diagnostic> {
-    let (manifest, provenance, claim, message_bundle, trusted_root, archives) =
-        load_offline_release(directory)?;
+    let release = load_offline_release(directory)?;
+    let OfflineRelease {
+        manifest,
+        provenance,
+        claim,
+        message_bundle,
+        trusted_root,
+        archives,
+    } = release;
     let borrowed_archives = archives
         .iter()
         .map(|archive| OfflineReleaseArchive {

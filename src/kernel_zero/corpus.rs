@@ -397,6 +397,150 @@ pub(crate) fn generated_corpus() -> Vec<GeneratedProgram> {
         .collect()
 }
 
+/// A compact, deterministic adversarial corpus for the part of Kernel-0
+/// semantics a random expression generator is least likely to cover: which
+/// *particular* checked-arithmetic fault becomes observable when more than
+/// one subexpression could fault.  These are source programs, rather than
+/// synthetic `Term`s, for the same reason as [`generated_corpus`]: the
+/// reference evaluator and every compiler backend must receive identical
+/// source bytes.
+///
+/// The selector's eight branches name the complete [`super::value::Fault`]
+/// family in its public status-code order.  Each strict context is sampled
+/// over its full ordered 8-by-8 product.  Thus, for example, changing a
+/// backend to evaluate `fault(right)` before `fault(left)` cannot still pass
+/// by merely producing some arithmetic failure: at least one sample exposes
+/// the wrong named fault.  The corpus is deliberately finite evidence, not a
+/// proof or a replacement for the mechanized Kernel-0 model.
+pub(crate) fn adversarial_fault_corpus() -> Vec<GeneratedProgram> {
+    const KINDS: i64 = 8;
+
+    let pairs = (0..KINDS)
+        .flat_map(|left| (0..KINDS).map(move |right| vec![Value::Int(left), Value::Int(right)]))
+        .collect::<Vec<_>>();
+    let kinds = (0..KINDS)
+        .map(|kind| vec![Value::Int(kind)])
+        .collect::<Vec<_>>();
+    let branches = (0..KINDS)
+        .flat_map(|selected| {
+            (0..KINDS).flat_map(move |unselected| {
+                [
+                    vec![
+                        Value::Bool(true),
+                        Value::Int(selected),
+                        Value::Int(unselected),
+                    ],
+                    vec![
+                        Value::Bool(false),
+                        Value::Int(unselected),
+                        Value::Int(selected),
+                    ],
+                ]
+            })
+        })
+        .chain((0..KINDS).flat_map(|inactive| {
+            [
+                vec![Value::Bool(true), Value::Int(KINDS), Value::Int(inactive)],
+                vec![Value::Bool(false), Value::Int(inactive), Value::Int(KINDS)],
+            ]
+        }))
+        .collect::<Vec<_>>();
+
+    let module = |name: &str, helpers: &str, parameters: &str, return_type: &str, body: &str| {
+        format!(
+            "module test.kernel_zero_adversarial;\n\n@id(\"app.main\")\nfn main() -> i64 {{ 0 }}\n\n{helpers}@id(\"app.entry\")\nfn {name}({parameters}) -> {return_type}\n{{\n    {body}\n}}\n"
+        )
+    };
+    let selector = "@id(\"test.fault\")\nfn fault(kind: i64) -> i64\n{\n    \
+if kind == 0 { 9223372036854775807 + 1 } else {\n        \
+if kind == 1 { (-9223372036854775807) - 2 } else {\n            \
+if kind == 2 { 4611686018427387904 * 2 } else {\n                \
+if kind == 3 { 1 / 0 } else {\n                    \
+if kind == 4 { (-9223372036854775807 - 1) / -1 } else {\n                        \
+if kind == 5 { 1 % 0 } else {\n                            \
+if kind == 6 { (-9223372036854775807 - 1) % -1 } else {\n                            \
+if kind == 7 { -(-9223372036854775807 - 1) } else { 7 }\n                        }\n                    }\n                }\n            }\n        }\n    }\n}\n}\n\n";
+    let take_first =
+        "@id(\"test.take_first\")\nfn take_first(first: i64, second: i64) -> i64 { first }\n\n";
+    let strict = |name: &str, return_type: &str, body: &str, helpers: &str| GeneratedProgram {
+        source: module(
+            name,
+            &format!("{selector}{helpers}"),
+            "left: i64, right: i64",
+            return_type,
+            body,
+        ),
+        entry_id: "app.entry".to_owned(),
+        entry_params: vec![GenType::I64, GenType::I64],
+        samples: pairs.clone(),
+    };
+
+    vec![
+        strict("entry", "i64", "fault(left) + fault(right)", ""),
+        strict("entry", "bool", "fault(left) < fault(right)", ""),
+        strict(
+            "entry",
+            "i64",
+            "take_first(fault(left), fault(right))",
+            take_first,
+        ),
+        strict(
+            "entry",
+            "i64",
+            "let bound = fault(left);\n    fault(right)",
+            "",
+        ),
+        strict(
+            "entry",
+            "bool",
+            "(fault(left) == 0) && (fault(right) == 0)",
+            "",
+        ),
+        strict(
+            "entry",
+            "bool",
+            "(fault(left) == 0) || (fault(right) == 0)",
+            "",
+        ),
+        GeneratedProgram {
+            source: module(
+                "entry",
+                selector,
+                "kind: i64",
+                "bool",
+                "false && (fault(kind) == 0)",
+            ),
+            entry_id: "app.entry".to_owned(),
+            entry_params: vec![GenType::I64],
+            samples: kinds.clone(),
+        },
+        GeneratedProgram {
+            source: module(
+                "entry",
+                selector,
+                "kind: i64",
+                "bool",
+                "true || (fault(kind) == 0)",
+            ),
+            entry_id: "app.entry".to_owned(),
+            entry_params: vec![GenType::I64],
+            samples: kinds,
+        },
+        GeneratedProgram {
+            source: module(
+                "entry",
+                selector,
+                "pick: bool, selected: i64, unselected: i64",
+                "i64",
+                "if pick { fault(selected) } else { fault(unselected) }",
+            ),
+            entry_id: "app.entry".to_owned(),
+            entry_params: vec![GenType::Bool, GenType::I64, GenType::I64],
+            samples: branches,
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,6 +571,44 @@ mod tests {
                 "generated program is unexpectedly large"
             );
             assert!(!program.samples.is_empty());
+        }
+    }
+
+    #[test]
+    fn adversarial_fault_corpus_is_deterministic_and_covers_every_ordered_pair() {
+        let first = adversarial_fault_corpus();
+        let second = adversarial_fault_corpus();
+        assert_eq!(first.len(), 9);
+        assert_eq!(
+            first
+                .iter()
+                .map(|program| program.source.as_str())
+                .collect::<Vec<_>>(),
+            second
+                .iter()
+                .map(|program| program.source.as_str())
+                .collect::<Vec<_>>(),
+            "adversarial source must be byte-identical across runs"
+        );
+        assert_eq!(
+            first
+                .iter()
+                .map(|program| program.samples.len())
+                .sum::<usize>(),
+            544,
+            "six strict 8-by-8 contexts, two lazy-right contexts, and faulting plus successful conditional branches"
+        );
+        for program in &first {
+            assert!(program.source.len() < 8192);
+            assert!(!program.samples.is_empty());
+            crate::parse(&program.source, "kernel-zero-adversarial-corpus.spx").unwrap_or_else(
+                |error| {
+                    panic!(
+                        "adversarial corpus source must parse: {error:?}\nsource:\n{}",
+                        program.source
+                    )
+                },
+            );
         }
     }
 }

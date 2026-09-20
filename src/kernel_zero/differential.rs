@@ -534,6 +534,7 @@ fn hand_written_cases() -> Vec<Case> {
 fn generated_cases() -> Vec<Case> {
     corpus::generated_corpus()
         .into_iter()
+        .chain(corpus::adversarial_fault_corpus())
         .map(|program| Case {
             source: program.source,
             entry_id: program.entry_id,

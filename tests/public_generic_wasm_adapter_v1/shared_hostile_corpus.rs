@@ -55,7 +55,8 @@ use super::reference_wasm_module;
 mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
     assert_matches_expected, baseline_descriptor_bytes, malformed_trusted_descriptor_cases,
-    parse_shared_corpus_lines, structured_descriptor_cases, MAX_BYTES_PER_LEAF,
+    malformed_trusted_descriptor_mutation_cases, parse_shared_corpus_lines,
+    structured_descriptor_cases, MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -166,6 +167,101 @@ impl Workspace {
     }
 }
 
+/// Persistent executable negatives for exactly the #173 branches requested
+/// for mutation proof. Each source edit happens only in a fresh temporary
+/// generated package. A successful instantiation is the discriminating
+/// signal: the original byte-exact pairing cannot reject because these bytes
+/// are also the generated consumer's trusted descriptor.
+#[test]
+fn each_requested_descriptor_envelope_mutation_is_detected_by_typescript_consumer() {
+    if !node_available() {
+        eprintln!("skipping: node is not available on PATH");
+        return;
+    }
+    let Some(tsc) = locate_tsc() else {
+        eprintln!("skipping: no repository-pinned (5.8.3) tsc is available on this host");
+        return;
+    };
+    let wasm_bytes = reference_wasm_module::build();
+    let (input, output) = shapes();
+    let binding = fixture_binding(&wasm_bytes);
+    let cases = malformed_trusted_descriptor_mutation_cases();
+    assert_eq!(
+        cases.len(),
+        5,
+        "the requested mutation-control set is closed"
+    );
+    for (name, bytes, _, _) in cases {
+        let consumer = generate_typescript_calling_consumer(&bytes, &binding, &input, &output)
+            .expect(
+                "generation stores configured descriptor bytes without granting them authority",
+            );
+        let workspace = Workspace::new(&format!("mutant-{name}"));
+        let root = workspace.path("generated-typescript-consumer");
+        write_generated_package(&root, consumer.files());
+        let descriptor_path = root.join("src/descriptor.ts");
+        let mut descriptor = fs::read_to_string(&descriptor_path).unwrap();
+        weaken_typescript_descriptor_branch(&mut descriptor, name);
+        fs::write(&descriptor_path, descriptor).unwrap();
+        let build = run(
+            Command::new(&tsc)
+                .current_dir(&root)
+                .args(["-p", "tsconfig.json"]),
+            "tsc -p tsconfig.json for descriptor-envelope mutant",
+        );
+        assert!(
+            build.status.success(),
+            "{name}: TypeScript descriptor-envelope mutant did not type-check:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let wasm_path = workspace.path("reference.wasm");
+        fs::write(&wasm_path, &wasm_bytes).unwrap();
+        fs::write(
+            root.join("test/mutated-descriptor.mjs"),
+            r#"
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { Provider } from "../dist/wasm-provider.js";
+import { TRUSTED_DESCRIPTOR_BYTES } from "../dist/descriptor.js";
+const wasmBytes = readFileSync(process.argv[2]);
+const original = WebAssembly.instantiate;
+let instantiations = 0;
+WebAssembly.instantiate = async (...args) => {
+  instantiations++;
+  return original(...args);
+};
+try {
+  const provider = await Provider.open(wasmBytes, { descriptorBytes: TRUSTED_DESCRIPTOR_BYTES });
+  assert.equal(instantiations, 1, "the weakened descriptor check must reach instantiation");
+  provider.close();
+} finally {
+  WebAssembly.instantiate = original;
+}
+console.log("MUTATED_DESCRIPTOR_ENVELOPE_REACHED_PROVIDER");
+"#,
+        )
+        .unwrap();
+        let output = run(
+            Command::new("node")
+                .current_dir(&root)
+                .arg("test/mutated-descriptor.mjs")
+                .arg(&wasm_path),
+            "node test/mutated-descriptor.mjs",
+        );
+        assert!(
+            output.status.success(),
+            "{name}: descriptor-envelope mutation was not detected:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("MUTATED_DESCRIPTOR_ENVELOPE_REACHED_PROVIDER"),
+            "{name}"
+        );
+    }
+}
+
 impl Drop for Workspace {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
@@ -217,6 +313,55 @@ fn write_generated_package(root: &Path, files: &[(String, String)]) {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(&path, contents).unwrap();
+    }
+}
+
+fn replace_once(source: &mut String, old: &str, new: &str, label: &str) {
+    assert_eq!(
+        source.matches(old).count(),
+        1,
+        "{label}: generated-source mutation anchor drifted: {old:?}"
+    );
+    *source = source.replacen(old, new, 1);
+}
+
+/// Temporarily weaken exactly one generated TypeScript Descriptor-v1 branch.
+/// The mutations preserve type-checking and avoid reading beyond the hostile
+/// input; their required observable effect is that `Provider::open` reaches
+/// `WebAssembly.instantiate` below.
+fn weaken_typescript_descriptor_branch(source: &mut String, case: &str) {
+    match case {
+        "truncated_final_frame" => replace_once(
+            source,
+            "if (length > bytes.length - offset) return false;",
+            "if (length > bytes.length - offset) return true;",
+            case,
+        ),
+        "unknown_descriptor_schema" => replace_once(
+            source,
+            "\"semaprax.public-generic-descriptor.v1\",",
+            "undefined,",
+            case,
+        ),
+        "stale_type_grammar_version" => replace_once(
+            source,
+            "\"semaprax.public-generic-type-grammar.v1\",",
+            "undefined,",
+            case,
+        ),
+        "invalid_utf8_export_id" => replace_once(
+            source,
+            "catch {\n      return false;\n    }",
+            "catch {\n      text = \"\";\n    }",
+            case,
+        ),
+        "trailing_bytes_after_final_frame" => replace_once(
+            source,
+            "return offset === bytes.length;",
+            "return true;",
+            case,
+        ),
+        other => panic!("{other}: not an admitted #173 mutation control"),
     }
 }
 

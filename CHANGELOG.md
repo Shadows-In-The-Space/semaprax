@@ -90,8 +90,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 - Version and digest the public-generic hostile corpus, pinning 17 shared case
   outcomes plus exact bytes for 9 structured-descriptor and 6
   malformed-trusted cases in one deterministic manifest while correcting
-  stale evidence counts. Exact-current-head hosted
-  evidence and real generated endpoints remain outstanding (#173).
+  stale evidence counts. Persistent compiled source mutants now prove that
+  five previously untested descriptor-envelope refusals are individually live
+  in the generated Rust, shared C11/C++17, and TypeScript consumers, and that
+  weakening each branch reaches the provider before clean settlement.
+  Exact-current-head hosted evidence, carrier-side consumer hostility, and real
+  generated endpoints remain outstanding (#173).
 
 - Extend the source-live repair preview with an explicitly selected OpenCode
   Provider-Adapter route, durable V2 receipts, a restart-stable absolute

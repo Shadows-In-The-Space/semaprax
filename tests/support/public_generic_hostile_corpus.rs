@@ -316,6 +316,37 @@ pub fn malformed_trusted_descriptor_cases(
     cases
 }
 
+/// The five malformed-trusted documents used for executable mutation
+/// negatives of generated consumer envelope checks.  This intentionally
+/// excludes `stale_boundary_profile_version`: that branch remains covered by
+/// the closed six-case corpus, but it is not one of issue #173's requested
+/// mutation controls.  Keeping this selection next to the bytes prevents a
+/// renderer-specific test from silently choosing a different fixture.
+pub fn malformed_trusted_descriptor_mutation_cases(
+) -> Vec<(&'static str, Vec<u8>, Option<&'static str>, &'static str)> {
+    const NAMES: [&str; 5] = [
+        "truncated_final_frame",
+        "unknown_descriptor_schema",
+        "stale_type_grammar_version",
+        "invalid_utf8_export_id",
+        "trailing_bytes_after_final_frame",
+    ];
+    let cases = malformed_trusted_descriptor_cases();
+    let selected: Vec<_> = cases
+        .into_iter()
+        .filter(|(name, _, _, _)| NAMES.contains(name))
+        .collect();
+    assert_eq!(
+        selected
+            .iter()
+            .map(|(name, _, _, _)| *name)
+            .collect::<Vec<_>>(),
+        NAMES.to_vec(),
+        "the executable mutation controls must remain the requested closed set"
+    );
+    selected
+}
+
 /// Versioned identity for the composed hostile corpus owned by issues #160 and
 /// #173. The outcome-manifest digest below covers the canonical baseline and
 /// every shared consumer case id/outcome. It additionally binds the exact bytes

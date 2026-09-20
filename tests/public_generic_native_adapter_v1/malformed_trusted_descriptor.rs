@@ -32,7 +32,9 @@ use semaprax::public_generic_consumer::rust_calling::{
     generate_rust_calling_consumer, OwnedByteField, RecordShape,
 };
 
-use crate::shared_hostile_corpus::public_generic_hostile_corpus::malformed_trusted_descriptor_cases;
+use crate::shared_hostile_corpus::public_generic_hostile_corpus::{
+    malformed_trusted_descriptor_cases, malformed_trusted_descriptor_mutation_cases,
+};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -182,6 +184,102 @@ int main() {
 }
 "#;
 
+/// A deliberately weakened consumer must reach the provider.  The reference
+/// provider is configured with the same bytes, so this proves the consumer's
+/// own envelope check -- rather than byte pairing or provider replay -- is
+/// what made the canonical driver refuse before allocation.
+const C_MUTANT_DRIVER: &str = r#"#include "spx_pg_calling_consumer.h"
+int main(void) {
+    size_t allocations_before = spx_pg_consumer_test_live_allocations();
+    spx_pg_calling_consumer *consumer = NULL;
+    if (spx_pg_consumer_open(spx_pg_trusted_descriptor_bytes, spx_pg_trusted_descriptor_len,
+                             spx_pg_trusted_binding_bytes, spx_pg_trusted_binding_len,
+                             &consumer) != SPX_PG_CONSUMER_OK || consumer == NULL) return 1;
+    if (spx_pg_consumer_test_live_allocations() <= allocations_before) return 2;
+    if (spx_pg_consumer_close_checked(&consumer, NULL) != SPX_PG_CONSUMER_OK || consumer != NULL) return 3;
+    return spx_pg_consumer_test_live_allocations() == allocations_before ? 0 : 4;
+}
+"#;
+
+fn replace_once(source: &mut String, old: &str, new: &str, label: &str) {
+    assert_eq!(
+        source.matches(old).count(),
+        1,
+        "{label}: generated-source mutation anchor drifted: {old:?}"
+    );
+    *source = source.replacen(old, new, 1);
+}
+
+/// Mutate precisely one C11 descriptor-envelope refusal branch.  The C++17
+/// wrapper delegates to this same generated C11 implementation, so one
+/// compiled C11 negative control covers both native language facades without
+/// inventing a second decoder.
+fn weaken_c11_descriptor_branch(source: &mut String, case: &str) {
+    match case {
+        "truncated_final_frame" => replace_once(
+            source,
+            "if (width > length - offset) return 0;",
+            "if (width > length - offset) { offset = length; break; }",
+            case,
+        ),
+        "unknown_descriptor_schema" => replace_once(
+            source,
+            "if (field == 0u) { version = descriptor_schema; version_length = sizeof(descriptor_schema) - 1u; }",
+            "if (field == 13u) { version = descriptor_schema; version_length = sizeof(descriptor_schema) - 1u; }",
+            case,
+        ),
+        "stale_type_grammar_version" => replace_once(
+            source,
+            "if (field == 2u) { version = grammar_schema; version_length = sizeof(grammar_schema) - 1u; }",
+            "if (field == 13u) { version = grammar_schema; version_length = sizeof(grammar_schema) - 1u; }",
+            case,
+        ),
+        "invalid_utf8_export_id" => replace_once(
+            source,
+            "if (!spx_pg_ccc_utf8(content, field_length)) return 0;",
+            "if (!spx_pg_ccc_utf8(content, field_length) && field == 13u) return 0;",
+            case,
+        ),
+        "trailing_bytes_after_final_frame" => {
+            replace_once(source, "return offset == length;", "return 1;", case)
+        }
+        other => panic!("{other}: not an admitted #173 mutation control"),
+    }
+}
+
+fn weaken_rust_descriptor_branch(source: &mut String, case: &str) {
+    match case {
+        "truncated_final_frame" => replace_once(
+            source,
+            "let Some(content) = bytes.get(prefix_end..end) else { return false; };",
+            "let Some(content) = bytes.get(prefix_end..end) else { return true; };",
+            case,
+        ),
+        "unknown_descriptor_schema" => replace_once(
+            source,
+            "0 => Some(b\"semaprax.public-generic-descriptor.v1\".as_slice()),",
+            "13 => Some(b\"semaprax.public-generic-descriptor.v1\".as_slice()),",
+            case,
+        ),
+        "stale_type_grammar_version" => replace_once(
+            source,
+            "2 => Some(b\"semaprax.public-generic-type-grammar.v1\".as_slice()),",
+            "13 => Some(b\"semaprax.public-generic-type-grammar.v1\".as_slice()),",
+            case,
+        ),
+        "invalid_utf8_export_id" => replace_once(
+            source,
+            "if std::str::from_utf8(content).is_err() { return false; }",
+            "if false { return false; }",
+            case,
+        ),
+        "trailing_bytes_after_final_frame" => {
+            replace_once(source, "offset == bytes.len()", "true", case)
+        }
+        other => panic!("{other}: not an admitted #173 mutation control"),
+    }
+}
+
 /// Generate, build and run the C11 and C++17 calling consumers configured
 /// with `bytes` as their trusted descriptor, and require each to refuse
 /// those same bytes with `DESCRIPTOR_REJECTED`, leaving no live allocation
@@ -260,6 +358,40 @@ fn assert_c11_and_cxx17_consumers_reject(
     );
 }
 
+/// Execute one deliberately weakened generated C11 consumer.  Success here is
+/// the negative-control result: it proves that removing this exact envelope
+/// refusal lets its byte-identical malformed trusted descriptor open.
+fn assert_c11_mutation_is_detected(label: &str, bytes: &[u8], binding: &NativeProviderBindingV1) {
+    let (input, output) = shapes();
+    let workspace = Workspace::new(&format!("mutant-{label}"));
+    let provider = compile_provider(&workspace.0, bytes, binding);
+    let consumer = generate_c_calling_consumer(bytes, binding, &input, &output)
+        .expect("generation keeps its byte-oriented API for this regression");
+    let root = workspace.0.join("c");
+    fs::create_dir_all(&root).unwrap();
+    write_files(&root, consumer.files());
+    let source_path = root.join("spx_pg_calling_consumer.c");
+    let mut source = fs::read_to_string(&source_path).unwrap();
+    weaken_c11_descriptor_branch(&mut source, label);
+    fs::write(&source_path, source).unwrap();
+    fs::write(root.join("mutant.c"), C_MUTANT_DRIVER).unwrap();
+    let binary = root.join(format!("mutant{}", env::consts::EXE_SUFFIX));
+    run(
+        Command::new(tool("CLANG", "clang"))
+            .current_dir(&root)
+            .args(["-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-I."])
+            .args(["spx_pg_calling_consumer.c", "mutant.c"])
+            .arg(&provider)
+            .arg("-o")
+            .arg(&binary),
+        &format!("[{label}] build C11 descriptor-envelope mutant"),
+    );
+    run(
+        Command::new(&binary).current_dir(&root),
+        &format!("[{label}] run C11 descriptor-envelope mutant"),
+    );
+}
+
 /// The Rust half of [`assert_c11_and_cxx17_consumers_reject`]: the generated
 /// crate's own test asserts `Error::DescriptorRejected` and an unchanged
 /// live-allocation count, so a refusal that happened after allocation would
@@ -313,6 +445,66 @@ fn exact_malformed_trusted_bytes_are_rejected_before_provider_allocation() {
     );
 }
 
+/// Rust counterpart of [`assert_c11_mutation_is_detected`].  It modifies only
+/// the temporary generated crate, compiles it, and requires `Provider::open`
+/// to reach the configured reference provider.  Thus the test fails if a
+/// mutation anchor drifts or if the supposedly independent branch is masked
+/// by pairing or by the provider.
+fn assert_rust_mutation_is_detected(label: &str, bytes: &[u8], binding: &NativeProviderBindingV1) {
+    let (input, output) = shapes();
+    let consumer = generate_rust_calling_consumer(bytes, binding, &input, &output)
+        .expect("generation keeps its byte-oriented API for this regression");
+    let workspace = Workspace::new(&format!("mutant-{label}"));
+    let provider = compile_provider(&workspace.0, bytes, binding);
+    let lib_dir = workspace.0.join("provider-lib");
+    fs::create_dir_all(&lib_dir).unwrap();
+    let archive = lib_dir.join("libspx_pg_reference_provider.a");
+    run(
+        Command::new(tool("AR", "ar"))
+            .args(["rcs"])
+            .arg(&archive)
+            .arg(&provider),
+        "archive reference provider for descriptor-envelope mutant",
+    );
+    let crate_root = workspace.0.join("consumer");
+    write_files(&crate_root, consumer.files());
+    let descriptor_path = crate_root.join("src/descriptor.rs");
+    let mut descriptor = fs::read_to_string(&descriptor_path).unwrap();
+    weaken_rust_descriptor_branch(&mut descriptor, label);
+    fs::write(&descriptor_path, descriptor).unwrap();
+    fs::write(
+        crate_root.join("tests/round_trip.rs"),
+        r#"use spx_pg_rust_calling_consumer::{diagnostics, Provider, TRUSTED_BINDING_BYTES, TRUSTED_DESCRIPTOR_BYTES};
+#[test]
+fn exact_malformed_trusted_bytes_reach_the_provider_after_the_mutation() {
+    let before = diagnostics::live_allocations();
+    let mut provider = Provider::open(TRUSTED_DESCRIPTOR_BYTES, TRUSTED_BINDING_BYTES)
+        .expect("the mutated descriptor envelope must admit its exact trusted bytes");
+    assert!(
+        diagnostics::live_allocations() > before,
+        "opening the weakened consumer must reach the provider allocation"
+    );
+    provider.close().expect("the reached provider must close cleanly");
+    assert_eq!(diagnostics::live_allocations(), before);
+}
+"#,
+    )
+    .unwrap();
+    let target = workspace.0.join("cargo-target");
+    let mut cargo = Command::new(tool("CARGO", "cargo"));
+    cargo
+        .current_dir(&crate_root)
+        .env("CARGO_TARGET_DIR", &target)
+        .env("SPX_PG_PROVIDER_LIB_DIR", &lib_dir)
+        .env("SPX_PG_PROVIDER_LIB_NAME", "spx_pg_reference_provider")
+        .env_remove("RUSTC_WRAPPER")
+        .args(["test", "--", "--test-threads=1"]);
+    run_cargo(
+        &mut cargo,
+        &format!("[{label}] run Rust descriptor-envelope mutant"),
+    );
+}
+
 #[test]
 fn generated_native_consumers_reject_a_byte_identical_malformed_trusted_descriptor_before_open() {
     assert_c11_and_cxx17_consumers_reject("native", &malformed_descriptor(), &binding());
@@ -351,5 +543,24 @@ fn malformed_trusted_corpus_is_refused_by_the_rust_consumer() {
     assert_eq!(cases.len(), 6, "the manifest is closed");
     for (name, bytes, _, _) in cases {
         assert_rust_consumer_rejects(name, &bytes, &binding());
+    }
+}
+
+/// Persistent executable mutation controls for the five #173 branches whose
+/// hostile bytes are also the consumer's embedded trusted bytes.  Each
+/// temporary source mutation makes exactly one case reach the provider;
+/// without this check, merely listing/refusing the cases could leave a dead
+/// branch or a masking validation layer undetected.
+#[test]
+fn each_requested_descriptor_envelope_mutation_is_detected_by_native_consumers() {
+    let cases = malformed_trusted_descriptor_mutation_cases();
+    assert_eq!(
+        cases.len(),
+        5,
+        "the requested mutation-control set is closed"
+    );
+    for (name, bytes, _, _) in cases {
+        assert_c11_mutation_is_detected(name, &bytes, &binding());
+        assert_rust_mutation_is_detected(name, &bytes, &binding());
     }
 }

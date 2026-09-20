@@ -6,6 +6,7 @@ pub mod driver;
     reason = "the effects module keeps its private test fixtures adjacent to the code they exercise"
 )]
 pub mod effects;
+pub mod model;
 mod render;
 pub mod source_live;
 mod step;

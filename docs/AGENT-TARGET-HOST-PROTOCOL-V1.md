@@ -99,6 +99,26 @@ Wasm legs. This is local execution evidence only; it does not add a public
 backend selector, a deployed target adapter, durable target replay, or a
 claim that target artifacts themselves provide authority.
 
+The same local parity profile now composes an additive source-model boundary
+before Proposal decoding. `iterative::model::TargetModelSource` converts only
+the lifecycle-owned `ProposalRequest` into a bounded canonical v1 host request,
+including exact turn/attempt, source revision, Proposal grammar, task, checked
+state/observation, prior effect and retry context. Its private move-only grant
+is bound to those bytes and one caller-selected deterministic model root; the
+host receives only the opaque grant digest and request document. Cancellation,
+call/request/aggregate/fuel exhaustion refuse before the injected model host.
+Dispatched attempts remain charged after a host failure, panic, overflow or
+non-UTF-8 response.
+
+Each model attempt retains a canonical bounded observation with cumulative
+accounting and a normalized settlement. Independent decoding and request-pair
+replay cannot construct a grant or dispatch a host. The combined parity case
+compares model request/evidence bytes, target-effect request/evidence bytes,
+terminal values and both accounting ledgers across interpreter, native C11
+`-O0`/`-O2`, and Core Wasm. This remains an injected local seam: it is not the
+Direct Runtime provider adapter, a physical provider, durable model recovery,
+public target ABI, or hosted target support.
+
 Focused implementation gate (run by the coordinating agent):
 
 ```sh

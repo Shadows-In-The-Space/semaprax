@@ -191,6 +191,14 @@ intent before adapter dispatch, and restores typed effect accounting from exact
 acknowledged observations without redispatch. The source adapter retains raw
 settlement bytes for that journal; canonical decoded proposals alone enter
 source authorization. It adds no provider transport or ambient authority.
+`agent_lifecycle/iterative/model` owns the separate bounded local target-parity
+model boundary. It projects the lifecycle-owned Proposal request into one
+canonical authority-free request, consumes a private per-turn grant, reserves
+model call/byte/fuel accounting before an injected host, and emits independently
+replayable canonical evidence. The combined test seam runs the surrounding
+checked stages and target effects on interpreter, native C11 and Core Wasm; it
+does not make the Direct Runtime provider adapter a target ABI or add provider,
+network, checkpoint, or production-backend authority.
 `compact_semantic_projection/selected` wraps existing task, public API, candidate,
 and Agent graph producers and independently regenerates selected content on
 replay; encoded evidence cannot replace the owning compiler object.

@@ -129,8 +129,13 @@ of starting a fresh latency window.
   token or cost reservation. Missing or malformed settlement usage is
   explicitly unknown.
 - It creates no target ABI. Native C11 and Core Wasm Agent-stage execution
-  must consume this same checked request/evidence contract in their own parity
-  profile.
+  retains a separate additive local parity protocol under
+  `agent_lifecycle::iterative::model`. That protocol consumes the same checked
+  lifecycle `ProposalRequest`, bounds the injected model host before Proposal
+  decode, and independently replays canonical request/evidence pairs across
+  interpreter, native C11 and Core Wasm stage execution. It deliberately does
+  not claim that the Direct Runtime provider adapter itself runs inside a
+  generated target or that a physical provider is available there.
 - Local fixtures are local evidence. This document makes no hosted-provider,
   production-support, billing, credential, network, or public-ABI claim.
 

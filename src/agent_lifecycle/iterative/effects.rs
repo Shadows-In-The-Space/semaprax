@@ -596,6 +596,7 @@ fn scalar_bytes(value: &RetainedValue) -> Option<usize> {
 pub(crate) mod tests {
     use super::*;
     use crate::agent_lifecycle::tests::{DEFINITION, MODULE, RUNTIME_V1};
+    mod model_boundary_tests;
     pub(crate) fn source(terminal: &str) -> String {
         let start = MODULE.find("@id(\"fixture.agent.fn.reduce\")").unwrap();
         let end = MODULE[start..].find("@id(\"app.main\")").unwrap() + start;

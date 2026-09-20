@@ -28,7 +28,10 @@ from pathlib import Path
 import stat
 import time
 
-from opencode_agent_task_pilot.evidence import _bytes as decode_base64
+from opencode_agent_task_pilot.evidence import (
+    _bytes as decode_base64,
+    mcp_tool_metrics,
+)
 
 DRIFT_TARGET = "src/core.spx"
 STALE_WRITE_RETURN_CODE = 126
@@ -65,41 +68,127 @@ INTERVENTION_KINDS = (
 )
 MAX_INTERVENTION_LEDGER_BYTES = 1_048_576
 
+PRESENTATION_SCHEMA = "semaprax.opencode-agent-task-pilot-presentation.v1"
+PRESENTATION_KEYS = frozenset(
+    {
+        "schema",
+        "prompt_sha256",
+        "prompt_bytes",
+        "mcp_wire_sha256",
+        "tool_calls",
+        "tool_response_bytes",
+        "presented_context_bytes",
+    }
+)
+MAX_PRESENTATION_BYTES = 65_536
+MAX_MCP_WIRE_BYTES = 32 * 1_048_576
+
 
 # --- 1. presentation bytes -------------------------------------------------
 
 
-def presented_context_bytes(prompt, mcp_metrics):
-    """Exact bytes made visible to the model at the pilot's own transport boundary.
+def _presentation(prompt, mcp_wire):
+    """Derive one exact, bounded presentation record from primary bytes.
 
-    Defined as the frozen task prompt bytes (presented exactly once, at session
-    start) plus every MCP `tools/call` response byte returned to the model as tool
-    context (`mcp_metrics['tool_response_bytes']`), summed with repeats across the
-    whole trial. Both terms are exact bytes captured on a transport the pilot
-    itself owns (the literal argv handed to `opencode run`, and the literal MCP
-    wire frames archived in `mcp-wire.jsonl`); neither is estimated from a token
-    count. `mcp_metrics` must be an `observed` result from
-    `opencode_agent_task_pilot.evidence.mcp_tool_metrics`; anything else makes this
-    unavailable rather than a guess.
+    The representation deliberately describes the pilot-owned boundary, not an
+    unobservable provider request: the frozen prompt is passed once to
+    ``opencode run`` and each raw MCP ``tools/call`` response is returned through
+    the local tool transport.  The raw wire digest prevents a later summary from
+    being substituted for those repeated responses.
     """
     if not isinstance(prompt, str) or not prompt:
-        return {"status": "unavailable", "reason": "frozen task prompt text is missing"}
-    if not isinstance(mcp_metrics, dict) or mcp_metrics.get("status") != "observed":
-        return {"status": "unavailable", "reason": "MCP tool response wire is not observed"}
-    tool_response_bytes = mcp_metrics.get("tool_response_bytes")
-    if (
-        isinstance(tool_response_bytes, bool)
-        or not isinstance(tool_response_bytes, int)
-        or tool_response_bytes < 0
-    ):
-        return {"status": "unavailable", "reason": "MCP tool response byte total is invalid"}
-    prompt_bytes = len(prompt.encode("utf-8"))
+        raise ValueError("frozen task prompt text is missing")
+    if not isinstance(mcp_wire, bytes) or len(mcp_wire) > MAX_MCP_WIRE_BYTES:
+        raise ValueError("MCP tool response wire is not bounded bytes")
+    metrics = mcp_tool_metrics(mcp_wire)
+    if metrics.get("status") != "observed":
+        raise ValueError("MCP tool response wire is not observed")
+    prompt_bytes = prompt.encode("utf-8")
+    tool_response_bytes = metrics["tool_response_bytes"]
+    return {
+        "schema": PRESENTATION_SCHEMA,
+        "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(),
+        "prompt_bytes": len(prompt_bytes),
+        "mcp_wire_sha256": hashlib.sha256(mcp_wire).hexdigest(),
+        "tool_calls": metrics["tool_calls"],
+        "tool_response_bytes": tool_response_bytes,
+        "presented_context_bytes": len(prompt_bytes) + tool_response_bytes,
+    }
+
+
+def _canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def write_presentation_evidence(evidence_dir, prompt, mcp_wire):
+    """Create the immutable primary-byte presentation record for a fresh trial."""
+    evidence_dir = Path(evidence_dir)
+    presentation = _presentation(prompt, mcp_wire)
+    encoded = _canonical(presentation) + b"\n"
+    if len(encoded) > MAX_PRESENTATION_BYTES:
+        raise ValueError("presentation evidence exceeds its bound")
+    path = evidence_dir / "presentation.json"
+    fd = None
+    try:
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise ValueError("safe no-follow presentation creation is unavailable")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        written = 0
+        while written < len(encoded):
+            count = os.write(fd, encoded[written:])
+            if count <= 0:
+                raise ValueError("presentation evidence write made no progress")
+            written += count
+        held = os.fstat(fd)
+        current = os.stat(path, follow_symlinks=False)
+        if (not stat.S_ISREG(held.st_mode) or held.st_nlink != 1
+                or held.st_size != len(encoded)
+                or (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino)):
+            raise ValueError("presentation evidence changed during creation")
+    except (OSError, ValueError) as error:
+        # A partial exclusive artifact is itself fail-closed evidence.  Do not
+        # unlink a pathname after an error: an adversary could rebind it between
+        # inspection and deletion.
+        raise ValueError("presentation evidence could not be created exclusively") from error
+    finally:
+        if fd is not None:
+            os.close(fd)
+    return dict(presentation, presentation_sha256=hashlib.sha256(encoded).hexdigest())
+
+
+def presented_context_bytes(evidence_dir, prompt):
+    """Read an immutable presentation record and re-derive it from raw evidence.
+
+    A counter in ``record.json`` is not sufficient evidence.  This requires the
+    independently retained canonical ``presentation.json`` and the raw
+    ``mcp-wire.jsonl`` it binds.  Missing legacy evidence remains unavailable;
+    no historical trial is made eligible by recomputation alone.
+    """
+    evidence_dir = Path(evidence_dir)
+    from opencode_agent_task_pilot.review_workflow import _read_regular
+    try:
+        encoded = _read_regular(evidence_dir / "presentation.json", MAX_PRESENTATION_BYTES)
+        mcp_wire = _read_regular(evidence_dir / "mcp-wire.jsonl", MAX_MCP_WIRE_BYTES)
+        observed = json.loads(encoded.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        return {"status": "unavailable", "reason": f"presentation evidence is not readable: {error}"}
+    if not isinstance(observed, dict) or set(observed) != PRESENTATION_KEYS:
+        return {"status": "unavailable", "reason": "presentation evidence has an unexpected shape"}
+    if observed.get("schema") != PRESENTATION_SCHEMA:
+        return {"status": "unavailable", "reason": "presentation evidence schema differs"}
+    if _canonical(observed) + b"\n" != encoded:
+        return {"status": "unavailable", "reason": "presentation evidence is not canonical JSON"}
+    try:
+        expected = _presentation(prompt, mcp_wire)
+    except (TypeError, ValueError) as error:
+        return {"status": "unavailable", "reason": f"presentation byte computation failed: {error}"}
+    if observed != expected:
+        return {"status": "unavailable", "reason": "presentation evidence differs from archived primary bytes"}
     return {
         "status": "observed",
         "method": "prompt_bytes_plus_mcp_tool_response_wire_bytes",
-        "prompt_bytes": prompt_bytes,
-        "tool_response_bytes": tool_response_bytes,
-        "presented_context_bytes": prompt_bytes + tool_response_bytes,
+        **expected,
+        "presentation_sha256": hashlib.sha256(encoded).hexdigest(),
     }
 
 
@@ -593,7 +682,7 @@ def initialize_intervention_ledger(evidence_dir):
 # --- combined eligibility predicate ------------------------------------------
 
 
-def compute_eligibility(*, prompt, mcp_metrics, gateway_log_bytes, drift_declared, evidence_dir):
+def compute_eligibility(*, prompt, gateway_log_bytes, drift_declared, evidence_dir):
     """The one eligibility predicate: eligible only when all four measurements
     are present and internally consistent. Never raises - any unexpected defect
     in an individual measurement is treated as that measurement being missing,
@@ -603,7 +692,7 @@ def compute_eligibility(*, prompt, mcp_metrics, gateway_log_bytes, drift_declare
     reasons = []
 
     try:
-        context = presented_context_bytes(prompt, mcp_metrics)
+        context = presented_context_bytes(evidence_dir, prompt)
     except Exception as error:  # noqa: BLE001 - fail closed, never propagate
         context = {"status": "unavailable", "reason": f"presentation byte computation failed: {error}"}
     if context.get("status") != "observed":

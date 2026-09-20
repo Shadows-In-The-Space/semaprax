@@ -19,7 +19,6 @@ import tempfile
 import time
 
 from opencode_agent_task_pilot.eligibility import compute_eligibility
-from opencode_agent_task_pilot.evidence import mcp_tool_metrics
 
 ROOT = Path(__file__).resolve().parents[2]
 CAP = 8 * 1024 * 1024
@@ -100,16 +99,9 @@ def replay_candidate(evidence_dir, compiler):
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError):
         prompt = None
     gateway_log = _optional_bytes(evidence / 'gateway.jsonl', 32 * CAP)
-    mcp_wire = _optional_bytes(evidence / 'mcp-wire.jsonl', 32 * CAP)
-    try:
-        mcp_metrics = mcp_tool_metrics(mcp_wire) if mcp_wire else {
-            'status': 'unavailable', 'reason': 'MCP wire evidence is absent',
-        }
-    except ValueError as error:
-        mcp_metrics = {'status': 'unavailable', 'reason': str(error)}
     try:
         eligibility = compute_eligibility(
-            prompt=prompt, mcp_metrics=mcp_metrics, gateway_log_bytes=gateway_log,
+            prompt=prompt, gateway_log_bytes=gateway_log,
             drift_declared=binding['drift_patch'] is not None, evidence_dir=evidence,
         )
     except Exception as error:  # noqa: BLE001 - fail closed, never propagate

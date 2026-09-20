@@ -23,6 +23,7 @@ from opencode_agent_task_pilot.eligibility import (
     compute_eligibility,
     initialize_intervention_ledger,
     record_blinded_review,
+    write_presentation_evidence,
 )
 from opencode_agent_task_pilot.evidence import gateway_diagnostics, mcp_tool_metrics, provider_usage
 from opencode_agent_task_pilot.review_workflow import audit_cohort, prepare_review_packet
@@ -720,6 +721,8 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
     acceptance_error = None
     validation_wall_ns = None
     review_package = None
+    presentation = None
+    presentation_error = None
     drift_applications = 0
     gateway_diagnostic = {"status": "unavailable", "reason": "gateway was not reached"}
     mcp_metrics = {"status": "unavailable", "reason": "MCP tools/call wire was not available"}
@@ -860,6 +863,11 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             ("seatbelt.sb", profile_bytes),
         ):
             exclusive_write(evidence / name, body)
+        try:
+            presentation = write_presentation_evidence(evidence, prompt, mcp_wire)
+        except ValueError as error:
+            # Retain the failed tuple and make eligibility fail closed below.
+            presentation_error = str(error)
         if gateway_diagnostic["status"] == "unavailable" and gateway_log:
             try:
                 gateway_diagnostic = gateway_diagnostics(gateway_log)
@@ -874,7 +882,6 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             exclusive_write(evidence / "review-package.json", (json.dumps(review_package, sort_keys=True) + "\n").encode())
         eligibility = compute_eligibility(
             prompt=prompt,
-            mcp_metrics=mcp_metrics,
             gateway_log_bytes=gateway_log,
             drift_declared=binding["drift_patch"] is not None,
             evidence_dir=evidence,
@@ -892,6 +899,8 @@ def run_tuple(task, lane, trial, opencode, semaprax, evidence, timeout=600):
             "stdout_sha256": sha(out), "stderr_sha256": sha(err),
             "session_sha256": sha(exported), "gateway_sha256": sha(gateway_log),
             "mcp_wire_sha256": sha(mcp_wire),
+            "presentation_sha256": None if presentation is None else presentation["presentation_sha256"],
+            "presentation_error": presentation_error,
             "drift_applications": drift_applications,
             "acceptance": acceptance_rows,
             "acceptance_error": acceptance_error,

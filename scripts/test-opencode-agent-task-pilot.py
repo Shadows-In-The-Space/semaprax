@@ -447,28 +447,64 @@ def _mcp_frame(response_bytes=100):
 
 
 class PresentedContextBytesTests(unittest.TestCase):
-    def test_sums_prompt_and_mcp_tool_response_bytes(self):
-        prompt = "do the migration"
-        metrics = {"status": "observed", "tool_response_bytes": 250}
-        result = elig.presented_context_bytes(prompt, metrics)
-        self.assertEqual(result["status"], "observed")
-        self.assertEqual(result["prompt_bytes"], len(prompt.encode("utf-8")))
-        self.assertEqual(result["presented_context_bytes"], len(prompt.encode("utf-8")) + 250)
+    def _write(self, evidence, prompt="do the migration"):
+        wire = (_mcp_frame(250) + "\n").encode()
+        (evidence / "mcp-wire.jsonl").write_bytes(wire)
+        manifest = elig.write_presentation_evidence(evidence, prompt, wire)
+        return wire, manifest
 
-    def test_unavailable_when_mcp_metrics_are_not_observed(self):
-        result = elig.presented_context_bytes("prompt", {"status": "unavailable", "reason": "no wire"})
-        self.assertEqual(result["status"], "unavailable")
-        self.assertIn("MCP tool response wire", result["reason"])
+    def test_binds_prompt_and_raw_mcp_tool_response_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = Path(temp)
+            wire, manifest = self._write(evidence)
+            result = elig.presented_context_bytes(evidence, "do the migration")
+            self.assertEqual(result["status"], "observed")
+            self.assertEqual(result["prompt_bytes"], len("do the migration".encode("utf-8")))
+            self.assertEqual(result["mcp_wire_sha256"], hashlib.sha256(wire).hexdigest())
+            self.assertEqual(result["presentation_sha256"], manifest["presentation_sha256"])
+            self.assertEqual(result["presented_context_bytes"], result["prompt_bytes"] + result["tool_response_bytes"])
 
-    def test_unavailable_when_prompt_is_missing(self):
-        result = elig.presented_context_bytes(None, {"status": "observed", "tool_response_bytes": 1})
-        self.assertEqual(result["status"], "unavailable")
+    def test_missing_or_noncanonical_presentation_evidence_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = Path(temp)
+            (evidence / "mcp-wire.jsonl").write_bytes(b"")
+            self.assertEqual(elig.presented_context_bytes(evidence, "prompt")["status"], "unavailable")
+            self._write(evidence, "prompt")
+            raw = json.loads((evidence / "presentation.json").read_text())
+            (evidence / "presentation.json").write_text(json.dumps(raw, indent=2) + "\n")
+            result = elig.presented_context_bytes(evidence, "prompt")
+            self.assertEqual(result["status"], "unavailable")
+            self.assertIn("canonical", result["reason"])
 
-    def test_unavailable_when_tool_response_bytes_is_malformed(self):
-        result = elig.presented_context_bytes("p", {"status": "observed", "tool_response_bytes": -1})
-        self.assertEqual(result["status"], "unavailable")
-        result = elig.presented_context_bytes("p", {"status": "observed", "tool_response_bytes": True})
-        self.assertEqual(result["status"], "unavailable")
+    def test_changed_prompt_or_wire_cannot_reuse_presentation_record(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = Path(temp)
+            self._write(evidence, "prompt")
+            self.assertEqual(elig.presented_context_bytes(evidence, "changed")["status"], "unavailable")
+            (evidence / "mcp-wire.jsonl").write_bytes(b"")
+            result = elig.presented_context_bytes(evidence, "prompt")
+            self.assertEqual(result["status"], "unavailable")
+            self.assertIn("differs", result["reason"])
+
+    def test_exclusive_no_follow_creation_refuses_existing_link(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = Path(temp)
+            outside = Path(temp).parent / "presentation-outside.json"
+            (evidence / "presentation.json").symlink_to(outside)
+            with self.assertRaises(ValueError):
+                elig.write_presentation_evidence(evidence, "prompt", b"")
+
+    def test_link_backed_presentation_record_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = Path(temp)
+            self._write(evidence, "prompt")
+            raw = (evidence / "presentation.json").read_bytes()
+            outside = Path(temp).parent / "presentation-reader-outside.json"
+            outside.write_bytes(raw)
+            (evidence / "presentation.json").unlink()
+            (evidence / "presentation.json").symlink_to(outside)
+            result = elig.presented_context_bytes(evidence, "prompt")
+            self.assertEqual(result["status"], "unavailable")
 
 
 class StaleRecoveryEventsTests(unittest.TestCase):
@@ -754,9 +790,12 @@ class InterventionLedgerTests(unittest.TestCase):
 
 
 class ComputeEligibilityTests(unittest.TestCase):
-    def _complete_evidence(self, temp):
+    def _complete_evidence(self, temp, prompt="migrate the signature"):
         evidence = Path(temp)
         (evidence / "candidate.diff").write_text("--- before\n+++ after\n")
+        wire = (_mcp_frame(42) + "\n").encode()
+        (evidence / "mcp-wire.jsonl").write_bytes(wire)
+        elig.write_presentation_evidence(evidence, prompt, wire)
         packet = prepare_review_packet(evidence, evidence / "review-packet.json")
         elig.initialize_intervention_ledger(evidence)
         elig.record_blinded_review(evidence, "reviewer-1", 0, 600_000_000_000, 400_000, True,
@@ -766,7 +805,6 @@ class ComputeEligibilityTests(unittest.TestCase):
     def _complete_kwargs(self, evidence, drift_declared=False, gateway_log_bytes=b""):
         return dict(
             prompt="migrate the signature",
-            mcp_metrics={"status": "observed", "tool_response_bytes": 42},
             gateway_log_bytes=gateway_log_bytes,
             drift_declared=drift_declared,
             evidence_dir=evidence,
@@ -803,7 +841,7 @@ class ComputeEligibilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             evidence = self._complete_evidence(temp)
             kwargs = self._complete_kwargs(evidence)
-            kwargs["mcp_metrics"] = {"status": "unavailable", "reason": "no wire"}
+            (evidence / "presentation.json").unlink()
             result = elig.compute_eligibility(**kwargs)
             self.assertFalse(result["eligible"])
             self.assertIn("presentation bytes", result["reasons"][0])
@@ -842,7 +880,7 @@ class ComputeEligibilityTests(unittest.TestCase):
                 raise RuntimeError("boom")
 
         result = elig.compute_eligibility(
-            prompt="p", mcp_metrics={"status": "observed", "tool_response_bytes": 1},
+            prompt="p",
             gateway_log_bytes=b"", drift_declared=False, evidence_dir=Explosive(),
         )
         self.assertFalse(result["eligible"])
@@ -1010,7 +1048,7 @@ class RunTupleEligibilityCliTests(unittest.TestCase):
             result = elig.blinded_review_slot(evidence)
             self.assertEqual(result["assurance"], "legacy_unbound")
             self.assertFalse(elig.compute_eligibility(
-                prompt="p", mcp_metrics={"status":"observed", "tool_response_bytes":1},
+                prompt="p",
                 gateway_log_bytes=b"", drift_declared=False, evidence_dir=evidence)["eligible"])
 
     def test_symlink_and_oversize_evidence_are_rejected(self):

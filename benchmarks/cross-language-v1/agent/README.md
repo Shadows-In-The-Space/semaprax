@@ -27,6 +27,35 @@ build/test/leak-check/provenance machinery, unmodified.
 | `fixtures/` | Committed replay fixtures. Each one is a hand-authored script, not a recorded model transcript (see its own `_non_claim` field). |
 | `tests/test_agent_driver.py` | Offline, credential-free self-tests (`python3 -m unittest discover -s benchmarks/cross-language-v1/agent/tests`). |
 
+## External baseline admission is not execution
+
+`baseline_admission.py` is an offline, pure validator for a future Zero or
+mainstream coding-agent baseline's *input provenance*. Its caller supplies the
+canonical owner `tasks.json` bytes and a descriptor binding the baseline's
+official source, immutable revision and artifact digest, license, exact agent
+guidance/invocation-contract digests, installation receipt digest, explicit model identity, and each
+independently reviewed port tree, oracle, equivalence review, and candidate
+path. The gate recomputes the owner inventory SHA-256, requires its reviewed
+pin, and derives the ordered closed task set itself; it accepts no detached
+task-ID/digest pair. It rejects missing, extra, reordered, mutable, malformed,
+or undeclared inputs deterministically.
+
+The only currently owner-pinned external identity is Zero:
+`https://github.com/vercel-labs/zerolang` at
+`eb2ed6c22fe3f6e3152efa0c0d05ffcf1ff4a2c7`, the exact subject reserved by
+`agent-task-comparison-v1`. A descriptor for a different source, a near-miss
+or moving revision, or any mainstream baseline is unavailable until its owner
+records an equivalent immutable pin; this gate does not invent one.
+
+Even a descriptor that passes every check returns `status: "unavailable"`.
+The gate neither reads those inputs from disk nor provisions or invokes a
+toolchain, agent, model, or oracle; it intentionally rejects an `executed`
+claim.  It therefore does not enable the reserved `zero-graph-native` v1 lane,
+does not change any `adapters.json` availability, and is not evidence that a
+Zero or mainstream baseline ran.  An independently reviewed port and official
+toolchain execution record remain required before any comparison outcome can
+be admitted.
+
 ## Why model identity and budgets are explicit constructor/CLI arguments
 
 `AGENTS.md`'s non-negotiable invariants state: "Capabilities are explicit.

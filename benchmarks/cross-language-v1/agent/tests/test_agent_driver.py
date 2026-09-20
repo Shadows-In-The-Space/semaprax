@@ -28,6 +28,11 @@ _SUITE = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_SUITE))
 
 from agent._harness import repo_root, run_module  # noqa: E402
+from agent.baseline_admission import (  # noqa: E402
+    ADMISSION_SCHEMA,
+    OWNER_TASK_INVENTORY_SHA256,
+    admit_baseline_descriptor,
+)
 from agent.budget import BudgetExceededError, BudgetLedger, RetriesExhaustedError  # noqa: E402
 from agent.contracts import Budget, ModelIdentity, PricingRates, SamplingParams  # noqa: E402
 from agent.orchestrator import build_request, evaluate_agent_pair  # noqa: E402
@@ -115,6 +120,200 @@ class ContractsTests(unittest.TestCase):
         first = build_prompt(task["id"], "rust", equivalence, TASK_DIR / "public/rust", ["candidate.rs"])
         second = build_prompt(task["id"], "rust", equivalence, TASK_DIR / "public/rust", ["candidate.rs"])
         self.assertEqual(first, second)
+
+
+class BaselineAdmissionTests(unittest.TestCase):
+    """A provenance declaration never upgrades an unexecuted baseline."""
+
+    @staticmethod
+    def digest(letter: str) -> str:
+        return "sha256:" + letter * 64
+
+    def owner_inventory(self) -> bytes:
+        return (_SUITE / "tasks.json").read_bytes()
+
+    def required_tasks(self) -> list[str]:
+        return [task["id"] for task in json.loads(self.owner_inventory())["tasks"]]
+
+    def document(self) -> dict:
+        return {
+            "schema": ADMISSION_SCHEMA,
+            "system": {"id": "zero", "display_name": "Zero"},
+            "toolchain": {
+                "official_source": "https://github.com/vercel-labs/zerolang",
+                "revision": "eb2ed6c22fe3f6e3152efa0c0d05ffcf1ff4a2c7",
+                "version": "0.1.0",
+                "artifact_sha256": self.digest("a"),
+                "installation_receipt_sha256": self.digest("9"),
+                "license": "MIT",
+            },
+            "agent_interface": {
+                "version": "2026-09-20",
+                "guidance_sha256": self.digest("b"),
+                "invocation_contract_sha256": self.digest("c"),
+            },
+            "model": {"provider": "example-provider", "model": "example-model", "revision": "2026-09-20"},
+            "ports": [
+                {
+                    "task_id": task_id, "port_tree_sha256": self.digest("d"),
+                    "oracle_sha256": self.digest("e"), "equivalence_review_sha256": self.digest("f"),
+                    "candidate_paths": ["src/candidate.zero"],
+                }
+                for task_id in self.required_tasks()
+            ],
+            "execution": {"status": "not_executed"},
+        }
+
+    def test_complete_offline_descriptor_stays_unavailable(self):
+        decision = admit_baseline_descriptor(self.document(), self.owner_inventory())
+        self.assertEqual(decision["status"], "unavailable")
+        self.assertEqual(decision["reason"], "offline_admission_is_not_execution_evidence")
+        self.assertEqual(decision["provenance"]["system_id"], "zero")
+        self.assertEqual(decision["provenance"]["task_ids"], self.required_tasks())
+        self.assertEqual(decision["provenance"]["tasks_sha256"], OWNER_TASK_INVENTORY_SHA256)
+        self.assertTrue(decision["provenance"]["descriptor_sha256"].startswith("sha256:"))
+
+    def test_descriptor_digest_is_deterministic_over_object_key_order(self):
+        document = self.document()
+        shuffled = json.loads(json.dumps(document, sort_keys=True, indent=2))
+        first = admit_baseline_descriptor(document, self.owner_inventory())
+        second = admit_baseline_descriptor(shuffled, self.owner_inventory())
+        self.assertEqual(first, second)
+
+    def test_missing_or_extra_required_port_is_refused(self):
+        missing = self.document()
+        missing["ports"] = missing["ports"][:1]
+        self.assertEqual(
+            admit_baseline_descriptor(missing, self.owner_inventory())["reason"],
+            "ports_do_not_cover_required_tasks",
+        )
+        extra = self.document()
+        extra["ports"].append(extra["ports"][0].copy())
+        self.assertEqual(
+            admit_baseline_descriptor(extra, self.owner_inventory())["reason"],
+            "ports_do_not_cover_required_tasks",
+        )
+
+    def test_mutable_or_malformed_immutable_inputs_are_refused(self):
+        mutable = self.document()
+        mutable["toolchain"]["revision"] = "refs/heads/main"
+        self.assertEqual(
+            admit_baseline_descriptor(mutable, self.owner_inventory())["reason"],
+            "invalid_toolchain_provenance",
+        )
+        whitespace = self.document()
+        whitespace["toolchain"]["revision"] = " eb2ed6c22fe3f6e3152efa0c0d05ffcf1ff4a2c7"
+        self.assertEqual(
+            admit_baseline_descriptor(whitespace, self.owner_inventory())["reason"],
+            "invalid_toolchain_provenance",
+        )
+        malformed = self.document()
+        malformed["agent_interface"]["guidance_sha256"] = "sha256:UPPERCASE"
+        self.assertEqual(
+            admit_baseline_descriptor(malformed, self.owner_inventory())["reason"],
+            "invalid_agent_interface_provenance",
+        )
+
+    def test_execution_claim_or_undeclared_field_is_refused(self):
+        claimed = self.document()
+        claimed["execution"] = {"status": "executed"}
+        self.assertEqual(
+            admit_baseline_descriptor(claimed, self.owner_inventory())["reason"],
+            "execution_evidence_not_admissible_here",
+        )
+        secret = self.document()
+        secret["model"]["api_key"] = "must-not-be-admitted"
+        self.assertEqual(
+            admit_baseline_descriptor(secret, self.owner_inventory())["reason"],
+            "invalid_model_identity",
+        )
+
+    def test_order_and_different_task_inventory_are_refused(self):
+        reordered = self.document()
+        reordered["ports"].reverse()
+        self.assertEqual(
+            admit_baseline_descriptor(reordered, self.owner_inventory())["reason"],
+            "ports_do_not_cover_required_tasks",
+        )
+        different = self.document()
+        different["ports"][1]["task_id"] = "other-task"
+        self.assertEqual(
+            admit_baseline_descriptor(different, self.owner_inventory())["reason"],
+            "ports_do_not_cover_required_tasks",
+        )
+
+    def test_detached_or_noncanonical_task_inventory_is_refused(self):
+        legacy_pair = {"task_ids": self.required_tasks(), "tasks_sha256": OWNER_TASK_INVENTORY_SHA256}
+        self.assertEqual(
+            admit_baseline_descriptor(self.document(), legacy_pair)["reason"],
+            "invalid_required_task_inventory",
+        )
+        noncanonical = self.owner_inventory() + b"\n"
+        self.assertEqual(
+            admit_baseline_descriptor(self.document(), noncanonical)["reason"],
+            "invalid_required_task_inventory",
+        )
+
+    def test_forged_well_formed_owner_digest_or_task_set_is_refused(self):
+        altered_content = json.loads(self.owner_inventory())
+        altered_content["tasks"][0]["summary"] = "forged but well-formed task content"
+        altered_content_bytes = (json.dumps(altered_content, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
+        self.assertEqual(
+            admit_baseline_descriptor(self.document(), altered_content_bytes)["reason"],
+            "invalid_required_task_inventory",
+        )
+        forged = json.loads(self.owner_inventory())
+        forged["tasks"][0]["id"] = "forged-task-v1"
+        forged_bytes = (json.dumps(forged, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
+        self.assertEqual(
+            admit_baseline_descriptor(self.document(), forged_bytes)["reason"],
+            "invalid_required_task_inventory",
+        )
+
+    def test_non_string_candidate_path_is_refused_without_raising(self):
+        malformed = self.document()
+        malformed["ports"][0]["candidate_paths"] = ["src/candidate.zero", 7]
+        decision = admit_baseline_descriptor(malformed, self.owner_inventory())
+        self.assertEqual(decision["status"], "unavailable")
+        self.assertEqual(decision["reason"], "invalid_port_provenance")
+
+    def test_wrong_source_or_near_miss_or_moving_revision_is_refused(self):
+        wrong_source = self.document()
+        wrong_source["toolchain"]["official_source"] = "https://example.invalid/zerolang"
+        self.assertEqual(
+            admit_baseline_descriptor(wrong_source, self.owner_inventory())["reason"],
+            "toolchain_identity_does_not_match_pinned_baseline",
+        )
+        near_miss = self.document()
+        near_miss["toolchain"]["revision"] = "eb2ed6c22fe3f6e3152efa0c0d05ffcf1ff4a2c8"
+        self.assertEqual(
+            admit_baseline_descriptor(near_miss, self.owner_inventory())["reason"],
+            "toolchain_identity_does_not_match_pinned_baseline",
+        )
+        moving = self.document()
+        moving["toolchain"]["revision"] = "main"
+        self.assertEqual(
+            admit_baseline_descriptor(moving, self.owner_inventory())["reason"],
+            "invalid_toolchain_provenance",
+        )
+
+    def test_unknown_or_unpinned_mainstream_system_is_refused(self):
+        unknown = self.document()
+        unknown["system"] = {"id": "mainstream-agent", "display_name": "Mainstream agent"}
+        self.assertEqual(
+            admit_baseline_descriptor(unknown, self.owner_inventory())["reason"],
+            "baseline_system_not_pinned",
+        )
+
+    def test_windows_absolute_candidate_paths_are_refused(self):
+        for path in ("C:/candidate.zero", "C:\\candidate.zero", "\\\\server\\share\\candidate.zero", "volume:entry"):
+            with self.subTest(path=path):
+                malformed = self.document()
+                malformed["ports"][0]["candidate_paths"] = [path]
+                self.assertEqual(
+                    admit_baseline_descriptor(malformed, self.owner_inventory())["reason"],
+                    "invalid_port_provenance",
+                )
 
 
 class BudgetLedgerTests(unittest.TestCase):

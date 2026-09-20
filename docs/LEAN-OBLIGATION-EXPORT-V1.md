@@ -425,9 +425,19 @@ written about this module:
   binding-first adapter over a caller-supplied kernel, not a runner: it grants
   no process, filesystem, network, or tool-discovery authority. The script is
   not in `scripts/quality.sh`, which stays toolchain-free; CI runs it directly.
-- The kernel has been run over exactly one module, the committed golden. No
-  corpus, and no generated-source mutation ladder beyond the two seeds.
-- No CLI surface; the module is library-only.
+- The kernel has been run over exactly one module, the committed golden. The
+  ordinary structural/replay corpus also contains one wholly admitted
+  `app.scalar` module covering `i32` negation, `u8` increment, `usize`
+  decrement, and an `i64` entry point; it reaches certificate, exact Wasm
+  artifact, retained-Project ProgramRoot association, and one exact
+  `theorem_proved` Assurance Manifest method. That second member uses the
+  fixture kernel and is **not** evidence that Lean accepted its generated
+  theorems. No broader live-kernel corpus is claimed.
+- The ProgramRoot association's `program_root`, canonical-root digest, source
+  path, source revision, and source digest are individually exercised by
+  hostile mutations. Each fails its authenticated closed envelope before a
+  supplied kernel sees any bytes. This is binding-first replay coverage, not
+  a claim that a malformed association can be repaired or accepted.
 - No CLI surface or automatic certificate discovery: a caller explicitly
   supplies certificate, retained revision, source path and Lean-kernel
   capability, then passes the opaque kernel-confirmed proof only to the exact

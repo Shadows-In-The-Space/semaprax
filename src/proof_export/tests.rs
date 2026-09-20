@@ -44,6 +44,8 @@ use crate::assurance_manifest::{
 use crate::diagnostic::Diagnostic;
 use crate::project::with_authenticated_project;
 
+mod scalar_corpus;
+
 // ---------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------
@@ -55,7 +57,7 @@ fn with_main(source: &str) -> String {
     format!("{source}\n@id(\"app.t.proof_export_test_main\")\nfn main() -> i64 {{ 0 }}\n")
 }
 
-fn write_temp(source: &str, label: &str) -> PathBuf {
+fn write_temp_exact(source: &str, label: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "semaprax-proof-export-{label}-{}-{}.spx",
         std::process::id(),
@@ -64,8 +66,12 @@ fn write_temp(source: &str, label: &str) -> PathBuf {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::write(&path, with_main(source)).unwrap();
+    std::fs::write(&path, source).unwrap();
     path
+}
+
+fn write_temp(source: &str, label: &str) -> PathBuf {
+    write_temp_exact(&with_main(source), label)
 }
 
 fn program(source: &str) -> crate::ast::Program {
@@ -146,7 +152,11 @@ impl LeanKernel for FixedKernel {
 }
 
 fn certificate_for(path: &Path) -> String {
-    export_obligation_certificate(path, "app.t.shifted", 0, &AcceptingKernel)
+    certificate_for_declaration(path, "app.t.shifted")
+}
+
+fn certificate_for_declaration(path: &Path, declaration_id: &str) -> String {
+    export_obligation_certificate(path, declaration_id, 0, &AcceptingKernel)
         .expect("fixture certificate")
 }
 

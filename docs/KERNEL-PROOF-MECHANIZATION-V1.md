@@ -21,15 +21,15 @@
 
 Read this before citing this document elsewhere.
 
-- **This is not a mechanization of Kernel-0.** It mechanizes Kernel-0's full
-  term/type syntax, a genuinely partial (`Fault`-outcome) small-step
-  semantics, a fully proved Progress trichotomy for the scalar-and-`if`
-  fragment, and a fully proved Preservation for the *entire* language
-  (`Let` and non-recursive `Call` included) — see "The spike" below for the
-  exact inventory. The later ranked-call-graph extension below proves
-  call-chain termination and acyclicity under an explicit strict-rank
-  certificate; full small-step normalization and connection to the compiler's
-  HIR remain open. The existing `kernel0-lean-proof-gate` CI job runs the proof
+- **This is not a mechanization of the real compiler.** It mechanizes
+  Kernel-0's full term/type syntax, a genuinely partial (`Fault`-outcome)
+  small-step semantics, and fully proved Progress and Preservation for the
+  *entire* language (`Let` and non-recursive `Call` included). It also iterates
+  that real `Step` relation for every caller-supplied fuel budget. The ranked
+  call-graph extension proves call-chain termination and acyclicity under an
+  explicit strict-rank certificate; a universal small-step normalization bound
+  and connection to the compiler's HIR remain open. The existing
+  `kernel0-lean-proof-gate` CI job runs the proof
   gate; a wired job does not establish a hosted verdict for an unrun commit.
 - **The recommendation (Lean 4) is evidence-based on this host, not a
   universal ranking.** Coq/Rocq's ecosystem is arguably the better textbook
@@ -80,7 +80,7 @@ smoothed away as the source document's `n1 op n2 = n` does.
 
 | Rank | Assistant | Maturity for *this* task | No-holes check (exact command) | Offline/hermetic story | CI cost | Ecosystem evidence |
 |---|---|---|---|---|---|---|
-| **1 (recommended)** | **Lean 4** | Good, growing; no canonical STLC-progress-preservation development ships with the language itself, but community developments exist and this session mechanized a comparable fragment from scratch in about two hours of iteration. | `#print axioms <name>` on every headline theorem; a clean result lists only `propext`/`Classical.choice`/`Quot.sound` (or a subset). Programmatic form: run and grep combined stdout for the literal substring `sorryAx`. **Verified this session** — see "The spike." An independent second check exists: `leanchecker`, shipped in the toolchain (`~/.elan/toolchains/.../bin/leanchecker`), is a standalone kernel-only re-checker distinct from the full elaborator, used in CI as `lake env leanchecker replay` in at least one real project (`williamjblair/lean-proofs`, "CI-gated `#print axioms`"; `coproduct-opensource/nucleus` issue #2555, "Lean trust chain: per-theorem axiom audit, second kernel"). | **Verified hermetic this session, first-hand.** `lake build` on the spike project (`packages = []`, zero external Lean dependencies) after `rm -rf .lake/build` completed in **1.2–1.3 seconds wall-clock with no network activity** — consistent with zero I/O, since any real fetch over any network would not complete in that time. The toolchain itself needs network **once**, to download (`elan`, from GitHub releases); this is a one-time install step, not a per-build cost, exactly analogous to `apt install gcc`. A project that pulls in Mathlib (not needed here, and not used by the spike) additionally runs `lake exe cache get`, which **does** fetch gigabytes over network as an ordinary part of its build — avoided entirely by not depending on Mathlib, which Kernel-0's scalar fragment does not need. | Toolchain already installed on this host: **2.7 GB** (`du -sh ~/.elan/toolchains/leanprover--lean4---v4.34.0`), slightly over the session's own "~2 GB" installation guidance — flagged honestly; this session did not perform that install, it was already present, and no new install was made. Incremental rebuild of the whole spike: ~1 second. A from-scratch CI job would pay the one-time ~2.7 GB toolchain fetch (cacheable via `actions/cache` on `.lake` and the elan toolchain directory, per `lean-action`'s own README) plus a build in the low single-digit seconds for a file this size. | No canonical "Software Foundations"-equivalent in the language itself (confirmed by search: "there is no formalization for simply typed lambda calculus in the mathlib," per a Lean Zulip thread); independent community repositories exist doing STLC with progress/preservation/determinism/soundness and "zero axioms or sorry placeholders" (e.g. `mdk-aza/type-sysytems-in-lean`). This session's own spike is first-party evidence that the shape of proof Kernel-0 needs is tractable in Lean 4.34.0 within a bounded session. |
+| **1 (recommended)** | **Lean 4** | Good, growing; no canonical STLC-progress-preservation development ships with the language itself, but community developments exist and this session mechanized a comparable fragment from scratch in about two hours of iteration. | `#print axioms <name>` on every headline theorem; a clean result lists only `propext`/`Classical.choice`/`Quot.sound` (or a subset). Programmatic form: run a gate-owned generated driver, parse exactly one report per inventoried theorem between unpredictable markers, and reject `sorryAx` or any non-standard axiom; proof-source report text is not evidence. **Verified this session** — see "The spike." An independent second check exists: `leanchecker`, shipped in the toolchain (`~/.elan/toolchains/.../bin/leanchecker`), is a standalone kernel-only re-checker distinct from the full elaborator, used in CI as `lake env leanchecker replay` in at least one real project (`williamjblair/lean-proofs`, "CI-gated `#print axioms`"; `coproduct-opensource/nucleus` issue #2555, "Lean trust chain: per-theorem axiom audit, second kernel"). | **Verified hermetic this session, first-hand.** `lake build` on the spike project (`packages = []`, zero external Lean dependencies) after `rm -rf .lake/build` completed in **1.2–1.3 seconds wall-clock with no network activity** — consistent with zero I/O, since any real fetch over any network would not complete in that time. The toolchain itself needs network **once**, to download (`elan`, from GitHub releases); this is a one-time install step, not a per-build cost, exactly analogous to `apt install gcc`. A project that pulls in Mathlib (not needed here, and not used by the spike) additionally runs `lake exe cache get`, which **does** fetch gigabytes over network as an ordinary part of its build — avoided entirely by not depending on Mathlib, which Kernel-0's scalar fragment does not need. | Toolchain already installed on this host: **2.7 GB** (`du -sh ~/.elan/toolchains/leanprover--lean4---v4.34.0`), slightly over the session's own "~2 GB" installation guidance — flagged honestly; this session did not perform that install, it was already present, and no new install was made. Incremental rebuild of the whole spike: ~1 second. A from-scratch CI job would pay the one-time ~2.7 GB toolchain fetch (cacheable via `actions/cache` on `.lake` and the elan toolchain directory, per `lean-action`'s own README) plus a build in the low single-digit seconds for a file this size. | No canonical "Software Foundations"-equivalent in the language itself (confirmed by search: "there is no formalization for simply typed lambda calculus in the mathlib," per a Lean Zulip thread); independent community repositories exist doing STLC with progress/preservation/determinism/soundness and "zero axioms or sorry placeholders" (e.g. `mdk-aza/type-sysytems-in-lean`). This session's own spike is first-party evidence that the shape of proof Kernel-0 needs is tractable in Lean 4.34.0 within a bounded session. |
 | 2 | **Coq / Rocq** (renamed from Coq; `rocq-prover.org`) | **Best textbook fit for exactly this proof genre.** *Software Foundations*, volume *Programming Language Foundations* (`softwarefoundations.cis.upenn.edu/plf-current/`), formalizes the simply-typed lambda calculus's syntax, small-step semantics, typing, and **proves Progress and Preservation by the same induction structure Kernel-0's paper proof already uses** — this is the field's standard teaching and reference text, actively maintained. | `Print Assumptions <name>.` on each theorem; clean output lists no axioms. Whole-repository sweep: `grep -Ir "Admitted\." .` and `grep -Ir "Axiom" .`, both expected empty — the standard artifact-evaluation check for Coq papers (per Coq-Club mailing list guidance). Independent re-check: `coqchk`, a separate, smaller trusted kernel that re-validates every axiom in the compiled `.vo` files without re-running tactics. | Coq itself needs no network to build a dependency-free project once installed (same one-time-install-vs-per-build split as Lean); `coqchk` is fully offline by construction. **Not verified hands-on this session** — Coq/`coqc`/`coq_makefile` are absent from this host (confirmed directly: `which coqc coq_makefile` returns nothing, matching issue #186's own audit finding on this same host). | Not installed here, so no first-hand size/time measurement. Docker images (`coqorg/coq`) are Debian-11-slim-based with a documented base layer of ~434 MB before adding the ~17 APT packages the full image needs; a real install (OCaml + opam + Coq) is a heavier, longer install than reusing an already-present Lean toolchain on this specific host. | *Software Foundations* PLF is the closest thing to an industry-standard reference for this exact proof (progress/preservation of a small typed calculus), continuously maintained at Penn; POPLmark-lineage work and CompCert both build on the same style. Strongest ecosystem fit of the four for this specific task, at the cost of a fresh install this session did not attempt. |
 | 3 | **Isabelle/HOL** | Strong general automation (Sledgehammer) but Isar's structured-proof style is a less direct match for an inductive small-step relation than Coq/Lean/Agda's tactic- or pattern-matching-driven styles. The Archive of Formal Proofs has adjacent entries (`System_F_Normalization`, Berghofer's `HOL-Proofs-Lambda` fundamental lambda-calculus properties shipped in the distribution itself) but no single canonical "STLC progress/preservation" tutorial entry the way Coq/Agda have. | **Notably stricter default than the other three**: `isabelle build`'s default `quick_and_dirty=false` **rejects `sorry` outright at build time** rather than merely warning and continuing — confirmed via the Isabelle NEWS/mailing-list record ("`sorry` is rejected by `isabelle build` as expected, with the default option `quick_and_dirty=false`"). This makes the "no admitted holes" gate close to *automatic*, rather than something a separate script must scan for. | Isabelle's own base distribution is self-contained (no network for a dependency-free theory); AFP entries are fetched separately and are the analogue of Lean's Mathlib-cache-fetch cost. **Not verified hands-on this session** — Isabelle is not installed on this host. | Not installed here. Community Docker CI images run **2.7 GB** (`braewebb/isabelle-action`), the largest of the four measured/cited here; the official distribution bundles a JVM, Poly/ML, and (optionally) a LaTeX toolchain for document generation, which is why the images run large even before any AFP dependency. | Distribution-shipped `HOL-Proofs-Lambda` and AFP's `System_F_Normalization`/case studies on lambda-calculus (Church-Rosser, standardization, HOAS) show the ecosystem has done this class of proof, but scattered across entries rather than one canonical teaching text the way Coq/Agda have. |
 | 4 | **Agda** | **Second-best textbook fit.** *Programming Language Foundations in Agda* (PLFA, `plfa.github.io`) is built around exactly this: STLC syntax, small-step semantics, typing, then "the next chapter prov[ing] its main properties, including progress and preservation," and explicitly notes that in a constructive setting "progress and preservation combine trivially to produce ... an evaluator" — the same intrinsic-typing style this document's spike partly borrows (de Bruijn indices to avoid a capture-avoidance lemma). | `--safe` is a single compiler flag, not a post-hoc scan: it **statically disallows** `postulate` (Agda's axiom-declaration form) and unsolved metavariables/incomplete pattern matches *in the same compilation unit*, confirmed against the current Agda manual ("Safe Agda"). This is arguably the cleanest single-flag version of the four — no separate scan step is needed at all. | Agda's core + standard library needs no network for a dependency-free module once installed; same one-time-install split as the other three. **Not verified hands-on this session** — Agda is not installed on this host. | Not installed here; no first-hand size/time measurement obtained this session. | PLFA is the field's other standard teaching reference for this exact proof shape, alongside Coq's *Software Foundations*, and is still actively maintained (2.8.0.2, 13 September 2026, per the Agda release history) with recent releases as of this session's own week. |
@@ -163,26 +163,27 @@ docstring that merely discusses "sorry" cannot fool them.
 
 **The gate formulation (Lean 4, the recommended choice), precisely:**
 
-1. Every top-level theorem this session's programme wants to certify has a
-   corresponding `#print axioms <fully-qualified name>` command, either in
-   the source file itself (as this spike does — see the bottom of
-   `proofs/kernel0-lean/Kernel0.lean`) or in a small driver script.
+1. Every top-level theorem this session's programme wants to certify is named
+   by the gate's fixed inventory. After the module builds, the gate generates
+   its own temporary `#print axioms <fully-qualified name>` driver;
+   proof-source print commands and report-shaped text carry no authority.
 2. Run `lake build` (or `lake env lean --run <file>` for a single file with
    no lakefile). Lean's elaborator both type-checks every proof and, for
    each `#print axioms` command, prints one `info:` line naming the axioms
    that theorem's proof term transitively depends on.
-3. **Pass condition**: every printed axiom set is a subset of
+3. **Pass condition**: fresh unpredictable begin/end markers occur exactly
+   once, every inventoried theorem has exactly one report between them, and
+   every printed axiom set is a subset of
    `{propext, Classical.choice, Quot.sound}` (Lean's three standard,
    accepted axioms — this spike needs only the first two, never
    `Classical.choice`, since every proof here is fully constructive) and
-   **no line contains `sorryAx`** or any project-specific custom axiom name.
+   **no owned report contains `sorryAx`** or any project-specific custom axiom name.
 4. **Failure looks like**: a `warning: declaration uses 'sorry'` at
    elaboration time (visible immediately, even before `#print axioms` runs)
    **and** the corresponding `#print axioms` line reading
    `'<name>' depends on axioms: [sorryAx]` (or `[sorryAx, propext, ...]` if
-   mixed with otherwise-real dependencies). A CI script's job is simply:
-   run the build, capture combined stdout, and `grep -q sorryAx` — a match
-   is a hard failure, unconditionally, no matter which theorem it came from.
+   mixed with otherwise-real dependencies). The gate rejects that owned
+   report; source-emitted lookalike reports cannot replace or suppress it.
 
 **Verbatim demonstration of both outcomes, run this session:**
 
@@ -384,8 +385,11 @@ non-strict descent would admit precisely this forged certificate, while also
 breaking the bounded-path proof in the main model.
 
 This extension is **call-chain termination**, not full normalization of
-`Step`. It does not yet show that substitution preserves the extracted call
-graph or construct a full evaluation decrease measure. It does not emit or
+`Step`. The subsequent bounded-step tranche proves full-language Progress and
+iterates Progress plus Preservation for any supplied fuel: evaluation either
+reaches a value/fault within the budget or consumes it exactly with a witnessed
+next `Step`. It still does not show that substitution preserves the extracted
+call graph or construct a universal evaluation decrease measure. It does not emit or
 verify a certificate from Rust HIR. The Rust bounded reifier's active-path
 cycle refusal is the corresponding implementation discipline, with finite
 differential evidence and independent exact-source replay; no theorem connects
@@ -393,11 +397,30 @@ the two. The finite scalar Kernel-0 scope, pinned Lean toolchain, zero external
 Lean packages, backend non-claims, and self-hosting rung remain unchanged.
 
 An exact-current-worktree local run of
-`python3 scripts/kernel0-lean-gate.py --require-kernel` passed all 16 pinned
+`python3 scripts/kernel0-lean-gate.py --require-kernel` passed all 21 pinned
 theorem signatures, the no-hole scan, `lake build`, every theorem's axiom-set
-audit, and the forged recursive-certificate rejection control. This is local
+audit, the forged recursive-certificate rejection control, and a hostile
+control that reuses the genuine two-step fixture while forging a one-step
+budget. This is local
 proof-build evidence, not a hosted verdict; the older transcripts above remain
 historical evidence for their original theorem set.
+
+The gate's trust boundary is now adversarially pinned as well. Signature
+lookup runs on comment/string-stripped Lean, so a commented copy cannot shadow
+a changed live theorem. The source scan rejects both `axiom` and Lean's
+equivalent top-level `constant` declarations. A fresh gate-owned audit driver,
+not `Kernel0.lean` output, imports the built module and emits all 21 reports
+between unpredictable markers; missing, duplicate, unexpected, or source-
+forged reports fail closed. The authoritative environment pin hashes the
+complete comment/string-stripped live source: every command, gap between
+declarations, and proof body. Thus a notation, macro, syntax/scope command,
+attribute, instance, or any other live elaboration change requires deliberate
+review and repinning. Twelve narrower exact regions remain for precise
+diagnostics over `Expr`, `Step`, `FaultRedex`, `ArgsProgress`, `Steps`,
+`Terminal`, `NormalizesWithin`, and their semantic dependencies. Always-run
+hostile self-tests exercise the commented-signature, forged-report/removal,
+live-`constant`, zero-cost `Steps.teleport`, universal-`FaultRedex`, and
+gap-injected local-notation `FaultRedex := fun _ => True` attacks.
 
 ## Relationship to issue #186
 
@@ -506,6 +529,10 @@ same inventory in more detail):
   `sorry`**: a genuine three-way trichotomy — value, steps, or
   `FaultRedex` — replacing the source document's incomplete two-outcome
   statement.
+- **Progress, the *entire* language, fully proved, zero `sorry`**: extends
+  the same trichotomy through `Let`, left-to-right call arguments, and call
+  beta reduction. `ArgsProgress` records the exact value-prefix/step/fault
+  frontier rather than assuming an argument evaluation order.
 - **Boolean-comparison alignment, fully proved and headline-gated**:
   `bool == bool` and `bool != bool` each reduce to the expected value on a
   representative pair, while `bool < bool` is impossible to type. This is
@@ -545,7 +572,13 @@ same inventory in more detail):
     machinery needed at all.
 - **Added after the original spike**: ranked call-graph path bounds,
   acyclicity, and call-chain termination, as detailed above.
-- **Explicitly not covered**: full small-step normalization, any connection
+- **Added after the call-graph tranche**: `bounded_step_progress` composes
+  full Progress and Preservation. For every supplied fuel it produces either
+  a terminal value/fault within the budget or an exact-length `Steps` witness
+  whose frontier has a next real `Step`. A two-beta-step helper fixture is the
+  positive control; the gate rejects a forged one-step budget for those same
+  two steps at the expected `2 ≤ 1` type mismatch.
+- **Explicitly not covered**: a universal small-step normalization bound, any connection
   to the compiler's real HIR (`src/kernel_zero.rs` or otherwise), and the
   native/Wasm backends.
 

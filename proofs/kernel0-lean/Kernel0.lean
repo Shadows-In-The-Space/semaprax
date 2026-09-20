@@ -14,9 +14,13 @@ operational semantics `Step`. Unlike the source document, arithmetic here is
 modeled as genuinely **partial**: `evalArith`/`evalNeg` return `none` for
 division/remainder by zero and for `i64` range overflow, and `Step` has no
 rule to fire when they do. `FaultRedex` names exactly those stuck-but-
-intended points, so **Progress** is stated and fully proved as a real
-trichotomy -- value, steps, or `FaultRedex` -- for the scalar-and-`if`
-sub-fragment (`ScalarIf`), matching the eight-outcome `Fault` finding
+intended points. **Progress** is fully proved as a real trichotomy -- value,
+steps, or `FaultRedex` -- for the whole calculus, including `Let` and `Call`;
+the scalar-and-`if` theorem remains as a smaller boundary result. A
+fuel-bounded theorem composes full Progress with Preservation over the actual
+`Step` relation: within any budget evaluation either reaches a terminal result
+or consumes the entire budget with a witnessed next step. This matches the
+eight-outcome `Fault` finding
 `docs/SEMANTIC-KERNEL-V1.md`'s differential test made about the *document's*
 two-outcome statement. **Preservation** is stated and fully proved for the
 *entire* language, `Let` and non-recursive `Call` included, with **zero**
@@ -436,6 +440,9 @@ inductive FaultRedex : Expr → Prop where
   | andStep {e1 e2} (h : FaultRedex e1) : FaultRedex (.and e1 e2)
   | orStep {e1 e2} (h : FaultRedex e1) : FaultRedex (.or e1 e2)
   | iteStep {c e1 e2} (h : FaultRedex c) : FaultRedex (.ite c e1 e2)
+  | letStep {e1 e2} (h : FaultRedex e1) : FaultRedex (.letIn e1 e2)
+  | callArgs {f vs e es} (hvs : ∀ v ∈ vs, IsValue v) (h : FaultRedex e) :
+      FaultRedex (.call f (vs ++ e :: es))
 
 /-! ## Canonical forms -/
 
@@ -597,6 +604,169 @@ theorem progress_scalarIf {P Γ e T} (hs : ScalarIf e) (ht : HasType P Γ e T) :
 theorem progress_scalarIf_closed {P e T} (hs : ScalarIf e) (ht : HasType P [] e T) :
     IsValue e ∨ (∃ e', Step P e e') ∨ FaultRedex e :=
   progress_scalarIf hs ht
+
+/-! ## Progress, full language
+
+The argument-list judgment below records the exact left-to-right frontier of
+a call: either every argument is a value, or the first non-value argument can
+step, or that first argument is an arithmetic fault.  This is proof data only;
+it neither executes a compiler backend nor connects the calculus to Rust HIR.
+-/
+
+inductive ArgsProgress (P : Program) : List Expr → Prop where
+  | values {args} (h : ∀ v ∈ args, IsValue v) : ArgsProgress P args
+  | step {vs e e' es} (hvs : ∀ v ∈ vs, IsValue v) (h : Step P e e') :
+      ArgsProgress P (vs ++ e :: es)
+  | fault {vs e es} (hvs : ∀ v ∈ vs, IsValue v) (h : FaultRedex e) :
+      ArgsProgress P (vs ++ e :: es)
+
+mutual
+
+/-- **Progress for all of Kernel-0.** A closed, well-typed term is a value,
+can take one real `Step`, or is an explicitly modeled arithmetic fault.  The
+proof includes `Let` and `Call`; the call case derives its callee lookup from
+the typing derivation and evaluates arguments left to right. -/
+theorem progress_full {P : Program} :
+    ∀ (e : Expr) {T : Ty}, HasType P [] e T →
+      IsValue e ∨ (∃ e', Step P e e') ∨ FaultRedex e
+  | .intLit n, _, _ => Or.inl (.intLit n)
+  | .boolLit b, _, _ => Or.inl (.boolLit b)
+  | .var i, _, ht => by cases ht with | var h => simp at h
+  | .arith op e1 e2, _, ht => by
+      cases ht with
+      | arith ht1 ht2 =>
+        rcases progress_full e1 ht1 with hv1 | ⟨e1', hs1⟩ | hf1
+        · rcases progress_full e2 ht2 with hv2 | ⟨e2', hs2⟩ | hf2
+          · obtain ⟨a, rfl⟩ := canonical_int hv1 ht1
+            obtain ⟨b, rfl⟩ := canonical_int hv2 ht2
+            rcases hr : evalArith op a b with _ | n
+            · exact Or.inr (Or.inr (.arithBase hr))
+            · exact Or.inr (Or.inl ⟨_, .arithVal hr⟩)
+          · exact Or.inr (Or.inl ⟨_, .arithStep2 hv1 hs2⟩)
+          · exact Or.inr (Or.inr (.arithStep2 hv1 hf2))
+        · exact Or.inr (Or.inl ⟨_, .arithStep1 hs1⟩)
+        · exact Or.inr (Or.inr (.arithStep1 hf1))
+  | .cmp op e1 e2, _, ht => by
+      cases ht with
+      | cmpInt ht1 ht2 =>
+        rcases progress_full e1 ht1 with hv1 | ⟨e1', hs1⟩ | hf1
+        · rcases progress_full e2 ht2 with hv2 | ⟨e2', hs2⟩ | hf2
+          · obtain ⟨a, rfl⟩ := canonical_int hv1 ht1
+            obtain ⟨b, rfl⟩ := canonical_int hv2 ht2
+            exact Or.inr (Or.inl ⟨_, .cmpVal⟩)
+          · exact Or.inr (Or.inl ⟨_, .cmpStep2 hv1 hs2⟩)
+          · exact Or.inr (Or.inr (.cmpStep2 hv1 hf2))
+        · exact Or.inr (Or.inl ⟨_, .cmpStep1 hs1⟩)
+        · exact Or.inr (Or.inr (.cmpStep1 hf1))
+      | cmpBool hop ht1 ht2 =>
+        rcases progress_full e1 ht1 with hv1 | ⟨e1', hs1⟩ | hf1
+        · rcases progress_full e2 ht2 with hv2 | ⟨e2', hs2⟩ | hf2
+          · obtain ⟨a, rfl⟩ := canonical_bool hv1 ht1
+            obtain ⟨b, rfl⟩ := canonical_bool hv2 ht2
+            exact Or.inr (Or.inl ⟨_, .cmpBoolVal hop⟩)
+          · exact Or.inr (Or.inl ⟨_, .cmpStep2 hv1 hs2⟩)
+          · exact Or.inr (Or.inr (.cmpStep2 hv1 hf2))
+        · exact Or.inr (Or.inl ⟨_, .cmpStep1 hs1⟩)
+        · exact Or.inr (Or.inr (.cmpStep1 hf1))
+  | .neg e, _, ht => by
+      cases ht with
+      | neg ht =>
+        rcases progress_full e ht with hv | ⟨e', hs⟩ | hf
+        · obtain ⟨n, rfl⟩ := canonical_int hv ht
+          rcases hr : evalNeg n with _ | m
+          · exact Or.inr (Or.inr (.negBase hr))
+          · exact Or.inr (Or.inl ⟨_, .negVal hr⟩)
+        · exact Or.inr (Or.inl ⟨_, .negStep hs⟩)
+        · exact Or.inr (Or.inr (.negStep hf))
+  | .not e, _, ht => by
+      cases ht with
+      | not ht =>
+        rcases progress_full e ht with hv | ⟨e', hs⟩ | hf
+        · obtain ⟨b, rfl⟩ := canonical_bool hv ht
+          exact Or.inr (Or.inl ⟨_, .notVal⟩)
+        · exact Or.inr (Or.inl ⟨_, .notStep hs⟩)
+        · exact Or.inr (Or.inr (.notStep hf))
+  | .and e1 e2, _, ht => by
+      cases ht with
+      | and ht1 ht2 =>
+        rcases progress_full e1 ht1 with hv | ⟨e1', hs⟩ | hf
+        · obtain ⟨b, rfl⟩ := canonical_bool hv ht1
+          cases b
+          · exact Or.inr (Or.inl ⟨_, .andFalse⟩)
+          · exact Or.inr (Or.inl ⟨_, .andTrue⟩)
+        · exact Or.inr (Or.inl ⟨_, .andStep hs⟩)
+        · exact Or.inr (Or.inr (.andStep hf))
+  | .or e1 e2, _, ht => by
+      cases ht with
+      | or ht1 ht2 =>
+        rcases progress_full e1 ht1 with hv | ⟨e1', hs⟩ | hf
+        · obtain ⟨b, rfl⟩ := canonical_bool hv ht1
+          cases b
+          · exact Or.inr (Or.inl ⟨_, .orFalse⟩)
+          · exact Or.inr (Or.inl ⟨_, .orTrue⟩)
+        · exact Or.inr (Or.inl ⟨_, .orStep hs⟩)
+        · exact Or.inr (Or.inr (.orStep hf))
+  | .ite c e1 e2, _, ht => by
+      cases ht with
+      | ite htc ht1 ht2 =>
+        rcases progress_full c htc with hv | ⟨c', hs⟩ | hf
+        · obtain ⟨b, rfl⟩ := canonical_bool hv htc
+          cases b
+          · exact Or.inr (Or.inl ⟨_, .iteFalse⟩)
+          · exact Or.inr (Or.inl ⟨_, .iteTrue⟩)
+        · exact Or.inr (Or.inl ⟨_, .iteStep hs⟩)
+        · exact Or.inr (Or.inr (.iteStep hf))
+  | .letIn e1 e2, _, ht => by
+      cases ht with
+      | letIn ht1 ht2 =>
+        rcases progress_full e1 ht1 with hv | ⟨e1', hs⟩ | hf
+        · exact Or.inr (Or.inl ⟨_, .letBeta hv⟩)
+        · exact Or.inr (Or.inl ⟨_, .letStep hs⟩)
+        · exact Or.inr (Or.inr (.letStep hf))
+  | .call f args, _, ht => by
+      cases ht with
+      | call hf hargs =>
+        cases progress_full_args args hargs with
+        | values hvs => exact Or.inr (Or.inl ⟨_, .callBeta hvs hf⟩)
+        | step hvs hs => exact Or.inr (Or.inl ⟨_, .callArgs hvs hs⟩)
+        | fault hvs hfault => exact Or.inr (Or.inr (.callArgs hvs hfault))
+termination_by structural e _ _ => e
+
+/-- Left-to-right progress for a closed, well-typed argument vector. -/
+theorem progress_full_args {P : Program} :
+    ∀ (args : List Expr) {Ts : List Ty}, ArgsHaveTypes P [] args Ts → ArgsProgress P args
+  | [], _, _ => .values (by simp)
+  | e :: es, _, hargs => by
+      cases hargs with
+      | cons ht hts =>
+        rcases progress_full e ht with hv | ⟨e', hs⟩ | hf
+        · cases progress_full_args es hts with
+          | values hvs =>
+              exact .values (by
+                intro v hvMem
+                simp only [List.mem_cons] at hvMem
+                rcases hvMem with rfl | hvTail
+                · exact hv
+                · exact hvs _ hvTail)
+          | step hvs hs =>
+              exact .step (vs := e :: _) (by
+                intro v hvMem
+                simp only [List.mem_cons] at hvMem
+                rcases hvMem with rfl | hvTail
+                · exact hv
+                · exact hvs _ hvTail) hs
+          | fault hvs hfault =>
+              exact .fault (vs := e :: _) (by
+                intro v hvMem
+                simp only [List.mem_cons] at hvMem
+                rcases hvMem with rfl | hvTail
+                · exact hv
+                · exact hvs _ hvTail) hfault
+        · exact .step (vs := []) (by simp) hs
+        · exact .fault (vs := []) (by simp) hf
+termination_by structural args _ _ => args
+
+end
 
 /-! ## Preservation, full language
 
@@ -978,6 +1148,75 @@ theorem preservation {P Γ e e' T} (hwf : WellFormedProgram P) (ht : HasType P �
       have hsub := subst_preserves_type (P := P) [] fd'.params Γ args fd'.body hargs hargs' hbody'
       simpa using hsub
 
+/-! ## Fuel-bounded small-step progress
+
+This section composes full-language Progress with Preservation.  It does not
+claim a global normalization bound: for every caller-supplied `fuel`, it
+constructs either a terminal value/fault reached in at most that many real
+`Step`s, or an exact-`fuel` frontier with a next real step.  Consequently the
+theorem cannot hide a stuck, well-typed closed term behind fuel exhaustion.
+The ranked call-graph proof above is still separate; connecting ranks and term
+size to a universal normalization measure remains future work.
+-/
+
+/-- Exactly `n` small steps, retaining every intermediate `Step` witness. -/
+inductive Steps (P : Program) : Expr → Expr → Nat → Prop where
+  | refl (e) : Steps P e e 0
+  | cons {e e' out n} (head : Step P e e') (tail : Steps P e' out n) :
+      Steps P e out (n + 1)
+
+/-- A value or the explicitly modeled checked-arithmetic fault outcome. -/
+def Terminal (e : Expr) : Prop := IsValue e ∨ FaultRedex e
+
+/-- A terminal outcome reached without exceeding the caller's step budget. -/
+def NormalizesWithin (P : Program) (e : Expr) (fuel : Nat) : Prop :=
+  ∃ out n, n ≤ fuel ∧ Steps P e out n ∧ Terminal out
+
+/-- **Fuel-bounded full-language progress.** Within any supplied budget, a
+closed well-typed term either reaches a terminal value/fault, or consumes the
+whole budget and has a witnessed next step.  Preservation is used after every
+step, so this iterates the real `Step` relation rather than an unrelated
+evaluator. -/
+theorem bounded_step_progress {P e T} (hwf : WellFormedProgram P)
+    (ht : HasType P [] e T) : ∀ fuel,
+      NormalizesWithin P e fuel ∨
+        ∃ frontier next, Steps P e frontier fuel ∧ Step P frontier next := by
+  intro fuel
+  induction fuel generalizing e T with
+  | zero =>
+      rcases progress_full e ht with hv | ⟨next, hs⟩ | hf
+      · exact Or.inl ⟨e, 0, Nat.le_refl 0, .refl e, Or.inl hv⟩
+      · exact Or.inr ⟨e, next, .refl e, hs⟩
+      · exact Or.inl ⟨e, 0, Nat.le_refl 0, .refl e, Or.inr hf⟩
+  | succ fuel ih =>
+      rcases progress_full e ht with hv | ⟨e', hs⟩ | hf
+      · exact Or.inl ⟨e, 0, Nat.zero_le _, .refl e, Or.inl hv⟩
+      · have ht' := preservation hwf ht hs
+        rcases ih ht' with hnormal | ⟨frontier, next, hsteps, hnext⟩
+        · rcases hnormal with ⟨out, n, hn, hsteps, hterminal⟩
+          exact Or.inl ⟨out, n + 1, by omega, .cons hs hsteps, hterminal⟩
+        · exact Or.inr ⟨frontier, next, .cons hs hsteps, hnext⟩
+      · exact Or.inl ⟨e, 0, Nat.zero_le _, .refl e, Or.inr hf⟩
+
+/-- The two real beta steps in the positive helper-call fixture. -/
+theorem helper_call_takes_two_steps :
+    Steps acyclicCallFixture (.call 0 []) (.intLit 42) 2 := by
+  have h0 : Step acyclicCallFixture (.call 0 []) (.call 1 []) := by
+    simpa [substEnvAt] using
+      (Step.callBeta (P := acyclicCallFixture) (f := 0) (args := [])
+        (fd := ⟨[], .int, .call 1 []⟩) (by simp) (by simp [acyclicCallFixture]))
+  have h1 : Step acyclicCallFixture (.call 1 []) (.intLit 42) := by
+    simpa [substEnvAt] using
+      (Step.callBeta (P := acyclicCallFixture) (f := 1) (args := [])
+        (fd := ⟨[], .int, .intLit 42⟩) (by simp) (by simp [acyclicCallFixture]))
+  exact Steps.cons h0 (Steps.cons h1 (Steps.refl _))
+
+/-- Positive executable proof fixture: function 0 calls function 1, whose
+body is `42`; the selected entry reaches that value in exactly two `Step`s. -/
+theorem helper_call_normalizes_within_two_steps :
+    NormalizesWithin acyclicCallFixture (.call 0 []) 2 :=
+  ⟨.intLit 42, 2, Nat.le_refl 2, helper_call_takes_two_steps, Or.inl (.intLit 42)⟩
+
 end Kernel0
 
 /-! ## No-admitted-holes gate: `#print axioms` on every headline theorem
@@ -1004,3 +1243,8 @@ the substring `sorryAx`). -/
 #print axioms Kernel0.ranked_call_chain_terminates
 #print axioms Kernel0.recursive_call_fixture_rejected
 #print axioms Kernel0.acyclic_call_fixture_ranked
+#print axioms Kernel0.progress_full
+#print axioms Kernel0.progress_full_args
+#print axioms Kernel0.bounded_step_progress
+#print axioms Kernel0.helper_call_takes_two_steps
+#print axioms Kernel0.helper_call_normalizes_within_two_steps

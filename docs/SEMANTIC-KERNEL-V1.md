@@ -487,10 +487,36 @@ or an unrelated elaboration error fails the control. The source-only gate
 also pins the control so replacing it with an unrelated failing theorem
 does not preserve a passing gate.
 
+The gate also pins the full-language Progress pair, the fuel-bounded theorem,
+and the concrete two-beta-step helper fixture. A second committed hostile
+control reuses that exact two-step witness while claiming a one-step
+`NormalizesWithin` budget; Lean must reject it specifically at the `2 ≤ 1`
+obligation. Success or any unrelated failure is a gate failure.
+
+The gate itself does not trust proof-source report text. It locates pinned
+signatures only after stripping comments and strings, rejects top-level
+`constant` as well as `axiom`, and runs all 21 axiom queries from a generated
+driver bracketed by unpredictable markers. Hostile self-tests pin rejection of
+a commented-signature shadow, forged reports after source-report removal, and
+a live `constant` declaration. One authoritative digest covers the complete
+comment/string-stripped live source, including commands between declarations
+and every proof body, so later notation/macro/syntax/scope/attribute/instance
+changes cannot silently alter elaboration. Twelve narrower region pins bind the
+headline statements to `Expr`, `Step`, the complete `FaultRedex` and
+`ArgsProgress` relations, `Steps`, `Terminal`, `NormalizesWithin`, and their
+semantic dependencies with more precise diagnostics. Further hostile self-tests
+inject a zero-cost `Steps.teleport`, a universal `FaultRedex` constructor, and
+a local notation rebinding later `FaultRedex` occurrences to `True`; all must
+be rejected before any Lean build is trusted.
+
 This is a call-graph termination property of the Lean calculus. It aligns
 with the Rust reifier's active-path recursion refusal but does not prove
-that the Rust traversal produces a Lean rank certificate. Full small-step
-normalization (including substitution), source-to-Lean correspondence,
+that the Rust traversal produces a Lean rank certificate. A later tranche
+proves full-language Progress and fuel-bounded iteration over the real `Step`
+relation: for every supplied fuel, a closed well-typed term reaches a
+value/fault within budget or consumes the exact budget and has a witnessed
+next step. It does not derive a universal fuel from call rank and term
+structure. Full small-step normalization, source-to-Lean correspondence,
 resource-limit equivalence, hosted execution, and every self-hosting rung
 above zero remain separate work. See
 [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md#ranked-call-graph-extension-issue-188)

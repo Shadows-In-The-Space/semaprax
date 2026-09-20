@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Kernel-0 Lean proof gate (issue #188).
 
-`proofs/kernel0-lean/Kernel0.lean` is a hole-free Lean 4 mechanization of a
-Progress trichotomy (scalar-and-`if` fragment) and Preservation (the whole
-language, `Let` and non-recursive `Call` included) for Kernel-0 -- see
+`proofs/kernel0-lean/Kernel0.lean` is a hole-free Lean 4 mechanization of
+Progress and Preservation for the whole Kernel-0 language, including `Let`
+and non-recursive `Call`, plus fuel-bounded progress over real `Step`s -- see
 `docs/KERNEL-PROOF-MECHANIZATION-V1.md` for the design record and
 `docs/SEMANTIC-KERNEL-V1.md` for what Kernel-0 is. Before this script
 existed, nothing in the repository re-checked that file: no CI job ran
@@ -19,7 +19,7 @@ What it catches, and how
 -------------------------
 1. The proof stops building at all.
    -> `lake build`'s exit code, when a Lean toolchain is on PATH.
-2. A `sorry`/`admit` tactic, or a new `axiom` declaration, appears in the
+2. A `sorry`/`admit` tactic, or a new `axiom`/`constant` declaration, appears in the
    source outside a comment or string literal.
    -> A nesting-aware Lean comment/string stripper (Lean 4 block comments
       nest) followed by a whole-token scan. This runs unconditionally, with
@@ -33,30 +33,39 @@ What it catches, and how
       -- but it is real, cheap, and needs no toolchain.
 3. A headline theorem starts depending on a custom axiom, or on `sorryAx`
    (Lean's marker for an admitted hole).
-   -> Every `info: ... '<name>' depends on axioms: [...]` line `lake build`
-      prints (one per `#print axioms` command already at the bottom of
-      Kernel0.lean) is parsed, and its axiom set must be a subset of Lean's
-      three standard, accepted axioms: `propext`, `Classical.choice`,
-      `Quot.sound`. Requires a Lean toolchain; skipped explicitly when one
-      is unavailable.
+   -> After `lake build`, the gate writes an unpredictable-marker audit
+      driver that imports `Kernel0` and issues all 21 `#print axioms`
+      commands itself. Only reports inside that invocation's owned marker
+      interval are parsed; missing, duplicate, forged source-owned, or
+      unexpected reports fail. Each set must be a subset of `propext`,
+      `Classical.choice`, and `Quot.sound`. Requires a Lean toolchain.
 4. A headline theorem is deleted, renamed, or its *statement* is weakened
    while the file still builds and still looks axiom-clean -- the failure
    mode a bare `lake build` gate misses entirely.
-   -> (a) Presence: each headline name must resolve to
-          exactly one `#print axioms` info line in the build output
-          (requires a toolchain -- an unresolvable name is also a hard
-          `lake build` failure, so this is belt-and-suspenders with (1)).
+   -> (a) Presence: each headline name must resolve to exactly one report in
+          the gate-owned audit invocation (requires a toolchain).
       (b) Signature pin (no toolchain needed, always runs): each headline
           theorem's exact statement -- from `theorem NAME` through the
           token that starts its proof -- is re-extracted from the source by
           the same algorithm used to produce the frozen copies pinned
-          below, and compared byte for byte. Changing a hypothesis, a
+          below, after comments and strings have been stripped, and compared
+          byte for byte. Changing a hypothesis, a
           conclusion, or a binder fails the gate even if the edited theorem
           still typechecks against its new, weaker statement.
+5. A named semantic judgment is weakened while every headline theorem keeps
+   the same statement -- for example, by adding a universal `FaultRedex`
+   constructor, a zero-cost `Steps.teleport` constructor, or a local notation
+   that rebinds `FaultRedex` to `fun _ => True` for later declarations.
+   -> The SHA-256 pin of the complete comment/string-stripped live source
+      authenticates every command and every gap between declarations. Twelve
+      narrower exact pins identify changes to the main semantic regions. Any
+      live command or proof-body change therefore requires a deliberate full
+      source repin. Always-run hostile self-tests inject all three attacks and
+      require the appropriate pin to fail.
 
 Exit behavior
 -------------
-The source-level checks (2, 4b, and a name-presence check independent of
+The source-level checks (2, 4b, 5, and a name-presence check independent of
 `lake`) always run and can fail the gate with no Lean toolchain installed.
 The build-dependent checks (1, 3, 4a) require `lake` on PATH; when it is
 absent, this script prints an unambiguous `SKIP` line naming exactly what
@@ -78,10 +87,13 @@ written to close. Hosted CI passes the flag; `scripts/quality.sh` does not.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
+import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 TAG = "KERNEL0-LEAN-GATE"
@@ -91,11 +103,11 @@ REPO_ROOT = SCRIPT_DIR.parent
 PROOF_DIR = REPO_ROOT / "proofs" / "kernel0-lean"
 SOURCE = PROOF_DIR / "Kernel0.lean"
 RECURSIVE_CONTROL = PROOF_DIR / "negative" / "RecursiveCallGraph.lean"
+FUEL_CONTROL = PROOF_DIR / "negative" / "InsufficientNormalizationFuel.lean"
 
 # Fully-qualified headline theorem names this gate certifies are present,
-# axiom-clean, and unchanged. Sourced from the `#print axioms` block at the
-# bottom of Kernel0.lean itself -- if that list ever grows, add the new name
-# both there and here (and to PINNED_SIGNATURES below).
+# axiom-clean, and unchanged. This gate owns the audit driver; proof-source
+# `#print` commands and their output are deliberately not trusted.
 HEADLINE_THEOREMS = [
     "progress_scalarIf",
     "progress_scalarIf_closed",
@@ -113,6 +125,11 @@ HEADLINE_THEOREMS = [
     "ranked_call_chain_terminates",
     "recursive_call_fixture_rejected",
     "acyclic_call_fixture_ranked",
+    "progress_full",
+    "progress_full_args",
+    "bounded_step_progress",
+    "helper_call_takes_two_steps",
+    "helper_call_normalizes_within_two_steps",
 ]
 
 # Frozen, byte-exact expected statement text for each headline theorem,
@@ -194,7 +211,73 @@ PINNED_SIGNATURES = {
         "theorem acyclic_call_fixture_ranked :\n"
         "    CallGraphRanked acyclicCallFixture (fun f => if f = 0 then 1 else 0)"
     ),
+    "progress_full": (
+        "theorem progress_full {P : Program} :\n"
+        "    ∀ (e : Expr) {T : Ty}, HasType P [] e T →\n"
+        "      IsValue e ∨ (∃ e', Step P e e') ∨ FaultRedex e"
+    ),
+    "progress_full_args": (
+        "theorem progress_full_args {P : Program} :\n"
+        "    ∀ (args : List Expr) {Ts : List Ty}, ArgsHaveTypes P [] args Ts → ArgsProgress P args"
+    ),
+    "bounded_step_progress": (
+        "theorem bounded_step_progress {P e T} (hwf : WellFormedProgram P)\n"
+        "    (ht : HasType P [] e T) : ∀ fuel,\n"
+        "      NormalizesWithin P e fuel ∨\n"
+        "        ∃ frontier next, Steps P e frontier fuel ∧ Step P frontier next"
+    ),
+    "helper_call_normalizes_within_two_steps": (
+        "theorem helper_call_normalizes_within_two_steps :\n"
+        "    NormalizesWithin acyclicCallFixture (.call 0 []) 2"
+    ),
+    "helper_call_takes_two_steps": (
+        "theorem helper_call_takes_two_steps :\n"
+        "    Steps acyclicCallFixture (.call 0 []) (.intLit 42) 2"
+    ),
 }
+
+# Comment/string-stripped exact code regions that define the judgments named
+# by the headline theorems. Statement pins alone are insufficient: adding a
+# universal FaultRedex case or a Steps.teleport constructor would preserve all
+# theorem signatures while making Progress/normalization vacuous.
+SEMANTIC_REGION_PINS = [
+    ("scalar_types", "inductive Ty where", "inductive Expr where",
+     "b768c629fdcc0220431fd5940f4d0491a7259c2446e1c019dcad75ca7694ead7"),
+    ("expr", "inductive Expr where", "structure FunDef where",
+     "2770163eb3f2db8db74f5264c1add39df8159e8c61c6784eb149b18bf576a6dc"),
+    ("program", "structure FunDef where", "  def callTargets",
+     "9c815bfe67a32ec43e542689c29b6c6cbe7553d92660305b1c70bc02f279ee15"),
+    ("values", "inductive IsValue", "def i64Min",
+     "cb9c67b24a5a946efc020e7bfb51d63f71b133b24347eff1c02d75b1fce897e1"),
+    ("arithmetic", "def i64Min", "def BoolEquality",
+     "2d31cece6ea66e1aeedc7a4aab8b05cc12411cfb2e690a6f2c4740aae183b1ee"),
+    ("typing", "  inductive HasType", "def WellFormedProgram",
+     "a4c726eb70e81d4217a8712a05be8e6af112951c5041959ee3b1dcbf9768d66c"),
+    ("well_formed", "def WellFormedProgram", "def substEnvAt",
+     "265a2b2394bff6850650abbd88523854f44373f408f1e60393809dd003154427"),
+    ("substitution", "def substEnvAt", "inductive Step",
+     "08a5f3734bbc5f038380402f5cc9df8db4056a285abe89184aed5d9696424dcf"),
+    ("step", "inductive Step", "inductive FaultRedex",
+     "7e75f1760a0257449089adf8a6511fe5a7908bee5625203baa07c3958566f33d"),
+    ("fault", "inductive FaultRedex", "theorem canonical_int",
+     "22ccb6ec2c8b7147092e193369028f385b355f71ffdcfa76c4751b2502fa43f7"),
+    ("args_progress", "inductive ArgsProgress", "theorem progress_full",
+     "99cf370b72cdeab1b541f46a3f766c27ceff9ec050e13c7ca718adc989ca1ae5"),
+    ("bounded_steps", "inductive Steps", "theorem bounded_step_progress",
+     "d37830caa89da3799719efc5842d0a6566498ff3c00ada15faee6297ac2c0edc"),
+]
+
+# This closes the gaps between the targeted regions above. Lean commands in a
+# gap can change how a later declaration elaborates without changing that
+# declaration's source text; for example, a local notation can rebind the token
+# `FaultRedex` to an always-true predicate. Keep the narrower pins for precise
+# diagnostics, but require this digest of every live command and proof body as
+# the authoritative environment pin. Comments and string contents are removed
+# by the same lexer used for signatures and token checks. Do not update this
+# value merely to make the gate green: every live-source change needs review.
+PINNED_LIVE_SOURCE_SHA256 = (
+    "a23a2cf3a88ed91d2b23ad6714b349f46caffd433fe8f27c83a1d13057707fb0"
+)
 
 PINNED_RECURSIVE_CONTROL = """import Kernel0
 open Kernel0
@@ -202,6 +285,13 @@ theorem forged_recursive_call_rank :
 CallGraphRanked recursiveCallFixture (fun _ => 0) := by
 intro caller callee edge
 exact Nat.le_refl 0"""
+
+PINNED_FUEL_CONTROL = """import Kernel0
+open Kernel0
+theorem forged_one_step_normalization :
+NormalizesWithin acyclicCallFixture (.call 0 []) 1 := by
+refine ⟨.intLit 42, 2, ?_, helper_call_takes_two_steps, Or.inl (.intLit 42)⟩
+exact Nat.le_refl 2"""
 
 ALLOWED_AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
 
@@ -303,19 +393,71 @@ def strip_comments_and_strings(text: str) -> str:
 
 
 TOKEN_RE = re.compile(r"\b(sorry|admit)\b")
-AXIOM_DECL_RE = re.compile(r"\baxiom\s+\w")
+AXIOM_DECL_RE = re.compile(r"\b(?:axiom|constant)\s+\w")
 
 
-def check_source_level(source_text: str, lines: list[str]) -> list[str]:
+def canonical_live_source(stripped: str) -> str:
+    """Drop comment-only gaps and insignificant trailing whitespace."""
+    return "\n".join(
+        line.rstrip() for line in stripped.splitlines() if line.strip()
+    )
+
+
+def semantic_region_digest(stripped: str, start_marker: str, end_marker: str) -> str | None:
+    start = stripped.find(start_marker)
+    if start < 0:
+        return None
+    end = stripped.find(end_marker, start + len(start_marker))
+    if end < 0:
+        return None
+    # Comments/strings are already spaces. Discard empty lines and trailing
+    # whitespace so documentation wording/length is not part of the semantic
+    # pin, while every live token and indentation remains exact.
+    canonical = canonical_live_source(stripped[start:end])
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def live_source_pin_failure(stripped: str) -> str | None:
+    actual = hashlib.sha256(canonical_live_source(stripped).encode("utf-8")).hexdigest()
+    if actual == PINNED_LIVE_SOURCE_SHA256:
+        return None
+    return (
+        "complete live Lean source changed: expected "
+        f"sha256:{PINNED_LIVE_SOURCE_SHA256}, actual sha256:{actual}; "
+        "review every live command/proof-body change before deliberately repinning"
+    )
+
+
+def semantic_pin_failures(stripped: str) -> list[str]:
+    failures: list[str] = []
+    for name, start, end, expected in SEMANTIC_REGION_PINS:
+        actual = semantic_region_digest(stripped, start, end)
+        if actual is None:
+            failures.append(f"semantic boundary `{name}` markers are missing or reordered")
+        elif actual != expected:
+            failures.append(
+                f"semantic boundary `{name}` changed: expected sha256:{expected}, "
+                f"actual sha256:{actual}"
+            )
+    return failures
+
+
+def check_source_level(source_text: str) -> list[str]:
     """Runs every check that needs only the source text, no Lean toolchain.
     Returns a list of failure messages (empty means this half passed)."""
     failures: list[str] = []
+
+    # Strip before declaration lookup as well as before token scanning. A
+    # commented copy of a pinned signature must never shadow a weakened live
+    # theorem later in the file.
+    stripped = strip_comments_and_strings(source_text)
+    stripped_lines = stripped.split("\n")
 
     # (4) presence + (4b) signature pin.
     missing = []
     changed = []
     for name in HEADLINE_THEOREMS:
-        actual = extract_signature(lines, name)
+        actual = extract_signature(stripped_lines, name)
         if actual is None:
             missing.append(name)
             continue
@@ -342,8 +484,7 @@ def check_source_level(source_text: str, lines: list[str]) -> list[str]:
             "theorems present with unchanged pinned statements)"
         )
 
-    # (2) sorry/admit/axiom token scan, comment- and string-aware.
-    stripped = strip_comments_and_strings(source_text)
+    # (2) sorry/admit/axiom/constant token scan, comment- and string-aware.
     bad_tokens = sorted(set(m.group(1) for m in TOKEN_RE.finditer(stripped)))
     axiom_decls = AXIOM_DECL_RE.findall(stripped)
     if bad_tokens:
@@ -353,15 +494,29 @@ def check_source_level(source_text: str, lines: list[str]) -> list[str]:
         )
     if axiom_decls:
         failures.append(
-            f"{len(axiom_decls)} custom `axiom` declaration(s) found outside "
+            f"{len(axiom_decls)} custom `axiom`/`constant` declaration(s) found outside "
             "comments/strings; this proof is meant to depend on no axiom "
             "beyond Lean's own propext/Classical.choice/Quot.sound"
         )
     if not bad_tokens and not axiom_decls:
         print(
-            f"{TAG}: sorry/admit/axiom token scan OK (0 found outside "
+            f"{TAG}: sorry/admit/axiom/constant token scan OK (0 found outside "
             "comments and string literals)"
         )
+
+    semantic_failures = semantic_pin_failures(stripped)
+    failures.extend(semantic_failures)
+    if not semantic_failures:
+        print(
+            f"{TAG}: semantic-boundary pins OK "
+            f"({len(SEMANTIC_REGION_PINS)}/{len(SEMANTIC_REGION_PINS)} exact code regions)"
+        )
+
+    source_pin_failure = live_source_pin_failure(stripped)
+    if source_pin_failure is not None:
+        failures.append(source_pin_failure)
+    else:
+        print(f"{TAG}: complete live-source environment pin OK (sha256 exact)")
 
     if not RECURSIVE_CONTROL.is_file():
         failures.append("recursive-call negative control is missing")
@@ -371,6 +526,142 @@ def check_source_level(source_text: str, lines: list[str]) -> list[str]:
         if normalized != PINNED_RECURSIVE_CONTROL:
             failures.append("recursive-call negative control changed from its pinned forged certificate")
 
+    if not FUEL_CONTROL.is_file():
+        failures.append("normalization-fuel negative control is missing")
+    else:
+        control = strip_comments_and_strings(FUEL_CONTROL.read_text(encoding="utf-8"))
+        normalized = "\n".join(line.strip() for line in control.splitlines() if line.strip())
+        if normalized != PINNED_FUEL_CONTROL:
+            failures.append("normalization-fuel negative control changed from its pinned forged certificate")
+
+    return failures
+
+
+def render_axiom_audit_driver(begin: str, end: str) -> str:
+    commands = "\n".join(f"#print axioms Kernel0.{name}" for name in HEADLINE_THEOREMS)
+    return (
+        "import Kernel0\n"
+        f'#eval IO.println "{begin}"\n'
+        f"{commands}\n"
+        f'#eval IO.println "{end}"\n'
+    )
+
+
+def validate_owned_axiom_output(output: str, begin: str, end: str) -> list[str]:
+    """Validate only reports bracketed by this run's unpredictable markers.
+
+    Imported source can print arbitrary text while elaborating, but cannot
+    remove the gate-owned commands. Duplicate/missing reports inside the
+    owned interval fail closed.
+    """
+    failures: list[str] = []
+    if output.count(begin) != 1 or output.count(end) != 1:
+        return ["gate-owned axiom audit markers are missing or duplicated"]
+    start = output.index(begin) + len(begin)
+    finish = output.index(end, start)
+    if finish <= start:
+        return ["gate-owned axiom audit markers are out of order"]
+    owned = output[start:finish]
+    if "sorryAx" in owned:
+        failures.append("`sorryAx` appears in gate-owned axiom audit output")
+
+    found: dict[str, list[list[str]]] = {}
+    for match in AXIOM_INFO_RE.finditer(owned):
+        name, axioms_str = match.group(1), match.group(2)
+        axioms = [a.strip() for a in axioms_str.split(",") if a.strip()]
+        found.setdefault(name, []).append(axioms)
+
+    expected = {f"Kernel0.{name}" for name in HEADLINE_THEOREMS}
+    unexpected = sorted(set(found) - expected)
+    if unexpected:
+        failures.append("unexpected theorem report(s) in owned axiom audit: " + ", ".join(unexpected))
+    for qualified in sorted(expected):
+        occurrences = found.get(qualified, [])
+        if len(occurrences) != 1:
+            failures.append(
+                f"`{qualified}` produced {len(occurrences)} owned axiom reports; expected exactly one"
+            )
+            continue
+        axioms = occurrences[0]
+        extra = [axiom for axiom in axioms if axiom not in ALLOWED_AXIOMS]
+        if extra:
+            failures.append(
+                f"`{qualified}` depends on axiom(s) outside "
+                f"{sorted(ALLOWED_AXIOMS)}: {axioms} (unexpected: {extra})"
+            )
+    return failures
+
+
+def hostile_gate_self_tests(source_text: str) -> list[str]:
+    """Exercise source, report, and semantic-relation spoofing regressions."""
+    failures: list[str] = []
+    commented = """/-
+theorem victim : True := by
+-/
+theorem victim : False := by
+  trivial"""
+    actual = extract_signature(strip_comments_and_strings(commented).split("\n"), "victim")
+    if actual != "theorem victim : False":
+        failures.append("self-test: commented signature shadowed the live theorem")
+
+    constant_attack = strip_comments_and_strings("/- constant decoy : Prop -/\nconstant forged : Prop")
+    if len(AXIOM_DECL_RE.findall(constant_attack)) != 1:
+        failures.append("self-test: live `constant` declaration evaded the custom-axiom scan")
+
+    begin = "KERNEL0-OWNED-AUDIT-BEGIN-self-test"
+    end = "KERNEL0-OWNED-AUDIT-END-self-test"
+    forged = "\n".join(
+        f"info: 'Kernel0.{name}' depends on axioms: [propext]"
+        for name in HEADLINE_THEOREMS
+    )
+    # This is exactly what a proof source can emit after removing its own
+    # #print commands. Without the gate-owned unpredictable markers it is not
+    # audit evidence.
+    if not validate_owned_axiom_output(forged, begin, end):
+        failures.append("self-test: unowned forged axiom reports were accepted")
+    driver = render_axiom_audit_driver(begin, end)
+    driver_lines = driver.splitlines()
+    if any(driver_lines.count(f"#print axioms Kernel0.{name}") != 1 for name in HEADLINE_THEOREMS):
+        failures.append("self-test: gate-owned driver omitted or duplicated a headline theorem")
+
+    teleport = source_text.replace(
+        "inductive Steps (P : Program) : Expr → Expr → Nat → Prop where\n",
+        "inductive Steps (P : Program) : Expr → Expr → Nat → Prop where\n"
+        "  | teleport (from to) : Steps P from to 0\n",
+        1,
+    )
+    teleport_failures = semantic_pin_failures(strip_comments_and_strings(teleport))
+    if teleport == source_text or not any("`bounded_steps` changed" in failure
+                                         for failure in teleport_failures):
+        failures.append("self-test: injected `Steps.teleport` constructor evaded semantic pins")
+
+    universal_fault = source_text.replace(
+        "inductive FaultRedex : Expr → Prop where\n",
+        "inductive FaultRedex : Expr → Prop where\n"
+        "  | universal (e) : FaultRedex e\n",
+        1,
+    )
+    fault_failures = semantic_pin_failures(strip_comments_and_strings(universal_fault))
+    if universal_fault == source_text or not any("`fault` changed" in failure
+                                                  for failure in fault_failures):
+        failures.append("self-test: universal `FaultRedex` constructor evaded semantic pins")
+
+    notation_attack = source_text.replace(
+        "inductive ArgsProgress (P : Program) : List Expr → Prop where\n",
+        'local notation "FaultRedex" => (fun _ : Expr => True)\n\n'
+        "inductive ArgsProgress (P : Program) : List Expr → Prop where\n",
+        1,
+    )
+    notation_stripped = strip_comments_and_strings(notation_attack)
+    notation_failure = live_source_pin_failure(notation_stripped)
+    if notation_attack == source_text:
+        failures.append("self-test: could not inject local-notation semantic-gap attack")
+    elif semantic_pin_failures(notation_stripped):
+        failures.append(
+            "self-test: local-notation attack no longer isolates the disjoint-region gap"
+        )
+    elif notation_failure is None:
+        failures.append("self-test: local-notation `FaultRedex := True` attack evaded full-source pin")
     return failures
 
 
@@ -411,70 +702,42 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
         capture_output=True,
         text=True,
     )
-    combined = proc.stdout + proc.stderr
     failures: list[str] = []
 
     if proc.returncode != 0:
+        combined = proc.stdout + proc.stderr
         failures.append(
             f"`lake build` exited {proc.returncode} (proof does not build):\n"
             + "\n".join("    " + l for l in combined.splitlines())
         )
-        # Axiom/presence checks below need a successful build's #print
-        # axioms output; a build failure is already the most serious
-        # possible failure, so report it and stop here.
+        # The independent audit driver needs an importable built module.
         return failures, True
 
-    if "sorryAx" in combined:
-        failures.append(
-            "`sorryAx` appears in `lake build` output -- an admitted hole "
-            "is reachable from a certified theorem:\n"
-            + "\n".join(
-                "    " + l for l in combined.splitlines() if "sorryAx" in l
-            )
+    nonce = secrets.token_hex(24)
+    begin = f"KERNEL0-OWNED-AUDIT-BEGIN-{nonce}"
+    end = f"KERNEL0-OWNED-AUDIT-END-{nonce}"
+    with tempfile.TemporaryDirectory(prefix="semaprax-kernel0-audit-") as temporary:
+        driver = Path(temporary) / "GateOwnedAxiomAudit.lean"
+        driver.write_text(render_axiom_audit_driver(begin, end), encoding="utf-8")
+        audit = subprocess.run(
+            [lake, "env", "lean", str(driver)],
+            cwd=str(PROOF_DIR),
+            capture_output=True,
+            text=True,
         )
-
-    found: dict[str, list[str]] = {}
-    for match in AXIOM_INFO_RE.finditer(combined):
-        name, axioms_str = match.group(1), match.group(2)
-        axioms = [a.strip() for a in axioms_str.split(",") if a.strip()]
-        found.setdefault(name, []).append(axioms)
-
-    missing_from_build = []
-    duplicate_axiom_reports = []
-    bad_axiom_sets = []
-    for name in HEADLINE_THEOREMS:
-        qualified = f"Kernel0.{name}"
-        occurrences = found.get(qualified)
-        if not occurrences:
-            missing_from_build.append(qualified)
-            continue
-        if len(occurrences) != 1:
-            duplicate_axiom_reports.append((qualified, len(occurrences)))
-        for axioms in occurrences:
-            extra = [a for a in axioms if a not in ALLOWED_AXIOMS]
-            if extra:
-                bad_axiom_sets.append((qualified, axioms, extra))
-
-    if missing_from_build:
+    audit_output = audit.stdout + audit.stderr
+    if audit.returncode != 0:
         failures.append(
-            "headline theorem(s) produced no `#print axioms` info line in "
-            "`lake build` output (their `#print axioms` command was removed, "
-            "or the name no longer resolves): " + ", ".join(missing_from_build)
+            f"gate-owned axiom audit exited {audit.returncode}:\n"
+            + "\n".join("    " + line for line in audit_output.splitlines())
         )
-    for qualified, count in duplicate_axiom_reports:
-        failures.append(
-            f"`{qualified}` produced {count} `#print axioms` info lines; expected exactly one"
-        )
-    for qualified, axioms, extra in bad_axiom_sets:
-        failures.append(
-            f"`{qualified}` depends on axiom(s) outside "
-            f"{sorted(ALLOWED_AXIOMS)}: {axioms} (unexpected: {extra})"
-        )
+    else:
+        failures.extend(validate_owned_axiom_output(audit_output, begin, end))
 
     if not failures:
-        print(f"{TAG}: `lake build` OK (exit 0, cold build in {PROOF_DIR})")
+        print(f"{TAG}: `lake build` OK (exit 0 in {PROOF_DIR})")
         print(
-            f"{TAG}: axiom-set OK for {len(HEADLINE_THEOREMS)}/"
+            f"{TAG}: gate-owned axiom-set audit OK for {len(HEADLINE_THEOREMS)}/"
             f"{len(HEADLINE_THEOREMS)} headline theorems (each a subset of "
             f"{sorted(ALLOWED_AXIOMS)})"
         )
@@ -511,6 +774,31 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
         else:
             print(f"{TAG}: recursive-call negative control OK (forged rank rejected)")
 
+    # The positive fixture takes two real Step witnesses.  Reusing those
+    # witnesses under a one-step budget must fail specifically at 2 ≤ 1.
+    if not failures:
+        control = subprocess.run(
+            [lake, "env", "lean", str(FUEL_CONTROL.relative_to(PROOF_DIR))],
+            cwd=str(PROOF_DIR), capture_output=True, text=True,
+        )
+        output = control.stdout + control.stderr
+        errors = [line for line in output.splitlines() if "error:" in line]
+        normalized_output = re.sub(r"\s+", " ", output)
+        if (
+            control.returncode == 0
+            or len(errors) != 1
+            or "Type mismatch" not in errors[0]
+            or "Nat.le_refl 2 has type 2 ≤ 2" not in normalized_output
+            or "expected to have type 2 ≤ 1" not in normalized_output
+            or "sorryAx" in output
+        ):
+            failures.append(
+                "normalization-fuel negative control did not fail at the expected "
+                "2 ≤ 1 type mismatch:\n" + output
+            )
+        else:
+            print(f"{TAG}: normalization-fuel negative control OK (one-step forgery rejected)")
+
     return failures, True
 
 
@@ -531,12 +819,18 @@ def main() -> int:
         return 1
 
     source_text = SOURCE.read_text(encoding="utf-8")
-    lines = source_text.split("\n")
+    self_test_failures = hostile_gate_self_tests(source_text)
+    if not self_test_failures:
+        print(
+            f"{TAG}: hostile gate self-tests OK "
+            "(commented signature, forged report/removal, constant declaration, "
+            "Steps.teleport, universal FaultRedex, local-notation FaultRedex rebinding)"
+        )
 
-    source_failures = check_source_level(source_text, lines)
+    source_failures = check_source_level(source_text)
     build_failures, build_ran = check_build_level(arguments.require_kernel)
 
-    all_failures = source_failures + build_failures
+    all_failures = self_test_failures + source_failures + build_failures
     if all_failures:
         for msg in all_failures:
             fail(msg)

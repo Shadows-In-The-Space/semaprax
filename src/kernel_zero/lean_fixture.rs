@@ -397,6 +397,22 @@ fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -
     }
     let indent = " ".repeat(2 + program.functions.len() * 4);
     output.push_str(&format!("{indent}simp [{program_name}] at hf\n"));
+    // Bind each executable Rust budget to Lean's exact call potential, then
+    // apply the numeric theorem. Typing is an explicit premise: a weight
+    // certificate must not silently manufacture a HIR correspondence proof.
+    for (index, function) in program.functions.iter().enumerate() {
+        let arguments = list(function.params.iter(), |(_, ty)| match ty {
+            KernelType::I64 => ".intLit 0".to_owned(),
+            KernelType::Bool => ".boolLit false".to_owned(),
+        });
+        let call = format!("(Expr.call {index} {arguments})");
+        let fuel = weights::value_call_fuel(program, &weights, &function.id)
+            .expect("replayed corpus value call must have representable fuel");
+        output.push_str(&format!(
+            "\ntheorem fuel_{suffix}_{index}\n  (hwf : WellFormedProgram {program_name})\n  (ht : HasType {program_name} [] {call} {}) :\n  NormalizesWithin {program_name} {call} {fuel} := by\n  have hp : weightedPotential {weight_name} {call} = {fuel} := by rfl\n  rw [← hp]\n  exact normalizes_within_weighted_potential hwf certificate_{suffix} ht\n",
+            lean_type(function.return_type)
+        ));
+    }
     count
 }
 
@@ -424,6 +440,11 @@ fn real_reified_weight_witnesses_are_deterministic_and_nonvacuous() {
     assert_eq!(source, fixture_source());
     assert!(source.contains("def program_generated_0 : Program := ["));
     assert!(source.contains("theorem certificate_generated_0 : WeightedCallCertificate"));
+    assert!(source.contains("theorem fuel_generated_0_0"));
+    assert_eq!(
+        source.matches("theorem fuel_generated_").count(),
+        source.matches("-- exact reification witness ").count()
+    );
     let programs = generated_corpus().len();
     assert!(programs > 0);
     assert_eq!(

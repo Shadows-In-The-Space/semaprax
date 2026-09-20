@@ -529,7 +529,8 @@ or modeled fault for every closed well-typed term under that certificate, with
 the helper-call fixture as a non-vacuous positive case. The private corpus
 harness described below now derives weights from real reified HIR and emits
 concrete Lean certificates; the general theorem does not prove that derivation
-correct for arbitrary HIR or compute a numeric fuel bound. Source-to-Lean correspondence,
+correct for arbitrary HIR. The numeric extension below bounds real small steps
+by the initial certified potential. Source-to-Lean correspondence,
 resource-limit equivalence, hosted execution, and every self-hosting rung
 above zero remain separate work. See
 [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md#ranked-call-graph-extension-issue-188)
@@ -618,6 +619,37 @@ axiom, language feature, public format, or self-hosting rung is added. The
 implementation session ran the seven weight tests through a small standalone
 Rust harness using the actual term and weight modules; full Cargo/corpus and
 Lean witness execution remain required before quoting those results as passed.
+
+### Numeric normalization fuel from the checked weights
+
+`steps_spend_weighted_potential` telescopes the already-proved strict decrease
+over the actual `Steps` relation: after `n` steps, `n + potential(out)` is at
+most `potential(entry)`. `normalizes_within_weighted_potential` combines that
+inequality with full-language bounded progress. An unfinished frontier after
+the entire initial potential would have potential zero and a next strictly
+decreasing step, which is impossible over natural numbers. Thus a closed,
+well-typed term in a well-formed program with a `WeightedCallCertificate`
+reaches a value or modeled arithmetic fault within its initial potential.
+The source/signature pins and gate-owned axiom audit include both theorems.
+
+The private Rust `value_call_fuel` replays the complete weight certificate and
+computes `weight(entry) + parameter_count` with checked arithmetic. This is
+the exact Lean potential of a call whose arguments are already scalar values,
+because each value has potential one. Unknown entries, invalid certificates,
+and overflow are refused. The real-corpus witness emits a numeric theorem for
+each function at a zero/false scalar call, checks the computed potential by
+Lean reduction, and applies the general numeric theorem. Program well-formedness
+and call typing remain explicit hypotheses; the witness does not claim to
+prove the Rust HIR type translation.
+
+The implementation session checked the two new proofs and a helper-call
+application in a small Lean module importing the existing compiled kernel;
+their reported axioms were subsets of the gate's existing allowed set. Eight
+weight tests passed in a standalone Rust harness importing the actual term,
+weight, and witness modules. Source pins and hostile gate self-tests passed.
+The complete rebuilt proof and real HIR corpus witness were not run in this
+session. This is a bound on modeled small steps, not compiler interpreter
+steps, machine instructions, elapsed time, memory, or a new self-hosting claim.
 
 ## Differential testing: reference interpreter vs. the compiler's interpreter
 

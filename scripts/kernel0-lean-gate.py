@@ -34,7 +34,7 @@ What it catches, and how
 3. A headline theorem starts depending on a custom axiom, or on `sorryAx`
    (Lean's marker for an admitted hole).
    -> After `lake build`, the gate writes an unpredictable-marker audit
-      driver that imports `Kernel0` and issues all 46 `#print axioms`
+      driver that imports `Kernel0` and issues all 48 `#print axioms`
       commands itself. Only reports inside that invocation's owned marker
       interval are parsed; missing, duplicate, forged source-owned, or
       unexpected reports fail. Each set must be a subset of `propext`,
@@ -143,6 +143,8 @@ HEADLINE_THEOREMS = [
     "weightedPotential_substEnvAt_values",
     "step_decreases_weighted_potential",
     "normalizes_from_weighted_certificate",
+    "steps_spend_weighted_potential",
+    "normalizes_within_weighted_potential",
     "acyclic_call_fixture_weighted",
     "helper_call_globally_normalizes",
     "named_lookup_resolves",
@@ -316,6 +318,17 @@ PINNED_SIGNATURES = {
         "    (ht : HasType P [] e T) :\n"
         "    ∃ out n, Steps P e out n ∧ Terminal out"
     ),
+    "steps_spend_weighted_potential": (
+        "theorem steps_spend_weighted_potential {P weight e out n}\n"
+        "    (hc : WeightedCallCertificate P weight) (hs : Steps P e out n) :\n"
+        "    n + weightedPotential weight out ≤ weightedPotential weight e"
+    ),
+    "normalizes_within_weighted_potential": (
+        "theorem normalizes_within_weighted_potential {P weight e T}\n"
+        "    (hwf : WellFormedProgram P) (hc : WeightedCallCertificate P weight)\n"
+        "    (ht : HasType P [] e T) :\n"
+        "    NormalizesWithin P e (weightedPotential weight e)"
+    ),
     "acyclic_call_fixture_weighted": (
         "theorem acyclic_call_fixture_weighted :\n"
         "    WeightedCallCertificate acyclicCallFixture acyclicCallWeight"
@@ -420,7 +433,7 @@ SEMANTIC_REGION_PINS = [
      "d37830caa89da3799719efc5842d0a6566498ff3c00ada15faee6297ac2c0edc"),
     ("weighted_normalization", "theorem bounded_step_progress",
      "theorem helper_call_takes_two_steps",
-     "b4d750929afb051e008a59f736d0ae5e7e42d40a88ef193fc8d09e18342d027b"),
+     "1a44f8f073693c3665ea353e7df42c006341bdebbcb6722a4ed88148a9eeba2d"),
     ("named_lowering", "inductive NamedTerm where", "end Kernel0",
      "23523eeb06b8e0da92ab996547b0e532e49ced058b849f89a9a9e2a1ec0b4988"),
 ]
@@ -434,7 +447,7 @@ SEMANTIC_REGION_PINS = [
 # by the same lexer used for signatures and token checks. Do not update this
 # value merely to make the gate green: every live-source change needs review.
 PINNED_LIVE_SOURCE_SHA256 = (
-    "709ccdf0dbc039ddb0cfed064f4cc90239e96ff52ddcb48226ab941d5a9e7848"
+    "d8e648c73da8da7a12224b8b5b1a7b88fae371c87c155e69670e6b6d1ed4a55d"
 )
 
 PINNED_RECURSIVE_CONTROL = """import Kernel0

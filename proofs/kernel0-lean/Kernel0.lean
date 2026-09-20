@@ -50,8 +50,9 @@ weight, and value substitution preserves the resulting potential. Every real
 `Step` then strictly decreases that natural number, so strong induction plus
 Preservation proves finite normalization of closed well-typed terms to a value
 or modeled arithmetic fault. This is certificate-conditioned proof, not a
-claim that Rust HIR currently emits or verifies the weights, and it does not
-compute a concrete universal fuel bound.
+claim about arbitrary Rust HIR. The numeric tranche telescopes this decrease
+over `Steps`: the initial potential bounds the number of real small steps.
+This fuel is unrelated to the compiler interpreter's resource accounting.
 
 Issue #188's seeded-defect audit of this file (proving the mechanized proof
 can actually reject an injected unsoundness, not only that it currently
@@ -1712,6 +1713,31 @@ theorem normalizes_from_weighted_certificate {P weight e T}
       · exact ⟨e, 0, .refl e, Or.inr hf⟩
   exact terminate _ e T rfl ht
 
+/-- Every real step spends at least one unit of the certified potential.
+This bound also applies to prefixes that have not reached a terminal state. -/
+theorem steps_spend_weighted_potential {P weight e out n}
+    (hc : WeightedCallCertificate P weight) (hs : Steps P e out n) :
+    n + weightedPotential weight out ≤ weightedPotential weight e := by
+  induction hs with
+  | refl e => simp
+  | cons head tail ih =>
+      have hdec := step_decreases_weighted_potential hc head
+      omega
+
+/-- A numeric normalization budget derived from the checked certificate.
+The frontier alternative would spend the whole initial potential and still
+take another strictly decreasing step in Nat, which is impossible. -/
+theorem normalizes_within_weighted_potential {P weight e T}
+    (hwf : WellFormedProgram P) (hc : WeightedCallCertificate P weight)
+    (ht : HasType P [] e T) :
+    NormalizesWithin P e (weightedPotential weight e) := by
+  rcases bounded_step_progress hwf ht (weightedPotential weight e) with
+    hnormal | ⟨frontier, next, hsteps, hnext⟩
+  · exact hnormal
+  · have hspent := steps_spend_weighted_potential hc hsteps
+    have hdec := step_decreases_weighted_potential hc hnext
+    omega
+
 def acyclicCallWeight (f : Nat) : Nat := if f = 0 then 3 else 2
 
 /-- The positive two-function fixture carries a non-vacuous certificate: its
@@ -2064,6 +2090,8 @@ the substring `sorryAx`). -/
 #print axioms Kernel0.weightedPotential_substEnvAt_values
 #print axioms Kernel0.step_decreases_weighted_potential
 #print axioms Kernel0.normalizes_from_weighted_certificate
+#print axioms Kernel0.steps_spend_weighted_potential
+#print axioms Kernel0.normalizes_within_weighted_potential
 #print axioms Kernel0.acyclic_call_fixture_weighted
 #print axioms Kernel0.helper_call_globally_normalizes
 #print axioms Kernel0.named_lookup_resolves

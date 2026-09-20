@@ -154,6 +154,22 @@ pub(super) fn verify(program: &KernelProgram, weights: &Weights) -> Result<(), W
     Ok(())
 }
 
+/// Numeric small-step budget for a call whose arguments are already values.
+/// Lean's value potential is one, so the exact potential is weight + arity.
+/// Typing and program well-formedness remain separate theorem hypotheses.
+pub(super) fn value_call_fuel(
+    program: &KernelProgram,
+    weights: &Weights,
+    entry: &DeclarationId,
+) -> Result<u64, WeightError> {
+    verify(program, weights)?;
+    let function = program
+        .function(entry)
+        .ok_or(WeightError::MissingFunction)?;
+    let arity = u64::try_from(function.params.len()).map_err(|_| WeightError::Overflow)?;
+    add(weights[entry], arity)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::term::{KernelFn, KernelType};
@@ -272,6 +288,47 @@ mod tests {
         assert_eq!(
             verify(&program, &forged),
             Err(WeightError::InvalidCertificate)
+        );
+    }
+
+    #[test]
+    fn value_call_fuel_replays_certificate_and_charges_every_value_argument() {
+        let mut entry = function("a", call("b"));
+        entry.params = vec![
+            (
+                crate::hir::ValueId::intrinsic_parameter("a", 0),
+                KernelType::I64,
+            ),
+            (
+                crate::hir::ValueId::intrinsic_parameter("a", 1),
+                KernelType::Bool,
+            ),
+        ];
+        let program = KernelProgram {
+            functions: vec![entry, function("b", Term::Int(42))],
+        };
+        let mut weights = derive(&program).unwrap();
+        assert_eq!(
+            value_call_fuel(&program, &weights, &DeclarationId::new("a")),
+            Ok(5)
+        );
+        assert_eq!(
+            value_call_fuel(&program, &weights, &DeclarationId::new("b")),
+            Ok(2)
+        );
+        assert_eq!(
+            value_call_fuel(&program, &weights, &DeclarationId::new("missing")),
+            Err(WeightError::MissingFunction)
+        );
+        weights.insert(DeclarationId::new("a"), 2);
+        assert_eq!(
+            value_call_fuel(&program, &weights, &DeclarationId::new("a")),
+            Err(WeightError::InvalidCertificate)
+        );
+        weights.insert(DeclarationId::new("a"), u64::MAX);
+        assert_eq!(
+            value_call_fuel(&program, &weights, &DeclarationId::new("a")),
+            Err(WeightError::Overflow)
         );
     }
 

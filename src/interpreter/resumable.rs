@@ -143,6 +143,14 @@ impl ResumableContinuation {
     pub fn request(&self) -> &ArgumentValue {
         &self.request
     }
+
+    pub(crate) fn history(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&ArgumentValue, &ArgumentValue)> {
+        self.history
+            .iter()
+            .map(|record| (&record.request, &record.answer))
+    }
 }
 
 /// How one `Evaluator` treats the ordered top-level `yield` sites its function

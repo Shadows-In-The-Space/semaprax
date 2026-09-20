@@ -55,7 +55,12 @@ different in kind:
   facts plus the checked program, selected function, and original arguments
   again. It returns only an inert continuation: the ordinary resume path must
   still receive a separate answer and replay every request. The codec performs
-  no dispatch, storage, scheduling, publication, or authority minting.
+  no dispatch, storage, scheduling, publication, or authority minting. Its
+  explicit v2 migration API authenticates the old envelope, replays both old
+  and destination revisions without a handler, requires compatible persistent
+  function/channel/site structure and bit-exact historical/current requests,
+  then emits canonical v2 bytes under separately supplied destination scope
+  and key. Migration is fuel-bounded proof work, not execution authority.
 - `resumable_effects::source_signature` — a pure bridge from the selected
   persistent source function and its checked `yields Request -> Response`
   clause to the runtime `EffectSignatureTable`. It uses versioned
@@ -568,16 +573,22 @@ Explicitly **not** done in this slice, and why:
   history with the caller-owned checkpoint key; it does not compute liveness or
   carry a live local frame. Computing and
   carrying a real owned suspension frame remains follow-up work.
-- **State migration exists only at the reference level.**
+- **General owned-state migration exists only at the reference level.**
   `src/resumable_effects/migration.rs`'s `migrate_suspended` now proves the
   checked-migration *pattern* (`execution_revision::typed_migration` and
   `live_invocation::migration`'s "evaluate twice, reject disagreement,
   carry cumulative budget forward") for an arbitrary caller-chosen `State`
-  pair. It does not migrate the new compiler plan or a checked source state
-  across program revisions. The current plan has only compiler-owned scalar
-  control identities and no migration-compatible owned checkpoint carrier; defining migration
-  compatibility for a future owned state type remains downstream work. The
-  public scalar checkpoint envelope is exact-revision recovery, not migration.
+  pair. The public scalar checkpoint v2 lane now supports narrower checked
+  source migration: old bytes are authenticated, both revisions replay the
+  recorded answer prefix without dispatch, and every historical and pending
+  request must agree bit for bit before the destination continuation is signed.
+  Persistent function and invocation identities, parameter/result/channel
+  types, ordered site positions and state identities remain compatible; the
+  ProgramRoot must change, while destination key and policy epoch are explicit
+  caller choices. Per-segment and combined old/new replay fuel are bounded.
+  The current plan still has only compiler-owned scalar control identities and
+  no migration-compatible owned local frame; defining compatibility and pure
+  transforms for future owned state remains downstream work.
 - **No public native/Wasm resumable execution runtime or Agent-runtime
   migration onto this mechanism.** The public preparation API emits bounded
   authenticated in-memory C11/Wasm projection artifacts, and the private
@@ -632,7 +643,7 @@ Explicitly **not** done in this slice, and why:
 | A non-Agent function can yield typed requests and resume safely | **Met only for the bounded `.spx` slice.** A selected ordinary free function declares one typed channel and one to eight direct sequential `yield` sites; `interpreter::resumable` runs them through an opaque continuation, the public authority-free preparation API emits exact native C11/Core-Wasm projection inventories, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same staged projections. A public bounded checkpoint envelope HMAC-authenticates its private structural continuation with independently supplied ProgramRoot/invocation/policy facts and re-derives the binding from the current program/function/arguments; it is not a public runtime ABI or durable store. Resume checks answer types (`SPX-F113`), every replayed request (`SPX-F114`), and exact program/site/argument/prior-answer binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). Disconnected yielding functions are pruned; nested or control-dependent yields, owned state and effectful prefixes remain open. Distinct request/response types are admitted for direct `let`, mutable whole-binding assignment, and tail sites; assignment checks its target against the retagged response type rather than the request placeholder. |
 | Generated state machines are deterministic semantic projections | **Met only for the bounded ordered replay plan.** `SequentialResumablePlan` deterministically derives entry/per-site-suspended/complete identities and independently validated yield-free start/per-site-resume HIR projections while the original one-site `ResumablePlan` remains source-compatible. The interpreter consumes its identities and opaque history; the public preparation profile binds target artifacts to the plan/state/role/bytes and independently re-emits them during verification; private native and Wasm runners execute its projections. Live-frame/liveness lowering and control-dependent yields remain open. |
 | Ownership, effects, contracts and authority survive suspension correctly | For the `.spx` plan, only Copy scalars are admitted, ordinary effects and reachable yielding callees are refused, the start projection owns precondition evaluation, the resume projection owns the suffix/postcondition, and suspension bindings confer no authority. The checked source `yields` clause derives its exact versioned runtime signature table and plan binding rather than relying on caller-authored shape strings; the fresh synchronous driver checks that table and explicit capability policy before every injected host call and makes failures sticky without retry. Owned values across suspension, effectful prefixes, durable recovery driving, asynchronous scheduling, and public native/Wasm handler integration remain **open**. At the separate Rust-reference level, `EffectHandler`, `CapabilityGatedHandler` and `SignatureCheckedHandler` prove the more general checking discipline. |
-| Checkpoint/recovery never grants effect authority by itself | **Met** for the reference journal and the bounded source continuation proof. `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. Separately, the public sequential-source v1 envelope requires a caller-owned key to authenticate exact ProgramRoot/invocation/policy scope; the additive v2 envelope also authenticates compiler-derived request/answer shapes, lowering-plan identity, and yield count. Both recover through the same private structural codec, which re-derives plan/site/binding from caller-supplied checked program/function/arguments; neither performs source evaluation or dispatch while decoding. |
+| Checkpoint/recovery never grants effect authority by itself | **Met** for the reference journal and the bounded source continuation proof. `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. Separately, the public sequential-source v1 envelope requires a caller-owned key to authenticate exact ProgramRoot/invocation/policy scope; the additive v2 envelope also authenticates compiler-derived request/answer shapes, lowering-plan identity, and yield count. Both recover through the same private structural codec, which re-derives plan/site/binding from caller-supplied checked program/function/arguments. V2 migration additionally replays both revisions and compares all recorded requests before signing a destination checkpoint. None of decode, migration, or evidence performs host dispatch or grants answer authority. |
 | Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture requires a public external-await/runtime seam, durable source checkpointing and a broader state profile than this private scalar plan provides. |
 
 ## Gate
@@ -654,6 +665,10 @@ distinct-type projection tests.
 runs 10 v1/v2 scope, signature-drift, canonicality, downgrade, corruption,
 bound and replay tests. The v2 cases exercise recovery through both suspension
 sites and preserve the unchanged v1 compatibility wire.
+
+`cargo test --locked -p semaprax --lib resumable_effects::source_checkpoint::migration::tests:: -- --nocapture`
+runs 12 old/new replay, forged-history, exact scalar-bit, compatibility,
+argument-change, key/scope rotation, and exact fuel-boundary migration tests.
 
 `cargo test --locked -p semaprax --lib resumable_effects::source_driver::tests:: -- --nocapture`
 runs 10 fresh-run success and refusal tests for compiler-derived tags, exact

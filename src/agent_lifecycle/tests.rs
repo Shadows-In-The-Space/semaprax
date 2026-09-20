@@ -1293,7 +1293,7 @@ fn main() -> i64 { 0 }
     };
     let before = leaked(&prefix);
 
-    let error = authorization::dispatch_on(
+    let failure = authorization::dispatch_on(
         authorization::StageBackend::Wasm {
             source: DIVISION_MODULE,
         },
@@ -1302,12 +1302,13 @@ fn main() -> i64 { 0 }
         &[RetainedValue::I64(10), RetainedValue::I64(0)],
         DEFAULT_STAGE_STEPS,
     )
-    .expect_err(
-        "division by zero inside the executed module must fail, not silently trap into a \
-         wrong value",
+    .expect("division by zero is a checked language outcome, not an executor failure");
+    assert_eq!(
+        failure.outcome,
+        RetainedCallOutcome::LanguageFailure(crate::runtime_status::normalize_arithmetic(
+            crate::cleanup_plan::StatusCase::DivisionByZero,
+        ))
     );
-    assert_eq!(error.len(), 1);
-    assert_eq!(error[0].code, "SPX-G570");
     assert_eq!(
         leaked(&prefix),
         before,

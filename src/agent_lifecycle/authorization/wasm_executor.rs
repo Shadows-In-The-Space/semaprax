@@ -93,7 +93,11 @@
 //! material all still live in the interpreter-side driver and are untouched
 //! here; `steps_used` is reported as `0` because Wasm does not count
 //! interpreter steps, exactly as `native_executor.rs` already does. The
-//! evidence this backend supports is local and re-runnable: it requires a
+//! Node boundary preserves only returned values and the compiler-owned
+//! arithmetic/contract status table; it authenticates redundant raw and
+//! normalized status fields before constructing an evaluation. It does not
+//! claim contract-detail, fuel, cleanup-event, or lifecycle settlement parity.
+//! The evidence this backend supports is local and re-runnable: it requires a
 //! `node` on PATH and claims nothing about hosted, browser, or production
 //! support.
 
@@ -103,6 +107,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
 
+use crate::cleanup_plan::{ContractPhase, StatusCase};
+use crate::conformance::NormalizedStatus;
 use crate::diagnostic::Diagnostic;
 use crate::hir::{
     self, DeclarationId, OwnershipMode, ResolvedFieldDeclaration, ResolvedFunction, ResolvedType,
@@ -422,9 +428,19 @@ fn run_direct(
         _ => return Err(invariant("wasm_executor.decode.result_shape")),
     };
     let selected = vec![entry.id.as_str().to_owned()];
-    let stdout = build_and_drive(binding, program, &selected, &selected, &[call])?;
-    let value: i64 = stdout
-        .trim()
+    let value = match build_and_drive(binding, program, &selected, &selected, &[call])? {
+        NodeStageRun::LanguageFailure(status) => {
+            return Ok(evaluation(
+                entry,
+                RetainedCallOutcome::LanguageFailure(status),
+                max_steps,
+            ));
+        }
+        NodeStageRun::Returned(mut values) => values
+            .pop()
+            .ok_or_else(|| invariant("wasm_executor.decode.arity"))?,
+    };
+    let value: i64 = value
         .parse()
         .map_err(|_| invariant("wasm_executor.decode"))?;
     let outcome = match entry.return_type {
@@ -1000,12 +1016,16 @@ fn run_through_injected_driver(
         .iter()
         .map(|driver| driver.id.clone())
         .collect::<Vec<_>>();
-    let stdout = build_and_drive(binding, &resolved, &selected, &invoked, &calls)?;
-
-    let lines = stdout.lines().collect::<Vec<_>>();
-    if lines.len() != drivers.len() {
-        return Err(invariant("wasm_executor.decode.arity"));
-    }
+    let lines = match build_and_drive(binding, &resolved, &selected, &invoked, &calls)? {
+        NodeStageRun::LanguageFailure(status) => {
+            return Ok(evaluation(
+                entry,
+                RetainedCallOutcome::LanguageFailure(status),
+                max_steps,
+            ));
+        }
+        NodeStageRun::Returned(values) => values,
+    };
     let mut leaves = Vec::with_capacity(drivers.len());
     for (driver, line) in drivers.iter().zip(&lines) {
         leaves.push(match driver.projection {
@@ -1111,7 +1131,7 @@ fn build_and_drive(
     selected: &[String],
     invocations: &[String],
     calls: &[String],
-) -> Result<String, Diagnostic> {
+) -> Result<NodeStageRun, Diagnostic> {
     if invocations.len() != calls.len() {
         return Err(invariant("wasm_executor.binding.invocation_arity"));
     }
@@ -1135,7 +1155,7 @@ fn build_and_drive(
     std::fs::create_dir(&root).map_err(|_| invariant("wasm_executor.probe_directory"))?;
     let outcome = drive_node(&envelope, calls, &root);
     let _ = std::fs::remove_dir_all(&root);
-    outcome
+    decode_node_outcomes(&outcome?, calls.len())
 }
 
 fn drive_node(
@@ -1158,11 +1178,11 @@ fn drive_node(
         std::fs::write(directory.join(path), decode_hex(hex)?)
             .map_err(|_| invariant("wasm_executor.artifact_write"))?;
     }
-    let emissions = calls
+    let call_thunks = calls
         .iter()
-        .map(|call| format!("out.push({call});"))
+        .map(|call| format!("() => {call}"))
         .collect::<Vec<_>>()
-        .join("\n");
+        .join(",\n");
     std::fs::write(
         directory.join("observe.mjs"),
         format!(
@@ -1171,8 +1191,29 @@ import instantiate from './semaprax.bindings.js';
 const wasm = new Uint8Array(fs.readFileSync(new URL('./app.wasm', import.meta.url)));
 const api = await instantiate(wasm);
 const out = [];
-{emissions}
-process.stdout.write(out.map(value => value + '\n').join(''));
+const normalizeFailure = error => {{
+  if(error?.semapraxSemantic !== true) throw error;
+  let raw = error.status;
+  if(raw === undefined) raw = error.domain === 'semaprax.arithmetic.v1' ? error.code : error.domain === 'semaprax.contract.v1' ? error.code + 8 : NaN;
+  if(!Number.isInteger(raw) || raw < 1 || raw > 10) throw new Error('SEMAPRAX stage status');
+  const domain = raw <= 8 ? 'semaprax.arithmetic.v1' : 'semaprax.contract.v1';
+  const code = raw <= 8 ? raw : raw - 8;
+  if(error.status !== undefined && error.status !== raw || error.code !== undefined && (error.code !== code || error.domain !== domain)) throw new Error('SEMAPRAX stage status mismatch');
+  return {{schema:'semaprax.agent-wasm-stage-outcome.v1',kind:'language_failure',raw_status:raw,status:{{schema:'semaprax.status.v1',domain_id:domain,code,class:raw<=8?'arithmetic':'contract',retryable:false}}}};
+}};
+const stage = call => {{try {{return {{schema:'semaprax.agent-wasm-stage-outcome.v1',kind:'returned',value:String(call())}}}} catch(error) {{return normalizeFailure(error)}}}};
+const calls = [
+{call_thunks}
+];
+for (const call of calls) {{
+  const result = stage(call);
+  out.push(result);
+  // A checked failure settles this invocation. Do not invoke another
+  // projection against that instance; the one authenticated status settles
+  // the whole retained call without depending on later arena state.
+  if(result.kind === 'language_failure') break;
+}}
+process.stdout.write(out.map(value => JSON.stringify(value) + '\n').join(''));
 "#
         ),
     )
@@ -1188,123 +1229,109 @@ process.stdout.write(out.map(value => value + '\n').join(''));
     String::from_utf8(output.stdout).map_err(|_| invariant("wasm_executor.output_utf8"))
 }
 
-#[cfg(test)]
-mod target_binding_tests {
-    use super::*;
+#[derive(Debug)]
+enum NodeStageRun {
+    Returned(Vec<String>),
+    LanguageFailure(NormalizedStatus),
+}
 
-    const SOURCE: &str = r#"module test.wasm_target_binding;
+fn normalized_raw_status(raw: u64) -> Option<NormalizedStatus> {
+    let arithmetic = match raw {
+        1 => Some(StatusCase::AddOverflow),
+        2 => Some(StatusCase::SubOverflow),
+        3 => Some(StatusCase::MulOverflow),
+        4 => Some(StatusCase::DivisionByZero),
+        5 => Some(StatusCase::DivisionOverflow),
+        6 => Some(StatusCase::RemainderByZero),
+        7 => Some(StatusCase::RemainderOverflow),
+        8 => Some(StatusCase::NegationOverflow),
+        _ => None,
+    };
+    arithmetic
+        .map(crate::runtime_status::normalize_arithmetic)
+        .or_else(|| match raw {
+            9 => Some(crate::runtime_status::normalize_contract(
+                ContractPhase::Requires,
+            )),
+            10 => Some(crate::runtime_status::normalize_contract(
+                ContractPhase::Ensures,
+            )),
+            _ => None,
+        })
+}
 
-@id("test.wasm_target_binding.identity")
-fn identity(value: i64) -> i64 { value }
-
-@id("test.wasm_target_binding.other")
-fn other(value: i64) -> i64 { value + 1 }
-
-@id("app.main")
-fn main() -> i64 { 0 }
-"#;
-
-    fn program() -> hir::ResolvedProgram {
-        let checked = crate::check(SOURCE, Path::new("wasm-target-binding-test.spx"))
-            .expect("fixture checks");
-        let program = hir::resolve(&checked).expect("fixture resolves");
-        hir::validate(&program).expect("fixture validates");
-        program
+fn decode_node_outcomes(stdout: &str, expected: usize) -> Result<NodeStageRun, Diagnostic> {
+    let rows = stdout.lines().collect::<Vec<_>>();
+    if rows.is_empty() || rows.len() > expected || expected == 0 {
+        return Err(invariant("wasm_executor.outcome.arity"));
     }
-
-    fn prepared(program: &hir::ResolvedProgram) -> PreparedRetainedCall {
-        crate::interpreter::retained_call::prepare_retained_call(
-            program,
-            "test.wasm_target_binding.identity",
-        )
-        .expect("identity prepares")
-    }
-
-    #[test]
-    fn target_binding_rejects_source_and_subject_remints_before_any_build_or_node() {
-        let program = program();
-        let prepared = prepared(&program);
-        let entry = program
-            .functions
-            .iter()
-            .find(|function| function.id.as_str() == prepared.function_id())
-            .expect("prepared entry belongs to fixture");
-        let arguments = [RetainedValue::I64(7)];
-        let binding = WasmTargetBinding::bind(SOURCE, &program, entry, &prepared, &arguments, 100)
-            .expect("exact checked source binds");
-        let selected = vec![entry.id.as_str().to_owned()];
-        let descriptor =
-            project::derive_public_api_descriptor(&program, &selected, binding.subject())
-                .expect("bound descriptor derives");
-        let artifact = binding
-            .bind_artifact(&descriptor, &selected)
-            .expect("descriptor retains exact target facts");
-        artifact
-            .verify_invocations(&selected)
-            .expect("the selected export is exactly the invocation");
-        let mut wrong_digest = artifact.clone();
-        wrong_digest.descriptor_digest =
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_owned();
-        let error = wrong_digest
-            .verify_descriptor(&descriptor)
-            .expect_err("a descriptor-digest remint cannot reach the carrier verifier");
-        assert_eq!(error.code, "SPX-G570");
-        assert!(error
-            .message
-            .contains("wasm_executor.binding.descriptor_drift"));
-
-        // Same source identity but altered body: it must be rejected before
-        // descriptor derivation, so no reminted source can select Node work.
-        let drifted = SOURCE.replace("{ value }", "{ value + 2 }");
-        let error = WasmTargetBinding::bind(&drifted, &program, entry, &prepared, &arguments, 100)
-            .expect_err("a same-id source remint cannot bind the original program");
-        assert_eq!(error.code, "SPX-G570");
-        assert!(error.message.contains("wasm_executor.binding.lifecycle"));
-
-        // Each retained subject coordinate is independently authenticated
-        // against the exact descriptor; a value that merely has digest shape
-        // does not satisfy the target binding.
-        for subject in [
-            project::PublicApiSubject {
-                project_schema: project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
-                project_revision:
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-                workspace_revision: &binding.lifecycle_identity,
-                project_graph_digest: &binding.invocation_identity,
-            },
-            project::PublicApiSubject {
-                project_schema: project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
-                project_revision: &binding.source_revision,
-                workspace_revision:
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-                project_graph_digest: &binding.invocation_identity,
-            },
-            project::PublicApiSubject {
-                project_schema: project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
-                project_revision: &binding.source_revision,
-                workspace_revision: &binding.lifecycle_identity,
-                project_graph_digest:
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            },
-        ] {
-            let reminted = project::derive_public_api_descriptor(&program, &selected, subject)
-                .expect("a syntactically valid but differently bound descriptor derives");
-            let error = binding
-                .bind_artifact(&reminted, &selected)
-                .expect_err("a reminted descriptor subject is never target-authenticated");
-            assert_eq!(error.code, "SPX-G570");
-            assert!(error.message.contains("wasm_executor.binding.descriptor"));
+    let row_count = rows.len();
+    let mut values = Vec::with_capacity(expected);
+    let mut failure: Option<NormalizedStatus> = None;
+    for row in rows {
+        let value: serde_json::Value =
+            serde_json::from_str(row).map_err(|_| invariant("wasm_executor.outcome.json"))?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| invariant("wasm_executor.outcome.object"))?;
+        if object.get("schema").and_then(serde_json::Value::as_str)
+            != Some("semaprax.agent-wasm-stage-outcome.v1")
+        {
+            return Err(invariant("wasm_executor.outcome.schema"));
         }
-
-        let changed_arguments = [RetainedValue::I64(8)];
-        let changed =
-            WasmTargetBinding::bind(SOURCE, &program, entry, &prepared, &changed_arguments, 100)
-                .expect("a distinct legitimate invocation binds separately");
-        assert_ne!(binding.invocation_identity, changed.invocation_identity);
-        let error = artifact
-            .verify_invocations(&["test.wasm_target_binding.other".to_owned()])
-            .expect_err("a selected-export remint cannot invoke a different function");
-        assert_eq!(error.code, "SPX-G570");
-        assert!(error.message.contains("wasm_executor.binding.invocation"));
+        match object.get("kind").and_then(serde_json::Value::as_str) {
+            Some("returned") if object.len() == 3 => {
+                if failure.is_some() {
+                    return Err(invariant("wasm_executor.outcome.mixed"));
+                }
+                values.push(
+                    object
+                        .get("value")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| invariant("wasm_executor.outcome.value"))?
+                        .to_owned(),
+                );
+            }
+            Some("language_failure") if object.len() == 4 => {
+                if !values.is_empty() {
+                    return Err(invariant("wasm_executor.outcome.mixed"));
+                }
+                let raw = object
+                    .get("raw_status")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| invariant("wasm_executor.outcome.raw_status"))?;
+                let status = normalized_raw_status(raw)
+                    .ok_or_else(|| invariant("wasm_executor.outcome.raw_status"))?;
+                let wire = object
+                    .get("status")
+                    .and_then(serde_json::Value::as_object)
+                    .filter(|wire| wire.len() == 5)
+                    .ok_or_else(|| invariant("wasm_executor.outcome.status"))?;
+                let class = if raw <= 8 { "arithmetic" } else { "contract" };
+                if wire.get("schema").and_then(serde_json::Value::as_str) != Some(status.schema())
+                    || wire.get("domain_id").and_then(serde_json::Value::as_str)
+                        != Some(status.domain_id())
+                    || wire.get("code").and_then(serde_json::Value::as_u64)
+                        != Some(u64::from(status.code()))
+                    || wire.get("class").and_then(serde_json::Value::as_str) != Some(class)
+                    || wire.get("retryable").and_then(serde_json::Value::as_bool) != Some(false)
+                    || failure.as_ref().is_some_and(|selected| selected != &status)
+                {
+                    return Err(invariant("wasm_executor.outcome.status_mismatch"));
+                }
+                failure = Some(status);
+            }
+            _ => return Err(invariant("wasm_executor.outcome.shape")),
+        }
+    }
+    match failure {
+        Some(status) if row_count == 1 => Ok(NodeStageRun::LanguageFailure(status)),
+        Some(_) => Err(invariant("wasm_executor.outcome.failure_arity")),
+        None if values.len() == expected => Ok(NodeStageRun::Returned(values)),
+        None => Err(invariant("wasm_executor.outcome.arity")),
     }
 }
+
+#[cfg(test)]
+#[path = "wasm_executor_tests.rs"]
+mod target_binding_tests;

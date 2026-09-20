@@ -25,6 +25,8 @@ mod malformed_trusted_descriptor;
 /// total-payload guard at all.
 #[path = "public_generic_native_adapter_v1/max_bounds_saturation.rs"]
 mod max_bounds_saturation;
+#[path = "public_generic_native_adapter_v1/result_carrier_hostility.rs"]
+mod result_carrier_hostility;
 /// The generated Rust *calling* consumer (issue #156): a real, standalone
 /// external crate built against the same compiled native provider `fixture`
 /// exercises from C, executed end to end.

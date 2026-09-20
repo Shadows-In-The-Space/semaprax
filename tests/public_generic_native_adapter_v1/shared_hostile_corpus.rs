@@ -56,13 +56,13 @@ use semaprax::public_generic_consumer::rust_calling::{
 pub(crate) mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
     assert_matches_expected, baseline_descriptor_bytes, malformed_result_carrier_cases,
-    parse_shared_corpus_lines, structured_descriptor_cases, valid_result_carrier_cases,
+    parse_shared_corpus_lines, structured_descriptor_cases, valid_result_carrier_cases, EXPECTED,
     MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-fn fixture_binding() -> NativeProviderBindingV1 {
+pub(crate) fn fixture_binding() -> NativeProviderBindingV1 {
     NativeProviderBindingV1::new(
         CarrierBindingV1::new(
             "sha256:6060606060606060606060606060606060606060606060606060606060606060",
@@ -75,7 +75,7 @@ fn fixture_binding() -> NativeProviderBindingV1 {
     )
 }
 
-fn shapes() -> (RecordShape, RecordShape) {
+pub(crate) fn shapes() -> (RecordShape, RecordShape) {
     let input = RecordShape::new(vec![OwnedByteField::new(
         "consumers.shared_hostile_corpus.leaf",
     )]);
@@ -148,7 +148,7 @@ fn rust_byte_slice_literal(bytes: &[u8]) -> String {
 
 /// Render `bytes` as a braced C/C++ initializer list, e.g. `{0x01,0x02}`,
 /// for splicing a fixed byte value into generated C/C++ test source.
-fn c_byte_array_literal(bytes: &[u8]) -> String {
+pub(crate) fn c_byte_array_literal(bytes: &[u8]) -> String {
     if bytes.is_empty() {
         return "{0}".to_owned();
     }
@@ -163,10 +163,10 @@ fn c_byte_array_literal(bytes: &[u8]) -> String {
     out
 }
 
-struct Workspace(PathBuf);
+pub(crate) struct Workspace(pub(crate) PathBuf);
 
 impl Workspace {
-    fn new(label: &str) -> Self {
+    pub(crate) fn new(label: &str) -> Self {
         let root = env::temp_dir().join(format!(
             "spx-pg-shared-hostile-corpus-{}-{}-{label}",
             std::process::id(),
@@ -177,7 +177,7 @@ impl Workspace {
         Self(root)
     }
 
-    fn path(&self, name: &str) -> PathBuf {
+    pub(crate) fn path(&self, name: &str) -> PathBuf {
         self.0.join(name)
     }
 }
@@ -188,17 +188,17 @@ impl Drop for Workspace {
     }
 }
 
-fn tool(variable: &str, fallback: &str) -> PathBuf {
+pub(crate) fn tool(variable: &str, fallback: &str) -> PathBuf {
     env::var_os(variable).map_or_else(|| PathBuf::from(fallback), PathBuf::from)
 }
 
-fn run(command: &mut Command, label: &str) -> Output {
+pub(crate) fn run(command: &mut Command, label: &str) -> Output {
     command
         .output()
         .unwrap_or_else(|error| panic!("run {label}: {error}"))
 }
 
-fn compile_provider_object(
+pub(crate) fn compile_provider_object(
     root: &Path,
     descriptor_bytes: &[u8],
     binding: &NativeProviderBindingV1,
@@ -988,7 +988,11 @@ fn cxx_malformed_result_carrier_cases() -> String {
     result
 }
 
-fn write_generated_files(root: &Path, files: &[(String, String)], splice: Option<(&str, &str)>) {
+pub(crate) fn write_generated_files(
+    root: &Path,
+    files: &[(String, String)],
+    splice: Option<(&str, &str)>,
+) {
     for (relative, contents) in files {
         let path = root.join(relative);
         if let Some(parent) = path.parent() {
@@ -1004,17 +1008,212 @@ fn write_generated_files(root: &Path, files: &[(String, String)], splice: Option
     }
 }
 
-/// Locate the exact anchor text `write_generated_files` splices in front of,
-/// and the exact call site the appended function needs registered at, for a
-/// C/C++-style fixed-`main` round trip. Panics loudly (never silently
-/// no-ops) if either anchor is not found in the generated content -- a
-/// missing anchor means this splice has drifted from the generator's actual
-/// output and must be re-synced, never silently skipped.
-fn splice_main_call(contents: &mut String, call_before: &str, call: &str) {
+/// Splice a C/C++ fixed-main test, failing closed if either anchor drifts.
+pub(crate) fn splice_main_call(contents: &mut String, call_before: &str, call: &str) {
     let position = contents
         .find(call_before)
         .unwrap_or_else(|| panic!("splice anchor {call_before:?} not found in generated main"));
     contents.insert_str(position, call);
+}
+
+/// Fails closed if a generated-code mutation anchor drifts.
+pub(crate) fn replace_once(source: &mut String, old: &str, new: &str, label: &str) {
+    assert_eq!(
+        source.matches(old).count(),
+        1,
+        "{label}: expected one generated-code mutation anchor"
+    );
+    *source = source.replacen(old, new, 1);
+}
+
+/// Full max-plus-one payload used to isolate the per-leaf capacity guard.
+fn complete_max_plus_one_result_carrier() -> Vec<u8> {
+    malformed_result_carrier_cases()
+        .into_iter()
+        .find(|(name, _)| *name == "result_carrier_complete_max_plus_one")
+        .map(|(_, bytes)| bytes)
+        .expect("the closed hostile manifest contains complete max-plus-one")
+}
+
+fn expected_shared_status(case: &str) -> &'static str {
+    EXPECTED
+        .iter()
+        .find(|(name, _)| *name == case)
+        .map(|(_, status)| *status)
+        .unwrap_or_else(|| panic!("the closed hostile manifest is missing `{case}`"))
+}
+
+/// A temporary C11 edit removes only the per-leaf guard, so the complete
+/// 65,537-byte leaf is admitted while the shared manifest requires rejection.
+#[test]
+fn result_carrier_capacity_guard_mutation_is_detected_by_native_consumers() {
+    let clang = tool("CLANG", "clang");
+    let clangxx = tool("CLANGXX", "clang++");
+    let (input, output) = shapes();
+    let binding = fixture_binding();
+    let bytes = complete_max_plus_one_result_carrier();
+    assert_eq!(
+        expected_shared_status("result_carrier_complete_max_plus_one"),
+        "RESULT_REJECTED",
+        "the normal shared corpus must fail after this mutant admits the same bytes"
+    );
+    let c_bytes = c_byte_array_literal(&bytes);
+    let workspace = Workspace::new("result-carrier-capacity-mutant");
+    let provider_object =
+        compile_provider_object(&workspace.0, baseline_descriptor_bytes(), &binding, &clang);
+
+    // ---- C11 ----
+    let c_consumer =
+        generate_c_calling_consumer(baseline_descriptor_bytes(), &binding, &input, &output)
+            .expect("a well-formed shape must generate");
+    let c_root = workspace.path("c-consumer");
+    write_generated_files(&c_root, c_consumer.files(), None);
+    let c_codec_path = c_root.join("spx_pg_calling_consumer.c");
+    let mut c_codec = fs::read_to_string(&c_codec_path).unwrap();
+    replace_once(
+        &mut c_codec,
+        "if (width > SPX_PG_CCC_MAX_LEAF_BYTES || width > len - offset ||\n            width > SPX_PG_CCC_MAX_TOTAL_BYTES - payload) return SPX_PG_CONSUMER_RESULT_REJECTED;",
+        "if (width > len - offset ||\n            width > SPX_PG_CCC_MAX_TOTAL_BYTES - payload) return SPX_PG_CONSUMER_RESULT_REJECTED;",
+        "C11 result-carrier per-leaf capacity guard",
+    );
+    fs::write(&c_codec_path, c_codec).unwrap();
+    let c_round_trip_path = c_root.join("round_trip.c");
+    let mut c_round_trip = fs::read_to_string(&c_round_trip_path).unwrap();
+    let c_mutant = format!(
+        r#"static void test_mutated_result_carrier_capacity_guard(void) {{
+    static const uint8_t candidate[] = {c_bytes};
+    size_t before = spx_pg_consumer_test_live_allocations();
+    REQUIRE(spx_pg_consumer_test_validate_result_carrier(candidate, sizeof(candidate)) ==
+            SPX_PG_CONSUMER_OK);
+    REQUIRE(spx_pg_consumer_test_live_allocations() == before);
+    (void)puts("MUTATED_RESULT_CARRIER_CAPACITY_GUARD_ADMITTED");
+}}
+"#
+    );
+    splice_main_call(&mut c_round_trip, "int main(void) {", &c_mutant);
+    splice_main_call(
+        &mut c_round_trip,
+        "(void)puts(\"c-calling-consumer-settled\");",
+        "test_mutated_result_carrier_capacity_guard();\n    ",
+    );
+    fs::write(&c_round_trip_path, c_round_trip).unwrap();
+    let c_executable = c_root.join("result_carrier_capacity_mutant");
+    let c_built = run(
+        Command::new(&clang)
+            .current_dir(&c_root)
+            .args(["-std=c11", "-O0", "-Wall", "-Wextra", "-Werror"])
+            .arg("spx_pg_calling_consumer.c")
+            .arg("round_trip.c")
+            .arg(&provider_object)
+            .arg("-o")
+            .arg(&c_executable),
+        "compile the C11 result-carrier mutant",
+    );
+    assert!(
+        c_built.status.success(),
+        "C11 result-carrier mutant did not compile: {}",
+        String::from_utf8_lossy(&c_built.stderr)
+    );
+    let c_run = run(
+        Command::new(&c_executable).current_dir(&c_root),
+        "run the C11 result-carrier mutant",
+    );
+    assert!(
+        c_run.status.success()
+            && String::from_utf8_lossy(&c_run.stdout)
+                .contains("MUTATED_RESULT_CARRIER_CAPACITY_GUARD_ADMITTED"),
+        "C11 result-carrier mutation was not detected:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&c_run.stdout),
+        String::from_utf8_lossy(&c_run.stderr)
+    );
+
+    // ---- C++17 facade over its own separately compiled mutated C11 codec ----
+    let cxx_consumer =
+        generate_cxx_calling_consumer(baseline_descriptor_bytes(), &binding, &input, &output)
+            .expect("a well-formed shape must generate");
+    let cxx_root = workspace.path("cxx-consumer");
+    write_generated_files(&cxx_root, cxx_consumer.files(), None);
+    let cxx_codec_path = cxx_root.join("spx_pg_calling_consumer.c");
+    let mut cxx_codec = fs::read_to_string(&cxx_codec_path).unwrap();
+    replace_once(
+        &mut cxx_codec,
+        "if (width > SPX_PG_CCC_MAX_LEAF_BYTES || width > len - offset ||\n            width > SPX_PG_CCC_MAX_TOTAL_BYTES - payload) return SPX_PG_CONSUMER_RESULT_REJECTED;",
+        "if (width > len - offset ||\n            width > SPX_PG_CCC_MAX_TOTAL_BYTES - payload) return SPX_PG_CONSUMER_RESULT_REJECTED;",
+        "C++17 facade's C11 result-carrier per-leaf capacity guard",
+    );
+    fs::write(&cxx_codec_path, cxx_codec).unwrap();
+    let cxx_round_trip_path = cxx_root.join("test/round_trip.cpp");
+    let mut cxx_round_trip = fs::read_to_string(&cxx_round_trip_path).unwrap();
+    let cxx_mutant = format!(
+        r#"static void test_mutated_result_carrier_capacity_guard() {{
+    const std::vector<std::uint8_t> candidate {c_bytes};
+    const std::size_t before = ::spx_pg_consumer_test_live_allocations();
+    REQUIRE(::spx_pg_consumer_test_validate_result_carrier(candidate.data(), candidate.size()) ==
+            SPX_PG_CONSUMER_OK);
+    REQUIRE(::spx_pg_consumer_test_live_allocations() == before);
+    std::puts("MUTATED_RESULT_CARRIER_CAPACITY_GUARD_ADMITTED");
+}}
+"#
+    );
+    splice_main_call(&mut cxx_round_trip, "int main() {", &cxx_mutant);
+    splice_main_call(
+        &mut cxx_round_trip,
+        "std::puts(\"cxx-calling-consumer-settled\");",
+        "test_mutated_result_carrier_capacity_guard();\n    ",
+    );
+    fs::write(&cxx_round_trip_path, cxx_round_trip).unwrap();
+    let cxx_consumer_object = cxx_root.join("spx_pg_calling_consumer.o");
+    let cxx_c_built = run(
+        Command::new(&clang)
+            .current_dir(&cxx_root)
+            .args(["-std=c11", "-O0", "-Wall", "-Wextra", "-Werror", "-c"])
+            .arg("spx_pg_calling_consumer.c")
+            .arg("-o")
+            .arg(&cxx_consumer_object),
+        "compile the C++17 facade's C11 result-carrier mutant",
+    );
+    assert!(
+        cxx_c_built.status.success(),
+        "C++17 facade's C11 mutant did not compile: {}",
+        String::from_utf8_lossy(&cxx_c_built.stderr)
+    );
+    let cxx_executable = cxx_root.join("result_carrier_capacity_mutant");
+    let cxx_built = run(
+        Command::new(&clangxx)
+            .current_dir(&cxx_root)
+            .args([
+                "-std=c++17",
+                "-O0",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-Iinclude",
+                "-I.",
+            ])
+            .arg("test/round_trip.cpp")
+            .arg(&cxx_consumer_object)
+            .arg(&provider_object)
+            .arg("-o")
+            .arg(&cxx_executable),
+        "compile the C++17 result-carrier mutant",
+    );
+    assert!(
+        cxx_built.status.success(),
+        "C++17 result-carrier mutant did not compile: {}",
+        String::from_utf8_lossy(&cxx_built.stderr)
+    );
+    let cxx_run = run(
+        Command::new(&cxx_executable).current_dir(&cxx_root),
+        "run the C++17 result-carrier mutant",
+    );
+    assert!(
+        cxx_run.status.success()
+            && String::from_utf8_lossy(&cxx_run.stdout)
+                .contains("MUTATED_RESULT_CARRIER_CAPACITY_GUARD_ADMITTED"),
+        "C++17 result-carrier mutation was not detected:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&cxx_run.stdout),
+        String::from_utf8_lossy(&cxx_run.stderr)
+    );
 }
 
 #[test]

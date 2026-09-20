@@ -897,6 +897,15 @@ empty, binary and exact-65,536-byte leaves. All ten use the generated
 consumer's result-validator entry point. The positive controls prevent an
 always-rejecting decoder from satisfying the hostile corpus; the complete
 max-plus-one payload makes its capacity refusal independent of truncation.
+The native C11 codec and its C++17 facade mutation-prove capacity, leaf-count,
+and trailing-byte refusal branches. The capacity temporary artifact removes
+only the per-leaf comparison and admits the complete max-plus-one document;
+the two framing artifacts change only their reached refusal return to `OK`.
+TypeScript independently changes the exact-width branch's closed result class.
+The normal corpus requires every document to be refused, so these are
+executable counterfactuals rather than source-text coverage. They do not claim
+mutation proof for Rust, the other result-framing branches, or Logical Carrier
+v1's separate field-path, kind, handle, and cleanup-plan rules.
 Each generated consumer's own
 `consumer.files()` output is left byte-for-byte untouched (the "byte for
 byte" claim above still holds); the harness instead splices one additional,

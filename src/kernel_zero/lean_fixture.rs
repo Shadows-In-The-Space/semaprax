@@ -12,8 +12,9 @@
 //!
 //! The witness is finite corpus evidence, not a proof that either the parser
 //! or the Rust translator is correct for all admitted programs.  In
-//! particular, HIR typing and construction of a Lean `Program` remain the
-//! explicit unproved translation assumptions recorded in Semantic Kernel v1.
+//! particular, HIR typing remains an unproved translation assumption. The
+//! fixture also constructs a concrete Lean `Program` and checks the strict
+//! weighted-call certificate derived from these real terms in Rust.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -26,7 +27,8 @@ use crate::hir::{DeclarationId, ValueId};
 
 use super::corpus::generated_corpus;
 use super::reify::BoundTranslation;
-use super::term::{KernelProgram, Term};
+use super::term::{KernelProgram, KernelType, Term};
+use super::weights;
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -117,7 +119,7 @@ fn value_ids(program: &KernelProgram) -> BTreeMap<ValueId, usize> {
         .collect()
 }
 
-fn list<T>(values: impl IntoIterator<Item = T>, mut render: impl FnMut(T) -> String) -> String {
+fn list<T>(values: impl IntoIterator<Item = T>, render: impl FnMut(T) -> String) -> String {
     let rendered = values
         .into_iter()
         .map(render)
@@ -333,6 +335,39 @@ fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -
     let function_scope = list(program.functions.iter(), |function| {
         function_labels[&function.id].to_string()
     });
+    let weights = weights::derive(program).expect("reified corpus must have finite u64 weights");
+    weights::verify(program, &weights).expect("derived weights must replay on the exact terms");
+    // Labels are generated locally, never copied from source identifiers.
+    let suffix = label.replace('-', "_");
+    let program_name = format!("program_{suffix}");
+    let weight_name = format!("weight_{suffix}");
+    let bodies = program
+        .functions
+        .iter()
+        .map(|function| {
+            let mut locals = function.params.iter().map(|(id, _)| id.clone()).collect();
+            lowered_term(&function.body, &function_positions, &mut locals)
+        })
+        .collect::<Vec<_>>();
+    let lean_type = |ty| match ty {
+        KernelType::I64 => ".int",
+        KernelType::Bool => ".bool",
+    };
+    let definitions = list(program.functions.iter().zip(&bodies), |(function, body)| {
+        let parameters = list(function.params.iter(), |(_, ty)| lean_type(*ty).to_owned());
+        format!(
+            "⟨{parameters}, {}, ({body})⟩",
+            lean_type(function.return_type)
+        )
+    });
+    output.push_str(&format!(
+        "\ndef {program_name} : Program := {definitions}\n"
+    ));
+    output.push_str(&format!("def {weight_name} : Nat → Nat\n"));
+    for (index, function) in program.functions.iter().enumerate() {
+        output.push_str(&format!("  | {index} => {}\n", weights[&function.id]));
+    }
+    output.push_str("  | _ => 0\n");
     let mut count = 0;
     for (function_index, function) in program.functions.iter().enumerate() {
         let parameters = function
@@ -342,12 +377,26 @@ fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -
             .collect::<Vec<_>>();
         let named_parameters = list(parameters.iter(), |id| values[id].to_string());
         let named = named_term(&function.body, &function_labels, &values);
-        let lowered = lowered_term(&function.body, &function_positions, &mut parameters.clone());
+        let lowered = &bodies[function_index];
         output.push_str(&format!(
             "\n-- exact reification witness {label}, function {function_index}\nexample :\n  lowerNamed {function_scope} {named_parameters} ({named}) = some ({lowered}) := by\n  rfl\n"
         ));
         count += 1;
     }
+    // Exhaust the actual finite function table. Each leaf is checked by Lean's
+    // reduction of weightedPotential, rather than trusting a Rust boolean or
+    // an unbound certificate for a separate hand-authored example program.
+    output.push_str(&format!(
+        "\ntheorem certificate_{suffix} : WeightedCallCertificate {program_name} {weight_name} := by\n  intro f fd hf\n"
+    ));
+    for index in 0..program.functions.len() {
+        let indent = " ".repeat(2 + index * 4);
+        output.push_str(&format!(
+            "{indent}cases f with\n{indent}| zero =>\n{indent}    simp [{program_name}] at hf\n{indent}    subst fd\n{indent}    decide\n{indent}| succ f =>\n"
+        ));
+    }
+    let indent = " ".repeat(2 + program.functions.len() * 4);
+    output.push_str(&format!("{indent}simp [{program_name}] at hf\n"));
     count
 }
 
@@ -367,6 +416,20 @@ fn fixture_source() -> String {
     output.push_str("\nend SemapraxKernel0Witness\n");
     output.push_str(&format!("\n-- witnesses: {count}\n"));
     output
+}
+
+#[test]
+fn real_reified_weight_witnesses_are_deterministic_and_nonvacuous() {
+    let source = fixture_source();
+    assert_eq!(source, fixture_source());
+    assert!(source.contains("def program_generated_0 : Program := ["));
+    assert!(source.contains("theorem certificate_generated_0 : WeightedCallCertificate"));
+    let programs = generated_corpus().len();
+    assert!(programs > 0);
+    assert_eq!(
+        source.matches(" : WeightedCallCertificate ").count(),
+        programs
+    );
 }
 
 #[test]

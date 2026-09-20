@@ -526,9 +526,10 @@ function weight dominates its body potential, calls pay their callee weight,
 value substitution preserves potential, and every real step strictly
 decreases it. Lean therefore proves finite small-step normalization to a value
 or modeled fault for every closed well-typed term under that certificate, with
-the helper-call fixture as a non-vacuous positive case. It does not derive
-weights from the ranked graph or Rust HIR and does not compute a numeric fuel
-bound. Source-to-Lean correspondence,
+the helper-call fixture as a non-vacuous positive case. The private corpus
+harness described below now derives weights from real reified HIR and emits
+concrete Lean certificates; the general theorem does not prove that derivation
+correct for arbitrary HIR or compute a numeric fuel bound. Source-to-Lean correspondence,
 resource-limit equivalence, hosted execution, and every self-hosting rung
 above zero remain separate work. See
 [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md#ranked-call-graph-extension-issue-188)
@@ -576,6 +577,47 @@ translation remain outside this theorem. Likewise, no independent named-term
 evaluation relation or general observational-equivalence theorem is claimed.
 `Int` retains the existing Lean model's literal range rather than imposing a
 new Rust `i64` admission proof. No completion-matrix or self-hosting rung changes.
+
+### Executable weights from the reified corpus (issue #188)
+
+The private proof harness now computes function weights directly from the
+`KernelProgram` returned by exact-source `BoundTranslation` replay.
+`src/kernel_zero/weights.rs` walks the complete syntactic call closure, memoizes
+each finished function, and assigns `weight(f) = potential(body(f)) + 1`.
+Its potential uses the existing Lean equation: values and variables cost one,
+ordinary constructors add one to their child potentials, and a call adds its
+argument potentials to the callee's weight. Lazy branches and calls nested
+inside arguments participate even when they would not execute. Stable identity
+orders the calculation independently of the supplied function-table order.
+
+The derivation refuses duplicate or unknown function identities, active-path
+cycles, more than 64 functions, more than 8,192 charged nodes, traversal depth
+128, and checked `u64` overflow. These are private proof-harness refusals,
+not compiler diagnostics or language-admission changes. An acyclic program can
+have an exponentially large mathematical weight; refusing an unrepresentable
+weight does not mean the program fails to terminate. A separate replay checks
+the exact function inventory and every strict body-potential inequality using
+the supplied weights, without replacing an invalid certificate by a new one.
+
+`src/kernel_zero/lean_fixture.rs` extends the existing real-corpus lowering
+witness with the actual parameter types, result types, lowered function bodies,
+and derived weights. For each corpus program it emits a complete
+`WeightedCallCertificate` proof by exhaustion of the finite function table.
+Lean's own `weightedPotential` reduction checks each inequality. The witness
+therefore links certificate arithmetic to the same concrete lowered terms
+whose identity-to-index translation is independently checked by `lowerNamed`.
+The deterministic-rendering regression runs even without Lean; the existing
+`real_reified_corpus_lowers_identically_in_lean` selector checks the generated
+proofs when its Lean toolchain is available.
+
+This is executable finite-corpus evidence, not a general theorem about the Rust
+derivation, HIR typing, or source translation. A weight certificate alone does
+not discharge `WellFormedProgram` or `HasType`, does not authorize execution,
+and does not establish a concrete runtime or interpreter-fuel bound. No proof
+axiom, language feature, public format, or self-hosting rung is added. The
+implementation session ran the seven weight tests through a small standalone
+Rust harness using the actual term and weight modules; full Cargo/corpus and
+Lean witness execution remain required before quoting those results as passed.
 
 ## Differential testing: reference interpreter vs. the compiler's interpreter
 

@@ -497,13 +497,13 @@ Success or any unrelated failure is a gate failure.
 
 The gate itself does not trust proof-source report text. It locates pinned
 signatures only after stripping comments and strings, rejects top-level
-`constant` as well as `axiom`, and runs all 34 axiom queries from a generated
+`constant` as well as `axiom`, and runs all 46 axiom queries from a generated
 driver bracketed by unpredictable markers. Hostile self-tests pin rejection of
 a commented-signature shadow, forged reports after source-report removal, and
 a live `constant` declaration. One authoritative digest covers the complete
 comment/string-stripped live source, including commands between declarations
 and every proof body, so later notation/macro/syntax/scope/attribute/instance
-changes cannot silently alter elaboration. Fourteen narrower region pins bind the
+changes cannot silently alter elaboration. Fifteen narrower region pins bind the
 headline statements to `Expr`, `Step`, the complete `FaultRedex` and
 `ArgsProgress` relations, `Steps`, `Terminal`, `NormalizesWithin`, and their
 semantic dependencies with more precise diagnostics. Further hostile self-tests
@@ -533,6 +533,49 @@ resource-limit equivalence, hosted execution, and every self-hosting rung
 above zero remain separate work. See
 [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md#ranked-call-graph-extension-issue-188)
 for the exact proof and gate scope.
+
+### Named identity lowering inside the Lean model
+
+The next #188 tranche makes one previously implicit representation boundary
+executable and proved: the Rust reified `Term` carries `ValueId` and
+`DeclarationId` identities, while Lean `Expr` carries de Bruijn variable indices
+and function-table indices. `NamedTerm` independently models every Kernel-0
+constructor with opaque natural-number identities; `lowerNamed` resolves those
+identities into the existing `Expr` calculus. Operators are already classified
+as arithmetic, comparison, or lazy boolean operators at this boundary.
+
+`NamedHasType` uses an association-list variable context and an explicit
+function-identity list naming the slots of the target signature table. Its
+variable lookup is independent of target index lookup. Lean proves that the
+two lookups agree, that every named typing derivation produces a successful
+lowering with the same target type, and that the executable lowering's exact
+returned expression has that type. The mutual argument-list theorem preserves
+types and authored order. Closed named terms therefore inherit the existing
+value/step/fault Progress theorem; under the existing well-formed-program and
+weighted-call hypotheses, their actual lowered expressions also normalize.
+
+The executable fixtures cover nested shadowing, an initializer that must still
+see the outer scope, an outer variable beneath a distinct binding, unknown
+callee refusal, and nontrivial argument ordering. A named helper entry resolves
+to the established two-step `42` fixture, with target typing and both real
+`Step` witnesses. The fourth compiled negative control forges the outer
+variable's index as zero instead of one. The gate requires exactly that type
+mismatch; missing imports, unrelated errors, or unexpected success fail it.
+Another source-level hostile check injects the new binding into its own
+initializer scope and requires the named-lowering semantic pin to reject it.
+The axiom audit now also accepts Lean's genuine empty-axiom report format,
+while rejecting duplicate reports across both formats.
+
+This is a type-preserving identity-to-index translation **inside Lean**, not a
+proof that Rust's `Term`, `ValueId`, `DeclarationId`, HIR, parser, operator
+classification, or source bytes match this model. Lowering resolves identities;
+it is not itself a type checker. The theorem's named typing premise is
+substantive. The function table and its identity list are supplied explicitly;
+their construction from Rust functions, uniqueness admission, and body
+translation remain outside this theorem. Likewise, no independent named-term
+evaluation relation or general observational-equivalence theorem is claimed.
+`Int` retains the existing Lean model's literal range rather than imposing a
+new Rust `i64` admission proof. No completion-matrix or self-hosting rung changes.
 
 ## Differential testing: reference interpreter vs. the compiler's interpreter
 

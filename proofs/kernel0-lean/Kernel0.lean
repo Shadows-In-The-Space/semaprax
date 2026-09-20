@@ -1778,6 +1778,250 @@ theorem helper_call_normalizes_within_two_steps :
     NormalizesWithin acyclicCallFixture (.call 0 []) 2 :=
   ⟨.intLit 42, 2, Nat.le_refl 2, helper_call_takes_two_steps, Or.inl (.intLit 42)⟩
 
+/-! ## Named reified terms and checked de Bruijn lowering
+
+The Rust reified term carries ValueId/DeclarationId identities, whereas Expr
+uses indices. This independent model makes that conversion explicit. Natural
+numbers model opaque identities (not their Rust representation). The model
+covers every Kernel-0 constructor; operator classification is already done.
+It is not a proof about parsing, Rust HIR admission, or the Rust translator.
+-/
+
+inductive NamedTerm where
+  | intLit (n : Int)
+  | boolLit (b : Bool)
+  | var (id : Nat)
+  | arith (op : ArithOp) (a b : NamedTerm)
+  | cmp (op : CmpOp) (a b : NamedTerm)
+  | neg (e : NamedTerm)
+  | not (e : NamedTerm)
+  | and (a b : NamedTerm)
+  | or (a b : NamedTerm)
+  | ite (c a b : NamedTerm)
+  | letIn (id : Nat) (value body : NamedTerm)
+  | call (id : Nat) (args : List NamedTerm)
+deriving Repr
+
+/-- First matching identity; a let extends only its body's scope. -/
+def resolveIdentity (id : Nat) : List Nat → Option Nat
+  | [] => none
+  | head :: tail => if id = head then some 0 else (resolveIdentity id tail).map Nat.succ
+
+def lookupNamedType (id : Nat) : List (Nat × Ty) → Option Ty
+  | [] => none
+  | (name, ty) :: tail => if id = name then some ty else lookupNamedType id tail
+
+mutual
+  def lowerNamed (functions locals : List Nat) : NamedTerm → Option Expr
+    | .intLit n => some (.intLit n)
+    | .boolLit b => some (.boolLit b)
+    | .var id => (resolveIdentity id locals).map Expr.var
+    | .arith op a b => do
+        return .arith op (← lowerNamed functions locals a) (← lowerNamed functions locals b)
+    | .cmp op a b => do
+        return .cmp op (← lowerNamed functions locals a) (← lowerNamed functions locals b)
+    | .neg e => (lowerNamed functions locals e).map Expr.neg
+    | .not e => (lowerNamed functions locals e).map Expr.not
+    | .and a b => do
+        return .and (← lowerNamed functions locals a) (← lowerNamed functions locals b)
+    | .or a b => do
+        return .or (← lowerNamed functions locals a) (← lowerNamed functions locals b)
+    | .ite c a b => do
+        return .ite (← lowerNamed functions locals c) (← lowerNamed functions locals a)
+          (← lowerNamed functions locals b)
+    | .letIn id value body => do
+        return .letIn (← lowerNamed functions locals value)
+          (← lowerNamed functions (id :: locals) body)
+    | .call id args => do
+        return .call (← resolveIdentity id functions) (← lowerNamedArgs functions locals args)
+
+  def lowerNamedArgs (functions locals : List Nat) : List NamedTerm → Option (List Expr)
+    | [] => some []
+    | e :: es => do
+        return (← lowerNamed functions locals e) :: (← lowerNamedArgs functions locals es)
+end
+
+/-- Named lookup and its de Bruijn index agree, including shadowing. -/
+theorem named_lookup_resolves {id Γ T} (h : lookupNamedType id Γ = some T) :
+    ∃ i, resolveIdentity id (Γ.map Prod.fst) = some i ∧
+      (Γ.map Prod.snd)[i]? = some T := by
+  induction Γ with
+  | nil => simp [lookupNamedType] at h
+  | cons binding tail ih =>
+      rcases binding with ⟨name, ty⟩
+      by_cases heq : id = name
+      · simp [lookupNamedType, heq] at h
+        subst ty
+        exact ⟨0, by simp [resolveIdentity, heq], by simp⟩
+      · have htail : lookupNamedType id tail = some T := by
+          simpa [lookupNamedType, heq] using h
+        rcases ih htail with ⟨i, hi, ht⟩
+        exact ⟨i + 1, by simp [resolveIdentity, heq, hi], by simpa using ht⟩
+
+mutual
+  /-- Source typing resolves variable identities by association, independently
+  of the target de Bruijn typing judgment. The function identity list names
+  slots of the explicit target signature table P; it grants no body proof. -/
+  inductive NamedHasType : Program → List Nat → List (Nat × Ty) → NamedTerm → Ty → Prop where
+    | intLit {P fs Γ n} : NamedHasType P fs Γ (.intLit n) .int
+    | boolLit {P fs Γ b} : NamedHasType P fs Γ (.boolLit b) .bool
+    | var {P fs Γ id T} (h : lookupNamedType id Γ = some T) :
+        NamedHasType P fs Γ (.var id) T
+    | arith {P fs Γ op a b} (ha : NamedHasType P fs Γ a .int)
+        (hb : NamedHasType P fs Γ b .int) : NamedHasType P fs Γ (.arith op a b) .int
+    | cmpInt {P fs Γ op a b} (ha : NamedHasType P fs Γ a .int)
+        (hb : NamedHasType P fs Γ b .int) : NamedHasType P fs Γ (.cmp op a b) .bool
+    | cmpBool {P fs Γ op a b} (hop : BoolEquality op)
+        (ha : NamedHasType P fs Γ a .bool) (hb : NamedHasType P fs Γ b .bool) :
+        NamedHasType P fs Γ (.cmp op a b) .bool
+    | neg {P fs Γ e} (h : NamedHasType P fs Γ e .int) : NamedHasType P fs Γ (.neg e) .int
+    | not {P fs Γ e} (h : NamedHasType P fs Γ e .bool) : NamedHasType P fs Γ (.not e) .bool
+    | and {P fs Γ a b} (ha : NamedHasType P fs Γ a .bool)
+        (hb : NamedHasType P fs Γ b .bool) : NamedHasType P fs Γ (.and a b) .bool
+    | or {P fs Γ a b} (ha : NamedHasType P fs Γ a .bool)
+        (hb : NamedHasType P fs Γ b .bool) : NamedHasType P fs Γ (.or a b) .bool
+    | ite {P fs Γ c a b T} (hc : NamedHasType P fs Γ c .bool)
+        (ha : NamedHasType P fs Γ a T) (hb : NamedHasType P fs Γ b T) :
+        NamedHasType P fs Γ (.ite c a b) T
+    | letIn {P fs Γ id a b Ta Tb} (ha : NamedHasType P fs Γ a Ta)
+        (hb : NamedHasType P fs ((id, Ta) :: Γ) b Tb) :
+        NamedHasType P fs Γ (.letIn id a b) Tb
+    | call {P fs Γ id args i fd} (hi : resolveIdentity id fs = some i)
+        (hf : P[i]? = some fd) (ha : NamedArgsHaveTypes P fs Γ args fd.params) :
+        NamedHasType P fs Γ (.call id args) fd.ret
+
+  inductive NamedArgsHaveTypes : Program → List Nat → List (Nat × Ty) →
+      List NamedTerm → List Ty → Prop where
+    | nil {P fs Γ} : NamedArgsHaveTypes P fs Γ [] []
+    | cons {P fs Γ e es T Ts} (he : NamedHasType P fs Γ e T)
+        (hs : NamedArgsHaveTypes P fs Γ es Ts) : NamedArgsHaveTypes P fs Γ (e :: es) (T :: Ts)
+end
+
+mutual
+theorem named_lower_preserves_type {P fs Γ term T}
+    (ht : NamedHasType P fs Γ term T) :
+    ∃ e, lowerNamed fs (Γ.map Prod.fst) term = some e ∧ HasType P (Γ.map Prod.snd) e T := by
+  cases ht with
+  | intLit => exact ⟨_, rfl, .intLit⟩
+  | boolLit => exact ⟨_, rfl, .boolLit⟩
+  | var h =>
+      rcases named_lookup_resolves h with ⟨i, hi, hty⟩
+      exact ⟨.var i, by simp [lowerNamed, hi], .var hty⟩
+  | arith ha hb =>
+      rcases named_lower_preserves_type ha with ⟨a, ea, ta⟩
+      rcases named_lower_preserves_type hb with ⟨b, eb, tb⟩
+      exact ⟨_, by simp [lowerNamed, ea, eb]; rfl, .arith ta tb⟩
+  | cmpInt ha hb =>
+      rcases named_lower_preserves_type ha with ⟨a, ea, ta⟩
+      rcases named_lower_preserves_type hb with ⟨b, eb, tb⟩
+      exact ⟨_, by simp [lowerNamed, ea, eb]; rfl, .cmpInt ta tb⟩
+  | cmpBool hop ha hb =>
+      rcases named_lower_preserves_type ha with ⟨a, ea, ta⟩
+      rcases named_lower_preserves_type hb with ⟨b, eb, tb⟩
+      exact ⟨_, by simp [lowerNamed, ea, eb], .cmpBool hop ta tb⟩
+  | neg h =>
+      rcases named_lower_preserves_type h with ⟨e, he, te⟩
+      exact ⟨_, by simp [lowerNamed, he], .neg te⟩
+  | not h =>
+      rcases named_lower_preserves_type h with ⟨e, he, te⟩
+      exact ⟨_, by simp [lowerNamed, he], .not te⟩
+  | and ha hb =>
+      rcases named_lower_preserves_type ha with ⟨a, ea, ta⟩
+      rcases named_lower_preserves_type hb with ⟨b, eb, tb⟩
+      exact ⟨_, by simp [lowerNamed, ea, eb], .and ta tb⟩
+  | or ha hb =>
+      rcases named_lower_preserves_type ha with ⟨a, ea, ta⟩
+      rcases named_lower_preserves_type hb with ⟨b, eb, tb⟩
+      exact ⟨_, by simp [lowerNamed, ea, eb], .or ta tb⟩
+  | ite hc ha hb =>
+      rcases named_lower_preserves_type hc with ⟨c, ec, tc⟩
+      rcases named_lower_preserves_type ha with ⟨a, ea, ta⟩
+      rcases named_lower_preserves_type hb with ⟨b, eb, tb⟩
+      exact ⟨_, by simp [lowerNamed, ec, ea, eb], .ite tc ta tb⟩
+  | letIn ha hb =>
+      rcases named_lower_preserves_type ha with ⟨a, ea, ta⟩
+      rcases named_lower_preserves_type hb with ⟨b, eb, tb⟩
+      simp only [List.map_cons] at eb
+      exact ⟨_, by simp [lowerNamed, ea, eb], .letIn ta tb⟩
+  | call hi hf ha =>
+      rcases named_lower_preserves_type_args ha with ⟨args, ea, ta⟩
+      exact ⟨_, by simp [lowerNamed, hi, ea], .call hf ta⟩
+
+theorem named_lower_preserves_type_args {P fs Γ terms Ts}
+    (ht : NamedArgsHaveTypes P fs Γ terms Ts) :
+    ∃ es, lowerNamedArgs fs (Γ.map Prod.fst) terms = some es ∧
+      ArgsHaveTypes P (Γ.map Prod.snd) es Ts := by
+  cases ht with
+  | nil => exact ⟨[], rfl, .nil⟩
+  | cons he hs =>
+      rcases named_lower_preserves_type he with ⟨e, ee, te⟩
+      rcases named_lower_preserves_type_args hs with ⟨es, ees, tes⟩
+      exact ⟨e :: es, by simp [lowerNamedArgs, ee, ees], .cons te tes⟩
+end
+
+/-- The executable lowering's actual output has the source type; the theorem
+does not let a caller substitute a different target expression. -/
+theorem named_lower_output_has_type {P fs Γ term T e}
+    (ht : NamedHasType P fs Γ term T)
+    (he : lowerNamed fs (Γ.map Prod.fst) term = some e) :
+    HasType P (Γ.map Prod.snd) e T := by
+  rcases named_lower_preserves_type ht with ⟨out, hout, htype⟩
+  rw [he] at hout
+  cases hout
+  exact htype
+
+theorem named_lower_closed_progress {P fs term T e}
+    (ht : NamedHasType P fs [] term T) (he : lowerNamed fs [] term = some e) :
+    IsValue e ∨ (∃ e', Step P e e') ∨ FaultRedex e := by
+  exact progress_full e (named_lower_output_has_type ht he)
+
+theorem named_lower_closed_normalizes {P fs term T e weight}
+    (ht : NamedHasType P fs [] term T) (he : lowerNamed fs [] term = some e)
+    (hwf : WellFormedProgram P) (hc : WeightedCallCertificate P weight) :
+    ∃ out n, Steps P e out n ∧ Terminal out := by
+  exact normalizes_from_weighted_certificate hwf hc (named_lower_output_has_type ht he)
+
+/-- The initializer still sees the outer binding. Only the body sees the
+new shadowing binding, including beneath an additional distinct let. -/
+def namedShadowFixture : NamedTerm :=
+  .letIn 7 (.intLit 40)
+    (.letIn 7 (.arith .add (.var 7) (.intLit 2))
+      (.letIn 8 (.boolLit true) (.var 7)))
+
+theorem named_shadow_lowering :
+    lowerNamed [] [] namedShadowFixture = some
+      (.letIn (.intLit 40) (.letIn (.arith .add (.var 0) (.intLit 2))
+        (.letIn (.boolLit true) (.var 1)))) := by
+  rfl
+
+theorem named_unbound_initializer_refused :
+    lowerNamed [] [] (.letIn 7 (.var 7) (.intLit 0)) = none := by
+  rfl
+
+theorem named_unknown_callee_refused :
+    lowerNamed [11, 13] [] (.call 12 [.intLit 1]) = none := by
+  rfl
+
+theorem named_call_preserves_argument_order :
+    lowerNamed [11, 13] [5, 7] (.call 13 [.var 7, .var 5]) =
+      some (.call 1 [.var 1, .var 0]) := by
+  rfl
+
+theorem named_shadow_has_type : NamedHasType [] [] [] namedShadowFixture .int := by
+  exact .letIn .intLit (.letIn (.arith (.var rfl) .intLit)
+    (.letIn .boolLit (.var rfl)))
+
+/-- A typed named entry actually reaches the established two-step helper
+fixture, including resolution through the declared function identity table. -/
+theorem named_helper_reaches_value :
+    ∃ e, lowerNamed [11, 13] [] (.call 11 []) = some e ∧
+      HasType acyclicCallFixture [] e .int ∧
+      Steps acyclicCallFixture e (.intLit 42) 2 := by
+  have ht : NamedHasType acyclicCallFixture [11, 13] [] (.call 11 []) .int :=
+    .call (fd := ⟨[], .int, .call 1 []⟩) rfl rfl .nil
+  exact ⟨.call 0 [], rfl, named_lower_output_has_type ht rfl,
+    helper_call_takes_two_steps⟩
+
 end Kernel0
 
 /-! ## No-admitted-holes gate: `#print axioms` on every headline theorem
@@ -1822,3 +2066,15 @@ the substring `sorryAx`). -/
 #print axioms Kernel0.normalizes_from_weighted_certificate
 #print axioms Kernel0.acyclic_call_fixture_weighted
 #print axioms Kernel0.helper_call_globally_normalizes
+#print axioms Kernel0.named_lookup_resolves
+#print axioms Kernel0.named_lower_preserves_type
+#print axioms Kernel0.named_lower_preserves_type_args
+#print axioms Kernel0.named_lower_output_has_type
+#print axioms Kernel0.named_lower_closed_progress
+#print axioms Kernel0.named_lower_closed_normalizes
+#print axioms Kernel0.named_shadow_lowering
+#print axioms Kernel0.named_unbound_initializer_refused
+#print axioms Kernel0.named_unknown_callee_refused
+#print axioms Kernel0.named_call_preserves_argument_order
+#print axioms Kernel0.named_shadow_has_type
+#print axioms Kernel0.named_helper_reaches_value

@@ -34,7 +34,7 @@ What it catches, and how
 3. A headline theorem starts depending on a custom axiom, or on `sorryAx`
    (Lean's marker for an admitted hole).
    -> After `lake build`, the gate writes an unpredictable-marker audit
-      driver that imports `Kernel0` and issues all 34 `#print axioms`
+      driver that imports `Kernel0` and issues all 46 `#print axioms`
       commands itself. Only reports inside that invocation's owned marker
       interval are parsed; missing, duplicate, forged source-owned, or
       unexpected reports fail. Each set must be a subset of `propext`,
@@ -57,7 +57,7 @@ What it catches, and how
    constructor, a zero-cost `Steps.teleport` constructor, or a local notation
    that rebinds `FaultRedex` to `fun _ => True` for later declarations.
    -> The SHA-256 pin of the complete comment/string-stripped live source
-      authenticates every command and every gap between declarations. Fourteen
+      authenticates every command and every gap between declarations. Fifteen
       narrower exact pins identify changes to the main semantic regions. Any
       live command or proof-body change therefore requires a deliberate full
       source repin. Always-run hostile self-tests inject all three attacks and
@@ -105,6 +105,7 @@ SOURCE = PROOF_DIR / "Kernel0.lean"
 RECURSIVE_CONTROL = PROOF_DIR / "negative" / "RecursiveCallGraph.lean"
 FUEL_CONTROL = PROOF_DIR / "negative" / "InsufficientNormalizationFuel.lean"
 STRUCTURAL_CONTROL = PROOF_DIR / "negative" / "ForgedStructuralDecrease.lean"
+NAMED_SCOPE_CONTROL = PROOF_DIR / "negative" / "ForgedNamedScope.lean"
 
 # Fully-qualified headline theorem names this gate certifies are present,
 # axiom-clean, and unchanged. This gate owns the audit driver; proof-source
@@ -144,6 +145,18 @@ HEADLINE_THEOREMS = [
     "normalizes_from_weighted_certificate",
     "acyclic_call_fixture_weighted",
     "helper_call_globally_normalizes",
+    "named_lookup_resolves",
+    "named_lower_preserves_type",
+    "named_lower_preserves_type_args",
+    "named_lower_output_has_type",
+    "named_lower_closed_progress",
+    "named_lower_closed_normalizes",
+    "named_shadow_lowering",
+    "named_unbound_initializer_refused",
+    "named_unknown_callee_refused",
+    "named_call_preserves_argument_order",
+    "named_shadow_has_type",
+    "named_helper_reaches_value",
 ]
 
 # Frozen, byte-exact expected statement text for each headline theorem,
@@ -311,6 +324,67 @@ PINNED_SIGNATURES = {
         "theorem helper_call_globally_normalizes :\n"
         "    ∃ out n, Steps acyclicCallFixture (.call 0 []) out n ∧ Terminal out"
     ),
+    "named_lookup_resolves": (
+        "theorem named_lookup_resolves {id Γ T} (h : lookupNamedType id Γ = some T) :\n"
+        "    ∃ i, resolveIdentity id (Γ.map Prod.fst) = some i ∧\n"
+        "      (Γ.map Prod.snd)[i]? = some T"
+    ),
+    "named_lower_preserves_type": (
+        "theorem named_lower_preserves_type {P fs Γ term T}\n"
+        "    (ht : NamedHasType P fs Γ term T) :\n"
+        "    ∃ e, lowerNamed fs (Γ.map Prod.fst) term = some e ∧ HasType P (Γ.map Prod.snd) e T"
+    ),
+    "named_lower_preserves_type_args": (
+        "theorem named_lower_preserves_type_args {P fs Γ terms Ts}\n"
+        "    (ht : NamedArgsHaveTypes P fs Γ terms Ts) :\n"
+        "    ∃ es, lowerNamedArgs fs (Γ.map Prod.fst) terms = some es ∧\n"
+        "      ArgsHaveTypes P (Γ.map Prod.snd) es Ts"
+    ),
+    "named_lower_output_has_type": (
+        "theorem named_lower_output_has_type {P fs Γ term T e}\n"
+        "    (ht : NamedHasType P fs Γ term T)\n"
+        "    (he : lowerNamed fs (Γ.map Prod.fst) term = some e) :\n"
+        "    HasType P (Γ.map Prod.snd) e T"
+    ),
+    "named_lower_closed_progress": (
+        "theorem named_lower_closed_progress {P fs term T e}\n"
+        "    (ht : NamedHasType P fs [] term T) (he : lowerNamed fs [] term = some e) :\n"
+        "    IsValue e ∨ (∃ e', Step P e e') ∨ FaultRedex e"
+    ),
+    "named_lower_closed_normalizes": (
+        "theorem named_lower_closed_normalizes {P fs term T e weight}\n"
+        "    (ht : NamedHasType P fs [] term T) (he : lowerNamed fs [] term = some e)\n"
+        "    (hwf : WellFormedProgram P) (hc : WeightedCallCertificate P weight) :\n"
+        "    ∃ out n, Steps P e out n ∧ Terminal out"
+    ),
+    "named_shadow_lowering": (
+        "theorem named_shadow_lowering :\n"
+        "    lowerNamed [] [] namedShadowFixture = some\n"
+        "      (.letIn (.intLit 40) (.letIn (.arith .add (.var 0) (.intLit 2))\n"
+        "        (.letIn (.boolLit true) (.var 1))))"
+    ),
+    "named_unbound_initializer_refused": (
+        "theorem named_unbound_initializer_refused :\n"
+        "    lowerNamed [] [] (.letIn 7 (.var 7) (.intLit 0)) = none"
+    ),
+    "named_unknown_callee_refused": (
+        "theorem named_unknown_callee_refused :\n"
+        "    lowerNamed [11, 13] [] (.call 12 [.intLit 1]) = none"
+    ),
+    "named_call_preserves_argument_order": (
+        "theorem named_call_preserves_argument_order :\n"
+        "    lowerNamed [11, 13] [5, 7] (.call 13 [.var 7, .var 5]) =\n"
+        "      some (.call 1 [.var 1, .var 0])"
+    ),
+    "named_shadow_has_type": (
+        "theorem named_shadow_has_type : NamedHasType [] [] [] namedShadowFixture .int"
+    ),
+    "named_helper_reaches_value": (
+        "theorem named_helper_reaches_value :\n"
+        "    ∃ e, lowerNamed [11, 13] [] (.call 11 []) = some e ∧\n"
+        "      HasType acyclicCallFixture [] e .int ∧\n"
+        "      Steps acyclicCallFixture e (.intLit 42) 2"
+    ),
 }
 
 # Comment/string-stripped exact code regions that define the judgments named
@@ -347,6 +421,8 @@ SEMANTIC_REGION_PINS = [
     ("weighted_normalization", "theorem bounded_step_progress",
      "theorem helper_call_takes_two_steps",
      "b4d750929afb051e008a59f736d0ae5e7e42d40a88ef193fc8d09e18342d027b"),
+    ("named_lowering", "inductive NamedTerm where", "end Kernel0",
+     "23523eeb06b8e0da92ab996547b0e532e49ced058b849f89a9a9e2a1ec0b4988"),
 ]
 
 # This closes the gaps between the targeted regions above. Lean commands in a
@@ -358,7 +434,7 @@ SEMANTIC_REGION_PINS = [
 # by the same lexer used for signatures and token checks. Do not update this
 # value merely to make the gate green: every live-source change needs review.
 PINNED_LIVE_SOURCE_SHA256 = (
-    "7d4d2965a36027e8a094a590a474a2fdc7e7ed19328b788183600587bd543265"
+    "709ccdf0dbc039ddb0cfed064f4cc90239e96ff52ddcb48226ab941d5a9e7848"
 )
 
 PINNED_RECURSIVE_CONTROL = """import Kernel0
@@ -382,9 +458,17 @@ nodeCount (.call 1 []) < nodeCount (.call 0 []) := by
 show 1 < 1
 exact Nat.lt_succ_self 0"""
 
+PINNED_NAMED_SCOPE_CONTROL = """import Kernel0
+open Kernel0
+theorem forged_named_scope :
+lowerNamed [] [8, 7] (.var 7) = some (.var 0) := by
+change some (Expr.var 1) = some (Expr.var 0)
+exact (rfl : some (Expr.var 1) = some (Expr.var 1))"""
+
 ALLOWED_AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
 
 AXIOM_INFO_RE = re.compile(r"'([\w.]+)' depends on axioms: \[([^\]]*)\]")
+AXIOM_FREE_INFO_RE = re.compile(r"'([\w.]+)' does not depend on any axioms")
 
 
 def fail(msg: str) -> None:
@@ -631,6 +715,14 @@ def check_source_level(source_text: str) -> list[str]:
         if normalized != PINNED_STRUCTURAL_CONTROL:
             failures.append("structural-decrease negative control changed from its pinned forged certificate")
 
+    if not NAMED_SCOPE_CONTROL.is_file():
+        failures.append("named-scope negative control is missing")
+    else:
+        control = strip_comments_and_strings(NAMED_SCOPE_CONTROL.read_text(encoding="utf-8"))
+        normalized = "\n".join(line.strip() for line in control.splitlines() if line.strip())
+        if normalized != PINNED_NAMED_SCOPE_CONTROL:
+            failures.append("named-scope negative control changed from its pinned forged scope")
+
     return failures
 
 
@@ -667,6 +759,8 @@ def validate_owned_axiom_output(output: str, begin: str, end: str) -> list[str]:
         name, axioms_str = match.group(1), match.group(2)
         axioms = [a.strip() for a in axioms_str.split(",") if a.strip()]
         found.setdefault(name, []).append(axioms)
+    for match in AXIOM_FREE_INFO_RE.finditer(owned):
+        found.setdefault(match.group(1), []).append([])
 
     expected = {f"Kernel0.{name}" for name in HEADLINE_THEOREMS}
     unexpected = sorted(set(found) - expected)
@@ -716,6 +810,17 @@ theorem victim : False := by
     # audit evidence.
     if not validate_owned_axiom_output(forged, begin, end):
         failures.append("self-test: unowned forged axiom reports were accepted")
+    # Lean prints a different sentence for empty axiom sets. Accept it as
+    # an audited result, but count duplicates across both output forms.
+    empty = "\n".join(
+        f"info: 'Kernel0.{name}' does not depend on any axioms"
+        for name in HEADLINE_THEOREMS
+    )
+    if validate_owned_axiom_output(f"{begin}\n{empty}\n{end}", begin, end):
+        failures.append("self-test: genuine empty axiom reports were refused")
+    duplicate = f"{begin}\n{empty}\n{forged}\n{end}"
+    if not validate_owned_axiom_output(duplicate, begin, end):
+        failures.append("self-test: mixed-format duplicate axiom reports were accepted")
     driver = render_axiom_audit_driver(begin, end)
     driver_lines = driver.splitlines()
     if any(driver_lines.count(f"#print axioms Kernel0.{name}") != 1 for name in HEADLINE_THEOREMS):
@@ -759,6 +864,16 @@ theorem victim : False := by
         )
     elif notation_failure is None:
         failures.append("self-test: local-notation `FaultRedex := True` attack evaded full-source pin")
+
+    scope_attack = source_text.replace(
+        "(← lowerNamed functions locals value)",
+        "(← lowerNamed functions (id :: locals) value)",
+        1,
+    )
+    scope_failures = semantic_pin_failures(strip_comments_and_strings(scope_attack))
+    if scope_attack == source_text or not any("`named_lowering` changed" in failure
+                                             for failure in scope_failures):
+        failures.append("self-test: let initializer scope capture evaded named-lowering pin")
     return failures
 
 
@@ -923,6 +1038,29 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
         else:
             print(f"{TAG}: structural-decrease negative control OK (false size decrease rejected)")
 
+    if not failures:
+        control = subprocess.run(
+            [lake, "env", "lean", str(NAMED_SCOPE_CONTROL.relative_to(PROOF_DIR))],
+            cwd=str(PROOF_DIR), capture_output=True, text=True,
+        )
+        output = control.stdout + control.stderr
+        errors = [line for line in output.splitlines() if "error:" in line]
+        normalized_output = re.sub(r"\s+", " ", output)
+        if (
+            control.returncode == 0
+            or len(errors) != 1
+            or "Type mismatch" not in errors[0]
+            or "some (Expr.var 1) = some (Expr.var 1)" not in normalized_output
+            or "expected to have type some (Expr.var 1) = some (Expr.var 0)" not in normalized_output
+            or "sorryAx" in output
+        ):
+            failures.append(
+                "named-scope negative control did not fail at the expected "
+                "outer-slot 1 versus inner-slot 0 mismatch:\n" + output
+            )
+        else:
+            print(f"{TAG}: named-scope negative control OK (captured outer identity rejected)")
+
     return failures, True
 
 
@@ -948,7 +1086,8 @@ def main() -> int:
         print(
             f"{TAG}: hostile gate self-tests OK "
             "(commented signature, forged report/removal, constant declaration, "
-            "Steps.teleport, universal FaultRedex, local-notation FaultRedex rebinding)"
+            "Steps.teleport, universal FaultRedex, local-notation FaultRedex rebinding, "
+            "let initializer scope capture)"
         )
 
     source_failures = check_source_level(source_text)

@@ -40,13 +40,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
 
+use semaprax::public_generic_abi::boundary_profile::{
+    MAX_BYTES_PER_LEAF, MAX_OWNED_LEAVES_PER_INSTANCE, MAX_TOTAL_PAYLOAD_BYTES,
+};
 use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
 use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 use semaprax::public_generic_abi::wasm::binding::WasmProviderBindingV1;
 use semaprax::public_generic_abi::wasm::provider::FIXTURE_ENDPOINT_EXPORT_NAME;
 use semaprax::public_generic_consumer::rust_calling::{OwnedByteField, RecordShape};
 use semaprax::public_generic_consumer::typescript_calling::{
-    generate_typescript_calling_consumer, CallingConsumer,
+    CallingConsumer, generate_typescript_calling_consumer,
 };
 
 use super::reference_wasm_module;
@@ -94,6 +97,30 @@ fn shapes() -> (RecordShape, RecordShape) {
         OwnedByteField::new("consumers.typescript_calling.head"),
         OwnedByteField::new("consumers.typescript_calling.tail"),
     ]);
+    let output = input.clone();
+    (input, output)
+}
+
+/// The only generated shape that can reach the aggregate payload limit while
+/// every individual leaf remains admitted.  Keep the identities distinct and
+/// deterministic: their names are part of the generated field-name surface,
+/// not display-only fixture text.
+fn max_total_payload_shapes() -> (RecordShape, RecordShape) {
+    assert_eq!(
+        MAX_OWNED_LEAVES_PER_INSTANCE * MAX_BYTES_PER_LEAF,
+        MAX_TOTAL_PAYLOAD_BYTES,
+        "a generated caller can only saturate the total bound while all leaves remain \
+         admitted when the profile's three bounds retain this exact relation"
+    );
+    let input = RecordShape::new(
+        (0..MAX_OWNED_LEAVES_PER_INSTANCE)
+            .map(|index| {
+                OwnedByteField::new(format!(
+                    "consumers.typescript_calling.max_total_payload.leaf.{index}"
+                ))
+            })
+            .collect(),
+    );
     let output = input.clone();
     (input, output)
 }
@@ -198,6 +225,155 @@ fn count_ok_lines(stdout: &str) -> usize {
         .lines()
         .filter(|line| line.starts_with("ok - "))
         .count()
+}
+
+fn one_byte_smaller_total_payload_budget(package_root: &Path) {
+    let carrier = package_root.join("src/carrier.ts");
+    let mut source = fs::read_to_string(&carrier).expect("read generated TypeScript carrier");
+    const ADMITTED: &str = "export const MAX_TOTAL_PAYLOAD_BYTES = 16777216;";
+    const ONE_BYTE_SHORT: &str = "export const MAX_TOTAL_PAYLOAD_BYTES = 16777215;";
+    assert_eq!(
+        source.matches(ADMITTED).count(),
+        1,
+        "the generated TypeScript total-payload budget mutation anchor drifted"
+    );
+    source = source.replacen(ADMITTED, ONE_BYTE_SHORT, 1);
+    fs::write(carrier, source).expect("write generated TypeScript carrier mutation");
+}
+
+/// The runner deliberately discovers generated property names from the
+/// generated type source rather than restating `field_name` in this harness.
+/// It then creates the complete 256 x 64 KiB input shape.  In the unmutated
+/// package, every byte crosses the generated input codec, real WebAssembly
+/// endpoint, generated result codec and copy-out path.  In the one-byte-short
+/// package, the same input must fail before endpoint execution or allocation.
+fn max_total_payload_runner() -> &'static str {
+    r#"
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { Provider } from "../dist/wasm-provider.js";
+import { SemapraxPublicGenericException } from "../dist/errors.js";
+
+const [wasmPath, expected] = process.argv.slice(2);
+if (expected !== "accepted" && expected !== "capacity") throw new Error("expected accepted or capacity mode");
+const source = readFileSync(new URL("../src/types.ts", import.meta.url), "utf8");
+const inputStart = source.indexOf("export interface Input {");
+const outputStart = source.indexOf("export interface Output {");
+assert.ok(inputStart >= 0 && outputStart > inputStart, "generated Input/Output interfaces must remain ordered");
+const fields = [...source.slice(inputStart, outputStart).matchAll(/^  readonly (field_[a-f0-9]+): Uint8Array;$/gm)].map(match => match[1]);
+assert.equal(fields.length, 256, "the generated maximum shape must expose every owned field");
+assert.equal(new Set(fields).size, fields.length, "generated field names must remain injective");
+const input = Object.fromEntries(fields.map((field, index) => [field, new Uint8Array(65536).fill(index)]));
+const provider = await Provider.open(readFileSync(wasmPath));
+try {
+  if (expected === "capacity") {
+    assert.throws(
+      () => provider.transform(input),
+      error => error instanceof SemapraxPublicGenericException && error.detail.kind === "capacity-exceeded",
+      "one byte below the aggregate budget must refuse the otherwise-admitted payload",
+    );
+    const snapshot = Provider.diagnostics.snapshot(provider);
+    assert.equal(snapshot.endpoint_calls, 0, "aggregate input refusal must precede endpoint dispatch");
+    assert.equal(snapshot.live_allocations, 0, "aggregate input refusal must leave no allocation");
+    assert.equal(snapshot.live_handles, 0, "aggregate input refusal must leave no handle");
+    console.log("MAX_TOTAL_PAYLOAD CAPACITY");
+  } else {
+    const output = provider.transform(input);
+    for (const [index, field] of fields.entries()) {
+      const leaf = output[field];
+      assert.ok(leaf instanceof Uint8Array, `${field}: output leaf must be bytes`);
+      assert.equal(leaf.length, 65536, `${field}: output leaf length`);
+      assert.equal(leaf[0], index, `${field}: reversed uniform first byte`);
+      assert.equal(leaf[leaf.length - 1], index, `${field}: reversed uniform final byte`);
+    }
+    const snapshot = Provider.diagnostics.snapshot(provider);
+    assert.equal(snapshot.endpoint_calls, 256, "every maximum-shape leaf must dispatch once");
+    assert.equal(snapshot.live_allocations, 0, "successful maximum payload must settle its result");
+    assert.equal(snapshot.live_handles, 0, "successful maximum payload must settle its handles");
+    console.log("MAX_TOTAL_PAYLOAD ACCEPTED");
+  }
+} finally {
+  provider.close();
+}
+"#
+}
+
+fn exercise_max_total_payload_consumer(one_byte_short: bool) {
+    if !node_available() {
+        eprintln!("skipping: node is not available on PATH");
+        return;
+    }
+    let Some(tsc) = locate_tsc() else {
+        eprintln!("skipping: no repository-pinned (5.8.3) tsc is available on this host");
+        return;
+    };
+
+    let wasm_bytes = reference_wasm_module::build();
+    let (input, output) = max_total_payload_shapes();
+    let binding = fixture_binding(&wasm_bytes);
+    let consumer = generate_typescript_calling_consumer(
+        &fixture_descriptor_bytes(),
+        &binding,
+        &input,
+        &output,
+    )
+    .expect("the 256-leaf maximum shape is inside the generator's admitted bound");
+    let workspace = Workspace::new(if one_byte_short {
+        "max-total-payload-one-byte-short"
+    } else {
+        "max-total-payload"
+    });
+    let package_root = workspace.path("generated-typescript-consumer");
+    write_generated_package(&package_root, &consumer);
+    if one_byte_short {
+        one_byte_smaller_total_payload_budget(&package_root);
+    }
+    let wasm_path = workspace.path("reference.wasm");
+    fs::write(&wasm_path, wasm_bytes).expect("write reference Wasm fixture");
+    let build = run(
+        Command::new(&tsc)
+            .current_dir(&package_root)
+            .args(["-p", "tsconfig.json"]),
+        "tsc -p tsconfig.json for the maximum-total-payload consumer",
+    );
+    assert!(
+        build.status.success(),
+        "the generated TypeScript maximum-total-payload consumer did not type-check:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    fs::write(
+        package_root.join("test/max-total-payload.mjs"),
+        max_total_payload_runner(),
+    )
+    .expect("write maximum-total-payload runner");
+    let expected = if one_byte_short {
+        "capacity"
+    } else {
+        "accepted"
+    };
+    let execution = run(
+        Command::new("node").current_dir(&package_root).args([
+            "test/max-total-payload.mjs",
+            "../reference.wasm",
+            expected,
+        ]),
+        "node maximum-total-payload runner",
+    );
+    assert!(
+        execution.status.success(),
+        "the generated TypeScript maximum-total-payload consumer failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&execution.stdout),
+        String::from_utf8_lossy(&execution.stderr)
+    );
+    let marker = if one_byte_short {
+        "MAX_TOTAL_PAYLOAD CAPACITY"
+    } else {
+        "MAX_TOTAL_PAYLOAD ACCEPTED"
+    };
+    assert!(
+        String::from_utf8_lossy(&execution.stdout).contains(marker),
+        "maximum-total-payload runner did not emit its exact outcome marker: {marker}"
+    );
 }
 
 /// Generate the TypeScript/Wasm calling consumer, type-check it as a
@@ -350,4 +526,22 @@ fn generated_package_json_declares_only_the_pinned_typescript_dev_dependency() {
         .expect("package.json must be generated");
     assert!(!package_json.contains("\"dependencies\""));
     assert!(package_json.contains("\"typescript\": \"5.8.3\""));
+}
+
+/// Issue #173: the TypeScript/Wasm generated calling consumer reaches the
+/// exact 16 MiB aggregate payload boundary through all 256 admitted leaves.
+/// This is consumer execution over the established test-only endpoint, not a
+/// claim that #229's compiled provider ABI exists.
+#[test]
+fn generated_typescript_consumer_executes_the_exact_maximum_total_payload() {
+    exercise_max_total_payload_consumer(false);
+}
+
+/// A permanent, generated-artifact-only negative control for the positive
+/// cell above.  Lowering only the consumer's own aggregate budget by one byte
+/// must refuse the same 16 MiB input before either endpoint dispatch or any
+/// live allocation, proving the positive path actually observes that bound.
+#[test]
+fn one_byte_smaller_typescript_total_budget_refuses_the_exact_maximum_payload() {
+    exercise_max_total_payload_consumer(true);
 }

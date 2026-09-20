@@ -3,21 +3,47 @@
 Audience: release engineers, platform maintainers, and security reviewers
 with access to a real Windows host or a Windows CI runner.
 
-Status: **code lands with this revision, and it is unexecuted and
-untypechecked on every host that authored it.** Every execution claim in this
-document is `HUMAN_BLOCKED: needs a Windows host` -- both authoring sessions
-ran on macOS arm64 with no `rustup`, no `*-pc-windows-*` target, and no
-Windows toolchain, and no cross-compilation or emulated substitute is treated
-as Windows evidence anywhere below. This revision adds the confinement
-primitive's Win32 wiring (`#[cfg(windows)]`, never compiled here) plus its
-host-independent sealed-capsule, admission-ordering, and settlement logic
-(compiled and tested on every host this crate builds on, this one included).
-See [Current state](#current-state-unchanged-by-the-first-revision) for
-exactly what changed and what a Windows-capable session must still verify.
+Status: **code lands with this revision; it is unexecuted on every host that
+has touched it, but its `#[cfg(windows)]` source has one later hosted Windows
+compilation witness.** Every *execution* claim in this document remains
+`HUMAN_BLOCKED: needs a Windows host` -- both authoring sessions ran on macOS
+arm64 with no `rustup`, no `*-pc-windows-*` target, and no Windows toolchain,
+and no cross-compilation or emulated substitute is treated as Windows evidence
+anywhere below. This revision adds the confinement primitive's Win32 wiring
+plus its host-independent sealed-capsule, admission-ordering, and settlement
+logic (compiled and tested on every host this crate builds on, this one
+included). See [Hosted Windows compilation evidence](#hosted-windows-compilation-evidence-type-check-only)
+and [Current state](#current-state-unchanged-by-the-first-revision) for the
+exact, deliberately narrow evidence and remaining verification.
 
 The macOS half of this split is
 [DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1](DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1.md),
 which does carry real local execution evidence.
+
+## Hosted Windows compilation evidence (type-check only)
+
+The earlier "never compiled" statement is no longer accurate. Hosted
+[run 35462242188](https://github.com/wavect/semaprax/actions/runs/35462242188)
+checked out `7cab8aa8fa67d412fa82643ab8139cbd9eb00b43`, which includes the
+Windows confinement module and `94adc21b`'s later
+`GetCurrentProcess` import correction to `primitive.rs`. Its overall workflow
+conclusion was failure for unrelated jobs, but the successful
+[Public Native Rust SDK v1 (windows-latest) job 105948054658](https://github.com/wavect/semaprax/actions/runs/35462242188/job/105948054658)
+compiled `semaprax-native-rust-interop-platform-sys` on Windows Server 2025
+while running this exact command:
+
+```text
+cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib tests::windows_archive::windows_real_brepro_archive_round_trips_through_exact_admission -- --exact --nocapture --test-threads=1
+```
+
+The selected `tests::windows_archive` test caused successful library
+compilation, which type-checks the `#[cfg(windows)]`
+`doctor::windows_confinement::primitive` source present in that checkout. It
+executed no `doctor::windows_confinement` function: it did **not** create a
+restricted token, start a confined child, assign a job, apply an ACL, or
+observe settlement. It is compilation evidence only, not a confinement or
+hostile-input execution witness. `7cab8aa8` is an ancestor of the tree audited
+for this update; no claim is made about a later unrun commit.
 
 ## Why the first revision had no accompanying code, and why this one does
 
@@ -50,9 +76,9 @@ for two reasons the coordinating session judged sufficient to proceed:
    exact vendored `windows-sys = "=0.61.2"` source this crate's `Cargo.toml`
    already pins, using only the `windows-sys` features that `Cargo.toml`
    (outside this session's lease) already enables. That is real diligence,
-   raising confidence the new module compiles; it is **not** a substitute for
-   a Windows toolchain actually compiling it, and this document does not
-   claim otherwise anywhere below.
+   raised confidence before a Windows toolchain compiled it. The later hosted
+   compilation witness above now proves type-checking for that exact checkout;
+   it remains **not** a substitute for executing the confinement primitive.
 
 The `Cargo.toml` constraint from the first revision still holds: the
 AppContainer filesystem-confinement route needs `Win32_Security_Isolation`,
@@ -87,15 +113,16 @@ import `doctor::unix::launch::darwin`'s private types):
   Win32 call; compiles and its tests run on every host).
 - `primitive.rs` -- `#[cfg(windows)]` restricted token, tightened job object,
   ACL'd scratch root, sealed-capsule-gated suspended spawn, and settlement
-  observation. Never compiled or executed on this authoring host; see its own
-  module documentation for the exact simplifications it makes and the
+  observation. Never compiled or executed on this authoring host; it has the
+  hosted Windows type-check witness above, but no execution witness. See its
+  own module documentation for the exact simplifications it makes and the
   specific claims it does and does not make about itself.
 
 This is still a **standalone confinement primitive**, not the production
 provisioner: it is not wired into any ordinary CLI route or into
 `provisioned_doctor_*`, per the issue's explicit request.
 
-## Confinement primitive (implemented; unexecuted and untypechecked so far)
+## Confinement primitive (implemented; hosted type-checked, unexecuted)
 
 Windows has no namespace or cgroup-v2 equivalent. The three building blocks
 this contract proposed, all already partially present in `windows-sys`'
@@ -141,8 +168,8 @@ disable/delete/restrict lists (not the fuller "also disable the caller's own
 logon SID" refinement this document originally proposed). That fuller
 refinement needs walking the calling token's `TokenGroups` to find the
 `SE_GROUP_LOGON_ID` entry -- a variable-length structure this session judged
-too easy to get subtly wrong with no way to compile-check it, let alone run
-it. `DISABLE_MAX_PRIVILEGE` alone is still a real, meaningful restriction
+too easy to get subtly wrong before any Windows compilation, let alone runtime
+execution. `DISABLE_MAX_PRIVILEGE` alone is still a real, meaningful restriction
 (the resulting token holds no privileges at all), and the logon-SID
 refinement is left as an explicit follow-up for a Windows-capable session,
 recorded in `primitive.rs`'s own module documentation. `Win32_Security` is
@@ -315,7 +342,7 @@ are specified here as the exact delta a maintainer should land.
 | Criterion | State |
 |---|---|
 | Versioned Windows contract, cross-referenced from V1 | met |
-| Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; **`#[cfg(windows)]`, never compiled or run on any host that has touched it** -- see [Nonclaims](#nonclaims) |
+| Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted Windows type-checked for exact checkout `7cab8aa8` in [job 105948054658](https://github.com/wavect/semaprax/actions/runs/35462242188/job/105948054658), but never executed -- see [Nonclaims](#nonclaims) |
 | Sealed-capsule consumption | structural body decode only (`doctor::windows_confinement::capsule`, host-independent, tested on every host); signature verification still needs `semaprax-doctor-capsule` as a `cfg(windows)` `Cargo.toml` dependency, outside every session's lease so far |
 | Hostile-input tests for the host-independent parts | 29 tests across `capsule`, `refusal`, and `settlement` pass on this authoring host (macOS arm64); `cargo test -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement` |
 | Hostile-input tests for the Win32 primitive itself | not attempted: needs a live process, a real job object, and a real token -- `HUMAN_BLOCKED: needs a Windows host` |
@@ -326,10 +353,11 @@ are specified here as the exact delta a maintainer should land.
 ## Nonclaims
 
 This contract does not: claim that `doctor::windows_confinement::primitive`
-has been compiled, type-checked, or executed anywhere -- every symbol it
-calls was cross-checked by hand against the vendored `windows-sys` source,
-which raises confidence but is not a substitute for a Windows toolchain
-actually building it; claim the existing ordinary-probe job-object
+has been executed anywhere. The hosted Windows compilation recorded above
+type-checks only exact checkout `7cab8aa8`; it does not establish an execution,
+confinement, token, job-object, ACL, filesystem, or settlement claim. Earlier
+hand-checking against vendored `windows-sys` was diligence, not substitute
+execution evidence; claim the existing ordinary-probe job-object
 confinement in `windows.rs` as evidence of production-grade sandboxing (it
 confines process *lifetime*, not filesystem or network access, and was not
 designed as a security boundary); claim Linux or macOS evidence proves

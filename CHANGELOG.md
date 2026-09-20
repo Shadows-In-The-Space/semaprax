@@ -8,6 +8,26 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a deterministic, non-executing cross-language benchmark reproduction
+  capsule that binds exact task and adapter inventories, equivalence files,
+  public and hidden trees (including empty directories), and per-language
+  adapter policy. Stable descriptor-backed reads reject path swaps, and a
+  matching capsule says only that scoring inputs match, never that a model or
+  toolchain ran (#211).
+
+- Compose the task-service reference application and generated service
+  scaffold with `std.tracing`'s pure trace-context and secret-classification
+  policy now that reachability pruning admits the dependency closure. Valid,
+  malformed, and caller-classified-secret cases join the existing backend
+  parity gate; no logging, span emission/export, or host authority is added
+  (#194).
+
+- Record the first hosted Windows compilation evidence for the production
+  provisioner confinement module. The successful Windows Server 2025 job
+  compiled the `cfg(windows)` code at the exact recorded revision but selected
+  no confinement test function, so runtime confinement evidence remains open
+  (#236).
+
 - Add an offline, unavailable-only admission gate for future external coding-
   agent baselines. It binds the owner-pinned task inventory bytes and Zero
   source revision to closed toolchain, interface, model, and reviewed-port

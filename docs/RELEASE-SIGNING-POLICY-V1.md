@@ -142,10 +142,17 @@ never inferred from this document alone.
 
 ### `semaprax.release-signature-claim.v1`
 
-Not built by any script in this repository today (there is no signing key
-to produce a real one). Defined here so `src/release_provenance.rs` has
-something concrete to verify the *binding* of, and so the checklist below
-can point at an exact target shape for the day a real signer exists.
+`scripts/release-signature-claim.py` deterministically projects this document
+from the exact final provenance bytes and a structurally complete `cosign
+sign-blob` v0.3 message-signature bundle. It derives the subject digest and pinned per-tag
+identity itself, and copies only the bundle's canonical base64 signature and
+certificate encodings. It does **not** sign, verify a signature, contact a
+transparency log, select/download a trust root, read a CI environment
+variable, or publish. The independent Rust consumer still parses the complete
+closed bundle framing before a caller-supplied offline verifier receives it.
+The current workflow does not invoke this builder or publish a claim/root yet;
+the script is deliberately a reviewable offline prerequisite rather than a
+claim that a signed release already exists.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -184,6 +191,32 @@ the other is expected.
   and the claim's opaque `signature` and `certificate` strings must be the
   exact strings in that bundle. A claim is therefore not an independently
   editable second signature representation.
+
+The claim builder can be replayed without a signing capability:
+
+```sh
+python3 scripts/release-signature-claim.py \
+  --provenance dist/release-provenance.json \
+  --bundle dist/release-provenance.bundle \
+  --output dist/release-signature-claim.json
+python3 scripts/release-signature-claim.py \
+  --provenance dist/release-provenance.json \
+  --bundle dist/release-provenance.bundle \
+  --check dist/release-signature-claim.json
+```
+
+The second command requires a byte-exact deterministic rendering. A changed
+provenance byte, a replayed bundle message digest, non-canonical copied base64,
+or a claim serialization drift fails closed. This replay is only preparation
+for a later explicit cryptographic verifier; it is not a cryptographic result.
+The builder reads at most 4 MiB of provenance, 2 MiB of bundle material, and
+64 KiB for an existing claim under `--check`, so a hostile replay path cannot
+request an unbounded allocation. It rejects duplicate JSON keys. Output uses a
+same-directory temporary file followed by replacement; the caller still owns
+and must trust the selected parent directory. The builder validates only the
+identity/digest and closed material projection it consumes; the independent
+Rust decoder remains responsible for the complete provenance and Rekor-entry
+contract before any cryptographic verifier is invoked.
 
 The parser admits one through eight fully shaped v0.3 Rekor entries for the
 content kind being consumed: `hashedrekord` for the message-signature bundle and

@@ -12,6 +12,7 @@ use function @id("catalog_normalizer.batch.record-count") from catalog_normalize
 use function @id("catalog_normalizer.batch.line-start") from catalog_normalizer.batch as line_start;
 use function @id("catalog_normalizer.batch.line-end") from catalog_normalizer.batch as line_end;
 use function @id("catalog_normalizer.batch.first-failure") from catalog_normalizer.batch as first_failure;
+use function @id("catalog_normalizer.batch.first-enriched-failure") from catalog_normalizer.batch as first_enriched_failure;
 use function @id("catalog_normalizer.batch.failure-category") from catalog_normalizer.batch as failure_category;
 use function @id("catalog_normalizer.batch.failure-record-plus-one") from catalog_normalizer.batch as failure_record_plus_one;
 use function @id("catalog_normalizer.batch.failure-offset") from catalog_normalizer.batch as failure_offset;
@@ -19,6 +20,9 @@ use function @id("catalog_normalizer.record.id-value") from catalog_normalizer.r
 use function @id("catalog_normalizer.record.quantity-value") from catalog_normalizer.record as record_quantity_value;
 use function @id("catalog_normalizer.record.quantity-or") from catalog_normalizer.record as quantity_or;
 use function @id("catalog_normalizer.record.label-value") from catalog_normalizer.record as record_label_value;
+use function @id("catalog_normalizer.enrichment.outcome") from catalog_normalizer.enrichment as enrichment_outcome;
+use function @id("catalog_normalizer.enrichment.has-category") from catalog_normalizer.enrichment as enrichment_has_category;
+use function @id("catalog_normalizer.enrichment.category-value") from catalog_normalizer.enrichment as enrichment_category_value;
 
 // This module owns bounded JSON string decoding and label normalization.
 // The batch module owns line boundaries. Both are application code; full
@@ -181,19 +185,19 @@ fn i64_byte(value: i64, index: usize) -> u8
 @id("catalog_normalizer.app.literal-byte")
 fn literal_byte(kind: usize, index: usize) -> u8
 {
-    match kind { 1usize => { let value = "{\"status\":\"error\",\"category\":\""; text_byte(string_as_str(value), index) }, 2usize => { let value = "\",\"record_index\":"; text_byte(string_as_str(value), index) }, 3usize => { let value = ",\"byte_offset\":"; text_byte(string_as_str(value), index) }, 4usize => { let value = "}\n"; text_byte(string_as_str(value), index) }, 5usize => { let value = "{\"status\":\"ok\",\"count\":"; text_byte(string_as_str(value), index) }, 6usize => { let value = ",\"total_quantity\":"; text_byte(string_as_str(value), index) }, 7usize => { let value = ",\"records\":["; text_byte(string_as_str(value), index) }, 8usize => { let value = "]}\n"; text_byte(string_as_str(value), index) }, 9usize => { let value = "{\"id\":\""; text_byte(string_as_str(value), index) }, 10usize => { let value = "\",\"label\":\""; text_byte(string_as_str(value), index) }, _ => { let value = "\",\"quantity\":"; text_byte(string_as_str(value), index) }, }
+    match kind { 1usize => { let value = "{\"status\":\"error\",\"category\":\""; text_byte(string_as_str(value), index) }, 2usize => { let value = "\",\"record_index\":"; text_byte(string_as_str(value), index) }, 3usize => { let value = ",\"byte_offset\":"; text_byte(string_as_str(value), index) }, 4usize => { let value = "}\n"; text_byte(string_as_str(value), index) }, 5usize => { let value = "{\"status\":\"ok\",\"count\":"; text_byte(string_as_str(value), index) }, 6usize => { let value = ",\"total_quantity\":"; text_byte(string_as_str(value), index) }, 7usize => { let value = ",\"records\":["; text_byte(string_as_str(value), index) }, 8usize => { let value = "]}\n"; text_byte(string_as_str(value), index) }, 9usize => { let value = "{\"id\":\""; text_byte(string_as_str(value), index) }, 10usize => { let value = "\",\"label\":\""; text_byte(string_as_str(value), index) }, 11usize => { let value = "\",\"quantity\":"; text_byte(string_as_str(value), index) }, 12usize => { let value = ",\"category\":"; text_byte(string_as_str(value), index) }, _ => { let value = "null"; text_byte(string_as_str(value), index) }, }
 }
 
 @id("catalog_normalizer.app.category-len")
 fn category_len(category: usize) -> usize
 {
-    match category { 1usize => 15usize, 2usize => 12usize, 3usize => 14usize, 4usize => 6usize, 5usize => 12usize, _ => 8usize, }
+    match category { 1usize => 15usize, 2usize => 12usize, 3usize => 14usize, 4usize => 6usize, 5usize => 12usize, 6usize => 8usize, 7usize => 15usize, 8usize => 16usize, _ => 18usize, }
 }
 
 @id("catalog_normalizer.app.category-byte")
 fn category_byte(category: usize, index: usize) -> u8
 {
-    match category { 1usize => { let value = "oversized_input"; text_byte(string_as_str(value), index) }, 2usize => { let value = "invalid_utf8"; text_byte(string_as_str(value), index) }, 3usize => { let value = "malformed_json"; text_byte(string_as_str(value), index) }, 4usize => { let value = "schema"; text_byte(string_as_str(value), index) }, 5usize => { let value = "duplicate_id"; text_byte(string_as_str(value), index) }, _ => { let value = "overflow"; text_byte(string_as_str(value), index) }, }
+    match category { 1usize => { let value = "oversized_input"; text_byte(string_as_str(value), index) }, 2usize => { let value = "invalid_utf8"; text_byte(string_as_str(value), index) }, 3usize => { let value = "malformed_json"; text_byte(string_as_str(value), index) }, 4usize => { let value = "schema"; text_byte(string_as_str(value), index) }, 5usize => { let value = "duplicate_id"; text_byte(string_as_str(value), index) }, 6usize => { let value = "overflow"; text_byte(string_as_str(value), index) }, 7usize => { let value = "provider_denied"; text_byte(string_as_str(value), index) }, 8usize => { let value = "provider_timeout"; text_byte(string_as_str(value), index) }, _ => { let value = "provider_malformed"; text_byte(string_as_str(value), index) }, }
 }
 
 @id("catalog_normalizer.app.error-len")
@@ -364,6 +368,32 @@ fn success_len(body: borrow Slice<u8>) -> usize
     length
 }
 
+@id("catalog_normalizer.app.enriched-value-len")
+fn enriched_value_len(outcome: usize) -> usize
+{
+    if enrichment_has_category(outcome) { i64_len(enrichment_category_value(outcome)) } else { 4usize }
+}
+
+// CNORM-041's enabled form appends exactly one category field to every
+// record. The source fixture is consulted only after `first_enriched_failure`
+// has accepted the complete batch, so these are projection facts, never
+// provisional provider effects.
+@id("catalog_normalizer.app.enriched-success-len")
+fn enriched_success_len(body: borrow Slice<u8>) -> usize
+{
+    let count = record_count(body);
+    let mut length = success_len(body);
+    let mut record = 0usize;
+    while record < count {
+        let start = line_start(body, record);
+        let line = byte_range(body, start, line_end(body, start));
+        length = length + 12usize + enriched_value_len(enrichment_outcome(line, record_id_value(line)));
+        record = record + 1usize;
+        record < count
+    }
+    length
+}
+
 @id("catalog_normalizer.app.absolute-field")
 fn absolute_field(body: borrow Slice<u8>, record: usize, field: usize) -> usize
 {
@@ -415,6 +445,12 @@ fn quantity_if(body: borrow Slice<u8>, active: bool, at: usize, fallback: i64) -
     if active { quantity_or(body, at, -1) } else { fallback }
 }
 
+@id("catalog_normalizer.app.outcome-if")
+fn outcome_if(body: borrow Slice<u8>, active: bool, id: usize, fallback: usize) -> usize
+{
+    if active { enrichment_outcome(body, id) } else { fallback }
+}
+
 @id("catalog_normalizer.app.next-record")
 fn next_record(done: bool, phase: usize, record: usize) -> usize
 {
@@ -431,6 +467,30 @@ fn next_phase(done: bool, phase: usize, count: usize, record: usize) -> usize
 fn next_part(done: bool, advanced: usize) -> usize
 {
     if done { 0usize } else { advanced }
+}
+
+@id("catalog_normalizer.app.enriched-phase-byte")
+fn enriched_phase_byte(body: borrow Slice<u8>, phase: usize, part: usize, count: usize, total: i64, id: usize, id_length: usize, label: usize, label_start: usize, label_end: usize, label_length: usize, quantity: i64, outcome: usize) -> u8
+{
+    match phase { 0usize => literal_byte(5usize, part), 1usize => usize_byte(count, part), 2usize => literal_byte(6usize, part), 3usize => i64_byte(total, part), 4usize => literal_byte(7usize, part), 5usize => literal_byte(9usize, part), 6usize => if part < id_length { escaped_byte_at(body, id, 0usize, decoded_len(body, id), part) } else { 0u8 }, 7usize => literal_byte(10usize, part), 8usize => if part < label_length { escaped_byte_at(body, label, label_start, label_end, part) } else { 0u8 }, 9usize => literal_byte(11usize, part), 10usize => i64_byte(quantity, part), 11usize => literal_byte(12usize, part), 12usize => if enrichment_has_category(outcome) { i64_byte(enrichment_category_value(outcome), part) } else { literal_byte(13usize, part) }, 13usize => if part == 0usize { 125u8 } else { 44u8 }, _ => literal_byte(8usize, part), }
+}
+
+@id("catalog_normalizer.app.enriched-phase-len")
+fn enriched_phase_len(phase: usize, count: usize, total: i64, record: usize, id_length: usize, label_length: usize, quantity: i64, outcome: usize) -> usize
+{
+    match phase { 0usize => 23usize, 1usize => usize_len(count), 2usize => 18usize, 3usize => i64_len(total), 4usize => 12usize, 5usize => 7usize, 6usize => id_length, 7usize => 11usize, 8usize => label_length, 9usize => 13usize, 10usize => i64_len(quantity), 11usize => 12usize, 12usize => enriched_value_len(outcome), 13usize => if record + 1usize < count { 2usize } else { 1usize }, _ => 3usize, }
+}
+
+@id("catalog_normalizer.app.enriched-next-record")
+fn enriched_next_record(done: bool, phase: usize, record: usize) -> usize
+{
+    if done && phase == 13usize { record + 1usize } else { record }
+}
+
+@id("catalog_normalizer.app.enriched-next-phase")
+fn enriched_next_phase(done: bool, phase: usize, count: usize, record: usize) -> usize
+{
+    if !done { phase } else { if phase == 4usize && count == 0usize { 14usize } else { if phase == 13usize { if record + 1usize < count { 5usize } else { 14usize } } else { phase + 1usize } } }
 }
 
 // CNORM-042 writer. The input is a fully selected failure; it cannot emit a
@@ -500,6 +560,55 @@ fn success_response(body: borrow Slice<u8>) -> Bytes
     bytes_copy(byte_range(view, 0usize, length))
 }
 
+@id("catalog_normalizer.app.enriched-success-response")
+fn enriched_success_response(body: borrow Slice<u8>) -> Bytes
+{
+    let count = record_count(body);
+    let total = success_total(body);
+    let length = enriched_success_len(body);
+    let mut out = bytes_zeroed(65536usize);
+    let mut index = 0usize;
+    let mut phase = 0usize;
+    let mut part = 0usize;
+    let mut record = 0usize;
+    let active = count > 0usize;
+    let mut id = field_if(body, active, 0usize, 1usize, 0usize);
+    let mut label = field_if(body, active, 0usize, 2usize, 0usize);
+    let mut quantity_at = field_if(body, active, 0usize, 3usize, 0usize);
+    let mut id_length = escaped_len_if(body, active, id, 0usize, if active { decoded_len(body, id) } else { 0usize }, 0usize);
+    let mut label_start = trim_start_if(body, active, label, 0usize);
+    let mut label_end = trim_end_if(body, active, label, label_start, label_start);
+    let mut label_length = escaped_len_if(body, active, label, label_start, label_end, 0usize);
+    let mut quantity = quantity_if(body, active, quantity_at, 0);
+    let mut outcome = outcome_if(body, active, id, 0usize);
+    while index < length {
+        let value = enriched_phase_byte(body, phase, part, count, total, id, id_length, label, label_start, label_end, label_length, quantity, outcome);
+        out = bytes_set(out, index, value);
+        index = index + 1usize;
+        let advanced_part = part + 1usize;
+        let segment = enriched_phase_len(phase, count, total, record, id_length, label_length, quantity, outcome);
+        let done = advanced_part >= segment;
+        let next_record_value = enriched_next_record(done, phase, record);
+        let changed_record = next_record_value != record && next_record_value < count;
+        phase = enriched_next_phase(done, phase, count, record);
+        part = next_part(done, advanced_part);
+        record = next_record_value;
+        id = field_if(body, changed_record, record, 1usize, id);
+        label = field_if(body, changed_record, record, 2usize, label);
+        quantity_at = field_if(body, changed_record, record, 3usize, quantity_at);
+        let id_end = if changed_record { decoded_len(body, id) } else { 0usize };
+        id_length = escaped_len_if(body, changed_record, id, 0usize, id_end, id_length);
+        label_start = trim_start_if(body, changed_record, label, label_start);
+        label_end = trim_end_if(body, changed_record, label, label_start, label_end);
+        label_length = escaped_len_if(body, changed_record, label, label_start, label_end, label_length);
+        quantity = quantity_if(body, changed_record, quantity_at, quantity);
+        outcome = outcome_if(body, changed_record, id, outcome);
+        index < length
+    }
+    let view = bytes_as_slice(out);
+    bytes_copy(byte_range(view, 0usize, length))
+}
+
 @id("catalog_normalizer.app.normalize")
 fn normalize(body: borrow Slice<u8>) -> Bytes
 {
@@ -511,6 +620,22 @@ fn normalize(body: borrow Slice<u8>) -> Bytes
 fn normalizes_to(body: borrow Slice<u8>, expected: borrow Slice<u8>) -> bool
 {
     let response = normalize(body);
+    bytes_equal(bytes_as_slice(response), expected)
+}
+
+// Enrichment is opt-in at the invocation boundary. The default `normalize`
+// path remains fixture-free and omits the category field entirely.
+@id("catalog_normalizer.app.normalize-enriched")
+fn normalize_enriched(body: borrow Slice<u8>) -> Bytes
+{
+    let failure = first_enriched_failure(body);
+    if failure == 0usize { enriched_success_response(body) } else { error_response(failure) }
+}
+
+@id("catalog_normalizer.app.normalizes-enriched-to")
+fn normalizes_enriched_to(body: borrow Slice<u8>, expected: borrow Slice<u8>) -> bool
+{
+    let response = normalize_enriched(body);
     bytes_equal(bytes_as_slice(response), expected)
 }
 

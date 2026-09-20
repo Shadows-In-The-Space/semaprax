@@ -7,6 +7,9 @@ use function @id("catalog_normalizer.record.quantity-or") from catalog_normalize
 use function @id("catalog_normalizer.record.record-problem") from catalog_normalizer.record as record_problem;
 use function @id("catalog_normalizer.record.problem-category") from catalog_normalizer.record as record_problem_category;
 use function @id("catalog_normalizer.record.problem-offset") from catalog_normalizer.record as record_problem_offset;
+use function @id("catalog_normalizer.enrichment.outcome") from catalog_normalizer.enrichment as enrichment_outcome;
+use function @id("catalog_normalizer.enrichment.is-terminal") from catalog_normalizer.enrichment as enrichment_terminal;
+use function @id("catalog_normalizer.enrichment.failure-category") from catalog_normalizer.enrichment as enrichment_failure_category;
 
 // A terminal LF closes the last record; it never creates an additional one.
 // The one-byte LF body therefore contains zero records.
@@ -291,6 +294,35 @@ fn first_failure(body: borrow Slice<u8>) -> usize
     let mut scanning = failure == 0usize && record < count;
     while scanning {
         failure = record_failure(body, record, total);
+        total = if failure == 0usize { total_after(total, valid_record_quantity(body, record)) } else { total };
+        record = if failure == 0usize { record + 1usize } else { count };
+        scanning = failure == 0usize && record < count;
+        scanning
+    }
+    failure
+}
+
+// CNORM-062 keeps the provider check inside the same input-order transaction
+// as parsing, duplicate detection, and checked totals. A terminal fixture
+// outcome wins before a later record is examined, and no response allocation
+// occurs until this whole selection has returned zero.
+@id("catalog_normalizer.batch.first-enriched-failure")
+fn first_enriched_failure(body: borrow Slice<u8>) -> usize
+{
+    let count = record_count(body);
+    let whole = body_too_long(body);
+    let many = !whole && count > 256usize;
+    let mut record = 0usize;
+    let mut total = 0;
+    let mut failure = if whole { pack_failure(1usize, 0usize, 65536usize) } else { if many { pack_failure(1usize, 257usize, 0usize) } else { 0usize } };
+    let mut scanning = failure == 0usize && record < count;
+    while scanning {
+        let regular = record_failure(body, record, total);
+        let start = line_start(body, record);
+        let line = byte_range(body, start, line_end(body, start));
+        let id = if regular == 0usize { record_id_value(line) } else { 0usize };
+        let provider = if regular == 0usize { enrichment_outcome(line, id) } else { 0usize };
+        failure = if regular != 0usize { regular } else { if enrichment_terminal(provider) { pack_failure(enrichment_failure_category(provider), record + 1usize, id) } else { 0usize } };
         total = if failure == 0usize { total_after(total, valid_record_quantity(body, record)) } else { total };
         record = if failure == 0usize { record + 1usize } else { count };
         scanning = failure == 0usize && record < count;

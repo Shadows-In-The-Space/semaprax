@@ -16,10 +16,17 @@ fn application_options() -> project::ProjectExecutionOptions {
         .expect("catalog-normalizer's documented bounded interpreter envelope")
 }
 
-fn run_oracle_bytes(input: &[u8]) -> Vec<u8> {
+fn run_oracle_with(input: &[u8], enriched: bool) -> Vec<u8> {
     let oracle_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/oracle/catalog_normalizer");
-    let mut child = Command::new("python3")
-        .arg("oracle.py")
+    let mut command = Command::new("python3");
+    command.arg("oracle.py");
+    if enriched {
+        command
+            .arg("--enrich")
+            .arg("--fixture")
+            .arg("fixtures/enrichment.json");
+    }
+    let mut child = command
         .current_dir(oracle_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -39,6 +46,10 @@ fn run_oracle_bytes(input: &[u8]) -> Vec<u8> {
         String::from_utf8_lossy(&output.stderr)
     );
     output.stdout
+}
+
+fn run_oracle_bytes(input: &[u8]) -> Vec<u8> {
+    run_oracle_with(input, false)
 }
 
 fn run_oracle(input: &[u8]) -> serde_json::Value {
@@ -119,11 +130,24 @@ fn canonical_response_literals_match_the_independent_oracle() {
 }
 
 #[test]
+fn enriched_response_literals_match_the_independent_oracle() {
+    assert_eq!(
+        run_oracle_with(b"{\"id\":\"widget-1\",\"label\":\" l \",\"quantity\":1}\n", true),
+        b"{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"widget-1\",\"label\":\"l\",\"quantity\":1,\"category\":7}]}\n"
+    );
+    assert_eq!(
+        run_oracle_with(b"{\"id\":\"blocked-vendor\",\"label\":\"l\",\"quantity\":1}\n", true),
+        b"{\"status\":\"error\",\"category\":\"provider_denied\",\"record_index\":0,\"byte_offset\":6}\n"
+    );
+}
+
+#[test]
 fn batch_boundaries_and_string_normalization_agree_across_backends() {
     let root = fixture();
     for source in [
         "src/app.spx",
         "src/batch.spx",
+        "src/enrichment.spx",
         "src/limits.spx",
         "src/record.spx",
         "src/tests.spx",
@@ -145,7 +169,7 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         .filter(|function| function.name.starts_with("test_"))
         .count();
     assert_eq!(
-        named_cases, 13,
+        named_cases, 14,
         "catalog-normalizer application case inventory drifted"
     );
     #[cfg(windows)]

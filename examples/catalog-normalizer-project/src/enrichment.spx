@@ -1,0 +1,86 @@
+module catalog_normalizer.enrichment;
+use function @id("std.data.json.dec.decoded_len") from std.data.json.dec as decoded_len;
+use function @id("std.data.json.dec.is_failure") from std.data.json.dec as is_failure;
+use function @id("std.data.json.dec.emit_at") from std.data.json.dec as emit_at;
+use function @id("std.data.json.dec.emit_len") from std.data.json.dec as emit_len;
+use function @id("std.data.json.dec.token_end") from std.data.json.dec as token_end;
+use function @id("std.data.json.dec.code_byte") from std.data.json.dec as code_byte;
+
+// This is the typed, deterministic fixture seam fixed by CNORM-060..062.
+// It has no network or ambient authority: `outcome` is a total lookup over
+// the frozen fixture identifiers. Codes 0..4 are success projections
+// (missing/found); 5..7 are terminal provider outcomes.
+@id("catalog_normalizer.enrichment.decoded-byte-at")
+fn decoded_byte_at(line: borrow Slice<u8>, token: usize, wanted: usize) -> u8
+{
+    let mut index = token + 1usize;
+    let mut part = 0usize;
+    let mut emitted = 0usize;
+    while emitted < wanted {
+        let last = part + 1usize >= emit_len(line, index);
+        index = if last { token_end(line, index) } else { index };
+        part = if last { 0usize } else { part + 1usize };
+        emitted = emitted + 1usize;
+        emitted < wanted
+    }
+    code_byte(emit_at(line, index, part))
+}
+
+@id("catalog_normalizer.enrichment.matches")
+fn matches(line: borrow Slice<u8>, token: usize, expected: borrow Slice<u8>) -> bool
+{
+    let length = decoded_len(line, token);
+    let mut index = 0usize;
+    let mut same = !is_failure(line, length) && length == byte_len(expected);
+    while same && index < length {
+        let byte = match byte_get(expected, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        same = decoded_byte_at(line, token, index) == byte;
+        index = index + 1usize;
+        same && index < length
+    }
+    same
+}
+
+@id("catalog_normalizer.enrichment.outcome")
+fn outcome(line: borrow Slice<u8>, token: usize) -> usize
+{
+    let widget_1 = "widget-1";
+    let widget_2 = "widget-2";
+    let widget_zero = "widget-zero";
+    let widget_max = "widget-max";
+    let blocked = "blocked-vendor";
+    let slow = "slow-vendor";
+    let garbled = "garbled-vendor";
+    let widget_1_text = string_as_str(widget_1);
+    let widget_2_text = string_as_str(widget_2);
+    let widget_zero_text = string_as_str(widget_zero);
+    let widget_max_text = string_as_str(widget_max);
+    let blocked_text = string_as_str(blocked);
+    let slow_text = string_as_str(slow);
+    let garbled_text = string_as_str(garbled);
+    if matches(line, token, str_as_bytes(widget_1_text)) { 1usize } else { if matches(line, token, str_as_bytes(widget_2_text)) { 2usize } else { if matches(line, token, str_as_bytes(widget_zero_text)) { 3usize } else { if matches(line, token, str_as_bytes(widget_max_text)) { 4usize } else { if matches(line, token, str_as_bytes(blocked_text)) { 5usize } else { if matches(line, token, str_as_bytes(slow_text)) { 6usize } else { if matches(line, token, str_as_bytes(garbled_text)) { 7usize } else { 0usize } } } } } } }
+}
+
+@id("catalog_normalizer.enrichment.is-terminal")
+fn is_terminal(value: usize) -> bool
+{
+    value >= 5usize
+}
+
+@id("catalog_normalizer.enrichment.failure-category")
+fn failure_category(value: usize) -> usize
+{
+    if value == 5usize { 7usize } else { if value == 6usize { 8usize } else { 9usize } }
+}
+
+@id("catalog_normalizer.enrichment.category-value")
+fn category_value(value: usize) -> i64
+{
+    if value == 1usize { 7 } else { if value == 2usize { 42 } else { if value == 3usize { 0 } else { 9999 } } }
+}
+
+@id("catalog_normalizer.enrichment.has-category")
+fn has_category(value: usize) -> bool
+{
+    value > 0usize && value < 5usize
+}

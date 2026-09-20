@@ -5,6 +5,7 @@ use function @id("catalog_normalizer.app.same_id") from catalog_normalizer.app a
 use function @id("catalog_normalizer.app.trimmed_matches") from catalog_normalizer.app as trimmed_matches;
 use function @id("catalog_normalizer.app.decoded_matches") from catalog_normalizer.app as decoded_matches;
 use function @id("catalog_normalizer.app.normalizes-to") from catalog_normalizer.app as normalizes_to;
+use function @id("catalog_normalizer.app.normalizes-enriched-to") from catalog_normalizer.app as normalizes_enriched_to;
 use function @id("catalog_normalizer.batch.record-count") from catalog_normalizer.batch as record_count;
 use function @id("catalog_normalizer.batch.line-start") from catalog_normalizer.batch as line_start;
 use function @id("catalog_normalizer.batch.line-end") from catalog_normalizer.batch as line_end;
@@ -128,6 +129,7 @@ fn main() -> i64
     failed = failed + if test_record_parser() == 0 { 0 } else { 1024 };
     failed = failed + if test_duplicate_batch() == 0 { 0 } else { 2048 };
     failed = failed + if test_canonical_responses() == 0 { 0 } else { 4096 };
+    failed = failed + if test_fixture_enrichment() == 0 { 0 } else { 8192 };
     failed
 }
 
@@ -281,4 +283,38 @@ fn test_canonical_responses() -> i64
     let expected_duplicate_text = string_as_str(expected_duplicate);
     let expected_duplicate_view = str_as_bytes(expected_duplicate_text);
     if normalizes_to(success_view, expected_success_view) && normalizes_to(duplicate_view, expected_duplicate_view) { 0 } else { 1 }
+}
+
+// CNORM-060..062: this is deliberately an opt-in frozen fixture lookup, not
+// a network request. Terminal outcomes select an error before the writer owns
+// any response bytes; the final input proves record-zero provider failure wins
+// over a malformed later record.
+@id("catalog_normalizer.tests.test-fixture-enrichment")
+fn test_fixture_enrichment() -> i64
+{
+    let found = "{\"id\":\"widget-1\",\"label\":\" l \",\"quantity\":1}";
+    let missing = "{\"id\":\"known-missing\",\"label\":\"l\",\"quantity\":1}";
+    let blocked = "{\"id\":\"blocked-vendor\",\"label\":\"l\",\"quantity\":1}";
+    let timeout = "{\"id\":\"slow-vendor\",\"label\":\"l\",\"quantity\":1}";
+    let malformed = "{\"id\":\"garbled-vendor\",\"label\":\"l\",\"quantity\":1}";
+    let provider_first = "{\"id\":\"blocked-vendor\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"later\",\"label\":\"l\",\"quantity\":-1}";
+    let found_expected = "{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"widget-1\",\"label\":\"l\",\"quantity\":1,\"category\":7}]}\n";
+    let missing_expected = "{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"known-missing\",\"label\":\"l\",\"quantity\":1,\"category\":null}]}\n";
+    let disabled_expected = "{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"blocked-vendor\",\"label\":\"l\",\"quantity\":1}]}\n";
+    let denied_expected = "{\"status\":\"error\",\"category\":\"provider_denied\",\"record_index\":0,\"byte_offset\":6}\n";
+    let timeout_expected = "{\"status\":\"error\",\"category\":\"provider_timeout\",\"record_index\":0,\"byte_offset\":6}\n";
+    let malformed_expected = "{\"status\":\"error\",\"category\":\"provider_malformed\",\"record_index\":0,\"byte_offset\":6}\n";
+    let found_text = string_as_str(found);
+    let missing_text = string_as_str(missing);
+    let blocked_text = string_as_str(blocked);
+    let timeout_text = string_as_str(timeout);
+    let malformed_text = string_as_str(malformed);
+    let provider_first_text = string_as_str(provider_first);
+    let found_expected_text = string_as_str(found_expected);
+    let missing_expected_text = string_as_str(missing_expected);
+    let disabled_expected_text = string_as_str(disabled_expected);
+    let denied_expected_text = string_as_str(denied_expected);
+    let timeout_expected_text = string_as_str(timeout_expected);
+    let malformed_expected_text = string_as_str(malformed_expected);
+    if normalizes_enriched_to(str_as_bytes(found_text), str_as_bytes(found_expected_text)) && normalizes_enriched_to(str_as_bytes(missing_text), str_as_bytes(missing_expected_text)) && normalizes_to(str_as_bytes(blocked_text), str_as_bytes(disabled_expected_text)) && normalizes_enriched_to(str_as_bytes(blocked_text), str_as_bytes(denied_expected_text)) && normalizes_enriched_to(str_as_bytes(timeout_text), str_as_bytes(timeout_expected_text)) && normalizes_enriched_to(str_as_bytes(malformed_text), str_as_bytes(malformed_expected_text)) && normalizes_enriched_to(str_as_bytes(provider_first_text), str_as_bytes(denied_expected_text)) { 0 } else { 1 }
 }

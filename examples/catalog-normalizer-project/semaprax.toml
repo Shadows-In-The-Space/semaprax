@@ -7,7 +7,7 @@ profile = "owned-data-api.v1"
 
 [modules]
 entry = "catalog_normalizer.app"
-sources = ["src/app.spx", "src/batch.spx", "src/limits.spx", "src/record.spx", "src/tests.spx"]
+sources = ["src/app.spx", "src/batch.spx", "src/enrichment.spx", "src/limits.spx", "src/record.spx", "src/tests.spx"]
 tests = ["catalog_normalizer.tests"]
 
 [exports]

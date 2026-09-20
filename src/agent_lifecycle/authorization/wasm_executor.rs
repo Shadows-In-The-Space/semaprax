@@ -51,17 +51,22 @@
 //!    the same three calls `compile_agent_lifecycle` itself makes. The
 //!    driver therefore has a real `CleanupPlan`/`LoanPlan`, not a
 //!    hand-forged one.
-//! 3. **The source text reaches this file explicitly.** [`WasmStageExecutor`]
-//!    holds the module source it was constructed with, supplied by the
-//!    caller through `super::StageBackend::Wasm { source }`. Nothing is read
-//!    from the filesystem and no ambient authority is acquired.
+//! 3. **The source text reaches this file explicitly and is target-bound.**
+//!    [`WasmStageExecutor`] checks/re-resolves it before any descriptor or
+//!    Node work, requires the whole resulting program and selected entry to
+//!    equal the retained invocation, and derives source-revision, lifecycle
+//!    and invocation identities. Those identities are the owned-data
+//!    descriptor subject; a fixed synthetic subject cannot select target
+//!    work. Nothing is read from the filesystem and no ambient authority is
+//!    acquired.
 //! 4. **The re-derived program must still be the same program.** Driver text
 //!    is appended after the existing source, so every existing declaration's
 //!    byte offsets, spans and `@id` identities are unchanged. That is
 //!    asserted rather than assumed: the re-resolved entry function is
 //!    compared for exact equality against the `ResolvedFunction` this
 //!    executor was handed, and a mismatch fails closed before any artifact
-//!    is built.
+//!    is built. The selected driver exports and descriptor digest are then
+//!    replay-verified against that same target binding before Node runs.
 //! 5. **No admission-rule change.** Each driver takes either no parameters
 //!    or one `i64` by value, and returns `i64`, `bool`, `usize`, or owned
 //!    `Bytes` --
@@ -96,6 +101,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use sha2::{Digest, Sha256};
+
 use crate::diagnostic::Diagnostic;
 use crate::hir::{
     self, DeclarationId, OwnershipMode, ResolvedFieldDeclaration, ResolvedFunction, ResolvedType,
@@ -116,6 +123,188 @@ use super::{sealed, ExecutionAuthority, StageExecutor};
 /// is data the caller hands it.
 pub(in crate::agent_lifecycle) struct WasmStageExecutor<'a> {
     pub(super) source: &'a str,
+}
+
+/// Exact, authority-free facts one Core Wasm dispatch binds before it may
+/// derive a descriptor or start Node.  This is deliberately internal: a
+/// caller chooses only the sealed Wasm selector's source text; it cannot mint
+/// a subject, lifecycle identity, or invocation identity for some other
+/// program.
+#[derive(Debug)]
+struct WasmTargetBinding<'a> {
+    source: &'a str,
+    source_revision: String,
+    lifecycle_identity: String,
+    invocation_identity: String,
+    entry: DeclarationId,
+}
+
+/// The artifact-specific extension of one [`WasmTargetBinding`].  The
+/// descriptor digest is retained with its exact selected export inventory so
+/// Node never receives a carrier whose subject or selection was merely
+/// inferred from a generated JavaScript expression.
+#[derive(Clone, Debug)]
+struct WasmArtifactBinding {
+    source_revision: String,
+    lifecycle_identity: String,
+    invocation_identity: String,
+    entry: DeclarationId,
+    selected: Vec<String>,
+    descriptor_digest: String,
+}
+
+fn target_digest(domain: &[u8], fields: impl IntoIterator<Item = String>) -> String {
+    let mut hash = Sha256::new();
+    hash.update(domain);
+    for field in fields {
+        hash.update((field.len() as u64).to_le_bytes());
+        hash.update(field.as_bytes());
+    }
+    format!("sha256:{:x}", crate::digest_hex::LowerHex(hash.finalize()))
+}
+
+impl<'a> WasmTargetBinding<'a> {
+    fn bind(
+        source: &'a str,
+        program: &hir::ResolvedProgram,
+        entry: &ResolvedFunction,
+        prepared: &PreparedRetainedCall,
+        arguments: &[RetainedValue],
+        max_steps: usize,
+    ) -> Result<Self, Diagnostic> {
+        // Parse/resolve/validate before any target artifact construction. The
+        // whole resolved program is compared, not merely an entry name, so a
+        // same-id source remint cannot substitute a different lifecycle.
+        let checked = crate::check(source, Path::new("agent-lifecycle-wasm-target-binding.spx"))
+            .map_err(|_| invariant("wasm_executor.binding.source_check"))?;
+        let source_revision = crate::graph::revision(&checked);
+        let resolved = hir::resolve(&checked)
+            .map_err(|_| invariant("wasm_executor.binding.source_resolve"))?;
+        hir::validate(&resolved).map_err(|_| invariant("wasm_executor.binding.source_validate"))?;
+        if &resolved != program {
+            return Err(invariant("wasm_executor.binding.lifecycle"));
+        }
+        let source_entry = resolved
+            .functions
+            .iter()
+            .find(|function| function.id == entry.id)
+            .ok_or_else(|| invariant("wasm_executor.binding.entry_absent"))?;
+        if source_entry != entry || prepared.function_id() != entry.id.as_str() {
+            return Err(invariant("wasm_executor.binding.entry"));
+        }
+
+        let lifecycle_identity = target_digest(
+            b"semaprax.agent-lifecycle.wasm-target-lifecycle.v1\0",
+            [
+                source_revision.clone(),
+                program.module.clone(),
+                program.entrypoint.as_str().to_owned(),
+            ],
+        );
+        let mut invocation_fields = vec![
+            source_revision.clone(),
+            lifecycle_identity.clone(),
+            entry.id.as_str().to_owned(),
+            prepared.parameter_count().to_string(),
+            max_steps.to_string(),
+            arguments.len().to_string(),
+        ];
+        invocation_fields.extend(
+            arguments
+                .iter()
+                .map(crate::agent_lifecycle::canonical_retained_value_json),
+        );
+        let invocation_identity = target_digest(
+            b"semaprax.agent-lifecycle.wasm-target-invocation.v1\0",
+            invocation_fields,
+        );
+        Ok(Self {
+            source,
+            source_revision,
+            lifecycle_identity,
+            invocation_identity,
+            entry: entry.id.clone(),
+        })
+    }
+
+    fn bind_artifact(
+        &self,
+        descriptor: &project::PublicApiDescriptor,
+        selected: &[String],
+    ) -> Result<WasmArtifactBinding, Diagnostic> {
+        if selected.is_empty()
+            || selected.windows(2).any(|pair| pair[0] >= pair[1])
+            || descriptor.exports().len() != selected.len()
+            || descriptor
+                .exports()
+                .iter()
+                .zip(selected)
+                .any(|(export, expected)| export.stable_id().as_str() != expected)
+            || descriptor.project_revision() != self.source_revision
+            || descriptor.workspace_revision() != self.lifecycle_identity
+            || descriptor.project_graph_digest() != self.invocation_identity
+        {
+            return Err(invariant("wasm_executor.binding.descriptor"));
+        }
+        Ok(WasmArtifactBinding {
+            source_revision: self.source_revision.clone(),
+            lifecycle_identity: self.lifecycle_identity.clone(),
+            invocation_identity: self.invocation_identity.clone(),
+            entry: self.entry.clone(),
+            selected: selected.to_vec(),
+            descriptor_digest: descriptor.digest(),
+        })
+    }
+
+    fn subject(&self) -> project::PublicApiSubject<'_> {
+        project::PublicApiSubject {
+            project_schema: project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
+            project_revision: &self.source_revision,
+            workspace_revision: &self.lifecycle_identity,
+            project_graph_digest: &self.invocation_identity,
+        }
+    }
+}
+
+impl WasmArtifactBinding {
+    fn verify_descriptor(
+        &self,
+        descriptor: &project::PublicApiDescriptor,
+    ) -> Result<(), Diagnostic> {
+        if descriptor.digest() != self.descriptor_digest
+            || descriptor.project_revision() != self.source_revision
+            || descriptor.workspace_revision() != self.lifecycle_identity
+            || descriptor.project_graph_digest() != self.invocation_identity
+            || descriptor
+                .exports()
+                .iter()
+                .map(|export| export.stable_id().as_str())
+                .ne(self.selected.iter().map(String::as_str))
+        {
+            return Err(invariant("wasm_executor.binding.descriptor_drift"));
+        }
+        Ok(())
+    }
+
+    fn verify_build(
+        &self,
+        build: &project::ProjectNpmBuild,
+        descriptor: &project::PublicApiDescriptor,
+    ) -> Result<(), Diagnostic> {
+        self.verify_descriptor(descriptor)?;
+        build
+            .verify_public_api_descriptor(descriptor)
+            .map_err(|_| invariant("wasm_executor.binding.carrier"))
+    }
+
+    fn verify_invocations(&self, invocations: &[String]) -> Result<(), Diagnostic> {
+        let mut ordered = invocations.to_vec();
+        ordered.sort();
+        if ordered != self.selected || self.entry.as_str().is_empty() {
+            return Err(invariant("wasm_executor.binding.invocation"));
+        }
+        Ok(())
+    }
 }
 
 impl sealed::Sealed for WasmStageExecutor<'_> {}
@@ -172,15 +361,16 @@ fn run(
     if entry.params.len() != arguments.len() || arguments.len() != prepared.parameter_count() {
         return Err(invariant("wasm_executor.argument.arity"));
     }
+    let binding = WasmTargetBinding::bind(source, program, entry, prepared, arguments, max_steps)?;
     if entry
         .params
         .iter()
         .all(|parameter| admitted_parameter(&parameter.ty, parameter.ownership))
         && admitted_result(&entry.return_type)
     {
-        return run_direct(program, entry, arguments, max_steps);
+        return run_direct(&binding, program, entry, arguments, max_steps);
     }
-    run_through_injected_driver(source, program, entry, arguments, max_steps)
+    run_through_injected_driver(&binding, program, entry, arguments, max_steps)
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +378,7 @@ fn run(
 // ---------------------------------------------------------------------------
 
 fn run_direct(
+    binding: &WasmTargetBinding<'_>,
     program: &hir::ResolvedProgram,
     entry: &ResolvedFunction,
     arguments: &[RetainedValue],
@@ -230,7 +421,8 @@ fn run_direct(
         ),
         _ => return Err(invariant("wasm_executor.decode.result_shape")),
     };
-    let stdout = build_and_drive(program, &[entry.id.as_str().to_owned()], &[call])?;
+    let selected = vec![entry.id.as_str().to_owned()];
+    let stdout = build_and_drive(binding, program, &selected, &selected, &[call])?;
     let value: i64 = stdout
         .trim()
         .parse()
@@ -709,7 +901,7 @@ fn render_fields(
 }
 
 fn run_through_injected_driver(
-    source: &str,
+    binding: &WasmTargetBinding<'_>,
     program: &hir::ResolvedProgram,
     entry: &ResolvedFunction,
     arguments: &[RetainedValue],
@@ -750,7 +942,7 @@ fn run_through_injected_driver(
         injected.push_str("}\n");
     }
 
-    let extended = format!("{source}{injected}");
+    let extended = format!("{}{}", binding.source, injected);
     let parsed = crate::check(
         &extended,
         Path::new("agent-lifecycle-wasm-stage-driver.spx"),
@@ -804,7 +996,11 @@ fn run_through_injected_driver(
             ),
         })
         .collect::<Vec<_>>();
-    let stdout = build_and_drive(&resolved, &selected, &calls)?;
+    let invoked = drivers
+        .iter()
+        .map(|driver| driver.id.clone())
+        .collect::<Vec<_>>();
+    let stdout = build_and_drive(binding, &resolved, &selected, &invoked, &calls)?;
 
     let lines = stdout.lines().collect::<Vec<_>>();
     if lines.len() != drivers.len() {
@@ -910,19 +1106,19 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>, Diagnostic> {
 // ---------------------------------------------------------------------------
 
 fn build_and_drive(
+    binding: &WasmTargetBinding<'_>,
     program: &hir::ResolvedProgram,
     selected: &[String],
+    invocations: &[String],
     calls: &[String],
 ) -> Result<String, Diagnostic> {
-    const FACT: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
-    let subject = project::PublicApiSubject {
-        project_schema: project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
-        project_revision: FACT,
-        workspace_revision: FACT,
-        project_graph_digest: FACT,
-    };
-    let descriptor = project::derive_public_api_descriptor(program, selected, subject)
+    if invocations.len() != calls.len() {
+        return Err(invariant("wasm_executor.binding.invocation_arity"));
+    }
+    let descriptor = project::derive_public_api_descriptor(program, selected, binding.subject())
         .map_err(|_| invariant("wasm_executor.descriptor"))?;
+    let artifact = binding.bind_artifact(&descriptor, selected)?;
+    artifact.verify_invocations(invocations)?;
     let build = project::prepare_owned_data_npm_build(
         program,
         &descriptor,
@@ -931,6 +1127,7 @@ fn build_and_drive(
         40 * 1024 * 1024,
     )
     .map_err(|_| invariant("wasm_executor.npm_build"))?;
+    artifact.verify_build(&build, &descriptor)?;
     let envelope: serde_json::Value =
         serde_json::from_str(build.envelope()).map_err(|_| invariant("wasm_executor.envelope"))?;
 
@@ -989,4 +1186,125 @@ process.stdout.write(out.map(value => value + '\n').join(''));
         return Err(invariant("wasm_executor.run"));
     }
     String::from_utf8(output.stdout).map_err(|_| invariant("wasm_executor.output_utf8"))
+}
+
+#[cfg(test)]
+mod target_binding_tests {
+    use super::*;
+
+    const SOURCE: &str = r#"module test.wasm_target_binding;
+
+@id("test.wasm_target_binding.identity")
+fn identity(value: i64) -> i64 { value }
+
+@id("test.wasm_target_binding.other")
+fn other(value: i64) -> i64 { value + 1 }
+
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+
+    fn program() -> hir::ResolvedProgram {
+        let checked = crate::check(SOURCE, Path::new("wasm-target-binding-test.spx"))
+            .expect("fixture checks");
+        let program = hir::resolve(&checked).expect("fixture resolves");
+        hir::validate(&program).expect("fixture validates");
+        program
+    }
+
+    fn prepared(program: &hir::ResolvedProgram) -> PreparedRetainedCall {
+        crate::interpreter::retained_call::prepare_retained_call(
+            program,
+            "test.wasm_target_binding.identity",
+        )
+        .expect("identity prepares")
+    }
+
+    #[test]
+    fn target_binding_rejects_source_and_subject_remints_before_any_build_or_node() {
+        let program = program();
+        let prepared = prepared(&program);
+        let entry = program
+            .functions
+            .iter()
+            .find(|function| function.id.as_str() == prepared.function_id())
+            .expect("prepared entry belongs to fixture");
+        let arguments = [RetainedValue::I64(7)];
+        let binding = WasmTargetBinding::bind(SOURCE, &program, entry, &prepared, &arguments, 100)
+            .expect("exact checked source binds");
+        let selected = vec![entry.id.as_str().to_owned()];
+        let descriptor =
+            project::derive_public_api_descriptor(&program, &selected, binding.subject())
+                .expect("bound descriptor derives");
+        let artifact = binding
+            .bind_artifact(&descriptor, &selected)
+            .expect("descriptor retains exact target facts");
+        artifact
+            .verify_invocations(&selected)
+            .expect("the selected export is exactly the invocation");
+        let mut wrong_digest = artifact.clone();
+        wrong_digest.descriptor_digest =
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_owned();
+        let error = wrong_digest
+            .verify_descriptor(&descriptor)
+            .expect_err("a descriptor-digest remint cannot reach the carrier verifier");
+        assert_eq!(error.code, "SPX-G570");
+        assert!(error
+            .message
+            .contains("wasm_executor.binding.descriptor_drift"));
+
+        // Same source identity but altered body: it must be rejected before
+        // descriptor derivation, so no reminted source can select Node work.
+        let drifted = SOURCE.replace("{ value }", "{ value + 2 }");
+        let error = WasmTargetBinding::bind(&drifted, &program, entry, &prepared, &arguments, 100)
+            .expect_err("a same-id source remint cannot bind the original program");
+        assert_eq!(error.code, "SPX-G570");
+        assert!(error.message.contains("wasm_executor.binding.lifecycle"));
+
+        // Each retained subject coordinate is independently authenticated
+        // against the exact descriptor; a value that merely has digest shape
+        // does not satisfy the target binding.
+        for subject in [
+            project::PublicApiSubject {
+                project_schema: project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
+                project_revision:
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                workspace_revision: &binding.lifecycle_identity,
+                project_graph_digest: &binding.invocation_identity,
+            },
+            project::PublicApiSubject {
+                project_schema: project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
+                project_revision: &binding.source_revision,
+                workspace_revision:
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                project_graph_digest: &binding.invocation_identity,
+            },
+            project::PublicApiSubject {
+                project_schema: project::PUBLIC_OWNED_DATA_PROJECT_SCHEMA,
+                project_revision: &binding.source_revision,
+                workspace_revision: &binding.lifecycle_identity,
+                project_graph_digest:
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            },
+        ] {
+            let reminted = project::derive_public_api_descriptor(&program, &selected, subject)
+                .expect("a syntactically valid but differently bound descriptor derives");
+            let error = binding
+                .bind_artifact(&reminted, &selected)
+                .expect_err("a reminted descriptor subject is never target-authenticated");
+            assert_eq!(error.code, "SPX-G570");
+            assert!(error.message.contains("wasm_executor.binding.descriptor"));
+        }
+
+        let changed_arguments = [RetainedValue::I64(8)];
+        let changed =
+            WasmTargetBinding::bind(SOURCE, &program, entry, &prepared, &changed_arguments, 100)
+                .expect("a distinct legitimate invocation binds separately");
+        assert_ne!(binding.invocation_identity, changed.invocation_identity);
+        let error = artifact
+            .verify_invocations(&["test.wasm_target_binding.other".to_owned()])
+            .expect_err("a selected-export remint cannot invoke a different function");
+        assert_eq!(error.code, "SPX-G570");
+        assert!(error.message.contains("wasm_executor.binding.invocation"));
+    }
 }

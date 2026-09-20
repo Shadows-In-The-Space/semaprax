@@ -510,6 +510,15 @@ result. Decode itself does not run source, dispatch an effect, or grant an
 answer authority. `resumable_effects::source_checkpoint` is the public scoped
 envelope around this structural representation; the inner codec stays private
 so callers cannot bypass the required ProgramRoot/invocation/policy binding.
+The original `semaprax.source-resumable-checkpoint.v1` API and bytes remain an
+explicit compatibility lane. The opt-in
+`semaprax.source-resumable-checkpoint.v2` API additionally authenticates the
+compiler-derived request and answer type identities, sequential-plan identity,
+and exact yield count under a distinct HMAC domain. Its encoder first decodes
+the continuation against the current checked program and original arguments;
+its decoder authenticates and proves canonical bytes before re-deriving those
+compiler facts. V1 and v2 reject one another rather than silently upgrading or
+downgrading a stored document.
 Neither layer is a public continuation ABI, durable production runtime,
 migration format, or target scheduler.
 
@@ -569,17 +578,20 @@ Explicitly **not** done in this slice, and why:
   scheduler. The scoped scalar checkpoint envelope above is deliberately not
   any of those seams. Migrating an Agent fixture onto the
   mechanism is untouched.
-- **A bounded public checkpoint envelope exists for the admitted scalar
+- **Bounded public checkpoint envelopes exist for the admitted scalar
   source lane, not a durable runtime.** A caller-owned 256-bit HMAC key
   authenticates the closed sequential continuation together with exact external
   ProgramRoot, invocation, and policy-epoch facts supplied independently again
-  at recovery. An untrusted store cannot rebind history across those scopes
-  without the key. Decode re-lowers the current program and derives the
-  suspension binding; normal resume replay remains the only path that can
-  accept an answer. The key is zeroized on drop and grants no effect or resume
-  authority. The envelope neither stores bytes nor dispatches work, and it is
-  not an endpoint, scheduler, checkpoint service, or compatibility promise for
-  broader owned/control-dependent state.
+  at recovery. V2 also binds the checked source channel shapes, lowering-plan
+  identity, and yield count; it inherits the inner sequential codec's current
+  two-to-eight-site checkpoint admission even though the signature bridge can
+  describe a one-site plan. An untrusted store cannot rebind history across
+  those scopes or signed compiler facts without the key. Decode re-lowers the
+  current program and derives the suspension binding; normal resume replay
+  remains the only path that can accept an answer. The key is zeroized on drop
+  and grants no effect or resume authority. Neither envelope stores bytes or
+  dispatches work, and neither is an endpoint, scheduler, checkpoint service,
+  or compatibility promise for broader owned/control-dependent state.
 - **A checkpoint byte-wire codec also exists at reference level.**
   `src/resumable_effects/codec.rs` encodes a `Journal` bound to its
   `EffectScope` into closed, deterministic JSON bytes and back, matching
@@ -609,7 +621,7 @@ Explicitly **not** done in this slice, and why:
 | A non-Agent function can yield typed requests and resume safely | **Met only for the bounded `.spx` slice.** A selected ordinary free function declares one typed channel and one to eight direct sequential `yield` sites; `interpreter::resumable` runs them through an opaque continuation, the public authority-free preparation API emits exact native C11/Core-Wasm projection inventories, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same staged projections. A public bounded checkpoint envelope HMAC-authenticates its private structural continuation with independently supplied ProgramRoot/invocation/policy facts and re-derives the binding from the current program/function/arguments; it is not a public runtime ABI or durable store. Resume checks answer types (`SPX-F113`), every replayed request (`SPX-F114`), and exact program/site/argument/prior-answer binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). Disconnected yielding functions are pruned; nested or control-dependent yields, owned state and effectful prefixes remain open. Distinct request/response types are admitted for direct `let`, mutable whole-binding assignment, and tail sites; assignment checks its target against the retagged response type rather than the request placeholder. |
 | Generated state machines are deterministic semantic projections | **Met only for the bounded ordered replay plan.** `SequentialResumablePlan` deterministically derives entry/per-site-suspended/complete identities and independently validated yield-free start/per-site-resume HIR projections while the original one-site `ResumablePlan` remains source-compatible. The interpreter consumes its identities and opaque history; the public preparation profile binds target artifacts to the plan/state/role/bytes and independently re-emits them during verification; private native and Wasm runners execute its projections. Live-frame/liveness lowering and control-dependent yields remain open. |
 | Ownership, effects, contracts and authority survive suspension correctly | For the `.spx` plan, only Copy scalars are admitted, ordinary effects and reachable yielding callees are refused, the start projection owns precondition evaluation, the resume projection owns the suffix/postcondition, and suspension bindings confer no authority. The checked source `yields` clause now derives its exact versioned runtime signature table and plan binding rather than relying on caller-authored shape strings. Owned values across suspension, effectful prefixes and durable/public resume authority remain **open**. At the separate Rust-reference level, `EffectHandler`, `CapabilityGatedHandler` and `SignatureCheckedHandler` prove the more general checking discipline. |
-| Checkpoint/recovery never grants effect authority by itself | **Met** for the reference journal and the bounded source continuation proof. `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. Separately, the public sequential-source envelope requires a caller-owned key to authenticate exact ProgramRoot/invocation/policy scope, while its private structural codec re-derives plan/site/binding from caller-supplied checked program/function/arguments; neither performs source evaluation or dispatch while decoding. |
+| Checkpoint/recovery never grants effect authority by itself | **Met** for the reference journal and the bounded source continuation proof. `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. Separately, the public sequential-source v1 envelope requires a caller-owned key to authenticate exact ProgramRoot/invocation/policy scope; the additive v2 envelope also authenticates compiler-derived request/answer shapes, lowering-plan identity, and yield count. Both recover through the same private structural codec, which re-derives plan/site/binding from caller-supplied checked program/function/arguments; neither performs source evaluation or dispatch while decoding. |
 | Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture requires a public external-await/runtime seam, durable source checkpointing and a broader state profile than this private scalar plan provides. |
 
 ## Gate
@@ -626,6 +638,11 @@ selector is:
 `cargo test --locked -p semaprax --lib resumable_effects::lowering::sequential_tests::`
 runs 5 ordered-site, eight-site-bound, history-binding, contract-placement and
 distinct-type projection tests.
+
+`cargo test --locked -p semaprax --lib resumable_effects::source_checkpoint:: -- --nocapture`
+runs 10 v1/v2 scope, signature-drift, canonicality, downgrade, corruption,
+bound and replay tests. The v2 cases exercise recovery through both suspension
+sites and preserve the unchanged v1 compatibility wire.
 
 ```sh
 SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 \

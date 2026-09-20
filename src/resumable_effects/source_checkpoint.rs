@@ -16,6 +16,11 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use zeroize::Zeroize;
 
+mod signature_bound;
+pub use signature_bound::{
+    decode_source_checkpoint_v2, encode_source_checkpoint_v2, SOURCE_RESUMABLE_CHECKPOINT_SCHEMA_V2,
+};
+
 /// Breaking changes to the public envelope require a new schema identity.
 pub const SOURCE_RESUMABLE_CHECKPOINT_SCHEMA: &str = "semaprax.source-resumable-checkpoint.v1";
 

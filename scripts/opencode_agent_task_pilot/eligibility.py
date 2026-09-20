@@ -16,6 +16,7 @@ nothing for the 2026-09-13 cohort's archived evidence directories beyond what th
 already-archived transport bytes actually contain: those trials never recorded a
 blinded review or an intervention ledger, so they remain ineligible.
 """
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -24,8 +25,14 @@ import time
 from opencode_agent_task_pilot.evidence import _bytes as decode_base64
 
 DRIFT_TARGET = "src/core.spx"
+STALE_WRITE_RETURN_CODE = 126
+STALE_WRITE_REFUSAL = b"pilot-write-source precondition is stale\n"
+MAX_PILOT_WRITE_SOURCE_BYTES = 1_048_576
 
 STALE_TRIGGER_KINDS = ("drift_on_source_read", "drift_on_identifying_command")
+STALE_IDENTIFYING_COMMANDS = frozenset(
+    {"graph", "context", "query", "workspace-graph", "workspace-context"}
+)
 RECOVERY_OUTCOME_KINDS = (
     "recovered_conditional_write",
     "rejected_stale_write",
@@ -206,8 +213,29 @@ def _decode_gateway_events(gateway_log_bytes):
         if isinstance(event["returncode"], bool) or not isinstance(event["returncode"], int):
             raise ValueError("gateway return code is invalid")
         argv = argv_bytes.decode("utf-8", "surrogateescape").split("\0")
-        events.append({"argv": argv, "returncode": event["returncode"]})
+        events.append({
+            "argv": argv,
+            "stderr": decode_base64(event["stderr_b64"], "gateway stderr"),
+            "returncode": event["returncode"],
+        })
     return events
+
+
+def _valid_pilot_write_source(argv):
+    """Whether argv is exactly the gateway's conditional source-write shape."""
+    if (
+        len(argv) != 4
+        or argv[0] != "pilot-write-source"
+    ):
+        return False
+    digest, encoded = argv[2:]
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        return False
+    try:
+        body = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError):
+        return False
+    return len(body) <= MAX_PILOT_WRITE_SOURCE_BYTES and base64.b64encode(body).decode("ascii") == encoded
 
 
 def stale_recovery_events(gateway_log_bytes, drift_declared):
@@ -219,14 +247,19 @@ def stale_recovery_events(gateway_log_bytes, drift_declared):
     anything else is internally inconsistent and reported unavailable rather than
     coerced.
 
-    For the one trigger (if any), the outcome is read off the very next
-    subsequent gateway call whose argv mentions the drifted file
-    (`src/core.spx`), by its real recorded return code:
-    `recovered_conditional_write` (that call succeeded), `rejected_stale_write`
-    (it failed - e.g. a stale-precondition rejection), or `no_recovery_attempt`
-    (no later call ever touched the file again). This reads real recorded exit
-    codes; it makes no claim about source-level correctness, which is the
-    separate job of `independent_acceptance`.
+    For the one trigger (if any), the outcome is read from the first later
+    exactly shaped `pilot-write-source src/core.spx <lowercase-sha256>
+    <canonical-base64>` command, which is the sole admitted conditional
+    source-recovery action in the source-first lane:
+    `recovered_conditional_write` (that write succeeded),
+    `rejected_stale_write` (the gateway returned its exact stale-precondition
+    refusal),
+    or `no_recovery_attempt` (no such write occurred). A later read or an
+    unrelated command mentioning the path is *not* recovery and cannot turn
+    this metric into a false success. A malformed source-write record or any
+    other write failure is unavailable rather than being relabelled as stale.
+    This reads real recorded exit codes; it makes no claim about source-level
+    correctness, which is the separate job of `independent_acceptance`.
     """
     if not isinstance(drift_declared, bool):
         raise ValueError("drift_declared must be an explicit boolean")
@@ -236,20 +269,34 @@ def stale_recovery_events(gateway_log_bytes, drift_declared):
         argv = event["argv"]
         if argv[:1] != ["pilot-drift"]:
             continue
-        trigger_command = argv[1] if len(argv) > 1 else None
+        if len(argv) != 2 or argv[1] not in {"pilot-read", *STALE_IDENTIFYING_COMMANDS}:
+            return {"status": "unavailable", "reason": "gateway drift trigger is malformed"}
+        trigger_command = argv[1]
         trigger_kind = (
-            "drift_on_source_read" if trigger_command == "pilot-read"
+            "drift_on_source_read"
+            if trigger_command == "pilot-read"
             else "drift_on_identifying_command"
         )
         outcome = "no_recovery_attempt"
         for later in events[index + 1:]:
             later_argv = later["argv"]
-            if later_argv[:1] == ["pilot-drift"] or DRIFT_TARGET not in later_argv:
+            if later_argv[:1] != ["pilot-write-source"]:
                 continue
-            outcome = (
-                "recovered_conditional_write" if later["returncode"] == 0
-                else "rejected_stale_write"
-            )
+            if not _valid_pilot_write_source(later_argv):
+                return {"status": "unavailable", "reason": "gateway source-recovery write is malformed"}
+            if later_argv[1] != DRIFT_TARGET:
+                continue
+            if later["returncode"] == 0:
+                if later["stderr"]:
+                    return {"status": "unavailable", "reason": "successful source-recovery write wrote stderr"}
+                outcome = "recovered_conditional_write"
+            elif (
+                later["returncode"] == STALE_WRITE_RETURN_CODE
+                and later["stderr"] == STALE_WRITE_REFUSAL
+            ):
+                outcome = "rejected_stale_write"
+            else:
+                return {"status": "unavailable", "reason": "source-recovery write did not have the gateway stale-precondition refusal"}
             break
         triggers.append({"trigger": trigger_kind, "recovery_outcome": outcome})
     if drift_declared and not triggers:

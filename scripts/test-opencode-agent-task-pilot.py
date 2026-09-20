@@ -473,7 +473,11 @@ class StaleRecoveryEventsTests(unittest.TestCase):
     def test_rejected_stale_write_after_identifying_trigger(self):
         body = _gateway_log(
             _gateway_event(["pilot-drift", "graph"]),
-            _gateway_event(["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"], code=126),
+            _gateway_event(
+                ["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"],
+                code=126,
+                err=b"pilot-write-source precondition is stale\n",
+            ),
         )
         result = elig.stale_recovery_events(body, True)
         self.assertEqual(result["events"][0]["trigger"], "drift_on_identifying_command")
@@ -483,6 +487,65 @@ class StaleRecoveryEventsTests(unittest.TestCase):
     def test_no_recovery_attempt_when_file_never_touched_again(self):
         body = _gateway_log(_gateway_event(["pilot-drift", "graph"]))
         result = elig.stale_recovery_events(body, True)
+        self.assertEqual(result["events"][0]["recovery_outcome"], "no_recovery_attempt")
+
+    def test_later_read_of_drifted_file_is_not_a_false_recovery(self):
+        body = _gateway_log(
+            _gateway_event(["pilot-drift", "pilot-read"]),
+            _gateway_event(["pilot-read", "src/core.spx"], code=0),
+        )
+        result = elig.stale_recovery_events(body, True)
+        self.assertEqual(result["status"], "observed")
+        self.assertEqual(result["events"][0]["recovery_outcome"], "no_recovery_attempt")
+        self.assertEqual(result["stale_recovery_actions"], 0)
+
+    def test_malformed_synthetic_drift_event_is_unavailable(self):
+        for argv in (["pilot-drift"], ["pilot-drift", "not-an-identifying-command"],
+                     ["pilot-drift", "graph", "extra"]):
+            with self.subTest(argv=argv):
+                result = elig.stale_recovery_events(_gateway_log(_gateway_event(argv)), True)
+                self.assertEqual(result["status"], "unavailable")
+                self.assertIn("malformed", result["reason"])
+
+    def test_malformed_source_recovery_write_is_unavailable(self):
+        valid = ["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"]
+        malformed = (
+            valid[:-1],
+            [*valid, "extra"],
+            [valid[0], valid[1], "F" * 64, valid[3]],
+            [valid[0], valid[1], valid[2], "not-base64!"],
+            [valid[0], "src/app.spx", valid[2], "not-base64!"],
+        )
+        for argv in malformed:
+            with self.subTest(argv=argv):
+                body = _gateway_log(
+                    _gateway_event(["pilot-drift", "pilot-read"]),
+                    _gateway_event(argv, code=126),
+                )
+                result = elig.stale_recovery_events(body, True)
+                self.assertEqual(result["status"], "unavailable")
+                self.assertIn("malformed", result["reason"])
+
+    def test_non_stale_source_write_failure_is_unavailable(self):
+        body = _gateway_log(
+            _gateway_event(["pilot-drift", "pilot-read"]),
+            _gateway_event(
+                ["pilot-write-source", "src/core.spx", "f" * 64, "Zm9v"],
+                code=126,
+                err=b"pilot-write-source body exceeds cap\n",
+            ),
+        )
+        result = elig.stale_recovery_events(body, True)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("stale-precondition", result["reason"])
+
+    def test_different_target_write_is_not_a_recovery_attempt(self):
+        body = _gateway_log(
+            _gateway_event(["pilot-drift", "pilot-read"]),
+            _gateway_event(["pilot-write-source", "src/app.spx", "f" * 64, "Zm9v"], code=0),
+        )
+        result = elig.stale_recovery_events(body, True)
+        self.assertEqual(result["status"], "observed")
         self.assertEqual(result["events"][0]["recovery_outcome"], "no_recovery_attempt")
 
     def test_inconsistent_declared_but_no_trigger_is_unavailable(self):

@@ -1569,9 +1569,18 @@ impl Resolver<'_> {
                             }
                         }
                         None => {
-                            super::resolve_vec_call::validate_whole_assignment(
-                                self, function, &target, &value,
-                            )?;
+                            // A direct `yield` is initially resolved with its
+                            // request type. `finish_yields_admission` retags
+                            // it to the enclosing clause's response type and
+                            // checks this exact target afterwards. Validating
+                            // the placeholder here would incorrectly reject
+                            // `yields Request -> Response` assignments when
+                            // the two admitted scalar types differ.
+                            if !matches!(&value.kind, ResolvedExprKind::Yield { .. }) {
+                                super::resolve_vec_call::validate_whole_assignment(
+                                    self, function, &target, &value,
+                                )?;
+                            }
                         }
                     }
                     let Statement::Assign {

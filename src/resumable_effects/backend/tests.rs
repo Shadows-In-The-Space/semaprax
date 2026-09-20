@@ -52,6 +52,28 @@ fn main() -> i64 { 0 }
     hir::resolve(&ast).unwrap()
 }
 
+fn distinct_response_assignment_program() -> ResolvedProgram {
+    let source = r#"
+module test.resumable_backend_assignment;
+@id("app.ask")
+fn ask(seed: i64) -> bool
+    yields i64 -> bool
+{
+    let mut answer = false;
+    answer = yield seed + 1;
+    answer
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let ast = crate::parse(
+        source,
+        Path::new("resumable-backend-distinct-response-assignment.spx"),
+    )
+    .unwrap();
+    hir::resolve(&ast).unwrap()
+}
+
 fn sequential_program() -> ResolvedProgram {
     let source = r#"
 module test.sequential_resumable_backend;
@@ -203,6 +225,68 @@ fn native_o0_o2_and_core_wasm_preserve_signed_zero_bits() {
                 },
             );
         }
+    }
+}
+
+#[test]
+fn direct_assignment_uses_the_response_type_across_interpreter_native_and_wasm() {
+    if !require_tools() {
+        return;
+    }
+    let program = distinct_response_assignment_program();
+    let plan = plan(&program);
+    let arguments = [ResumableScalar::I64(41)];
+    let interpreted =
+        run_resumable_effect(&program, "app.ask", &[ArgumentValue::Int(41)], 10_000).unwrap();
+    let ResumableStep::Suspended {
+        state,
+        binding,
+        request,
+    } = interpreted.step
+    else {
+        panic!("interpreter assignment start did not suspend")
+    };
+    assert_eq!(request, ArgumentValue::Int(42));
+    assert!(matches!(
+        resume_resumable_effect(
+            &program,
+            "app.ask",
+            &[ArgumentValue::Int(41)],
+            &state,
+            &binding,
+            &request,
+            &ArgumentValue::Bool(true),
+            10_000,
+        )
+        .unwrap()
+        .step,
+        ResumableStep::Completed {
+            result: ArgumentValue::Bool(true),
+            ..
+        }
+    ));
+
+    for backend in [Backend::NativeO0, Backend::NativeO2, Backend::CoreWasm] {
+        let BackendStep::Suspended(suspension) = run(backend, &program, &plan, &arguments).unwrap()
+        else {
+            panic!("backend assignment start did not suspend")
+        };
+        assert_eq!(suspension.request(), &ResumableScalar::I64(42));
+        assert_eq!(
+            resume(
+                backend,
+                &program,
+                &plan,
+                &arguments,
+                &suspension,
+                ResumableScalar::Bool(true),
+            )
+            .unwrap(),
+            BackendStep::Complete {
+                state: plan.complete.id.clone(),
+                result: ResumableScalar::Bool(true),
+            }
+        );
     }
 }
 

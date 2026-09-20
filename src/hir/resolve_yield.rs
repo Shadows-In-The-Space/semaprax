@@ -106,32 +106,6 @@ impl Resolver<'_> {
                 offender.span,
             ));
         }
-        if request_type != response_type {
-            if let ast::ExprKind::Block { statements, .. } = &function.body.kind {
-                if statements.iter().any(|statement| {
-                    matches!(
-                        statement,
-                        ast::Statement::Assign {
-                            value: ast::Expr {
-                                kind: ast::ExprKind::Yield { .. },
-                                ..
-                            },
-                            ..
-                        }
-                    )
-                }) {
-                    return Err(self.error(
-                        ILL_TYPED_YIELD,
-                        format!(
-                            "function `{}` assigns a yielded response whose type differs from its request; \
-                             this bounded profile admits distinct response types only through `let` or tail yields",
-                            function.name
-                        ),
-                        yields.span,
-                    ));
-                }
-            }
-        }
         Ok(Some(ResolvedYieldsClause {
             request_type,
             response_type,
@@ -643,7 +617,12 @@ fn scan_statement(
             }
             Ok(())
         }
-        ResolvedStatement::Assign { binding, value, .. } => {
+        ResolvedStatement::Assign {
+            binding,
+            field,
+            value,
+            ..
+        } => {
             if let Some(ty) = yielded_bindings.get(&binding.id) {
                 binding.ty = ty.clone();
             }
@@ -655,7 +634,29 @@ fn scan_statement(
                 top_level,
                 found,
                 yielded_bindings,
-            )
+            )?;
+            // `resolve_expr` initially gives a `yield` its request type, as
+            // it does not carry the enclosing function's resolved signature.
+            // A direct whole-binding assignment is therefore deferred until
+            // the expression is retagged above.  Check the actual target
+            // against the declared response here, rather than requiring the
+            // request and response types to happen to agree.
+            if top_level
+                && field.is_none()
+                && matches!(&value.kind, ResolvedExprKind::Yield { .. })
+                && binding.ty != yields.response_type
+            {
+                return Err(resolver.error(
+                    ILL_TYPED_YIELD,
+                    format!(
+                        "function `{function_name}` assigns a yielded response of type `{:?}` to \
+                         binding `{}` of type `{:?}`",
+                        yields.response_type, binding.name, binding.ty
+                    ),
+                    value.span,
+                ));
+            }
+            Ok(())
         }
         ResolvedStatement::Unsafe { body, .. } => scan_expr(
             resolver,
@@ -763,7 +764,7 @@ fn main() -> i64 { 0 }
     }
 
     #[test]
-    fn a_distinct_response_type_assignment_fails_with_the_stable_profile_diagnostic() {
+    fn a_distinct_response_type_assignment_is_retagged_before_assignment_validation() {
         let source = r#"
 module test.resolve_yield_assignment_response;
 @id("app.ask")
@@ -775,8 +776,61 @@ fn ask(seed: i64) -> bool yields i64 -> bool {
 @id("app.main")
 fn main() -> i64 { 0 }
 "#;
-        let error = resolve(source).unwrap_err();
+        let parsed = crate::parse(source, Path::new("resolve-yield-assignment.spx")).unwrap();
+        let source_diagnostics = crate::source_verify::verify(&parsed);
+        assert!(
+            source_diagnostics.is_empty(),
+            "the valid source must pass verification before HIR retagging: {source_diagnostics:?}"
+        );
+        let resolved = hir::resolve(&parsed)
+            .map_err(|mut diagnostics| diagnostics.remove(0))
+            .expect("a direct assignment accepts the response type");
+        hir::validate(&resolved).expect("the retagged assignment remains valid HIR");
+        let ask = resolved
+            .functions
+            .iter()
+            .find(|function| function.id.as_str() == "app.ask")
+            .unwrap();
+        let hir::ResolvedExprKind::Block { statements, .. } = &ask.body.kind else {
+            panic!("resumable function body is a block")
+        };
+        let hir::ResolvedStatement::Assign { binding, value, .. } = &statements[1] else {
+            panic!("fixture's yielded response remains a direct assignment")
+        };
+        assert_eq!(binding.ty, hir::ResolvedType::Bool);
+        assert_eq!(value.ty, hir::ResolvedType::Bool);
+        assert!(matches!(&value.kind, hir::ResolvedExprKind::Yield { .. }));
+    }
+
+    #[test]
+    fn a_direct_yield_assignment_still_requires_the_declared_response_type() {
+        let source = r#"
+module test.resolve_yield_assignment_response_mismatch;
+@id("app.ask")
+fn ask(seed: i64) -> i64 yields i64 -> bool {
+    let mut answer = 0;
+    answer = yield seed;
+    answer
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+        let parsed =
+            crate::parse(source, Path::new("resolve-yield-assignment-mismatch.spx")).unwrap();
+        let source_diagnostics = crate::source_verify::verify(&parsed);
+        assert!(
+            source_diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "SPX-U102"),
+            "the placeholder mismatch must be deferred to the response-aware HIR check: {source_diagnostics:?}"
+        );
+        let error = hir::resolve(&parsed)
+            .unwrap_err()
+            .into_iter()
+            .next()
+            .unwrap();
         assert_eq!(error.code, ILL_TYPED_YIELD);
+        assert!(error.message.contains("yielded response of type"));
     }
 
     #[test]

@@ -25,6 +25,22 @@ fn ask(seed: i64) -> i64
 fn main() -> i64 { 0 }
 "#;
 
+/// A direct mutable assignment receives the declared response type, not the
+/// request placeholder type used while the expression first resolves.
+const ASSIGNED_BOOL_ANSWER: &str = r#"
+module test.resumable_effects_interpreter_assignment;
+@id("app.ask")
+fn ask(seed: i64) -> bool
+    yields i64 -> bool
+{
+    let mut answer = false;
+    answer = yield seed + 1;
+    answer
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+
 const TWO_YIELDS: &str = r#"
 module test.sequential_resumable_effects_interpreter;
 @id("app.ask")
@@ -169,6 +185,43 @@ fn resuming_substitutes_the_answer_at_the_yield_and_runs_the_suffix() {
         }
     ));
     assert_ne!(other.step, evaluated.step);
+}
+
+#[test]
+fn a_distinct_response_type_can_resume_through_a_direct_assignment() {
+    let program = resolved(ASSIGNED_BOOL_ANSWER);
+    let (state, binding, request) = suspension(&program, &[ArgumentValue::Int(41)]);
+    assert_eq!(request, ArgumentValue::Int(42));
+    let evaluation = resume_resumable_effect(
+        &program,
+        "app.ask",
+        &[ArgumentValue::Int(41)],
+        &state,
+        &binding,
+        &request,
+        &ArgumentValue::Bool(true),
+        MAX_STEPS,
+    )
+    .unwrap();
+    assert!(matches!(
+        evaluation.step,
+        ResumableStep::Completed {
+            result: ArgumentValue::Bool(true),
+            ..
+        }
+    ));
+    let error = resume_resumable_effect(
+        &program,
+        "app.ask",
+        &[ArgumentValue::Int(41)],
+        &state,
+        &binding,
+        &request,
+        &ArgumentValue::Int(42),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(error[0].code, "SPX-F113");
 }
 
 #[test]

@@ -280,6 +280,17 @@ impl<'a, 'p> IterativeVerifier<'a, 'p> {
                             }
                         }
                         None => {
+                            // The source verifier runs before HIR has the
+                            // enclosing `yields Request -> Response` clause
+                            // available to retag this direct expression. Its
+                            // initial type is therefore the request type;
+                            // defer only this whole-binding mismatch to
+                            // `finish_yields_admission`, which checks the
+                            // binding against the declared response type.
+                            // Field assignments and every non-yield value
+                            // retain the ordinary exact-type diagnostic here.
+                            let direct_yield =
+                                matches!(&value.kind, crate::ast::ExprKind::Yield { .. });
                             // Same-owner replacement: a `Vec<T>` reopen such as
                             // `values = vec_push(values, v)` and the byte-buffer
                             // `buffer = bytes_set(buffer, index, value)` are the
@@ -318,7 +329,7 @@ impl<'a, 'p> IterativeVerifier<'a, 'p> {
                                 self.diagnostics.push(diagnostic);
                             }
                             if let Some(actual) = &actual {
-                                if mutable && actual.ty != binding_ty {
+                                if mutable && actual.ty != binding_ty && !direct_yield {
                                     self.diagnostics.push(error(
                                         self.program,
                                         "SPX-U102",

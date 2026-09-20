@@ -172,6 +172,38 @@ fn main() -> i64 { 0 }
 }
 
 #[test]
+fn distinct_response_assignment_rebuilds_a_yield_free_response_typed_projection() {
+    let source = r#"
+module test.sequential_assignment_types;
+@id("app.ask")
+fn ask(seed: i64) -> bool yields i64 -> bool {
+    let mut answer = false;
+    answer = yield seed + 1;
+    answer
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let program = program(source);
+    let plan = lower_sequential(&program, selected(&program)).unwrap();
+    assert_eq!(plan.suspensions.len(), 1);
+    assert_eq!(plan.suspensions[0].request_type, ResolvedType::I64);
+    assert_eq!(plan.suspensions[0].response_type, ResolvedType::Bool);
+    let resume = plan.resume_program_at(&program, 0).unwrap();
+    hir::validate(&resume).unwrap();
+    let function = selected(&resume);
+    assert_eq!(function.params[1].ty, ResolvedType::Bool);
+    let ResolvedExprKind::Block { statements, .. } = &function.body.kind else {
+        panic!("resumable projection body is a block")
+    };
+    let ResolvedStatement::Assign { binding, value, .. } = &statements[1] else {
+        panic!("response remains an assignment in the continuation")
+    };
+    assert_eq!(binding.ty, ResolvedType::Bool);
+    assert_eq!(value.ty, ResolvedType::Bool);
+}
+
+#[test]
 fn lower_rejects_a_forged_ninth_or_nested_yield() {
     let mut program = program(SOURCE);
     let function = program

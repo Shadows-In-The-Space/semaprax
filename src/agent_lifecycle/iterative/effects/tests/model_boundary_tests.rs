@@ -3,7 +3,16 @@ use super::*;
 struct ParityModelHandler {
     proposal: String,
     calls: usize,
-    malformed: bool,
+    reply: ModelReply,
+}
+
+#[derive(Clone, Copy)]
+enum ModelReply {
+    Valid,
+    Malformed,
+    Failed,
+    Panicked,
+    ResponseOverLimit,
 }
 
 impl crate::agent_lifecycle::iterative::model::ModelHostHandler for ParityModelHandler {
@@ -16,10 +25,19 @@ impl crate::agent_lifecycle::iterative::model::ModelHostHandler for ParityModelH
         assert!(!request.context().is_empty());
         assert!(!request.proposal_schema_digest().is_empty());
         self.calls += 1;
-        if self.malformed {
-            sink.write(&[0xff])
-        } else {
-            sink.write(self.proposal.as_bytes())
+        match self.reply {
+            ModelReply::Valid => sink.write(self.proposal.as_bytes()),
+            ModelReply::Malformed => sink.write(&[0xff]),
+            ModelReply::Failed => {
+                return Err(crate::agent_lifecycle::iterative::model::ModelHostError::Failed)
+            }
+            ModelReply::Panicked => panic!("deliberate model host panic"),
+            ModelReply::ResponseOverLimit => {
+                // The source must observe the sink's sticky overflow state;
+                // a host cannot turn a rejected write into a successful result.
+                let _ = sink.write(&vec![b'x'; 16 * 1024 + 1]);
+                return Ok(());
+            }
         }
         .map_err(|_| crate::agent_lifecycle::iterative::model::ModelHostError::Failed)
     }
@@ -30,7 +48,7 @@ fn model_target_run_on(
     backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
     limits: crate::agent_lifecycle::iterative::model::ModelLimits,
     cancellation: &AgentCancellation,
-    malformed: bool,
+    reply: ModelReply,
 ) -> (
     Result<TargetEffectRun, Vec<Diagnostic>>,
     Vec<Vec<u8>>,
@@ -43,7 +61,7 @@ fn model_target_run_on(
     let mut model_handler = ParityModelHandler {
         proposal,
         calls: 0,
-        malformed,
+        reply,
     };
     let binding = crate::agent_lifecycle::iterative::model::ModelSourceBinding::new(
         "fixture.agent.model.target-parity",
@@ -109,7 +127,7 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
         crate::agent_lifecycle::authorization::StageBackend::Interpreter,
         model_limits(),
         &cancellation,
-        false,
+        ModelReply::Valid,
     );
     let expected_run = expected.0.as_ref().unwrap();
     assert_eq!(expected_run.lifecycle().status(), IterativeStatus::Complete);
@@ -160,7 +178,13 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
         ),
     ] {
         let cancellation = AgentCancellation::new();
-        let actual = model_target_run_on(&compiled, backend, model_limits(), &cancellation, false);
+        let actual = model_target_run_on(
+            &compiled,
+            backend,
+            model_limits(),
+            &cancellation,
+            ModelReply::Valid,
+        );
         let actual_run = actual
             .0
             .as_ref()
@@ -191,26 +215,89 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
 }
 
 #[test]
-fn model_boundary_refuses_fuel_and_malformed_response_before_effect_dispatch() {
+fn model_boundary_settles_every_refusal_before_effect_dispatch_on_all_stage_backends() {
     if !target_backend_tools_available() {
         eprintln!("skipping target model refusal parity: clang or node unavailable");
         return;
     }
     let module_source = typed_effect_source();
     let compiled = compile_from_source(&module_source);
-    for (limits, malformed, expected) in [
+    for (label, limits, reply, expected, dispatched, model_calls) in [
         (
+            "fuel",
             crate::agent_lifecycle::iterative::model::ModelLimits {
                 max_fuel: 0,
                 ..model_limits()
             },
-            false,
+            ModelReply::Valid,
             crate::agent_lifecycle::iterative::model::ModelSettlement::FuelExhausted,
+            false,
+            0,
         ),
         (
+            "call budget",
+            crate::agent_lifecycle::iterative::model::ModelLimits {
+                max_calls: 0,
+                ..model_limits()
+            },
+            ModelReply::Valid,
+            crate::agent_lifecycle::iterative::model::ModelSettlement::CallBudget,
+            false,
+            0,
+        ),
+        (
+            "request budget",
+            crate::agent_lifecycle::iterative::model::ModelLimits {
+                max_request_bytes: 1,
+                ..model_limits()
+            },
+            ModelReply::Valid,
+            crate::agent_lifecycle::iterative::model::ModelSettlement::RequestBudget,
+            false,
+            0,
+        ),
+        (
+            "total budget",
+            crate::agent_lifecycle::iterative::model::ModelLimits {
+                max_total_bytes: 1,
+                ..model_limits()
+            },
+            ModelReply::Valid,
+            crate::agent_lifecycle::iterative::model::ModelSettlement::RequestBudget,
+            false,
+            0,
+        ),
+        (
+            "malformed response",
             model_limits(),
-            true,
+            ModelReply::Malformed,
             crate::agent_lifecycle::iterative::model::ModelSettlement::MalformedResponse,
+            true,
+            1,
+        ),
+        (
+            "response budget",
+            model_limits(),
+            ModelReply::ResponseOverLimit,
+            crate::agent_lifecycle::iterative::model::ModelSettlement::ResponseBudget,
+            true,
+            1,
+        ),
+        (
+            "host failed",
+            model_limits(),
+            ModelReply::Failed,
+            crate::agent_lifecycle::iterative::model::ModelSettlement::HostFailed,
+            true,
+            1,
+        ),
+        (
+            "host panicked",
+            model_limits(),
+            ModelReply::Panicked,
+            crate::agent_lifecycle::iterative::model::ModelSettlement::HostPanicked,
+            true,
+            1,
         ),
     ] {
         let cancellation = AgentCancellation::new();
@@ -219,13 +306,13 @@ fn model_boundary_refuses_fuel_and_malformed_response_before_effect_dispatch() {
             crate::agent_lifecycle::authorization::StageBackend::Interpreter,
             limits,
             &cancellation,
-            malformed,
+            reply,
         );
         assert!(reference.0.is_err());
         assert_eq!(reference.2.len(), 1);
         assert_eq!(reference.2[0].settlement(), expected);
-        assert_eq!(reference.2[0].dispatched(), malformed);
-        assert_eq!(reference.4, usize::from(malformed));
+        assert_eq!(reference.2[0].dispatched(), dispatched);
+        assert_eq!(reference.4, model_calls);
         assert_eq!(reference.5.calls, 0);
 
         for (label, backend) in [
@@ -245,7 +332,7 @@ fn model_boundary_refuses_fuel_and_malformed_response_before_effect_dispatch() {
             ),
         ] {
             let cancellation = AgentCancellation::new();
-            let actual = model_target_run_on(&compiled, backend, limits, &cancellation, malformed);
+            let actual = model_target_run_on(&compiled, backend, limits, &cancellation, reply);
             assert_eq!(
                 actual.0.as_ref().err().map(|errors| errors
                     .iter()
@@ -276,7 +363,7 @@ fn model_boundary_refuses_fuel_and_malformed_response_before_effect_dispatch() {
         crate::agent_lifecycle::authorization::StageBackend::Interpreter,
         model_limits(),
         &cancellation,
-        false,
+        ModelReply::Valid,
     );
     assert_eq!(
         reference.0.unwrap().lifecycle().status(),
@@ -304,7 +391,13 @@ fn model_boundary_refuses_fuel_and_malformed_response_before_effect_dispatch() {
     ] {
         let cancellation = AgentCancellation::new();
         cancellation.cancel();
-        let actual = model_target_run_on(&compiled, backend, model_limits(), &cancellation, false);
+        let actual = model_target_run_on(
+            &compiled,
+            backend,
+            model_limits(),
+            &cancellation,
+            ModelReply::Valid,
+        );
         assert_eq!(
             actual.0.unwrap().lifecycle().status(),
             IterativeStatus::Cancelled,

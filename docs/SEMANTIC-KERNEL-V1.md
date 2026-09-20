@@ -466,6 +466,36 @@ termination theorem, does not connect Rust HIR to the Lean syntax, and does
 not advance the self-hosting ladder. The existing Lean proofs and hosted
 evidence claims are unchanged.
 
+### Mechanized call-chain termination (issue #188)
+
+`proofs/kernel0-lean/Kernel0.lean` extends its existing `Expr` and `Program`
+with `callTargets`, which walks every constructor, every branch (including
+lazy/unselected branches), and every call argument. `CallEdge` reads a caller's
+actual body from that same function table. A `CallGraphRanked` certificate
+requires a natural-number rank to decrease strictly on every derived edge.
+Under that explicit hypothesis, Lean proves that a path of length `n` from
+`f` to `g` satisfies `n + rank(g) ≤ rank(f)`, every closed path has length
+zero, and no infinite call chain exists. An ordinary helper-call fixture
+satisfies the certificate; a self-call nested in another call's argument
+cannot satisfy it for any rank.
+
+The existing proof gate pins these five added theorem statements and audits
+their axiom sets. Its committed negative control offers a forged constant
+rank for the recursive fixture: Lean must reject the non-strict `0 ≤ 0`
+proof where strict `0 < 0` is required. Unexpected success, missing imports,
+or an unrelated elaboration error fails the control. The source-only gate
+also pins the control so replacing it with an unrelated failing theorem
+does not preserve a passing gate.
+
+This is a call-graph termination property of the Lean calculus. It aligns
+with the Rust reifier's active-path recursion refusal but does not prove
+that the Rust traversal produces a Lean rank certificate. Full small-step
+normalization (including substitution), source-to-Lean correspondence,
+resource-limit equivalence, hosted execution, and every self-hosting rung
+above zero remain separate work. See
+[Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md#ranked-call-graph-extension-issue-188)
+for the exact proof and gate scope.
+
 ## Differential testing: reference interpreter vs. the compiler's interpreter
 
 **What ran.** `src/kernel_zero/differential.rs`'s single test,

@@ -26,9 +26,11 @@ Read this before citing this document elsewhere.
   semantics, a fully proved Progress trichotomy for the scalar-and-`if`
   fragment, and a fully proved Preservation for the *entire* language
   (`Let` and non-recursive `Call` included) — see "The spike" below for the
-  exact inventory. It does **not** cover termination (the call graph's
-  acyclicity), does not connect to the compiler's HIR at all, and is not
-  wired into any CI gate.
+  exact inventory. The later ranked-call-graph extension below proves
+  call-chain termination and acyclicity under an explicit strict-rank
+  certificate; full small-step normalization and connection to the compiler's
+  HIR remain open. The existing `kernel0-lean-proof-gate` CI job runs the proof
+  gate; a wired job does not establish a hosted verdict for an unrun commit.
 - **The recommendation (Lean 4) is evidence-based on this host, not a
   universal ranking.** Coq/Rocq's ecosystem is arguably the better textbook
   fit for exactly this kind of small-calculus metatheory (see "Ecosystem
@@ -348,6 +350,55 @@ comment in `Kernel0.lean` for the full account.
 All four seeds above were reverted before commit; only the `mod` fix and
 this section are new committed content from this pass.
 
+## Ranked call-graph extension (issue #188)
+
+The same `Kernel0.lean` now derives `CallEdge` from `Program` lookups and a
+complete `callTargets` traversal of its existing `Expr`. It counts calls
+inside argument lists and all branches, including a syntactically present
+branch that execution may never select. A supplied natural rank is a
+certificate to check against those edges, never a replacement graph to trust.
+
+Five additional headline theorems are part of the existing gate:
+
+- `call_path_rank_bound`: a length-`n` call path from `f` to `g` obeys
+  `n + rank(g) ≤ rank(f)` under `CallGraphRanked`.
+- `ranked_call_graph_acyclic`: a path from a function back to itself has
+  length zero under that certificate.
+- `ranked_call_chain_terminates`: no infinite sequence of call edges exists
+  under that certificate.
+- `recursive_call_fixture_rejected`: a self-call nested in another call's
+  argument cannot have a strict rank, for any proposed rank function.
+- `acyclic_call_fixture_ranked`: a concrete ordinary helper call has a
+  valid rank, preventing a reject-all definition from satisfying the suite.
+
+`scripts/kernel0-lean-gate.py` keeps its pinned theorem signatures and
+no-hole/custom-axiom checks and includes all five names in its axiom audit.
+After a successful build it checks the committed
+`negative/RecursiveCallGraph.lean`: the fixture tries to certify the recursive
+program with constant rank zero, offering `Nat.le_refl 0` at a strict-rank
+obligation. The expected kernel rejection is specifically the type mismatch
+between `0 ≤ 0` and `0 < 0`; success, a missing import, another error, or an
+admitted hole fails this negative control. Its source is pinned (ignoring
+comments and surrounding line whitespace). Weakening strict descent to
+non-strict descent would admit precisely this forged certificate, while also
+breaking the bounded-path proof in the main model.
+
+This extension is **call-chain termination**, not full normalization of
+`Step`. It does not yet show that substitution preserves the extracted call
+graph or construct a full evaluation decrease measure. It does not emit or
+verify a certificate from Rust HIR. The Rust bounded reifier's active-path
+cycle refusal is the corresponding implementation discipline, with finite
+differential evidence and independent exact-source replay; no theorem connects
+the two. The finite scalar Kernel-0 scope, pinned Lean toolchain, zero external
+Lean packages, backend non-claims, and self-hosting rung remain unchanged.
+
+An exact-current-worktree local run of
+`python3 scripts/kernel0-lean-gate.py --require-kernel` passed all 16 pinned
+theorem signatures, the no-hole scan, `lake build`, every theorem's axiom-set
+audit, and the forged recursive-certificate rejection control. This is local
+proof-build evidence, not a hosted verdict; the older transcripts above remain
+historical evidence for their original theorem set.
+
 ## Relationship to issue #186
 
 A parallel audit on issue #186 ("Export selected obligations to an external
@@ -492,9 +543,11 @@ same inventory in more detail):
     defined via `List.map`, and how Lean's own manual documents this class
     of function — resolved it cleanly, with no `sizeOf`/`decreasing_by`
     machinery needed at all.
-- **Explicitly not covered**: termination (Kernel-0's call-graph acyclicity
-  argument), any connection to the compiler's real HIR (`src/kernel_zero.rs`
-  or otherwise), and the native/Wasm backends.
+- **Added after the original spike**: ranked call-graph path bounds,
+  acyclicity, and call-chain termination, as detailed above.
+- **Explicitly not covered**: full small-step normalization, any connection
+  to the compiler's real HIR (`src/kernel_zero.rs` or otherwise), and the
+  native/Wasm backends.
 
 **Verified, not claimed**: every transcript in "Question 2" above was run
 this session against the committed file, from a genuine cold rebuild. The

@@ -109,11 +109,106 @@ structure FunDef where
   body : Expr
 deriving Repr
 
-/-- A whole Kernel-0 program: a fixed, indexed table of `Fn`s. This
-mechanization does not model or use the call graph's acyclicity (Kernel-0's
-termination argument); see docs/KERNEL-PROOF-MECHANIZATION-V1.md's scope
-note. -/
+/-- A whole Kernel-0 program: a fixed, indexed table of `Fn`s. Call-graph
+termination below uses this same table and expression syntax. -/
 abbrev Program := List FunDef
+
+/-! ## Ranked call graphs
+
+The graph is derived from *all* syntactic calls, including unevaluated branches
+and calls nested in arguments. A natural-number rank certificate must strictly
+decrease on every edge. This mechanizes call-chain termination, not termination
+of `Step`, nor correctness of the Rust HIR translator or its resource bounds.
+-/
+
+mutual
+  /-- Every syntactic callee, preserving occurrences and authored order. -/
+  def callTargets : Expr → List Nat
+    | .intLit _ | .boolLit _ | .var _ => []
+    | .arith _ a b | .cmp _ a b | .and a b | .or a b | .letIn a b =>
+        callTargets a ++ callTargets b
+    | .neg e | .not e => callTargets e
+    | .ite c a b => callTargets c ++ callTargets a ++ callTargets b
+    | .call f args => f :: argsCallTargets args
+
+  def argsCallTargets : List Expr → List Nat
+    | [] => []
+    | e :: es => callTargets e ++ argsCallTargets es
+end
+
+/-- A caller's body, looked up in the actual program, contains the callee. -/
+def CallEdge (P : Program) (caller callee : Nat) : Prop :=
+  ∃ fd, P[caller]? = some fd ∧ callee ∈ callTargets fd.body
+
+/-- The certificate is checked against derived edges, not a supplied graph. -/
+def CallGraphRanked (P : Program) (rank : Nat → Nat) : Prop :=
+  ∀ caller callee, CallEdge P caller callee → rank callee < rank caller
+
+/-- A path of exactly `length` call edges (including the empty path). -/
+inductive CallPath (P : Program) : Nat → Nat → Nat → Prop where
+  | nil (f) : CallPath P f f 0
+  | cons {f g h n} : CallEdge P f g → CallPath P g h n → CallPath P f h (n + 1)
+
+theorem call_path_rank_bound {P rank f g n} (hr : CallGraphRanked P rank)
+    (hp : CallPath P f g n) : n + rank g ≤ rank f := by
+  induction hp with
+  | nil => omega
+  | cons edge path ih =>
+      have decrease := hr _ _ edge
+      omega
+
+theorem ranked_call_graph_acyclic {P rank f n} (hr : CallGraphRanked P rank)
+    (hp : CallPath P f f n) : n = 0 := by
+  have bound := call_path_rank_bound hr hp
+  omega
+
+theorem ranked_call_chain_terminates {P rank} (hr : CallGraphRanked P rank) :
+    ¬ ∃ chain : Nat → Nat, ∀ n, CallEdge P (chain n) (chain (n + 1)) := by
+  intro ⟨chain, edges⟩
+  have bound : ∀ n, n + rank (chain n) ≤ rank (chain 0) := by
+    intro n
+    induction n with
+    | zero => omega
+    | succ n ih =>
+        have decrease := hr _ _ (edges n)
+        omega
+  have impossible := bound (rank (chain 0) + 1)
+  omega
+
+/-- A self-call hidden inside a call argument is still an edge. -/
+def recursiveCallFixture : Program :=
+  [⟨[], .int, .call 1 [.call 0 []]⟩, ⟨[.int], .int, .var 0⟩]
+
+theorem recursive_call_fixture_rejected (rank : Nat → Nat) :
+    ¬ CallGraphRanked recursiveCallFixture rank := by
+  intro hr
+  have selfEdge : CallEdge recursiveCallFixture 0 0 := by
+    exact ⟨⟨[], .int, .call 1 [.call 0 []]⟩, rfl, by
+      simp [callTargets, argsCallTargets]⟩
+  have impossible := hr 0 0 selfEdge
+  omega
+
+/-- Positive control: an ordinary helper call has a valid strict rank. -/
+def acyclicCallFixture : Program :=
+  [⟨[], .int, .call 1 []⟩, ⟨[], .int, .intLit 42⟩]
+
+theorem acyclic_call_fixture_ranked :
+    CallGraphRanked acyclicCallFixture (fun f => if f = 0 then 1 else 0) := by
+  intro caller callee ⟨fd, lookup, occurs⟩
+  cases caller with
+  | zero =>
+      simp [acyclicCallFixture] at lookup
+      subst fd
+      simp [callTargets, argsCallTargets] at occurs
+      subst callee
+      decide
+  | succ caller =>
+      cases caller with
+      | zero =>
+          simp [acyclicCallFixture] at lookup
+          subst fd
+          simp [callTargets] at occurs
+      | succ caller => simp [acyclicCallFixture] at lookup
 
 /-! ## Values -/
 
@@ -904,3 +999,8 @@ the substring `sorryAx`). -/
 #print axioms Kernel0.bool_equality_steps
 #print axioms Kernel0.bool_inequality_steps
 #print axioms Kernel0.bool_ordering_is_not_typed
+#print axioms Kernel0.call_path_rank_bound
+#print axioms Kernel0.ranked_call_graph_acyclic
+#print axioms Kernel0.ranked_call_chain_terminates
+#print axioms Kernel0.recursive_call_fixture_rejected
+#print axioms Kernel0.acyclic_call_fixture_ranked

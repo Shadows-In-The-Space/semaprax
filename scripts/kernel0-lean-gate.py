@@ -42,7 +42,7 @@ What it catches, and how
 4. A headline theorem is deleted, renamed, or its *statement* is weakened
    while the file still builds and still looks axiom-clean -- the failure
    mode a bare `lake build` gate misses entirely.
-   -> (a) Presence: each of the eleven headline names must resolve to
+   -> (a) Presence: each headline name must resolve to
           exactly one `#print axioms` info line in the build output
           (requires a toolchain -- an unresolvable name is also a hard
           `lake build` failure, so this is belt-and-suspenders with (1)).
@@ -90,6 +90,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 PROOF_DIR = REPO_ROOT / "proofs" / "kernel0-lean"
 SOURCE = PROOF_DIR / "Kernel0.lean"
+RECURSIVE_CONTROL = PROOF_DIR / "negative" / "RecursiveCallGraph.lean"
 
 # Fully-qualified headline theorem names this gate certifies are present,
 # axiom-clean, and unchanged. Sourced from the `#print axioms` block at the
@@ -107,6 +108,11 @@ HEADLINE_THEOREMS = [
     "bool_equality_steps",
     "bool_inequality_steps",
     "bool_ordering_is_not_typed",
+    "call_path_rank_bound",
+    "ranked_call_graph_acyclic",
+    "ranked_call_chain_terminates",
+    "recursive_call_fixture_rejected",
+    "acyclic_call_fixture_ranked",
 ]
 
 # Frozen, byte-exact expected statement text for each headline theorem,
@@ -168,7 +174,34 @@ PINNED_SIGNATURES = {
         "theorem bool_ordering_is_not_typed {P Γ a b} :\n"
         "    ¬ HasType P Γ (.cmp .lt (.boolLit a) (.boolLit b)) .bool"
     ),
+    "call_path_rank_bound": (
+        "theorem call_path_rank_bound {P rank f g n} (hr : CallGraphRanked P rank)\n"
+        "    (hp : CallPath P f g n) : n + rank g ≤ rank f"
+    ),
+    "ranked_call_graph_acyclic": (
+        "theorem ranked_call_graph_acyclic {P rank f n} (hr : CallGraphRanked P rank)\n"
+        "    (hp : CallPath P f f n) : n = 0"
+    ),
+    "ranked_call_chain_terminates": (
+        "theorem ranked_call_chain_terminates {P rank} (hr : CallGraphRanked P rank) :\n"
+        "    ¬ ∃ chain : Nat → Nat, ∀ n, CallEdge P (chain n) (chain (n + 1))"
+    ),
+    "recursive_call_fixture_rejected": (
+        "theorem recursive_call_fixture_rejected (rank : Nat → Nat) :\n"
+        "    ¬ CallGraphRanked recursiveCallFixture rank"
+    ),
+    "acyclic_call_fixture_ranked": (
+        "theorem acyclic_call_fixture_ranked :\n"
+        "    CallGraphRanked acyclicCallFixture (fun f => if f = 0 then 1 else 0)"
+    ),
 }
+
+PINNED_RECURSIVE_CONTROL = """import Kernel0
+open Kernel0
+theorem forged_recursive_call_rank :
+CallGraphRanked recursiveCallFixture (fun _ => 0) := by
+intro caller callee edge
+exact Nat.le_refl 0"""
 
 ALLOWED_AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
 
@@ -330,6 +363,14 @@ def check_source_level(source_text: str, lines: list[str]) -> list[str]:
             "comments and string literals)"
         )
 
+    if not RECURSIVE_CONTROL.is_file():
+        failures.append("recursive-call negative control is missing")
+    else:
+        control = strip_comments_and_strings(RECURSIVE_CONTROL.read_text(encoding="utf-8"))
+        normalized = "\n".join(line.strip() for line in control.splitlines() if line.strip())
+        if normalized != PINNED_RECURSIVE_CONTROL:
+            failures.append("recursive-call negative control changed from its pinned forged certificate")
+
     return failures
 
 
@@ -399,6 +440,7 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
         found.setdefault(name, []).append(axioms)
 
     missing_from_build = []
+    duplicate_axiom_reports = []
     bad_axiom_sets = []
     for name in HEADLINE_THEOREMS:
         qualified = f"Kernel0.{name}"
@@ -406,6 +448,8 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
         if not occurrences:
             missing_from_build.append(qualified)
             continue
+        if len(occurrences) != 1:
+            duplicate_axiom_reports.append((qualified, len(occurrences)))
         for axioms in occurrences:
             extra = [a for a in axioms if a not in ALLOWED_AXIOMS]
             if extra:
@@ -416,6 +460,10 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
             "headline theorem(s) produced no `#print axioms` info line in "
             "`lake build` output (their `#print axioms` command was removed, "
             "or the name no longer resolves): " + ", ".join(missing_from_build)
+        )
+    for qualified, count in duplicate_axiom_reports:
+        failures.append(
+            f"`{qualified}` produced {count} `#print axioms` info lines; expected exactly one"
         )
     for qualified, axioms, extra in bad_axiom_sets:
         failures.append(
@@ -430,6 +478,38 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
             f"{len(HEADLINE_THEOREMS)} headline theorems (each a subset of "
             f"{sorted(ALLOWED_AXIOMS)})"
         )
+
+    # The built module supplies the real CallGraphRanked definition. A forged
+    # constant rank for its nested recursive fixture must be rejected by the
+    # kernel, specifically at the <= proof offered where strict < is required.
+    # Import/build failures and unrelated syntax errors are not a passing control.
+    if not failures:
+        control = subprocess.run(
+            [lake, "env", "lean", str(RECURSIVE_CONTROL.relative_to(PROOF_DIR))],
+            cwd=str(PROOF_DIR), capture_output=True, text=True,
+        )
+        output = control.stdout + control.stderr
+        errors = [line for line in output.splitlines() if "error:" in line]
+        normalized_output = re.sub(r"\s+", " ", output)
+        # Lean can display the expected constant-rank application before
+        # beta reduction. Accept exactly that equivalent form as well as 0.
+        normalized_output = re.sub(
+            r"\(fun \w+ => 0\) (?:caller|callee)\b", "0", normalized_output
+        )
+        if (
+            control.returncode == 0
+            or len(errors) != 1
+            or "Type mismatch" not in errors[0]
+            or "Nat.le_refl 0 has type 0 ≤ 0" not in normalized_output
+            or "expected to have type 0 < 0" not in normalized_output
+            or "sorryAx" in output
+        ):
+            failures.append(
+                "recursive-call negative control did not fail at the expected strict-rank "
+                "type mismatch:\n" + output
+            )
+        else:
+            print(f"{TAG}: recursive-call negative control OK (forged rank rejected)")
 
     return failures, True
 

@@ -99,7 +99,12 @@ format: `Unreleased` then release buckets, grouped by impact.
   scratch path. Terminal recovery now replays recorded provider bytes without
   pre-deriving fixture diagnostics or redispatching, binds corrective turns to
   the actual canonical prior effect, and rejects tampered settled responses.
-  The route remains source-immutable and grants neither test execution nor
+  A public embedding seam can now inject one opaque, host-selected,
+  fixed-buffer candidate-test observer: its canonical result is bound to the
+  exact candidate/base/source/capability, settled as typed feedback for a later
+  provider turn, and replayed without redispatch. Executable bytes and metadata
+  are bound, run/export scratch state is cleaned before reuse, and foreign or
+  tainted observations fail closed. The ordinary CLI still grants no test or
   publication authority; the scripted V1 seam stays frozen for offline
   regression coverage (#116).
 

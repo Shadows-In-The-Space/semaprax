@@ -398,7 +398,7 @@ fn run_command(
         config.display().to_string(),
         checkpoint.display().to_string(),
         "--opencode".into(),
-        "/bin/true".into(),
+        "/usr/bin/true".into(),
         "--scratch".into(),
         scratch.display().to_string(),
     ])
@@ -597,7 +597,7 @@ fn migrate_command(
         "fixture.agent.fn.migrate_b".into(),
         "1000".into(),
         "--opencode".into(),
-        "/bin/true".into(),
+        "/usr/bin/true".into(),
         "--scratch".into(),
         scratch.display().to_string(),
     ])

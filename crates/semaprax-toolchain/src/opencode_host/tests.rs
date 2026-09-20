@@ -1,4 +1,18 @@
 use super::*;
+
+fn fixture_executable() -> PathBuf {
+    static EXECUTABLE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    EXECUTABLE
+        .get_or_init(|| {
+            let path = std::env::temp_dir().join(format!(
+                "semaprax-opencode-fixture-executable-{}",
+                std::process::id()
+            ));
+            std::fs::write(&path, b"fixture executable identity").unwrap();
+            path
+        })
+        .clone()
+}
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -57,9 +71,9 @@ fn config(digest: &str) -> OpenCodeHostConfig {
     let _ = std::fs::remove_dir_all(&sandbox);
     std::fs::create_dir(&sandbox).unwrap();
     let config = OpenCodeHostConfig::new(
-        PathBuf::from("/bin/true"),
+        fixture_executable(),
         sandbox.clone(),
-        Duration::from_secs(1),
+        Duration::from_secs(5),
         OpenCodeGrammar {
             digest: digest.into(),
             canonical_schema: "{}".into(),
@@ -204,7 +218,7 @@ fn main() -> i64 { 0 }
     let (events, export) = receipt_fixture(&prompt, &document);
     let mut handler = OpenCodeModelHandler::new(
         OpenCodeHostConfig::new(
-            PathBuf::from("/bin/true"),
+            fixture_executable(),
             {
                 let sandbox = std::env::temp_dir().join(format!(
                     "semaprax-opencode-host-compiled-{}",
@@ -214,7 +228,7 @@ fn main() -> i64 { 0 }
                 std::fs::create_dir(&sandbox).unwrap();
                 sandbox
             },
-            Duration::from_secs(1),
+            Duration::from_secs(5),
             grammar,
         )
         .unwrap(),
@@ -253,7 +267,7 @@ fn process_runner_uses_a_local_stub_without_provider_access() {
     let config = OpenCodeHostConfig::new(
         stub,
         sandbox,
-        Duration::from_secs(1),
+        Duration::from_secs(5),
         OpenCodeGrammar {
             digest: "g".into(),
             canonical_schema: "{}".into(),
@@ -272,6 +286,206 @@ fn process_runner_uses_a_local_stub_without_provider_access() {
             .unwrap();
     assert_eq!(policy["snapshot"], false);
     assert_eq!(policy["agent"][OPENCODE_AGENT]["permission"]["*"], "deny");
+    assert!(config.sandbox.join(environment::PRIVATE).is_dir());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn process_runner_cleans_owned_policy_for_the_same_scratch_on_resume() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("semaprax-opencode-reuse-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).unwrap();
+    let stub = root.join("stub");
+    std::fs::write(&stub, "#!/bin/sh\nprintf 'stub-output'\n").unwrap();
+    let mut permissions = std::fs::metadata(&stub).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&stub, permissions).unwrap();
+    let sandbox = root.join("sandbox");
+    std::fs::create_dir(&sandbox).unwrap();
+    let config = |sandbox| {
+        OpenCodeHostConfig::new(
+            stub.clone(),
+            sandbox,
+            Duration::from_secs(5),
+            OpenCodeGrammar {
+                digest: "g".into(),
+                canonical_schema: "{}".into(),
+                provider_schema: "{}".into(),
+            },
+        )
+        .unwrap()
+    };
+    let first = config(sandbox.clone());
+    let mut runner = ProcessOpenCodeRunner;
+    assert_eq!(runner.run(&first, "first").unwrap(), b"stub-output");
+    assert!(sandbox.join("opencode.json").is_file());
+    assert!(sandbox.join(environment::PRIVATE).is_dir());
+    assert_eq!(runner.export(&first, "session").unwrap(), b"stub-output");
+    assert!(!sandbox.join("opencode.json").exists());
+    assert!(!sandbox.join(environment::PRIVATE).exists());
+    let resumed = config(sandbox.clone());
+    assert_eq!(runner.run(&resumed, "resume").unwrap(), b"stub-output");
+    assert!(sandbox.join("opencode.json").is_file());
+    assert!(sandbox.join(environment::PRIVATE).is_dir());
+    std::fs::write(
+        sandbox.join(super::STAGED_EXECUTABLE),
+        std::fs::read(&stub).unwrap(),
+    )
+    .unwrap();
+    let after_interruption = config(sandbox.clone());
+    assert!(sandbox.read_dir().unwrap().next().is_none());
+    assert_eq!(
+        runner
+            .run(&after_interruption, "after interruption")
+            .unwrap(),
+        b"stub-output"
+    );
+    assert_eq!(
+        runner.export(&after_interruption, "session").unwrap(),
+        b"stub-output"
+    );
+    assert!(sandbox.read_dir().unwrap().next().is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn host_config_refuses_and_preserves_unauthenticated_staged_executable() {
+    let root = std::env::temp_dir().join(format!(
+        "semaprax-opencode-foreign-stage-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).unwrap();
+    let sandbox = root.join("sandbox");
+    std::fs::create_dir(&sandbox).unwrap();
+    let staged = sandbox.join(super::STAGED_EXECUTABLE);
+    std::fs::write(&staged, b"foreign").unwrap();
+    assert!(OpenCodeHostConfig::new(
+        fixture_executable(),
+        sandbox,
+        Duration::from_secs(1),
+        OpenCodeGrammar {
+            digest: "g".into(),
+            canonical_schema: "{}".into(),
+            provider_schema: "{}".into(),
+        },
+    )
+    .is_err());
+    assert_eq!(std::fs::read(staged).unwrap(), b"foreign");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn malformed_run_events_abandon_the_owned_session_before_return() {
+    use std::os::unix::fs::PermissionsExt;
+    let root =
+        std::env::temp_dir().join(format!("semaprax-opencode-abandon-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).unwrap();
+    let stub = root.join("stub");
+    std::fs::write(&stub, "#!/bin/sh\nprintf 'malformed-events'\n").unwrap();
+    let mut permissions = std::fs::metadata(&stub).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&stub, permissions).unwrap();
+    let sandbox = root.join("sandbox");
+    std::fs::create_dir(&sandbox).unwrap();
+    let config = OpenCodeHostConfig::new(
+        stub,
+        sandbox.clone(),
+        Duration::from_secs(5),
+        OpenCodeGrammar {
+            digest: "g".into(),
+            canonical_schema: "{}".into(),
+            provider_schema: "{}".into(),
+        },
+    )
+    .unwrap();
+    let outcome = OpenCodeModelHandler::new(config, ProcessOpenCodeRunner)
+        .invoke_prompt("prompt", MAX_EVENTS_BYTES);
+    assert!(matches!(outcome, ModelInvocationOutcome::Failed { .. }));
+    assert!(sandbox.read_dir().unwrap().next().is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn process_runner_refuses_executable_bytes_drift_after_binding() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("semaprax-opencode-drift-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).unwrap();
+    let stub = root.join("stub");
+    std::fs::write(&stub, "#!/bin/sh\nprintf 'stub-output'\n").unwrap();
+    let mut permissions = std::fs::metadata(&stub).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&stub, permissions).unwrap();
+    let sandbox = root.join("sandbox");
+    std::fs::create_dir(&sandbox).unwrap();
+    let config = OpenCodeHostConfig::new(
+        stub.clone(),
+        sandbox,
+        Duration::from_secs(1),
+        OpenCodeGrammar {
+            digest: "g".into(),
+            canonical_schema: "{}".into(),
+            provider_schema: "{}".into(),
+        },
+    )
+    .unwrap();
+    std::fs::write(&stub, "#!/bin/sh\nprintf 'changed'\n").unwrap();
+    assert_eq!(
+        ProcessOpenCodeRunner.run(&config, "drift"),
+        Err(OpenCodeRunnerFailure::Refused)
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn process_runner_refuses_and_retains_unexpected_scratch_output() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = std::env::temp_dir().join(format!("semaprax-opencode-taint-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir(&root).unwrap();
+    let stub = root.join("stub");
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nprintf 'provider-owned' > unexpected\nprintf 'stub-output'\n",
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&stub).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&stub, permissions).unwrap();
+    let sandbox = root.join("sandbox");
+    std::fs::create_dir(&sandbox).unwrap();
+    let config = OpenCodeHostConfig::new(
+        stub,
+        sandbox.clone(),
+        Duration::from_secs(5),
+        OpenCodeGrammar {
+            digest: "g".into(),
+            canonical_schema: "{}".into(),
+            provider_schema: "{}".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        ProcessOpenCodeRunner.run(&config, "taint"),
+        Err(OpenCodeRunnerFailure::Refused)
+    );
+    assert_eq!(
+        std::fs::read(sandbox.join("unexpected")).unwrap(),
+        b"provider-owned"
+    );
+    assert!(!sandbox.join("opencode.json").exists());
+    assert_eq!(
+        ProcessOpenCodeRunner.run(&config, "must not redispatch"),
+        Err(OpenCodeRunnerFailure::Refused)
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -407,7 +621,7 @@ fn host_config_rejects_a_sandbox_symlink() {
     let linked = root.join("linked");
     symlink(&actual, &linked).unwrap();
     assert!(OpenCodeHostConfig::new(
-        PathBuf::from("/bin/true"),
+        fixture_executable(),
         linked,
         Duration::from_secs(1),
         OpenCodeGrammar {

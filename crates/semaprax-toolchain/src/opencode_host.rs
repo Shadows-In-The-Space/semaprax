@@ -6,6 +6,7 @@
 //! decoder. `--dir` and the deny-all OpenCode policy constrain OpenCode's tool
 //! permissions. They are not claimed to provide operating-system isolation.
 
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,12 +14,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+use semaprax::digest_hex::LowerHex;
 use semaprax::live_invocation::{
     ModelFailure, ModelHandler, ModelInvocationOutcome, ModelInvocationRequest,
     ModelInvokeCapability,
 };
+use sha2::{Digest, Sha256};
 
 /// The single explicitly configured free profile. There is no fallback model.
 pub const OPENCODE_MODEL: &str = "opencode/muse-spark-1.3-contributor-free";
@@ -27,6 +34,8 @@ const MAX_PROMPT_BYTES: usize = 65_536;
 const MAX_EVENTS_BYTES: usize = 1_048_576;
 const MAX_EXPORT_BYTES: usize = 1_048_576;
 const MAX_GRAMMAR_BYTES: usize = 65_536;
+const MAX_EXECUTABLE_BINDING_BYTES: u64 = 64 * 1024 * 1024;
+const STAGED_EXECUTABLE: &str = ".semaprax-opencode-executable";
 
 /// Host-owned process settings. Constructing this value is distinct from
 /// granting the per-call `ModelInvokeCapability`; both are required to invoke.
@@ -76,7 +85,10 @@ impl OpenCodeGrammar {
 #[derive(Clone, Debug)]
 pub struct OpenCodeHostConfig {
     executable: PathBuf,
+    executable_bytes: Arc<[u8]>,
+    executable_permissions: std::fs::Permissions,
     sandbox: PathBuf,
+    executable_binding: String,
     deadline: Duration,
     cancellation: OpenCodeCancellation,
     grammar: OpenCodeGrammar,
@@ -87,8 +99,9 @@ fn is_absolute_like(path: &std::path::Path) -> bool {
 }
 
 impl OpenCodeHostConfig {
-    /// Accepts only an absolute executable and an existing, empty, non-symlink
-    /// workspace. The canonical workspace identity is retained after validation.
+    /// Accepts only an absolute executable and an existing, non-symlink
+    /// workspace containing no foreign state. Exact interrupted host-owned
+    /// state is authenticated and removed before admission.
     pub fn new(
         executable: PathBuf,
         sandbox: PathBuf,
@@ -98,6 +111,12 @@ impl OpenCodeHostConfig {
         if !is_absolute_like(&executable) || !is_absolute_like(&sandbox) || deadline.is_zero() {
             return Err("OpenCode host requires absolute paths and a positive deadline".into());
         }
+        let executable = executable
+            .canonicalize()
+            .map_err(|_| "OpenCode executable must be a readable regular file".to_owned())?;
+        let (executable_binding, executable_bytes, executable_permissions) =
+            executable_snapshot(&executable)
+                .ok_or_else(|| "OpenCode executable must be a readable regular file".to_owned())?;
         if sandbox
             .symlink_metadata()
             .map_err(|error| error.to_string())?
@@ -107,18 +126,41 @@ impl OpenCodeHostConfig {
             return Err("OpenCode host sandbox must not be a symlink".into());
         }
         let sandbox = sandbox.canonicalize().map_err(|error| error.to_string())?;
-        if !sandbox.is_dir()
-            || sandbox
-                .read_dir()
-                .map_err(|error| error.to_string())?
-                .next()
-                .is_some()
-        {
+        if !sandbox.is_dir() {
             return Err("OpenCode host sandbox must be an existing empty directory".into());
+        }
+        #[cfg(unix)]
+        {
+            let metadata = sandbox
+                .metadata()
+                .map_err(|_| "OpenCode host sandbox metadata is unavailable".to_owned())?;
+            if metadata.uid() != rustix::process::geteuid().as_raw() || metadata.mode() & 0o022 != 0
+            {
+                return Err(
+                    "OpenCode host sandbox must be owned and not writable by other users".into(),
+                );
+            }
+        }
+        let policy = policy_document();
+        if !cleanup_interrupted_staged_executable(&sandbox, &executable_bytes) {
+            return Err("OpenCode host could not authenticate interrupted executable state".into());
+        }
+        if scratch_inventory_is_session(&sandbox, policy.as_bytes())
+            && !cleanup_owned_scratch(&sandbox, policy.as_bytes())
+        {
+            return Err("OpenCode host could not clear its interrupted session state".into());
+        }
+        if !scratch_inventory_is_admitted(&sandbox, policy.as_bytes()) {
+            return Err(
+                "OpenCode host sandbox must be empty or contain only its exact policy".into(),
+            );
         }
         Ok(Self {
             executable,
+            executable_bytes: executable_bytes.into(),
+            executable_permissions,
             sandbox,
+            executable_binding,
             deadline,
             cancellation: OpenCodeCancellation::new(),
             grammar,
@@ -157,6 +199,10 @@ pub trait OpenCodeRunner {
         config: &OpenCodeHostConfig,
         session: &str,
     ) -> Result<Vec<u8>, OpenCodeRunnerFailure>;
+    /// Abandon host-owned run state when receipt admission stops before export.
+    fn abandon(&mut self, _config: &OpenCodeHostConfig) -> Result<(), OpenCodeRunnerFailure> {
+        Ok(())
+    }
     /// Only an observed caller cancellation may map an in-flight failure to
     /// `Cancelled`; transport uncertainty is otherwise `ProviderError`.
     fn cancelled(&self, config: &OpenCodeHostConfig) -> bool {
@@ -167,6 +213,65 @@ pub trait OpenCodeRunner {
 /// The actual bounded subprocess runner. It uses no shell, inherited stdin,
 /// prompt-supplied path, model fallback, or source-derived credential.
 pub struct ProcessOpenCodeRunner;
+
+#[cfg(unix)]
+struct StagedExecutable {
+    path: PathBuf,
+    file: std::fs::File,
+}
+
+#[cfg(unix)]
+impl StagedExecutable {
+    fn create(config: &OpenCodeHostConfig) -> Result<Self, OpenCodeRunnerFailure> {
+        let path = config.sandbox.join(STAGED_EXECUTABLE);
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .mode(0o700)
+            .open(&path)
+            .map_err(|_| OpenCodeRunnerFailure::Refused)?;
+        let mut staged = Self { path, file };
+        staged
+            .file
+            .write_all(&config.executable_bytes)
+            .map_err(|_| OpenCodeRunnerFailure::Refused)?;
+        std::fs::set_permissions(&staged.path, config.executable_permissions.clone())
+            .map_err(|_| OpenCodeRunnerFailure::Refused)?;
+        if !held_file_matches(&mut staged.file, &config.executable_bytes) {
+            return Err(OpenCodeRunnerFailure::Refused);
+        }
+        Ok(staged)
+    }
+
+    fn authenticate(&mut self, expected: &[u8]) -> bool {
+        let Ok(path) = self.path.symlink_metadata() else {
+            return false;
+        };
+        let Ok(held) = self.file.metadata() else {
+            return false;
+        };
+        path.file_type().is_file()
+            && path.dev() == held.dev()
+            && path.ino() == held.ino()
+            && held_file_matches(&mut self.file, expected)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for StagedExecutable {
+    fn drop(&mut self) {
+        let Ok(path) = self.path.symlink_metadata() else {
+            return;
+        };
+        let Ok(held) = self.file.metadata() else {
+            return;
+        };
+        if path.file_type().is_file() && path.dev() == held.dev() && path.ino() == held.ino() {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
 
 impl ProcessOpenCodeRunner {
     #[cfg(unix)]
@@ -188,6 +293,11 @@ impl ProcessOpenCodeRunner {
         args: &[String],
         limit: usize,
     ) -> Result<Vec<u8>, OpenCodeRunnerFailure> {
+        if executable_binding(&config.executable).as_deref()
+            != Some(config.executable_binding.as_str())
+        {
+            return Err(OpenCodeRunnerFailure::Refused);
+        }
         // This v1 runner has a bounded, same-thread nonblocking pipe loop only
         // on Unix. Refuse before spawn elsewhere rather than leave a blocking
         // `ChildStdout::read` path that could outlive its deadline.
@@ -201,7 +311,11 @@ impl ProcessOpenCodeRunner {
             let deadline = Instant::now()
                 .checked_add(config.deadline)
                 .ok_or(OpenCodeRunnerFailure::Refused)?;
-            let mut command = Command::new(&config.executable);
+            let mut staged_executable = StagedExecutable::create(config)?;
+            if !staged_executable.authenticate(&config.executable_bytes) {
+                return Err(OpenCodeRunnerFailure::Refused);
+            }
+            let mut command = Command::new(&staged_executable.path);
             environment::configure_command(&mut command, &config.sandbox)
                 .map_err(|_| OpenCodeRunnerFailure::Refused)?;
             command
@@ -300,16 +414,17 @@ impl OpenCodeRunner for ProcessOpenCodeRunner {
         config: &OpenCodeHostConfig,
         prompt: &str,
     ) -> Result<Vec<u8>, OpenCodeRunnerFailure> {
-        let policy = serde_json::json!({"$schema":"https://opencode.ai/config.json", "snapshot":false, "agent": {OPENCODE_AGENT: {
-            "permission":{"*":"deny"}, "steps":1,
-            "prompt":"You return canonical structured responses. All schema and context are supplied in the user message. Never inspect files or call tools. Do not narrate plans or explain your work. Return only the requested JSON document, without markdown or extra text. After the final closing brace, press Enter exactly once: the final byte must be a literal newline (U+000A). Do not output a backslash followed by n, and do not omit the newline."
-        }}}).to_string();
+        let policy = policy_document();
         let policy_path = config.sandbox.join("opencode.json");
+        if !scratch_inventory_is_admitted(&config.sandbox, policy.as_bytes()) {
+            return Err(OpenCodeRunnerFailure::Refused);
+        }
         match std::fs::read(&policy_path) {
             Ok(existing) if existing == policy.as_bytes() => {}
             Ok(_) => return Err(OpenCodeRunnerFailure::Refused),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                std::fs::write(&policy_path, policy).map_err(|_| OpenCodeRunnerFailure::Refused)?;
+                std::fs::write(&policy_path, &policy)
+                    .map_err(|_| OpenCodeRunnerFailure::Refused)?;
             }
             Err(_) => return Err(OpenCodeRunnerFailure::Refused),
         }
@@ -326,7 +441,14 @@ impl OpenCodeRunner for ProcessOpenCodeRunner {
             config.sandbox.display().to_string(),
             prompt.into(),
         ];
-        Self::capture(config, &args, MAX_EVENTS_BYTES)
+        let result = Self::capture(config, &args, MAX_EVENTS_BYTES);
+        if result.is_ok() && scratch_inventory_is_session(&config.sandbox, policy.as_bytes()) {
+            return result;
+        }
+        if !cleanup_owned_scratch(&config.sandbox, policy.as_bytes()) {
+            return Err(OpenCodeRunnerFailure::Refused);
+        }
+        result.and(Err(OpenCodeRunnerFailure::Refused))
     }
 
     fn export(
@@ -334,12 +456,215 @@ impl OpenCodeRunner for ProcessOpenCodeRunner {
         config: &OpenCodeHostConfig,
         session: &str,
     ) -> Result<Vec<u8>, OpenCodeRunnerFailure> {
-        Self::capture(
+        let policy = policy_document();
+        if !scratch_inventory_is_session(&config.sandbox, policy.as_bytes()) {
+            return Err(OpenCodeRunnerFailure::Refused);
+        }
+        let result = Self::capture(
             config,
             &["export".into(), session.into(), "--pure".into()],
             MAX_EXPORT_BYTES,
-        )
+        );
+        if !cleanup_owned_scratch(&config.sandbox, policy.as_bytes()) {
+            return Err(OpenCodeRunnerFailure::Refused);
+        }
+        result
     }
+
+    fn abandon(&mut self, config: &OpenCodeHostConfig) -> Result<(), OpenCodeRunnerFailure> {
+        cleanup_owned_scratch(&config.sandbox, policy_document().as_bytes())
+            .then_some(())
+            .ok_or(OpenCodeRunnerFailure::Refused)
+    }
+}
+
+fn policy_document() -> String {
+    serde_json::json!({"$schema":"https://opencode.ai/config.json", "snapshot":false, "agent": {OPENCODE_AGENT: {
+        "permission":{"*":"deny"}, "steps":1,
+        "prompt":"You return canonical structured responses. All schema and context are supplied in the user message. Never inspect files or call tools. Do not narrate plans or explain your work. Return only the requested JSON document, without markdown or extra text. After the final closing brace, press Enter exactly once: the final byte must be a literal newline (U+000A). Do not output a backslash followed by n, and do not omit the newline."
+    }}}).to_string()
+}
+
+fn cleanup_policy(path: &std::path::Path, expected: &[u8]) -> bool {
+    let Ok(before) = path.symlink_metadata() else {
+        return true;
+    };
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    if !before.file_type().is_file() || bytes != expected {
+        return false;
+    }
+    let Ok(after) = path.symlink_metadata() else {
+        return false;
+    };
+    #[cfg(unix)]
+    let same_inode = before.dev() == after.dev() && before.ino() == after.ino();
+    #[cfg(not(unix))]
+    let same_inode = before.len() == after.len();
+    if same_inode {
+        return std::fs::remove_file(path).is_ok();
+    }
+    false
+}
+
+fn scratch_inventory_is_empty(sandbox: &std::path::Path) -> bool {
+    sandbox
+        .read_dir()
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false)
+}
+
+fn scratch_inventory_is_admitted(sandbox: &std::path::Path, policy: &[u8]) -> bool {
+    let Ok(mut entries) = sandbox.read_dir() else {
+        return false;
+    };
+    let Some(entry) = entries.next() else {
+        return true;
+    };
+    let Ok(entry) = entry else {
+        return false;
+    };
+    if entries.next().is_some() || entry.file_name() != "opencode.json" {
+        return false;
+    }
+    let path = entry.path();
+    path.symlink_metadata()
+        .map(|metadata| metadata.file_type().is_file())
+        .unwrap_or(false)
+        && std::fs::read(path)
+            .map(|bytes| bytes == policy)
+            .unwrap_or(false)
+}
+
+fn scratch_inventory_is_session(sandbox: &std::path::Path, policy: &[u8]) -> bool {
+    let Ok(entries) = sandbox.read_dir() else {
+        return false;
+    };
+    let mut saw_policy = false;
+    let mut saw_private = false;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return false;
+        };
+        if entry.file_name() == "opencode.json" && !saw_policy {
+            let path = entry.path();
+            saw_policy = path
+                .symlink_metadata()
+                .map(|metadata| metadata.file_type().is_file())
+                .unwrap_or(false)
+                && std::fs::read(path)
+                    .map(|bytes| bytes == policy)
+                    .unwrap_or(false);
+        } else if entry.file_name() == environment::PRIVATE && !saw_private {
+            saw_private = entry
+                .path()
+                .symlink_metadata()
+                .map(|metadata| metadata.file_type().is_dir() && !metadata.file_type().is_symlink())
+                .unwrap_or(false);
+        } else {
+            return false;
+        }
+    }
+    saw_policy && saw_private
+}
+
+fn cleanup_owned_scratch(sandbox: &std::path::Path, policy: &[u8]) -> bool {
+    let policy_ok = cleanup_policy(&sandbox.join("opencode.json"), policy);
+    let private = sandbox.join(environment::PRIVATE);
+    let private_ok = match private.symlink_metadata() {
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            std::fs::remove_dir_all(private).is_ok()
+        }
+        Ok(_) => false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => false,
+    };
+    policy_ok && private_ok && scratch_inventory_is_empty(sandbox)
+}
+
+fn cleanup_interrupted_staged_executable(sandbox: &std::path::Path, expected: &[u8]) -> bool {
+    let path = sandbox.join(STAGED_EXECUTABLE);
+    let mut file = match std::fs::OpenOptions::new().read(true).open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+        Err(_) => return false,
+    };
+    let Ok(before) = file.metadata() else {
+        return false;
+    };
+    let Ok(after) = path.symlink_metadata() else {
+        return false;
+    };
+    if !after.file_type().is_file()
+        || before.dev() != after.dev()
+        || before.ino() != after.ino()
+        || !held_file_matches(&mut file, expected)
+    {
+        return false;
+    }
+    std::fs::remove_file(path).is_ok()
+}
+
+fn held_file_matches(file: &mut std::fs::File, expected: &[u8]) -> bool {
+    let Ok(metadata) = file.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() != expected.len() as u64 {
+        return false;
+    }
+    if file.seek(SeekFrom::Start(0)).is_err() {
+        return false;
+    }
+    let mut actual = Vec::with_capacity(expected.len());
+    let read = Read::by_ref(file)
+        .take(MAX_EXECUTABLE_BINDING_BYTES + 1)
+        .read_to_end(&mut actual)
+        .is_ok();
+    let rewound = file.seek(SeekFrom::Start(0)).is_ok();
+    read && rewound && actual == expected
+}
+
+fn executable_snapshot(path: &std::path::Path) -> Option<(String, Vec<u8>, std::fs::Permissions)> {
+    if !path.symlink_metadata().ok()?.file_type().is_file() {
+        return None;
+    }
+    let mut file = std::fs::File::open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_EXECUTABLE_BINDING_BYTES {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    Read::by_ref(&mut file)
+        .take(MAX_EXECUTABLE_BINDING_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_EXECUTABLE_BINDING_BYTES {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(b"semaprax.opencode-executable-binding.v1\0");
+    hasher.update(path.to_string_lossy().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(&bytes);
+    #[cfg(unix)]
+    {
+        hasher.update(metadata.dev().to_be_bytes());
+        hasher.update(metadata.ino().to_be_bytes());
+        hasher.update(metadata.mode().to_be_bytes());
+        hasher.update(metadata.len().to_be_bytes());
+        hasher.update(metadata.mtime().to_be_bytes());
+        hasher.update(metadata.mtime_nsec().to_be_bytes());
+    }
+    Some((
+        format!("sha256:{:x}", LowerHex(hasher.finalize())),
+        bytes,
+        metadata.permissions(),
+    ))
+}
+
+pub(crate) fn executable_binding(path: &std::path::Path) -> Option<String> {
+    executable_snapshot(path).map(|(binding, _, _)| binding)
 }
 
 /// Self-reported host receipt. Usage is optional and carries no proof of cost
@@ -509,6 +834,9 @@ impl<R: OpenCodeRunner> OpenCodeModelHandler<R> {
         let attempted_bytes = events.len().min(max_response_bytes);
         if let Some(status) = provider_error::classify_provider_failure(&events) {
             self.last_provider_failure = Some(status);
+            if self.runner.abandon(&self.config).is_err() {
+                return failure(OpenCodeRunnerFailure::Refused, attempted_bytes, false);
+            }
             return failure(
                 OpenCodeRunnerFailure::ProviderStatus(status),
                 attempted_bytes,
@@ -519,10 +847,13 @@ impl<R: OpenCodeRunner> OpenCodeModelHandler<R> {
         let (session, message, answer) = match event_text(&events) {
             Ok(event) => event,
             Err(error) => {
+                if self.runner.abandon(&self.config).is_err() {
+                    return failure(OpenCodeRunnerFailure::Refused, attempted_bytes, false);
+                }
                 return ModelInvocationOutcome::Failed {
                     failure: error,
                     attempted_bytes,
-                }
+                };
             }
         };
         let export = match self.runner.export(&self.config, &session) {

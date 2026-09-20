@@ -45,7 +45,9 @@ use semaprax::provider_adapter_sdk::{
 };
 use serde_json::{json, Map, Value};
 
-use crate::opencode_host::repair_adapter::{source_model_identity, OpenCodeRepairAdapter};
+use crate::opencode_host::repair_adapter::{
+    source_model_identity, source_model_identity_for_config, OpenCodeRepairAdapter,
+};
 use crate::opencode_host::{
     OpenCodeGrammar, OpenCodeHostConfig, OpenCodeRunner, ProcessOpenCodeRunner,
 };
@@ -64,6 +66,17 @@ const RECEIPT_SCHEMA_V2: &str = "semaprax.source-live-cli.repair-receipt.v2";
 const CONFIG_SCHEMA_V1: &str = "semaprax.source-live-cli.repair-config.v1";
 const CONFIG_SCHEMA_V2: &str = "semaprax.source-live-cli.repair-config.v2";
 const MAX_ONE_PROVIDER_CALL_MS: i64 = 30_000;
+
+use super::candidate_test::{
+    candidate_test_bound_identity, candidate_test_evidence, candidate_test_subject,
+    replayed_candidate_test_evidence,
+};
+pub(super) use super::candidate_test::{
+    CandidateTestCapability, CandidateTestEvidence, CandidateTestHost, CandidateTestObservation,
+    CandidateTestObservationError, CandidateTestObserver, CandidateTestStatus,
+    CandidateTestSubject, ReplayedCandidateTestEvidence, CANDIDATE_TEST_SCHEMA,
+    MAX_CANDIDATE_TEST_OBSERVATION_BYTES,
+};
 
 fn is_absolute_like(path: &Path) -> bool {
     path.is_absolute() || path.to_string_lossy().starts_with('/')
@@ -608,12 +621,16 @@ impl ProviderAdapter for FeedbackGuardedAdapter {
 /// scripted corrective turn can verify the runtime's preceding observation.
 /// This is populated only after recovery has admitted and dispatched an
 /// effect; it never previews a fixture candidate to manufacture feedback.
-struct FeedbackRecordingHandler {
+struct FeedbackRecordingHandler<'host, 'observer> {
     inner: OfflineRepairHandler,
     preceding_effect_hex: Rc<RefCell<Option<String>>>,
+    source_revision: String,
+    candidate_test: Option<&'host mut CandidateTestHost<'observer>>,
+    candidate_test_evidence: Option<CandidateTestEvidence>,
+    candidate_test_refused: bool,
 }
 
-impl FeedbackRecordingHandler {
+impl FeedbackRecordingHandler<'_, '_> {
     fn latest_preview(&self) -> Option<&semaprax::agent_runtime_v2::OfflineRepairPreview> {
         self.inner.latest_preview()
     }
@@ -621,14 +638,51 @@ impl FeedbackRecordingHandler {
     fn rejection_count(&self) -> u32 {
         self.inner.rejection_count()
     }
+
+    fn candidate_test_evidence(&self) -> Option<&CandidateTestEvidence> {
+        self.candidate_test_evidence.as_ref()
+    }
+
+    fn candidate_test_refused(&self) -> bool {
+        self.candidate_test_refused
+    }
 }
 
-impl TypedEffectHandler for FeedbackRecordingHandler {
+impl TypedEffectHandler for FeedbackRecordingHandler<'_, '_> {
     fn execute(
         &mut self,
         request: &TypedEffectRequest<'_>,
     ) -> Option<Vec<(String, RetainedValue)>> {
-        let result = self.inner.execute(request)?;
+        let mut result = self.inner.execute(request)?;
+        if let (Some(candidate_test), Some(preview)) = (
+            self.candidate_test.as_deref_mut(),
+            self.inner.latest_preview(),
+        ) {
+            let subject =
+                candidate_test_subject(&candidate_test.capability, preview, &self.source_revision);
+            let observation = match candidate_test.observe(&subject) {
+                Ok(observation) => observation,
+                Err(_) => {
+                    self.candidate_test_refused = true;
+                    return None;
+                }
+            };
+            let evidence = match candidate_test_evidence(observation, &subject) {
+                Ok(evidence) => evidence,
+                Err(()) => {
+                    self.candidate_test_refused = true;
+                    return None;
+                }
+            };
+            let [(result_id, RetainedValue::I64(_))] = result.as_slice() else {
+                return None;
+            };
+            result = vec![(
+                result_id.clone(),
+                RetainedValue::I64(evidence.feedback_code),
+            )];
+            self.candidate_test_evidence = Some(evidence);
+        }
         *self.preceding_effect_hex.borrow_mut() = Some(canonical_effect_hex(&result));
         Some(result)
     }
@@ -690,6 +744,20 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
     command: Command,
     runner: R,
 ) -> Result<String, CliError> {
+    execute_with_runner_and_candidate_test(command, runner, None)
+}
+
+/// Private embedding seam for an already-selected candidate-test capability.
+pub(super) fn execute_with_runner_and_candidate_test<
+    'host,
+    'observer,
+    R: OpenCodeRunner + 'static,
+>(
+    command: Command,
+    runner: R,
+    mut candidate_test: Option<&'host mut CandidateTestHost<'observer>>,
+) -> Result<String, CliError> {
+    let candidate_test_selected = candidate_test.is_some();
     let (config_path, checkpoint_path, fresh, provider_operands) = match command {
         Command::Run {
             config,
@@ -771,9 +839,18 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
         effect_budget,
     )
     .map_err(|diagnostics| diagnostic_error("repair runtime binding refused", diagnostics))?;
-    let (adapter_identity, clock): (_, Box<dyn SourceInvocationClock>) = match &config.provider {
+    if candidate_test.is_some() && !matches!(&config.provider, RepairProvider::OpenCode) {
+        return Err(CliError::refused(
+            "candidate-test capability requires OpenCode repair configuration",
+        ));
+    }
+    let (adapter_identity, clock, process_adapter_identity): (
+        _,
+        Box<dyn SourceInvocationClock>,
+        Option<String>,
+    ) = match &config.provider {
         RepairProvider::Scripted(_) if provider_operands.is_none() => {
-            (scripted_identity(), Box::new(FixedClock))
+            (scripted_identity(), Box::new(FixedClock), None)
         }
         RepairProvider::Scripted(_) => {
             return Err(CliError::usage(
@@ -784,13 +861,25 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
             let operands = provider_operands
                 .as_ref()
                 .expect("provider operands were checked");
+            let executable = operands
+                .executable
+                .canonicalize()
+                .map_err(|_| CliError::refused("repair OpenCode executable is unavailable"))?;
             let scratch = operands
                 .scratch
                 .canonicalize()
                 .map_err(|_| CliError::refused("repair OpenCode scratch is unavailable"))?;
+            let process_identity = source_model_identity(&executable, &scratch);
+            let process_adapter_identity = process_identity.adapter_identity.clone();
             (
-                source_deployment_identity(source_model_identity(&operands.executable, &scratch))?,
+                candidate_test_bound_identity(
+                    source_deployment_identity(process_identity)?,
+                    candidate_test.as_deref().map(|host| &host.capability),
+                    &config.target,
+                    source.source_revision(),
+                ),
                 Box::new(UnixClock),
+                Some(process_adapter_identity),
             )
         }
         RepairProvider::OpenCode => {
@@ -799,6 +888,7 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
             ));
         }
     };
+    let bound_adapter_identity = adapter_identity.adapter_identity.clone();
     let model_binding = runtime
         .source_model_binding(adapter_identity)
         .map_err(|diagnostics| {
@@ -811,15 +901,6 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
         clock.clock_domain(),
     );
 
-    // --- Acquire and validate the ordinary journal store before constructing
-    // the ephemeral repair handler. `run_live_bound_model_durable` below owns
-    // exact binding recovery (program root, lifecycle, effect contract and
-    // host-bound model adapter) before it can dispatch provider/effect work.
-    // OpenCode mode performs no candidate preview while preparing the handler;
-    // neither does the inherited V1 fixture. Its guard checks the actual
-    // preceding effect observation only when the corrective turn starts.
-    // A terminal generation is never redispatched and a binding mismatch is
-    // refused rather than silently replayed against stale evidence. ---
     let mut store = if fresh {
         CheckpointDir::fresh(&checkpoint_path, &project_root)?
     } else {
@@ -832,8 +913,6 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
         ));
     }
 
-    // --- Only this live invocation performs any work below this point; the
-    // candidate it may create is ephemeral and is never committed here. ---
     let envelope = OfflineRepairEnvelope::new(Arc::clone(&project), config.target.clone())
         .map_err(|diagnostics| diagnostic_error("repair target envelope refused", diagnostics))?;
     let preceding_effect_hex = Rc::new(RefCell::new(None));
@@ -848,6 +927,10 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
         )
         .map_err(|diagnostics| diagnostic_error("repair effect contract refused", diagnostics))?,
         preceding_effect_hex: Rc::clone(&preceding_effect_hex),
+        source_revision: source.source_revision().to_owned(),
+        candidate_test: candidate_test.take(),
+        candidate_test_evidence: None,
+        candidate_test_refused: false,
     };
 
     let mut scripted_starts = None;
@@ -896,11 +979,24 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
                 grammar,
             )
             .map_err(|_| CliError::refused("repair OpenCode host configuration refused"))?;
+            if process_adapter_identity.as_deref()
+                != Some(
+                    source_model_identity_for_config(&host)
+                        .adapter_identity
+                        .as_str(),
+                )
+            {
+                return Err(CliError::refused(
+                    "repair OpenCode executable changed while binding the host",
+                ));
+            }
             let runner = Rc::new(RefCell::new(runner));
+            let bound_adapter_identity = bound_adapter_identity.clone();
             Box::new(move || -> Box<dyn ProviderAdapter> {
-                Box::new(OpenCodeRepairAdapter::new(
+                Box::new(OpenCodeRepairAdapter::new_with_adapter_identity(
                     host.clone(),
                     SharedRunner(Rc::clone(&runner)),
+                    bound_adapter_identity.clone(),
                 ))
             })
         }
@@ -938,6 +1034,12 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
         })?;
     drop(source);
 
+    if handler.candidate_test_refused() {
+        return Err(CliError::refused(
+            "repair candidate-test observation was refused",
+        ));
+    }
+
     let model_dispatches = complete.run().model_dispatches;
     let effect_dispatches = complete.run().effect_dispatches;
     // A pure terminal-checkpoint replay dispatches nothing. Fixture mode also
@@ -959,10 +1061,24 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
 
     let preview = handler.latest_preview();
     let rejection_count = handler.rejection_count();
+    let candidate_test_evidence = handler.candidate_test_evidence();
+    let replayed_candidate_test_evidence = if fresh {
+        None
+    } else {
+        replayed_candidate_test_evidence(
+            &complete.run().checkpoint,
+            &config.corrected_operation_id,
+            &config.result_id,
+            candidate_test_selected,
+        )
+    };
     receipt_with_preview(
         &config,
         preview,
         rejection_count,
+        candidate_test_evidence,
+        replayed_candidate_test_evidence,
+        candidate_test_selected,
         &complete.run().checkpoint,
         model_dispatches,
         effect_dispatches,
@@ -972,6 +1088,9 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
 fn receipt(
     config: &RepairConfig,
     preview: Option<&semaprax::agent_runtime_v2::OfflineRepairPreview>,
+    candidate_test_evidence: Option<&CandidateTestEvidence>,
+    replayed_candidate_test_evidence: Option<ReplayedCandidateTestEvidence>,
+    candidate_test_selected: bool,
     checkpoint: &semaprax::live_invocation::source_journal::RecoveredSourceCheckpoint,
     model_dispatches: u32,
     effect_dispatches: u32,
@@ -996,10 +1115,39 @@ fn receipt(
             "chain": checkpoint.chain(),
             "generation": checkpoint.generation(),
         });
-        report["candidate_test_execution"] = json!({
-            "status": "not_run",
-            "reason": "this repair host has no candidate test-execution authority",
-        });
+        report["candidate_test_execution"] =
+            match (candidate_test_evidence, replayed_candidate_test_evidence) {
+                (Some(evidence), None) => json!({
+                    "schema": CANDIDATE_TEST_SCHEMA,
+                    "status": evidence.status.text(),
+                    "feedback_code": evidence.feedback_code,
+                    "replayed": false,
+                    "observation": checked_value(
+                        &evidence.canonical,
+                        "repair candidate-test observation refused",
+                    )?,
+                }),
+                (None, Some(evidence)) => json!({
+                    "schema": CANDIDATE_TEST_SCHEMA,
+                    "status": evidence.status.text(),
+                    "feedback_code": evidence.feedback_code,
+                    "replayed": true,
+                    "observation": Value::Null,
+                }),
+                (None, None) => json!({
+                    "status": "not_run",
+                    "reason": if candidate_test_selected {
+                        "no settled candidate-test observation is available"
+                    } else {
+                        "this repair host has no candidate test-execution authority"
+                    },
+                }),
+                (Some(_), Some(_)) => {
+                    return Err(CliError::refused(
+                        "repair candidate-test receipt has conflicting observations",
+                    ))
+                }
+            };
     }
     if let Some(preview) = preview {
         report["candidate_digest"] = json!(preview.candidate().candidate_digest());
@@ -1010,18 +1158,42 @@ fn receipt(
         report["impact_summary"] =
             checked_value(preview.impact_summary(), "repair impact summary refused")?;
         if matches!(&config.provider, RepairProvider::OpenCode) {
+            let candidate_test_ran =
+                candidate_test_evidence.is_some() || replayed_candidate_test_evidence.is_some();
+            let mut blind_spots = vec![
+                Value::String(
+                    "no publication, Git mutation, or physical delivery is authorized by this receipt"
+                        .to_owned(),
+                ),
+                Value::String(
+                    "provider usage is an observation, not cost or delivery proof".to_owned(),
+                ),
+            ];
+            if !candidate_test_ran {
+                blind_spots.insert(0, Value::String(if candidate_test_selected {
+                    "candidate tests were not observed: no settled candidate-test observation is available"
+                        .to_owned()
+                } else {
+                    "candidate tests were not executed: this host has no test-execution authority"
+                        .to_owned()
+                }));
+            } else if replayed_candidate_test_evidence.is_some() {
+                blind_spots.insert(
+                    0,
+                    Value::String(
+                        "candidate-test observation is replayed from the durable journal; no new test was executed"
+                            .to_owned(),
+                    ),
+                );
+            }
             report["analysis"] = json!({
                 "coverage": {
                     "source_review": true,
                     "semantic_delta": true,
                     "impact_summary": true,
-                    "candidate_test_execution": false,
+                    "candidate_test_execution": candidate_test_ran,
                 },
-                "blind_spots": [
-                    "candidate tests were not executed: this host has no test-execution authority",
-                    "no publication, Git mutation, or physical delivery is authorized by this receipt",
-                    "provider usage is an observation, not cost or delivery proof",
-                ],
+                "blind_spots": blind_spots,
             });
         }
     } else {
@@ -1030,16 +1202,23 @@ fn receipt(
         report["semantic_delta"] = Value::Null;
         report["impact_summary"] = Value::Null;
         if matches!(&config.provider, RepairProvider::OpenCode) {
+            let replayed_candidate_test = replayed_candidate_test_evidence.is_some();
             report["analysis"] = json!({
                 "coverage": {
                     "source_review": false,
                     "semantic_delta": false,
                     "impact_summary": false,
-                    "candidate_test_execution": false,
+                    "candidate_test_execution": replayed_candidate_test,
                 },
                 "blind_spots": [
                     "terminal checkpoint replay did not create or revalidate a candidate",
-                    "candidate tests were not executed: this host has no test-execution authority",
+                    if replayed_candidate_test_evidence.is_some() {
+                        "candidate-test observation is replayed from the durable journal; no new test was executed"
+                    } else if candidate_test_selected {
+                        "no settled candidate-test observation is available"
+                    } else {
+                        "candidate tests were not executed: this host has no test-execution authority"
+                    },
                     "no publication, Git mutation, or physical delivery is authorized by this receipt",
                 ],
             });
@@ -1055,6 +1234,9 @@ fn receipt_with_preview(
     config: &RepairConfig,
     preview: Option<&semaprax::agent_runtime_v2::OfflineRepairPreview>,
     rejection_count: u32,
+    candidate_test_evidence: Option<&CandidateTestEvidence>,
+    replayed_candidate_test_evidence: Option<ReplayedCandidateTestEvidence>,
+    candidate_test_selected: bool,
     checkpoint: &semaprax::live_invocation::source_journal::RecoveredSourceCheckpoint,
     model_dispatches: u32,
     effect_dispatches: u32,
@@ -1062,6 +1244,9 @@ fn receipt_with_preview(
     let base = receipt(
         config,
         preview,
+        candidate_test_evidence,
+        replayed_candidate_test_evidence,
+        candidate_test_selected,
         checkpoint,
         model_dispatches,
         effect_dispatches,

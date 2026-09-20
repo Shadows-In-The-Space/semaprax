@@ -44,10 +44,38 @@ pub fn source_model_identity(
     }
 }
 
+pub(crate) fn source_model_identity_for_config(
+    config: &OpenCodeHostConfig,
+) -> semaprax::agent_runtime_v2::SourceModelAdapterIdentity {
+    semaprax::agent_runtime_v2::SourceModelAdapterIdentity {
+        provider_id: "opencode".into(),
+        model_id: OPENCODE_MODEL.into(),
+        adapter_identity: host_adapter_identity_with_binding(
+            &config.executable,
+            &config.sandbox,
+            &config.executable_binding,
+        ),
+        adapter_version: ADAPTER_VERSION.into(),
+        provider_profile: PROVIDER_PROFILE.into(),
+    }
+}
+
 fn host_adapter_identity(executable: &Path, scratch: &Path) -> String {
+    let executable_binding =
+        super::executable_binding(executable).unwrap_or_else(|| "unreadable-executable".to_owned());
+    host_adapter_identity_with_binding(executable, scratch, &executable_binding)
+}
+
+fn host_adapter_identity_with_binding(
+    executable: &Path,
+    scratch: &Path,
+    executable_binding: &str,
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"semaprax.opencode-repair-host-binding.v1\0");
     hasher.update(executable.to_string_lossy().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(executable_binding.as_bytes());
     hasher.update(b"\0");
     hasher.update(scratch.to_string_lossy().as_bytes());
     format!(
@@ -56,9 +84,9 @@ fn host_adapter_identity(executable: &Path, scratch: &Path) -> String {
     )
 }
 
-fn capabilities(executable: &Path, scratch: &Path) -> AdapterCapabilities {
+fn capabilities(adapter_identity: String) -> AdapterCapabilities {
     AdapterCapabilities {
-        adapter_identity: host_adapter_identity(executable, scratch),
+        adapter_identity,
         adapter_version: ADAPTER_VERSION.into(),
         provider_profile: PROVIDER_PROFILE.into(),
         structured_output_modes: vec![StructuredOutputMode::RawText],
@@ -91,7 +119,21 @@ pub struct OpenCodeRepairAdapter<R> {
 impl<R> OpenCodeRepairAdapter<R> {
     #[must_use]
     pub fn new(config: OpenCodeHostConfig, runner: R) -> Self {
-        let capabilities = capabilities(&config.executable, &config.sandbox);
+        let adapter_identity = source_model_identity_for_config(&config).adapter_identity;
+        Self::new_with_adapter_identity(config, runner, adapter_identity)
+    }
+
+    /// Construct an adapter whose advertised identity is already bound by a
+    /// narrower host capability. The caller remains responsible for deriving
+    /// that identity from the ordinary OpenCode host identity; this method
+    /// does not parse or grant a capability itself.
+    #[must_use]
+    pub(crate) fn new_with_adapter_identity(
+        config: OpenCodeHostConfig,
+        runner: R,
+        adapter_identity: String,
+    ) -> Self {
+        let capabilities = capabilities(adapter_identity);
         Self {
             handler: OpenCodeModelHandler::new(config, runner),
             capabilities,
@@ -249,7 +291,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let config = OpenCodeHostConfig::new(
-            PathBuf::from("/bin/true"),
+            PathBuf::from("/usr/bin/true"),
             root.clone(),
             Duration::from_secs(1),
             OpenCodeGrammar {
@@ -314,16 +356,16 @@ mod tests {
     fn repair_adapter_identity_binds_the_selected_host_paths() {
         let (config, root) = config();
         let canonical_root = root.canonicalize().unwrap();
-        let expected =
-            source_model_identity(Path::new("/bin/true"), &canonical_root).adapter_identity;
+        let executable = config.executable.clone();
+        let expected = source_model_identity(&executable, &canonical_root).adapter_identity;
         let adapter = OpenCodeRepairAdapter::new(config, RefusingRunner(Rc::new(Cell::new(0))));
         assert_eq!(adapter.capabilities().adapter_identity, expected);
         assert_ne!(
-            source_model_identity(Path::new("/bin/false"), &canonical_root).adapter_identity,
+            source_model_identity(Path::new("/usr/bin/false"), &canonical_root).adapter_identity,
             expected
         );
         assert_ne!(
-            source_model_identity(Path::new("/bin/true"), &root.join("other")).adapter_identity,
+            source_model_identity(&executable, &root.join("other")).adapter_identity,
             expected
         );
         let _ = std::fs::remove_dir_all(root);

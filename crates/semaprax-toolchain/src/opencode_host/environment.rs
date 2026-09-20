@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const MAX_AUTH_BYTES: u64 = 1_048_576;
-const PRIVATE: &str = ".opencode-host-private";
+pub(super) const PRIVATE: &str = ".opencode-host-private";
 const REFUSED: &str = "OpenCode host environment is not context-isolated";
 
 struct Sources {

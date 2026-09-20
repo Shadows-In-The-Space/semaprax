@@ -38,7 +38,7 @@ fn config(digest: &str) -> OpenCodeHostConfig {
     let _ = std::fs::remove_dir_all(&sandbox);
     std::fs::create_dir(&sandbox).unwrap();
     let config = OpenCodeHostConfig::new(
-        PathBuf::from("/bin/true"),
+        PathBuf::from("/usr/bin/true"),
         sandbox.clone(),
         Duration::from_secs(1),
         OpenCodeGrammar {
@@ -340,7 +340,7 @@ fn policy_refusal_does_not_return_policy_contents() {
     std::fs::create_dir(&sandbox).unwrap();
     let sentinel = "SECRET_POLICY_SENTINEL";
     let cfg = OpenCodeHostConfig::new(
-        PathBuf::from("/bin/true"),
+        PathBuf::from("/usr/bin/true"),
         sandbox.clone(),
         Duration::from_secs(1),
         OpenCodeGrammar {

@@ -45,6 +45,30 @@ fn write_project(fixture: &Fixture, app_source: &str) -> PathBuf {
     root.join("semaprax.toml")
 }
 
+fn project_tree(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    fn visit(root: &Path, path: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>) {
+        let mut entries = fs::read_dir(path)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.path());
+        for entry in entries {
+            let path = entry.path();
+            if entry.file_type().unwrap().is_dir() {
+                visit(root, &path, files);
+            } else {
+                files.push((
+                    path.strip_prefix(root).unwrap().to_owned(),
+                    fs::read(path).unwrap(),
+                ));
+            }
+        }
+    }
+    let mut files = Vec::new();
+    visit(root, root, &mut files);
+    files
+}
+
 fn schema_digest(app_source: &str) -> String {
     let compiled = compile_source_agent_lifecycle_v2(
         app_source,
@@ -69,6 +93,19 @@ fn proposal(schema_digest: &str, budget: &str, sequence: &str) -> String {
         budget = budget,
         sequence = sequence,
     )
+}
+
+fn decode_hex(text: &str) -> Vec<u8> {
+    assert_eq!(text.len() % 2, 0, "feedback hex has whole bytes");
+    text.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            std::str::from_utf8(pair)
+                .ok()
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                .expect("feedback is lowercase hexadecimal")
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -133,6 +170,141 @@ struct RecordedOpenCodeRunner {
     last_answer: Option<String>,
     prompts: Rc<RefCell<Vec<String>>>,
     calls: Rc<Cell<usize>>,
+}
+
+#[derive(Clone)]
+struct CandidateTestSubjectFact {
+    capability: String,
+    candidate_revision: String,
+    base_project_revision: String,
+    source_revision: String,
+    candidate_source: String,
+}
+
+enum CandidateTestReply {
+    Canonical {
+        status: &'static str,
+        detail: &'static str,
+    },
+    CanonicalOverride {
+        field: &'static str,
+        value: &'static str,
+    },
+    ExtraField,
+    DuplicateStatus,
+    ExtraNewline,
+    Raw(Vec<u8>),
+}
+
+struct RecordedCandidateTestObserver {
+    reply: CandidateTestReply,
+    calls: Rc<Cell<usize>>,
+    subjects: Rc<RefCell<Vec<CandidateTestSubjectFact>>>,
+}
+
+impl CandidateTestObserver for RecordedCandidateTestObserver {
+    fn observe(
+        &mut self,
+        _: &CandidateTestCapability,
+        subject: &CandidateTestSubject,
+    ) -> Result<CandidateTestObservation, CandidateTestObservationError> {
+        self.calls.set(self.calls.get() + 1);
+        let candidate_source = subject
+            .candidate()
+            .revision()
+            .sources()
+            .iter()
+            .find(|source| source.path() == "src/app.spx")
+            .expect("candidate test receives the exact selected source")
+            .source()
+            .to_owned();
+        self.subjects.borrow_mut().push(CandidateTestSubjectFact {
+            capability: subject.capability().to_owned(),
+            candidate_revision: subject.candidate_revision().to_owned(),
+            base_project_revision: subject.base_project_revision().to_owned(),
+            source_revision: subject.source_revision().to_owned(),
+            candidate_source,
+        });
+        match &self.reply {
+            CandidateTestReply::Canonical { status, detail } => {
+                CandidateTestObservation::try_from_bytes(
+                    &serde_json::to_vec(&serde_json::json!({
+                        "schema": CANDIDATE_TEST_SCHEMA,
+                        "capability": subject.capability(),
+                        "candidate_revision": subject.candidate_revision(),
+                        "base_project_revision": subject.base_project_revision(),
+                        "source_revision": subject.source_revision(),
+                        "status": status,
+                        "detail": detail,
+                    }))
+                    .unwrap(),
+                )
+                .map_err(|_| CandidateTestObservationError)
+            }
+            CandidateTestReply::CanonicalOverride {
+                field,
+                value: override_value,
+            } => {
+                let mut document = serde_json::json!({
+                    "schema": CANDIDATE_TEST_SCHEMA,
+                    "capability": subject.capability(),
+                    "candidate_revision": subject.candidate_revision(),
+                    "base_project_revision": subject.base_project_revision(),
+                    "source_revision": subject.source_revision(),
+                    "status": "passed",
+                    "detail": "candidate test passed",
+                });
+                document[*field] = serde_json::json!(override_value);
+                CandidateTestObservation::try_from_bytes(&serde_json::to_vec(&document).unwrap())
+            }
+            CandidateTestReply::ExtraField => {
+                let mut value = serde_json::json!({
+                    "schema": CANDIDATE_TEST_SCHEMA,
+                    "capability": subject.capability(),
+                    "candidate_revision": subject.candidate_revision(),
+                    "base_project_revision": subject.base_project_revision(),
+                    "source_revision": subject.source_revision(),
+                    "status": "passed",
+                    "detail": "candidate test passed",
+                });
+                value["extra"] = serde_json::json!("unexpected");
+                CandidateTestObservation::try_from_bytes(&serde_json::to_vec(&value).unwrap())
+            }
+            CandidateTestReply::DuplicateStatus => {
+                let value = serde_json::to_string(&serde_json::json!({
+                    "schema": CANDIDATE_TEST_SCHEMA,
+                    "capability": subject.capability(),
+                    "candidate_revision": subject.candidate_revision(),
+                    "base_project_revision": subject.base_project_revision(),
+                    "source_revision": subject.source_revision(),
+                    "status": "passed",
+                    "detail": "candidate test passed",
+                }))
+                .unwrap()
+                .replacen(
+                    "\"status\":\"passed\"",
+                    "\"status\":\"passed\",\"status\":\"passed\"",
+                    1,
+                );
+                CandidateTestObservation::try_from_bytes(value.as_bytes())
+            }
+            CandidateTestReply::ExtraNewline => {
+                let mut value = serde_json::to_vec(&serde_json::json!({
+                    "schema": CANDIDATE_TEST_SCHEMA,
+                    "capability": subject.capability(),
+                    "candidate_revision": subject.candidate_revision(),
+                    "base_project_revision": subject.base_project_revision(),
+                    "source_revision": subject.source_revision(),
+                    "status": "passed",
+                    "detail": "candidate test passed",
+                }))
+                .unwrap();
+                value.extend_from_slice(b"\n\n");
+                CandidateTestObservation::try_from_bytes(&value)
+            }
+            CandidateTestReply::Raw(bytes) => CandidateTestObservation::try_from_bytes(bytes),
+        }
+    }
 }
 
 impl OpenCodeRunner for RecordedOpenCodeRunner {
@@ -206,8 +378,15 @@ fn recorded_transport(prompt: &str, answer: &str) -> (Vec<u8>, Vec<u8>) {
 }
 
 fn v2_command(verb: &str, config: PathBuf, checkpoint: PathBuf, scratch: PathBuf) -> Command {
+    let executable = scratch
+        .parent()
+        .expect("fixture scratch has a parent")
+        .join("opencode-fixture-executable");
+    if !executable.exists() {
+        fs::write(&executable, b"fixed injected-runner executable identity").unwrap();
+    }
     let provider = OpenCodeOperands {
-        executable: PathBuf::from("/bin/true"),
+        executable,
         scratch,
     };
     match verb {
@@ -290,6 +469,34 @@ fn setup_v2(fixture: &Fixture, migration_id: &str) -> (PathBuf, PathBuf, String)
         &repair_config_value(&manifest, &task_path, &digest, migration_id),
     );
     let config = v2_config(fixture, &v1_config);
+    let checkpoint = fixture.0.join("checkpoint");
+    (config, checkpoint, digest)
+}
+
+fn setup_v2_with_feedback_turn(
+    fixture: &Fixture,
+    migration_id: &str,
+) -> (PathBuf, PathBuf, String) {
+    let app_source = opencode_app_source()
+        .replacen("sequence <= 1usize", "sequence <= 2usize", 1)
+        .replacen("state.epoch < 2", "state.epoch < 3", 1)
+        .replacen(r#"\"max_tool_calls\":2"#, r#"\"max_tool_calls\":3"#, 1);
+    assert!(app_source.contains("sequence <= 2usize"));
+    assert!(app_source.contains("state.epoch < 3"));
+    assert!(app_source.contains(r#"\"max_tool_calls\":3"#));
+    let manifest = write_project(fixture, &app_source).canonicalize().unwrap();
+    let digest = schema_digest(&app_source);
+    let task_path = fixture.0.join("task.txt");
+    fs::write(&task_path, b"repair the checked candidate").unwrap();
+    let v1_config = write_config(
+        fixture,
+        &repair_config_value(&manifest, &task_path, &digest, migration_id),
+    );
+    let config = v2_config(fixture, &v1_config);
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    value["ceiling"] = serde_json::json!(3);
+    value["effect_budget"]["max_calls"] = serde_json::json!(3);
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
     let checkpoint = fixture.0.join("checkpoint");
     (config, checkpoint, digest)
 }
@@ -554,6 +761,355 @@ fn repair_v2_tampered_settled_wire_refuses_resume_without_redispatch() {
         "hostile recovery must not write authoritative source"
     );
     assert_eq!(fs::read(&checkpoint_document).unwrap(), tampered);
+}
+
+#[test]
+fn v2_failed_candidate_test_is_bound_feedback_and_terminal_resume_never_redispatches_it() {
+    let fixture = Fixture::new();
+    let (config, checkpoint, digest) = setup_v2(&fixture, "test.repair.v2-test-failure.v1");
+    let scratch = fixture.0.join("scratch");
+    fs::create_dir(&scratch).unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let prompts = Rc::new(RefCell::new(Vec::new()));
+    let test_calls = Rc::new(Cell::new(0));
+    let subjects = Rc::new(RefCell::new(Vec::new()));
+    let mut observer = RecordedCandidateTestObserver {
+        reply: CandidateTestReply::Canonical {
+            status: "failed",
+            detail: "the checked candidate test failed",
+        },
+        calls: Rc::clone(&test_calls),
+        subjects: Rc::clone(&subjects),
+    };
+    let capability = CandidateTestCapability::host_selected("test.candidate.v1").unwrap();
+    let mut host = CandidateTestHost::new(capability, &mut observer);
+    let source_path = fixture.0.join("project/src/app.spx");
+    let source_before = fs::read(&source_path).unwrap();
+    let project_before = project_tree(&fixture.0.join("project"));
+    let first = execute_with_runner_and_candidate_test(
+        v2_command("run", config.clone(), checkpoint.clone(), scratch.clone()),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::from([proposal(&digest, "0", "0"), proposal(&digest, "7", "1")]),
+            last_answer: None,
+            prompts: Rc::clone(&prompts),
+            calls: Rc::clone(&calls),
+        },
+        Some(&mut host),
+    )
+    .unwrap();
+    let first: serde_json::Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(first["candidate_test_execution"]["status"], "failed");
+    assert_eq!(
+        first["analysis"]["coverage"]["candidate_test_execution"],
+        true
+    );
+    assert!(first["candidate_test_execution"]["feedback_code"]
+        .as_i64()
+        .is_some_and(|code| code < 0));
+    assert_eq!(test_calls.get(), 1);
+    assert_eq!(subjects.borrow().len(), 1);
+    let subject = &subjects.borrow()[0];
+    assert_eq!(subject.capability, "test.candidate.v1");
+    assert_eq!(
+        subject.candidate_revision,
+        first["candidate_digest"].as_str().unwrap()
+    );
+    assert!(subject.base_project_revision.starts_with("sha256:"));
+    assert!(subject.source_revision.starts_with("sha256:"));
+    assert!(subject.candidate_source.contains("\n    7\n"));
+    assert_eq!(fs::read(&source_path).unwrap(), source_before);
+    assert_eq!(project_tree(&fixture.0.join("project")), project_before);
+    let checkpoint_before = fs::read(checkpoint.join("checkpoint.json")).unwrap();
+
+    let resumed = execute_with_runner_and_candidate_test(
+        v2_command("resume", config, checkpoint.clone(), scratch),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::new(),
+            last_answer: None,
+            prompts,
+            calls: Rc::clone(&calls),
+        },
+        Some(&mut host),
+    )
+    .unwrap();
+    let resumed: serde_json::Value = serde_json::from_str(&resumed).unwrap();
+    assert_eq!(resumed["model_dispatches"], 0);
+    assert_eq!(resumed["effect_dispatches"], 0);
+    assert_eq!(resumed["candidate_test_execution"]["status"], "failed");
+    assert_eq!(resumed["candidate_test_execution"]["replayed"], true);
+    assert_eq!(
+        resumed["candidate_test_execution"]["observation"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        resumed["analysis"]["coverage"]["candidate_test_execution"],
+        true
+    );
+    assert_eq!(calls.get(), 2);
+    assert_eq!(test_calls.get(), 1);
+    assert_eq!(
+        fs::read(&checkpoint.join("checkpoint.json")).unwrap(),
+        checkpoint_before
+    );
+    assert_eq!(fs::read(&source_path).unwrap(), source_before);
+    assert_eq!(project_tree(&fixture.0.join("project")), project_before);
+}
+
+#[test]
+fn v2_failed_candidate_test_feedback_reaches_the_next_real_provider_prompt() {
+    let fixture = Fixture::new();
+    let (config, checkpoint, digest) =
+        setup_v2_with_feedback_turn(&fixture, "test.repair.v2-test-feedback.v1");
+    let project_before = project_tree(&fixture.0.join("project"));
+    let scratch = fixture.0.join("scratch");
+    fs::create_dir(&scratch).unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let prompts = Rc::new(RefCell::new(Vec::new()));
+    let test_calls = Rc::new(Cell::new(0));
+    let subjects = Rc::new(RefCell::new(Vec::new()));
+    let mut observer = RecordedCandidateTestObserver {
+        reply: CandidateTestReply::Canonical {
+            status: "failed",
+            detail: "the candidate test must be repaired",
+        },
+        calls: Rc::clone(&test_calls),
+        subjects,
+    };
+    let capability = CandidateTestCapability::host_selected("test.feedback.v1").unwrap();
+    let mut host = CandidateTestHost::new(capability, &mut observer);
+    execute_with_runner_and_candidate_test(
+        v2_command("run", config, checkpoint, scratch),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::from([
+                proposal(&digest, "0", "0"),
+                proposal(&digest, "7", "1"),
+                proposal(&digest, "0", "0"),
+            ]),
+            last_answer: None,
+            prompts: Rc::clone(&prompts),
+            calls: Rc::clone(&calls),
+        },
+        Some(&mut host),
+    )
+    .unwrap();
+    assert_eq!(test_calls.get(), 1);
+    assert_eq!(calls.get(), 3, "the third request must reach the provider");
+    let third: serde_json::Value = serde_json::from_str(&prompts.borrow()[2]).unwrap();
+    let feedback = third["previous_effect_hex"]
+        .as_str()
+        .expect("the next provider request carries the settled effect feedback");
+    let bytes = decode_hex(feedback);
+    let feedback: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let code = feedback["fields"][0][1]
+        .as_str()
+        .and_then(|value| value.parse::<i64>().ok())
+        .expect("candidate-test feedback remains a canonically encoded typed i64 result");
+    assert!(
+        code < 0,
+        "the actual failed test must feed a negative result"
+    );
+    assert_eq!(project_tree(&fixture.0.join("project")), project_before);
+}
+
+#[test]
+fn v2_candidate_test_observation_refuses_malformed_oversized_and_withheld_output() {
+    for raw in [
+        Vec::new(),
+        b"{not canonical}".to_vec(),
+        vec![b'x'; MAX_CANDIDATE_TEST_OBSERVATION_BYTES + 1],
+    ] {
+        let fixture = Fixture::new();
+        let (config, checkpoint, digest) = setup_v2(&fixture, "test.repair.v2-test-hostile.v1");
+        let scratch = fixture.0.join("scratch");
+        fs::create_dir(&scratch).unwrap();
+        let calls = Rc::new(Cell::new(0));
+        let prompts = Rc::new(RefCell::new(Vec::new()));
+        let test_calls = Rc::new(Cell::new(0));
+        let subjects = Rc::new(RefCell::new(Vec::new()));
+        let mut observer = RecordedCandidateTestObserver {
+            reply: CandidateTestReply::Raw(raw),
+            calls: Rc::clone(&test_calls),
+            subjects,
+        };
+        let capability = CandidateTestCapability::host_selected("test.hostile.v1").unwrap();
+        let mut host = CandidateTestHost::new(capability, &mut observer);
+        let source_path = fixture.0.join("project/src/app.spx");
+        let source_before = fs::read(&source_path).unwrap();
+        let project_before = project_tree(&fixture.0.join("project"));
+        assert!(execute_with_runner_and_candidate_test(
+            v2_command("run", config.clone(), checkpoint.clone(), scratch.clone()),
+            RecordedOpenCodeRunner {
+                answers: VecDeque::from([proposal(&digest, "0", "0"), proposal(&digest, "7", "1")]),
+                last_answer: None,
+                prompts,
+                calls: Rc::clone(&calls),
+            },
+            Some(&mut host),
+        )
+        .is_err());
+        assert_eq!(calls.get(), 2);
+        assert_eq!(test_calls.get(), 1);
+        assert_eq!(fs::read(&source_path).unwrap(), source_before);
+        assert_eq!(project_tree(&fixture.0.join("project")), project_before);
+        let resumed = execute_with_runner_and_candidate_test(
+            v2_command("resume", config, checkpoint, scratch),
+            RecordedOpenCodeRunner {
+                answers: VecDeque::new(),
+                last_answer: None,
+                prompts: Rc::new(RefCell::new(Vec::new())),
+                calls: Rc::clone(&calls),
+            },
+            Some(&mut host),
+        )
+        .unwrap();
+        let resumed: serde_json::Value = serde_json::from_str(&resumed).unwrap();
+        assert_eq!(resumed["candidate_test_execution"]["status"], "refused");
+        assert_eq!(resumed["candidate_test_execution"]["replayed"], true);
+        assert_eq!(
+            calls.get(),
+            2,
+            "uncertain observer work must not redispatch"
+        );
+        assert_eq!(test_calls.get(), 1);
+        assert_eq!(fs::read(&source_path).unwrap(), source_before);
+        assert_eq!(project_tree(&fixture.0.join("project")), project_before);
+    }
+}
+
+#[test]
+fn v2_candidate_test_observation_refuses_foreign_bindings_and_noncanonical_fields() {
+    let replies = [
+        CandidateTestReply::CanonicalOverride {
+            field: "candidate_revision",
+            value: "sha256:foreign-candidate",
+        },
+        CandidateTestReply::CanonicalOverride {
+            field: "base_project_revision",
+            value: "sha256:foreign-base",
+        },
+        CandidateTestReply::CanonicalOverride {
+            field: "source_revision",
+            value: "sha256:foreign-source",
+        },
+        CandidateTestReply::CanonicalOverride {
+            field: "capability",
+            value: "foreign-capability",
+        },
+        CandidateTestReply::CanonicalOverride {
+            field: "status",
+            value: "unknown",
+        },
+        CandidateTestReply::CanonicalOverride {
+            field: "detail",
+            value: "",
+        },
+        CandidateTestReply::CanonicalOverride {
+            field: "detail",
+            value: "\u{0001}",
+        },
+        CandidateTestReply::ExtraField,
+        CandidateTestReply::DuplicateStatus,
+        CandidateTestReply::ExtraNewline,
+    ];
+    for reply in replies {
+        let fixture = Fixture::new();
+        let (config, checkpoint, digest) =
+            setup_v2(&fixture, "test.repair.v2-test-binding-fields.v1");
+        let project_before = project_tree(&fixture.0.join("project"));
+        let scratch = fixture.0.join("scratch");
+        fs::create_dir(&scratch).unwrap();
+        let calls = Rc::new(Cell::new(0));
+        let prompts = Rc::new(RefCell::new(Vec::new()));
+        let test_calls = Rc::new(Cell::new(0));
+        let subjects = Rc::new(RefCell::new(Vec::new()));
+        let mut observer = RecordedCandidateTestObserver {
+            reply,
+            calls: Rc::clone(&test_calls),
+            subjects,
+        };
+        let mut host = CandidateTestHost::new(
+            CandidateTestCapability::host_selected("test.hostile-binding.v1").unwrap(),
+            &mut observer,
+        );
+        assert!(execute_with_runner_and_candidate_test(
+            v2_command("run", config, checkpoint, scratch),
+            RecordedOpenCodeRunner {
+                answers: VecDeque::from([proposal(&digest, "0", "0"), proposal(&digest, "7", "1")]),
+                last_answer: None,
+                prompts,
+                calls,
+            },
+            Some(&mut host),
+        )
+        .is_err());
+        assert_eq!(test_calls.get(), 1);
+        assert_eq!(project_tree(&fixture.0.join("project")), project_before);
+    }
+}
+
+#[test]
+fn v2_candidate_test_capability_drift_refuses_resume_before_provider_or_test_dispatch() {
+    let fixture = Fixture::new();
+    let (config, checkpoint, digest) = setup_v2(&fixture, "test.repair.v2-test-binding.v1");
+    let scratch = fixture.0.join("scratch");
+    fs::create_dir(&scratch).unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let prompts = Rc::new(RefCell::new(Vec::new()));
+    let test_calls = Rc::new(Cell::new(0));
+    let subjects = Rc::new(RefCell::new(Vec::new()));
+    let mut first_observer = RecordedCandidateTestObserver {
+        reply: CandidateTestReply::Canonical {
+            status: "passed",
+            detail: "candidate test passed",
+        },
+        calls: Rc::clone(&test_calls),
+        subjects: Rc::clone(&subjects),
+    };
+    let mut first_host = CandidateTestHost::new(
+        CandidateTestCapability::host_selected("test.binding.a.v1").unwrap(),
+        &mut first_observer,
+    );
+    execute_with_runner_and_candidate_test(
+        v2_command("run", config.clone(), checkpoint.clone(), scratch.clone()),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::from([proposal(&digest, "0", "0"), proposal(&digest, "7", "1")]),
+            last_answer: None,
+            prompts: Rc::clone(&prompts),
+            calls: Rc::clone(&calls),
+        },
+        Some(&mut first_host),
+    )
+    .unwrap();
+    let checkpoint_before = fs::read(checkpoint.join("checkpoint.json")).unwrap();
+    let mut second_observer = RecordedCandidateTestObserver {
+        reply: CandidateTestReply::Canonical {
+            status: "passed",
+            detail: "a different host must not be accepted",
+        },
+        calls: Rc::clone(&test_calls),
+        subjects,
+    };
+    let mut second_host = CandidateTestHost::new(
+        CandidateTestCapability::host_selected("test.binding.b.v1").unwrap(),
+        &mut second_observer,
+    );
+    assert!(execute_with_runner_and_candidate_test(
+        v2_command("resume", config, checkpoint.clone(), scratch),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::new(),
+            last_answer: None,
+            prompts,
+            calls: Rc::clone(&calls),
+        },
+        Some(&mut second_host),
+    )
+    .is_err());
+    assert_eq!(calls.get(), 2);
+    assert_eq!(test_calls.get(), 1);
+    assert_eq!(
+        fs::read(checkpoint.join("checkpoint.json")).unwrap(),
+        checkpoint_before
+    );
 }
 
 /// Ordering property: the ordinary Project lock/authority is acquired before

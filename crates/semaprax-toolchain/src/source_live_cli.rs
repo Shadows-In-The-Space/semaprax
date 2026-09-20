@@ -4,11 +4,18 @@
 //! supplies host-selected files, an exclusive latest-store lease, a stable
 //! clock, and the one fixed free OpenCode provider.
 
+mod candidate_test;
 mod checkpoint;
 mod offline_repair_cli;
 mod options;
 mod repair;
 mod run;
+
+pub use candidate_test::{
+    CandidateTestCapability, CandidateTestHost, CandidateTestObservation,
+    CandidateTestObservationError, CandidateTestObserver, CandidateTestSubject,
+    CANDIDATE_TEST_SCHEMA, MAX_CANDIDATE_TEST_OBSERVATION_BYTES,
+};
 
 #[cfg(test)]
 mod tests;
@@ -48,4 +55,21 @@ pub fn run(arguments: &[String]) -> Result<String, (String, u8)> {
         _ => options::Command::parse(arguments).and_then(run::execute),
     };
     result.map_err(|error| (error.reason, error.code))
+}
+
+/// Run the durable V2 repair route with an explicitly injected candidate-test
+/// observer. Ordinary [`run`] calls never acquire this capability.
+pub fn run_repair_with_candidate_test(
+    arguments: &[String],
+    capability: CandidateTestCapability,
+    observer: &mut dyn CandidateTestObserver,
+) -> Result<String, (String, u8)> {
+    let command = repair::Command::parse(arguments).map_err(|error| (error.reason, error.code))?;
+    let mut host = CandidateTestHost::new(capability, observer);
+    repair::execute_with_runner_and_candidate_test(
+        command,
+        crate::opencode_host::ProcessOpenCodeRunner,
+        Some(&mut host),
+    )
+    .map_err(|error| (error.reason, error.code))
 }

@@ -60,13 +60,47 @@ fixture turn can require the actual first rejection's checked effect-feedback
 bytes, proving that the correction did not proceed blind. Version 2
 (`semaprax.source-live-cli.repair-config.v2`) has the same fields except
 `turns`, and requires the explicit `--opencode ABS --scratch EMPTY_ABS`
-operands. `ABS` names the operator-selected executable; `EMPTY_ABS` is a new,
-empty, non-symlink scratch directory for that one invocation. The only v2
+operands. `ABS` names the operator-selected executable; `EMPTY_ABS` is a
+host-selected, non-symlink scratch directory that is empty or contains only the
+exact deny-all policy and private session directory left by an interrupted
+run-before-export boundary. The configured executable is retained as an exact
+bounded byte snapshot, copied to a create-new staged file for each attempt, and
+re-authenticated before spawn. Host construction removes a crash-left staged
+file only when its held inode and bytes match that snapshot, then clears the
+exact owned policy/private state; a completed dispatch removes all of it eagerly
+and refuses while preserving any foreign entry the provider leaves. This is
+binding inside the documented host boundary, not isolation from a hostile
+concurrent process running as the same operating-system principal. The only v2
 provider profile is the fixed free `opencode/muse-spark-1.3-contributor-free`
 profile. There is no fallback model and no provider selection in source or
 configuration. The selected source Agent deployment must already admit that
 exact provider/model row; a V2 host binding against a source deployment that
 only admits another model fails before checkpoint or provider work.
+
+The ordinary V2 CLI still has **no candidate-test authority**. An embedding host
+may instead call the public `source_live_cli::run_repair_with_candidate_test`
+entry with one opaque candidate-test capability together
+with a bounded observer. The observer receives the immutable exact
+`ProjectCandidate` (including its retained candidate source material) together
+with the candidate revision, base Project revision, source revision, and
+host-selected capability identity; it receives no candidate mutator, command,
+environment, process handle, publication grant, or Git authority. It returns one canonical
+`semaprax.source-live-cli.candidate-test-observation.v1` data document with a
+bounded `passed`, `failed`, or `refused` outcome. The host rejects malformed,
+oversized, foreign-candidate, stale-base, stale-source, or wrong-capability
+documents. There is deliberately no JSON operand that selects a test runner.
+
+When such an embedding observes a candidate, its canonical outcome is reduced
+to a deterministic typed `i64` feedback code bound to the entire observation.
+That result is settled through the existing typed-effect/journal boundary before
+any later proposal request, so a failed candidate test becomes actual bounded
+feedback rather than a fixture-side annotation. The capability identity is also
+bound into the V2 model/journal binding: resuming with a different selected
+capability refuses before provider or test-observer dispatch. A terminal replay
+dispatches neither and does not fabricate a fresh observation. `refused` is an
+honest host observation, not a pass or an authorization to retry outside the
+checked loop. The callback returns fixed-size bounded observation storage; it
+cannot hand validation an unbounded allocation.
 
 V2 interprets `deadline_millis` in the restart-stable Unix-epoch-millisecond
 clock domain. The process timeout is the smaller of 30 seconds and the time
@@ -85,6 +119,19 @@ checkpoint dispatches neither provider nor typed effect again, a changed source
 or executable/scratch host binding refuses, and an unresolved acknowledged delivery remains
 uncertain rather than being sent again. These facts make interruption/resume
 observable in the journal, not an exactly-once claim about an external service.
+The V1 scripted fixture is a deterministic terminal-receipt seam only; this
+document does not claim nonterminal V1 provider replay or exactly-once fixture
+work after a crash. V2 recovery retains the journal's explicit
+uncertainty/idempotency outcome for an acknowledged but unsettled provider
+attempt.
+
+Candidate-test observation has the same fail-closed crash boundary. The host
+observer runs only after a durable effect intent exists and before its
+`EffectObserved` settlement. A returned observer error is settled as a refused
+handler result; if the process stops before either settlement, the journal
+remains uncertain. Resume does not redispatch the observer in either case. The
+observer's bounded `detail` field is included in the fresh public CLI receipt;
+embedding hosts must therefore return only review-safe, non-secret detail.
 
 The repair receipt is always source-immutable and publication-authority-free.
 V1 retains the frozen `semaprax.source-live-cli.repair-receipt.v1` projection:
@@ -93,13 +140,15 @@ candidate count, checkpoint generation and dispatch counters. V2 emits the
 additive `semaprax.source-live-cli.repair-receipt.v2` projection. On the
 invocation that produces a candidate it additionally carries `journal_binding`
 (invocation, chain, generation) and `analysis.coverage` / `analysis.blind_spots`
-for those review artifacts. V2's
-`candidate_test_execution.status: "not_run"` is deliberate: no candidate test
-execution capability is available on this route, so it cannot claim a failed
-test observation or manufacture feedback from one. A terminal replay carries
-no newly fabricated candidate evidence. Neither receipt is a cost proof,
-provider-delivery proof, test result, source/Git mutation, or approval to
-publish the candidate.
+for those review artifacts. V2's `candidate_test_execution.status: "not_run"`
+is deliberate when the ordinary CLI route supplies no capability. A
+capability-bearing embedding can instead report the bounded canonical observation
+and its feedback code in the fresh receipt. A terminal replay carries the
+previously settled status and typed feedback with `replayed: true`; the full
+host observation document is not retained in the current journal, and no new
+observation is fabricated. Neither receipt is a cost proof,
+provider-delivery proof, source/Git mutation, or approval to publish the
+candidate.
 
 Priced migration requires both predecessor and destination config v2 pricing
 with exactly matching work unit, currency, minor-unit exponent and integer
@@ -252,4 +301,11 @@ Suspend, pure StateB migration, destination completion, terminal recovery,
 and competing-destination claim refusal. Store tests cover exclusive locks,
 held-directory rename, poisoned writes, symlink/FIFO input refusal, and an
 empty fresh directory that neither mode silently resumes. These are local
-fixture results, not a live provider or power-loss test.
+fixture results, not a live provider or power-loss test. The repair-specific
+local fixture additionally injects a bounded candidate-test observer: it proves
+failed-test feedback reaches a later recorded provider request,
+malformed/oversized/withheld observation data is refused, terminal resume does
+not redispatch either provider or observer, and capability-binding drift fails
+closed. This is local injected-host evidence only; it is neither a real
+test-command execution claim nor the operator-approved live-provider smoke
+required by issue #116.

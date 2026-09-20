@@ -82,9 +82,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 - Extend the source-live repair preview with an explicitly selected OpenCode
   Provider-Adapter route, durable V2 receipts, a restart-stable absolute
   deadline, and checkpoint identity bound to the chosen executable and
-  scratch path. The route remains source-immutable and grants neither test
-  execution nor publication authority; the scripted V1 seam stays frozen for
-  offline regression coverage (#116).
+  scratch path. Terminal recovery now replays recorded provider bytes without
+  pre-deriving fixture diagnostics or redispatching, binds corrective turns to
+  the actual canonical prior effect, and rejects tampered settled responses.
+  The route remains source-immutable and grants neither test execution nor
+  publication authority; the scripted V1 seam stays frozen for offline
+  regression coverage (#116).
 
 - Add whole-line UTF-8 validation and checked nonnegative `i64` total helpers
   to the catalog-normalizer example, with malformed-scalar, boundary-total,

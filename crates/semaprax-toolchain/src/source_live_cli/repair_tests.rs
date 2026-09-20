@@ -1,8 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::*;
+use crate::opencode_host::{OpenCodeHostConfig, OpenCodeRunner, OpenCodeRunnerFailure};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -126,6 +128,172 @@ fn run_repair(verb: &str, config: &Path, checkpoint: &Path) -> Result<String, Cl
     ])
 }
 
+struct RecordedOpenCodeRunner {
+    answers: VecDeque<String>,
+    last_answer: Option<String>,
+    prompts: Rc<RefCell<Vec<String>>>,
+    calls: Rc<Cell<usize>>,
+}
+
+impl OpenCodeRunner for RecordedOpenCodeRunner {
+    fn run(
+        &mut self,
+        _: &OpenCodeHostConfig,
+        prompt: &str,
+    ) -> Result<Vec<u8>, OpenCodeRunnerFailure> {
+        let answer = self
+            .answers
+            .pop_front()
+            .expect("recorded OpenCode answer is available");
+        self.calls.set(self.calls.get() + 1);
+        self.prompts.borrow_mut().push(prompt.to_owned());
+        self.last_answer = Some(answer.clone());
+        Ok(recorded_transport(prompt, &answer).0)
+    }
+
+    fn export(
+        &mut self,
+        _: &OpenCodeHostConfig,
+        _: &str,
+    ) -> Result<Vec<u8>, OpenCodeRunnerFailure> {
+        let prompt = self
+            .prompts
+            .borrow()
+            .last()
+            .expect("OpenCode export follows run")
+            .clone();
+        Ok(recorded_transport(
+            &prompt,
+            self.last_answer
+                .as_deref()
+                .expect("OpenCode answer was retained"),
+        )
+        .1)
+    }
+}
+
+fn recorded_transport(prompt: &str, answer: &str) -> (Vec<u8>, Vec<u8>) {
+    let mut export: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../scripts/fixtures/opencode-provider-smoke-v1/session.json"
+    ))
+    .expect("checked OpenCode transport fixture");
+    let presented = if prompt.contains(' ') {
+        format!("\"{}\"", prompt.replace('"', "\\\""))
+    } else {
+        prompt.to_owned()
+    };
+    export["messages"][0]["parts"][0]["text"] = serde_json::json!(presented);
+    export["messages"][1]["parts"][2]["text"] = serde_json::json!(answer);
+    let parts = export["messages"][1]["parts"]
+        .as_array()
+        .expect("checked OpenCode transport parts");
+    let events = [
+        ("step_start", &parts[0]),
+        ("text", &parts[2]),
+        ("step_finish", &parts[3]),
+    ]
+    .iter()
+    .map(|(kind, part)| {
+        serde_json::json!({"type": kind, "sessionID": "ses_fixture", "part": part}).to_string()
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
+    .into_bytes();
+    (
+        events,
+        serde_json::to_vec(&export).expect("canonical OpenCode export"),
+    )
+}
+
+fn v2_command(verb: &str, config: PathBuf, checkpoint: PathBuf, scratch: PathBuf) -> Command {
+    let provider = OpenCodeOperands {
+        executable: PathBuf::from("/bin/true"),
+        scratch,
+    };
+    match verb {
+        "run" => Command::Run {
+            config,
+            checkpoint,
+            provider: Some(provider),
+        },
+        "resume" => Command::Resume {
+            config,
+            checkpoint,
+            provider: Some(provider),
+        },
+        _ => panic!("test helper only accepts run or resume"),
+    }
+}
+
+fn v2_config(fixture: &Fixture, config: &Path) -> PathBuf {
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(config).unwrap()).unwrap();
+    value["schema"] = serde_json::json!(CONFIG_SCHEMA_V2);
+    value.as_object_mut().unwrap().remove("turns");
+    let deadline = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Unix epoch clock")
+        .checked_add(Duration::from_secs(60))
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .expect("bounded V2 deadline");
+    value["deadline_millis"] = serde_json::json!(deadline);
+    let path = fixture.0.join("config-v2.json");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    path
+}
+
+fn opencode_app_source() -> String {
+    const OPENCODE_SOURCE_MODEL: &str = "muse-spark-1.3-contributor-free";
+    let source = APP
+        .replace("fake.local", "opencode")
+        .replace("fake-basic", OPENCODE_SOURCE_MODEL);
+    assert!(
+        !source.contains("fake.local") && !source.contains("fake-basic"),
+        "the V2 fixture must admit only the exact OpenCode model pair"
+    );
+    assert!(
+        source.contains(&format!(r#"\"model_id\":\"{OPENCODE_SOURCE_MODEL}\""#))
+            && source.contains(&format!(
+                r#"\"allowed_model_ids\":[\"{OPENCODE_SOURCE_MODEL}\"]"#
+            )),
+        "the V2 fixture must bind the adapter's full provider/model identity"
+    );
+    source
+}
+
+#[test]
+fn opencode_source_binding_uses_the_unprefixed_checked_model_identity() {
+    let raw = source_model_identity(Path::new("/bin/true"), Path::new("/scratch"));
+    let adapter_identity = raw.adapter_identity.clone();
+    let bound = source_deployment_identity(raw).unwrap();
+    assert_eq!(bound.provider_id, "opencode");
+    assert_eq!(bound.model_id, "muse-spark-1.3-contributor-free");
+    assert_eq!(bound.adapter_identity, adapter_identity);
+
+    let invalid = SourceModelAdapterIdentity {
+        provider_id: "opencode".into(),
+        model_id: "muse-spark-1.3-contributor-free".into(),
+        adapter_identity: "fixture".into(),
+        adapter_version: "1".into(),
+        provider_profile: "fixture".into(),
+    };
+    assert!(source_deployment_identity(invalid).is_err());
+}
+
+fn setup_v2(fixture: &Fixture, migration_id: &str) -> (PathBuf, PathBuf, String) {
+    let app_source = opencode_app_source();
+    let manifest = write_project(fixture, &app_source).canonicalize().unwrap();
+    let digest = schema_digest(&app_source);
+    let task_path = fixture.0.join("task.txt");
+    fs::write(&task_path, b"repair the checked candidate").unwrap();
+    let v1_config = write_config(
+        fixture,
+        &repair_config_value(&manifest, &task_path, &digest, migration_id),
+    );
+    let config = v2_config(fixture, &v1_config);
+    let checkpoint = fixture.0.join("checkpoint");
+    (config, checkpoint, digest)
+}
+
 fn setup(fixture: &Fixture, migration_id: &str) -> (PathBuf, PathBuf) {
     let manifest = write_project(fixture, APP).canonicalize().unwrap();
     let digest = schema_digest(APP);
@@ -213,6 +381,179 @@ fn repair_resume_replays_terminal_checkpoint_without_redispatch_or_refabricated_
     assert_eq!(resumed_report["candidate_digest"], serde_json::Value::Null);
     assert_eq!(resumed_report["generation"], first_report["generation"]);
     assert_eq!(fs::read(&checkpoint_document).unwrap(), bytes_before);
+}
+
+/// V1 fixture fields only describe the test transport. Once a terminal source
+/// journal exists, recovery must validate that journal before it derives any
+/// fixture diagnostic or candidate preview. Otherwise an irrelevant fixture
+/// edit could turn a read-only replay into a new pre-replay candidate action.
+#[test]
+fn repair_v1_terminal_resume_does_not_prederive_fixture_diagnostics() {
+    let fixture = Fixture::new();
+    let (config, checkpoint) = setup(&fixture, "test.repair.fixture-replay.v1");
+    run_repair("run", &config, &checkpoint).unwrap();
+    let checkpoint_document = checkpoint.join("checkpoint.json");
+    let bytes_before = fs::read(&checkpoint_document).unwrap();
+
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    // These fields are consumed by the fixed fixture only. `7, false` is the
+    // corrected candidate shape, so the former eager `envelope.preview` would
+    // reject before it ever recovered the terminal journal.
+    value["malformed_replacement"] = serde_json::json!(7);
+    value["malformed_bool_literal"] = serde_json::json!(false);
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+
+    let resumed: serde_json::Value =
+        serde_json::from_str(&run_repair("resume", &config, &checkpoint).unwrap()).unwrap();
+    assert_eq!(resumed["status"], "complete");
+    assert_eq!(resumed["model_dispatches"], 0);
+    assert_eq!(resumed["effect_dispatches"], 0);
+    assert_eq!(resumed["candidate_digest"], serde_json::Value::Null);
+    assert_eq!(fs::read(&checkpoint_document).unwrap(), bytes_before);
+}
+
+/// The V2 route receives exactly the same settled OpenCode event/export wire
+/// as production, through an injected credential-free runner. A terminal
+/// replay does not start that runner, fabricate fresh candidate evidence, or
+/// mutate authoritative source or the checkpoint.
+#[test]
+fn repair_v2_settled_wire_terminal_resume_is_zero_dispatch_and_nonpublishing() {
+    let fixture = Fixture::new();
+    let (config, checkpoint, digest) = setup_v2(&fixture, "test.repair.v2-terminal.v1");
+    let scratch = fixture.0.join("scratch");
+    let source_path = fixture.0.join("project/src/app.spx");
+    let source_before = fs::read(&source_path).unwrap();
+    fs::create_dir(&scratch).unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let prompts = Rc::new(RefCell::new(Vec::new()));
+    let first = execute_with_runner(
+        v2_command("run", config.clone(), checkpoint.clone(), scratch.clone()),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::from([proposal(&digest, "0", "0"), proposal(&digest, "7", "1")]),
+            last_answer: None,
+            prompts: Rc::clone(&prompts),
+            calls: Rc::clone(&calls),
+        },
+    )
+    .unwrap();
+    let first: serde_json::Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(first["schema"], RECEIPT_SCHEMA_V2);
+    assert_eq!(first["status"], "complete");
+    assert_eq!(first["model_dispatches"], 2);
+    assert_eq!(first["effect_dispatches"], 2);
+    assert_eq!(first["candidate_test_execution"]["status"], "not_run");
+    assert_eq!(first["source_mutation"], false);
+    assert_eq!(first["publication_authority"], false);
+    assert!(first["journal_binding"]["invocation"].is_string());
+    assert_eq!(calls.get(), 2);
+    assert_eq!(prompts.borrow().len(), 2);
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        source_before,
+        "the settled V2 run must not write authoritative source"
+    );
+    let checkpoint_document = checkpoint.join("checkpoint.json");
+    let bytes_before = fs::read(&checkpoint_document).unwrap();
+
+    let resumed = execute_with_runner(
+        v2_command("resume", config, checkpoint.clone(), scratch),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::new(),
+            last_answer: None,
+            prompts,
+            calls: Rc::clone(&calls),
+        },
+    )
+    .unwrap();
+    let resumed: serde_json::Value = serde_json::from_str(&resumed).unwrap();
+    assert_eq!(resumed["schema"], RECEIPT_SCHEMA_V2);
+    assert_eq!(resumed["status"], "complete");
+    assert_eq!(resumed["model_dispatches"], 0);
+    assert_eq!(resumed["effect_dispatches"], 0);
+    assert_eq!(resumed["candidate_digest"], serde_json::Value::Null);
+    assert_eq!(resumed["analysis"]["coverage"]["source_review"], false);
+    assert_eq!(resumed["source_mutation"], false);
+    assert_eq!(resumed["publication_authority"], false);
+    assert_eq!(calls.get(), 2, "terminal replay must not start OpenCode");
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        source_before,
+        "the terminal V2 replay must not write authoritative source"
+    );
+    assert_eq!(fs::read(&checkpoint_document).unwrap(), bytes_before);
+}
+
+/// A settled-provider response is journal-authenticated. A hostile edit to
+/// its retained bytes must fail recovery before an OpenCode invocation, effect
+/// execution, candidate preview, or checkpoint write can occur.
+#[test]
+fn repair_v2_tampered_settled_wire_refuses_resume_without_redispatch() {
+    let fixture = Fixture::new();
+    let (config, checkpoint, digest) = setup_v2(&fixture, "test.repair.v2-tamper.v1");
+    let scratch = fixture.0.join("scratch");
+    let source_path = fixture.0.join("project/src/app.spx");
+    let source_before = fs::read(&source_path).unwrap();
+    fs::create_dir(&scratch).unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let prompts = Rc::new(RefCell::new(Vec::new()));
+    execute_with_runner(
+        v2_command("run", config.clone(), checkpoint.clone(), scratch.clone()),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::from([proposal(&digest, "0", "0"), proposal(&digest, "7", "1")]),
+            last_answer: None,
+            prompts: Rc::clone(&prompts),
+            calls: Rc::clone(&calls),
+        },
+    )
+    .unwrap();
+    assert_eq!(calls.get(), 2);
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        source_before,
+        "the settled V2 run must not write authoritative source"
+    );
+    let checkpoint_document = checkpoint.join("checkpoint.json");
+    let mut journal: serde_json::Value =
+        serde_json::from_slice(&fs::read(&checkpoint_document).unwrap()).unwrap();
+    let settled = journal["entries"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|entry| entry["kind"] == "attempt_settled")
+        .expect("recorded V2 execution has a settled provider response");
+    let response = settled["response"]
+        .as_str()
+        .expect("settled response is hex")
+        .to_owned();
+    let replacement = if response.starts_with('0') { '1' } else { '0' };
+    settled["response"] = serde_json::json!(format!("{replacement}{}", &response[1..]));
+    let tampered = serde_json::to_vec(&journal).unwrap();
+    fs::write(&checkpoint_document, &tampered).unwrap();
+
+    let error = execute_with_runner(
+        v2_command("resume", config, checkpoint.clone(), scratch),
+        RecordedOpenCodeRunner {
+            answers: VecDeque::new(),
+            last_answer: None,
+            prompts,
+            calls: Rc::clone(&calls),
+        },
+    )
+    .expect_err("tampered settled response must fail closed");
+    assert!(
+        error
+            .reason
+            .contains("repair checked source execution refused"),
+        "unexpected refusal: {}",
+        error.reason
+    );
+    assert_eq!(calls.get(), 2, "hostile recovery must not start OpenCode");
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        source_before,
+        "hostile recovery must not write authoritative source"
+    );
+    assert_eq!(fs::read(&checkpoint_document).unwrap(), tampered);
 }
 
 /// Ordering property: the ordinary Project lock/authority is acquired before
@@ -312,6 +653,41 @@ fn repair_run_fails_when_the_required_prior_feedback_observation_is_withheld() {
             .contains("repair checked source execution refused"),
         "unexpected refusal reason: {}",
         error.reason
+    );
+}
+
+#[test]
+fn repair_feedback_guard_rejects_a_forged_nonempty_prior_effect() {
+    let expected_feedback = Rc::new(RefCell::new(Some(canonical_effect_hex(&[(
+        "value".to_owned(),
+        semaprax::interpreter::retained_call::RetainedValue::I64(583),
+    )]))));
+    let starts = Rc::new(Cell::new(0));
+    let mut guarded = FeedbackGuardedAdapter {
+        inner: ScriptedStreamingAdapter::new(Vec::new(), Vec::new(), usage(1, 1, 0), true),
+        starts: Rc::clone(&starts),
+        requires_prior_feedback: true,
+        expected_feedback,
+        refuse_start: false,
+    };
+    let request = AdapterRequest {
+        request_bytes: br#"{"previous_effect_hex":"00"}"#.to_vec(),
+        max_response_bytes: 4096,
+    };
+    let error = guarded
+        .start(
+            &AdapterInvocationCapability::grant("repair feedback guard test"),
+            &request,
+        )
+        .expect_err("a nonempty effect observation must still match the actual handler result");
+    assert_eq!(
+        error.0,
+        "repair correction omitted checked diagnostic feedback"
+    );
+    assert_eq!(
+        starts.get(),
+        1,
+        "the guard records the rejected attempted adapter start"
     );
 }
 

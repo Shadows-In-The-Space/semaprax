@@ -20,9 +20,11 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use semaprax::agent_deployment::migrate_agent_definition_v1;
+use semaprax::agent_lifecycle::canonical_retained_value_json;
 use semaprax::agent_lifecycle::iterative::compile_source_agent_lifecycle_v2;
 use semaprax::agent_lifecycle::iterative::effects::{
-    EffectArgument, EffectBudget, EffectOperation, EffectResult, EffectScalar,
+    EffectArgument, EffectBudget, EffectOperation, EffectResult, EffectScalar, TypedEffectHandler,
+    TypedEffectRequest,
 };
 use semaprax::agent_lifecycle::iterative::source_live::{SourceLivePolicy, SourceProposalPolicy};
 use semaprax::agent_lifecycle::iterative::IterativeBudget;
@@ -33,6 +35,7 @@ use semaprax::agent_runtime_v2::{
     SourceModelAdapterIdentity,
 };
 use semaprax::execution_revision::ProgramRootRef;
+use semaprax::interpreter::retained_call::RetainedValue;
 use semaprax::live_invocation::{InvocationClock, SourceInvocationClock};
 use semaprax::project::{with_authenticated_project, ProjectRevision};
 use semaprax::provider_adapter_sdk::fixture_adapters::{usage, ScriptedStreamingAdapter};
@@ -95,9 +98,10 @@ impl SourceInvocationClock for UnixClock {
 }
 
 /// One scripted provider turn: the exact canonical proposal document the
-/// fixture provider returns, and (for a corrective turn) the diagnostic
-/// feedback hex it must have observed in the prompt to prove the turn used
-/// the checked rejection rather than repeating the malformed guess blind.
+/// fixture provider returns and whether it must observe the preceding checked
+/// effect result in its prompt. The fixture never precomputes that result:
+/// terminal recovery must be able to replay before any candidate preview is
+/// derived from fixture-only inputs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RepairTurn {
     document: String,
@@ -140,8 +144,6 @@ struct RepairConfig {
     max_argument_bytes: usize,
     max_result_bytes: usize,
     max_total_bytes: usize,
-    malformed_replacement: i64,
-    malformed_bool_literal: bool,
     provider: RepairProvider,
 }
 
@@ -261,6 +263,14 @@ impl RepairConfig {
                 "effect_budget has missing or unknown keys",
             ));
         }
+        // These V1 fixture-only fields remain syntactically validated to keep
+        // its frozen configuration key set, but candidate feedback now comes
+        // from the live handler's actual preceding effect result.
+        let _ = signed_i64(map, "malformed_replacement")?;
+        let _ = map
+            .get("malformed_bool_literal")
+            .and_then(Value::as_bool)
+            .ok_or(CliError::refused("malformed_bool_literal must be boolean"))?;
         let provider = if v1 {
             let turns = map
                 .get("turns")
@@ -320,11 +330,6 @@ impl RepairConfig {
             max_argument_bytes: positive_usize(effect_budget, "max_argument_bytes")?,
             max_result_bytes: positive_usize(effect_budget, "max_result_bytes")?,
             max_total_bytes: positive_usize(effect_budget, "max_total_bytes")?,
-            malformed_replacement: signed_i64(map, "malformed_replacement")?,
-            malformed_bool_literal: map
-                .get("malformed_bool_literal")
-                .and_then(Value::as_bool)
-                .ok_or(CliError::refused("malformed_bool_literal must be boolean"))?,
             provider,
         })
     }
@@ -477,6 +482,24 @@ fn scripted_identity() -> SourceModelAdapterIdentity {
     }
 }
 
+/// Source Agent model rows carry the provider and model as separate fields.
+/// The fixed OpenCode command model is provider-qualified, so retain that
+/// qualification for the host adapter while binding only its exact model
+/// component to the checked source deployment.
+fn source_deployment_identity(
+    mut identity: SourceModelAdapterIdentity,
+) -> Result<SourceModelAdapterIdentity, CliError> {
+    identity.model_id = identity
+        .model_id
+        .strip_prefix("opencode/")
+        .filter(|model| !model.is_empty())
+        .map(str::to_owned)
+        .ok_or(CliError::refused(
+            "repair OpenCode model identity is not provider-qualified",
+        ))?;
+    Ok(identity)
+}
+
 fn operations(config: &RepairConfig) -> Vec<EffectOperation> {
     [
         &config.malformed_operation_id,
@@ -531,31 +554,11 @@ fn checkpoint_policy<'a>(
     }
 }
 
-fn feedback_hex(code: i64, result_id: &str) -> String {
-    format!(
-        "{{\"schema\":\"semaprax.agent-effect-fields.v1\",\"fields\":[[\"{result_id}\",\"{code}\"]]}}\n"
-    )
-    .bytes()
-    .map(|byte| format!("{byte:02x}"))
-    .collect()
-}
-
-fn feedback_code(diagnostics: &[semaprax::diagnostic::Diagnostic]) -> i64 {
-    diagnostics
-        .iter()
-        .find_map(|diagnostic| {
-            diagnostic
-                .code
-                .strip_prefix("SPX-G")
-                .and_then(|code| code.parse::<i64>().ok())
-        })
-        .unwrap_or(583)
-}
-
 struct FeedbackGuardedAdapter {
     inner: ScriptedStreamingAdapter,
     starts: Rc<Cell<usize>>,
-    required_feedback: Option<String>,
+    requires_prior_feedback: bool,
+    expected_feedback: Rc<RefCell<Option<String>>>,
     refuse_start: bool,
 }
 impl ProviderAdapter for FeedbackGuardedAdapter {
@@ -574,16 +577,20 @@ impl ProviderAdapter for FeedbackGuardedAdapter {
             ));
         }
         self.starts.set(self.starts.get() + 1);
-        if self.required_feedback.as_ref().is_some_and(|expected| {
-            serde_json::from_slice::<Value>(&request.request_bytes)
+        if self.requires_prior_feedback {
+            let observed = serde_json::from_slice::<Value>(&request.request_bytes)
                 .ok()
-                .and_then(|prompt| prompt["previous_effect_hex"].as_str().map(str::to_owned))
-                .as_deref()
-                != Some(expected)
-        }) {
-            return Err(AdapterRefusal(
-                "repair correction omitted checked diagnostic feedback".to_owned(),
-            ));
+                .and_then(|prompt| {
+                    prompt["previous_effect_hex"]
+                        .as_str()
+                        .map(ToOwned::to_owned)
+                });
+            let expected = self.expected_feedback.borrow();
+            if expected.is_none() || observed.as_deref() != expected.as_deref() {
+                return Err(AdapterRefusal(
+                    "repair correction omitted checked diagnostic feedback".to_owned(),
+                ));
+            }
         }
         self.inner.start(capability, request)
     }
@@ -595,6 +602,56 @@ impl ProviderAdapter for FeedbackGuardedAdapter {
     fn cancel(&mut self, reason: &str) {
         self.inner.cancel(reason);
     }
+}
+
+/// Captures the canonical bytes returned by the actual effect handler so the
+/// scripted corrective turn can verify the runtime's preceding observation.
+/// This is populated only after recovery has admitted and dispatched an
+/// effect; it never previews a fixture candidate to manufacture feedback.
+struct FeedbackRecordingHandler {
+    inner: OfflineRepairHandler,
+    preceding_effect_hex: Rc<RefCell<Option<String>>>,
+}
+
+impl FeedbackRecordingHandler {
+    fn latest_preview(&self) -> Option<&semaprax::agent_runtime_v2::OfflineRepairPreview> {
+        self.inner.latest_preview()
+    }
+
+    fn rejection_count(&self) -> u32 {
+        self.inner.rejection_count()
+    }
+}
+
+impl TypedEffectHandler for FeedbackRecordingHandler {
+    fn execute(
+        &mut self,
+        request: &TypedEffectRequest<'_>,
+    ) -> Option<Vec<(String, RetainedValue)>> {
+        let result = self.inner.execute(request)?;
+        *self.preceding_effect_hex.borrow_mut() = Some(canonical_effect_hex(&result));
+        Some(result)
+    }
+}
+
+fn canonical_effect_hex(fields: &[(String, RetainedValue)]) -> String {
+    let rows = fields
+        .iter()
+        .map(|(id, value)| {
+            format!(
+                "[{},{}]",
+                serde_json::to_string(id).expect("effect result identifiers are strings"),
+                canonical_retained_value_json(value)
+            )
+        })
+        .collect::<Vec<_>>();
+    format!(
+        "{{\"schema\":\"semaprax.agent-effect-fields.v1\",\"fields\":[{}]}}\n",
+        rows.join(",")
+    )
+    .bytes()
+    .map(|byte| format!("{byte:02x}"))
+    .collect()
 }
 
 /// One runner instance can serve successive fresh adapter instances while the
@@ -732,7 +789,7 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
                 .canonicalize()
                 .map_err(|_| CliError::refused("repair OpenCode scratch is unavailable"))?;
             (
-                source_model_identity(&operands.executable, &scratch),
+                source_deployment_identity(source_model_identity(&operands.executable, &scratch))?,
                 Box::new(UnixClock),
             )
         }
@@ -759,7 +816,8 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
     // exact binding recovery (program root, lifecycle, effect contract and
     // host-bound model adapter) before it can dispatch provider/effect work.
     // OpenCode mode performs no candidate preview while preparing the handler;
-    // the V1 fixture alone derives its expected deterministic diagnostic here.
+    // neither does the inherited V1 fixture. Its guard checks the actual
+    // preceding effect observation only when the corrective turn starts.
     // A terminal generation is never redispatched and a binding mismatch is
     // refused rather than silently replayed against stale evidence. ---
     let mut store = if fresh {
@@ -778,47 +836,35 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
     // candidate it may create is ephemeral and is never committed here. ---
     let envelope = OfflineRepairEnvelope::new(Arc::clone(&project), config.target.clone())
         .map_err(|diagnostics| diagnostic_error("repair target envelope refused", diagnostics))?;
-    let expected_feedback = if matches!(&config.provider, RepairProvider::Scripted(_)) {
-        let malformed = envelope
-            .preview(config.malformed_replacement, config.malformed_bool_literal)
-            .err()
-            .ok_or(CliError::refused(
-                "repair malformed replacement unexpectedly admitted",
-            ))?;
-        Some(feedback_hex(feedback_code(&malformed), &config.result_id))
-    } else {
-        None
+    let preceding_effect_hex = Rc::new(RefCell::new(None));
+    let mut handler = FeedbackRecordingHandler {
+        inner: OfflineRepairHandler::new(
+            envelope,
+            config.malformed_operation_id.clone(),
+            config.corrected_operation_id.clone(),
+            config.effect_id.clone(),
+            config.argument_id.clone(),
+            config.result_id.clone(),
+        )
+        .map_err(|diagnostics| diagnostic_error("repair effect contract refused", diagnostics))?,
+        preceding_effect_hex: Rc::clone(&preceding_effect_hex),
     };
-    let mut handler = OfflineRepairHandler::new(
-        envelope,
-        config.malformed_operation_id.clone(),
-        config.corrected_operation_id.clone(),
-        config.effect_id.clone(),
-        config.argument_id.clone(),
-        config.result_id.clone(),
-    )
-    .map_err(|diagnostics| diagnostic_error("repair effect contract refused", diagnostics))?;
 
     let mut scripted_starts = None;
     let mut factory: Box<dyn FnMut() -> Box<dyn ProviderAdapter>> = match &config.provider {
         RepairProvider::Scripted(turns) => {
-            let scripts = RefCell::new(VecDeque::from(turns.clone().map(|turn| {
-                (
-                    turn.document,
-                    turn.requires_prior_feedback.then(|| {
-                        expected_feedback
-                            .as_ref()
-                            .expect("scripted repair has checked feedback")
-                            .clone()
-                    }),
-                )
-            })));
+            let scripts = RefCell::new(VecDeque::from(
+                turns
+                    .clone()
+                    .map(|turn| (turn.document, turn.requires_prior_feedback)),
+            ));
             let starts = Rc::new(Cell::new(0));
             scripted_starts = Some((Rc::clone(&starts), turns.len()));
             Box::new(move || -> Box<dyn ProviderAdapter> {
                 let next = scripts.borrow_mut().pop_front();
                 let refuse_start = next.is_none();
-                let (document, required_feedback) = next.unwrap_or_else(|| (String::new(), None));
+                let (document, requires_prior_feedback) =
+                    next.unwrap_or_else(|| (String::new(), false));
                 Box::new(FeedbackGuardedAdapter {
                     inner: ScriptedStreamingAdapter::new(
                         document
@@ -831,7 +877,8 @@ fn execute_with_runner<R: OpenCodeRunner + 'static>(
                         true,
                     ),
                     starts: Rc::clone(&starts),
-                    required_feedback,
+                    requires_prior_feedback,
+                    expected_feedback: Rc::clone(&preceding_effect_hex),
                     refuse_start,
                 })
             })

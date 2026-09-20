@@ -436,7 +436,7 @@ diagnostic/reason range, CI job/step, and support/publication standing.
 
 ### 2.17 Completion matrix cross-reference
 
-- `docs/COMPLETION-MATRIX.md:107-116` names the public generic ABI programme as a separate milestone with its own nine prerequisite gates and states "No public generic signature, descriptor, carrier … [is admitted]" — corroborates the milestone document's own standing decision (§1, §3).
+- `docs/COMPLETION-MATRIX.md:107-116` names the public generic ABI programme as a separate milestone with eight prerequisite gates and a distinct PG-9 decision gate, and states "No public generic signature, descriptor, carrier … [is admitted]" — corroborates the milestone document's own standing decision (§1, §3).
 
 ## 3. What #164 still requires (explicitly open)
 

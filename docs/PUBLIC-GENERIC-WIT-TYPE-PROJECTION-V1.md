@@ -404,9 +404,9 @@ compiler or generated-code path spawns anything. They do not:
 - lower anything to Core Wasm or Component Model bytes;
 - prove, or attempt to prove, that a public generic export is "callable
   through a real Wasm component" (issue #176's first acceptance criterion) —
-  that requires a calling convention and a physical adapter, both blocked on
-  PG-9's undecided support/publication decision and on #229's open compiled
-  `.wasm` provider gap;
+  that requires a calling convention and a physical adapter and remains outside
+  PG-9's decided `unsupported`/`unpublished` scope, with #229's compiled
+  `.wasm` provider gap still open;
 - widen the milestone's standing support decision, reinterpret any existing
   descriptor/carrier/package/prelude/graph/cleanup schema, or change the
   frozen `semaprax:project-scalar@1.0.0` WIT identity

@@ -28,8 +28,8 @@ For complete chronological detail, including historical context and archived art
 ## 0.4.1 highlights
 
 - Public generic ownership is now a separate milestone rather than a side
-  effect of the internal generic closure. It owns nine prerequisite gates, the
-  separation invariants between them, and a standing decision that the surface
+  effect of the internal generic closure. It owns eight prerequisite gates, a
+  distinct PG-9 decision gate, the separation invariants between them, and a standing decision that the surface
   is unsupported and unpublished — plus an executable separation gate that
   reddens if an internal admission ever starts producing a public generic
   signature.

@@ -1,7 +1,7 @@
 # Public Generic Ownership Milestone v1
 
-Status: open milestone, separately gated. Eight of its nine prerequisite gates
-are hosted green (see the gate table below); PG-9 was decided 2026-09-19 (see
+Status: open milestone, separately gated. All eight prerequisite gates are
+hosted green (see the gate table below); PG-9 was decided 2026-09-19 (see
 the PG-9 decision record below): `unsupported`, `unpublished`. No public
 generic ownership surface is admitted, generated, published, or supported at
 this commit. This document owns the milestone's identity, its gates, the
@@ -79,7 +79,7 @@ those becomes its own artifact with its own executable gate.
 | --- | --- |
 | Milestone | `semaprax.public-generic-ownership.v1` |
 | Roadmap workstream | ABI-09, [public generic programme](ROADMAP.md) |
-| Prerequisite gates | `PG-1` through `PG-9` |
+| Gates | Prerequisites `PG-1` through `PG-8`; support/publication decision `PG-9` |
 | Separation gate | `public_generic_ownership_milestone` in the projections harness |
 
 The milestone identifier names the programme. It is deliberately not a Project
@@ -87,10 +87,11 @@ schema, profile, descriptor, carrier, or prelude version: a public generic
 surface requires new versioned artifacts of its own rather than reinterpreted
 Project v8, v9, or v11 bytes.
 
-## Prerequisite gates
+## Prerequisite gates and decision gate
 
 Each gate is independent, has one owning artifact, and is advanced only by that
-artifact's executable evidence. The state column uses exactly three values:
+artifact's executable evidence. The prerequisite state cells for PG-1 through
+PG-8 use exactly three values:
 
 - `Open` — nothing is implemented for it.
 - `Implemented, local evidence` — the code and its executable gate exist and
@@ -98,6 +99,10 @@ artifact's executable evidence. The state column uses exactly three values:
   not a support claim.
 - `Hosted green` — a hosted run and job are recorded in the owning artifact for
   an exact implementation commit.
+
+PG-9 is a decision rather than an evidence state. Its cell records the exact
+human-authorized support and publication decision separately from this
+three-value prerequisite vocabulary.
 
 PG-8 is what converts local evidence into hosted evidence; no other gate may
 record `Hosted green` before it does. PG-9 may only move once every other gate
@@ -109,10 +114,10 @@ reads `Hosted green`.
 | PG-2 | Explicit template identity and ordered argument identities: persistent template declaration identity, declared arity, positional parameter owner and index, and digests that distinguish permutation, omission, duplication, and substitution | [Public Generic Type Grammar v1](PUBLIC-GENERIC-TYPE-GRAMMAR-V1.md) | Hosted green |
 | PG-3 | Semantic compatibility rules: a closed classification over two grammar surfaces with explicit reasons, no compatibility inferred from a diff classification, and no version decision inferred from a classification | [Public Generic Compatibility v1](PUBLIC-GENERIC-COMPATIBILITY-V1.md) | Hosted green |
 | PG-4 | Candidate ABI-delta evidence that selects the public generic signature, retains ordered arguments and substituted fields, and survives mutation, recovery, and independent byte-exact replay | [Public Generic Candidate Delta v1](PUBLIC-GENERIC-CANDIDATE-DELTA-V1.md) | Hosted green |
-| PG-5 | Generated Rust, TypeScript/Wasm, C, and C++ consumers derived from the grammar, byte-deterministic, with no ambient authority | [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Hosted green (see PG-8 note; not yet a #164 frozen candidate) |
-| PG-6 | Hostile metadata replay: forged, stale, truncated, reordered, and mutated grammar or descriptor bytes fail closed in every consumer route and in independent replay | [Public Generic Descriptor v1](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Hosted green (see PG-8 note; not yet a #164 frozen candidate) |
-| PG-7 | Owned allocation and failure settlement across the boundary: bounded allocation, exact copy-out, sticky failure selection, canonical cleanup order, and equal checked behavior on interpreter, native C11, and Core Wasm | [Public Generic Settlement Obligations v1](PUBLIC-GENERIC-SETTLEMENT-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md); also documented in [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | Hosted green (see PG-8 note; not yet a #164 frozen candidate) |
-| PG-8 | Cross-platform hosted evidence for the complete milestone corpus on Linux, macOS, and Windows, recorded for an exact implementation commit | The `public-generic-ownership-milestone` job in [CI required checks v1](CI-REQUIRED-CHECKS-V1.md) | Hosted green (complete corpus, commit `7def8fb1…`, run 35433295593) |
+| PG-5 | Generated Rust, TypeScript/Wasm, C, and C++ consumers derived from the grammar, byte-deterministic, with no ambient authority | [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Hosted green |
+| PG-6 | Hostile metadata replay: forged, stale, truncated, reordered, and mutated grammar or descriptor bytes fail closed in every consumer route and in independent replay | [Public Generic Descriptor v1](PUBLIC-GENERIC-DESCRIPTOR-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md) | Hosted green |
+| PG-7 | Owned allocation and failure settlement across the boundary: bounded allocation, exact copy-out, sticky failure selection, canonical cleanup order, and equal checked behavior on interpreter, native C11, and Core Wasm | [Public Generic Settlement Obligations v1](PUBLIC-GENERIC-SETTLEMENT-V1.md), [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md); also documented in [Public Generic Consumers v1](PUBLIC-GENERIC-CONSUMERS-V1.md#cross-engine-settlement-corpus-issue-162) | Hosted green |
+| PG-8 | Cross-platform hosted evidence for the complete milestone corpus on Linux, macOS, and Windows, recorded for an exact implementation commit | The `public-generic-ownership-milestone` job in [CI required checks v1](CI-REQUIRED-CHECKS-V1.md) | Hosted green |
 | PG-9 | An explicit support and publication decision naming the exact version, target, and consumer scope, with its prerequisite profile decisions | This milestone | **Decided** 2026-09-19: `unsupported`, `unpublished` (see the PG-9 decision record below) |
 
 PG-1 through PG-8 are prerequisites of PG-9, not substitutes for it. A complete
@@ -533,7 +538,12 @@ from either issue's own text. Only a named maintainer may convert the
 recommended option into an approved one, by posting the filled review-comment
 template each issue requires.
 
-## PG-9 prepared decision record
+## Historical PG-9 prepared decision record (2026-09-18)
+
+The material through the 2026-09-19 reverification addendum below is retained
+as a dated audit trail. Its present-tense statements describe the 2026-09-18
+snapshot and are superseded by that addendum and by the recorded PG-9 decision;
+they are not current-state claims.
 
 ### Scope note: #165 and #141 are the same decision, two angles
 
@@ -549,7 +559,7 @@ cannot honestly move ahead of #165. There is no scope in which #141 would
 recommend a different support/publication state than #165; this record
 answers both from one evidence base and says so once rather than twice.
 
-### Gate-by-gate table, verified against current `main`
+### Historical gate-by-gate snapshot, verified against 2026-09-18 `main`
 
 Evidence kind uses the vocabulary this task requires: **hosted** (a completed
 GitHub Actions run on a hosted runner), **local** (a command run on a

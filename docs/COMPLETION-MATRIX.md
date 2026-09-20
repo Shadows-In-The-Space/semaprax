@@ -107,8 +107,8 @@ The generic implementation includes [argument inference v3](GENERIC-ARGUMENT-INF
 [closures v2](CLOSURES-V2.md). These have hosted-green evidence for their
 admitted substitutions, HIR/graph/ProgramRoot replay and backend behavior;
 general constraints, owning captures and public generic ABI remain separate.
-Public generic ownership is a separate milestone with its own nine prerequisite
-gates and its own standing support decision, not an outcome of that internal
+Public generic ownership is a separate milestone with eight prerequisite gates,
+a distinct PG-9 decision gate, and its own standing support decision, not an outcome of that internal
 work; the [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md)
 owns it and its executable separation gate. All eight prerequisite gates
 (PG-1 through PG-8 - grammar, template/argument identities, compatibility

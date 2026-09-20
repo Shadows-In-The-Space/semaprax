@@ -184,8 +184,9 @@ milestone's remaining gates.
   they still reject generic surfaces, and the milestone's separation gate
   continues to prove it.
 - Not a semantic-version, support, or publication decision. No verdict maps
-  onto a version bump or a promotion; only PG-9 decides support and
-  publication, and it has not.
+  onto a version bump or a promotion; PG-9 alone decided support and
+  publication as `unsupported` and `unpublished`, and this delta cannot alter
+  or widen that decision.
 - Not runtime, allocation, settlement, or external-consumer evidence. The route
   observes no execution, allocates nothing across a boundary, and settles no
   failure.

@@ -259,17 +259,17 @@ fn wasm_scalar_exports_reject_every_generic_selection() {
         .expect("the same scalar export is admitted from a generic-free module");
 }
 
-/// The charter is part of the gate. Nine prerequisite gates must be named,
-/// every state must come from the charter's own closed vocabulary, no gate may
-/// claim hosted evidence before the cross-platform gate that produces it, the
-/// decision gate must stay undecided, and the standing decision must still read
-/// unsupported and unpublished.
+/// The charter is part of the gate. All nine gates must be named, every
+/// prerequisite state must come from the charter's own closed vocabulary, no
+/// prerequisite may claim hosted evidence before the cross-platform gate that
+/// produces it, and the decision gate must record the exact conservative
+/// decision without turning evidence into publication authority.
 #[test]
-fn the_milestone_charter_still_records_an_undecided_unsupported_surface() {
+fn the_milestone_charter_records_the_conservative_support_decision() {
     const STATES: [&str; 3] = ["Open", "Implemented, local evidence", "Hosted green"];
     let text = std::fs::read_to_string(source_root().join(MILESTONE)).unwrap();
     let mut rows = Vec::new();
-    for index in 1..=9u32 {
+    for index in 1..=8u32 {
         let marker = format!("| PG-{index} |");
         let row = text
             .lines()
@@ -296,9 +296,15 @@ fn the_milestone_charter_still_records_an_undecided_unsupported_surface() {
         hosted.is_empty() || hosted.contains(&8),
         "gates {hosted:?} claim hosted evidence while the cross-platform gate PG-8 does not"
     );
-    assert_eq!(
-        rows[8].1, "Open",
-        "the support and publication decision PG-9 must stay undecided"
+    let decision = text
+        .lines()
+        .find(|line| line.starts_with("| PG-9 |"))
+        .expect("the charter must state gate PG-9");
+    assert!(
+        decision.ends_with(
+            "| **Decided** 2026-09-19: `unsupported`, `unpublished` (see the PG-9 decision record below) |"
+        ),
+        "PG-9 must retain the exact human-authorized conservative decision"
     );
     assert!(
         text.contains("**public generic ownership is not supported and not\npublished.**"),

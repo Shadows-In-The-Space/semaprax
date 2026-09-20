@@ -102,7 +102,8 @@ impl WebhookDeliverySession {
 
     /// Reconcile exactly one prepared request. A matching replay does not call
     /// the adapter. A panic after adapter entry leaves the ledger's provisional
-    /// uncertainty sticky, preventing an automatic retry in this session.
+    /// uncertainty and its policy binding sticky, preventing an automatic
+    /// retry while allowing an exact receipt replay in this session.
     pub fn reconcile(
         &mut self,
         prepared: PreparedWebhookDelivery,
@@ -117,12 +118,34 @@ impl WebhookDeliverySession {
             }
         }
 
+        let inserted_commitment = if self
+            .policy_commitments
+            .contains_key(&prepared.session_identity_digest)
+        {
+            false
+        } else {
+            self.policy_commitments.insert(
+                prepared.session_identity_digest.clone(),
+                prepared.policy_digest.clone(),
+            );
+            true
+        };
         let outcome =
-            self.ledger
+            match self
+                .ledger
                 .reconcile(prepared.identity.clone(), &prepared.request, |request| {
                     let observation = adapter.send(request);
                     settlement_disposition(request, &observation)
-                })?;
+                }) {
+                Ok(outcome) => outcome,
+                Err(refusal) => {
+                    if inserted_commitment {
+                        self.policy_commitments
+                            .remove(&prepared.session_identity_digest);
+                    }
+                    return Err(refusal.into());
+                }
+            };
         let replayed = !outcome.was_dispatched();
         if replayed
             && !self
@@ -130,12 +153,6 @@ impl WebhookDeliverySession {
                 .contains_key(&prepared.session_identity_digest)
         {
             return Err(WebhookLedgerRefusal::ReplayBindingUnavailable);
-        }
-        if !replayed {
-            self.policy_commitments.insert(
-                prepared.session_identity_digest.clone(),
-                prepared.policy_digest.clone(),
-            );
         }
         let disposition = outcome.record().disposition().clone();
         Ok(WebhookDeliveryReceipt {
@@ -197,6 +214,7 @@ pub fn prepare_webhook_delivery(
         session_identity_digest,
         policy_digest,
         request: PreparedRequest {
+            method: HttpMethod::Post,
             endpoint: request.endpoint,
             headers: vec![
                 ("content-type".into(), request.content_type),

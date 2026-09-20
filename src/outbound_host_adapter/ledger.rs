@@ -300,6 +300,7 @@ mod tests {
 
     fn request(number: u8, body: &[u8]) -> PreparedRequest {
         PreparedRequest {
+            method: crate::outbound_host_adapter::HttpMethod::Post,
             endpoint: "https://hooks.example.test/v1/events".into(),
             headers: vec![
                 ("content-type".into(), "application/json".into()),

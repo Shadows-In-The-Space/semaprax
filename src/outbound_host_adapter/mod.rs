@@ -16,6 +16,7 @@ use sha2::{Digest as _, Sha256};
 use zeroize::Zeroize;
 
 mod email;
+mod http;
 mod ledger;
 mod tracing;
 mod webhook;
@@ -26,6 +27,10 @@ pub use email::{
     EmailRequest, PreparedEmailDelivery, MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENT_BYTES,
     MAX_EMAIL_ATTACHMENT_NAME_BYTES, MAX_EMAIL_BODY_BYTES, MAX_EMAIL_RECIPIENTS,
     MAX_EMAIL_SUBJECT_BYTES,
+};
+pub use http::{
+    deliver_http, prepare_http_delivery, HttpDeliveryReceipt, HttpDeliverySession, HttpHeader,
+    HttpLedgerRefusal, HttpRequest, PreparedHttpDelivery,
 };
 pub use ledger::{
     DeliveryIdentity, HostDeliveryLedger, LedgerCheckpoint, LedgerCheckpointRefusal, LedgerOutcome,
@@ -43,7 +48,8 @@ pub use webhook::{
 type HmacSha256 = Hmac<Sha256>;
 
 const WEBHOOK_MAC_DOMAIN: &[u8] = b"semaprax.outbound.webhook-signature.v2\0";
-const DIGEST_DOMAIN: &[u8] = b"semaprax.outbound.request.v1\0";
+const DIGEST_DOMAIN_V1: &[u8] = b"semaprax.outbound.request.v1\0";
+const DIGEST_DOMAIN_V2: &[u8] = b"semaprax.outbound.request.v2\0";
 
 pub const MAX_ENDPOINT_BYTES: usize = 2_048;
 pub const MAX_REQUEST_BODY_BYTES: usize = 65_536;
@@ -66,9 +72,32 @@ pub enum Refusal {
     RequestTooLarge,
     InvalidIdentity,
     InvalidContentType,
+    InvalidHeader,
     CardinalityExceeded,
     SecretUnavailable,
     InvalidEmail,
+}
+
+/// Closed request methods supported by the bounded HTTPS adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HttpMethod {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+impl HttpMethod {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Delete => "DELETE",
+        }
+    }
 }
 
 /// Exact deployment-owned limits and destinations for one outbound effect.
@@ -424,6 +453,7 @@ impl std::io::Write for CappedJsonWriter {
 /// Complete, validated request passed to the injected host transport.
 #[derive(Clone, Eq, PartialEq)]
 pub struct PreparedRequest {
+    method: HttpMethod,
     endpoint: String,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
@@ -441,6 +471,7 @@ impl fmt::Debug for PreparedRequest {
             .collect::<Vec<_>>();
         formatter
             .debug_struct("PreparedRequest")
+            .field("method", &self.method)
             .field("endpoint_origin", &canonical_origin(&self.endpoint))
             .field("header_names", &header_names)
             .field("body_bytes", &self.body.len())
@@ -452,6 +483,10 @@ impl fmt::Debug for PreparedRequest {
 }
 
 impl PreparedRequest {
+    pub fn method(&self) -> HttpMethod {
+        self.method
+    }
+
     pub fn endpoint(&self) -> &str {
         &self.endpoint
     }
@@ -595,7 +630,16 @@ impl OutboundAdapter for NativeHttpsAdapter {
         }
         let mut builder = self
             .client
-            .post(&request.endpoint)
+            .request(
+                match request.method {
+                    HttpMethod::Get => reqwest::Method::GET,
+                    HttpMethod::Post => reqwest::Method::POST,
+                    HttpMethod::Put => reqwest::Method::PUT,
+                    HttpMethod::Patch => reqwest::Method::PATCH,
+                    HttpMethod::Delete => reqwest::Method::DELETE,
+                },
+                &request.endpoint,
+            )
             .timeout(Duration::from_millis(request.deadline_ms))
             .body(request.body.clone());
         for (name, value) in &request.headers {
@@ -883,6 +927,7 @@ pub fn deliver_webhook(
         &request.body,
     )?;
     let prepared = PreparedRequest {
+        method: HttpMethod::Post,
         endpoint: request.endpoint.clone(),
         headers: vec![
             ("content-type".into(), request.content_type.clone()),
@@ -922,6 +967,7 @@ pub fn export_event(
         return Err(Refusal::RequestTooLarge);
     }
     let prepared = PreparedRequest {
+        method: HttpMethod::Post,
         endpoint,
         headers: vec![
             ("content-type".into(), "application/json".into()),
@@ -1118,7 +1164,13 @@ fn delivery_evidence(
 
 fn request_digest(request: &PreparedRequest) -> String {
     let mut hash = Sha256::new();
-    hash.update(DIGEST_DOMAIN);
+    if request.method == HttpMethod::Post {
+        // Preserve every existing email, webhook, and export commitment.
+        hash.update(DIGEST_DOMAIN_V1);
+    } else {
+        hash.update(DIGEST_DOMAIN_V2);
+        digest_part(&mut hash, request.method.as_str().as_bytes());
+    }
     digest_part(&mut hash, request.endpoint.as_bytes());
     hash.update((request.headers.len() as u64).to_le_bytes());
     for (name, value) in &request.headers {

@@ -6,9 +6,9 @@ only. No hosted or public-network support claim follows from this module.
 Audience: runtime integrators and reviewers of outbound application effects.
 
 `src/outbound_host_adapter/` joins the existing pure `std` policy packages and
-bounded HTTPS POST runtime at one injected host boundary. It covers structured
-operational export, signed webhook delivery, and a provider-neutral email
-envelope. The policy layer reads no environment and creates no threads or
+bounded HTTPS runtime at one injected host boundary. It covers typed
+GET/POST/PUT/PATCH/DELETE requests, structured operational export, signed
+webhook delivery, and a provider-neutral email envelope. The policy layer reads no environment and creates no threads or
 timers. `NativeHttpsAdapter` is the explicit physical HTTPS implementation: its
 host supplies TLS policy, while it disables ambient proxies, redirects, and
 retries. Tests use a deterministic recording fixture and perform no network
@@ -64,6 +64,10 @@ The ledger independently derives the existing canonical request digest and
 requires its idempotency component to be the one exact boundary-owned
 `idempotency-key` header. It records only the digest plus the closed local
 disposition.
+Legacy POST requests retain the v1 digest domain and byte layout. Non-POST
+requests use the v2 domain and bind the selected method before the remaining
+request fields, so extending the adapter does not silently rewrite existing
+email, webhook, export, or POST evidence commitments.
 
 The existing `deliver_*` convenience calls remain stateless, one-shot helpers.
 The additive `prepare_email_delivery` plus `EmailDeliverySession::reconcile`
@@ -79,9 +83,11 @@ a bounded nonempty accepted provider response before it writes replay state and
 its receipt type exposes no response bytes. Therefore exact replay needs the
 canonical request, identity/idempotency, policy commitment, and closed
 disposition only; it neither pretends to replay provider payloads nor retains
-them in process memory. A panic after adapter entry writes no session-side
-state, leaving the ledger's pre-reserved `Uncertain { Transport }` terminal
-record sticky. The policy commitment domain-separates the policy ID, sorted
+them in process memory. A panic after adapter entry leaves both the pre-dispatch
+policy commitment and the ledger's pre-reserved `Uncertain { Transport }`
+terminal record sticky, so an exact replay can reconstruct the uncertainty
+without adapter entry. A normal ledger refusal rolls back a newly staged policy
+commitment. The policy commitment domain-separates the policy ID, sorted
 allowed origins, and every request/response/deadline/export limit, so a host
 cannot silently replay through a changed policy with the same policy ID.
 Policy commitments and session identities are SHA-256 values;
@@ -113,8 +119,8 @@ remote receipt, turn evidence into a capability, or authorize a retry.
 
 ### Read-only disposition checkpoints
 
-`HostDeliveryLedger::checkpoint` and the corresponding method on the email,
-webhook, and structured-export sessions produce an immutable
+`HostDeliveryLedger::checkpoint` and the corresponding method on the HTTP,
+email, webhook, and structured-export sessions produce an immutable
 `LedgerCheckpoint`. Its additive
 `semaprax.outbound.delivery-ledger-checkpoint.v1` JSON wire contains exactly
 `schema`, `capacity`, and `entries`. Each entry contains exactly an identity
@@ -155,6 +161,34 @@ retain/authenticate the expected commitment independently. Missing or stale
 observations never authorize a retry through this API. Exporting a snapshot
 after settlement cannot close the crash window before that export, so durable
 delivery recovery and exactly-once claims remain out of scope.
+
+## High-level HTTPS requests
+
+`deliver_http` and `prepare_http_delivery` admit an explicit `HttpMethod`,
+canonical HTTPS endpoint, stable request and idempotency identities, optional
+content type, bounded public headers, body, and deadline. The physical adapter
+receives the selected method; the canonical request digest binds that method
+in addition to endpoint, ordered headers, body, deadline, redirect limit, and
+response limit. GET bodies are refused. Redirects and transport retries remain
+fixed at zero for every method.
+
+Header admission is deliberately narrow. Names must be canonical lowercase,
+values are bounded and control-free, duplicates refuse, and callers cannot
+supply the boundary-owned `content-type` or `idempotency-key` names.
+Credential-shaped names (`authorization`, `proxy-authorization`, `cookie`,
+`set-cookie`, and `x-api-key`) are refused from the caller-controlled value.
+A trusted provider adapter may apply deployment-owned credentials outside the
+request value; this module does not read a secret store or expose credentials
+to source, debug output, checkpoints, or evidence.
+
+`HttpDeliverySession` gives the same bounded process-local disposition replay
+as email/webhook/export sessions. An exact identity and complete request,
+including method, replays without entering the adapter; changing only the
+method conflicts before dispatch. Accepted response bytes are intentionally
+dropped by the session, while the one-shot `deliver_http` result may return a
+bounded accepted body. Panic, deadline, transport, and response-overflow
+uncertainty stay sticky. This does not claim durable or remote exactly-once
+delivery, DNS pinning, provider authentication, or public-network support.
 
 ## Email envelope
 
@@ -245,10 +279,16 @@ idempotency/header mismatch refusal, sticky uncertainty after an unwinding
 dispatch closure, and deterministic commitment state. It performs no live
 network operation.
 
+The HTTP cases execute all five typed methods through the injected adapter,
+cover endpoint/body/header/content-type maxima and credential-name refusal,
+redacted debug surfaces, exact no-redispatch reconciliation, method-only
+conflict, bounded response settlement, sticky panic uncertainty, and read-only
+checkpoint verification. They exercise fixtures only, not a public endpoint.
+
 The checkpoint selector is
 `outbound_host_adapter::ledger::checkpoint::tests::`. Its seven cases cover
 deterministic all-disposition round trips, the empty-state known-answer digest,
 commitment/live-state drift, exact lookup, monotonic union/conflict refusal,
 panic-reserved uncertainty, full-capacity admission and byte/inventory limits,
 hostile schemas/digests/statuses/noncanonical wires, and exports/imports from
-all three adapter sessions without extra adapter calls.
+the adapter sessions without extra adapter calls.

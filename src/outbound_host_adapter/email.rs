@@ -201,8 +201,9 @@ impl EmailDeliverySession {
     /// A matching replay never enters `adapter.send`. This mode settles only
     /// the closed disposition, so nonempty provider response bytes are dropped
     /// on the original attempt and are not required to reconstruct a replay.
-    /// A panic after adapter entry leaves the underlying ledger's provisional
-    /// uncertainty intact; this wrapper deliberately writes no replacement.
+    /// A panic after adapter entry leaves the pre-dispatch policy commitment
+    /// and underlying ledger's provisional uncertainty intact, making that
+    /// uncertainty replayable without another adapter call.
     pub fn reconcile(
         &mut self,
         prepared: PreparedEmailDelivery,
@@ -217,12 +218,34 @@ impl EmailDeliverySession {
             }
         }
 
+        let inserted_commitment = if self
+            .policy_commitments
+            .contains_key(&prepared.session_identity_digest)
+        {
+            false
+        } else {
+            self.policy_commitments.insert(
+                prepared.session_identity_digest.clone(),
+                prepared.policy_digest.clone(),
+            );
+            true
+        };
         let outcome =
-            self.ledger
+            match self
+                .ledger
                 .reconcile(prepared.identity.clone(), &prepared.request, |request| {
                     let observation = adapter.send(request);
                     settlement_disposition(request, &observation)
-                })?;
+                }) {
+                Ok(outcome) => outcome,
+                Err(refusal) => {
+                    if inserted_commitment {
+                        self.policy_commitments
+                            .remove(&prepared.session_identity_digest);
+                    }
+                    return Err(refusal.into());
+                }
+            };
         let replayed = !outcome.was_dispatched();
         if replayed
             && !self
@@ -230,12 +253,6 @@ impl EmailDeliverySession {
                 .contains_key(&prepared.session_identity_digest)
         {
             return Err(EmailLedgerRefusal::ReplayBindingUnavailable);
-        }
-        if !replayed {
-            self.policy_commitments.insert(
-                prepared.session_identity_digest.clone(),
-                prepared.policy_digest.clone(),
-            );
         }
         let disposition = outcome.record().disposition().clone();
         Ok(EmailDeliveryReceipt {
@@ -282,6 +299,7 @@ pub fn prepare_email_delivery(
         session_identity_digest,
         policy_digest,
         request: PreparedRequest {
+            method: HttpMethod::Post,
             endpoint: request.endpoint,
             headers: vec![
                 (
@@ -308,6 +326,7 @@ pub fn deliver_email(
     let origin = validate_email(&capability.policy, &request)?;
     let body = request.encode(capability.policy.max_request_bytes)?;
     let prepared = PreparedRequest {
+        method: HttpMethod::Post,
         endpoint: request.endpoint,
         headers: vec![
             (

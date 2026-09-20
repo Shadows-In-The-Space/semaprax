@@ -13,6 +13,7 @@ fn identity(n: usize) -> DeliveryIdentity {
 
 fn request(n: usize) -> PreparedRequest {
     PreparedRequest {
+        method: crate::outbound_host_adapter::HttpMethod::Post,
         endpoint: "https://private.example.test/mail".into(),
         headers: vec![("idempotency-key".into(), format!("private-key-{n}"))],
         body: b"private-email-or-webhook-or-tracing-content".to_vec(),
@@ -307,7 +308,7 @@ fn hostile_closed_schema_status_digests_and_ordering_are_refused() {
 }
 
 #[test]
-fn all_three_adapter_sessions_export_exact_read_only_observations() {
+fn all_four_adapter_sessions_export_exact_read_only_observations() {
     use crate::outbound_host_adapter::*;
     struct Adapter(Vec<PreparedRequest>);
     impl OutboundAdapter for Adapter {
@@ -357,6 +358,28 @@ fn all_three_adapter_sessions_export_exact_read_only_observations() {
     let email_checkpoint = decode(&email.checkpoint().unwrap());
     email.verify_checkpoint(&email_checkpoint).unwrap();
 
+    let mut http = HttpDeliverySession::new(2).unwrap();
+    http.reconcile(
+        prepare_http_delivery(
+            capability(),
+            HttpRequest {
+                method: HttpMethod::Put,
+                endpoint: endpoint.into(),
+                request_id: "private-http-request".into(),
+                idempotency_key: "private-http-key".into(),
+                content_type: Some("application/json".into()),
+                headers: vec![],
+                body: b"private-body".to_vec(),
+                deadline_ms: 1000,
+            },
+        )
+        .unwrap(),
+        &mut adapter,
+    )
+    .unwrap();
+    let http_checkpoint = decode(&http.checkpoint().unwrap());
+    http.verify_checkpoint(&http_checkpoint).unwrap();
+
     let mut webhook = WebhookDeliverySession::new(2).unwrap();
     webhook
         .reconcile(
@@ -404,10 +427,15 @@ fn all_three_adapter_sessions_export_exact_read_only_observations() {
     let tracing_checkpoint = decode(&tracing.checkpoint().unwrap());
     tracing.verify_checkpoint(&tracing_checkpoint).unwrap();
 
-    assert_eq!(adapter.0.len(), 3);
-    for (checkpoint, request) in [email_checkpoint, webhook_checkpoint, tracing_checkpoint]
-        .iter()
-        .zip(&adapter.0)
+    assert_eq!(adapter.0.len(), 4);
+    for (checkpoint, request) in [
+        email_checkpoint,
+        http_checkpoint,
+        webhook_checkpoint,
+        tracing_checkpoint,
+    ]
+    .iter()
+    .zip(&adapter.0)
     {
         let key = request
             .headers()
@@ -427,7 +455,7 @@ fn all_three_adapter_sessions_export_exact_read_only_observations() {
     }
     assert_eq!(
         adapter.0.len(),
-        3,
+        4,
         "offline imports and queries cannot enter adapters"
     );
 }

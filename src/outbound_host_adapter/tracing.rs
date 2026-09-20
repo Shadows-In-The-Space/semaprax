@@ -131,7 +131,8 @@ impl ExportEventSession {
     /// Exact replay never calls `adapter.send`. Policy, canonical event, and
     /// complete prepared-request drift are refused before dispatch. The ledger
     /// reserves uncertainty before entering the adapter, so an unwind is
-    /// sticky and cannot be retried through this session.
+    /// sticky alongside its commitments: it cannot be retried through this
+    /// session, but its exact uncertainty can be replayed without dispatch.
     pub fn reconcile(
         &mut self,
         prepared: PreparedExportEvent,
@@ -162,21 +163,12 @@ impl ExportEventSession {
             }
         }
 
-        let outcome =
-            self.ledger
-                .reconcile(prepared.identity.clone(), &prepared.request, |request| {
-                    let observation = adapter.send(request);
-                    settlement_disposition(request, &observation)
-                })?;
-        let replayed = !outcome.was_dispatched();
-        if replayed
-            && !self
-                .commitments
-                .contains_key(&prepared.session_identity_digest)
+        let inserted_commitment = if self
+            .commitments
+            .contains_key(&prepared.session_identity_digest)
         {
-            return Err(ExportEventLedgerRefusal::ReplayBindingUnavailable);
-        }
-        if !replayed {
+            false
+        } else {
             self.commitments.insert(
                 prepared.session_identity_digest.clone(),
                 ExportCommitments {
@@ -185,6 +177,30 @@ impl ExportEventSession {
                     request: prepared.request_digest.clone(),
                 },
             );
+            true
+        };
+        let outcome =
+            match self
+                .ledger
+                .reconcile(prepared.identity.clone(), &prepared.request, |request| {
+                    let observation = adapter.send(request);
+                    settlement_disposition(request, &observation)
+                }) {
+                Ok(outcome) => outcome,
+                Err(refusal) => {
+                    if inserted_commitment {
+                        self.commitments.remove(&prepared.session_identity_digest);
+                    }
+                    return Err(refusal.into());
+                }
+            };
+        let replayed = !outcome.was_dispatched();
+        if replayed
+            && !self
+                .commitments
+                .contains_key(&prepared.session_identity_digest)
+        {
+            return Err(ExportEventLedgerRefusal::ReplayBindingUnavailable);
         }
         let disposition = outcome.record().disposition().clone();
         Ok(ExportEventReceipt {
@@ -238,6 +254,7 @@ pub fn prepare_export_event(
     let event_digest = event_digest(&body);
     let max_response_bytes = capability.policy.max_response_bytes;
     let request = PreparedRequest {
+        method: HttpMethod::Post,
         endpoint,
         headers: vec![
             ("content-type".into(), "application/json".into()),

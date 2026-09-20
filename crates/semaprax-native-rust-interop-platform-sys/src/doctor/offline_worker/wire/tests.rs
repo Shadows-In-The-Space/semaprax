@@ -350,3 +350,22 @@ fn exit_trailer_round_trips_and_never_appears_outside_an_exit_row() {
     bytes.truncate(bytes.len() - 1);
     assert_eq!(validate_reply(&single, &bytes).unwrap_err(), Error::Invalid);
 }
+
+#[test]
+fn exit_trailer_rejects_physically_impossible_zero_signal() {
+    let request = Request::parse(&request_bytes(1, 1, b"p")).unwrap();
+    let rows = vec![(1, Err(ProbeError::Exit))];
+    assert_eq!(
+        encode_reply(&request, &rows, &[(1, Termination::Signaled(0))]).unwrap_err(),
+        Error::Invalid
+    );
+    let mut bytes = encode_reply(&request, &rows, &[(1, Termination::Signaled(9))]).unwrap();
+    // Keep the trailer framing valid while replacing the signal payload with
+    // zero. `waitpid` cannot produce WTERMSIG(status) == 0 for a signaled
+    // child, so diagnostic decoding must refuse this hostile projection.
+    *bytes
+        .last_mut()
+        .expect("the encoded exit trailer has a signal byte") = 0;
+    assert_eq!(validate_reply(&request, &bytes).unwrap(), rows);
+    assert_eq!(decode_exit_detail(&bytes, 1), None);
+}

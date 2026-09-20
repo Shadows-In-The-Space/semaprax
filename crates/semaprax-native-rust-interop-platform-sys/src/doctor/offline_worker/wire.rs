@@ -41,10 +41,13 @@ impl Termination {
     }
 }
 
-fn encode_termination(value: Termination) -> [u8; EXIT_DETAIL_BYTES] {
+fn encode_termination(value: Termination) -> Option<[u8; EXIT_DETAIL_BYTES]> {
     match value {
-        Termination::Exited(code) => [0, code],
-        Termination::Signaled(signal) => [1, signal.clamp(0, i32::from(u8::MAX)) as u8],
+        Termination::Exited(code) => Some([0, code]),
+        Termination::Signaled(signal) => u8::try_from(signal)
+            .ok()
+            .filter(|signal| *signal != 0)
+            .map(|signal| [1, signal]),
     }
 }
 
@@ -52,7 +55,12 @@ fn encode_termination(value: Termination) -> [u8; EXIT_DETAIL_BYTES] {
 fn decode_termination(bytes: &[u8]) -> Option<Termination> {
     match *bytes {
         [0, code] => Some(Termination::Exited(code)),
-        [1, signal] => Some(Termination::Signaled(i32::from(signal))),
+        // `waitpid` never reports signal zero as a terminating signal. Reject
+        // it in the diagnostic trailer too, so hostile bytes cannot invent a
+        // physically impossible "signaled(0)" observation. This trailer is
+        // diagnostic-only, but it must still be a faithful projection of the
+        // worker's exact wait status.
+        [1, signal] if signal != 0 => Some(Termination::Signaled(i32::from(signal))),
         _ => None,
     }
 }
@@ -202,16 +210,21 @@ pub(super) fn encode_reply(
     if rows.len() != request.roles().count() {
         return Err(Error::Invalid);
     }
-    let trailer_for = |role: u8, value: &Result<Vec<u8>, ProbeError>| -> Vec<u8> {
+    let trailer_for = |role: u8, value: &Result<Vec<u8>, ProbeError>| {
         if !matches!(value, Err(ProbeError::Exit)) {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         exit_detail
             .iter()
             .find(|(candidate, _)| *candidate == role)
-            .map_or_else(Vec::new, |(_, termination)| {
-                encode_termination(*termination).to_vec()
-            })
+            .map_or_else(
+                || Ok(Vec::new()),
+                |(_, termination)| {
+                    encode_termination(*termination)
+                        .map(|bytes| bytes.to_vec())
+                        .ok_or(Error::Invalid)
+                },
+            )
     };
     let mut length = REPLY_HEADER;
     for ((role, value), (expected, _)) in rows.iter().zip(request.roles()) {
@@ -222,7 +235,7 @@ pub(super) fn encode_reply(
         if payload_len > 65_536 {
             return Err(Error::Limit);
         }
-        let trailer_len = trailer_for(*role, value).len();
+        let trailer_len = trailer_for(*role, value)?.len();
         length = length
             .checked_add(6 + payload_len + trailer_len)
             .filter(|length| *length <= MAX_REPLY_BYTES)
@@ -247,7 +260,7 @@ pub(super) fn encode_reply(
             }
             Err(error) => {
                 output.push(encode_error(*error));
-                let trailer = trailer_for(*role, value);
+                let trailer = trailer_for(*role, value)?;
                 output.extend_from_slice(&(trailer.len() as u32).to_le_bytes());
                 output.extend_from_slice(&trailer);
             }

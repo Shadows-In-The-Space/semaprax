@@ -17,12 +17,22 @@ use Step::*;
 struct Script {
     steps: VecDeque<Step>,
     stopped: bool,
+    termination: Option<wire::Termination>,
 }
 impl Script {
     fn new(steps: Vec<Step>) -> Self {
         Self {
             steps: steps.into(),
             stopped: false,
+            termination: None,
+        }
+    }
+
+    fn with_termination(steps: Vec<Step>, termination: wire::Termination) -> Self {
+        Self {
+            steps: steps.into(),
+            stopped: false,
+            termination: Some(termination),
         }
     }
     fn next(&mut self) -> Step {
@@ -73,9 +83,7 @@ impl Operations for Script {
         panic!("scripted fail-stop; no physical process exists")
     }
     fn last_termination(&mut self) -> Option<wire::Termination> {
-        // Scripted evidence proves drive()'s control flow, never a physical
-        // wait status; the diagnostic trailer stays absent in every case here.
-        None
+        self.termination
     }
 }
 fn time(seconds: u64) -> Step {
@@ -259,6 +267,46 @@ fn read_and_observation_failures_clear_partial_output_after_settlement() {
         ],
         Err(ProbeError::Exit),
     );
+}
+
+#[test]
+fn termination_detail_is_retained_only_for_the_selected_exit_failure() {
+    let steps = vec![
+        data(0, 0),
+        data(1, 0),
+        Observe(Ok(true)),
+        time(0),
+        Kill(Ok(())),
+        Reap(Ok(Some(false))),
+        time(0),
+        data(0, 0),
+        data(1, 0),
+    ];
+    let mut script = Script::with_termination(steps, wire::Termination::Exited(22));
+    let mut output = Vec::with_capacity(65_536);
+    let failure = drive(&mut script, &mut output).unwrap_err();
+    assert_eq!(failure.error, ProbeError::Exit);
+    assert_eq!(failure.termination, Some(wire::Termination::Exited(22)));
+    assert!(output.is_empty());
+    assert!(script.steps.is_empty());
+
+    let steps = vec![
+        data(0, 1),
+        Read(1, Err(())),
+        time(0),
+        Kill(Ok(())),
+        Reap(Ok(Some(false))),
+        time(0),
+        data(0, 0),
+        data(1, 0),
+    ];
+    let mut script = Script::with_termination(steps, wire::Termination::Exited(22));
+    let mut output = Vec::with_capacity(65_536);
+    let failure = drive(&mut script, &mut output).unwrap_err();
+    assert_eq!(failure.error, ProbeError::Io);
+    assert_eq!(failure.termination, None);
+    assert!(output.is_empty());
+    assert!(script.steps.is_empty());
 }
 
 #[test]

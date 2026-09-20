@@ -432,26 +432,31 @@ real synthetic archives; it also cross-checks that the required-check
 inventory this script derives from the live workflow agrees, as a set, with
 the exact inventory `tests/offline_package/ci_release_gate.rs` pins.
 
-The release workflow runs `scripts/release-manifest.py` immediately after it
-writes `dist/SHA256SUMS`, then `scripts/release-provenance.py`, then the pinned
-keyless `cosign sign-blob` command. Only after that command has produced the
-bundle does the workflow derive and byte-replay
-`release-signature-claim.json` from the exact provenance/bundle pair and
-snapshot `trusted_root.jsonl` for offline verification. Separately, each
-producer runs the pinned GitHub `attest-build-provenance` action after its smoke test and before the
-archive is retained, copies that action's bundle into its deterministic
-`release-attestation-<target>.json` release asset, and fails if the aggregate
-publisher does not receive exactly one non-empty bundle per admitted target. It
-uploads `release-manifest.json`, `release-provenance.json`, the Sigstore
+Each producer runs the pinned GitHub `attest-build-provenance` action after its
+smoke test and before the archive is retained, copying that action's bundle
+into its deterministic `release-attestation-<target>.json` release asset. The
+aggregate publisher requires exactly one non-empty archive and bundle for every
+admitted target, freezes `trusted_root.jsonl`, then has `gh attestation verify`
+check each exact archive against its corresponding held bundle and the pinned
+repository, caller workflow, tag ref, source commit, and hosted-runner policy.
+That check computes the archive digest from the downloaded bytes; a non-empty
+but swapped, stale, or foreign bundle cannot reach `SHA256SUMS`, the final
+manifest, provenance, or publication. Only after this archive-attestation gate
+does the workflow write `dist/SHA256SUMS`, run `scripts/release-manifest.py`,
+run `scripts/release-provenance.py`, and keylessly `cosign sign-blob` the final
+provenance. It then derives and byte-replays `release-signature-claim.json`
+from the exact provenance/bundle pair. The workflow uploads
+`release-manifest.json`, `release-provenance.json`, the Sigstore
 `release-provenance.bundle`, its deterministic
 `release-signature-claim.json`, and the explicit `trusted_root.jsonl` snapshot
 with the three archives and checksum file. The per-archive attestations do not
 replace the signature over the final closed inventory, and the bundle does not
 replace the archive attestations. This strict order prevents signing a mutable
 or incomplete archive inventory. The trusted-root snapshot is release input
-for a later offline verifier, not a claim that merely parsing it authenticates
-anything. Its streamed capture is capped at the verifier's 4 MiB trusted-root
-limit. Workflow configuration is not hosted evidence:
+for both the aggregate archive-attestation gate and a later offline verifier,
+not a claim that merely parsing it authenticates anything. Its streamed capture
+is capped at the verifier's 4 MiB trusted-root limit. Workflow configuration is
+not hosted evidence:
 only a completed tag run and its immutable assets can establish that a release
 was signed.
 

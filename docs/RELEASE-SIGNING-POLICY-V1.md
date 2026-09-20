@@ -465,14 +465,25 @@ historical evidence are changed.
    immutable action revision, and requests the declared `cosign` release
    version. The workflow contract test rejects a missing or changed pin.
 3. **Attestation and signing follow the admitted subjects.** Each producer
-   smoke-tests then attests its archive before upload. `publish-release` runs
-   `scripts/release-manifest.py` only after every target archive exists, then
-   `scripts/release-provenance.py`, then signs the resulting
+   smoke-tests then attests its archive before upload. `publish-release` freezes
+   the bounded `trusted_root.jsonl` and cryptographically checks each held
+   archive against its matching held bundle, pinned repository/caller workflow,
+   exact tag ref, exact source commit, and hosted-runner policy before it writes
+   `SHA256SUMS`. It then runs `scripts/release-manifest.py`,
+   `scripts/release-provenance.py`, and signs the resulting
    `release-provenance.json`. It never signs a manifest before the last archive
-   is built, and `gh release create` fails rather than replacing an existing
-   release's assets.
+   is built and independently attested, and `gh release create` fails rather
+   than replacing an existing release's assets.
 4. **The concrete configured shape is:**
    ```sh
+   gh attestation trusted-root | head -c 4194305 > dist/trusted_root.jsonl
+   gh attestation verify "dist/$ARCHIVE" \
+     --bundle "dist/$ATTESTATION" \
+     --custom-trusted-root dist/trusted_root.jsonl \
+     --repo wavect/semaprax \
+     --signer-workflow wavect/semaprax/.github/workflows/ci.yml \
+     --source-digest "$COMMIT" --source-ref "refs/tags/$TAG" \
+     --deny-self-hosted-runners
    python3 scripts/release-manifest.py --version "$VERSION" --tag "$TAG" \
      --commit "$COMMIT" --archives-dir dist --output dist/release-manifest.json
    python3 scripts/release-provenance.py --manifest dist/release-manifest.json \
@@ -490,8 +501,6 @@ historical evidence are changed.
      --provenance dist/release-provenance.json \
      --bundle dist/release-provenance.bundle \
      --check dist/release-signature-claim.json
-   gh attestation trusted-root \
-     | head -c 4194305 > dist/trusted_root.jsonl
    ```
    followed by uploading `release-manifest.json`, `release-provenance.json`,
    `release-provenance.bundle`, `release-signature-claim.json`, and

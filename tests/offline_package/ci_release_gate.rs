@@ -105,6 +105,45 @@ fn named_step_positions(job: &str, names: &[&str]) -> Result<Vec<usize>, String>
         .collect()
 }
 
+/// The aggregate must verify the retained bundle that corresponds to each held
+/// archive before it derives either checksums or the signed release inventory.
+/// Keep this as a small parser rather than a list of witnesses: ordering inside
+/// one shell step is security-relevant.
+fn archive_attestation_gate_positions(job: &str) -> Result<(usize, usize, usize), String> {
+    for required in [
+        "gh attestation verify \"dist/$archive\"",
+        "--bundle \"dist/$attestation\"",
+        "--custom-trusted-root dist/trusted_root.jsonl",
+        "--repo wavect/semaprax",
+        "--signer-workflow wavect/semaprax/.github/workflows/ci.yml",
+        "--source-digest \"$GITHUB_SHA\"",
+        "--source-ref \"$GITHUB_REF\"",
+        "--deny-self-hosted-runners",
+    ] {
+        if job.matches(required).count() != 1 {
+            return Err(format!(
+                "the archive-attestation gate must contain exactly one {required:?}"
+            ));
+        }
+    }
+    let root = job
+        .find("gh attestation trusted-root")
+        .ok_or_else(|| "the archive-attestation gate must freeze a trusted root".to_owned())?;
+    let verify = job
+        .find("gh attestation verify \"dist/$archive\"")
+        .expect("required above");
+    let checksums = job
+        .find("(cd dist && sha256sum")
+        .ok_or_else(|| "the aggregate must write checksums after verification".to_owned())?;
+    if !(root < verify && verify < checksums) {
+        return Err(
+            "trusted-root capture, archive-attestation verification, and checksums are out of order"
+                .to_owned(),
+        );
+    }
+    Ok((root, verify, checksums))
+}
+
 #[test]
 fn release_artifacts_are_attested_signed_and_packaged_for_offline_replay_before_uploading() {
     let workflow = workflow();
@@ -124,6 +163,14 @@ fn release_artifacts_are_attested_signed_and_packaged_for_offline_replay_before_
         "--run-id \"$GITHUB_RUN_ID\"",
         "--run-attempt \"$GITHUB_RUN_ATTEMPT\"",
         "--host-class github-hosted-ubuntu-24.04",
+        "gh attestation verify \"dist/$archive\"",
+        "--bundle \"dist/$attestation\"",
+        "--custom-trusted-root dist/trusted_root.jsonl",
+        "--repo wavect/semaprax",
+        "--signer-workflow wavect/semaprax/.github/workflows/ci.yml",
+        "--source-digest \"$GITHUB_SHA\"",
+        "--source-ref \"$GITHUB_REF\"",
+        "--deny-self-hosted-runners",
         "cosign sign-blob --yes \\\n            --bundle dist/release-provenance.bundle \\\n            dist/release-provenance.json",
         "python3 scripts/release-signature-claim.py",
         "--output dist/release-signature-claim.json",
@@ -162,6 +209,22 @@ fn release_artifacts_are_attested_signed_and_packaged_for_offline_replay_before_
         publisher.matches("gh attestation trusted-root").count(),
         1,
         "the publisher must package exactly one explicit offline trusted-root set"
+    );
+    assert_eq!(
+        publisher.matches("gh attestation verify").count(),
+        1,
+        "the aggregate must cryptographically bind every retained archive to its staged bundle"
+    );
+    archive_attestation_gate_positions(publisher)
+        .expect("archive attestation validation must precede checksums and final release state");
+    let missing_commit_pin = publisher.replacen(
+        "--source-digest \"$GITHUB_SHA\"",
+        "--source-digest \"unbound\"",
+        1,
+    );
+    assert!(
+        archive_attestation_gate_positions(&missing_commit_pin).is_err(),
+        "the archive gate must reject a superficially valid command that loses its exact source pin"
     );
     assert_eq!(publisher.matches("id-token: write").count(), 1);
     for exact in [
@@ -220,7 +283,7 @@ fn release_artifacts_are_attested_signed_and_packaged_for_offline_replay_before_
             "Generate release provenance from the final manifest",
             "Install pinned cosign",
             "Sign final release provenance with keyless Sigstore",
-            "Derive the signature claim and package offline trust roots",
+            "Derive the signature claim after archive-attestation verification",
             "Publish the alpha archives only after complete aggregation",
         ],
     )

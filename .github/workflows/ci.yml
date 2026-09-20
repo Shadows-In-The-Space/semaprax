@@ -2453,6 +2453,8 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Authenticate the complete archive inventory and produce SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -2476,6 +2478,27 @@ jobs:
           test "$(find dist -maxdepth 1 -type f -name 'release-attestation-*.json' | wc -l | tr -d ' ')" = "${#attestations[@]}"
           for attestation in "${attestations[@]}"; do
             test -s "dist/$attestation"
+          done
+          # Freeze the root before the first aggregate verification so every
+          # archive/bundle pair is checked against the exact root published
+          # with this release. `--bundle` prevents a different API-fetched
+          # attestation from standing in for the retained one.
+          test ! -e dist/trusted_root.jsonl
+          gh attestation trusted-root \
+            | head -c 4194305 > dist/trusted_root.jsonl
+          test -s dist/trusted_root.jsonl
+          test "$(wc -c < dist/trusted_root.jsonl | tr -d ' ')" -le 4194304
+          for index in "${!archives[@]}"; do
+            archive="${archives[$index]}"
+            attestation="${attestations[$index]}"
+            gh attestation verify "dist/$archive" \
+              --bundle "dist/$attestation" \
+              --custom-trusted-root dist/trusted_root.jsonl \
+              --repo wavect/semaprax \
+              --signer-workflow wavect/semaprax/.github/workflows/ci.yml \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" \
+              --deny-self-hosted-runners
           done
           (cd dist && sha256sum "${archives[@]}") > dist/SHA256SUMS
           test "$(wc -l < dist/SHA256SUMS | tr -d ' ')" = "${#archives[@]}"
@@ -2524,7 +2547,7 @@ jobs:
             --bundle dist/release-provenance.bundle \
             dist/release-provenance.json
           test -s dist/release-provenance.bundle
-      - name: Derive the signature claim and package offline trust roots
+      - name: Derive the signature claim after archive-attestation verification
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -2533,7 +2556,8 @@ jobs:
           test -s dist/release-provenance.json
           test -s dist/release-provenance.bundle
           test ! -e dist/release-signature-claim.json
-          test ! -e dist/trusted_root.jsonl
+          test -s dist/trusted_root.jsonl
+          test "$(wc -c < dist/trusted_root.jsonl | tr -d ' ')" -le 4194304
           python3 scripts/release-signature-claim.py \
             --provenance dist/release-provenance.json \
             --bundle dist/release-provenance.bundle \
@@ -2542,11 +2566,7 @@ jobs:
             --provenance dist/release-provenance.json \
             --bundle dist/release-provenance.bundle \
             --check dist/release-signature-claim.json
-          gh attestation trusted-root \
-            | head -c 4194305 > dist/trusted_root.jsonl
           test -s dist/release-signature-claim.json
-          test -s dist/trusted_root.jsonl
-          test "$(wc -c < dist/trusted_root.jsonl | tr -d ' ')" -le 4194304
       - name: Publish the alpha archives only after complete aggregation
         env:
           GH_TOKEN: ${{ github.token }}

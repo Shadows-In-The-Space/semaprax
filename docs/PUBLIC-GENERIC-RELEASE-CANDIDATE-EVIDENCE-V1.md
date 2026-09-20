@@ -160,7 +160,7 @@ Verified at `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:62-64`.
 
 The composed hostile corpus has the versioned schema
 `semaprax.public-generic-hostile-corpus.v1` and the pinned outcome-manifest digest
-`sha256:8b9534dd79b5f4e6f3be06b76750d4586eb835b98a064430288f0c53d4fa5214`,
+`sha256:0e2550a84551d17515b8453f711d8be8d86ba56f76b2a0956480bef7c3c7b2be`,
 defined by `tests/support/public_generic_hostile_corpus.rs` and checked by its
 `versioned_manifest_digest_is_stable` test. For PG-6's descriptor/carrier
 portion, it consists of two related, separately-scoped artifacts; the older
@@ -168,15 +168,16 @@ metadata-format corpus remains a separate comparison row below:
 
 | Artifact | Scope | Case count | Verified at |
 | --- | --- | --- | --- |
-| Shared calling-consumer hostile corpus (issue #160, extended by #173) | Cross-checks Rust/C11/C++17/TypeScript-Wasm calling consumers against one manifest | 17 cases (`EXPECTED` table) | `tests/support/public_generic_hostile_corpus.rs:352-388`; case list in prose at `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:841-878` |
+| Shared calling-consumer hostile corpus (issue #160, extended by #173) | Cross-checks Rust/C11/C++17/TypeScript-Wasm calling consumers against one manifest | 21 cases (`EXPECTED` table) | `tests/support/public_generic_hostile_corpus.rs`; case list in prose at `docs/PUBLIC-GENERIC-CONSUMERS-V1.md#shared-hostile-corpus-issue-160` |
 | Reference-codec hostile replay (issue #173's own two closed gaps) | `descriptor.rs`/`carrier.rs`/`carrier/frame.rs`/`native/binding.rs`/`wasm/binding.rs` invalid-UTF-8 and unrecognized-`LeafKind`-tag cases | 6 cases | `tests/projections/public_generic_descriptor_carrier_hostile_replay.rs` (named at `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:990-1003`) |
 | Metadata-format hostile corpus (grammar half, hosted green) | Nine hostile documents against the four *metadata* consumers | 9 documents | `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:169-176` |
 
-The schema and digest bind the canonical baseline, all 17 shared case ids and
+The schema and digest bind the canonical baseline, all 21 shared case ids and
 outcomes, the nine structured descriptor mutations, and all six
 malformed-trusted mutations (including the latter groups' expected
-replay/decode outcomes and exact byte digests). The native and Wasm harnesses'
-driver-local recipes for the 17 shared cases are not encoded in this manifest;
+replay/decode outcomes and exact byte digests), plus exact bytes for four
+malformed result-carrier cases. The native and Wasm harnesses'
+driver-local recipes for the 21 shared cases are not encoded in this manifest;
 their agreement remains execution evidence. A changed bound field must
 deliberately mint a new corpus version or update the pinned known-answer with
 review.
@@ -393,7 +394,7 @@ diagnostic/reason range, CI job/step, and support/publication standing.
 - **Owning code module**: `tests/support/public_generic_hostile_corpus.rs` (pure data, `#[path]`-included into both harnesses below)
 - **Generator/verifier entry points**: `tests/public_generic_native_adapter_v1/shared_hostile_corpus.rs` (Rust/C11/C++17), `tests/public_generic_wasm_adapter_v1/shared_hostile_corpus.rs` (TypeScript/Wasm)
 - **Focused test selector**: `cargo test --locked -p semaprax --test public_generic_native_adapter_v1` and `--test public_generic_wasm_adapter_v1` (same selectors as §2.7-2.10; the shared-corpus tests live inside these binaries)
-- **Canonical golden fixture**: `EXPECTED` table in `tests/support/public_generic_hostile_corpus.rs:352` (17 shared cases); the separate malformed-trusted descriptor manifest has 6 cases
+- **Canonical golden fixture**: `EXPECTED` table in `tests/support/public_generic_hostile_corpus.rs` (21 shared cases); the separate malformed-trusted descriptor manifest has 6 cases
 - **CI job/step**: `public-generic-ownership-milestone` job, "Callable-boundary corpus, generated consumers, settlement and hostile replay" step
 - **Support/publication standing**: Hosted job-level evidence exists at prior commits, with local proof details; no exact-current-head run is recorded — `docs/PUBLIC-GENERIC-CONSUMERS-V1.md:180-190`
 

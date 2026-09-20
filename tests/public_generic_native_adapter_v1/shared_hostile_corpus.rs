@@ -55,8 +55,8 @@ use semaprax::public_generic_consumer::rust_calling::{
 #[path = "../support/public_generic_hostile_corpus.rs"]
 pub(crate) mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
-    assert_matches_expected, baseline_descriptor_bytes, parse_shared_corpus_lines,
-    structured_descriptor_cases, MAX_BYTES_PER_LEAF,
+    assert_matches_expected, baseline_descriptor_bytes, malformed_result_carrier_cases,
+    parse_shared_corpus_lines, structured_descriptor_cases, MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -415,6 +415,7 @@ fn shared_hostile_corpus_prints_its_observed_outcomes() {
         println!("SHARED_CORPUS binding_valid_for_different_artifact {status}");
     }
 __STRUCTURED_DESCRIPTOR_CASES__
+__MALFORMED_RESULT_CARRIER_CASES__
 }
 "#;
 
@@ -633,6 +634,7 @@ const C_APPENDIX_FN: &str = r#"static void test_shared_hostile_corpus(void) {
         printf("SHARED_CORPUS one_byte_over_per_leaf_bound_rejected %s\n", status);
     }
 __STRUCTURED_DESCRIPTOR_CASES__
+__MALFORMED_RESULT_CARRIER_CASES__
 }
 
 "#;
@@ -825,6 +827,7 @@ const CXX_APPENDIX_FN: &str = r#"static void test_shared_hostile_corpus() {
         std::printf("SHARED_CORPUS one_byte_over_per_leaf_bound_rejected %s\n", status);
     }
 __STRUCTURED_DESCRIPTOR_CASES__
+__MALFORMED_RESULT_CARRIER_CASES__
 }
 
 "#;
@@ -904,6 +907,77 @@ fn cxx_structured_cases() -> String {
     result
 }
 
+fn rust_malformed_result_carrier_cases() -> String {
+    let mut result = String::new();
+    for (name, bytes) in malformed_result_carrier_cases() {
+        write!(
+            &mut result,
+            r#"
+    {{
+        const CANDIDATE: &[u8] = {};
+        let before = diagnostics::live_allocations();
+        let status = match diagnostics::validate_result_carrier(CANDIDATE) {{
+            Ok(()) => "ACCEPTED",
+            Err(Error::ResultRejected(_)) => "RESULT_REJECTED",
+            Err(_) => "OTHER",
+        }};
+        assert_eq!(diagnostics::live_allocations(), before);
+        println!("SHARED_CORPUS {name} {{status}}");
+    }}
+"#,
+            rust_byte_slice_literal(&bytes)
+        )
+        .unwrap();
+    }
+    result
+}
+
+fn c_malformed_result_carrier_cases() -> String {
+    let mut result = String::new();
+    for (name, bytes) in malformed_result_carrier_cases() {
+        write!(
+            &mut result,
+            r#"
+    {{
+        static const uint8_t candidate[] = {};
+        size_t before = spx_pg_consumer_test_live_allocations();
+        spx_pg_consumer_status rc = spx_pg_consumer_test_validate_result_carrier(
+            candidate, sizeof(candidate));
+        REQUIRE(rc == SPX_PG_CONSUMER_RESULT_REJECTED);
+        REQUIRE(spx_pg_consumer_test_live_allocations() == before);
+        printf("SHARED_CORPUS {name} RESULT_REJECTED\n");
+    }}
+"#,
+            c_byte_array_literal(&bytes)
+        )
+        .unwrap();
+    }
+    result
+}
+
+fn cxx_malformed_result_carrier_cases() -> String {
+    let mut result = String::new();
+    for (name, bytes) in malformed_result_carrier_cases() {
+        write!(
+            &mut result,
+            r#"
+    {{
+        std::vector<std::uint8_t> candidate {};
+        std::size_t before = ::spx_pg_consumer_test_live_allocations();
+        const auto rc = ::spx_pg_consumer_test_validate_result_carrier(
+            candidate.data(), candidate.size());
+        REQUIRE(rc == SPX_PG_CONSUMER_RESULT_REJECTED);
+        REQUIRE(::spx_pg_consumer_test_live_allocations() == before);
+        std::printf("SHARED_CORPUS {name} RESULT_REJECTED\n");
+    }}
+"#,
+            c_byte_array_literal(&bytes)
+        )
+        .unwrap();
+    }
+    result
+}
+
 fn write_generated_files(root: &Path, files: &[(String, String)], splice: Option<(&str, &str)>) {
     for (relative, contents) in files {
         let path = root.join(relative);
@@ -966,7 +1040,11 @@ fn shared_hostile_corpus_agrees_across_rust_c11_and_cxx17_consumers() {
             "__CROSS_ARTIFACT_BINDING_BYTES__",
             &rust_byte_slice_literal(&cross_artifact_binding_bytes),
         )
-        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &rust_structured_cases());
+        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &rust_structured_cases())
+        .replace(
+            "__MALFORMED_RESULT_CARRIER_CASES__",
+            &rust_malformed_result_carrier_cases(),
+        );
     let c_appendix_fn = C_APPENDIX_FN
         .replace(
             "__CROSS_TARGET_BINDING_BYTES__",
@@ -976,7 +1054,11 @@ fn shared_hostile_corpus_agrees_across_rust_c11_and_cxx17_consumers() {
             "__CROSS_ARTIFACT_BINDING_BYTES__",
             &c_byte_array_literal(&cross_artifact_binding_bytes),
         )
-        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &c_structured_cases());
+        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &c_structured_cases())
+        .replace(
+            "__MALFORMED_RESULT_CARRIER_CASES__",
+            &c_malformed_result_carrier_cases(),
+        );
     let cxx_appendix_fn = CXX_APPENDIX_FN
         .replace(
             "__CROSS_TARGET_BINDING_BYTES__",
@@ -986,7 +1068,11 @@ fn shared_hostile_corpus_agrees_across_rust_c11_and_cxx17_consumers() {
             "__CROSS_ARTIFACT_BINDING_BYTES__",
             &c_byte_array_literal(&cross_artifact_binding_bytes),
         )
-        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &cxx_structured_cases());
+        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &cxx_structured_cases())
+        .replace(
+            "__MALFORMED_RESULT_CARRIER_CASES__",
+            &cxx_malformed_result_carrier_cases(),
+        );
 
     let workspace = Workspace::new("shared-corpus");
     eprintln!("shared hostile corpus workspace: {}", workspace.0.display());

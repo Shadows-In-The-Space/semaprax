@@ -18,15 +18,12 @@
 //!
 //! What this corpus does NOT cover, stated once here rather than implied:
 //! it exercises only the outcomes every one of the four consumers can
-//! express identically today (open-time descriptor/binding rejection and
-//! the per-leaf byte bound). `CarrierRejected`, `ExecutionFailed`,
-//! `ResultRejected`, `AllocationFailure`, `NullArgument` (native-only), and
-//! C++'s `ReleaseFailed` are exercised by each consumer's OWN existing
-//! generator-produced hostile tests already (see the coverage audit in this
-//! issue's report) -- duplicating them here under a false "shared" label
-//! would not make them any more cross-checked, since those specific reasons
-//! are not uniformly reachable across all four targets from the same
-//! artifact bytes today. The full ordinal 0..=13 (native) / 0..=7 (Wasm)
+//! express identically today: open-time descriptor/binding rejection, the
+//! per-leaf input byte bound, and pre-allocation refusal of a malformed
+//! result carrier. `CarrierRejected`, `ExecutionFailed`, `AllocationFailure`,
+//! `NullArgument` (native-only), and C++'s `ReleaseFailed` are exercised by
+//! each consumer's OWN existing generator-produced hostile tests already
+//! (see the coverage audit in this issue's report). The full ordinal 0..=13 (native) / 0..=7 (Wasm)
 //! failure-injection matrices are also deliberately excluded from this file:
 //! the native and Core Wasm carrier protocols have different phase counts
 //! (14 vs. 8 injectable ordinals), so "ordinal N" is not the same logical
@@ -182,6 +179,40 @@ pub fn structured_descriptor_cases() -> Vec<(&'static str, Vec<u8>, &'static str
         "67ef2381b1c7f08c7aaf4f11c960404133b2e477a51e0915a81d2914cf566350",
     ));
     cases
+}
+
+/// Closed, byte-identical malformed *result* carriers for the shared
+/// one-leaf calling-consumer fixture. Every document is refused by the
+/// generated result decoder before it can allocate an output leaf, invoke a
+/// target, or expose a result. The `u64::MAX` width deliberately exercises
+/// exact-width handling instead of a host `usize` narrowing accident.
+///
+/// This has a fixed leaf count because the generated callers derive that
+/// count from the descriptor at generation time; a caller with a different
+/// shape must generate a separate fixture rather than reinterpret this
+/// corpus's bytes.
+pub fn malformed_result_carrier_cases() -> Vec<(&'static str, Vec<u8>)> {
+    fn header() -> Vec<u8> {
+        1u64.to_le_bytes().to_vec()
+    }
+
+    let truncated = header();
+
+    let wrong_count = 2u64.to_le_bytes().to_vec();
+
+    let mut max_width = header();
+    max_width.extend_from_slice(&u64::MAX.to_le_bytes());
+
+    let mut trailing = header();
+    trailing.extend_from_slice(&0u64.to_le_bytes());
+    trailing.push(0xff);
+
+    vec![
+        ("result_carrier_truncated_length", truncated),
+        ("result_carrier_wrong_leaf_count", wrong_count),
+        ("result_carrier_u64_max_leaf_length", max_width),
+        ("result_carrier_trailing_byte", trailing),
+    ]
 }
 
 /// The twelve canonical Descriptor-v1 frame ranges of
@@ -360,9 +391,9 @@ pub const HOSTILE_CORPUS_SCHEMA: &str = "semaprax.public-generic-hostile-corpus.
 /// changes; a changed shared id/outcome, shared-module mutation, or baseline
 /// must deliberately mint a new corpus version or update this known-answer.
 pub const HOSTILE_CORPUS_MANIFEST_DIGEST: &str =
-    "sha256:8b9534dd79b5f4e6f3be06b76750d4586eb835b98a064430288f0c53d4fa5214";
+    "sha256:0e2550a84551d17515b8453f711d8be8d86ba56f76b2a0956480bef7c3c7b2be";
 
-pub const HOSTILE_CORPUS_SHARED_CASE_COUNT: usize = 17;
+pub const HOSTILE_CORPUS_SHARED_CASE_COUNT: usize = 21;
 pub const HOSTILE_CORPUS_MALFORMED_TRUSTED_CASE_COUNT: usize = 6;
 
 /// Restates `src/public_generic_abi/boundary_profile.rs::MAX_BYTES_PER_LEAF`
@@ -377,11 +408,11 @@ pub const MAX_BYTES_PER_LEAF: usize = 64 * 1024;
 /// driver prints as `SHARED_CORPUS <case_id> <STATUS>`) and the single
 /// expected normalized status every route must agree on. `STATUS` is one of
 /// `ACCEPTED`, `DESCRIPTOR_REJECTED`, `PROVIDER_MISMATCH`,
-/// `CAPACITY_EXCEEDED` -- the closed subset of the shared
-/// `DescriptorRejected`/`ProviderMismatch`/`CapacityExceeded`/accepted
-/// vocabulary every one of Rust's `Error`, C's `spx_pg_consumer_status`,
-/// C++'s `ErrorKind`, and TypeScript's `SemapraxPublicGenericError.kind`
-/// already restate identically (see the coverage audit).
+/// `CAPACITY_EXCEEDED`, `RESULT_REJECTED` -- the closed subset of the shared
+/// `DescriptorRejected`/`ProviderMismatch`/`CapacityExceeded`/
+/// `ResultRejected`/accepted vocabulary every one of Rust's `Error`, C's
+/// `spx_pg_consumer_status`, C++'s `ErrorKind`, and TypeScript's
+/// `SemapraxPublicGenericError.kind` already restate identically.
 pub const EXPECTED: &[(&str, &str)] = &[
     ("success_baseline", "ACCEPTED"),
     ("descriptor_first_byte_flipped", "DESCRIPTOR_REJECTED"),
@@ -419,6 +450,10 @@ pub const EXPECTED: &[(&str, &str)] = &[
     // ("cross-artifact replay" / "independent recomputation rather than
     // trusting embedded digest fields", issue #173).
     ("binding_valid_for_different_artifact", "PROVIDER_MISMATCH"),
+    ("result_carrier_truncated_length", "RESULT_REJECTED"),
+    ("result_carrier_wrong_leaf_count", "RESULT_REJECTED"),
+    ("result_carrier_u64_max_leaf_length", "RESULT_REJECTED"),
+    ("result_carrier_trailing_byte", "RESULT_REJECTED"),
 ];
 
 /// Parse every `SHARED_CORPUS <case_id> <STATUS>` line a spliced driver
@@ -549,6 +584,16 @@ mod tests {
             ));
             manifest.push('\n');
         }
+        for (name, bytes) in malformed_result_carrier_cases() {
+            manifest.push_str("malformed-result-carrier\t");
+            manifest.push_str(name);
+            manifest.push('\t');
+            manifest.push_str(&format!(
+                "{:x}",
+                semaprax::digest_hex::LowerHex(Sha256::digest(&bytes))
+            ));
+            manifest.push('\n');
+        }
         manifest.into_bytes()
     }
 
@@ -599,6 +644,24 @@ mod tests {
                 let error = replay(&bytes, &trusted).unwrap_err();
                 assert_eq!(error.code, expected_code, "{name}");
             }
+        }
+    }
+
+    #[test]
+    fn malformed_result_carrier_cases_are_closed_and_distinct() {
+        use sha2::{Digest as _, Sha256};
+
+        let cases = malformed_result_carrier_cases();
+        assert_eq!(cases.len(), 4);
+        let mut digests = std::collections::BTreeSet::new();
+        for (name, bytes) in cases {
+            assert!(
+                digests.insert(format!(
+                    "{:x}",
+                    semaprax::digest_hex::LowerHex(Sha256::digest(&bytes))
+                )),
+                "{name}: carrier cases must not collapse to identical bytes"
+            );
         }
     }
 

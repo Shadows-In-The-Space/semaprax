@@ -13,6 +13,15 @@ size_t spx_pg_consumer_test_live_allocations(void) { return spx_pg_test_live_all
 size_t spx_pg_consumer_test_live_handles(spx_pg_calling_consumer *consumer) {
     return consumer == NULL ? 0 : spx_pg_test_live_handles_v1(consumer->provider);
 }
+spx_pg_consumer_status spx_pg_consumer_test_validate_result_carrier(
+    const uint8_t *bytes, size_t len) {
+    if (bytes == NULL) return SPX_PG_CONSUMER_NULL_ARGUMENT;
+    spx_pg_owned_bytes leaves[FIELD_COUNT];
+    memset(leaves, 0, sizeof(leaves));
+    const spx_pg_consumer_status status = spx_pg_ccc_decode_leaves(bytes, len, leaves);
+    spx_pg_ccc_free_leaves(leaves, FIELD_COUNT);
+    return status;
+}
 
 spx_pg_consumer_status spx_pg_consumer_open(const uint8_t *descriptor_bytes, size_t descriptor_len,
     const uint8_t *provider_binding_bytes, size_t provider_binding_len,

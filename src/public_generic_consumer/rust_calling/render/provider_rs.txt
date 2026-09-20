@@ -392,7 +392,9 @@ fn map_export_failure(status: ffi::Status) -> Error {
 /// after every terminal case, success and injected failure alike.
 #[doc(hidden)]
 pub mod diagnostics {
+    use super::super::carrier;
     use super::ffi;
+    use super::Error;
     use super::Provider;
 
     pub fn live_allocations() -> usize {
@@ -417,5 +419,13 @@ pub mod diagnostics {
     pub fn clear_failure_injection() {
         // SAFETY: takes no argument; clears process-global test-only state.
         unsafe { ffi::spx_pg_test_clear_failure_injection_v1() }
+    }
+
+    /// Test-only access to this generated caller's own result-carrier
+    /// decoder. It does not open a provider, mint a handle, allocate a
+    /// native value, or invoke an endpoint; hostile bytes must fail during
+    /// the decoder's full framing pass before any result leaf is copied.
+    pub fn validate_result_carrier(bytes: &[u8]) -> Result<(), Error> {
+        carrier::decode_output(bytes).map(|_| ())
     }
 }

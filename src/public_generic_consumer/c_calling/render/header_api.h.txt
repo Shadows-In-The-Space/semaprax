@@ -83,6 +83,11 @@ size_t spx_pg_consumer_test_live_allocations(void);
 /* The native provider's own live-handle counter for `consumer`'s provider.
  * Returns 0 for a null `consumer`. */
 size_t spx_pg_consumer_test_live_handles(spx_pg_calling_consumer *consumer);
+/* Runs this generated consumer's own full result-carrier decoder without
+ * opening a provider or invoking an endpoint. Any temporary output leaves
+ * from an admitted control are discharged before return. */
+spx_pg_consumer_status spx_pg_consumer_test_validate_result_carrier(
+    const uint8_t *bytes, size_t len);
 
 #ifdef __cplusplus
 }

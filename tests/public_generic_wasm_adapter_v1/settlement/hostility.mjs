@@ -182,13 +182,13 @@ export async function hostility(pkg, only = null, repeats = 64) {
   await check('codec-count-and-length-bounds',()=>{
     for(const n of [0,257])expect(()=>codec.encodeLeaves(Array.from({length:n},()=>new Uint8Array(0))),cap('leaf-count'));
     expect(()=>codec.encodeLeaves([new Uint8Array(65537)]),cap('leaf-bytes'));
-    expect(()=>codec.locateLeaves(new Uint8Array(16779273),2),cap('carrier-bytes'));
+    expect(()=>codec.locateLeaves(new Uint8Array(16779273),2),{kind:'result-rejected',reason:'carrier-bytes'});
     const valid=independentCarrier(payloads(2,0));
     for(const length of [0,7,8,15,valid.length-1]) expect(()=>codec.decodeLeaves(valid.subarray(0,length),2),{kind:'result-rejected',reason:'carrier-framing'});
     const count=Uint8Array.from(valid);new DataView(count.buffer).setBigUint64(0,3n,true);
     expect(()=>codec.decodeLeaves(count,2),{kind:'result-rejected',reason:'carrier-count'});
     const huge=Uint8Array.from(valid);new DataView(huge.buffer).setBigUint64(8,0xffffffffffffffffn,true);
-    expect(()=>codec.decodeLeaves(huge,2),cap('leaf-bytes'));
+    expect(()=>codec.decodeLeaves(huge,2),{kind:'result-rejected',reason:'leaf-bytes'});
     expect(()=>codec.decodeLeaves(Uint8Array.from([...valid,0]),2),{kind:'result-rejected',reason:'carrier-trailing'});
     return { exact_refusals:12 };
   });
@@ -197,7 +197,7 @@ export async function hostility(pkg, only = null, repeats = 64) {
     const wire=new DataView(valid.buffer);wire.setBigUint64(8+8+5,65537n,true);
     let copies=0;const original=Uint8Array.prototype.slice;
     Uint8Array.prototype.slice=function(...args){copies++;return Reflect.apply(original,this,args);};
-    try {expect(()=>codec.decodeLeaves(valid,2),cap('leaf-bytes'));}finally{Uint8Array.prototype.slice=original;}
+    try {expect(()=>codec.decodeLeaves(valid,2),{kind:'result-rejected',reason:'leaf-bytes'});}finally{Uint8Array.prototype.slice=original;}
     assert.equal(copies,0,'last-leaf validation must precede every payload allocation');
     return { copied_payload_leaves:copies };
   });

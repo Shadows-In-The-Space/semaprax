@@ -13,6 +13,10 @@ export type CarrierReason = "input-shape" | "input-field" | "input-bytes"
   | "carrier-framing" | "carrier-count" | "carrier-trailing";
 export type CapacityReason = "leaf-count" | "leaf-bytes" | "total-payload"
   | "carrier-bytes" | "trace-events" | "memory-growth" | "generation" | "host-allocation";
+/** Incoming result frames use their own closed refusal class. A hostile
+ * provider claim of an over-bound carrier is not a caller-requested capacity
+ * failure, even though the bound vocabulary is shared with input admission. */
+export type ResultReason = CarrierReason | "leaf-bytes" | "total-payload" | "carrier-bytes";
 
 export type SemapraxPublicGenericError =
   | { readonly kind: "descriptor-rejected"; readonly reason: DescriptorReason }
@@ -20,7 +24,7 @@ export type SemapraxPublicGenericError =
   | { readonly kind: "carrier-rejected"; readonly reason: CarrierReason }
   | { readonly kind: "capacity-exceeded"; readonly reason: CapacityReason }
   | { readonly kind: "execution-failed"; readonly status: number }
-  | { readonly kind: "result-rejected"; readonly reason: CarrierReason }
+  | { readonly kind: "result-rejected"; readonly reason: ResultReason }
   | { readonly kind: "release-failed"; readonly status: number };
 
 export class SemapraxPublicGenericException extends Error {

@@ -844,17 +844,19 @@ consumer that quietly started accepting what the other three reject would
 not have failed anything, because every existing test only asserts against
 its own author's expectation. `tests/support/public_generic_hostile_corpus.rs`
 is the one shared manifest (one on-disk file, `#[path]`-included, unmodified,
-into both native and Wasm harnesses) naming 17 cases and their one expected
+into both native and Wasm harnesses) naming 21 cases and their one expected
 outcome; `tests/public_generic_native_adapter_v1/shared_hostile_corpus.rs`
 and `tests/public_generic_wasm_adapter_v1/shared_hostile_corpus.rs` generate
 all four consumers from the SAME canonical descriptor baseline, capture each
 one's REAL observed outcome (never assert-and-swallow), and check every one
 of them against that one manifest. The composed corpus is identified as
 `semaprax.public-generic-hostile-corpus.v1` with outcome-manifest digest
-`sha256:8b9534dd79b5f4e6f3be06b76750d4586eb835b98a064430288f0c53d4fa5214`;
+`sha256:0e2550a84551d17515b8453f711d8be8d86ba56f76b2a0956480bef7c3c7b2be`;
 the separate malformed-trusted descriptor manifest contains six additional
-cases. The digest binds the 17 shared case ids and expected outcomes, not the
-native/Wasm harness-local mutation recipes; those remain execution evidence.
+cases. The digest binds the 21 shared case ids and expected outcomes, the
+exact bytes of the four malformed result-carrier cases, and the existing
+descriptor material; it does not bind native/Wasm harness-local mutation
+recipes, which remain execution evidence.
 
 **Coverage audit — what already existed per consumer before this issue** (test
 names are exact, from the generator's own `ROUND_TRIP_BODY`/equivalent

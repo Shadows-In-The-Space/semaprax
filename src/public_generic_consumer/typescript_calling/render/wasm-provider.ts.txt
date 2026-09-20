@@ -432,6 +432,10 @@ export class Provider {
     exportResult(provider: Provider, handle: unknown): Output { return provider.#exportResult(handle); },
     releaseInput(provider: Provider, handle: unknown): void { provider.#releaseHandle(handle, "input"); },
     releaseResult(provider: Provider, handle: unknown): void { provider.#releaseHandle(handle, "result"); },
+    /** Test-only direct path through the generated result decoder. It never
+     * opens a module, allocates a carrier span, mints a handle, or calls an
+     * endpoint; malformed bytes are refused before result leaf copies. */
+    validateResultCarrier(bytes: Uint8Array): void { decodeOutput(bytes); },
     mutateNextExport(provider: Provider, mutation: number): void {
       if (!Number.isInteger(mutation) || mutation < 0 || mutation > 6) throw carrier("failure-injection");
       provider.#exportMutation = mutation;

@@ -55,8 +55,8 @@ use super::reference_wasm_module;
 mod public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
     assert_matches_expected, baseline_descriptor_bytes, malformed_trusted_descriptor_cases,
-    malformed_trusted_descriptor_mutation_cases, parse_shared_corpus_lines,
-    structured_descriptor_cases, MAX_BYTES_PER_LEAF,
+    malformed_result_carrier_cases, malformed_trusted_descriptor_mutation_cases,
+    parse_shared_corpus_lines, structured_descriptor_cases, MAX_BYTES_PER_LEAF,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -237,6 +237,7 @@ try {
 } finally {
   WebAssembly.instantiate = original;
 }
+
 console.log("MUTATED_DESCRIPTOR_ENVELOPE_REACHED_PROVIDER");
 "#,
         )
@@ -260,6 +261,95 @@ console.log("MUTATED_DESCRIPTOR_ENVELOPE_REACHED_PROVIDER");
             "{name}"
         );
     }
+}
+
+/// The shared u64::MAX result-carrier case must reach TypeScript's exact
+/// incoming-result width branch. This temporary mutant changes only that
+/// branch's closed class; the observed capacity error proves the corpus does
+/// not pass merely because a later framing check also refuses the bytes.
+#[test]
+fn result_carrier_capacity_reason_mutation_is_detected_by_typescript_consumer() {
+    if !node_available() {
+        eprintln!("skipping: node is not available on PATH");
+        return;
+    }
+    let Some(tsc) = locate_tsc() else {
+        eprintln!("skipping: no repository-pinned (5.8.3) tsc is available on this host");
+        return;
+    };
+    let wasm_bytes = reference_wasm_module::build();
+    let (input, output) = shapes();
+    let binding = fixture_binding(&wasm_bytes);
+    let consumer = generate_typescript_calling_consumer(
+        baseline_descriptor_bytes(),
+        &binding,
+        &input,
+        &output,
+    )
+    .expect("a well-formed shape must generate");
+    let workspace = Workspace::new("result-carrier-capacity-mutant");
+    let root = workspace.path("generated-typescript-consumer");
+    write_generated_package(&root, consumer.files());
+    let carrier_path = root.join("src/carrier.ts");
+    let mut carrier = fs::read_to_string(&carrier_path).unwrap();
+    replace_once(
+        &mut carrier,
+        "if (length > BigInt(MAX_BYTES_PER_LEAF)) throw resultRejected(\"leaf-bytes\");",
+        "if (length > BigInt(MAX_BYTES_PER_LEAF)) throw capacityExceeded(\"leaf-bytes\");",
+        "result-carrier u64::MAX width",
+    );
+    fs::write(&carrier_path, carrier).unwrap();
+    let build = run(
+        Command::new(&tsc)
+            .current_dir(&root)
+            .args(["-p", "tsconfig.json"]),
+        "tsc -p tsconfig.json for result-carrier mutant",
+    );
+    assert!(
+        build.status.success(),
+        "TypeScript result-carrier mutant did not type-check:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let bytes = malformed_result_carrier_cases()
+        .into_iter()
+        .find(|(name, _)| *name == "result_carrier_u64_max_leaf_length")
+        .map(|(_, bytes)| bytes)
+        .expect("the closed corpus contains the u64::MAX width case");
+    fs::write(
+        root.join("test/mutated-result-carrier.mjs"),
+        format!(
+            r#"
+import assert from "node:assert/strict";
+import {{ decodeOutput }} from "../dist/carrier.js";
+import {{ SemapraxPublicGenericException }} from "../dist/errors.js";
+const candidate = new Uint8Array({});
+assert.throws(
+  () => decodeOutput(candidate),
+  error => error instanceof SemapraxPublicGenericException &&
+    error.detail.kind === "capacity-exceeded",
+);
+console.log("MUTATED_RESULT_CARRIER_CAPACITY_BRANCH_REACHED");
+"#,
+            js_byte_array_literal(&bytes)
+        ),
+    )
+    .unwrap();
+    let output = run(
+        Command::new("node")
+            .current_dir(&root)
+            .arg("test/mutated-result-carrier.mjs"),
+        "node mutated-result-carrier.mjs",
+    );
+    assert!(
+        output.status.success(),
+        "result-carrier mutation was not detected:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("MUTATED_RESULT_CARRIER_CAPACITY_BRANCH_REACHED")
+    );
 }
 
 impl Drop for Workspace {
@@ -517,6 +607,7 @@ const TS_APPENDIX: &str = r#"
   });
 
 __STRUCTURED_DESCRIPTOR_CASES__
+__MALFORMED_RESULT_CARRIER_CASES__
 "#;
 
 fn ts_structured_cases() -> String {
@@ -535,6 +626,32 @@ fn ts_structured_cases() -> String {
     }} catch (error) {{
       if (error instanceof SemapraxPublicGenericException &&
           error.detail.kind === "descriptor-rejected") status = "DESCRIPTOR_REJECTED";
+    }}
+    console.log(`SHARED_CORPUS {name} ${{status}}`);
+  }});
+"#,
+            js_byte_array_literal(&bytes)
+        )
+        .unwrap();
+    }
+    result
+}
+
+fn ts_malformed_result_carrier_cases() -> String {
+    let mut result = String::new();
+    for (name, bytes) in malformed_result_carrier_cases() {
+        write!(
+            &mut result,
+            r#"
+  await test("shared corpus: {name}", async () => {{
+    const candidate = new Uint8Array({});
+    let status = "OTHER";
+    try {{
+      Provider.diagnostics.validateResultCarrier(candidate);
+      status = "ACCEPTED";
+    }} catch (error) {{
+      if (error instanceof SemapraxPublicGenericException &&
+          error.detail.kind === "result-rejected") status = "RESULT_REJECTED";
     }}
     console.log(`SHARED_CORPUS {name} ${{status}}`);
   }});
@@ -603,7 +720,11 @@ fn shared_hostile_corpus_agrees_with_the_native_manifest() {
             "__CROSS_ARTIFACT_BINDING_BYTES__",
             &js_byte_array_literal(&cross_artifact_binding_bytes),
         )
-        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &ts_structured_cases());
+        .replace("__STRUCTURED_DESCRIPTOR_CASES__", &ts_structured_cases())
+        .replace(
+            "__MALFORMED_RESULT_CARRIER_CASES__",
+            &ts_malformed_result_carrier_cases(),
+        );
 
     let round_trip_path = package_root.join("test/round-trip.mjs");
     let mut contents = fs::read_to_string(&round_trip_path).unwrap();

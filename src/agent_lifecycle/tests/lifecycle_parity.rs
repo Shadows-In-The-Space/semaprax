@@ -97,6 +97,7 @@ struct Probe<'a> {
     trace: Trace,
     cancellation: &'a AgentCancellation,
     cancel_on_read: bool,
+    cancel_before_stage: Option<&'static str>,
 }
 
 impl IterativeDriver for Probe<'_> {
@@ -107,6 +108,9 @@ impl IterativeDriver for Probe<'_> {
         max_steps: usize,
     ) -> Result<(), Vec<Diagnostic>> {
         self.trace.stages.push((role, turn, max_steps));
+        if self.cancel_before_stage == Some(role) {
+            self.cancellation.cancel();
+        }
         Ok(())
     }
 
@@ -184,6 +188,7 @@ fn run(
         trace: Trace::default(),
         cancellation: &cancellation,
         cancel_on_read,
+        cancel_before_stage: None,
     };
     let run = compiled
         .run_with_driver_on(
@@ -329,6 +334,7 @@ fn frozen_lifecycle_completes_with_fresh_grants_and_real_read_results_on_every_b
         trace: Trace::default(),
         cancellation: &cancellation,
         cancel_on_read: false,
+        cancel_before_stage: None,
     };
     let ordinary = compiled
         .run_with_driver(&task(), &proposals, &mut probe, budget, &cancellation)
@@ -340,6 +346,39 @@ fn frozen_lifecycle_completes_with_fresh_grants_and_real_read_results_on_every_b
         assert_parity(&expected, &actual, leg);
         assert!(actual.0.stages().iter().all(|stage| stage.steps_used == 0));
     }
+}
+
+#[test]
+fn cancellation_racing_the_wasm_stage_reservation_settles_without_target_admission() {
+    let compiled = compile(&source());
+    let cancellation = AgentCancellation::new();
+    let mut probe = Probe {
+        trace: Trace::default(),
+        cancellation: &cancellation,
+        cancel_on_read: false,
+        cancel_before_stage: Some("initialize"),
+    };
+    let run = compiled
+        .run_with_driver_on(
+            &task(),
+            &proposals(&compiled),
+            &mut probe,
+            IterativeBudget::default(),
+            &cancellation,
+            StageBackend::Wasm {
+                // Deliberately invalid: cancellation must be observed at the
+                // sealed boundary before source checking, artifact work, or
+                // Node process admission.
+                source: "not a SEMAPRAX module",
+            },
+        )
+        .expect("a rechecked pre-dispatch cancellation is a settled run");
+    assert_eq!(run.status(), IterativeStatus::Cancelled);
+    assert_eq!(
+        (run.iterations(), run.effects(), run.stages().len()),
+        (0, 0, 0)
+    );
+    assert_eq!(probe.trace.stages, [("initialize", 0, DEFAULT_STAGE_STEPS)]);
 }
 
 #[test]

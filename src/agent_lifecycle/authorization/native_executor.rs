@@ -93,7 +93,13 @@ impl StageExecutor for NativeStageExecutor {
         prepared: &PreparedRetainedCall,
         arguments: &[RetainedValue],
         max_steps: usize,
+        cancellation: Option<&crate::agent_runtime::AgentCancellation>,
     ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
+        if cancellation.is_some_and(crate::agent_runtime::AgentCancellation::is_cancelled) {
+            return Err(vec![super::super::stages::invariant(
+                "stage_executor.cancelled",
+            )]);
+        }
         run(program, prepared, arguments, max_steps, self.optimization).map_err(|error| vec![error])
     }
 }

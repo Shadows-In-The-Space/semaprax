@@ -22,6 +22,7 @@
 
 use sha2::{Digest, Sha256};
 
+use crate::agent_runtime::AgentCancellation;
 use crate::diagnostic::Diagnostic;
 use crate::hir;
 use crate::interpreter::retained_call::{
@@ -200,13 +201,45 @@ pub(super) fn run_authorize_stage_on(
     state: &RetainedValue,
     proposal_canonical: &str,
 ) -> Result<(AuthorizationOutcome, StageRecord), Vec<Diagnostic>> {
+    run_authorize_stage_on_cancellable(
+        backend,
+        program,
+        stage,
+        arguments,
+        max_steps,
+        policy_digest,
+        state,
+        proposal_canonical,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_authorize_stage_on_cancellable(
+    backend: StageBackend<'_>,
+    program: &hir::ResolvedProgram,
+    stage: &AuthorizeStage,
+    arguments: &[RetainedValue],
+    max_steps: usize,
+    policy_digest: &str,
+    state: &RetainedValue,
+    proposal_canonical: &str,
+    cancellation: Option<&AgentCancellation>,
+) -> Result<(AuthorizationOutcome, StageRecord), Vec<Diagnostic>> {
     let prepared = stage.stage().prepared();
     if prepared.function_id() != stage.stage().function_id() {
         return Err(vec![super::stages::invariant(
             "authorize.retained_call.identity",
         )]);
     }
-    let evaluation = dispatch_on(backend, program, prepared, arguments, max_steps)?;
+    let evaluation = dispatch_on_admitted(
+        backend,
+        program,
+        prepared,
+        arguments,
+        max_steps,
+        cancellation,
+    )?;
     if evaluation.function_id.as_str() != stage.stage().function_id() {
         return Err(vec![super::stages::invariant(
             "authorize.retained_call.dispatch",
@@ -361,6 +394,7 @@ impl ExecutionAuthority {
 ///         _prepared: &semaprax::interpreter::retained_call::PreparedRetainedCall,
 ///         _arguments: &[semaprax::interpreter::retained_call::RetainedValue],
 ///         _max_steps: usize,
+///         _cancellation: Option<&semaprax::agent_runtime::AgentCancellation>,
 ///     ) -> Result<
 ///         semaprax::interpreter::retained_call::RetainedCallEvaluation,
 ///         Vec<semaprax::diagnostic::Diagnostic>,
@@ -383,6 +417,7 @@ pub trait StageExecutor: sealed::Sealed {
         prepared: &PreparedRetainedCall,
         arguments: &[RetainedValue],
         max_steps: usize,
+        cancellation: Option<&AgentCancellation>,
     ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>>;
 }
 
@@ -405,7 +440,11 @@ impl StageExecutor for InterpreterStageExecutor {
         prepared: &PreparedRetainedCall,
         arguments: &[RetainedValue],
         max_steps: usize,
+        cancellation: Option<&AgentCancellation>,
     ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
+        if cancellation.is_some_and(AgentCancellation::is_cancelled) {
+            return Err(vec![super::stages::invariant("stage_executor.cancelled")]);
+        }
         evaluate_retained_call(program, prepared, arguments, max_steps)
     }
 }
@@ -456,19 +495,75 @@ pub(super) fn dispatch_on(
     arguments: &[RetainedValue],
     max_steps: usize,
 ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
+    dispatch_on_admitted(backend, program, prepared, arguments, max_steps, None)
+}
+
+/// Dispatch after rechecking the caller's monotonic cancellation immediately
+/// at the sealed executor boundary. Lifecycle callers use this route so a
+/// cancellation racing their outer reservation cannot enter a compiler or
+/// target process. The ordinary `dispatch_on` compatibility route remains
+/// intentionally uncancellable for direct deterministic-stage tests.
+pub(super) fn dispatch_on_cancellable(
+    backend: StageBackend<'_>,
+    program: &hir::ResolvedProgram,
+    prepared: &PreparedRetainedCall,
+    arguments: &[RetainedValue],
+    max_steps: usize,
+    cancellation: &AgentCancellation,
+) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
+    dispatch_on_admitted(
+        backend,
+        program,
+        prepared,
+        arguments,
+        max_steps,
+        Some(cancellation),
+    )
+}
+
+fn dispatch_on_admitted(
+    backend: StageBackend<'_>,
+    program: &hir::ResolvedProgram,
+    prepared: &PreparedRetainedCall,
+    arguments: &[RetainedValue],
+    max_steps: usize,
+    cancellation: Option<&AgentCancellation>,
+) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
     let authority = ExecutionAuthority::grant();
     match backend {
-        StageBackend::Interpreter => {
-            InterpreterStageExecutor.execute(authority, program, prepared, arguments, max_steps)
-        }
-        StageBackend::Native => {
-            NativeStageExecutor::o0().execute(authority, program, prepared, arguments, max_steps)
-        }
+        StageBackend::Interpreter => InterpreterStageExecutor.execute(
+            authority,
+            program,
+            prepared,
+            arguments,
+            max_steps,
+            cancellation,
+        ),
+        StageBackend::Native => NativeStageExecutor::o0().execute(
+            authority,
+            program,
+            prepared,
+            arguments,
+            max_steps,
+            cancellation,
+        ),
         StageBackend::NativeAtOptimization(optimization) => NativeStageExecutor { optimization }
-            .execute(authority, program, prepared, arguments, max_steps),
-        StageBackend::Wasm { source } => {
-            WasmStageExecutor { source }.execute(authority, program, prepared, arguments, max_steps)
-        }
+            .execute(
+                authority,
+                program,
+                prepared,
+                arguments,
+                max_steps,
+                cancellation,
+            ),
+        StageBackend::Wasm { source } => WasmStageExecutor { source }.execute(
+            authority,
+            program,
+            prepared,
+            arguments,
+            max_steps,
+            cancellation,
+        ),
     }
 }
 

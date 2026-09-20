@@ -88,11 +88,16 @@
 //! ## What this is not
 //!
 //! Running a stage body in a real Core Wasm module under a real engine is
-//! not the same as running the Agent *lifecycle* on Wasm. Budgets,
-//! cancellation, the effect/model request protocol and per-turn grant
-//! material all still live in the interpreter-side driver and are untouched
-//! here; `steps_used` is reported as `0` because Wasm does not count
-//! interpreter steps, exactly as `native_executor.rs` already does. The
+//! not the same as running the Agent *lifecycle* on Wasm. Lifecycle stage
+//! count and effect/model budgets remain in the interpreter-side driver. Its
+//! existing monotonic cancellation is now rechecked at the sealed executor
+//! boundary and while Node is live; observed cancellation kills and reaps the
+//! child. Node stdout is concurrently drained into a bounded buffer, and
+//! aggregate projection fan-out is refused before spawn when its conservative
+//! output bound exceeds that ceiling. This is process admission and cleanup,
+//! not Wasm instruction metering or a wall-clock deadline. `steps_used` is
+//! reported as `0` because Wasm does not count interpreter steps, exactly as
+//! `native_executor.rs` already does. The
 //! Node boundary preserves only returned values and the compiler-owned
 //! arithmetic/contract status table; it authenticates redundant raw and
 //! normalized status fields before constructing an evaluation. It does not
@@ -102,11 +107,11 @@
 //! support.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
 
+use crate::agent_runtime::AgentCancellation;
 use crate::cleanup_plan::{ContractPhase, StatusCase};
 use crate::conformance::NormalizedStatus;
 use crate::diagnostic::Diagnostic;
@@ -123,6 +128,12 @@ use crate::project;
 use crate::agent_lifecycle::stages::invariant;
 
 use super::{sealed, ExecutionAuthority, StageExecutor};
+
+#[path = "wasm_executor_process.rs"]
+mod process;
+use process::{run_node_process, MAX_NODE_STDOUT_BYTES};
+
+const MAX_NODE_OUTCOME_ROW_BYTES: usize = BYTE_STREAM_CAP * 2 + 1_024;
 
 /// The Core Wasm stage executor, carrying the exact module source text it is
 /// allowed to re-resolve. It reads no file and opens no network; the source
@@ -323,8 +334,17 @@ impl StageExecutor for WasmStageExecutor<'_> {
         prepared: &PreparedRetainedCall,
         arguments: &[RetainedValue],
         max_steps: usize,
+        cancellation: Option<&AgentCancellation>,
     ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
-        run(self.source, program, prepared, arguments, max_steps).map_err(|error| vec![error])
+        run_admitted(
+            self.source,
+            program,
+            prepared,
+            arguments,
+            max_steps,
+            cancellation,
+        )
+        .map_err(|error| vec![error])
     }
 }
 
@@ -356,6 +376,20 @@ fn run(
     arguments: &[RetainedValue],
     max_steps: usize,
 ) -> Result<RetainedCallEvaluation, Diagnostic> {
+    run_admitted(source, program, prepared, arguments, max_steps, None)
+}
+
+fn run_admitted(
+    source: &str,
+    program: &hir::ResolvedProgram,
+    prepared: &PreparedRetainedCall,
+    arguments: &[RetainedValue],
+    max_steps: usize,
+    cancellation: Option<&AgentCancellation>,
+) -> Result<RetainedCallEvaluation, Diagnostic> {
+    if cancellation.is_some_and(AgentCancellation::is_cancelled) {
+        return Err(invariant("wasm_executor.process.cancelled"));
+    }
     if !(1..=1_000_000).contains(&max_steps) {
         return Err(invariant("wasm_executor.max_steps"));
     }
@@ -374,9 +408,9 @@ fn run(
         .all(|parameter| admitted_parameter(&parameter.ty, parameter.ownership))
         && admitted_result(&entry.return_type)
     {
-        return run_direct(&binding, program, entry, arguments, max_steps);
+        return run_direct(&binding, program, entry, arguments, max_steps, cancellation);
     }
-    run_through_injected_driver(&binding, program, entry, arguments, max_steps)
+    run_through_injected_driver(&binding, program, entry, arguments, max_steps, cancellation)
 }
 
 // ---------------------------------------------------------------------------
@@ -389,6 +423,7 @@ fn run_direct(
     entry: &ResolvedFunction,
     arguments: &[RetainedValue],
     max_steps: usize,
+    cancellation: Option<&AgentCancellation>,
 ) -> Result<RetainedCallEvaluation, Diagnostic> {
     let mut call_args = Vec::with_capacity(arguments.len());
     for (parameter, argument) in entry.params.iter().zip(arguments) {
@@ -428,7 +463,14 @@ fn run_direct(
         _ => return Err(invariant("wasm_executor.decode.result_shape")),
     };
     let selected = vec![entry.id.as_str().to_owned()];
-    let value = match build_and_drive(binding, program, &selected, &selected, &[call])? {
+    let value = match build_and_drive(
+        binding,
+        program,
+        &selected,
+        &selected,
+        &[call],
+        cancellation,
+    )? {
         NodeStageRun::LanguageFailure(status) => {
             return Ok(evaluation(
                 entry,
@@ -922,6 +964,7 @@ fn run_through_injected_driver(
     entry: &ResolvedFunction,
     arguments: &[RetainedValue],
     max_steps: usize,
+    cancellation: Option<&AgentCancellation>,
 ) -> Result<RetainedCallEvaluation, Diagnostic> {
     let plan = ResultPlan::derive(program, &entry.return_type)?;
 
@@ -1016,7 +1059,14 @@ fn run_through_injected_driver(
         .iter()
         .map(|driver| driver.id.clone())
         .collect::<Vec<_>>();
-    let lines = match build_and_drive(binding, &resolved, &selected, &invoked, &calls)? {
+    let lines = match build_and_drive(
+        binding,
+        &resolved,
+        &selected,
+        &invoked,
+        &calls,
+        cancellation,
+    )? {
         NodeStageRun::LanguageFailure(status) => {
             return Ok(evaluation(
                 entry,
@@ -1131,9 +1181,18 @@ fn build_and_drive(
     selected: &[String],
     invocations: &[String],
     calls: &[String],
+    cancellation: Option<&AgentCancellation>,
 ) -> Result<NodeStageRun, Diagnostic> {
     if invocations.len() != calls.len() {
         return Err(invariant("wasm_executor.binding.invocation_arity"));
+    }
+    let output_budget = calls
+        .len()
+        .checked_mul(MAX_NODE_OUTCOME_ROW_BYTES)
+        .filter(|bytes| *bytes <= MAX_NODE_STDOUT_BYTES)
+        .ok_or_else(|| invariant("wasm_executor.process.output_budget"))?;
+    if cancellation.is_some_and(AgentCancellation::is_cancelled) {
+        return Err(invariant("wasm_executor.process.cancelled"));
     }
     let descriptor = project::derive_public_api_descriptor(program, selected, binding.subject())
         .map_err(|_| invariant("wasm_executor.descriptor"))?;
@@ -1153,7 +1212,7 @@ fn build_and_drive(
 
     let root = probe_root();
     std::fs::create_dir(&root).map_err(|_| invariant("wasm_executor.probe_directory"))?;
-    let outcome = drive_node(&envelope, calls, &root);
+    let outcome = drive_node(&envelope, calls, &root, cancellation, output_budget);
     let _ = std::fs::remove_dir_all(&root);
     decode_node_outcomes(&outcome?, calls.len())
 }
@@ -1162,6 +1221,8 @@ fn drive_node(
     envelope: &serde_json::Value,
     calls: &[String],
     root: &Path,
+    cancellation: Option<&AgentCancellation>,
+    output_budget: usize,
 ) -> Result<String, Diagnostic> {
     let directory = root.join("owned-data");
     std::fs::create_dir(&directory).map_err(|_| invariant("wasm_executor.artifact_directory"))?;
@@ -1218,15 +1279,7 @@ process.stdout.write(out.map(value => JSON.stringify(value) + '\n').join(''));
         ),
     )
     .map_err(|_| invariant("wasm_executor.driver_write"))?;
-    let output = Command::new("node")
-        .arg("observe.mjs")
-        .current_dir(&directory)
-        .output()
-        .map_err(|_| invariant("wasm_executor.tool.node"))?;
-    if !output.status.success() {
-        return Err(invariant("wasm_executor.run"));
-    }
-    String::from_utf8(output.stdout).map_err(|_| invariant("wasm_executor.output_utf8"))
+    run_node_process(&directory, cancellation, output_budget)
 }
 
 #[derive(Debug)]

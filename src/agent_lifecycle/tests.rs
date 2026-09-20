@@ -1347,7 +1347,11 @@ fn main() -> i64 { 0 }
 #[test]
 fn the_wasm_executor_has_no_route_to_mint_an_authorization_or_reach_undocumented_process_authority()
 {
-    let wasm_executor = include_str!("authorization/wasm_executor.rs");
+    let wasm_executor = [
+        include_str!("authorization/wasm_executor.rs"),
+        include_str!("authorization/wasm_executor_process.rs"),
+    ]
+    .join("\n");
     assert_eq!(wasm_executor.matches("Authorized {").count(), 0);
     assert_eq!(wasm_executor.matches("AuthorizedRequest").count(), 0);
     assert_eq!(wasm_executor.matches("mint(").count(), 0);

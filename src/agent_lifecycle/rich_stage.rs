@@ -615,14 +615,21 @@ pub fn run_rich_turn_on(
         .map_err(|_| refused("turn.proposal_projection"))?;
 
     let authorize_args = [state.clone(), proposal_value.clone()];
-    let evaluation = super::authorization::dispatch_on(
+    let evaluation = super::authorization::dispatch_on_cancellable(
         stages.backend(backend),
         &stages.program,
         &stages.authorize,
         &authorize_args,
         max_steps,
+        cancellation,
     )
-    .map_err(|_| refused("authorize.evaluate"))?;
+    .map_err(|_| {
+        if cancellation.is_cancelled() {
+            refused("turn.cancelled")
+        } else {
+            refused("authorize.evaluate")
+        }
+    })?;
     let RetainedCallOutcome::Returned(RetainedValue::Variant(decision)) = evaluation.outcome else {
         return Err(refused("authorize.did_not_return"));
     };
@@ -650,14 +657,21 @@ pub fn run_rich_turn_on(
     // module's "Known limitation").
 
     let reduce_args = [state, proposal_value, RetainedValue::Bytes(outcome_bytes)];
-    let evaluation = super::authorization::dispatch_on(
+    let evaluation = super::authorization::dispatch_on_cancellable(
         stages.backend(backend),
         &stages.program,
         &stages.reduce,
         &reduce_args,
         max_steps,
+        cancellation,
     )
-    .map_err(|_| refused("reduce.evaluate"))?;
+    .map_err(|_| {
+        if cancellation.is_cancelled() {
+            refused("turn.cancelled")
+        } else {
+            refused("reduce.evaluate")
+        }
+    })?;
     let RetainedCallOutcome::Returned(RetainedValue::Variant(transition)) = evaluation.outcome
     else {
         return Err(refused("reduce.did_not_return"));

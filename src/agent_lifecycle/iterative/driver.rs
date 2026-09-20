@@ -373,13 +373,20 @@ impl CompiledIterativeLifecycle {
             ($stage:expr, $arguments:expr) => {{
                 boundary!();
                 driver.before_stage($stage.role(), run.iterations, budget.max_steps_per_stage)?;
-                let evaluation = authorization::dispatch_on(
+                let evaluation = match authorization::dispatch_on_cancellable(
                     backend,
                     &inner.program,
                     $stage.prepared(),
                     $arguments,
                     budget.max_steps_per_stage,
-                )?;
+                    cancellation,
+                ) {
+                    Ok(evaluation) => evaluation,
+                    Err(_) if cancellation.is_cancelled() => {
+                        stop!(IterativeStatus::Cancelled, None);
+                    }
+                    Err(errors) => return Err(errors.into()),
+                };
                 run.stages.push(StageRecord::of($stage, &evaluation));
                 match evaluation.outcome {
                     RetainedCallOutcome::Returned(value) => value,
@@ -441,7 +448,7 @@ impl CompiledIterativeLifecycle {
             let mut args = vec![state.clone()];
             args.extend(projected.iter().cloned());
             driver.before_stage("authorize", run.iterations, budget.max_steps_per_stage)?;
-            let (decision, record) = authorization::run_authorize_stage_on(
+            let authorized_run = authorization::run_authorize_stage_on_cancellable(
                 backend,
                 &inner.program,
                 &inner.binding.authorize,
@@ -450,7 +457,15 @@ impl CompiledIterativeLifecycle {
                 &policy,
                 &state,
                 decoded.canonical_json(),
-            )?;
+                Some(cancellation),
+            );
+            let (decision, record) = match authorized_run {
+                Ok(outcome) => outcome,
+                Err(_) if cancellation.is_cancelled() => {
+                    stop!(IterativeStatus::Cancelled, None);
+                }
+                Err(errors) => return Err(errors.into()),
+            };
             run.stages.push(record);
             let authorized = match decision {
                 authorization::AuthorizationOutcome::Granted(value) => value,

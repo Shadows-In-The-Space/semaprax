@@ -1,4 +1,6 @@
 use super::*;
+use std::process::Command;
+use std::time::Duration;
 
 const SOURCE: &str = r#"module test.wasm_target_binding;
 
@@ -128,6 +130,105 @@ fn structured_outcome_rejects_malformed_and_mismatched_status_before_publication
 
     let failure = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v1\",\"kind\":\"language_failure\",\"raw_status\":9,\"status\":{\"schema\":\"semaprax.status.v1\",\"domain_id\":\"semaprax.contract.v1\",\"code\":1,\"class\":\"contract\",\"retryable\":false}}";
     assert!(decode_node_outcomes(&format!("{failure}\n{ok}\n"), 2).is_err());
+}
+
+#[test]
+fn direct_and_injected_paths_refuse_cancelled_or_invalid_budget_before_target_work() {
+    const INJECTED_SOURCE: &str = r#"module test.wasm_target_binding.admission;
+
+@id("test.wasm_target_binding.admission.result")
+record StageResult {
+    @id("test.wasm_target_binding.admission.result.value") value: i64,
+}
+
+@id("test.wasm_target_binding.admission.wrap")
+fn wrap(value: i64) -> StageResult { StageResult { value: value } }
+
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+
+    let direct_program = program();
+    let direct_prepared = prepared(&direct_program);
+    let checked = crate::check(
+        INJECTED_SOURCE,
+        Path::new("wasm-target-process-admission-test.spx"),
+    )
+    .unwrap();
+    let injected_program = hir::resolve(&checked).unwrap();
+    hir::validate(&injected_program).unwrap();
+    let injected_prepared = crate::interpreter::retained_call::prepare_retained_call(
+        &injected_program,
+        "test.wasm_target_binding.admission.wrap",
+    )
+    .unwrap();
+    let cancellation = AgentCancellation::new();
+    cancellation.cancel();
+
+    for (source, program, prepared) in [
+        (SOURCE, &direct_program, &direct_prepared),
+        (INJECTED_SOURCE, &injected_program, &injected_prepared),
+    ] {
+        let cancelled = run_admitted(
+            source,
+            program,
+            prepared,
+            &[RetainedValue::I64(7)],
+            100,
+            Some(&cancellation),
+        )
+        .expect_err("cancellation must win before direct or injected target construction");
+        assert!(cancelled
+            .message
+            .contains("wasm_executor.process.cancelled"));
+
+        for max_steps in [0, 1_000_001] {
+            let budget = run_admitted(
+                source,
+                program,
+                prepared,
+                &[RetainedValue::I64(7)],
+                max_steps,
+                None,
+            )
+            .expect_err("invalid stage budget must win before target construction");
+            assert!(budget.message.contains("wasm_executor.max_steps"));
+        }
+    }
+}
+
+#[test]
+fn node_process_cancellation_and_output_overflow_kill_reap_and_fail_closed() {
+    if Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    let root = probe_root();
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("observe.mjs"), "setInterval(() => {}, 1000);\n").unwrap();
+    let cancellation = AgentCancellation::new();
+    let trigger = cancellation.clone();
+    let canceller = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(25));
+        trigger.cancel();
+    });
+    let cancelled = run_node_process(&root, Some(&cancellation), 64)
+        .expect_err("an in-flight local target must be killed and reaped on cancellation");
+    canceller.join().unwrap();
+    assert!(cancelled
+        .message
+        .contains("wasm_executor.process.cancelled"));
+
+    std::fs::write(
+        root.join("observe.mjs"),
+        "const chunk = 'x'.repeat(4096); while (true) process.stdout.write(chunk);\n",
+    )
+    .unwrap();
+    let overflow = run_node_process(&root, None, 32)
+        .expect_err("bounded capture must reject rather than retain oversized target output");
+    assert!(overflow
+        .message
+        .contains("wasm_executor.process.output_budget"));
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

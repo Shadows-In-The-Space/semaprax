@@ -795,6 +795,14 @@ or checkpoint authority. Covered
 arithmetic and contract failures retain exact normalized statuses; arbitrary
 NaN payload preservation is not claimed across the JavaScript `Number` test
 adapter. Ordinary backend emission retains its explicit `yields` refusals.
+`src/resumable_effects/source_checkpoint.rs` wraps the admitted sequential
+scalar continuation in a bounded canonical public envelope. A caller-owned
+256-bit HMAC key authenticates the continuation together with exact
+caller-supplied ProgramRoot, invocation and policy-epoch facts, preventing an
+untrusted store from rebinding answer history across those scopes. Decode
+rechecks the tag and facts, re-lowers the current checked program and
+reconstructs an inert continuation; the zeroized key grants no effect or resume
+authority, and the codec performs no dispatch or persistence.
 [Resumable Effects v1](RESUMABLE-EFFECTS-V1.md) owns the bounded contract and
 remaining general-lowering/runtime gaps.
 

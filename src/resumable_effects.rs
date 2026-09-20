@@ -27,7 +27,11 @@
 //! plan's state, invocation binding and opaque in-memory replay history. The
 //! [`target`] prepares a bounded, deterministic in-memory inventory of those
 //! projections as native C11 source or Core Wasm bytes without acquiring host
-//! authority. The crate-private, `cfg(test)`-only `backend` module executes the
+//! authority. [`source_checkpoint`] HMAC-authenticates the scalar continuation
+//! and exact caller-supplied ProgramRoot, invocation, and policy-epoch facts
+//! with a caller-owned key; decode remains inert and replay still owns
+//! resumption. The crate-private,
+//! `cfg(test)`-only `backend` module executes the
 //! projections through real native `-O0`/`-O2` and Core Wasm target paths; its
 //! temporary storage and local tool processes are test-harness authority only.
 //! Ordinary native/Wasm emission still refuses a `yields` function; there is
@@ -100,6 +104,7 @@ pub mod core;
 pub(crate) mod lowering;
 pub mod migration;
 pub mod signature;
+pub mod source_checkpoint;
 pub mod target;
 #[cfg(test)]
 mod tests;

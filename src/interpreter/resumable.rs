@@ -118,10 +118,11 @@ pub(super) struct ResumableYieldRecord {
 
 /// An opaque Copy-scalar continuation for a sequential top-level `yield`
 /// program. It is proof data only: it grants neither authority to answer a
-/// request nor a public continuation ABI. The crate-private checkpoint codec
-/// reconstructs this only after independently re-deriving its checked program,
-/// site, argument binding, and typed history. Request claims are authenticated
-/// by the ordinary deterministic replay during resume.
+/// request nor a public continuation ABI. The public ambient-authority-free
+/// checkpoint envelope uses a crate-private structural codec to reconstruct this only
+/// after independently re-deriving its checked program, site, argument binding,
+/// and typed history. Request claims are verified by the ordinary
+/// deterministic replay during resume.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResumableContinuation {
     state: ResumableStateId,
@@ -368,9 +369,10 @@ pub fn run_sequential_resumable_effect(
     )?))
 }
 
-/// Resume an opaque sequential continuation. The carrier is deliberately
-/// in-memory and non-serializing; it supplies the previous request/answer
-/// trace solely so replay can re-check it under the exact current program.
+/// Resume an opaque sequential continuation. It supplies the previous
+/// request/answer trace solely so replay can re-check it under the exact
+/// current program. The ambient-authority-free public checkpoint envelope can recover
+/// this carrier, but recovery itself never supplies an answer or dispatches.
 pub fn resume_sequential_resumable_effect(
     program: &hir::ResolvedProgram,
     function_id: &str,
@@ -915,7 +917,7 @@ fn scalar_values_equal(left: &Value, right: &Value) -> bool {
 #[cfg(test)]
 mod tests;
 
-/// Closed recovery bytes for the admitted scalar sequential lane. This stays
-/// crate-private: it is not an external await protocol or a durable runtime
-/// guarantee.
+/// Inner closed recovery bytes for the admitted scalar sequential lane. The
+/// public scoped envelope is `resumable_effects::source_checkpoint`; keeping
+/// this structural layer crate-private prevents bypassing its external scope.
 pub(crate) mod checkpoint;

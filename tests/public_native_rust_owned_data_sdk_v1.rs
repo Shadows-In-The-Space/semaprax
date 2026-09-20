@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +19,8 @@ const SELECTED: [&str; 3] = [
     "frame.payload-maybe",
     "frame.payload-result",
 ];
+const PACKAGE_CRATE_FILE: &str = "semaprax-generated-native-rust-owned-data-sdk-0.1.0.crate";
+const PACKAGE_CRATE_DIRECTORY: &str = "semaprax-generated-native-rust-owned-data-sdk-0.1.0";
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 #[path = "public_native_rust_owned_data_sdk_v1/handle_identity.rs"]
@@ -343,7 +346,7 @@ fn descriptor_replay_is_exact_and_display_rename_preserves_the_provider_api() {
 #[ignore = "isolated into the dedicated native-rust-owned-data-sdk-v1 CI job \
             per ADR 0003 answer 6 so an unrelated shard failure cannot hide \
             its result; run explicitly with --ignored there"]
-fn published_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
+fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
     assert!(
         Command::new("clang")
             .arg("--version")
@@ -366,6 +369,7 @@ fn published_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
     let generated = fixture.0.join("generated-sdk");
     let setup_target = native_rust_target::CargoTarget::new();
     let consumer_target = native_rust_target::CargoTarget::new();
+    let package_target = native_rust_target::CargoTarget::new();
     let setup_manifest =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/owned-data-rust/Cargo.toml");
     run(
@@ -410,19 +414,85 @@ fn published_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
     assert!(!ffi.contains("spx_owned_data_test_fault_v1"));
     assert!(!public.contains("Handle"));
 
-    let consumer = fixture.0.join("consumer");
-    std::fs::create_dir(&consumer).unwrap();
-    std::fs::create_dir(consumer.join("src")).unwrap();
+    // Issue #145 requires an external consumer of the archive a registry
+    // would contain, rather than a path dependency into the generated output.
+    // `cargo package` is offline and does not publish; the extract below is
+    // the only dependency root the fresh consumer can reach.
+    run(
+        native_rust_cargo::cargo_command()
+            .args(["package", "--offline", "--no-verify", "--manifest-path"])
+            .arg(generated.join("Cargo.toml"))
+            .arg("--target-dir")
+            .arg(package_target.path()),
+        "package owned-data SDK tarball",
+    );
+    let packaged_tarball = package_target
+        .path()
+        .join("package")
+        .join(PACKAGE_CRATE_FILE);
+    let tarball_bytes = fs::read(&packaged_tarball).unwrap_or_else(|error| {
+        panic!(
+            "read owned-data SDK package tarball {}: {error}",
+            packaged_tarball.display()
+        )
+    });
+    assert_eq!(
+        tarball_bytes.len(),
+        fs::metadata(&packaged_tarball).unwrap().len() as usize
+    );
+    let extracted_root = fixture.0.join("packaged-sdk");
+    fs::create_dir(&extracted_root).unwrap();
+    run(
+        Command::new("tar")
+            .arg("xzf")
+            .arg(&packaged_tarball)
+            .arg("-C")
+            .arg(&extracted_root),
+        "extract owned-data SDK tarball",
+    );
+    let extracted = extracted_root.join(PACKAGE_CRATE_DIRECTORY);
+    let packaged_manifest = fs::read_to_string(extracted.join("Cargo.toml")).unwrap();
+    assert!(!packaged_manifest.contains(env!("CARGO_MANIFEST_DIR")));
+    for forbidden in [
+        "semaprax-native-rust-interop-builder",
+        "semaprax-native-rust-interop",
+        "semaprax-native-rust-owned-data-package",
+        "semaprax-native-rust-interop-platform",
+        "semaprax-toolchain",
+        "/Users/",
+        "/home/",
+        r"C:\\Users\\",
+    ] {
+        assert!(
+            !packaged_manifest.contains(forbidden),
+            "packaged owned-data SDK manifest leaks `{forbidden}`"
+        );
+    }
+    assert_eq!(
+        fs::read(extracted.join("descriptor.json")).unwrap(),
+        fs::read(generated.join("descriptor.json")).unwrap(),
+        "the installed archive must retain the source-derived descriptor bytes"
+    );
+    assert_eq!(
+        fs::read(extracted.join("semaprax.native-rust-owned-data-sdk.json")).unwrap(),
+        fs::read(generated.join("semaprax.native-rust-owned-data-sdk.json")).unwrap(),
+        "the installed archive must retain the source-derived package manifest"
+    );
+
+    let consumer = fixture.0.join("packaged-consumer");
+    fs::create_dir_all(consumer.join("src")).unwrap();
     let consumer_source =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/owned-data-rust/consumer");
-    std::fs::copy(
-        consumer_source.join("Cargo.toml"),
-        consumer.join("Cargo.toml"),
-    )
-    .unwrap();
-    std::fs::copy(
+    fs::copy(
         consumer_source.join("src/main.rs"),
         consumer.join("src/main.rs"),
+    )
+    .unwrap();
+    fs::write(
+        consumer.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"semaprax-owned-data-rust-packaged-consumer\"\nversion = \"0.0.0\"\nedition = \"2021\"\nrust-version = \"1.85\"\npublish = false\n\n[workspace]\n\n[dependencies]\nsemaprax-generated-native-rust-owned-data-sdk = {{ path = {extracted:?} }}\n\n[lints.rust]\nunsafe_code = \"forbid\"\n"
+        ),
     )
     .unwrap();
     run(
@@ -432,6 +502,7 @@ fn published_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
             .env("CARGO_TARGET_DIR", consumer_target.path()),
         "lock safe consumer",
     );
+    let lock_before_run = fs::read(consumer.join("Cargo.lock")).unwrap();
     let consumer_output = run(
         native_rust_cargo::cargo_command()
             .args(["run", "--locked", "--offline", "--quiet"])
@@ -440,6 +511,10 @@ fn published_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
         "run safe consumer",
     );
     assert_eq!(consumer_output.stdout, b"42\n");
+    assert_eq!(
+        fs::read(consumer.join("Cargo.lock")).unwrap(),
+        lock_before_run
+    );
 
     #[cfg(not(windows))]
     {

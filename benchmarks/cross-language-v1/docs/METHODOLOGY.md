@@ -296,6 +296,16 @@ modifying `run.py`:
   adapter's observed toolchain version, the model identity, the sampling
   seed, the exact prompt's digest, and the transcript's digest together —
   the "Transcript capture bound to the run's provenance" requirement.
+  It also retains each ordered transcript entry and each exact
+  transport-produced candidate artifact, each with a content digest. An
+  operator may give `run_agent.py` an explicit versioned literal-redaction
+  policy to create a publishable projection; the values selected for
+  redaction are never emitted, their replacements carry the selected value's
+  digest, and every projected item still commits to its original digest. This
+  is deliberate redaction, not an ambient secret scan. Candidate paths must
+  equal the declared candidate-path set exactly; a traversal/root path,
+  non-text payload, or attempted scaffold/test replacement fails before any
+  scratch write.
 
 This closes the "no LLM anywhere" gap at the level that is actually
 testable without credentials: the full driver path (prompt construction,

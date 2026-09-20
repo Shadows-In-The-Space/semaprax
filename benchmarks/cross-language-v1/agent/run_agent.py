@@ -41,7 +41,13 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from agent._harness import repo_root, run_module  # noqa: E402
-from agent.contracts import Budget, ModelIdentity, PricingRates, SamplingParams  # noqa: E402
+from agent.contracts import (  # noqa: E402
+    Budget,
+    ModelIdentity,
+    PricingRates,
+    SamplingParams,
+    load_redaction_literals,
+)
 from agent.live_transport import LiveTransport  # noqa: E402
 from agent.orchestrator import build_request, evaluate_agent_pair  # noqa: E402
 from agent.replay_transport import ReplayTransport  # noqa: E402
@@ -55,6 +61,11 @@ def parse_args():
                          help="relative path within the task's public tree the transport must supply "
                               "(repeatable)")
     parser.add_argument("--output", required=True, help="output JSON path")
+    parser.add_argument(
+        "--redaction-file",
+        help="optional JSON literal-redaction policy for transcript/candidate evidence; "
+        "the policy's contents are never copied into the result",
+    )
     parser.add_argument("--root", help="repository root task paths resolve against (default: repo root)")
     parser.add_argument("--tasks", help="task inventory path (default: this suite's tasks.json)")
     parser.add_argument("--adapters", help="adapter inventory path (default: this suite's adapters.json)")
@@ -93,6 +104,11 @@ def fail(message: str) -> int:
 def main() -> int:
     args = parse_args()
     run = run_module()
+
+    try:
+        redactions = load_redaction_literals(args.redaction_file) if args.redaction_file else ()
+    except ValueError as error:
+        return fail(str(error))
 
     root = pathlib.Path(args.root).resolve() if args.root else repo_root()
     tasks_path = pathlib.Path(args.tasks).resolve() if args.tasks else (repo_root() / "benchmarks/cross-language-v1/tasks.json")
@@ -157,6 +173,7 @@ def main() -> int:
         root, task, args.language, adapter, transport, request,
         semaprax_binary=args.semaprax or "semaprax",
         candidate_paths=args.candidate_paths,
+        redactions=redactions,
     )
     document = {
         "schema": "benchmark.cross_language.agent.v1",

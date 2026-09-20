@@ -34,7 +34,15 @@ from agent.baseline_admission import (  # noqa: E402
     admit_baseline_descriptor,
 )
 from agent.budget import BudgetExceededError, BudgetLedger, RetriesExhaustedError  # noqa: E402
-from agent.contracts import Budget, ModelIdentity, PricingRates, SamplingParams  # noqa: E402
+from agent.contracts import (  # noqa: E402
+    REDACTION_SCHEMA,
+    Budget,
+    ModelIdentity,
+    PricingRates,
+    SamplingParams,
+    load_redaction_literals,
+    redaction_policy_digest,
+)
 from agent.orchestrator import build_request, evaluate_agent_pair  # noqa: E402
 from agent.prompts import build_prompt  # noqa: E402
 from agent.replay_transport import ReplayTransport  # noqa: E402
@@ -128,6 +136,32 @@ class ContractsTests(unittest.TestCase):
         first = build_prompt(task["id"], "rust", equivalence, TASK_DIR / "public/rust", ["candidate.rs"])
         second = build_prompt(task["id"], "rust", equivalence, TASK_DIR / "public/rust", ["candidate.rs"])
         self.assertEqual(first, second)
+
+    def test_versioned_redaction_policy_is_explicit_and_does_not_publish_literals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            policy = pathlib.Path(directory) / "redactions.json"
+            policy.write_text(json.dumps({
+                "schema": REDACTION_SCHEMA,
+                "literals": ["candidate-private-value", "private"],
+            }))
+            literals = load_redaction_literals(policy)
+        self.assertEqual(literals, ("candidate-private-value", "private"))
+        digest = redaction_policy_digest(literals)
+        self.assertTrue(digest.startswith("sha256:"))
+        self.assertNotIn("private", digest)
+
+    def test_redaction_policy_rejects_unversioned_or_duplicate_literals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            policy = pathlib.Path(directory) / "redactions.json"
+            policy.write_text(json.dumps({"literals": ["private"]}))
+            with self.assertRaisesRegex(ValueError, "exactly schema and literals"):
+                load_redaction_literals(policy)
+            policy.write_text(json.dumps({
+                "schema": REDACTION_SCHEMA,
+                "literals": ["private", "private"],
+            }))
+            with self.assertRaisesRegex(ValueError, "unique"):
+                load_redaction_literals(policy)
 
 
 class BaselineAdmissionTests(unittest.TestCase):
@@ -558,6 +592,104 @@ class OrchestratorBudgetFailureTests(unittest.TestCase):
         self.assertEqual(record["status"], "retries_exhausted")
         self.assertNotIn("public", record)
         self.assertNotIn("hidden", record)
+
+
+class EvidenceAndCandidateBoundaryTests(unittest.TestCase):
+    """A transport's evidence is complete or explicitly redacted, and it
+    cannot rewrite a scaffold/test path while being scored."""
+
+    def test_redacted_evidence_retains_all_transcript_and_candidate_artifacts(self):
+        task, adapter = real_task_and_adapter()
+        record = evaluate_agent_pair(
+            repo_root(), task, "rust", adapter, ReplayTransport(FIXTURE_OK), real_request(),
+            candidate_paths=["candidate.rs"],
+            redactions=("transient 503", "pub fn validate"),
+        )
+        self.assertEqual(record["status"], "ok", record)
+        self.assertEqual(len(record["transcript"]), 4)
+        self.assertTrue(all("content" in row and "content_digest" in row for row in record["transcript"]))
+        self.assertTrue(any(row["redacted"] for row in record["transcript"]))
+        self.assertNotIn("transient 503", json.dumps(record))
+        artifacts = record["evidence"]["candidate_artifacts"]
+        self.assertEqual([row["path"] for row in artifacts], ["candidate.rs"])
+        self.assertTrue(artifacts[0]["redacted"])
+        self.assertNotIn("pub fn validate", artifacts[0]["content"])
+        self.assertTrue(artifacts[0]["content_digest"].startswith("sha256:"))
+        self.assertEqual(
+            record["evidence"]["redaction_policy_digest"],
+            redaction_policy_digest(("transient 503", "pub fn validate")),
+        )
+
+    def test_extra_or_traversal_candidate_paths_are_refused_before_any_scoring_write(self):
+        task, adapter = real_task_and_adapter()
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = write_fixture(pathlib.Path(directory), [
+                {
+                    "attempt": 1,
+                    "kind": "final",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cost_usd": 0.0,
+                    "response_text": "unexpected file",
+                    "candidate_files": {
+                        "candidate.rs": "pub fn validate() {}\n",
+                        "../escape.rs": "must never be written\n",
+                    },
+                },
+            ])
+            record = evaluate_agent_pair(
+                repo_root(), task, "rust", adapter, ReplayTransport(fixture), real_request(),
+                candidate_paths=["candidate.rs"],
+            )
+        self.assertEqual(record["status"], "failed")
+        self.assertIn("invalid transport candidate artifacts", record["reason"])
+        self.assertIn("../escape.rs", record["reason"])
+        self.assertNotIn("candidate_artifacts", record["evidence"])
+        self.assertNotIn("public", record)
+        self.assertNotIn("hidden", record)
+
+    def test_extra_declared_regular_path_is_refused_before_scoring(self):
+        task, adapter = real_task_and_adapter()
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = write_fixture(pathlib.Path(directory), [
+                {
+                    "attempt": 1,
+                    "kind": "final",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cost_usd": 0.0,
+                    "response_text": "extra scaffold replacement",
+                    "candidate_files": {
+                        "candidate.rs": "pub fn validate() {}\n",
+                        "main.rs": "fn main() {}\n",
+                    },
+                },
+            ])
+            record = evaluate_agent_pair(
+                repo_root(), task, "rust", adapter, ReplayTransport(fixture), real_request(),
+                candidate_paths=["candidate.rs"],
+            )
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(
+            record["reason"],
+            "transport candidate paths mismatch: missing=[]; unexpected=['main.rs']",
+        )
+        self.assertNotIn("candidate_artifacts", record["evidence"])
+
+    def test_empty_or_platform_root_candidate_declaration_is_refused_before_scoring(self):
+        task, adapter = real_task_and_adapter()
+        transport = ReplayTransport(FIXTURE_OK)
+        empty = evaluate_agent_pair(
+            repo_root(), task, "rust", adapter, transport, real_request(), candidate_paths=[],
+        )
+        self.assertEqual(empty["status"], "failed")
+        self.assertEqual(empty["reason"], "at least one candidate path must be declared")
+
+        platform_path = evaluate_agent_pair(
+            repo_root(), task, "rust", adapter, transport, real_request(), candidate_paths=["C:escape.rs"],
+        )
+        self.assertEqual(platform_path["status"], "failed")
+        self.assertIn("platform-specific root", platform_path["reason"])
 
 
 @unittest.skipUnless(shutil.which("rustc"), "requires a real rustc toolchain, as run.py's own tests already do")

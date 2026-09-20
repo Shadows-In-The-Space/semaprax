@@ -12,11 +12,83 @@ benchmark harness's own model authority.
 from __future__ import annotations
 
 import hashlib
+import json
+import pathlib
 from dataclasses import dataclass, field
+
+
+REDACTION_SCHEMA = "benchmark.cross_language.agent.redactions.v1"
 
 
 def sha256_text(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _validated_redactions(literals) -> tuple[str, ...]:
+    """Return a deterministic literal-redaction policy.
+
+    A caller supplies literals explicitly; this module never tries to discover
+    secrets from the environment or by a heuristic scan.  Longest-first
+    replacement prevents a shorter literal from obscuring a longer one that
+    overlaps it.  The policy's values are never written to a benchmark result
+    (only its digest is), so a result can show exactly which policy was bound
+    without publishing its redaction inputs.
+    """
+    if literals is None:
+        return ()
+    if not isinstance(literals, (list, tuple)):
+        raise ValueError("redaction literals must be a list")
+    if any(not isinstance(value, str) or not value for value in literals):
+        raise ValueError("redaction literals must be non-empty strings")
+    if len(set(literals)) != len(literals):
+        raise ValueError("redaction literals must be unique")
+    return tuple(sorted(literals, key=lambda value: (-len(value), value)))
+
+
+def load_redaction_literals(path: str | pathlib.Path) -> tuple[str, ...]:
+    """Load one explicit, versioned literal-redaction policy.
+
+    The file is intentionally a small declaration rather than an ambient
+    provider-specific secret scanner: callers decide precisely what may be
+    removed from the evidence they publish, and the result binds a digest of
+    that declared policy.  It is never copied into the result document.
+    """
+    source = pathlib.Path(path)
+    try:
+        value = json.loads(source.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read redaction policy {source}: {error}") from error
+    if not isinstance(value, dict) or set(value) != {"schema", "literals"}:
+        raise ValueError("redaction policy must have exactly schema and literals")
+    if value["schema"] != REDACTION_SCHEMA:
+        raise ValueError(f"redaction policy schema must be {REDACTION_SCHEMA!r}")
+    return _validated_redactions(value["literals"])
+
+
+def redaction_policy_digest(literals) -> str:
+    values = _validated_redactions(literals)
+    return sha256_text(_canonical_json({"schema": REDACTION_SCHEMA, "literals": list(values)}))
+
+
+def redact_content(content: str, literals) -> tuple[str, bool]:
+    """Replace explicit sensitive literals with a deterministic marker.
+
+    The marker identifies the redacted byte sequence by digest without
+    retaining it.  `content_digest` below always commits to the original
+    content, so an evidence reader can distinguish a redacted projection from
+    an incomplete transcript or artifact list.
+    """
+    result = content
+    redacted = False
+    for literal in _validated_redactions(literals):
+        if literal in result:
+            result = result.replace(literal, f"[REDACTED {sha256_text(literal)}]")
+            redacted = True
+    return result, redacted
 
 
 @dataclass(frozen=True)
@@ -129,10 +201,12 @@ class Usage:
 
 @dataclass(frozen=True)
 class TranscriptEntry:
-    """One recorded attempt. `content` is kept (these fixtures are small) so
-    the transcript is directly auditable; `digest` is bound into the run's
-    overall provenance so a transcript cannot be edited after the fact
-    without changing the identity a reader checks it against.
+    """One recorded attempt. `content` is retained in the result so the
+    transcript is directly auditable; an explicit policy may project a
+    literal-redacted version for publication while `content_digest` still
+    commits to the original. `digest` is bound into the run's overall
+    provenance so a transcript cannot be edited after the fact without
+    changing the identity a reader checks it against.
     """
 
     attempt: int
@@ -147,12 +221,16 @@ class TranscriptEntry:
     def digest(self) -> str:
         return sha256_text(f"{self.attempt}\0{self.role}\0{self.kind}\0{self.content}")
 
-    def to_dict(self) -> dict:
+    def to_dict(self, redactions=()) -> dict:
+        content, redacted = redact_content(self.content, redactions)
         return {
             "attempt": self.attempt,
             "role": self.role,
             "kind": self.kind,
             "digest": self.digest,
+            "content": content,
+            "content_digest": sha256_text(self.content),
+            "redacted": redacted,
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "cost_usd": self.cost_usd,

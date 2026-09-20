@@ -16,7 +16,7 @@ build/test/leak-check/provenance machinery, unmodified.
 
 | Path | Role |
 | --- | --- |
-| `contracts.py` | Explicit, recorded data shapes: `ModelIdentity`, `SamplingParams`, `Budget`, `PricingRates`, `SolverRequest`/`SolverResponse`, transcript entries. No field has an ambient/environment fallback. |
+| `contracts.py` | Explicit, recorded data shapes: `ModelIdentity`, `SamplingParams`, `Budget`, `PricingRates`, `SolverRequest`/`SolverResponse`, transcript entries, and the versioned literal-redaction policy. No field has an ambient/environment fallback. |
 | `budget.py` | `BudgetLedger`: charges token/retry/cost usage against a `Budget` and raises the instant a ceiling would be crossed, before the attempt is applied. |
 | `transport.py` | The abstract `SolverTransport` seam (`complete(request) -> response`) plus its exceptions. |
 | `replay_transport.py` | Deterministic, offline transport. Reads a committed JSON fixture (`benchmark.cross_language.agent.replay_fixture.v1`) and replays it verbatim — no network, no credentials, no clock, no RNG. |
@@ -101,6 +101,22 @@ leak-check path `run.py` uses for a human-written candidate. It writes a
 block binding the task's digest, the adapter's observed version, the
 model identity, the sampling seed, the prompt digest, and the transcript
 digest together.
+
+The result retains every transcript entry and every candidate artifact in
+deterministic order. Each retains its original content digest. An authorized
+operator preparing a result for publication can pass an explicit JSON policy
+with exact keys `{"schema":"benchmark.cross_language.agent.redactions.v1",
+"literals":[...]}` through `--redaction-file`; matching literals are replaced
+by digest-tagged markers while the policy's literal values themselves are
+never copied into the result. This is a projection, not a heuristic secret
+scanner or ambient credential lookup. With no policy, the locally written
+evidence is complete and unredacted.
+
+The transport may write **only** the exact `--candidate-path` set. Traversal,
+platform-root paths, non-text artifacts, duplicate declarations, and any
+extra path (including a public test or scaffold) are terminal failures before
+the scorer creates a scratch write. This keeps a candidate from making its
+own oracle pass by rewriting it.
 
 ## Budget enforcement fails closed
 

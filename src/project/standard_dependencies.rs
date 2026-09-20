@@ -126,6 +126,12 @@ const PACKAGES: &[BundledPackage] = &[
         dependencies: &["std.format", "std.io"],
     },
     BundledPackage {
+        name: "std.export.policy",
+        path: "dependencies/std.export.policy/0.1.0/policy.spx",
+        source: include_str!("../../std/export-policy/src/policy.spx"),
+        dependencies: &["std.http"],
+    },
+    BundledPackage {
         name: "std.format",
         path: "dependencies/std.format/0.1.0/format.spx",
         source: include_str!("../../std/format/src/format.spx"),
@@ -177,6 +183,12 @@ const PACKAGES: &[BundledPackage] = &[
         path: "dependencies/std.mem/0.1.0/mem.spx",
         source: include_str!("../../std/mem/src/mem.spx"),
         dependencies: &[],
+    },
+    BundledPackage {
+        name: "std.metrics",
+        path: "dependencies/std.metrics/0.1.0/metrics.spx",
+        source: include_str!("../../std/metrics/src/metrics.spx"),
+        dependencies: &["std.log.redact", "std.num.overflow"],
     },
     BundledPackage {
         name: "std.num",
@@ -337,8 +349,9 @@ fn range_error(message: String) -> Diagnostic {
 mod tests {
     use super::*;
 
-    // `std.auth`, `std.db`, `std.http`, and `std.jobs` shipped their pure
-    // decision-procedure source under `std/` (issues #189-192) but were not
+    // `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.metrics`, and
+    // `std.export.policy` shipped their pure decision-procedure source under `std/`
+    // (issues #189-193) but were not
     // yet wired into this closed bundled-dependency registry, so no ordinary
     // consumer project could declare them in `[dependencies]` -- only their
     // own `std/<name>/semaprax.toml` (which lists the module's own file as a
@@ -383,19 +396,28 @@ mod tests {
     }
 
     #[test]
-    fn issue_189_192_packages_are_bundled() {
-        for name in ["std.auth", "std.db", "std.http", "std.jobs"] {
+    fn issue_189_193_packages_are_bundled() {
+        for name in [
+            "std.auth",
+            "std.db",
+            "std.http",
+            "std.jobs",
+            "std.metrics",
+            "std.export.policy",
+        ] {
             assert!(is_bundled(name), "`{name}` is not a bundled package");
         }
     }
 
     #[test]
-    fn issue_189_192_packages_resolve_their_declared_source_file() {
+    fn issue_189_193_packages_resolve_their_declared_source_file() {
         for (name, path_suffix) in [
             ("std.auth", "auth.spx"),
             ("std.db", "db.spx"),
             ("std.http", "http.spx"),
             ("std.jobs", "jobs.spx"),
+            ("std.metrics", "metrics.spx"),
+            ("std.export.policy", "policy.spx"),
         ] {
             let bundled = package(name).unwrap_or_else(|| panic!("`{name}` is not bundled"));
             assert!(
@@ -412,6 +434,14 @@ mod tests {
         // imports `std.bytes.equals`), which must already be bundled.
         assert_eq!(package("std.jobs").unwrap().dependencies, &["std.bytes"]);
         assert!(is_bundled("std.bytes"));
+        assert_eq!(
+            package("std.metrics").unwrap().dependencies,
+            &["std.log.redact", "std.num.overflow"]
+        );
+        assert_eq!(
+            package("std.export.policy").unwrap().dependencies,
+            &["std.http"]
+        );
     }
 
     #[test]

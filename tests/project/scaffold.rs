@@ -596,8 +596,8 @@ fn tables_layout_derives_a_v3_capsule_and_replays_only_as_itself() {
     assert_eq!(manifest.bytes(), LIBRARY_TABLES_MANIFEST);
 }
 
-/// The service template composes three bundled standard-library dependencies
-/// (`std.auth`, `std.jobs`, `std.tracing`) through the extensible table manifest. It only
+/// The service template composes bundled standard-library dependencies through
+/// the extensible table manifest. It only
 /// derives under `ScaffoldLayout::Tables`: the frozen layout has no
 /// `[dependencies]` table, so that pairing is refused before anything is
 /// rendered, and it still passes `validate_rendered_project`'s in-memory
@@ -650,7 +650,7 @@ fn service_template_composes_bundled_dependencies_and_only_derives_under_tables_
         "web = [\"demo-project.identifier_is_valid\", \"demo-project.method_is_rejected\"]\n"
     ));
     assert!(manifest.contains(
-        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\n"
+        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.db = \"=0.1.0\"\nstd.export.policy = \"=0.1.0\"\nstd.http = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.metrics = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\n"
     ));
 
     let agents = derived.files()[1].utf8();
@@ -669,7 +669,13 @@ fn service_template_composes_bundled_dependencies_and_only_derives_under_tables_
     );
     assert!(core.contains("use function @id(\"std.jobs.claim.is_legal\") from std.jobs"));
     assert!(core.contains(
+        "use function @id(\"std.metrics.try-admit-labeled-series-guarded\") from std.metrics"
+    ));
+    assert!(core.contains(
         "use function @id(\"std.tracing.trace_context_fields_admitted_guarded\") from std.tracing"
+    ));
+    assert!(core.contains(
+        "use function @id(\"std.export.policy.export_admitted\") from std.export.policy"
     ));
     assert!(core.contains("it neither reads headers nor emits a log or span"));
 

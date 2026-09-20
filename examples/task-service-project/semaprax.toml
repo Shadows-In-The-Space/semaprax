@@ -16,6 +16,8 @@ web = ["task_service.core.identifier_is_valid", "task_service.core.method_is_rej
 [dependencies]
 std.auth = "=0.1.0"
 std.db = "=0.1.0"
+std.export.policy = "=0.1.0"
 std.http = "=0.1.0"
 std.jobs = "=0.1.0"
+std.metrics = "=0.1.0"
 std.tracing = "=0.1.0"

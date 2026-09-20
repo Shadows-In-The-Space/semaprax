@@ -17,7 +17,10 @@ use function @id("std.jobs.idempotency.enqueue_outcome") from std.jobs as idempo
 use function @id("std.jobs.retry.next_state_after_outcome") from std.jobs as retry_next_state_after_outcome;
 use function @id("std.jobs.schedule.is_due") from std.jobs as schedule_is_due;
 use function @id("std.jobs.state.is_terminal") from std.jobs as state_is_terminal;
+use function @id("std.metrics.counter-increment") from std.metrics as counter_increment;
+use function @id("std.metrics.try-admit-labeled-series-guarded") from std.metrics as try_admit_labeled_series_guarded;
 use function @id("std.tracing.trace_context_fields_admitted_guarded") from std.tracing as trace_context_fields_admitted_guarded;
+use function @id("std.export.policy.export_admitted") from std.export.policy as export_admitted;
 
 // This module models the domain record (a task) and its background job as
 // plain scalar facts -- an id, an owner account id, a status -- rather than
@@ -148,6 +151,24 @@ fn trace_context_is_admitted(trace_id: borrow Slice<u8>, parent_id: borrow Slice
     trace_context_fields_admitted_guarded(trace_id, parent_id, trace_flags, carries_secret, false, false, false, false, false)
 }
 
+// A completed job may produce a bounded, caller-classified metric series.
+// This records only the admission decision: it neither retains metric bytes
+// nor sends them to a collector. A secret-classified label is refused before
+// a host adapter can register or export the series.
+@id("task_service.core.completed_job_metric_is_admitted")
+fn completed_job_metric_is_admitted(label: borrow Slice<u8>, value: borrow Slice<u8>, carries_secret: bool) -> bool
+{
+    counter_increment(0, 1) == 1 && try_admit_labeled_series_guarded(0, label, value, carries_secret, false, false, false, false, false) == 1
+}
+
+// Export policy bounds an adapter-owned batch before it can emit telemetry.
+// A successful decision is not a queue mutation, connection, or delivery.
+@id("task_service.core.completed_job_export_is_admitted")
+fn completed_job_export_is_admitted(existing_depth: i64, batch_count: usize, batch_bytes: usize, target: borrow Slice<u8>) -> bool
+{
+    export_admitted(existing_depth, batch_count, batch_bytes, target)
+}
+
 // The full acceptance scenario: register, log in, create/update the domain
 // record, enqueue and complete a background job, query its status, log out,
 // then confirm both an unauthorized access and an invalid request are
@@ -191,5 +212,10 @@ fn run_scenario() -> i64
     let parent_id = [48u8, 48u8, 102u8, 48u8, 54u8, 55u8, 97u8, 97u8, 48u8, 98u8, 97u8, 57u8, 48u8, 50u8, 98u8, 55u8];
     let trace_flags = [48u8, 49u8];
     let trace_context_ok = trace_context_is_admitted(array_as_slice(trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), false);
-    if registered && usable_at_login && table_ok && platform_ready && task_id == 1 && update_authorized && in_progress_status == 1usize && enqueue_legal && enqueue_outcome_code == 0usize && status_done && intruder_rejected && retired_session_rejected && method_rejected && identifier_rejected && trace_context_ok { 0 } else { 1 }
+    let metric_label = [106u8, 111u8, 98u8, 95u8, 115u8, 116u8, 97u8, 116u8, 101u8];
+    let metric_value = [115u8, 117u8, 99u8, 99u8, 101u8, 101u8, 100u8, 101u8, 100u8];
+    let metric_ok = completed_job_metric_is_admitted(array_as_slice(metric_label), array_as_slice(metric_value), false);
+    let export_target = [116u8, 97u8, 115u8, 107u8, 45u8, 115u8, 101u8, 114u8, 118u8, 105u8, 99u8, 101u8, 45u8, 111u8, 98u8, 115u8, 101u8, 114u8, 118u8, 97u8, 98u8, 105u8, 108u8, 105u8, 116u8, 121u8];
+    let export_ok = completed_job_export_is_admitted(0, 1usize, 32usize, array_as_slice(export_target));
+    if registered && usable_at_login && table_ok && platform_ready && task_id == 1 && update_authorized && in_progress_status == 1usize && enqueue_legal && enqueue_outcome_code == 0usize && status_done && intruder_rejected && retired_session_rejected && method_rejected && identifier_rejected && trace_context_ok && metric_ok && export_ok { 0 } else { 1 }
 }

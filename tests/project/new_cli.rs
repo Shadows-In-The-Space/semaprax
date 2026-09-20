@@ -277,8 +277,8 @@ fn standalone_new_creates_the_library_template_and_the_project_works() {
     );
 }
 
-/// The service template composes three bundled standard-library dependencies
-/// (`std.auth`, `std.jobs`, `std.tracing`) declared in its `[dependencies]` table; `new`
+/// The service template composes bundled standard-library dependencies declared
+/// in its `[dependencies]` table; `new`
 /// always renders the table manifest layout regardless of template, so this
 /// is the one template whose own manifest could not derive under the frozen
 /// layout at all (see `tests/project/scaffold.rs`'s own coverage of that
@@ -302,7 +302,7 @@ fn standalone_new_creates_the_service_template_and_the_project_works() {
     assert!(project.join("src/app.spx").is_file());
     let manifest = std::fs::read_to_string(project.join("semaprax.toml")).unwrap();
     assert!(manifest.contains(
-        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\n"
+        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.db = \"=0.1.0\"\nstd.export.policy = \"=0.1.0\"\nstd.http = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.metrics = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\n"
     ));
 
     let check = cli(&project, &["check", "."]);

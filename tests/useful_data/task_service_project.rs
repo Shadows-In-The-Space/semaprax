@@ -81,8 +81,8 @@ fn run_returns_zero(path: &Path) {
 }
 
 /// `check`, `test`, and `run` all pass on the interpreter, and the manifest's
-/// bundled dependencies resolve to the compiler's own `std.auth`/`std.jobs`
-/// source rather than anything vendored by hand.
+/// bundled dependencies resolve to the compiler's own source rather than
+/// anything vendored by hand.
 ///
 /// Negative control (performed manually, not committed): flipping
 /// `task_service.core.task_owner_authorized`'s `&&` to `||` makes
@@ -107,6 +107,18 @@ fn check_test_and_run_pass_on_the_interpreter() {
                 .workspace_manifest()
                 .contains("dependencies/std.jobs/0.1.0"),
             "the workspace does not carry the bundled std.jobs source"
+        );
+        assert!(
+            snapshot
+                .workspace_manifest()
+                .contains("dependencies/std.metrics/0.1.0"),
+            "the workspace does not carry the bundled std.metrics source"
+        );
+        assert!(
+            snapshot
+                .workspace_manifest()
+                .contains("dependencies/std.export.policy/0.1.0"),
+            "the workspace does not carry the bundled std.export.policy source"
         );
         let options = project::ProjectExecutionOptions::default();
         assert_eq!(
@@ -507,30 +519,33 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
     .unwrap();
 }
 
-/// The real reference application composes database, HTTP, and tracing
-/// decision layers after reachability pruning removed the former SPX-G171
-/// blocker. Pin the direct packages and tracing's transitive redaction
-/// closure; source-level tests cover request, migration, and trace refusals,
-/// while the cross-backend gate below executes them. These remain pure policy
-/// dependencies, not database, transport, emission, export, or span support.
+/// The real reference application composes database, HTTP, metric, exporter,
+/// and tracing decision layers. Pin the direct packages and transitive
+/// closures; source-level tests cover request, migration, metric and export
+/// refusals, while the cross-backend gate below executes them. These remain
+/// pure policy dependencies, not database, transport, emission, export, or
+/// span support.
 #[test]
-fn std_db_http_and_tracing_fit_the_real_reference_application() {
+fn observability_policy_packages_fit_the_real_reference_application() {
     project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
         let manifest = snapshot.workspace_manifest();
         for package in [
             "dependencies/std.db/0.1.0",
             "dependencies/std.http/0.1.0",
+            "dependencies/std.metrics/0.1.0",
+            "dependencies/std.export.policy/0.1.0",
             "dependencies/std.tracing/0.1.0",
             "dependencies/std.encoding/0.1.0",
             "dependencies/std.log.redact/0.1.0",
+            "dependencies/std.num.overflow/0.1.0",
         ] {
             assert!(
                 manifest.contains(package),
-                "the workspace does not carry `{package}` from std.tracing's real closure"
+                "the workspace does not carry `{package}` from the observability policy closure"
             );
         }
         Ok(())
     })
-    .expect("the checked-in std.tracing policy closure must fit under SPX-G171");
+    .expect("the checked-in observability policy closure must fit under SPX-G171");
 }

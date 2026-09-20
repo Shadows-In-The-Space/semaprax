@@ -1236,3 +1236,205 @@ fn email_ledger_session_keeps_an_unwinding_attempt_sticky_without_retry() {
     );
     assert!(retry_adapter.calls.is_empty());
 }
+
+#[test]
+fn webhook_ledger_session_replays_exact_disposition_without_response_or_redispatch() {
+    let mut session = WebhookDeliverySession::new(2).unwrap();
+    let mut first_adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 202,
+        body: b"provider-private-receipt".to_vec(),
+    });
+    let first = session
+        .reconcile(
+            prepare_webhook_delivery(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                webhook(),
+            )
+            .unwrap(),
+            &mut first_adapter,
+        )
+        .unwrap();
+    assert_eq!(first_adapter.calls.len(), 1);
+    assert!(!first.was_replayed());
+    assert_eq!(
+        first.evidence().disposition(),
+        &DeliveryDisposition::Accepted { status: 202 }
+    );
+    let first_wire = first.evidence().render();
+    assert!(!format!("{first:?}").contains("provider-private-receipt"));
+
+    let mut replay_adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    let replay = session
+        .reconcile(
+            prepare_webhook_delivery(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                webhook(),
+            )
+            .unwrap(),
+            &mut replay_adapter,
+        )
+        .unwrap();
+    assert!(replay.was_replayed());
+    assert!(replay_adapter.calls.is_empty());
+    assert_eq!(replay.evidence().render(), first_wire);
+    assert_eq!(session.len(), 1);
+}
+
+#[test]
+fn webhook_ledger_refuses_payload_secret_and_policy_drift_before_dispatch() {
+    let mut session = WebhookDeliverySession::new(2).unwrap();
+    let mut first_adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 204,
+        body: Vec::new(),
+    });
+    session
+        .reconcile(
+            prepare_webhook_delivery(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                webhook(),
+            )
+            .unwrap(),
+            &mut first_adapter,
+        )
+        .unwrap();
+
+    let mut changed = webhook();
+    changed.body.push(b'!');
+    let mut changed_adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    assert_eq!(
+        session.reconcile(
+            prepare_webhook_delivery(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                changed,
+            )
+            .unwrap(),
+            &mut changed_adapter,
+        ),
+        Err(WebhookLedgerRefusal::Ledger(
+            LedgerRefusal::ConflictingRequest
+        ))
+    );
+    assert!(changed_adapter.calls.is_empty());
+
+    // The signature is part of the exact prepared request, so replacing the
+    // deployment-selected secret cannot silently replay another key's result.
+    let mut secret_adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    assert_eq!(
+        session.reconcile(
+            prepare_webhook_delivery(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([8; 32]),
+                webhook(),
+            )
+            .unwrap(),
+            &mut secret_adapter,
+        ),
+        Err(WebhookLedgerRefusal::Ledger(
+            LedgerRefusal::ConflictingRequest
+        ))
+    );
+    assert!(secret_adapter.calls.is_empty());
+
+    let drifted_policy = OutboundPolicy::new(
+        "deploy.outbound.v1",
+        ["https://hooks.example.test".to_owned()],
+        1_024,
+        512,
+        5_000,
+        3,
+        3,
+    )
+    .unwrap();
+    let drifted_capability = OutboundCapability::grant_for_trusted_host(
+        "sha256:deployment",
+        "invocation-7",
+        drifted_policy,
+    )
+    .unwrap();
+    let mut drifted_adapter = FixtureAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    assert_eq!(
+        session.reconcile(
+            prepare_webhook_delivery(
+                drifted_capability,
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                webhook(),
+            )
+            .unwrap(),
+            &mut drifted_adapter,
+        ),
+        Err(WebhookLedgerRefusal::PolicyChanged)
+    );
+    assert!(drifted_adapter.calls.is_empty());
+}
+
+struct PanickingWebhookAdapter;
+
+impl OutboundAdapter for PanickingWebhookAdapter {
+    fn send(&mut self, _request: &PreparedRequest) -> AdapterObservation {
+        panic!("simulated webhook adapter unwind after physical start")
+    }
+}
+
+#[test]
+fn webhook_ledger_keeps_unwind_sticky_and_capacity_precedes_dispatch() {
+    let mut session = WebhookDeliverySession::new(1).unwrap();
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut adapter = PanickingWebhookAdapter;
+        let _ = session.reconcile(
+            prepare_webhook_delivery(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                webhook(),
+            )
+            .unwrap(),
+            &mut adapter,
+        );
+    }));
+    assert!(unwind.is_err());
+    assert_eq!(session.len(), 1);
+
+    let mut retry_adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 204,
+        body: Vec::new(),
+    });
+    assert_eq!(
+        session.reconcile(
+            prepare_webhook_delivery(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                webhook(),
+            )
+            .unwrap(),
+            &mut retry_adapter,
+        ),
+        Err(WebhookLedgerRefusal::ReplayBindingUnavailable)
+    );
+    assert!(retry_adapter.calls.is_empty());
+
+    let mut second = webhook();
+    second.idempotency_key = "job-9:event-5".into();
+    second.delivery_id = "delivery-2".into();
+    let mut capacity_adapter = FixtureAdapter::returning(AdapterObservation::Response {
+        status: 204,
+        body: Vec::new(),
+    });
+    assert_eq!(
+        session.reconcile(
+            prepare_webhook_delivery(
+                capability(),
+                WebhookSigningSecret::from_trusted_host_bytes([7; 32]),
+                second,
+            )
+            .unwrap(),
+            &mut capacity_adapter,
+        ),
+        Err(WebhookLedgerRefusal::Ledger(
+            LedgerRefusal::CapacityExceeded
+        ))
+    );
+    assert!(capacity_adapter.calls.is_empty());
+}

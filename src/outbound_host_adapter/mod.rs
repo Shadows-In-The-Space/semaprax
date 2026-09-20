@@ -17,6 +17,7 @@ use zeroize::Zeroize;
 
 mod email;
 mod ledger;
+mod webhook;
 
 pub use email::{
     deliver_email, prepare_email_delivery, verify_email_envelope, EmailAttachment,
@@ -28,6 +29,10 @@ pub use email::{
 pub use ledger::{
     DeliveryIdentity, HostDeliveryLedger, LedgerOutcome, LedgerRecord, LedgerRefusal,
     MAX_LEDGER_ENTRIES,
+};
+pub use webhook::{
+    prepare_webhook_delivery, PreparedWebhookDelivery, WebhookDeliveryReceipt,
+    WebhookDeliverySession, WebhookLedgerRefusal,
 };
 
 type HmacSha256 = Hmac<Sha256>;

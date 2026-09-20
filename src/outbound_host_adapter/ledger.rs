@@ -12,6 +12,10 @@ use sha2::{Digest as _, Sha256};
 
 use super::{request_digest, valid_identity, DeliveryDisposition, PreparedRequest};
 
+#[path = "ledger_checkpoint.rs"]
+mod checkpoint;
+pub use checkpoint::{LedgerCheckpoint, LedgerCheckpointRefusal, MAX_LEDGER_CHECKPOINT_BYTES};
+
 const LEDGER_IDENTITY_DOMAIN: &[u8] = b"semaprax.outbound.delivery-ledger.identity.v1\0";
 const LEDGER_STATE_DOMAIN: &str = "semaprax.outbound.delivery-ledger.v1";
 
@@ -169,6 +173,12 @@ impl HostDeliveryLedger {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Export bounded, commitment-only observations for offline comparison.
+    /// Import returns a read-only checkpoint, never another dispatch ledger.
+    pub fn checkpoint(&self) -> Result<LedgerCheckpoint, LedgerCheckpointRefusal> {
+        LedgerCheckpoint::from_ledger(self)
     }
 
     /// Reconcile one exact prepared request before adapter dispatch.

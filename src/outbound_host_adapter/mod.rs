@@ -28,8 +28,8 @@ pub use email::{
     MAX_EMAIL_SUBJECT_BYTES,
 };
 pub use ledger::{
-    DeliveryIdentity, HostDeliveryLedger, LedgerOutcome, LedgerRecord, LedgerRefusal,
-    MAX_LEDGER_ENTRIES,
+    DeliveryIdentity, HostDeliveryLedger, LedgerCheckpoint, LedgerCheckpointRefusal, LedgerOutcome,
+    LedgerRecord, LedgerRefusal, MAX_LEDGER_CHECKPOINT_BYTES, MAX_LEDGER_ENTRIES,
 };
 pub use tracing::{
     prepare_export_event, ExportEventLedgerRefusal, ExportEventReceipt, ExportEventSession,

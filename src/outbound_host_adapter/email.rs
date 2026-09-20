@@ -183,6 +183,19 @@ impl EmailDeliverySession {
         self.ledger.len()
     }
 
+    /// Export disposition observations only, excluding session policy bindings.
+    /// An imported checkpoint is read-only and cannot restore this session.
+    pub fn checkpoint(&self) -> Result<LedgerCheckpoint, LedgerCheckpointRefusal> {
+        self.ledger.checkpoint()
+    }
+
+    pub fn verify_checkpoint(
+        &self,
+        checkpoint: &LedgerCheckpoint,
+    ) -> Result<(), LedgerCheckpointRefusal> {
+        checkpoint.verify_against(&self.ledger)
+    }
+
     /// Reconcile one prepared email request before adapter dispatch.
     ///
     /// A matching replay never enters `adapter.send`. This mode settles only

@@ -87,6 +87,19 @@ impl WebhookDeliverySession {
         self.ledger.len()
     }
 
+    /// Export disposition observations only, excluding session policy bindings.
+    /// An imported checkpoint is read-only and cannot restore this session.
+    pub fn checkpoint(&self) -> Result<LedgerCheckpoint, LedgerCheckpointRefusal> {
+        self.ledger.checkpoint()
+    }
+
+    pub fn verify_checkpoint(
+        &self,
+        checkpoint: &LedgerCheckpoint,
+    ) -> Result<(), LedgerCheckpointRefusal> {
+        checkpoint.verify_against(&self.ledger)
+    }
+
     /// Reconcile exactly one prepared request. A matching replay does not call
     /// the adapter. A panic after adapter entry leaves the ledger's provisional
     /// uncertainty sticky, preventing an automatic retry in this session.

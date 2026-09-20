@@ -111,6 +111,51 @@ forgets all knowledge when dropped or after a process restart. Consequently it
 is neither durable delivery state nor an exactly-once protocol; it cannot prove
 remote receipt, turn evidence into a capability, or authorize a retry.
 
+### Read-only disposition checkpoints
+
+`HostDeliveryLedger::checkpoint` and the corresponding method on the email,
+webhook, and structured-export sessions produce an immutable
+`LedgerCheckpoint`. Its additive
+`semaprax.outbound.delivery-ledger-checkpoint.v1` JSON wire contains exactly
+`schema`, `capacity`, and `entries`. Each entry contains exactly an identity
+commitment, a request commitment, and the closed local disposition, ordered by
+identity commitment. The older one-way diagnostic `render` format is unchanged.
+Neither format contains endpoint, headers, signing keys, raw identity parts,
+request/response bytes, or provider errors. SHA-256 commitments can still expose
+guessable low-entropy inputs to offline comparison.
+
+The checkpoint digest domain is
+`semaprax.outbound.delivery-ledger-checkpoint.v1\0`; SHA-256 covers that domain,
+the canonical wire byte length as little-endian u64, and the exact wire bytes.
+`decode(bytes, expected_digest)` bounds input to 98,304 bytes before hashing or
+JSON parsing, requires the independently retained digest, and validates the
+closed schema, 1–256 capacity, entry count no greater than capacity, lowercase
+SHA-256 values, unique identities, closed dispositions, and byte-exact canonical
+re-rendering. Accepted statuses must be 2xx; rejected statuses are the remaining
+100–599 values. Duplicate fields/entries, reordered entries, alternate JSON
+spellings, unknown members, and invalid status/reason combinations refuse.
+The maximum 256-entry checkpoint fits below the wire limit.
+
+An imported checkpoint offers read-only `lookup` by exact identity and prepared
+request. Unknown identities remain unknown; changed request bytes conflict.
+`verify_against` compares its complete state and capacity against a still-live
+ledger; each family session exposes `verify_checkpoint` for the same comparison.
+`merge` computes a bounded union of compatible observations without modifying
+either input. Capacity must match, and any request or disposition disagreement
+refuses, including replacing an uncertainty with acceptance. A panic-reserved
+uncertainty is preserved when exported and imported.
+
+This is offline observation transport, **not live-session restoration**. The
+checkpoint does not include session policy/event commitments, cannot construct
+a capability or delivery receipt, and has no dispatch method or conversion into
+a live ledger/session. It does not create a journal, fsync, authenticate its own
+provenance, establish freshness, or prevent external rollback. A digest supplied
+alongside attacker-controlled bytes authenticates nothing; trusted hosts must
+retain/authenticate the expected commitment independently. Missing or stale
+observations never authorize a retry through this API. Exporting a snapshot
+after settlement cannot close the crash window before that export, so durable
+delivery recovery and exactly-once claims remain out of scope.
+
 ## Email envelope
 
 `deliver_email` accepts one explicit `EmailRequest` and consumes the same
@@ -199,3 +244,11 @@ duplicate exact replay without redispatch, changed-payload conflict refusal,
 idempotency/header mismatch refusal, sticky uncertainty after an unwinding
 dispatch closure, and deterministic commitment state. It performs no live
 network operation.
+
+The checkpoint selector is
+`outbound_host_adapter::ledger::checkpoint::tests::`. Its seven cases cover
+deterministic all-disposition round trips, the empty-state known-answer digest,
+commitment/live-state drift, exact lookup, monotonic union/conflict refusal,
+panic-reserved uncertainty, full-capacity admission and byte/inventory limits,
+hostile schemas/digests/statuses/noncanonical wires, and exports/imports from
+all three adapter sessions without extra adapter calls.

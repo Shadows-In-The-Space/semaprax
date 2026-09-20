@@ -113,6 +113,19 @@ impl ExportEventSession {
         self.ledger.len()
     }
 
+    /// Export disposition observations only, excluding policy/event bindings.
+    /// An imported checkpoint is read-only and cannot restore this session.
+    pub fn checkpoint(&self) -> Result<LedgerCheckpoint, LedgerCheckpointRefusal> {
+        self.ledger.checkpoint()
+    }
+
+    pub fn verify_checkpoint(
+        &self,
+        checkpoint: &LedgerCheckpoint,
+    ) -> Result<(), LedgerCheckpointRefusal> {
+        checkpoint.verify_against(&self.ledger)
+    }
+
     /// Reconcile one exact prepared export before adapter dispatch.
     ///
     /// Exact replay never calls `adapter.send`. Policy, canonical event, and

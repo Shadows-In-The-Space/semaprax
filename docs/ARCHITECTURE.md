@@ -764,6 +764,25 @@ closed-wire replay plus revision-bound closure/source checks. This split and
 its focused evidence are authored but unpromoted; the completion matrix remains
 the sole status authority.
 
+`src/resumable_effects/lowering.rs` owns the deterministic three-state HIR
+plan for the existing single top-level, Copy-scalar source `yield` profile. It
+derives exactly bound suspension identities and independently validated,
+yield-free request and resume projections; `src/interpreter/resumable.rs`
+consumes the same plan identities for source execution. Until projection
+isolation exists, lowering refuses a second `yields`-declaring function
+anywhere in the resolved program, including a disconnected one. The
+crate-private `src/resumable_effects/backend/` runners compile only under
+`cfg(test)` and send those projections through the ordinary native C11 and
+Core-Wasm generators as local parity evidence. Their test process explicitly
+owns its temporary storage and local `clang`/Node process use; production
+library code and generated programs gain none of that authority. They add no
+public continuation ABI, scheduler or checkpoint authority. Covered
+arithmetic and contract failures retain exact normalized statuses; arbitrary
+NaN payload preservation is not claimed across the JavaScript `Number` test
+adapter. Ordinary backend emission retains its explicit `yields` refusals.
+[Resumable Effects v1](RESUMABLE-EFFECTS-V1.md) owns the bounded contract and
+remaining general-lowering/runtime gaps.
+
 ### Native bootstrap backend
 
 `src/https_client.rs` owns a separate explicit native-host HTTP service. Its

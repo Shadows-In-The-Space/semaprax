@@ -8,6 +8,20 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a deterministic compiler-owned three-state HIR plan for the existing
+  single-top-level, Copy-scalar `yield` slice. Resume state now binds the exact
+  checked program, yield site, and bit-exact original arguments; a second
+  yielding function anywhere in the program, reachable yielding callees,
+  incoming callers, generic calls, forged projections, and stale bindings fail
+  closed. The interpreter consumes the plan identities, while `cfg(test)`-only
+  native `-O0`/`-O2` and Core Wasm runners execute independently validated
+  yield-free projections, preserving exact normalized prefix/suffix arithmetic
+  and pre/postcondition failures. Ordinary native/Wasm emitters still refuse
+  `yields`; arbitrary NaN-payload preservation across the JavaScript Wasm test
+  adapter, public continuation ABI, external-await runtime seam, durable source
+  checkpoint, Agent migration, and general multi-yield lowering are not
+  claimed (#204).
+
 - Add a deterministic, non-executing cross-language benchmark reproduction
   capsule that binds exact task and adapter inventories, equivalence files,
   public and hidden trees (including empty directories), and per-language

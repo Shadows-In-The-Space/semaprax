@@ -4,11 +4,12 @@ Audience: compiler contributors implementing the source-syntax/HIR/backend
 generalization this document specifies, and reviewers auditing what #204
 delivered versus what remains.
 
-Status: **a minimal `.spx` slice, executed by exactly one engine**, on top of
-a Rust reference validator. Issue #204 asks the compiler to let an ordinary,
+Status: **a minimal `.spx` slice with compiler-owned lowering, interpreter
+execution, and private cross-backend parity evidence**, on top of a Rust
+reference validator. Issue #204 asks the compiler to let an ordinary,
 non-Agent function declare typed resumable effects with the same generality
-Aver's `yield` lowering has. Three things exist today, and they are
-deliberately different in kind:
+Aver's `yield` lowering has. The pieces that exist today are deliberately
+different in kind:
 
 - `src/resumable_effects/` — a Rust-level generic driver, journal, capability
   gate, per-effect signature table and checkpoint codec, proving the
@@ -17,10 +18,17 @@ deliberately different in kind:
 - The admitted `.spx` `yields`/`yield` slice — parser, canonical formatter,
   resolver/HIR, verifier, semantic graph, native backend and Wasm backend,
   landed together.
-- `interpreter::resumable` — the one engine that *executes* a suspension.
-  Native (`SPX-B116`) and Wasm (`SPX-W126`) still refuse, explicitly and
-  testably, rather than silently differ. See
-  [Interpreter execution](#interpreter-execution).
+- `resumable_effects::lowering` — one deterministic three-state HIR plan for
+  that existing slice, including independently validated yield-free request
+  and resume projections. It does not widen source admission.
+- `interpreter::resumable` — the public compiler engine that executes the
+  source suspension and consumes the plan's state and invocation identities.
+- `resumable_effects::backend` — `cfg(test)`-only, crate-private parity runners
+  that execute those yield-free projections through real native `-O0`/`-O2`
+  and Core Wasm target paths. Ordinary native (`SPX-B116`) and Wasm
+  (`SPX-W126`) emission still refuses a `yields` function; this is bounded
+  test evidence, not production compiler authority, a public resumable ABI or
+  a scheduler.
 
 What is still open is in [Scope boundary](#scope-boundary).
 
@@ -167,9 +175,9 @@ failure case #204 names explicitly).
   machinery under a freshly derived scope. This implements implementation-
   sequence step 7 ("Implement pure state migration functions between
   compatible ProgramRoot revisions and reject incompatible state changes")
-  at the reference level; it does not yet migrate a real checked state type
-  produced by source-syntax lowering, because no such lowering exists yet
-  (see [Scope boundary](#scope-boundary)).
+  at the reference level; it does not migrate the compiler plan's state or
+  bind a migration to its checked-HIR identity (see
+  [Scope boundary](#scope-boundary)).
 
 `src/resumable_effects/signature.rs`:
 
@@ -299,6 +307,64 @@ failure case #204 names explicitly).
   proves the refusal is exactly-once: the replay wires a panicking handler.
 
 
+## Compiler-owned lowering and private backend parity
+
+`src/resumable_effects/lowering.rs` derives one `ResumablePlan` from the exact
+checked HIR program. The plan has explicit `entry`, `suspended` and `complete`
+state identities, the authored yield-site identity and type pair, and two
+yield-free HIR programs:
+
+- the **start/request projection** evaluates the authored precondition and
+  prefix, then returns the request instead of crossing the yield;
+- the **resume projection** adds one compiler-owned answer parameter, replays
+  the pure scalar prefix with that answer in the authored yield slot, and
+  evaluates the authored suffix and postcondition.
+
+Both projections rebuild loan and cleanup proof attachments and pass ordinary
+HIR validation before any backend sees them. Moving a request subtree also
+rederives its structural expression and local identities at the new canonical
+path; copied HIR identities are not accepted as a shortcut. The plan refuses
+an entrypoint or any incoming caller because replacing a function's signature
+inside an otherwise callable program would be unsound. It walks the reachable
+call closure and diagnoses a `yields`-declaring callee specifically. Because
+the current projection retains the rest of the resolved program, it also
+conservatively requires exactly one `yields`-declaring function in the **whole
+program**, including disconnected functions and forged generic instances;
+otherwise the retained function would still trigger the ordinary backend
+refusal. Generic calls remain outside this projection.
+
+The plan identity commits to deterministic checked-HIR bytes, the selected
+function and the yield site. A pending suspension additionally binds that
+identity, the suspended-state and yield-site identities, and the exact tagged
+bits of every original scalar argument. Request equality is insufficient:
+`yield 0; answer + seed` can produce the same request for two invocations whose
+suffix result differs. A state or binding mismatch fails closed with
+`SPX-F115`; the digest is proof data and confers no authority.
+
+`src/resumable_effects/backend/` is compiled only under `cfg(test)` and is
+crate-private. Its runners replay the request projection and compare exact
+request bits before executing the resume projection through the real C/native
+and Core Wasm generators. The test process explicitly uses local temporary
+storage plus `clang`/Node from its environment; none of that ambient authority
+is present in a production library build or granted to generated code. This
+proves target agreement for the bounded plan without changing the ordinary
+emitters' `SPX-B116`/`SPX-W126` refusal or inventing a public checkpoint ABI.
+The Core Wasm runner keeps the Public Scalar Export Profile's existing
+`usize` refusal (`SPX-W115`); native evidence covers it with the target's
+64-bit carrier. Because its test adapter crosses the JavaScript `Number`
+boundary, arbitrary NaN payload/signaling-bit preservation is not a portable
+Wasm claim. Arithmetic failures in both the request prefix and resumed suffix,
+plus failing `requires` and `ensures`, preserve the interpreter's exact
+normalized status across native `-O0`/`-O2` and Core Wasm. These runners make
+no fuel, cleanup-event, scheduling or durability claim.
+
+This is intentionally separate from `resumable_effects::core`. That reference
+driver synchronously dispatches a request through an injected handler; its
+`Step::Suspend` is a terminal/replayed outcome, not a pending source `yield`
+that accepts an externally supplied answer. Reusing it for source suspension
+would require a distinct external-await journal phase and runtime protocol,
+neither of which this tranche adds.
+
 ## Interpreter execution
 
 `src/interpreter/resumable.rs` is the first engine that runs an `.spx`
@@ -306,9 +372,12 @@ suspension. Its whole public surface is two functions:
 
 ```text
 run_resumable_effect(program, function_id, arguments, max_steps)
-    -> Suspended { request } | Completed { result } | LanguageFailure | ...
-resume_resumable_effect(program, function_id, arguments, request, answer, max_steps)
-    -> Completed { result } | ...
+    -> Suspended { state, binding, request }
+     | Completed { state, result } | LanguageFailure | ...
+resume_resumable_effect(
+    program, function_id, arguments, state, binding, request, answer, max_steps
+)
+    -> Completed { state, result } | ...
 ```
 
 **How a resume works, and why it is sound here.** A suspension is resumed by
@@ -321,19 +390,21 @@ original prefix: a `yields`-declaring function may declare no `uses` effects
 nothing; every parameter and intermediate value is an admitted Copy scalar
 (`SPX-T301`/`SPX-T303`), so nothing owned is live across the suspension and
 the replay allocates and frees nothing; and exactly one `yield` exists, at the
-function's own top level (`SPX-T297`/`SPX-T298`), so the prefix is
-straight-line and the replay reaches the same single site. Widening any of
-those restrictions invalidates this execution model and requires a real
-state-machine lowering instead — which is the same lowering the native and
-Wasm backends need.
+function's own top level (`SPX-T297`/`SPX-T298`), so control cannot branch
+around or repeat the yield site. Finally, lowering rejects a reachable
+`yields` callee, so the call closure cannot hide a second suspension. Widening
+any of those restrictions invalidates this execution model and requires a
+general continuation lowering.
 
 **Replay is proven, not assumed.** Every resume recomputes the request from
 the replayed prefix and requires it to equal the request the suspension
 recorded. Disagreement is refused (`SPX-F114`) rather than answered — the
 same `RequestDrift` discipline `resumable_effects::core` enforces at the
-reference level, now applied to real source. In particular a recorded
-request cannot be replayed against a *different* invocation's arguments: the
-prefix recomputes that invocation's own request and the two disagree.
+reference level, now applied to real source. Request comparison is the second
+check, not the identity check: before replay, the suspension's `state` and
+`binding` must match the exact checked program, yield site and bit-exact
+original arguments (`SPX-F115`). This rejects different arguments even when
+they deliberately compute the same request.
 
 **A resumed computation is checked, not trusted.** Both the recorded request
 and the supplied answer are checked against the function's declared
@@ -350,54 +421,53 @@ refuses a `yield` outright — `Resumption::Refused` is the default every other
 evaluator carries — so nothing gained the ability to suspend by accident.
 
 New diagnostics: `SPX-F113` (a resume value's type disagrees with the
-declared `yields` signature) and `SPX-F114` (the replayed prefix recomputed a
-different request than the suspension recorded; the resume fails closed).
+declared `yields` signature), `SPX-F114` (the replayed prefix recomputed a
+different request than the suspension recorded), and `SPX-F115` (the state
+or invocation binding is not for this exact program, yield site and original
+argument bits). All fail closed before a resumed result is produced.
 
 ## Scope boundary
 
 Explicitly **not** done in this slice, and why:
 
 - **The `.spx` slice is minimal by construction, not by accident.** Every
-  restriction it was admitted under is still in force: exactly one `yield`
-  per function, only at the function's own top level (never in a loop, a
-  conditional branch, a call argument or any nested expression), scalar
-  request/response/parameter/local types, no `uses` effects, no generics,
-  free functions only. Widening any one of them is its own tranche across
-  the same seven layers.
+  restriction it was admitted under is still in force: exactly one `yield`,
+  only at the function's own top level (never in a loop, a conditional branch,
+  a call argument or any nested expression), scalar request/response/
+  parameter/local types, no `uses` effects, no generics, free functions only.
+  The current non-isolated projection additionally requires exactly one
+  `yields`-declaring function in the whole resolved program, even when a
+  second one is disconnected. Widening any one of these constraints is its
+  own tranche across the same seven layers.
 - **Shapes are opaque caller-supplied strings, not checked source types.**
   `EffectSignature`'s `request_shape`/`answer_shape` are compared for exact
-  equality. Deriving such a shape from a real checked source type — so that
-  the *compiler* computes what a suspension waits for rather than the caller
-  declaring it — belongs to the syntax/HIR tranche below. What exists here
-  is the checking discipline and its refusals, not a source-derived type
-  identity.
-- **No compiler-checked ownership analysis.** `'static + Clone + Eq + Debug`
+  equality. The bounded compiler plan does carry its source-derived scalar
+  request/answer types, but it does not connect them to this general reference
+  table or derive opaque shape strings for multiple effect families. That
+  integration remains open.
+- **No compiler-checked owned suspension state.** `'static + Clone + Eq + Debug`
   is this reference module's own approximation of "plain owned, transferable
   data" — it rejects a borrow or a non-`'static` handle the same way a real
   ownership checker would reject an escaping reference, but it is not the
-  compiler's alias/uniqueness analysis over real HIR locals. Wiring a real
-  `yield` point to the existing ownership/ cleanup-plan machinery
-  (`cleanup_plan::build`) so the compiler itself computes which locals cross
-  a suspension is follow-up work this design enables but does not perform.
+  compiler's alias/uniqueness analysis over real HIR locals. The bounded plan
+  independently rebuilds loan and cleanup attachments, but admits only Copy
+  scalars and therefore proves that no owned local crosses its one suspension.
+  Computing and carrying a real owned suspension frame remains follow-up work.
 - **State migration exists only at the reference level.**
   `src/resumable_effects/migration.rs`'s `migrate_suspended` now proves the
   checked-migration *pattern* (`execution_revision::typed_migration` and
   `live_invocation::migration`'s "evaluate twice, reject disagreement,
   carry cumulative budget forward") for an arbitrary caller-chosen `State`
-  pair. It does not migrate a real checked state type produced by
-  compiler-owned source-syntax lowering, because no such lowering exists
-  yet; that is still downstream of the syntax/HIR tranche below, and this
-  module intentionally does not add a second, competing migration story
-  once that lowering lands.
-- **No native or Wasm lowering, and no Agent-runtime migration onto this
-  mechanism.** #204's implementation sequence says "interpreter first, then
-  native/Wasm". The interpreter half is done (see
-  [Interpreter execution](#interpreter-execution)); the native and Wasm
-  halves are not, and both backends keep refusing a `yields`-declaring
-  function outright — `SPX-B116` and `SPX-W126` — so no program can observe
-  a backend that silently disagrees with the interpreter. Neither a C nor a
-  Wasm target has a control-transfer mechanism this slice could reuse
-  without a real state-machine lowering, which is the next tranche.
+  pair. It does not migrate the new compiler plan or a checked source state
+  across program revisions. The current plan has only compiler-owned scalar
+  control identities and no public checkpoint carrier; defining migration
+  compatibility for a future owned state type remains downstream work.
+- **No public native/Wasm resumable target or Agent-runtime migration onto
+  this mechanism.** The private parity runners execute the plan's yield-free
+  projections through real native and Core Wasm target paths, but ordinary
+  emission still refuses a `yields`-declaring function outright —
+  `SPX-B116` and `SPX-W126`. There is no public continuation ABI, external-
+  await runtime seam, durable source-level checkpoint, or target scheduler.
   Migrating an Agent fixture onto the mechanism is untouched.
 - **A checkpoint byte-wire codec now exists, at reference level.**
   `src/resumable_effects/codec.rs` encodes a `Journal` bound to its
@@ -425,21 +495,36 @@ Explicitly **not** done in this slice, and why:
 
 | Criterion (from issue #204) | Status |
 | --- | --- |
-| A non-Agent function can yield typed requests and resume safely | **Met for the minimal `.spx` slice, on one engine.** An ordinary free function declares `yields Request -> Response` and suspends at a single top-level `yield`; `interpreter::resumable` runs the suspension and the resume, checking the answer against the declared response type (`SPX-F113`) and the replayed request against the recorded one (`SPX-F114`). Native and Wasm still refuse (`SPX-B116`/`SPX-W126`). Beyond that slice — loops, branches, several yields, owned state across a suspension — it remains reference-validator level. "Typed" is now per-effect, not only per-program: `EffectSignatureTable` declares what each effect's request looks like and what resuming it must supply, and a resume that does not match is refused (`SignatureCheckedHandler` before the effect boundary, `validate_journal_signatures` on a recovered journal). |
-| Generated state machines are deterministic semantic projections | Proven at the reference level (`RequestDrift`/`TransitionDrift`) and, for the `.spx` slice, by the interpreter's own request-recomputation check on every resume (`SPX-F114`). **No state machine is generated yet**: the interpreter resumes by replaying a straight-line prefix, which is why the restrictions above are load-bearing and why native/Wasm still refuse. |
-| Ownership, effects, contracts and authority survive suspension correctly | Ownership: reference-level `'static`/`Clone` gate only (see above). Effects: `EffectHandler` is the sole authority boundary; `CapabilityGatedHandler` checks a declared capability id against a bounded allowlist before that boundary is reached, and `SignatureCheckedHandler` independently checks the declared request and answer shapes, refusing an answer that answers a different effect before it can become an observation. Contracts (pre/postconditions) and real compiler-checked ownership: **open**, need HIR integration. |
+| A non-Agent function can yield typed requests and resume safely | **Met only for the minimal `.spx` slice.** One ordinary free function in the whole program declares `yields Request -> Response` and suspends at a single top-level `yield`; `interpreter::resumable` runs it, and `cfg(test)`-only native `-O0`/`-O2` and Core Wasm runners execute the same plan projections. Resume checks the answer type (`SPX-F113`), replayed request (`SPX-F114`), and exact program/site/argument binding (`SPX-F115`). Ordinary native/Wasm emission still refuses (`SPX-B116`/`SPX-W126`). A second yielding function (even disconnected), multiple or nested yields, suspension in loops/branches/call arguments, owned state and effectful prefixes remain open. |
+| Generated state machines are deterministic semantic projections | **Met only for the bounded three-state plan.** `ResumablePlan` deterministically derives entry/suspended/complete identities and independently validated yield-free start/resume HIR projections. The interpreter consumes its identities/binding; private native and Wasm runners consume its projections. A general continuation/state-machine lowering for several or control-dependent yields is still open. |
+| Ownership, effects, contracts and authority survive suspension correctly | For the `.spx` plan, only Copy scalars are admitted, ordinary effects and reachable yielding callees are refused, the start projection owns precondition evaluation, the resume projection owns the suffix/postcondition, and suspension bindings confer no authority. Owned values across suspension, effectful prefixes and durable/public resume authority remain **open**. At the separate Rust-reference level, `EffectHandler`, `CapabilityGatedHandler` and `SignatureCheckedHandler` prove the more general checking discipline. |
 | Checkpoint/recovery never grants effect authority by itself | **Met**, including at the "reminted resume" level: `Journal`/`resume` never dispatch on a replayed entry, and a valid journal is refused outright under a scope the caller did not itself derive. Extends through the byte-wire codec: `decode_checkpoint` performs the identical three-way scope check before reconstructing any entry, and a decoded-then-validated journal still cannot be resumed under a scope the caller did not itself derive. |
-| Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture onto `resumable_effects` is follow-up work once the syntax/HIR tranche exists for it to lower into. |
+| Agents can progressively reuse the mechanism rather than remain a separate runtime island | **Open.** `agent_lifecycle`/`agent_runtime_v2` are untouched (outside this module's lease); migrating even one Agent fixture requires a public external-await/runtime seam, durable source checkpointing and a broader state profile than this private scalar plan provides. |
 
 ## Gate
 
-`cargo test --locked -p semaprax --lib interpreter::resumable` (13 unit
-tests driving real `.spx` source through parse, resolve and execution, plus
-the native/Wasm refusal parity assertions) is the `.spx` slice's selector.
+`cargo test --locked -p semaprax --lib interpreter::resumable::tests::`
+runs 14 unit tests driving real `.spx` source through parse, resolve, start,
+exactly bound resume and same-request/different-argument refusal.
 
-`cargo test --locked -p semaprax --lib resumable_effects::` (63 unit tests:
-30 for `core`/`capability`/`migration`, 16 for `signature`, 17 for `codec`)
-and `cargo test --locked -p semaprax --doc resumable_effects` (2
-`compile_fail` doctests proving the typed-resume and ownership compile-time
-rejections) are this module's focused selectors. All of it is local,
-offline, re-runnable evidence; nothing hosted, native, or Wasm is claimed.
+`cargo test --locked -p semaprax --lib resumable_effects::lowering::tests::`
+runs 10 deterministic-plan, HIR-projection, whole-program-isolation,
+canonical-identity and hostile-
+mutation tests. The required physical target selector is:
+
+```sh
+SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 \
+  cargo test --locked -p semaprax --lib \
+  resumable_effects::backend::tests:: -- --nocapture
+```
+
+It runs 7 private parity tests and fails rather than skips if local `clang` or
+Node is absent. The combined
+`SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS=1 cargo test --locked -p semaprax --lib resumable_effects::`
+selector runs 80 tests. `cargo test --locked -p semaprax --doc
+resumable_effects` retains the two `compile_fail` doctests proving the
+typed-resume and ownership compile-time refusals.
+
+These are local, offline, re-runnable results. They are not hosted evidence,
+do not promote the private projection runners to public native/Wasm support,
+and do not close #204's general lowering or runtime work.

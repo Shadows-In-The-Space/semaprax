@@ -5,10 +5,10 @@
 //! resolver/HIR, verifier, semantic graph, and both backends, but no engine
 //! executed it: native refused with `SPX-B116`, Wasm with `SPX-W126`, and the
 //! interpreter refused at its own admission gate. This module is the first
-//! engine that runs it, and it deliberately changes neither backend --
-//! per the backend-equivalence invariant an engine that cannot lower a
-//! suspension must keep refusing rather than silently differ, and both still
-//! do, with the same stable codes.
+//! public compiler engine that runs it. Ordinary native and Wasm emission
+//! still refuses with those stable codes; compiler-private parity runners use
+//! `resumable_effects::lowering`'s independently validated yield-free
+//! projections instead of weakening either ordinary emitter's admission.
 //!
 //! # The execution model
 //!
@@ -25,8 +25,12 @@
 //!   (`SPX-T301`/`SPX-T303`), so nothing owned is live across the
 //!   suspension and the replay allocates and frees nothing;
 //! - `parser::yields` admits exactly one `yield`, only at the function's own
-//!   top level (`SPX-T297`/`SPX-T298`), so the prefix is straight-line and
-//!   the replay reaches the same single site.
+//!   top level (`SPX-T297`/`SPX-T298`), so control cannot branch around or
+//!   repeat the yield site.
+//! - `resumable_effects::lowering` rejects a call closure that reaches any
+//!   other `yields`-declaring function. The one-site proof is therefore over
+//!   the complete reachable computation, not merely the selected function's
+//!   source body.
 //!
 //! Replay is therefore a *re-use* of an already-computed prefix, not a
 //! second, possibly divergent execution -- and this module proves that
@@ -36,6 +40,14 @@
 //! over. This is the same discipline `resumable_effects::core`'s
 //! `RequestDrift` enforces at the Rust reference level, now applied to real
 //! `.spx` source.
+//!
+//! Request equality is not a continuation identity: two argument vectors can
+//! compute the same request and different suffix results. Each suspension
+//! therefore carries a domain-separated binding over the exact checked HIR,
+//! the lowering plan and yield-site identities, and the bit-exact original
+//! scalar arguments. Resume refuses a mismatched state or binding with
+//! `SPX-F115`. The binding commits to the replay inputs; it grants no effect
+//! authority.
 //!
 //! # Typed resume
 //!
@@ -57,6 +69,9 @@
 use crate::conformance::NormalizedStatus;
 use crate::diagnostic::Diagnostic;
 use crate::hir::{self, ResolvedFunction, ResolvedType};
+use crate::resumable_effects::lowering::{
+    self, ResumablePlan, ResumableScalar, ResumableStateId, ResumableSuspensionBinding,
+};
 
 use super::prepared::PreparedCancellation;
 use super::{
@@ -75,6 +90,9 @@ const RESUME_TYPE_MISMATCH: &str = "SPX-F113";
 /// The replayed prefix recomputed a different request than the suspension
 /// recorded. Fails closed: no resumed value is produced.
 const REQUEST_DRIFT: &str = "SPX-F114";
+/// The caller presented a continuation state or invocation binding that was
+/// not produced by this exact checked program and exact argument vector.
+const SUSPENSION_MISMATCH: &str = "SPX-F115";
 
 /// The `Flow::Guard` detail a fresh suspension travels on. It never escapes
 /// this module: [`evaluate_resumable`] converts it into
@@ -139,10 +157,13 @@ pub enum ResumableStep {
     /// The function reached its `yield` and produced this request. Nothing
     /// was dispatched: the caller owns deciding whether and how to answer.
     Suspended {
+        state: ResumableStateId,
+        binding: ResumableSuspensionBinding,
         request: ArgumentValue,
     },
     /// The function ran to its result -- on a resume, past the yield site.
     Completed {
+        state: ResumableStateId,
         result: ArgumentValue,
     },
     LanguageFailure(NormalizedStatus),
@@ -177,11 +198,14 @@ pub fn run_resumable_effect(
 /// `request` is the request the suspension recorded. It is not trusted: the
 /// replayed prefix recomputes its own request and the two must agree
 /// (`SPX-F114`). `answer` must have the declared response type
-/// (`SPX-F113`).
+/// (`SPX-F113`). `state` and `binding` must identify this exact checked
+/// program, yield site, and bit-exact original argument vector (`SPX-F115`).
 pub fn resume_resumable_effect(
     program: &hir::ResolvedProgram,
     function_id: &str,
     arguments: &[ArgumentValue],
+    state: &ResumableStateId,
+    binding: &ResumableSuspensionBinding,
     request: &ArgumentValue,
     answer: &ArgumentValue,
     max_steps: usize,
@@ -190,7 +214,12 @@ pub fn resume_resumable_effect(
         program,
         function_id,
         arguments,
-        Some((request.clone(), answer.clone())),
+        Some((
+            state.clone(),
+            binding.clone(),
+            request.clone(),
+            answer.clone(),
+        )),
         max_steps,
     )
 }
@@ -199,7 +228,12 @@ fn evaluate_resumable(
     program: &hir::ResolvedProgram,
     function_id: &str,
     arguments: &[ArgumentValue],
-    resume: Option<(ArgumentValue, ArgumentValue)>,
+    resume: Option<(
+        ResumableStateId,
+        ResumableSuspensionBinding,
+        ArgumentValue,
+        ArgumentValue,
+    )>,
     max_steps: usize,
 ) -> Result<ResumableEvaluation, Vec<Diagnostic>> {
     if !(1..=MAX_STEPS_LIMIT).contains(&max_steps) {
@@ -240,18 +274,34 @@ fn evaluate_resumable(
         )]);
     }
     let bound = bind_scalar_arguments(entry, arguments)?;
-    let resumption = match resume {
-        None => Resumption::Fresh(None),
-        Some((request, answer)) => Resumption::Replay {
-            expected: typed_resume_value(&yields.request_type, &request, "request")?,
-            answer: typed_resume_value(&yields.response_type, &answer, "answer")?,
-            observed: false,
-        },
-    };
-
     let admitted = admitted_resolved_functions(program);
     scan_closure(function_id, &admitted, program)?;
     hir::validate(program).map_err(|error| vec![error])?;
+    let plan = lowering::lower(program, entry).map_err(|error| vec![error])?;
+    let scalar_arguments = resumable_scalars(arguments).ok_or_else(|| {
+        vec![argument_error(
+            "resumable invocation contains a non-scalar argument".to_owned(),
+        )]
+    })?;
+    let expected_binding = plan.suspension_binding(&scalar_arguments);
+    let resumption = match resume {
+        None => Resumption::Fresh(None),
+        Some((state, binding, request, answer)) => {
+            if state != plan.suspension.state.id || binding != expected_binding {
+                return Err(vec![Diagnostic::io(
+                    SUSPENSION_MISMATCH,
+                    format!(
+                        "resuming `{function_id}` presented a suspension state or invocation binding that does not match this exact checked program, yield site, and argument vector"
+                    ),
+                )]);
+            }
+            Resumption::Replay {
+                expected: typed_resume_value(&yields.request_type, &request, "request")?,
+                answer: typed_resume_value(&yields.response_type, &answer, "answer")?,
+                observed: false,
+            }
+        }
+    };
     let closure_functions =
         super::closures::checked_functions(program).map_err(|error| vec![error])?;
 
@@ -270,7 +320,8 @@ fn evaluate_resumable(
                 );
                 evaluator.resumption = resumption;
                 let settled = evaluator.evaluate_entry(entry, &bound);
-                let step = settle_step(settled, &mut evaluator.resumption);
+                let step =
+                    settle_step(settled, &mut evaluator.resumption, &plan, &expected_binding);
                 ResumableEvaluation {
                     step,
                     steps_used: evaluator.steps,
@@ -303,10 +354,18 @@ fn evaluate_resumable(
 
 /// Turn the evaluator's settled `Result` into one closed step, reading the
 /// parked request for the suspension case.
-fn settle_step(settled: Result<Value, Flow>, resumption: &mut Resumption) -> ResumableStep {
+fn settle_step(
+    settled: Result<Value, Flow>,
+    resumption: &mut Resumption,
+    plan: &ResumablePlan,
+    binding: &ResumableSuspensionBinding,
+) -> ResumableStep {
     match settled {
         Ok(value) => match argument_of(&value) {
-            Some(result) => ResumableStep::Completed { result },
+            Some(result) => ResumableStep::Completed {
+                state: plan.complete.id.clone(),
+                result,
+            },
             None => ResumableStep::GuardError(
                 "resumable-effect entry returned a non-scalar value".to_owned(),
             ),
@@ -318,7 +377,11 @@ fn settle_step(settled: Result<Value, Flow>, resumption: &mut Resumption) -> Res
                 );
             };
             match argument_of(request) {
-                Some(request) => ResumableStep::Suspended { request },
+                Some(request) => ResumableStep::Suspended {
+                    state: plan.suspension.state.id.clone(),
+                    binding: binding.clone(),
+                    request,
+                },
                 None => {
                     ResumableStep::GuardError("`yield` produced a non-scalar request".to_owned())
                 }
@@ -338,6 +401,25 @@ fn settle_step(settled: Result<Value, Flow>, resumption: &mut Resumption) -> Res
             "unexpected UTF-8 materialization limit in resumable evaluation".to_owned(),
         ),
     }
+}
+
+fn resumable_scalars(arguments: &[ArgumentValue]) -> Option<Vec<ResumableScalar>> {
+    arguments
+        .iter()
+        .map(|argument| {
+            Some(match argument {
+                ArgumentValue::Int(value) => ResumableScalar::I64(*value),
+                ArgumentValue::Int32(value) => ResumableScalar::I32(*value),
+                ArgumentValue::Uint8(value) => ResumableScalar::U8(*value),
+                ArgumentValue::Usize(value) => ResumableScalar::Usize(*value),
+                ArgumentValue::Char(value) => ResumableScalar::Char(*value),
+                ArgumentValue::Float32(value) => ResumableScalar::F32(value.to_bits()),
+                ArgumentValue::Float64(value) => ResumableScalar::F64(value.to_bits()),
+                ArgumentValue::Bool(value) => ResumableScalar::Bool(*value),
+                _ => return None,
+            })
+        })
+        .collect()
 }
 
 /// Bind the caller's arguments positionally, refusing an arity or type

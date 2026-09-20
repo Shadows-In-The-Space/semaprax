@@ -125,11 +125,11 @@ impl ValueId {
         Self::new(format!("{operation}.param.{index}"))
     }
 
-    pub(super) fn parameter(function: &FunctionExecutionId, index: usize) -> Self {
+    pub(crate) fn parameter(function: &FunctionExecutionId, index: usize) -> Self {
         Self::new(scoped_identity(function, "value:param", &index.to_string()))
     }
 
-    pub(super) fn local(function: &FunctionExecutionId, path: &str) -> Self {
+    pub(crate) fn local(function: &FunctionExecutionId, path: &str) -> Self {
         Self::new(scoped_identity(function, "value:local", path))
     }
 

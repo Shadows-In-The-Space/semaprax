@@ -31,18 +31,40 @@ fn resolved(source: &str) -> hir::ResolvedProgram {
     hir::resolve(&program).expect("the slice source resolves")
 }
 
+fn suspension(
+    program: &hir::ResolvedProgram,
+    arguments: &[ArgumentValue],
+) -> (ResumableStateId, ResumableSuspensionBinding, ArgumentValue) {
+    match run_resumable_effect(program, "app.ask", arguments, MAX_STEPS)
+        .unwrap()
+        .step
+    {
+        ResumableStep::Suspended {
+            state,
+            binding,
+            request,
+        } => (state, binding, request),
+        other => panic!("expected suspension, got {other:?}"),
+    }
+}
+
 #[test]
 fn a_fresh_invocation_suspends_at_its_yield_with_the_computed_request() {
     let program = resolved(ASK);
     let evaluated =
         run_resumable_effect(&program, "app.ask", &[ArgumentValue::Int(41)], MAX_STEPS).unwrap();
     // `seed + 1` is the request: the prefix really ran, it was not skipped.
-    assert_eq!(
-        evaluated.step,
-        ResumableStep::Suspended {
-            request: ArgumentValue::Int(42)
-        }
-    );
+    let ResumableStep::Suspended {
+        state,
+        binding,
+        request,
+    } = evaluated.step
+    else {
+        panic!("fresh invocation did not suspend")
+    };
+    assert_eq!(request, ArgumentValue::Int(42));
+    assert!(state.as_str().contains("|suspended|"));
+    assert_ne!(binding.as_bytes(), &[0; 32]);
     assert!(evaluated.steps_used > 0);
     assert_eq!(evaluated.max_steps, MAX_STEPS);
 }
@@ -50,51 +72,63 @@ fn a_fresh_invocation_suspends_at_its_yield_with_the_computed_request() {
 #[test]
 fn resuming_substitutes_the_answer_at_the_yield_and_runs_the_suffix() {
     let program = resolved(ASK);
+    let (state, binding, request) = suspension(&program, &[ArgumentValue::Int(41)]);
     let evaluated = resume_resumable_effect(
         &program,
         "app.ask",
         &[ArgumentValue::Int(41)],
-        &ArgumentValue::Int(42),
+        &state,
+        &binding,
+        &request,
         &ArgumentValue::Int(10),
         MAX_STEPS,
     )
     .unwrap();
     // 10 * 2 -- the suffix ran with the supplied answer, not with the
     // request and not with the seed.
-    assert_eq!(
-        evaluated.step,
-        ResumableStep::Completed {
-            result: ArgumentValue::Int(20)
-        }
-    );
+    let ResumableStep::Completed {
+        state: completed,
+        result,
+    } = &evaluated.step
+    else {
+        panic!("resume did not complete")
+    };
+    assert_eq!(*result, ArgumentValue::Int(20));
+    assert!(completed.as_str().contains("|complete"));
     // Negative control: the suffix is genuinely a function of the answer.
     let other = resume_resumable_effect(
         &program,
         "app.ask",
         &[ArgumentValue::Int(41)],
-        &ArgumentValue::Int(42),
+        &state,
+        &binding,
+        &request,
         &ArgumentValue::Int(11),
         MAX_STEPS,
     )
     .unwrap();
-    assert_eq!(
+    assert!(matches!(
         other.step,
         ResumableStep::Completed {
-            result: ArgumentValue::Int(22)
+            result: ArgumentValue::Int(22),
+            ..
         }
-    );
+    ));
     assert_ne!(other.step, evaluated.step);
 }
 
 #[test]
 fn a_resume_presenting_a_request_the_replayed_prefix_does_not_recompute_is_refused() {
     let program = resolved(ASK);
+    let (state, binding, _) = suspension(&program, &[ArgumentValue::Int(41)]);
     // The genuine suspension for seed 41 recorded request 42. Presenting 99
     // is drift: the prefix recomputes 42 and the resume fails closed.
     let refused = resume_resumable_effect(
         &program,
         "app.ask",
         &[ArgumentValue::Int(41)],
+        &state,
+        &binding,
         &ArgumentValue::Int(99),
         &ArgumentValue::Int(10),
         MAX_STEPS,
@@ -106,25 +140,28 @@ fn a_resume_presenting_a_request_the_replayed_prefix_does_not_recompute_is_refus
 }
 
 #[test]
-fn a_resume_presenting_the_right_request_under_different_arguments_is_refused_as_drift() {
+fn a_resume_presenting_a_suspension_under_different_arguments_is_refused_before_replay() {
     let program = resolved(ASK);
-    // A journal's recorded request cannot be replayed against a different
-    // invocation's arguments: seed 7 recomputes 8, not 42.
+    let (state, binding, request) = suspension(&program, &[ArgumentValue::Int(41)]);
+    // The binding rejects the other invocation before request replay.
     let refused = resume_resumable_effect(
         &program,
         "app.ask",
         &[ArgumentValue::Int(7)],
-        &ArgumentValue::Int(42),
+        &state,
+        &binding,
+        &request,
         &ArgumentValue::Int(10),
         MAX_STEPS,
     )
     .unwrap_err();
-    assert_eq!(refused[0].code, "SPX-F114");
+    assert_eq!(refused[0].code, "SPX-F115");
 }
 
 #[test]
 fn an_answer_of_the_wrong_type_is_refused_before_the_program_is_entered() {
     let program = resolved(ASK);
+    let (state, binding, request) = suspension(&program, &[ArgumentValue::Int(41)]);
     for wrong in [
         ArgumentValue::Bool(true),
         ArgumentValue::Int32(10),
@@ -135,7 +172,9 @@ fn an_answer_of_the_wrong_type_is_refused_before_the_program_is_entered() {
             &program,
             "app.ask",
             &[ArgumentValue::Int(41)],
-            &ArgumentValue::Int(42),
+            &state,
+            &binding,
+            &request,
             &wrong,
             MAX_STEPS,
         )
@@ -148,10 +187,13 @@ fn an_answer_of_the_wrong_type_is_refused_before_the_program_is_entered() {
 #[test]
 fn a_recorded_request_of_the_wrong_type_is_refused_the_same_way() {
     let program = resolved(ASK);
+    let (state, binding, _) = suspension(&program, &[ArgumentValue::Int(41)]);
     let refused = resume_resumable_effect(
         &program,
         "app.ask",
         &[ArgumentValue::Int(41)],
+        &state,
+        &binding,
         &ArgumentValue::Bool(true),
         &ArgumentValue::Int(10),
         MAX_STEPS,
@@ -275,20 +317,16 @@ fn main() -> i64 { 0 }
     )
     .expect("it resolves");
     let negative_zero = ArgumentValue::Float64(-0.0);
-    assert_eq!(
-        run_resumable_effect(&program, "app.ask", &[negative_zero.clone()], MAX_STEPS)
-            .unwrap()
-            .step,
-        ResumableStep::Suspended {
-            request: negative_zero.clone()
-        }
-    );
+    let (state, binding, request) = suspension(&program, &[negative_zero.clone()]);
+    assert_eq!(request, negative_zero);
     // `-0.0 == 0.0` in IEEE, but they are distinct requests: presenting the
     // positive zero as the recorded request is drift, not a match.
     let refused = resume_resumable_effect(
         &program,
         "app.ask",
         &[negative_zero.clone()],
+        &state,
+        &binding,
         &ArgumentValue::Float64(0.0),
         &ArgumentValue::Float64(1.0),
         MAX_STEPS,
@@ -296,11 +334,13 @@ fn main() -> i64 { 0 }
     .unwrap_err();
     assert_eq!(refused[0].code, "SPX-F114");
     // The genuine recorded request replays.
-    assert_eq!(
+    assert!(matches!(
         resume_resumable_effect(
             &program,
             "app.ask",
             &[negative_zero.clone()],
+            &state,
+            &binding,
             &negative_zero,
             &ArgumentValue::Float64(1.5),
             MAX_STEPS,
@@ -308,7 +348,44 @@ fn main() -> i64 { 0 }
         .unwrap()
         .step,
         ResumableStep::Completed {
-            result: ArgumentValue::Float64(1.5)
+            result: ArgumentValue::Float64(1.5),
+            ..
         }
+    ));
+}
+
+#[test]
+fn equal_requests_from_different_arguments_cannot_alias_one_suspension() {
+    let source = r#"
+module test.resumable_effects_argument_binding;
+@id("app.ask")
+fn ask(seed: i64) -> i64
+    yields i64 -> i64
+{
+    let answer = yield 0;
+    answer + seed
+}
+@id("app.main")
+fn main() -> i64 { 0 }
+"#;
+    let program = resolved(source);
+    let (state, binding, request) = suspension(&program, &[ArgumentValue::Int(1)]);
+    assert_eq!(request, ArgumentValue::Int(0));
+    assert_eq!(
+        suspension(&program, &[ArgumentValue::Int(2)]).2,
+        ArgumentValue::Int(0),
+        "negative control: both invocations genuinely request the same value"
     );
+    let refused = resume_resumable_effect(
+        &program,
+        "app.ask",
+        &[ArgumentValue::Int(2)],
+        &state,
+        &binding,
+        &request,
+        &ArgumentValue::Int(10),
+        MAX_STEPS,
+    )
+    .unwrap_err();
+    assert_eq!(refused[0].code, "SPX-F115");
 }

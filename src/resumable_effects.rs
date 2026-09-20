@@ -1,6 +1,5 @@
-//! Resumable effects (issue #204): a general, non-Agent reference mechanism
-//! for typed suspend/resume computation, generalizing the vocabulary the
-//! closed six-role Agent shape already ships one instance of.
+//! Resumable effects (issue #204): the non-Agent reference mechanism and the
+//! bounded compiler-owned lowering for typed suspend/resume computation.
 //!
 //! # What already exists and what this module adds
 //!
@@ -11,27 +10,28 @@
 //! `Intent`/`Observed`/`Transition` entries with replay that dispatches zero
 //! host calls for an already-completed run. That machinery is real,
 //! HOSTED GREEN, and stays untouched by this module (it is outside this
-//! module's lease). What it does **not** yet do — and what issue #204 asks
-//! for — is let an ordinary, non-Agent function declare typed resumable
-//! effects with the same shape. [`core::ResumableEffectProgram`],
-//! [`core::Journal`] and [`core::run`]/[`core::resume`] are that
-//! generalization: the same `Step`/journal-entry vocabulary, parameterized
-//! over a caller-chosen `State`/`Request`/`Observation`/`Result`/`CleanupOp`
-//! instead of the six fixed Agent roles.
+//! module's lease). [`core::ResumableEffectProgram`], [`core::Journal`] and
+//! [`core::run`]/[`core::resume`] are a Rust-level generalization of its
+//! vocabulary, parameterized over caller-chosen carrier types. They remain a
+//! synchronous handler/journal reference protocol, not the runtime for source
+//! `yield` and not an external-await continuation.
 //!
-//! # Status: reference validator, not source syntax
+//! # Status: bounded source lowering, not a general runtime
 //!
-//! This is a Rust-level reference kernel exercised only through the fixture
-//! programs in [`tests`] — the same posture `live_invocation` already
-//! documents for the `model.invoke` boundary ("a small, self-contained
-//! reference kernel... it does not touch the parser, HIR, or the existing
-//! compiled pipeline"). It does **not** add `.spx` `yield`/effect syntax, a
-//! parser diagnostic, an HIR node, a verifier rule, a semantic-graph
-//! projection, or native/Wasm lowering, and it does not migrate the
-//! existing Agent lifecycle onto itself. Those are exactly the parser,
-//! HIR, verifier, semantic-graph, native-backend and Wasm-backend changes
-//! the repository's change protocol requires to move together once syntax
-//! carries runtime meaning — a change too large for one bounded slice.
+//! The compiler admits one existing `.spx` slice: an explicitly identified
+//! free function with one direct top-level `yield`, Copy-scalar state and no
+//! ordinary effects. [`lowering`] derives deterministic entry/suspended/
+//! complete identities plus independently validated yield-free start and
+//! resume HIR projections. `interpreter::resumable` consumes the plan's state
+//! and invocation binding. Until closed-program projection exists, lowering
+//! requires exactly one `yields` function in the whole resolved program. The
+//! crate-private, `cfg(test)`-only `backend` module exercises its projections
+//! through real native `-O0`/`-O2` and Core Wasm target paths; its temporary
+//! storage and local tool processes are test-harness authority only. Ordinary
+//! native/Wasm emission still refuses a `yields` function; there is no public
+//! continuation ABI, external-await scheduler, durable source checkpoint,
+//! Agent migration, or general multi-yield lowering.
+//!
 //! [`docs/RESUMABLE-EFFECTS-V1.md`](../../docs/RESUMABLE-EFFECTS-V1.md)
 //! records the full design and exactly this scope boundary.
 //!
@@ -89,9 +89,12 @@
 //! }
 //! ```
 
+#[cfg(test)]
+pub(crate) mod backend;
 pub mod capability;
 pub mod codec;
 pub mod core;
+pub(crate) mod lowering;
 pub mod migration;
 pub mod signature;
 #[cfg(test)]
@@ -108,6 +111,7 @@ pub use core::{
     resume, run, CleanupHandler, DriverError, EffectHandler, EffectScope, Journal, JournalEntry,
     JournalError, Outcome, ResumableEffectProgram, Step,
 };
+pub use lowering::{ResumableStateId, ResumableSuspensionBinding};
 pub use migration::{migrate_suspended, MigratedState, MigrationError, StateMigration};
 pub use signature::{
     validate_journal_signatures, EffectSignature, EffectSignatureTable, EffectTag,

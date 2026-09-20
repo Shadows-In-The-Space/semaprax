@@ -1,17 +1,18 @@
 # Provisioned Linux offline doctor lifecycle gate v1
 
-Status: **executed, and still failing, but narrowly**, most recently
-2026-09-17 against `bfb1da19`
-([run 35274228390](https://github.com/wavect/semaprax/actions/runs/35274228390)).
-Preconditions and settlement pass every time. Both admitted suites now report
-**12 passed, 1 failed** of 13. The single remaining failure in each is the
-`real-distributions` fixture, and `clang` inside it now completes and reports
-its own version — so the pre-`execve` diagnosis recorded below for the fourth
-run **no longer describes the current head**. See [Executions](#executions).
-
 Audience: release engineers and security reviewers who can supply one
 disposable, trusted Linux x86-64 host, or dispatch this gate against a
 GitHub-hosted runner.
+
+Status: **executed, and still failing, but narrowly**, most recently
+2026-09-19 against `3ee2ea85`
+([run 35472257722](https://github.com/wavect/semaprax/actions/runs/35472257722)).
+Preconditions and settlement pass. Both admitted suites report **12 passed, 1
+failed** of 13. The remaining `real-distributions` fixture shows Clang
+successfully, while Node terminates with `SIGSEGV` (signal 11); Rust remains a
+failed role in the same reply, but the pre-tranche test stopped at Node before
+reporting Rust's termination detail. This is a hosted failure, not promotion
+evidence. See [Executions](#executions).
 
 Owning contract: [Linux production offline doctor provisioner
 v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md). This document adds the executable
@@ -157,7 +158,8 @@ Two things follow, and both contradict the fourth-run reading:
    confined process that never reached `execve` cannot report a version string
    it had to execute a compiler to obtain.
 
-The remaining failure is therefore **narrow and specific, not structural**:
+In run 35274228390, the remaining failure was therefore **narrow and
+specific, not structural**:
 `clang` succeeds while `node` and `rust` both report `offline tool terminated
 unsuccessfully`, leaving the overall report exit 1 where the fixture asserts
 exit 0. The two failing test names are
@@ -173,6 +175,30 @@ runner only; nothing here is evidence for macOS, Windows, or a physical
 device. The cause of the `node`/`rust` failure is not established — only that
 it is downstream of `execve` rather than before it, which is where the four
 earlier runs placed it.
+
+### Latest execution: run 35472257722
+
+The latest dispatch ran commit `3ee2ea85` on a GitHub-hosted `ubuntu-24.04`
+runner. All host, release, image, and cgroup preconditions passed, and the
+final delegated cgroup was empty. The new diagnostic reply trailer identified
+the first failing role precisely in the platform-sys suite:
+
+```
+real selected tool must complete under confinement (role 2):
+Exit: the tool was killed by signal 11 (SIGSEGV)
+```
+
+The collector suite's canonical report agrees on the role split: Clang is
+`ok`, Node and Rust are `failed`, and the collector exits one as required. The
+platform-sys and collector suites each report 12 passed and 1 failed. Because
+the role loop panicked at Node, this run does not establish Rust's individual
+termination signal or exit code. It also does not identify whether Node's
+segmentation fault arises from its runtime/loader or from a denied operation;
+no syscall-policy widening is justified by this evidence.
+
+The follow-up diagnostic tranche changes only the two real-distribution test
+assertions so all role failures are collected into one failure message. It has
+not been hosted-executed yet and makes no completion or promotion claim.
 
 ## What is true today
 

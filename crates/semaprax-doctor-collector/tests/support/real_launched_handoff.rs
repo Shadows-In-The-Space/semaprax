@@ -2,7 +2,7 @@
 //! downstream processes. The trusted provisioner supplies the closed bundle,
 //! immutable startup images/loader closure and independent expected details.
 //! No observed version/report is used to manufacture its own passing oracle.
-use super::{launch, launched_handoff, report};
+use super::{launch, launched_handoff, observe, report};
 use semaprax_native_rust_interop_platform_sys::{
     create_doctor_offline_input, DoctorOfflineBundle, DoctorOfflineInput, DoctorOfflineTarget,
     DOCTOR_OFFLINE_INPUT_MAX_BYTES,
@@ -86,7 +86,7 @@ fn production_launcher_reports_all_roles_from_provisioned_real_distributions() {
     let collector = launched_handoff::prepared_executable(&launched_handoff::installed_image(
         "SEMAPRAX_DOCTOR_COLLECTOR",
     ));
-    report::require_for_selector(
+    require_all_roles(
         launched_handoff::run(&request_file, &bundle_file, &worker, &collector),
         &selector,
         "all",
@@ -106,5 +106,83 @@ fn production_launcher_reports_all_roles_from_provisioned_real_distributions() {
             .unwrap()
             .bytes(),
         request
+    );
+}
+
+/// Keep the real-distribution assertion fail-closed while reporting every
+/// role present in the canonical report. The outer collector cannot observe
+/// the worker's wire termination trailer, so this layer reports role status
+/// and the worker test supplies the finer exit/signal reason.
+fn require_all_roles(
+    observation: observe::Observation,
+    selector: &str,
+    target: &str,
+    tools: &[(&str, &str, &str)],
+    status: i32,
+) {
+    let mut failures = Vec::new();
+    if observation.status.code() != Some(status) {
+        failures.push(format!(
+            "collector status {:?}; observed roles [{}]",
+            observation.status,
+            observed_role_statuses(&observation.stdout, tools)
+        ));
+    }
+    if !observation.stderr.is_empty() {
+        failures.push(format!(
+            "collector stderr: {:?}",
+            String::from_utf8_lossy(&observation.stderr)
+        ));
+    }
+    let expected_debug = report::expected_for_selector(selector, target, tools, "debug");
+    let expected_release = report::expected_for_selector(selector, target, tools, "release");
+    if observation.stdout != expected_debug && observation.stdout != expected_release {
+        failures.push(format!(
+            "canonical report mismatch; observed roles [{}]; stdout {:?}",
+            observed_role_statuses(&observation.stdout, tools),
+            String::from_utf8_lossy(&observation.stdout)
+        ));
+    }
+    if !failures.is_empty() {
+        panic!(
+            "real-distribution roles failed under the production launcher:\n{}",
+            failures.join("\n")
+        );
+    }
+}
+
+/// Diagnostic-only status extraction. It intentionally has no authority over
+/// the exact canonical-byte assertion above; malformed or missing rows are
+/// rendered as `<missing>` and remain failures rather than being repaired.
+fn observed_role_statuses(stdout: &[u8], tools: &[(&str, &str, &str)]) -> String {
+    let text = String::from_utf8_lossy(stdout);
+    tools
+        .iter()
+        .map(|(id, _, _)| {
+            let marker = format!("\"id\":\"{id}\",\"required\":true,\"status\":\"");
+            let status = text
+                .find(&marker)
+                .and_then(|start| {
+                    let after = &text[start + marker.len()..];
+                    after.find('"').map(|end| &after[..end])
+                })
+                .unwrap_or("<missing>");
+            format!("{id}={status}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[test]
+fn role_status_summary_keeps_all_real_distribution_failures() {
+    let tools = [
+        ("clang", "ok", "clang"),
+        ("node", "ok", "node"),
+        ("rust", "ok", "rust"),
+    ];
+    let report = br#"{"checks":[{"id":"clang","required":true,"status":"ok"},{"id":"node","required":true,"status":"failed"},{"id":"rust","required":true,"status":"failed"}]}"#;
+    assert_eq!(
+        observed_role_statuses(report, &tools),
+        "clang=ok, node=failed, rust=failed"
     );
 }

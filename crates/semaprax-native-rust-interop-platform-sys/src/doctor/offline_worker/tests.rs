@@ -396,26 +396,66 @@ fn provisioned_real_clang_node_rust_distributions() {
     assert!(!bundle.is_empty() && bundle.len() <= DOCTOR_OFFLINE_INPUT_MAX_BYTES);
     let request = request(&bundle, 3, &selector);
     let (status, output, errors) = run(&request, &bundle);
-    assert!(status.success());
-    assert!(errors.is_empty());
-    let rows = wire::validate_reply(&wire::Request::parse(&request).unwrap(), &output).unwrap();
+    let mut failures = Vec::new();
+    if !status.success() {
+        failures.push(format!("worker exited with {status:?}"));
+    }
+    if !errors.is_empty() {
+        failures.push(format!(
+            "worker stderr: {:?}",
+            String::from_utf8_lossy(&errors)
+        ));
+    }
+    let rows = match wire::validate_reply(&wire::Request::parse(&request).unwrap(), &output) {
+        Ok(rows) => rows,
+        Err(error) => {
+            failures.push(format!("worker reply rejected: {error:?}"));
+            panic!(
+                "real selected tools failed under confinement: {}",
+                failures.join("; ")
+            );
+        }
+    };
     for ((role, value), expected) in rows.into_iter().zip([1, 2, 4]) {
-        assert_eq!(role, expected);
+        if role != expected {
+            failures.push(format!("reply role {role}, expected {expected}"));
+            continue;
+        }
         let bytes = match value {
             Ok(bytes) => bytes,
-            Err(error) => panic!(
-                "real selected tool must complete under confinement (role {role}): {}",
-                describe_probe_failure(error, &output, role)
-            ),
+            Err(error) => {
+                failures.push(format!(
+                    "role {role} failed under confinement: {}",
+                    describe_probe_failure(error, &output, role)
+                ));
+                continue;
+            }
         };
-        assert!(!bytes.is_empty());
-        let text = std::str::from_utf8(&bytes).unwrap();
-        assert!(match role {
+        if bytes.is_empty() {
+            failures.push(format!("role {role} returned an empty version payload"));
+            continue;
+        }
+        let text = match std::str::from_utf8(&bytes) {
+            Ok(text) => text,
+            Err(error) => {
+                failures.push(format!("role {role} returned invalid UTF-8: {error}"));
+                continue;
+            }
+        };
+        if !match role {
             1 => text.contains("clang version"),
             2 => text.starts_with('v'),
             4 => text.starts_with("rustc "),
             _ => false,
-        });
+        } {
+            failures.push(format!("role {role} returned unexpected version {text:?}"));
+        }
+    }
+    if !failures.is_empty() {
+        panic!(
+            "real selected tools failed under confinement (all roles):\n{}",
+            failures.join("\n")
+        );
     }
 }
 

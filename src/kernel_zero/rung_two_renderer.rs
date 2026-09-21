@@ -3,7 +3,8 @@
 //! The component under test is production-compiled code in
 //! `canonical_char_renderer`; it derives and independently replays the exact
 //! embedded Semaprax source into Kernel-0 before evaluating its byte lane.
-//! The second test enables that component as a shadow of the real canonical
+//! It replays that source binding at each full byte-lane invocation.  The
+//! second test enables that component as a shadow of the real canonical
 //! formatter path, proving the integration is not an isolated candidate.
 //!
 //! Rust output remains authoritative. A mismatch fails the shadow gate, but
@@ -57,10 +58,21 @@ fn exact_source_component_matches_the_rust_renderer_over_a_broad_scalar_corpus()
 
     let values = valid_scalar_corpus();
     for scalar in &values {
+        let expected = crate::format::canonical_char(*scalar);
+        let bytes = canonical_char_renderer::render_bytes(*scalar).unwrap();
         assert_eq!(
             canonical_char_renderer::render(*scalar).unwrap(),
-            crate::format::canonical_char(*scalar),
+            expected,
             "scalar U+{scalar:04X}"
+        );
+        assert_eq!(
+            bytes,
+            expected.as_bytes(),
+            "scalar U+{scalar:04X}: exact Kernel-0 byte lane must agree at every position"
+        );
+        assert!(
+            (3..=12).contains(&bytes.len()),
+            "scalar U+{scalar:04X}: component emitted an invalid canonical-char byte length"
         );
     }
     for invalid in [0xd800, 0xdfff, 0x110000] {
@@ -70,6 +82,42 @@ fn exact_source_component_matches_the_rust_renderer_over_a_broad_scalar_corpus()
         );
     }
     assert!(values.len() > 90, "broad scalar corpus became vacuous");
+}
+
+#[test]
+fn byte_lane_keeps_canonical_delimiters_and_exact_positions_at_each_escape_boundary() {
+    // This is deliberately a small literal table rather than deriving the
+    // oracle from the component.  It pins the representation transitions that
+    // are easiest to accidentally agree on when only final Strings are
+    // compared: named escapes, printable ASCII, and every Unicode digit width.
+    let expected = [
+        (0, "'\\0'"),
+        (9, "'\\t'"),
+        (10, "'\\n'"),
+        (13, "'\\r'"),
+        (39, "'\\\''"),
+        (92, "'\\\\'"),
+        (32, "' '"),
+        (126, "'~'"),
+        (127, "'\\u{7f}'"),
+        (255, "'\\u{ff}'"),
+        (256, "'\\u{100}'"),
+        (4096, "'\\u{1000}'"),
+        (65536, "'\\u{10000}'"),
+        (0x10ffff, "'\\u{10ffff}'"),
+    ];
+    for (scalar, expected) in expected {
+        let actual = canonical_char_renderer::render_bytes(scalar).unwrap();
+        assert_eq!(actual, expected.as_bytes(), "scalar U+{scalar:04X}");
+        assert_eq!(actual.first(), Some(&b'\''), "scalar U+{scalar:04X}");
+        assert_eq!(actual.last(), Some(&b'\''), "scalar U+{scalar:04X}");
+        for (index, (actual, expected)) in actual.iter().zip(expected.bytes()).enumerate() {
+            assert_eq!(
+                *actual, expected,
+                "scalar U+{scalar:04X}: byte {index} drifted from the independent literal oracle"
+            );
+        }
+    }
 }
 
 #[test]

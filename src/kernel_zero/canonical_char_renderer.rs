@@ -40,20 +40,32 @@ impl From<Refusal> for RendererRefusal {
 }
 
 struct Renderer {
-    program: KernelProgram,
+    /// This is deliberately retained instead of only retaining its first
+    /// translated program.  Each byte-lane invocation replays the binding
+    /// against the caller's source bytes before evaluation, so the cache
+    /// cannot turn an old successful translation into authority for changed
+    /// component text.
+    binding: BoundTranslation,
 }
 
 impl Renderer {
     fn derive() -> Result<Self, RendererRefusal> {
-        let entry = DeclarationId::new("format.render-byte");
-        let binding = BoundTranslation::derive(SOURCE, &entry)?;
-        let program = binding.replay(SOURCE, &entry)?.clone();
-        Ok(Self { program })
+        Self::derive_from_source(SOURCE)
     }
 
-    fn int(&self, entry: &str, arguments: &[i64]) -> Result<i64, RendererRefusal> {
-        let entry = self
-            .program
+    fn derive_from_source(source: &str) -> Result<Self, RendererRefusal> {
+        let entry = DeclarationId::new("format.render-byte");
+        let binding = BoundTranslation::derive(source, &entry)?;
+        Ok(Self { binding })
+    }
+
+    fn int(
+        &self,
+        program: &KernelProgram,
+        entry: &str,
+        arguments: &[i64],
+    ) -> Result<i64, RendererRefusal> {
+        let entry = program
             .function(&DeclarationId::new(entry))
             .ok_or(RendererRefusal::MissingEntry)?;
         let arguments = arguments
@@ -61,28 +73,34 @@ impl Renderer {
             .copied()
             .map(Value::Int)
             .collect::<Vec<_>>();
-        match eval_program(&self.program, entry, &arguments) {
+        match eval_program(program, entry, &arguments) {
             Ok(Value::Int(value)) => Ok(value),
             Ok(Value::Bool(_)) | Err(_) => Err(RendererRefusal::Evaluation),
         }
     }
 
-    fn render(&self, value: u32) -> Result<String, RendererRefusal> {
+    fn bytes(&self, source: &str, value: u32) -> Result<Vec<u8>, RendererRefusal> {
         if char::from_u32(value).is_none() {
             return Err(RendererRefusal::InvalidScalar);
         }
+        let bound_entry = DeclarationId::new("format.render-byte");
+        let program = self.binding.replay(source, &bound_entry)?;
         let value = i64::from(value);
-        let length = self.int("format.render-length", &[value])?;
+        let length = self.int(program, "format.render-length", &[value])?;
         let length = usize::try_from(length).map_err(|_| RendererRefusal::InvalidLength)?;
         if !(3..=MAX_RENDERED_BYTES).contains(&length) {
             return Err(RendererRefusal::InvalidLength);
         }
         let mut bytes = Vec::with_capacity(length);
         for index in 0..length {
-            let byte = self.int("format.render-byte", &[value, index as i64])?;
+            let byte = self.int(program, "format.render-byte", &[value, index as i64])?;
             bytes.push(u8::try_from(byte).map_err(|_| RendererRefusal::InvalidByte)?);
         }
-        String::from_utf8(bytes).map_err(|_| RendererRefusal::InvalidByte)
+        Ok(bytes)
+    }
+
+    fn render(&self, source: &str, value: u32) -> Result<String, RendererRefusal> {
+        String::from_utf8(self.bytes(source, value)?).map_err(|_| RendererRefusal::InvalidByte)
     }
 }
 
@@ -92,7 +110,43 @@ pub(crate) fn render(value: u32) -> Result<String, RendererRefusal> {
         .get_or_init(Renderer::derive)
         .as_ref()
         .map_err(|error| *error)?
-        .render(value)
+        .render(SOURCE, value)
+}
+
+/// Test-only access to the independently evaluated byte lane.  The ordinary
+/// interface intentionally remains text-shaped: this does not make a
+/// Kernel-0-owned formatter buffer or grant it production authority.
+#[cfg(test)]
+pub(crate) fn render_bytes(value: u32) -> Result<Vec<u8>, RendererRefusal> {
+    static RENDERER: OnceLock<Result<Renderer, RendererRefusal>> = OnceLock::new();
+    RENDERER
+        .get_or_init(Renderer::derive)
+        .as_ref()
+        .map_err(|error| *error)?
+        .bytes(SOURCE, value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_renderer_replays_the_exact_component_source_before_emitting_bytes() {
+        let renderer = Renderer::derive().expect("embedded component must derive");
+        assert_eq!(
+            renderer.bytes(SOURCE, u32::from('A')).unwrap(),
+            b"'A'".to_vec(),
+            "the exact embedded source must replay before byte-lane evaluation"
+        );
+
+        let drifted = SOURCE.replacen("value == 0", "value == 1", 1);
+        assert_ne!(drifted, SOURCE, "source-drift control must mutate bytes");
+        assert_eq!(
+            renderer.bytes(&drifted, u32::from('A')),
+            Err(RendererRefusal::Profile),
+            "a cached translation must not evaluate against changed component bytes"
+        );
+    }
 }
 
 #[cfg(test)]

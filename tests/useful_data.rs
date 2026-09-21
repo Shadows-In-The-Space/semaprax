@@ -71,6 +71,8 @@ mod network_io_wasm;
 mod process_io;
 #[path = "useful_data/project.rs"]
 mod project;
+#[path = "useful_data/task_service_logging_policy.rs"]
+mod task_service_logging_policy;
 #[path = "useful_data/task_service_project.rs"]
 mod task_service_project;
 #[path = "useful_data/vector_stats_project.rs"]

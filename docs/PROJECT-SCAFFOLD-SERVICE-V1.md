@@ -49,16 +49,16 @@ calculator's table-layout inventory: `README.md`, `AGENTS.md`,
 *contents* differ:
 
 - `semaprax.toml` uses the `useful-data.v1` profile and declares the bundled
-  `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.metrics`,
-  `std.export.policy`, `std.tracing`, and `std.webhook` decision packages under
-  `[dependencies]`, and
+  `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.log`, `std.log.redact`,
+  `std.metrics`, `std.export.policy`, `std.tracing`, and `std.webhook` decision
+  packages under `[dependencies]`, and
   exports `<name>.identifier_is_valid` and `<name>.method_is_rejected` under
   `[exports].web` (`Public Useful Data Export v1` admits no authored aggregate
   in a project that also declares a web export, so the domain record and its
   job are modeled as plain scalar facts, not a `record`).
 - `src/core.spx` composes auth/session, database/migration/transaction,
-  request-line, durable-job/idempotency, metric/export, trace-context, and
-  webhook-admission predicates by stable `@id`. Its webhook step combines the
+  request-line, durable-job/idempotency, bounded redacted-log, metric/export,
+  trace-context, and webhook-admission predicates by stable `@id`. Its webhook step combines the
   existing exact-descriptor idempotency outcome with a bounded signature
   envelope, symmetric replay window, attempt count, and caller-classified
   secret guard; it is a decision before any signing, queueing, retry
@@ -66,13 +66,12 @@ calculator's table-layout inventory: `README.md`, `AGENTS.md`,
 - `src/app.spx` calls the core module's `run_scenario`, which walks
   register/login/create-or-update/enqueue/complete/query/logout end to end and
   confirms both an unauthorized-access and an invalid-request rejection.
-- `src/tests.spx` asserts the same scenario plus four narrower cases: the
-  success path, unauthorized rejection, invalid-input rejection, and
-  idempotent duplicate enqueue.
+- `src/tests.spx` asserts the same scenario plus focused success, refusal,
+  idempotency, redaction, tracing, metric, export, and webhook cases.
 - `AGENTS.md` is the same base guide every template ships, with the table
   layout's "Project v1 function boundaries" section (declared aggregates
   cannot cross a scalar-signature function boundary) plus one more section
-  naming all eight bundled dependencies and their non-claims.
+  naming all ten bundled dependencies and their non-claims.
 
 This mirrors `examples/task-service-project/`, generalized with the
 `{{name}}`/`{{module}}` substitution every template uses; the reference
@@ -87,7 +86,7 @@ as the other two: schema `semaprax.project-scaffold.v3`, digest domain
 project passes the same in-memory check-and-test validation
 (`validate_owned_project_test`) before the capsule is returned to the caller,
 using the bundled dependency registry
-(`src/project/standard_dependencies.rs`) to resolve all eight decision
+(`src/project/standard_dependencies.rs`) to resolve all ten decision
 packages purely in memory -- no filesystem or network access, exactly like an
 ordinary project naming those packages in `[dependencies]`.
 

@@ -650,7 +650,7 @@ fn service_template_composes_bundled_dependencies_and_only_derives_under_tables_
         "web = [\"demo-project.identifier_is_valid\", \"demo-project.method_is_rejected\"]\n"
     ));
     assert!(manifest.contains(
-        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.db = \"=0.1.0\"\nstd.export.policy = \"=0.1.0\"\nstd.http = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.metrics = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\n"
+        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.db = \"=0.1.0\"\nstd.export.policy = \"=0.1.0\"\nstd.http = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.log = \"=0.1.0\"\nstd.log.redact = \"=0.1.0\"\nstd.metrics = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\n"
     ));
 
     let agents = derived.files()[1].utf8();

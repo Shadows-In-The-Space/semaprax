@@ -10,6 +10,7 @@ use function @id("task_service.core.migration_is_admitted") from task_service.co
 use function @id("task_service.core.registration_admitted") from task_service.core as registration_admitted;
 use function @id("task_service.core.request_is_admitted") from task_service.core as request_is_admitted;
 use function @id("task_service.core.run_scenario") from task_service.core as run_scenario;
+use function @id("task_service.core.structured_log_policy_is_admitted") from task_service.core as structured_log_policy_is_admitted;
 use function @id("task_service.core.task_owner_authorized") from task_service.core as task_owner_authorized;
 use function @id("task_service.core.trace_context_is_admitted") from task_service.core as trace_context_is_admitted;
 use function @id("task_service.core.update_is_committed") from task_service.core as update_is_committed;
@@ -69,6 +70,26 @@ fn duplicate_enqueue_is_idempotent() -> bool
 {
     let key = [1u8, 4u8, 3u8];
     enqueue_outcome(true, array_as_slice(key), array_as_slice(key)) == 1usize
+}
+
+// Structured-log admission is an effect-free policy only. The exact level and
+// field-count ceilings are bounded, and every protected-field classification
+// refuses before any host writer, exporter, or delivery adapter could observe
+// the event.
+@id("task_service.tests.structured_log_is_bounded_and_redacted")
+fn structured_log_is_bounded_and_redacted() -> bool
+{
+    let admitted = structured_log_policy_is_admitted(2u8, 2u8, 32usize, false, false, false, false, false, false);
+    let filtered = !structured_log_policy_is_admitted(1u8, 4u8, 1usize, false, false, false, false, false, false);
+    let invalid_level = !structured_log_policy_is_admitted(6u8, 2u8, 1usize, false, false, false, false, false, false);
+    let too_many_fields = !structured_log_policy_is_admitted(2u8, 2u8, 33usize, false, false, false, false, false, false);
+    let password = !structured_log_policy_is_admitted(2u8, 2u8, 1usize, true, false, false, false, false, false);
+    let api_key = !structured_log_policy_is_admitted(2u8, 2u8, 1usize, false, true, false, false, false, false);
+    let bearer = !structured_log_policy_is_admitted(2u8, 2u8, 1usize, false, false, true, false, false, false);
+    let session = !structured_log_policy_is_admitted(2u8, 2u8, 1usize, false, false, false, true, false, false);
+    let webhook_secret = !structured_log_policy_is_admitted(2u8, 2u8, 1usize, false, false, false, false, true, false);
+    let smtp_credential = !structured_log_policy_is_admitted(2u8, 2u8, 1usize, false, false, false, false, false, true);
+    admitted && filtered && invalid_level && too_many_fields && password && api_key && bearer && session && webhook_secret && smtp_credential
 }
 
 // A valid W3C-shaped trace context with no classified secret is admitted by
@@ -141,5 +162,5 @@ fn webhook_delivery_is_idempotent_and_bounded() -> bool
 @id("task_service.tests.main")
 fn main() -> i64
 {
-    if scenario_succeeds() && success_path() && unauthorized_is_rejected() && invalid_is_rejected() && migration_and_transaction_are_checked() && duplicate_enqueue_is_idempotent() && trace_context_is_admitted_test() && trace_context_is_refused_test() && completed_job_metric_is_guarded() && completed_job_export_is_bounded() && webhook_delivery_is_idempotent_and_bounded() { 0 } else { 1 }
+    if scenario_succeeds() && success_path() && unauthorized_is_rejected() && invalid_is_rejected() && migration_and_transaction_are_checked() && duplicate_enqueue_is_idempotent() && structured_log_is_bounded_and_redacted() && trace_context_is_admitted_test() && trace_context_is_refused_test() && completed_job_metric_is_guarded() && completed_job_export_is_bounded() && webhook_delivery_is_idempotent_and_bounded() { 0 } else { 1 }
 }

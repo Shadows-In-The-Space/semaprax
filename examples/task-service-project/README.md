@@ -14,11 +14,14 @@ semaprax run   examples/task-service-project
 
 ## What it demonstrates
 
-- **Eight `[dependencies]` edges on bundled standard-library packages**:
+- **Ten `[dependencies]` edges on bundled standard-library packages**:
   `std.auth = "=0.1.0"` (session lifecycle and password-policy bounds),
   `std.db = "=0.1.0"` (identifier, migration, and transaction decisions),
   `std.http = "=0.1.0"` (request-line admission),
   `std.jobs = "=0.1.0"` (claim/lease/retry/idempotency state machines), and
+  `std.log = "=0.1.0"` (bounded level admission),
+  `std.log.redact = "=0.1.0"` (bounded field-count and protected-field
+  admission),
   `std.metrics = "=0.1.0"` (guarded metric-series admission),
   `std.tracing = "=0.1.0"` (pure W3C trace-context shape and caller-classified
   secret policy), and `std.export.policy = "=0.1.0"` (bounded exporter-batch
@@ -27,8 +30,9 @@ semaprax run   examples/task-service-project
   secret policy). The first four packages became project-selectable when
   `std.auth`, `std.db`, `std.http`, and `std.jobs` joined the compiler's
   closed bundled-dependency registry; `std.tracing` was already selectable.
-  Metrics, export policy, and webhook are now likewise compiler-bundled. None
-  of these dependencies contributes telemetry emission or delivery authority.
+  Metrics, export policy, webhook, structured logging, and redaction are now
+  likewise compiler-bundled. None of these dependencies contributes telemetry
+  emission or delivery authority.
 - **Row-level authorization**, not just session validity:
   `task_service.core.task_owner_authorized` requires both a usable session
   *and* that the session's own account matches the row's owner. A retired
@@ -126,8 +130,10 @@ lives here rather than in source comments that a canonical rename would have
 to drop.
 
 **The observability policy closure now fits, but only as pure policy
-dependencies.** Its reached closure includes `std.encoding`, `std.log.redact`,
-and `std.num.overflow`; the checked-in
+dependencies.** Its reached closure includes `std.encoding`, `std.log`,
+`std.log.redact`, and `std.num.overflow`; the checked-in
+`structured_log_policy_is_admitted` call admits only a bounded level and at
+most 32 fields with no classified protected field. The
 `trace_context_is_admitted` call validates W3C-shaped IDs and refuses a
 caller-classified secret, while the metric and export calls refuse
 secret-classified labels, full queues, injected target IDs, stale webhook
@@ -135,10 +141,10 @@ timestamps, conflicting idempotency descriptors, over-budget attempts, and
 classified secret payloads.
 `tests/useful_data/task_service_project.rs` pins that real closure and runs
 the application’s tests on the interpreter, native C11, and Core Wasm; the
-entry runs on the interpreter and native C11 only. This is not `std.log`, an emission
-adapter, span export, or a claim that any observability profile is supported.
-`std.log` remains deliberately absent and is not represented as a supported
-fallback by this reference application.
+entry runs on the interpreter and native C11 only. This is not structured-log
+emission, an adapter, span export, or a claim that any observability profile is
+supported. `std.log` and `std.log.redact` remain bounded pure admission
+dependencies; no supported fallback writer or delivery exists here.
 
 **This project's manifest qualifies for a deterministic local OCI artifact.**
 `semaprax build --target oci examples/task-service-project --output <new-dir>`

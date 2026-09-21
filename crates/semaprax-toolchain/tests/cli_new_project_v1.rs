@@ -239,7 +239,7 @@ fn service_template_has_exact_bytes_and_passes_the_developer_loop() {
     );
     let manifest = String::from_utf8(files["semaprax.toml"].clone()).unwrap();
     assert!(manifest.contains(
-        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.db = \"=0.1.0\"\nstd.export.policy = \"=0.1.0\"\nstd.http = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.metrics = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\nstd.webhook = \"=0.1.0\"\n"
+        "[dependencies]\nstd.auth = \"=0.1.0\"\nstd.db = \"=0.1.0\"\nstd.export.policy = \"=0.1.0\"\nstd.http = \"=0.1.0\"\nstd.jobs = \"=0.1.0\"\nstd.log = \"=0.1.0\"\nstd.log.redact = \"=0.1.0\"\nstd.metrics = \"=0.1.0\"\nstd.tracing = \"=0.1.0\"\nstd.webhook = \"=0.1.0\"\n"
     ));
     for command in ["check", "test", "run"] {
         assert_success(&cli(&fixture.root, &[command, "demo-svc/semaprax.toml"]));

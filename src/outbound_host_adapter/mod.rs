@@ -57,8 +57,10 @@ pub use trace_context::{
 };
 pub use trace_http::{deliver_traced_http, prepare_traced_http_delivery, TracedHttpRequest};
 pub use tracing::{
-    prepare_export_event, ExportEventLedgerRefusal, ExportEventReceipt, ExportEventSession,
-    PreparedExportEvent,
+    prepare_export_event, DurableExportEventOutcome, DurableExportEventRefusal,
+    ExportEventLedgerRefusal, ExportEventReceipt, ExportEventSession, ExportSessionCheckpoint,
+    ExportSessionCheckpointRefusal, ExportSessionCheckpointStore, ExportSessionRestoreCapability,
+    ExportSessionRestoreRefusal, PreparedExportEvent, MAX_EXPORT_SESSION_CHECKPOINT_BYTES,
 };
 pub use webhook::{
     prepare_webhook_delivery, PreparedWebhookDelivery, WebhookDeliveryReceipt,

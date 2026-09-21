@@ -15,6 +15,9 @@ const EXPORT_IDEMPOTENCY_DOMAIN: &[u8] = b"semaprax.outbound.export-event.idempo
 const SESSION_IDENTITY_DOMAIN: &[u8] = b"semaprax.outbound.export-session.identity.v1\0";
 const POLICY_COMMITMENT_DOMAIN: &[u8] = b"semaprax.outbound.export-session.policy.v1\0";
 const EVENT_COMMITMENT_DOMAIN: &[u8] = b"semaprax.outbound.export-session.event.v1\0";
+const SESSION_CHECKPOINT_SCHEMA: &str = "semaprax.outbound.export-session-checkpoint.v1";
+const SESSION_CHECKPOINT_DIGEST_DOMAIN: &[u8] = b"semaprax.outbound.export-session-checkpoint.v1\0";
+pub const MAX_EXPORT_SESSION_CHECKPOINT_BYTES: usize = 192 * 1024;
 
 /// An admitted operational export that has not reached an adapter.
 ///
@@ -90,6 +93,335 @@ struct ExportCommitments {
     request: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ExportCheckpointCommitments {
+    policy: String,
+    event: String,
+    request: String,
+    ledger_identity: String,
+}
+
+/// Authority-free, bounded durable image of one typed export session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExportSessionCheckpoint {
+    ledger: LedgerCheckpoint,
+    commitments: BTreeMap<String, ExportCheckpointCommitments>,
+}
+
+impl ExportSessionCheckpoint {
+    fn from_session(session: &ExportEventSession) -> Result<Self, ExportSessionCheckpointRefusal> {
+        if session.commitments.len() != session.ledger.len() {
+            return Err(ExportSessionCheckpointRefusal::BindingMismatch);
+        }
+        let ledger = session.ledger.checkpoint()?;
+        let commitments = bind_checkpoint_commitments(&ledger, &session.commitments)?;
+        let checkpoint = Self {
+            ledger,
+            commitments,
+        };
+        if checkpoint.render().len() > MAX_EXPORT_SESSION_CHECKPOINT_BYTES {
+            return Err(ExportSessionCheckpointRefusal::TooLarge);
+        }
+        Ok(checkpoint)
+    }
+
+    pub fn render(&self) -> String {
+        let commitments = self
+            .commitments
+            .iter()
+            .map(|(identity, value)| {
+                serde_json::json!({
+                    "event": value.event,
+                    "identity": identity,
+                    "ledger_identity": value.ledger_identity,
+                    "policy": value.policy,
+                    "request": value.request,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut value = serde_json::json!({
+            "commitments": commitments,
+            "ledger": self.ledger.render(),
+            "ledger_digest": self.ledger.digest(),
+            "schema": SESSION_CHECKPOINT_SCHEMA,
+        });
+        value.sort_all_objects();
+        serde_json::to_string(&value).expect("bounded export session checkpoint encodes")
+    }
+
+    pub fn len(&self) -> usize {
+        self.ledger.len()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.ledger.capacity()
+    }
+
+    pub fn digest(&self) -> String {
+        session_checkpoint_digest(self.render().as_bytes())
+    }
+
+    pub fn decode(
+        bytes: &[u8],
+        expected_digest: &str,
+    ) -> Result<Self, ExportSessionCheckpointRefusal> {
+        if bytes.len() > MAX_EXPORT_SESSION_CHECKPOINT_BYTES {
+            return Err(ExportSessionCheckpointRefusal::TooLarge);
+        }
+        if !valid_sha256(expected_digest) || session_checkpoint_digest(bytes) != expected_digest {
+            return Err(ExportSessionCheckpointRefusal::BindingMismatch);
+        }
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|_| ExportSessionCheckpointRefusal::Malformed)?;
+        let _root = value
+            .as_object()
+            .filter(|root| root.len() == 4)
+            .ok_or(ExportSessionCheckpointRefusal::Malformed)?;
+        if value["schema"].as_str() != Some(SESSION_CHECKPOINT_SCHEMA) {
+            return Err(ExportSessionCheckpointRefusal::Malformed);
+        }
+        let ledger_wire = value["ledger"]
+            .as_str()
+            .ok_or(ExportSessionCheckpointRefusal::Malformed)?;
+        let ledger_digest = value["ledger_digest"]
+            .as_str()
+            .ok_or(ExportSessionCheckpointRefusal::Malformed)?;
+        let ledger = LedgerCheckpoint::decode(ledger_wire.as_bytes(), ledger_digest)?;
+        let entries = value["commitments"]
+            .as_array()
+            .ok_or(ExportSessionCheckpointRefusal::Malformed)?;
+        if entries.len() > ledger.capacity() {
+            return Err(ExportSessionCheckpointRefusal::CapacityExceeded);
+        }
+        let mut commitments = BTreeMap::new();
+        for entry in entries {
+            let object = entry
+                .as_object()
+                .filter(|object| object.len() == 5)
+                .ok_or(ExportSessionCheckpointRefusal::Malformed)?;
+            let member = |name| {
+                object
+                    .get(name)
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| valid_sha256(value))
+                    .map(str::to_owned)
+                    .ok_or(ExportSessionCheckpointRefusal::Malformed)
+            };
+            let identity = member("identity")?;
+            let binding = ExportCommitments {
+                policy: member("policy")?,
+                event: member("event")?,
+                request: member("request")?,
+            };
+            let binding = ExportCheckpointCommitments {
+                policy: binding.policy,
+                event: binding.event,
+                request: binding.request,
+                ledger_identity: member("ledger_identity")?,
+            };
+            if commitments.insert(identity, binding).is_some() {
+                return Err(ExportSessionCheckpointRefusal::Malformed);
+            }
+        }
+        if commitments.len() != ledger.len() {
+            return Err(ExportSessionCheckpointRefusal::BindingMismatch);
+        }
+        let ledger_bindings = ledger_identity_request_bindings(&ledger)?;
+        if commitments
+            .values()
+            .any(|binding| ledger_bindings.get(&binding.request) != Some(&binding.ledger_identity))
+        {
+            return Err(ExportSessionCheckpointRefusal::BindingMismatch);
+        }
+        let checkpoint = Self {
+            ledger,
+            commitments,
+        };
+        if checkpoint.render().as_bytes() != bytes {
+            return Err(ExportSessionCheckpointRefusal::NonCanonical);
+        }
+        Ok(checkpoint)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExportSessionCheckpointRefusal {
+    TooLarge,
+    Malformed,
+    NonCanonical,
+    BindingMismatch,
+    CapacityExceeded,
+    Ledger(LedgerCheckpointRefusal),
+}
+
+impl From<LedgerCheckpointRefusal> for ExportSessionCheckpointRefusal {
+    fn from(value: LedgerCheckpointRefusal) -> Self {
+        Self::Ledger(value)
+    }
+}
+
+pub trait ExportSessionCheckpointStore {
+    fn commit(&mut self, checkpoint: &ExportSessionCheckpoint) -> CheckpointCommit;
+}
+
+pub struct ExportSessionRestoreCapability {
+    expected_digest: String,
+    expected_capacity: usize,
+}
+
+impl ExportSessionRestoreCapability {
+    pub fn grant_for_trusted_host(
+        expected_digest: impl Into<String>,
+        expected_capacity: usize,
+    ) -> Result<Self, ExportSessionRestoreRefusal> {
+        let expected_digest = expected_digest.into();
+        if !valid_sha256(&expected_digest)
+            || expected_capacity == 0
+            || expected_capacity > MAX_LEDGER_ENTRIES
+        {
+            return Err(ExportSessionRestoreRefusal::InvalidCapability);
+        }
+        Ok(Self {
+            expected_digest,
+            expected_capacity,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExportSessionRestoreRefusal {
+    InvalidCapability,
+    Checkpoint(ExportSessionCheckpointRefusal),
+    CapacityMismatch,
+    Ledger(LedgerRestoreRefusal),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DurableExportEventOutcome {
+    Dispatched(ExportEventReceipt),
+    Replayed(ExportEventReceipt),
+    IntentNotCommitted,
+    IntentUncertain(ExportEventReceipt),
+    SettlementUncertain(ExportEventReceipt),
+}
+
+impl DurableExportEventOutcome {
+    pub fn receipt(&self) -> Option<&ExportEventReceipt> {
+        match self {
+            Self::Dispatched(receipt)
+            | Self::Replayed(receipt)
+            | Self::IntentUncertain(receipt)
+            | Self::SettlementUncertain(receipt) => Some(receipt),
+            Self::IntentNotCommitted => None,
+        }
+    }
+
+    pub fn was_dispatched(&self) -> bool {
+        matches!(self, Self::Dispatched(_) | Self::SettlementUncertain(_))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DurableExportEventRefusal {
+    Session(ExportEventLedgerRefusal),
+    Durable(DurableLedgerRefusal),
+    Checkpoint(ExportSessionCheckpointRefusal),
+}
+
+fn ledger_identity_request_bindings(
+    ledger: &LedgerCheckpoint,
+) -> Result<BTreeMap<String, String>, ExportSessionCheckpointRefusal> {
+    let value: serde_json::Value = serde_json::from_str(&ledger.render())
+        .map_err(|_| ExportSessionCheckpointRefusal::Malformed)?;
+    let entries = value["entries"]
+        .as_array()
+        .ok_or(ExportSessionCheckpointRefusal::Malformed)?;
+    let mut by_request = BTreeMap::new();
+    for entry in entries {
+        let request = entry["request_digest"]
+            .as_str()
+            .filter(|value| valid_sha256(value))
+            .ok_or(ExportSessionCheckpointRefusal::Malformed)?;
+        let identity = entry["identity_digest"]
+            .as_str()
+            .filter(|value| valid_sha256(value))
+            .ok_or(ExportSessionCheckpointRefusal::Malformed)?;
+        if by_request
+            .insert(request.to_owned(), identity.to_owned())
+            .is_some()
+        {
+            return Err(ExportSessionCheckpointRefusal::BindingMismatch);
+        }
+    }
+    Ok(by_request)
+}
+
+fn bind_checkpoint_commitments(
+    ledger: &LedgerCheckpoint,
+    commitments: &BTreeMap<String, ExportCommitments>,
+) -> Result<BTreeMap<String, ExportCheckpointCommitments>, ExportSessionCheckpointRefusal> {
+    if commitments.len() != ledger.len() {
+        return Err(ExportSessionCheckpointRefusal::BindingMismatch);
+    }
+    let mut ledger_identities = ledger_identity_request_bindings(ledger)?;
+    let mut bound = BTreeMap::new();
+    for (identity, binding) in commitments {
+        let ledger_identity = ledger_identities
+            .remove(&binding.request)
+            .ok_or(ExportSessionCheckpointRefusal::BindingMismatch)?;
+        bound.insert(
+            identity.clone(),
+            ExportCheckpointCommitments {
+                policy: binding.policy.clone(),
+                event: binding.event.clone(),
+                request: binding.request.clone(),
+                ledger_identity,
+            },
+        );
+    }
+    if !ledger_identities.is_empty() {
+        return Err(ExportSessionCheckpointRefusal::BindingMismatch);
+    }
+    Ok(bound)
+}
+
+struct TypedCheckpointStore<'a, Store> {
+    store: &'a mut Store,
+    commitments: &'a BTreeMap<String, ExportCommitments>,
+}
+
+fn commit_typed_checkpoint(
+    store: &mut impl ExportSessionCheckpointStore,
+    ledger: &LedgerCheckpoint,
+    commitments: &BTreeMap<String, ExportCommitments>,
+    maximum_bytes: usize,
+) -> CheckpointCommit {
+    let Ok(commitments) = bind_checkpoint_commitments(ledger, commitments) else {
+        return CheckpointCommit::NotCommitted;
+    };
+    let checkpoint = ExportSessionCheckpoint {
+        ledger: ledger.clone(),
+        commitments,
+    };
+    if checkpoint.render().len() > maximum_bytes {
+        return CheckpointCommit::NotCommitted;
+    }
+    store.commit(&checkpoint)
+}
+
+impl<Store: ExportSessionCheckpointStore> LedgerCheckpointStore
+    for TypedCheckpointStore<'_, Store>
+{
+    fn commit(&mut self, ledger: &LedgerCheckpoint) -> CheckpointCommit {
+        commit_typed_checkpoint(
+            self.store,
+            ledger,
+            self.commitments,
+            MAX_EXPORT_SESSION_CHECKPOINT_BYTES,
+        )
+    }
+}
+
 /// Bounded process-local reconciliation state for operational exports.
 ///
 /// The session retains only domain-separated SHA-256 commitments plus the
@@ -117,6 +449,53 @@ impl ExportEventSession {
     /// An imported checkpoint is read-only and cannot restore this session.
     pub fn checkpoint(&self) -> Result<LedgerCheckpoint, LedgerCheckpointRefusal> {
         self.ledger.checkpoint()
+    }
+
+    /// Export the typed session state, including policy/event/request
+    /// commitments needed to refuse drift after authenticated restoration.
+    pub fn session_checkpoint(
+        &self,
+    ) -> Result<ExportSessionCheckpoint, ExportSessionCheckpointRefusal> {
+        ExportSessionCheckpoint::from_session(self)
+    }
+
+    /// Restore dispatch-capable typed state only with exact host provenance.
+    /// This creates no storage, timer, retry, or adapter authority.
+    pub fn restore_authenticated(
+        bytes: &[u8],
+        capability: ExportSessionRestoreCapability,
+    ) -> Result<Self, ExportSessionRestoreRefusal> {
+        let checkpoint = ExportSessionCheckpoint::decode(bytes, &capability.expected_digest)
+            .map_err(ExportSessionRestoreRefusal::Checkpoint)?;
+        if checkpoint.ledger.capacity() != capability.expected_capacity {
+            return Err(ExportSessionRestoreRefusal::CapacityMismatch);
+        }
+        let ledger_bytes = checkpoint.ledger.render();
+        let ledger_capability = LedgerRestoreCapability::grant_for_trusted_host(
+            checkpoint.ledger.digest(),
+            checkpoint.ledger.capacity(),
+        )
+        .map_err(ExportSessionRestoreRefusal::Ledger)?;
+        let ledger =
+            HostDeliveryLedger::restore_authenticated(ledger_bytes.as_bytes(), ledger_capability)
+                .map_err(ExportSessionRestoreRefusal::Ledger)?;
+        Ok(Self {
+            ledger,
+            commitments: checkpoint
+                .commitments
+                .into_iter()
+                .map(|(identity, binding)| {
+                    (
+                        identity,
+                        ExportCommitments {
+                            policy: binding.policy,
+                            event: binding.event,
+                            request: binding.request,
+                        },
+                    )
+                })
+                .collect(),
+        })
     }
 
     pub fn verify_checkpoint(
@@ -215,6 +594,133 @@ impl ExportEventSession {
             replayed,
         })
     }
+
+    /// Persist typed intent before physical dispatch and typed settlement
+    /// afterwards. Only a `Committed` intent ACK permits `adapter.send`.
+    pub fn reconcile_durable(
+        &mut self,
+        prepared: PreparedExportEvent,
+        store: &mut impl ExportSessionCheckpointStore,
+        adapter: &mut impl OutboundAdapter,
+    ) -> Result<DurableExportEventOutcome, DurableExportEventRefusal> {
+        if policy_digest(&prepared.capability.policy) != prepared.policy_digest {
+            return Err(DurableExportEventRefusal::Session(
+                ExportEventLedgerRefusal::PolicyChanged,
+            ));
+        }
+        if event_digest(prepared.request.body()) != prepared.event_digest {
+            return Err(DurableExportEventRefusal::Session(
+                ExportEventLedgerRefusal::EventChanged,
+            ));
+        }
+        if request_digest(&prepared.request) != prepared.request_digest {
+            return Err(DurableExportEventRefusal::Session(
+                ExportEventLedgerRefusal::RequestChanged,
+            ));
+        }
+        if let Some(existing) = self.commitments.get(&prepared.session_identity_digest) {
+            if existing.policy != prepared.policy_digest {
+                return Err(DurableExportEventRefusal::Session(
+                    ExportEventLedgerRefusal::PolicyChanged,
+                ));
+            }
+            if existing.event != prepared.event_digest {
+                return Err(DurableExportEventRefusal::Session(
+                    ExportEventLedgerRefusal::EventChanged,
+                ));
+            }
+            if existing.request != prepared.request_digest {
+                return Err(DurableExportEventRefusal::Session(
+                    ExportEventLedgerRefusal::RequestChanged,
+                ));
+            }
+        }
+        let inserted = if self
+            .commitments
+            .contains_key(&prepared.session_identity_digest)
+        {
+            false
+        } else {
+            self.commitments.insert(
+                prepared.session_identity_digest.clone(),
+                ExportCommitments {
+                    policy: prepared.policy_digest.clone(),
+                    event: prepared.event_digest.clone(),
+                    request: prepared.request_digest.clone(),
+                },
+            );
+            true
+        };
+        let mut typed_store = TypedCheckpointStore {
+            store,
+            commitments: &self.commitments,
+        };
+        let outcome = self.ledger.reconcile_durable(
+            prepared.identity.clone(),
+            &prepared.request,
+            &mut typed_store,
+            |request| {
+                let observation = adapter.send(request);
+                settlement_disposition(request, &observation)
+            },
+        );
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if inserted {
+                    self.commitments.remove(&prepared.session_identity_digest);
+                }
+                return Err(DurableExportEventRefusal::Durable(error));
+            }
+        };
+        if matches!(outcome, DurableLedgerOutcome::IntentNotCommitted) && inserted {
+            self.commitments.remove(&prepared.session_identity_digest);
+        }
+        Ok(match outcome {
+            DurableLedgerOutcome::Dispatched(record) => {
+                DurableExportEventOutcome::Dispatched(durable_receipt(prepared, record, false))
+            }
+            DurableLedgerOutcome::Replayed(record) => {
+                DurableExportEventOutcome::Replayed(durable_receipt(prepared, record, true))
+            }
+            DurableLedgerOutcome::IntentNotCommitted => {
+                DurableExportEventOutcome::IntentNotCommitted
+            }
+            DurableLedgerOutcome::IntentUncertain(record) => {
+                DurableExportEventOutcome::IntentUncertain(durable_receipt(prepared, record, false))
+            }
+            DurableLedgerOutcome::SettlementUncertain(record) => {
+                DurableExportEventOutcome::SettlementUncertain(durable_receipt(
+                    prepared, record, false,
+                ))
+            }
+        })
+    }
+}
+
+fn durable_receipt(
+    prepared: PreparedExportEvent,
+    record: LedgerRecord,
+    replayed: bool,
+) -> ExportEventReceipt {
+    ExportEventReceipt {
+        evidence: delivery_evidence(
+            prepared.capability,
+            prepared.origin,
+            prepared.event_id,
+            prepared.idempotency_key,
+            prepared.request,
+            record.disposition().clone(),
+        ),
+        replayed,
+    }
+}
+
+fn session_checkpoint_digest(bytes: &[u8]) -> String {
+    let mut hash = Sha256::new();
+    hash.update(SESSION_CHECKPOINT_DIGEST_DOMAIN);
+    hash.update(bytes);
+    format!("sha256:{:x}", crate::digest_hex::LowerHex(hash.finalize()))
 }
 
 /// Validate and construct the exact structured-export request that a session

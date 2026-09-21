@@ -200,6 +200,21 @@ impl SpanExportSession {
         self.inner.checkpoint()
     }
 
+    pub fn session_checkpoint(
+        &self,
+    ) -> Result<ExportSessionCheckpoint, ExportSessionCheckpointRefusal> {
+        self.inner.session_checkpoint()
+    }
+
+    pub fn restore_authenticated(
+        bytes: &[u8],
+        capability: ExportSessionRestoreCapability,
+    ) -> Result<Self, ExportSessionRestoreRefusal> {
+        Ok(Self {
+            inner: ExportEventSession::restore_authenticated(bytes, capability)?,
+        })
+    }
+
     pub fn verify_checkpoint(
         &self,
         checkpoint: &LedgerCheckpoint,
@@ -213,6 +228,15 @@ impl SpanExportSession {
         adapter: &mut impl OutboundAdapter,
     ) -> Result<ExportEventReceipt, ExportEventLedgerRefusal> {
         self.inner.reconcile(prepared.inner, adapter)
+    }
+
+    pub fn reconcile_durable(
+        &mut self,
+        prepared: PreparedSpanExport,
+        store: &mut impl ExportSessionCheckpointStore,
+        adapter: &mut impl OutboundAdapter,
+    ) -> Result<DurableExportEventOutcome, DurableExportEventRefusal> {
+        self.inner.reconcile_durable(prepared.inner, store, adapter)
     }
 }
 

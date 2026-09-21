@@ -249,3 +249,25 @@ fn span_attribute_and_session_maximum_plus_one_refuse() {
         Err(Refusal::RequestTooLarge)
     ));
 }
+
+struct RefusingStore;
+
+impl ExportSessionCheckpointStore for RefusingStore {
+    fn commit(&mut self, _checkpoint: &ExportSessionCheckpoint) -> CheckpointCommit {
+        CheckpointCommit::NotCommitted
+    }
+}
+
+#[test]
+fn span_session_exposes_typed_durable_intent_refusal() {
+    let mut session = SpanExportSession::new(1).unwrap();
+    let mut adapter = Adapter::default();
+    assert_eq!(
+        session
+            .reconcile_durable(prepare(span()), &mut RefusingStore, &mut adapter)
+            .unwrap(),
+        DurableExportEventOutcome::IntentNotCommitted
+    );
+    assert!(adapter.calls.is_empty());
+    assert_eq!(session.len(), 0);
+}

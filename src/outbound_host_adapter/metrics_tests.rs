@@ -283,3 +283,42 @@ fn distinct_observations_and_metric_kinds_have_bounded_independent_state() {
     assert_eq!(session.len(), 3);
     assert!(MetricExportSession::new(MAX_LEDGER_ENTRIES + 1).is_err());
 }
+
+#[derive(Default)]
+struct SessionStore(Vec<ExportSessionCheckpoint>);
+
+impl ExportSessionCheckpointStore for SessionStore {
+    fn commit(&mut self, checkpoint: &ExportSessionCheckpoint) -> CheckpointCommit {
+        self.0.push(checkpoint.clone());
+        CheckpointCommit::Committed
+    }
+}
+
+#[test]
+fn metric_session_exposes_typed_durable_reconcile_and_restore() {
+    let mut session = MetricExportSession::new(1).unwrap();
+    let mut store = SessionStore::default();
+    let mut adapter = Adapter::default();
+    let outcome = session
+        .reconcile_durable(
+            prepare(
+                "invocation-durable-metric",
+                metric("metric-durable", Vec::new()),
+            ),
+            &mut store,
+            &mut adapter,
+        )
+        .unwrap();
+    assert!(matches!(outcome, DurableExportEventOutcome::Dispatched(_)));
+    assert_eq!(store.0.len(), 2);
+    let checkpoint = session.session_checkpoint().unwrap();
+    let capability = ExportSessionRestoreCapability::grant_for_trusted_host(
+        checkpoint.digest(),
+        checkpoint.capacity(),
+    )
+    .unwrap();
+    let restored =
+        MetricExportSession::restore_authenticated(checkpoint.render().as_bytes(), capability)
+            .unwrap();
+    assert_eq!(restored.len(), 1);
+}

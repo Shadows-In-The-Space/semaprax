@@ -1,4 +1,5 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::{cell::Cell, rc::Rc};
 
 use super::*;
 
@@ -31,6 +32,20 @@ struct PanickingAdapter;
 impl OutboundAdapter for PanickingAdapter {
     fn send(&mut self, _request: &PreparedRequest) -> AdapterObservation {
         panic!("simulated exporter unwind after physical start")
+    }
+}
+
+struct AlwaysAcceptingAdapter {
+    calls: usize,
+}
+
+impl OutboundAdapter for AlwaysAcceptingAdapter {
+    fn send(&mut self, _request: &PreparedRequest) -> AdapterObservation {
+        self.calls += 1;
+        AdapterObservation::Response {
+            status: 202,
+            body: Vec::new(),
+        }
     }
 }
 
@@ -379,4 +394,189 @@ fn panic_is_sticky_and_capacity_refuses_before_adapter_entry() {
         ))
     );
     assert!(capacity_adapter.calls.is_empty());
+}
+
+#[derive(Default)]
+struct DurableStore {
+    outcomes: Vec<CheckpointCommit>,
+    checkpoints: Vec<ExportSessionCheckpoint>,
+    commits: Rc<Cell<usize>>,
+}
+
+impl ExportSessionCheckpointStore for DurableStore {
+    fn commit(&mut self, checkpoint: &ExportSessionCheckpoint) -> CheckpointCommit {
+        self.checkpoints.push(checkpoint.clone());
+        self.commits.set(self.commits.get() + 1);
+        if self.outcomes.is_empty() {
+            CheckpointCommit::Committed
+        } else {
+            self.outcomes.remove(0)
+        }
+    }
+}
+
+struct AckObservingAdapter<'a> {
+    commits: &'a Cell<usize>,
+    calls: usize,
+}
+
+impl OutboundAdapter for AckObservingAdapter<'_> {
+    fn send(&mut self, _request: &PreparedRequest) -> AdapterObservation {
+        assert_eq!(self.commits.get(), 1, "typed intent ACK precedes dispatch");
+        self.calls += 1;
+        AdapterObservation::Response {
+            status: 202,
+            body: Vec::new(),
+        }
+    }
+}
+
+#[test]
+fn durable_typed_session_acks_before_dispatch_and_restores_exact_bindings() {
+    let mut session = ExportEventSession::new(2).unwrap();
+    let mut store = DurableStore::default();
+    let commits = Rc::clone(&store.commits);
+    let mut adapter = AckObservingAdapter {
+        commits: &commits,
+        calls: 0,
+    };
+    let outcome = session
+        .reconcile_durable(
+            prepare("invocation-durable", event("31", b"durable-secret")),
+            &mut store,
+            &mut adapter,
+        )
+        .unwrap();
+    assert!(matches!(outcome, DurableExportEventOutcome::Dispatched(_)));
+    assert!(outcome.was_dispatched());
+    assert_eq!(adapter.calls, 1);
+    assert_eq!(store.checkpoints.len(), 2);
+    assert_eq!(store.checkpoints[0].len(), 1);
+
+    let checkpoint = session.session_checkpoint().unwrap();
+    let wire = checkpoint.render();
+    let capability = ExportSessionRestoreCapability::grant_for_trusted_host(
+        checkpoint.digest(),
+        checkpoint.capacity(),
+    )
+    .unwrap();
+    let mut restored = ExportEventSession::restore_authenticated(wire.as_bytes(), capability)
+        .expect("authenticated typed state restores");
+    let mut replay_adapter = RecordingAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    let replay = restored
+        .reconcile_durable(
+            prepare("invocation-durable", event("31", b"durable-secret")),
+            &mut DurableStore::default(),
+            &mut replay_adapter,
+        )
+        .unwrap();
+    assert!(matches!(replay, DurableExportEventOutcome::Replayed(_)));
+    assert!(replay_adapter.calls.is_empty());
+
+    let mut drift_adapter = RecordingAdapter::returning(AdapterObservation::DeadlineAfterStart);
+    assert_eq!(
+        restored.reconcile_durable(
+            prepare("invocation-durable", event("32", b"durable-secret")),
+            &mut DurableStore::default(),
+            &mut drift_adapter,
+        ),
+        Err(DurableExportEventRefusal::Session(
+            ExportEventLedgerRefusal::EventChanged
+        ))
+    );
+    assert!(drift_adapter.calls.is_empty());
+}
+
+#[test]
+fn durable_typed_session_refuses_unacked_intent_and_hostile_checkpoint_bytes() {
+    let mut session = ExportEventSession::new(1).unwrap();
+    let mut store = DurableStore {
+        outcomes: vec![CheckpointCommit::NotCommitted],
+        checkpoints: Vec::new(),
+        commits: Rc::new(Cell::new(0)),
+    };
+    let mut adapter = RecordingAdapter::returning(AdapterObservation::Response {
+        status: 202,
+        body: Vec::new(),
+    });
+    assert_eq!(
+        session
+            .reconcile_durable(
+                prepare("invocation-unacked", event("31", b"secret")),
+                &mut store,
+                &mut adapter,
+            )
+            .unwrap(),
+        DurableExportEventOutcome::IntentNotCommitted
+    );
+    assert!(adapter.calls.is_empty());
+    assert_eq!(session.len(), 0);
+
+    let checkpoint = ExportEventSession::new(1)
+        .unwrap()
+        .session_checkpoint()
+        .unwrap();
+    let wire = checkpoint.render();
+    assert_eq!(
+        ExportSessionCheckpoint::decode(
+            &vec![b'x'; MAX_EXPORT_SESSION_CHECKPOINT_BYTES + 1],
+            &checkpoint.digest(),
+        ),
+        Err(ExportSessionCheckpointRefusal::TooLarge)
+    );
+    let mut changed: serde_json::Value = serde_json::from_str(&wire).unwrap();
+    changed["unknown"] = serde_json::Value::Bool(true);
+    changed.sort_all_objects();
+    let changed = serde_json::to_vec(&changed).unwrap();
+    let changed_digest = session_checkpoint_digest(&changed);
+    assert_eq!(
+        ExportSessionCheckpoint::decode(&changed, &changed_digest),
+        Err(ExportSessionCheckpointRefusal::Malformed)
+    );
+    let committed = store.checkpoints[0].render();
+    let mut mismatched: serde_json::Value = serde_json::from_str(&committed).unwrap();
+    mismatched["commitments"][0]["ledger_identity"] = serde_json::Value::String(
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+    );
+    mismatched.sort_all_objects();
+    let mismatched = serde_json::to_vec(&mismatched).unwrap();
+    let mismatched_digest = session_checkpoint_digest(&mismatched);
+    assert_eq!(
+        ExportSessionCheckpoint::decode(&mismatched, &mismatched_digest),
+        Err(ExportSessionCheckpointRefusal::BindingMismatch)
+    );
+    let mut noncanonical = wire.into_bytes();
+    noncanonical.insert(0, b' ');
+    let digest = session_checkpoint_digest(&noncanonical);
+    assert_eq!(
+        ExportSessionCheckpoint::decode(&noncanonical, &digest),
+        Err(ExportSessionCheckpointRefusal::NonCanonical)
+    );
+}
+
+#[test]
+fn typed_checkpoint_size_guard_precedes_store_commit() {
+    let mut session = ExportEventSession::new(1).unwrap();
+    let mut adapter = AlwaysAcceptingAdapter { calls: 0 };
+    session
+        .reconcile(
+            prepare("capacity", event_with_id("event-capacity", "31", b"secret")),
+            &mut adapter,
+        )
+        .unwrap();
+    assert_eq!(adapter.calls, 1);
+
+    let commits = Rc::new(Cell::new(0));
+    let mut store = DurableStore {
+        outcomes: vec![CheckpointCommit::Committed],
+        checkpoints: Vec::new(),
+        commits: Rc::clone(&commits),
+    };
+    let ledger = session.ledger.checkpoint().unwrap();
+    let exact = session.session_checkpoint().unwrap().render().len();
+    assert_eq!(
+        commit_typed_checkpoint(&mut store, &ledger, &session.commitments, exact - 1),
+        CheckpointCommit::NotCommitted
+    );
+    assert_eq!(commits.get(), 0, "oversized checkpoint reached the store");
 }

@@ -88,6 +88,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import secrets
 import shutil
@@ -102,6 +103,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 PROOF_DIR = REPO_ROOT / "proofs" / "kernel0-lean"
 SOURCE = PROOF_DIR / "Kernel0.lean"
+TRANSACTION_SOURCE = PROOF_DIR / "TransactionReplay.lean"
+TRANSACTION_SOURCE_SHA256 = "ccb2b1cd0ab1a6bad6407260368f84581178d35bbaac54364fbb92068db16bcc"
 RECURSIVE_CONTROL = PROOF_DIR / "negative" / "RecursiveCallGraph.lean"
 FUEL_CONTROL = PROOF_DIR / "negative" / "InsufficientNormalizationFuel.lean"
 STRUCTURAL_CONTROL = PROOF_DIR / "negative" / "ForgedStructuralDecrease.lean"
@@ -967,6 +970,47 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
             f"{sorted(ALLOWED_AXIOMS)})"
         )
 
+    # The transaction theorem is useful only when exact compiler-produced
+    # rename/replace fixtures elaborate too. The Rust test fresh-replays the
+    # engine, writes a gate-owned create-new fixture, invokes this pinned Lean,
+    # and audits every general and concrete theorem's axiom report.
+    if not failures:
+        lean = shutil.which("lean")
+        cargo = shutil.which("cargo")
+        if lean is None or cargo is None:
+            failures.append(
+                "transaction replay fixture gate requires both `lean` and `cargo` on PATH"
+            )
+        else:
+            with tempfile.TemporaryDirectory(prefix="semaprax-transaction-lean-") as temporary:
+                fixture = Path(temporary) / "TransactionReplayFixture.lean"
+                environment = dict(os.environ)
+                environment["SEMAPRAX_TRANSACTION_LEAN"] = lean
+                environment["SEMAPRAX_TRANSACTION_FIXTURE"] = str(fixture)
+                transaction = subprocess.run(
+                    [
+                        cargo,
+                        "test",
+                        "--locked",
+                        "-p",
+                        "semaprax",
+                        "--lib",
+                        "exact_rename_and_replace_fixtures_are_deterministic_and_kernel_checkable",
+                    ],
+                    cwd=str(REPO_ROOT),
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                )
+            output = transaction.stdout + transaction.stderr
+            if transaction.returncode != 0 or "1 passed" not in output:
+                failures.append(
+                    "transaction replay fixture gate did not execute exactly one passing test:\n"
+                    + output
+                )
+            else:
+                print(f"{TAG}: transaction replay real-fixture Lean gate OK (1 passed)")
+
     # The built module supplies the real CallGraphRanked definition. A forged
     # constant rank for its nested recursive fixture must be rejected by the
     # kernel, specifically at the <= proof offered where strict < is required.
@@ -1092,8 +1136,29 @@ def main() -> int:
     if not SOURCE.is_file():
         fail(f"expected proof source not found at {SOURCE}")
         return 1
+    if not TRANSACTION_SOURCE.is_file():
+        fail(f"expected transaction proof source not found at {TRANSACTION_SOURCE}")
+        return 1
 
     source_text = SOURCE.read_text(encoding="utf-8")
+    transaction_bytes = TRANSACTION_SOURCE.read_bytes()
+    transaction_text = transaction_bytes.decode("utf-8")
+    transaction_stripped = strip_comments_and_strings(transaction_text)
+    transaction_failures = []
+    actual_transaction_digest = hashlib.sha256(transaction_bytes).hexdigest()
+    if actual_transaction_digest != TRANSACTION_SOURCE_SHA256:
+        transaction_failures.append(
+            "transaction replay proof changed from its exact source pin: "
+            f"expected sha256:{TRANSACTION_SOURCE_SHA256}, actual sha256:{actual_transaction_digest}"
+        )
+    if TOKEN_RE.search(transaction_stripped) or AXIOM_DECL_RE.search(transaction_stripped):
+        transaction_failures.append(
+            "transaction replay proof contains sorry/admit/axiom/constant outside comments or strings"
+        )
+    if not transaction_failures:
+        print(
+            f"{TAG}: transaction replay exact-source pin and hole scan OK"
+        )
     self_test_failures = hostile_gate_self_tests(source_text)
     if not self_test_failures:
         print(
@@ -1106,7 +1171,9 @@ def main() -> int:
     source_failures = check_source_level(source_text)
     build_failures, build_ran = check_build_level(arguments.require_kernel)
 
-    all_failures = self_test_failures + source_failures + build_failures
+    all_failures = (
+        self_test_failures + transaction_failures + source_failures + build_failures
+    )
     if all_failures:
         for msg in all_failures:
             fail(msg)

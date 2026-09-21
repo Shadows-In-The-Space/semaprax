@@ -247,5 +247,8 @@ impl BoundTransaction {
 }
 
 #[cfg(test)]
+#[path = "transaction/lean.rs"]
+mod lean;
+#[cfg(test)]
 #[path = "transaction/tests.rs"]
 mod tests;

@@ -1,5 +1,8 @@
 name = "Kernel0"
-defaultTargets = ["Kernel0"]
+defaultTargets = ["Kernel0", "TransactionReplay"]
 
 [[lean_lib]]
 name = "Kernel0"
+
+[[lean_lib]]
+name = "TransactionReplay"

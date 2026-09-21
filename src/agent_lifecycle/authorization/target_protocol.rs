@@ -16,22 +16,23 @@ use crate::agent_runtime::AgentCancellation;
 
 /// Closed, length-framed schema for an admitted target result carrier.
 pub const CARRIER_SCHEMA: &str = "semaprax.agent-target-carrier.v1";
-/// Closed, length-framed schema for an authority-free target request.
-pub const REQUEST_SCHEMA: &str = "semaprax.agent-target-host-request.v1";
+/// Closed, length-framed schema for an authority-free target request. Version
+/// two adds the authorization-binding commitment used by independent replay.
+pub const REQUEST_SCHEMA: &str = "semaprax.agent-target-host-request.v2";
 /// Schema for an authority-free target execution observation.
 pub const EVIDENCE_SCHEMA: &str = "semaprax.agent-target-host-evidence.v1";
 
 const GRANT_DOMAIN: &[u8] = b"semaprax.agent-target-host.grant.v1\0";
 const ARGUMENT_DOMAIN: &[u8] = b"semaprax.agent-target-host.argument.v1\0";
-const REQUEST_DOMAIN: &[u8] = b"semaprax.agent-target-host.request.v1\0";
+const REQUEST_DOMAIN: &[u8] = b"semaprax.agent-target-host.request.v2\0";
 const RESULT_DOMAIN: &[u8] = b"semaprax.agent-target-host.result.v1\0";
 const EVIDENCE_DOMAIN: &[u8] = b"semaprax.agent-target-host.evidence.v1\0";
 const MAX_IDENTIFIER_BYTES: usize = 240;
 const MAX_CARRIER_BYTES: usize = 65_536;
 const SHA256_DIGEST_BYTES: usize = 71;
-const MAX_REQUEST_BYTES: usize = (9 * std::mem::size_of::<u64>())
+const MAX_REQUEST_BYTES: usize = (10 * std::mem::size_of::<u64>())
     + REQUEST_SCHEMA.len()
-    + SHA256_DIGEST_BYTES
+    + (2 * SHA256_DIGEST_BYTES)
     + (4 * MAX_IDENTIFIER_BYTES)
     + (2 * std::mem::size_of::<u64>())
     + MAX_CARRIER_BYTES;
@@ -322,11 +323,14 @@ impl TargetGrant {
     }
 }
 
-/// Exact request passed to a target adapter.  It carries no ambient handle,
-/// source pointer, seal, capability, or mutable accounting authority.
+/// Exact request passed to a target adapter. Its authorization-binding digest
+/// anchors retained evidence to the same spent lifecycle authorization, but
+/// carries no ambient handle, source pointer, seal, capability, or mutable
+/// accounting authority.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TargetHostRequest {
     grant_id: String,
+    authorization_binding: String,
     operation: TargetOperation,
     turn: u64,
     argument: TypedCarrier,
@@ -358,6 +362,7 @@ impl TargetHostRequest {
         let mut bytes = Vec::with_capacity(argument.len() + 512);
         frame(&mut bytes, REQUEST_SCHEMA.as_bytes());
         frame(&mut bytes, self.grant_id.as_bytes());
+        frame(&mut bytes, self.authorization_binding.as_bytes());
         self.operation.canonical(&mut bytes);
         frame(&mut bytes, &self.turn.to_be_bytes());
         frame(&mut bytes, &self.fuel.to_be_bytes());
@@ -372,6 +377,7 @@ impl TargetHostRequest {
         let mut cursor = 0;
         let schema = take_frame_request(bytes, &mut cursor)?;
         let grant_id = take_frame_request(bytes, &mut cursor)?;
+        let authorization_binding = take_frame_request(bytes, &mut cursor)?;
         let operation_id = take_frame_request(bytes, &mut cursor)?;
         let effect_id = take_frame_request(bytes, &mut cursor)?;
         let argument_type = take_frame_request(bytes, &mut cursor)?;
@@ -385,6 +391,9 @@ impl TargetHostRequest {
         let grant_id =
             std::str::from_utf8(grant_id).map_err(|_| ProtocolError::MalformedRequest)?;
         validate_digest(grant_id).map_err(|_| ProtocolError::MalformedRequest)?;
+        let authorization_binding = std::str::from_utf8(authorization_binding)
+            .map_err(|_| ProtocolError::MalformedRequest)?;
+        validate_digest(authorization_binding).map_err(|_| ProtocolError::MalformedRequest)?;
         let operation = TargetOperation::new(
             decode_identifier(operation_id, ProtocolError::MalformedRequest)?,
             decode_identifier(effect_id, ProtocolError::MalformedRequest)?,
@@ -396,6 +405,7 @@ impl TargetHostRequest {
             .map_err(|_| ProtocolError::MalformedRequest)?;
         let request = Self {
             grant_id: grant_id.to_owned(),
+            authorization_binding: authorization_binding.to_owned(),
             operation,
             turn,
             argument,
@@ -685,6 +695,7 @@ impl TargetEvidence {
     /// from exact host-visible data and verifies the sealed observation.
     pub fn replay(&self, request: &TargetHostRequest) -> Result<(), ProtocolError> {
         if request.grant_id != self.grant_id
+            || request.authorization_binding != self.authorization_binding
             || request.operation != self.operation
             || request.turn != self.turn
         {
@@ -738,6 +749,7 @@ pub(in crate::agent_lifecycle) fn dispatch(
 ) -> TargetDispatch {
     let request = TargetHostRequest {
         grant_id: grant.grant_id.clone(),
+        authorization_binding: grant.authorization_binding.clone(),
         operation: grant.operation.clone(),
         turn: grant.turn,
         argument,
@@ -933,6 +945,10 @@ pub enum ProtocolError {
     ReplayMismatch,
 }
 
+#[cfg(test)]
+#[path = "target_protocol_authorization_tests.rs"]
+mod authorization_tests;
+
 fn validate_identifier(value: &str) -> Result<(), ProtocolError> {
     if value.is_empty()
         || value.len() > MAX_IDENTIFIER_BYTES
@@ -1123,6 +1139,7 @@ mod tests {
         assert_eq!(run.evidence().accounting().calls(), 1);
         let request = TargetHostRequest {
             grant_id: run.evidence().grant_id.clone(),
+            authorization_binding: run.evidence().authorization_binding.clone(),
             operation: operation(),
             turn: 3,
             argument: carrier("fixture.Argument", b"request"),
@@ -1154,6 +1171,7 @@ mod tests {
         );
         let request = TargetHostRequest {
             grant_id: run.evidence().grant_id.clone(),
+            authorization_binding: run.evidence().authorization_binding.clone(),
             operation: operation(),
             turn: 3,
             argument: carrier("fixture.Argument", b"request"),
@@ -1346,6 +1364,7 @@ mod tests {
         let response = carrier("fixture.Result", b"ok").encode();
         let request_bytes = TargetHostRequest {
             grant_id: grant().grant_id.clone(),
+            authorization_binding: grant().authorization_binding.clone(),
             operation: operation(),
             turn: 3,
             argument: carrier("fixture.Argument", b"request"),
@@ -1403,6 +1422,7 @@ mod tests {
         forged.dispatched = false;
         let request = TargetHostRequest {
             grant_id: forged.grant_id.clone(),
+            authorization_binding: forged.authorization_binding.clone(),
             operation: operation(),
             turn: 3,
             argument: carrier("fixture.Argument", b"request"),

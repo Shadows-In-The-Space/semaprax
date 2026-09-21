@@ -41,7 +41,10 @@ There is no method accepting caller-authored evidence or an arbitrary run.
 Malformed host results stop subsequent dispatch and retain measured byte work.
 Cancellation and budget exhaustion are also evidence-bearing outcomes. These
 roots describe execution; they grant no authority to invoke a handler or publish
-an artifact beyond the explicitly supplied live operation.
+an artifact beyond the explicitly supplied live operation. Target request and
+observation replay also bind the same non-authorizing authorization digest, so
+a serialized observation cannot splice its authorization attribution from a
+different retained request.
 
 The focused `execution_revision::typed` integration test exercises three turns
 and two distinct operations, verifies exact arguments and results, compares

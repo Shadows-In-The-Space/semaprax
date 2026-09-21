@@ -32,8 +32,9 @@ charged if the host
 fails, panics, returns an oversized carrier, or returns malformed/wrongly typed
 bytes.
 
-The request contains only a hashed opaque grant identity, exact operation
-facts, turn, fuel, and a closed length-framed typed argument carrier. It never
+The v2 request contains only a hashed opaque grant identity, the matching
+non-authorizing authorization-binding digest, exact operation facts, turn,
+fuel, and a closed length-framed typed argument carrier. It never
 contains the authorization seal, filesystem/process/network capability,
 source pointer, Wasm linear-memory pointer, mutable accounting handle, or a
 way to dispatch another operation. A target adapter is injected by the caller;
@@ -54,8 +55,10 @@ may replace it.
 operation facts, turn, request/result commitments, reservation accounting,
 dispatch bit, and normalized settlement. Its domain-separated digest is a
 common semantic observation for retained, C11, and Core-Wasm adapters. Both
-the request and observation have exact bounded length-framed v1 canonical
-wires. `TargetEvidence::decode` independently rejects malformed, noncanonical
+the request has an exact bounded length-framed v2 canonical wire and the
+observation retains its v1 wire. Request v2 adds the authorization-binding
+digest; legacy v1-shaped request bytes fail closed rather than being upgraded
+implicitly. `TargetEvidence::decode` independently rejects malformed, noncanonical
 or internally inconsistent observations; `replay_wire` then rederives the
 request commitment from the retained request wire and checks the observation
 without invoking a handler. It does not receive or independently replay result

@@ -21,6 +21,7 @@ mod ledger;
 mod metrics;
 mod protected_names;
 mod spans;
+mod trace_context;
 mod tracing;
 mod webhook;
 
@@ -47,6 +48,7 @@ pub use spans::{
     prepare_span_export, verify_span_export, PreparedSpanExport, SpanExport, SpanExportSession,
     SpanStatus, SpanWireMismatch,
 };
+pub use trace_context::{TraceContext, TraceContextError, TraceEntropyCapability};
 pub use tracing::{
     prepare_export_event, ExportEventLedgerRefusal, ExportEventReceipt, ExportEventSession,
     PreparedExportEvent,

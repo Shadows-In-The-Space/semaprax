@@ -41,6 +41,24 @@ pub enum SpanWireMismatch {
 }
 
 impl SpanExport {
+    pub fn from_trace_context(
+        context: &super::trace_context::TraceContext,
+        name: String,
+        duration_micros: u64,
+        status: SpanStatus,
+        attributes: Vec<ExportField>,
+    ) -> Self {
+        Self {
+            trace_id: context.trace_id(),
+            span_id: context.span_id(),
+            parent_span_id: context.parent_span_id(),
+            name,
+            duration_micros,
+            status,
+            attributes,
+        }
+    }
+
     fn encode(&self, policy: &OutboundPolicy) -> Result<Vec<u8>, Refusal> {
         if !lower_hex_id(&self.trace_id, 32)
             || !lower_hex_id(&self.span_id, 16)

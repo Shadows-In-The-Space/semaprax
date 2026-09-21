@@ -284,6 +284,22 @@ commitment. IDs are caller inputs: this layer deliberately does not read
 ambient randomness or a clock. A trusted host that generates IDs must acquire
 its own declared entropy capability before constructing a span.
 
+`TraceContext` provides that explicit construction and propagation path. A
+trusted host injects `TraceEntropyCapability`, whose successful fill contract
+requires uniformly selected cryptographically secure random or pseudorandom
+bytes; providers unable to guarantee that fail instead of setting the W3C
+random-ID flag falsely. Fresh contexts request exactly one 16-byte trace ID
+and one 8-byte span ID, while inbound and child contexts request one new
+8-byte span ID. The boundary accepts only the fixed W3C
+`traceparent` version `00` shape with lowercase, nonzero identifiers and only
+the sampled and random-trace-id flags. It preserves admitted trace flags,
+records the received span as the parent, and emits the new local span in the
+outbound header. Entropy failure, zero output, identifier collision, unknown
+versions, reserved flags, and malformed or extended inputs fail closed before
+any export. `SpanExport::from_trace_context` binds the same typed context into
+the completed-span wire; parsing an inbound header never grants outbound
+authority.
+
 Metric observations and spans have separate domain-separated idempotency keys
 and media types. A span's replay identity binds both its trace ID and its
 trace-scoped span ID, while the provider-facing header retains the span ID.

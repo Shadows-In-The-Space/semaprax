@@ -344,6 +344,40 @@ impl OpenCodeRunner for RecordedOpenCodeRunner {
     }
 }
 
+/// Deterministically models an external source edit after the durable route
+/// has received a real provider response. The production post-run snapshot
+/// recheck, not this runner, must select the refusal.
+struct SourceMutatingOpenCodeRunner {
+    inner: RecordedOpenCodeRunner,
+    source_path: PathBuf,
+    replacement: Vec<u8>,
+    mutated: bool,
+}
+
+impl OpenCodeRunner for SourceMutatingOpenCodeRunner {
+    fn run(
+        &mut self,
+        config: &OpenCodeHostConfig,
+        prompt: &str,
+    ) -> Result<Vec<u8>, OpenCodeRunnerFailure> {
+        let transport = self.inner.run(config, prompt)?;
+        if !self.mutated {
+            fs::write(&self.source_path, &self.replacement)
+                .expect("the test source mutation must be writable");
+            self.mutated = true;
+        }
+        Ok(transport)
+    }
+
+    fn export(
+        &mut self,
+        config: &OpenCodeHostConfig,
+        prompt: &str,
+    ) -> Result<Vec<u8>, OpenCodeRunnerFailure> {
+        self.inner.export(config, prompt)
+    }
+}
+
 fn recorded_transport(prompt: &str, answer: &str) -> (Vec<u8>, Vec<u8>) {
     let mut export: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../scripts/fixtures/opencode-provider-smoke-v1/session.json"
@@ -1182,6 +1216,83 @@ fn repair_run_acquires_project_authority_before_creating_the_checkpoint_store() 
     assert!(run_repair("run", &config, &checkpoint).is_err());
     assert!(!checkpoint.exists());
 }
+
+/// This reaches the production entry recheck after `with_authenticated_project`
+/// has retained the exact source snapshot but before checkpoint or provider
+/// construction. It must reject the externally changed raw path and leave no
+/// checkpoint behind.
+#[test]
+fn repair_run_refuses_source_changed_after_project_authentication() {
+    let fixture = Fixture::new();
+    let (config, checkpoint) = setup(&fixture, "test.repair.entry-source-drift.v1");
+    let source_path = fixture.0.join("project/src/app.spx");
+    let changed = format!("{APP}\n").into_bytes();
+    set_test_source_snapshot_hook(move || fs::write(source_path, changed).unwrap());
+
+    let error = run_repair("run", &config, &checkpoint)
+        .expect_err("source drift after Project authentication must be refused");
+    assert_eq!(
+        error.reason,
+        "repair source cannot be read within checked snapshot bounds"
+    );
+    assert!(
+        !checkpoint.exists(),
+        "the entry recheck must refuse before checkpoint creation"
+    );
+}
+
+/// The existing recorded OpenCode runner is the smallest deterministic live
+/// boundary for an external edit during a real durable run. The completed
+/// journal remains available for review, but the CLI must refuse its receipt
+/// rather than associate it with source bytes it did not authenticate.
+#[test]
+fn repair_v2_refuses_source_changed_during_provider_run() {
+    let fixture = Fixture::new();
+    let (config, checkpoint, digest) = setup_v2(&fixture, "test.repair.exit-source-drift.v1");
+    let scratch = fixture.0.join("scratch");
+    fs::create_dir(&scratch).unwrap();
+    let source_path = fixture.0.join("project/src/app.spx");
+    let changed = opencode_app_source()
+        .replacen("\n    0\n", "\n    9\n", 1)
+        .into_bytes();
+    let calls = Rc::new(Cell::new(0));
+    let prompts = Rc::new(RefCell::new(Vec::new()));
+
+    let error = execute_with_runner(
+        v2_command("run", config, checkpoint.clone(), scratch),
+        SourceMutatingOpenCodeRunner {
+            inner: RecordedOpenCodeRunner {
+                answers: VecDeque::from([proposal(&digest, "0", "0"), proposal(&digest, "7", "1")]),
+                last_answer: None,
+                prompts,
+                calls: Rc::clone(&calls),
+            },
+            source_path: source_path.clone(),
+            replacement: changed.clone(),
+            mutated: false,
+        },
+    )
+    .expect_err("source changed during provider work must be refused");
+    assert_eq!(
+        error.reason,
+        "repair source differs from checked Project snapshot"
+    );
+    assert_eq!(
+        calls.get(),
+        2,
+        "the completed durable run reached both provider turns"
+    );
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        changed,
+        "the CLI must not overwrite the externally changed authoritative source"
+    );
+    assert!(
+        checkpoint.join("checkpoint.json").is_file(),
+        "the acknowledged completed journal remains reviewable after the refusal"
+    );
+}
+
 /// The hostile, load-bearing case: source drift between the checked preview
 /// and a later resume fails closed rather than silently replaying stale
 /// evidence against a Project that no longer matches it. The refused resume

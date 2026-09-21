@@ -71,6 +71,7 @@ const MAX_ONE_PROVIDER_CALL_MS: i64 = 30_000;
 #[cfg(test)]
 std::thread_local! {
     static TEST_EFFECT_HANDLER_CALLS: Cell<usize> = const { Cell::new(0) };
+    static TEST_SOURCE_SNAPSHOT_HOOK: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
 }
 
 #[cfg(test)]
@@ -82,6 +83,29 @@ fn reset_test_effect_handler_calls() {
 fn test_effect_handler_calls() -> usize {
     TEST_EFFECT_HANDLER_CALLS.with(|calls| calls.get())
 }
+
+#[cfg(test)]
+fn set_test_source_snapshot_hook(hook: impl FnOnce() + 'static) {
+    TEST_SOURCE_SNAPSHOT_HOOK.with(|slot| {
+        assert!(
+            slot.borrow().is_none(),
+            "source snapshot hook is already set"
+        );
+        *slot.borrow_mut() = Some(Box::new(hook));
+    });
+}
+
+#[cfg(test)]
+fn run_test_source_snapshot_hook() {
+    TEST_SOURCE_SNAPSHOT_HOOK.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook();
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn run_test_source_snapshot_hook() {}
 
 use super::candidate_test::{
     candidate_test_bound_identity, candidate_test_evidence, candidate_test_subject,
@@ -512,6 +536,24 @@ fn diagnostic_error(context: &str, diagnostics: Vec<semaprax::diagnostic::Diagno
     CliError::detail(format!("{context}: {diagnostics:?}"))
 }
 
+/// Confirms that the host-visible file is exactly the source snapshot the
+/// authenticated Project compiled. The candidate route must not accidentally
+/// bind its durable journal and review artifacts to a source file that changed
+/// after Project authentication. Reading to the checked snapshot's exact
+/// length also keeps a concurrently grown source from becoming an unbounded
+/// host read.
+fn verify_checked_source_snapshot(path: &Path, checked_source: &[u8]) -> Result<(), CliError> {
+    let disk_source = bounded_read(path, checked_source.len()).map_err(|_| {
+        CliError::refused("repair source cannot be read within checked snapshot bounds")
+    })?;
+    if disk_source != checked_source {
+        return Err(CliError::refused(
+            "repair source differs from checked Project snapshot",
+        ));
+    }
+    Ok(())
+}
+
 /// Classify a retained V2 journal with the closed recovery error, rather than
 /// exposing compiler-internal diagnostic formatting to an operator. This is
 /// deliberately a refusal only: the journal is still authenticated by the
@@ -848,8 +890,12 @@ pub(super) fn execute_with_runner_and_candidate_test<
         .find(|source| source.path() == config.source_path)
         .ok_or(CliError::refused("repair source is unavailable"))?;
     let source_disk_path = project_root.join(&config.source_path);
-    let source_before = std::fs::read(&source_disk_path)
-        .map_err(|_| CliError::refused("repair source cannot be read"))?;
+    let source_before = source.source().as_bytes();
+    // Test-only mutation is deliberately at the authentication-to-host-read
+    // boundary so the regression executes this production recheck rather than
+    // merely calling its helper.
+    run_test_source_snapshot_hook();
+    verify_checked_source_snapshot(&source_disk_path, source_before)?;
 
     let root = project
         .program_root()
@@ -1166,12 +1212,7 @@ pub(super) fn execute_with_runner_and_candidate_test<
             ));
         }
     }
-    if std::fs::read(&source_disk_path)
-        .map_err(|_| CliError::refused("repair source cannot be reread"))?
-        != source_before
-    {
-        return Err(CliError::refused("repair source changed during execution"));
-    }
+    verify_checked_source_snapshot(&source_disk_path, source_before)?;
 
     let preview = handler.latest_preview();
     let rejection_count = handler.rejection_count();

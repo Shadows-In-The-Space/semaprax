@@ -68,6 +68,27 @@ pub(crate) fn canonical_bool(value: bool) -> String {
     crate::kernel_zero::canonical_bool_renderer::verify_shadow(value, &text);
     text
 }
+/// Canonical binary-operator spelling. Rust's enum text remains authoritative;
+/// the Kernel-0 component only shadows the real formatter branch in tests.
+fn canonical_binary_op(op: BinaryOp) -> &'static str {
+    let text = op.text();
+    #[cfg(test)]
+    crate::kernel_zero::canonical_operator_renderer::verify_binary_shadow(op, text);
+    text
+}
+
+/// Canonical unary-operator spelling. This mirrors the Rust formatter's
+/// closed two-variant mapping while retaining it as production authority.
+fn canonical_unary_op(op: UnaryOp) -> &'static str {
+    let text = match op {
+        UnaryOp::Neg => "-",
+        UnaryOp::Not => "!",
+    };
+    #[cfg(test)]
+    crate::kernel_zero::canonical_operator_renderer::verify_unary_shadow(op, text);
+    text
+}
+
 pub(crate) fn canonical_string(value: &str) -> String {
     let mut text = String::from("\"");
     for ch in value.chars() {
@@ -833,12 +854,7 @@ fn write_expr_measured(
                         frames.push(Frame::CallArgs(args, 0));
                     }
                     ExprKind::Unary { op, value } => {
-                        output
-                            .write_str(match op {
-                                UnaryOp::Neg => "-",
-                                UnaryOp::Not => "!",
-                            })
-                            .unwrap();
+                        output.write_str(canonical_unary_op(*op)).unwrap();
                         frames.push(Frame::Expr(value, 7));
                     }
                     ExprKind::Binary { op, left, right } => {
@@ -1017,7 +1033,7 @@ fn write_expr_measured(
                 }
             }
             Frame::BinaryRight(right, op, delimited) => {
-                write!(output, " {} ", op.text()).unwrap();
+                write!(output, " {} ", canonical_binary_op(op)).unwrap();
                 if delimited {
                     frames.push(Frame::Close(')'));
                 }

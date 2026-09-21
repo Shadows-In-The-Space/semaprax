@@ -1157,9 +1157,10 @@ the completion matrix, or the commits accompanying it.
 ### Rung 2 renderer integration evidence
 
 `src/kernel_zero/canonical_char_renderer.spx`,
-`canonical_bool_renderer.spx`, `canonical_int_renderer.spx`, and
-`canonical_string_renderer.spx` own narrow pure Kernel-0 components for the
-production formatter's character, boolean, signed-integer, and decoded-string-
+`canonical_bool_renderer.spx`, `canonical_int_renderer.spx`,
+`canonical_operator_renderer.spx`, and `canonical_string_renderer.spx` own
+narrow pure Kernel-0 components for the production formatter's character,
+boolean, signed-integer, closed binary/unary operator-token, and decoded-string-
 scalar primitives. Their Rust siblings own bounded compiler-side boundaries.
 Kernel-0 cannot own a string or byte buffer, so every component exposes the
 smallest lossless interface available at this rung: `render_length(value)` and
@@ -1168,17 +1169,19 @@ and independently replays its exact embedded source bytes before every complete
 byte-lane evaluation, without calling the compiler interpreter.
 
 This is no longer only an isolated finite candidate. Under test-only shadow
-switches, the real character, boolean, integer, and decoded-string-scalar
-formatter paths execute their respective Kernel-0 components and refuse any
-byte disagreement while still returning the Rust result. The integration tests
-format ordinary literal and pattern AST nodes and pin exact shadow-comparison
-counts, so bypassing a component cannot pass vacuously. Broad scalar corpora
-separately compare character and string-scalar components against independent
-oracles for named escapes, printable ASCII, lowercase variable-width
-`\\u{...}` escapes, and direct UTF-8; a fixed literal byte oracle covers both
-boolean spellings, while an independent decimal oracle covers signed-integer
-extrema. A wrong delimiter, spelling, hex case, digit order, or length is
-therefore observable at the actual formatter boundary.
+switches, the real character, boolean, integer, binary/unary operator, and
+decoded-string-scalar formatter paths execute their respective Kernel-0
+components and refuse any byte disagreement while still returning the Rust
+result. The integration tests format ordinary literal, pattern, and operator
+AST nodes and pin exact shadow-comparison counts, so bypassing a component
+cannot pass vacuously. Broad scalar corpora separately compare character and
+string-scalar components against independent oracles for named escapes,
+printable ASCII, lowercase variable-width `\\u{...}` escapes, and direct UTF-8;
+a fixed literal byte oracle covers both boolean spellings, while independent
+decimal and closed opcode-oracle tables cover signed-integer extrema and all
+13 binary plus two unary token spellings. A wrong delimiter, spelling, hex
+case, digit order, token byte, or length is therefore observable at the actual
+formatter boundary.
 
 It does **not** reach rung 2. Rust remains the only authoritative formatter;
 normal production formatting does not execute or depend on the shadow. The

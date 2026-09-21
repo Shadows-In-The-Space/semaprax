@@ -1,0 +1,85 @@
+module kernel_zero.canonical_operator_renderer;
+
+@id("format.operator-render-length")
+fn render_length(code: i64) -> i64
+{
+    if code == 5 || code == 6 || code == 8 || code == 10 || code == 11 || code == 12 {
+        2
+    } else {
+        1
+    }
+}
+
+@id("format.operator-first-byte")
+fn first_byte(code: i64) -> i64
+{
+    if code == 0 {
+        43
+    } else {
+        if code == 1 || code == 13 {
+            45
+        } else {
+            if code == 2 {
+                42
+            } else {
+                if code == 3 {
+                    47
+                } else {
+                    if code == 4 {
+                        37
+                    } else {
+                        if code == 5 {
+                            61
+                        } else {
+                            if code == 6 || code == 14 {
+                                33
+                            } else {
+                                if code == 7 || code == 8 {
+                                    60
+                                } else {
+                                    if code == 9 || code == 10 {
+                                        62
+                                    } else {
+                                        if code == 11 {
+                                            38
+                                        } else {
+                                            124
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@id("format.operator-render-byte")
+fn render_byte(code: i64, index: i64) -> i64
+{
+    if index < 0 || index >= render_length(code) {
+        0
+    } else {
+        if index == 0 {
+            first_byte(code)
+        } else {
+            if code == 5 || code == 6 || code == 8 || code == 10 {
+                61
+            } else {
+                if code == 11 {
+                    38
+                } else {
+                    124
+                }
+            }
+        }
+    }
+}
+
+@id("kernel-zero.canonical-operator-renderer.main")
+fn main() -> i64
+{
+    render_length(0)
+}

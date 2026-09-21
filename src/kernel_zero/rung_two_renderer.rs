@@ -18,6 +18,10 @@ use crate::hir::{self, DeclarationId};
 use super::canonical_bool_renderer::{self as canonical_bool_renderer, SOURCE as BOOL_SOURCE};
 use super::canonical_char_renderer::{self, RendererRefusal, SOURCE};
 use super::canonical_int_renderer::{self as canonical_int_renderer, SOURCE as INT_SOURCE};
+use super::canonical_operator_renderer::{
+    self as canonical_operator_renderer, RendererRefusal as OperatorRendererRefusal,
+    SOURCE as OPERATOR_SOURCE,
+};
 use super::canonical_string_renderer::{
     self as canonical_string_renderer, RendererRefusal as StringRendererRefusal,
     SOURCE as STRING_SOURCE,
@@ -273,6 +277,155 @@ fn main() -> i64 { classify(literal()) }
     assert_eq!(
         comparisons, EXPECTED_COMPARISONS,
         "the canonical formatter's capacity and emitted traversals must shadow the one boolean expression and two boolean patterns"
+    );
+}
+
+fn operator_oracle(opcode: i64) -> &'static [u8] {
+    // Do not derive this from `BinaryOp::text`, the formatter, or the
+    // component. This literal table is the independent finite oracle for the
+    // exact in-process opcode inventory documented by the component boundary.
+    match opcode {
+        0 => b"+",
+        1 => b"-",
+        2 => b"*",
+        3 => b"/",
+        4 => b"%",
+        5 => b"==",
+        6 => b"!=",
+        7 => b"<",
+        8 => b"<=",
+        9 => b">",
+        10 => b">=",
+        11 => b"&&",
+        12 => b"||",
+        13 => b"-",
+        14 => b"!",
+        _ => panic!("operator oracle received an unadmitted opcode {opcode}"),
+    }
+}
+
+#[test]
+fn exact_source_component_matches_the_independent_canonical_operator_oracle() {
+    let parsed = crate::parse(
+        OPERATOR_SOURCE,
+        "kernel-zero-canonical-operator-renderer.spx",
+    )
+    .expect("rung-2 operator renderer component must parse");
+    let resolved = hir::resolve(&parsed).expect("rung-2 operator renderer component must resolve");
+    for id in [
+        "format.operator-render-length",
+        "format.operator-first-byte",
+        "format.operator-render-byte",
+    ] {
+        let id = DeclarationId::new(id);
+        assert!(
+            super::reifies_into_kernel_zero(&resolved, &id),
+            "rung-2 operator renderer declaration {id} must stay in Kernel-0"
+        );
+    }
+    let entry = DeclarationId::new("format.operator-render-byte");
+    let binding = BoundTranslation::derive(OPERATOR_SOURCE, &entry)
+        .expect("rung-2 operator renderer must have an exact-source Kernel-0 translation");
+    assert!(binding.replay(OPERATOR_SOURCE, &entry).is_ok());
+
+    for opcode in 0..=14 {
+        let expected = operator_oracle(opcode);
+        let actual = canonical_operator_renderer::render_bytes(opcode).unwrap();
+        assert_eq!(actual, expected, "operator opcode {opcode}");
+        assert!(
+            (1..=2).contains(&actual.len()),
+            "operator opcode {opcode} escaped the bounded byte lane"
+        );
+        for (index, expected_byte) in expected.iter().copied().enumerate() {
+            assert_eq!(
+                canonical_operator_renderer::render_byte(opcode, index).unwrap(),
+                expected_byte,
+                "operator opcode {opcode}, byte {index} drifted from the independent literal oracle"
+            );
+        }
+        assert_eq!(
+            canonical_operator_renderer::render_byte(opcode, expected.len()),
+            Err(OperatorRendererRefusal::InvalidByte),
+            "operator opcode {opcode} must reject its first out-of-range byte index"
+        );
+    }
+    for opcode in [i64::MIN, -1, 15, i64::MAX] {
+        assert_eq!(
+            canonical_operator_renderer::render_bytes(opcode),
+            Err(OperatorRendererRefusal::InvalidOpcode),
+            "unknown opcode {opcode} must refuse before renderer output"
+        );
+    }
+}
+
+#[test]
+fn canonical_formatter_executes_the_kernel_zero_shadow_on_real_operator_nodes() {
+    let source = r#"module test.kernel_zero_operator_formatter_shadow;
+
+@id("test.kernel-zero-operator-formatter-shadow.add")
+fn add(left: i64, right: i64) -> i64 { left + right }
+
+@id("test.kernel-zero-operator-formatter-shadow.sub")
+fn sub(left: i64, right: i64) -> i64 { left - right }
+
+@id("test.kernel-zero-operator-formatter-shadow.mul")
+fn mul(left: i64, right: i64) -> i64 { left * right }
+
+@id("test.kernel-zero-operator-formatter-shadow.div")
+fn div(left: i64, right: i64) -> i64 { left / right }
+
+@id("test.kernel-zero-operator-formatter-shadow.rem")
+fn rem(left: i64, right: i64) -> i64 { left % right }
+
+@id("test.kernel-zero-operator-formatter-shadow.eq")
+fn equal(left: i64, right: i64) -> bool { left == right }
+
+@id("test.kernel-zero-operator-formatter-shadow.ne")
+fn not_equal(left: i64, right: i64) -> bool { left != right }
+
+@id("test.kernel-zero-operator-formatter-shadow.lt")
+fn less(left: i64, right: i64) -> bool { left < right }
+
+@id("test.kernel-zero-operator-formatter-shadow.le")
+fn less_equal(left: i64, right: i64) -> bool { left <= right }
+
+@id("test.kernel-zero-operator-formatter-shadow.gt")
+fn greater(left: i64, right: i64) -> bool { left > right }
+
+@id("test.kernel-zero-operator-formatter-shadow.ge")
+fn greater_equal(left: i64, right: i64) -> bool { left >= right }
+
+@id("test.kernel-zero-operator-formatter-shadow.and")
+fn both(left: bool, right: bool) -> bool { left && right }
+
+@id("test.kernel-zero-operator-formatter-shadow.or")
+fn either(left: bool, right: bool) -> bool { left || right }
+
+@id("test.kernel-zero-operator-formatter-shadow.neg")
+fn negate(value: i64) -> i64 { -value }
+
+@id("test.kernel-zero-operator-formatter-shadow.not")
+fn invert(value: bool) -> bool { !value }
+"#;
+    let parsed = crate::parse(source, "kernel-zero-operator-formatter-shadow.spx").unwrap();
+    let expected = crate::format::canonical(&parsed);
+    let (actual, comparisons) =
+        canonical_operator_renderer::with_shadow(|| crate::format::canonical(&parsed));
+    assert_eq!(
+        actual, expected,
+        "shadowing changed canonical formatter bytes"
+    );
+    // Every function body is one operator expression. The formatter first
+    // measures the body for exact capacity and then emits it, so every one of
+    // the 13 binary and two unary tokens must cross the shadow twice.
+    const BINARY_OPERATOR_COUNT: usize = 13;
+    const UNARY_OPERATOR_COUNT: usize = 2;
+    const MEASURED_AND_EMITTED_VISITS: usize = 2;
+    const EXPECTED_COMPARISONS: usize =
+        (BINARY_OPERATOR_COUNT + UNARY_OPERATOR_COUNT) * MEASURED_AND_EMITTED_VISITS;
+    assert_eq!(
+        comparisons, EXPECTED_COMPARISONS,
+        "the canonical formatter's measured and emitted traversals must shadow every operator token"
     );
 }
 

@@ -71,6 +71,11 @@ pub(crate) mod canonical_bool_renderer;
 // shadow boundary. It is not a production authority route.
 #[allow(dead_code)]
 pub(crate) mod canonical_int_renderer;
+// Operator tokens are a closed Kernel-0-shaped formatter surface. Like the
+// literal siblings this boundary is test-only and never supplies production
+// formatter bytes.
+#[allow(dead_code)]
+pub(crate) mod canonical_operator_renderer;
 // The string-escaping sibling remains a test-only formatter shadow boundary.
 // It has no owned string buffer and is not a production authority route.
 #[allow(dead_code)]

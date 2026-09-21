@@ -351,6 +351,88 @@ console.log("MUTATED_RESULT_CARRIER_CAPACITY_BRANCH_REACHED");
         .contains("MUTATED_RESULT_CARRIER_CAPACITY_BRANCH_REACHED"));
 }
 
+/// The trailing-byte corpus member must reach the generated TypeScript
+/// decoder's final exact-consumption check.  Removing only that check admits
+/// the hostile bytes, which prevents the shared refusal from being explained
+/// by an earlier length/count branch.
+#[test]
+fn result_carrier_trailing_byte_guard_mutation_is_detected_by_typescript_consumer() {
+    if !node_available() {
+        eprintln!("skipping: node is not available on PATH");
+        return;
+    }
+    let Some(tsc) = locate_tsc() else {
+        eprintln!("skipping: no repository-pinned (5.8.3) tsc is available on this host");
+        return;
+    };
+    let wasm_bytes = reference_wasm_module::build();
+    let (input, output) = shapes();
+    let binding = fixture_binding(&wasm_bytes);
+    let consumer = generate_typescript_calling_consumer(
+        baseline_descriptor_bytes(),
+        &binding,
+        &input,
+        &output,
+    )
+    .expect("a well-formed shape must generate");
+    let workspace = Workspace::new("result-carrier-trailing-mutant");
+    let root = workspace.path("generated-typescript-consumer");
+    write_generated_package(&root, consumer.files());
+    let carrier_path = root.join("src/carrier.ts");
+    let mut carrier = fs::read_to_string(&carrier_path).unwrap();
+    replace_once(
+        &mut carrier,
+        "if (offset !== checked.length) throw resultRejected(\"carrier-trailing\");",
+        "if (false) throw resultRejected(\"carrier-trailing\");",
+        "result-carrier trailing byte",
+    );
+    fs::write(&carrier_path, carrier).unwrap();
+    let build = run(
+        Command::new(&tsc)
+            .current_dir(&root)
+            .args(["-p", "tsconfig.json"]),
+        "tsc -p tsconfig.json for trailing-result-carrier mutant",
+    );
+    assert!(
+        build.status.success(),
+        "TypeScript trailing-result-carrier mutant did not type-check:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let bytes = malformed_result_carrier_cases()
+        .into_iter()
+        .find(|(name, _)| *name == "result_carrier_trailing_byte")
+        .map(|(_, bytes)| bytes)
+        .expect("the closed corpus contains the trailing-byte case");
+    fs::write(
+        root.join("test/mutated-result-carrier-trailing.mjs"),
+        format!(
+            r#"
+import assert from "node:assert/strict";
+import {{ decodeOutput }} from "../dist/carrier.js";
+const candidate = new Uint8Array({});
+assert.doesNotThrow(() => decodeOutput(candidate));
+console.log("MUTATED_RESULT_CARRIER_TRAILING_BRANCH_REACHED");
+"#,
+            js_byte_array_literal(&bytes)
+        ),
+    )
+    .unwrap();
+    let output = run(
+        Command::new("node")
+            .current_dir(&root)
+            .arg("test/mutated-result-carrier-trailing.mjs"),
+        "node mutated-result-carrier-trailing.mjs",
+    );
+    assert!(
+        output.status.success(),
+        "trailing-result-carrier mutation was not detected:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("MUTATED_RESULT_CARRIER_TRAILING_BRANCH_REACHED"));
+}
+
 impl Drop for Workspace {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);

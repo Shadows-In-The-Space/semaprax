@@ -1146,13 +1146,39 @@ next.
 |---|---|---|---|
 | **0** | A Kernel-0-shaped `.spx` program is admitted by the unmodified toolchain and produces the *same* observable result on the interpreter, the native backend, and the Wasm backend, for at least one concrete program and input. | **Yes.** | "Rung 0 evidence" below. |
 | **1** | A kernel-sized program (bounded by the ceilings above, not merely "small") implements a non-trivial pure computation (validation, classification, or similar) entirely within Kernel-0/Kernel-1's admitted shapes, still with cross-backend agreement. | **Yes.** | "Rung 1 evidence" below: a 35,669-byte, 32-policy classifier passed 72 independent-oracle/interpreter cases and 216 native/Core-Wasm comparisons. |
-| **2** | A pure, total, pipeline-safe compiler component with no ownership/effects of its own — a canonical formatter or renderer fragment is the issue's own suggested first candidate — is implemented in SEMAPRAX, differential-tested byte-identical against the Rust implementation over a broad corpus, and its build is bootstrap-reproducible under a stated environment. | **No.** | Not attempted this session. |
+| **2** | A pure, total, pipeline-safe compiler component with no ownership/effects of its own — a canonical formatter or renderer fragment is the issue's own suggested first candidate — is implemented in SEMAPRAX, differential-tested byte-identical against the Rust implementation over a broad corpus, and its build is bootstrap-reproducible under a stated environment. | **No.** | A bounded canonical-character byte-lane candidate now has an executable byte-for-byte Rust comparison gate over a deterministic scalar corpus, but it has no SEMAPRAX owned-buffer output and no bootstrap proof; see “Rung 2 preparatory renderer evidence”. |
 | **3** | A parser fragment is self-hosted with the same differential-equivalence and bootstrap-reproducibility bar as rung 2, plus documented fallback/recovery if the self-hosted path disagrees with the Rust reference. | **No.** | Not attempted. |
 | **4** | Semantic projection (HIR → semantic graph) is self-hosted with the same bar, plus stable-ID and determinism regression coverage carried over unchanged. | **No.** | Not attempted. |
 | **5** | The semantic-transaction validator (precondition checking, replay-before-commit, fail-closed staleness) is self-hosted with the same bar. | **No.** | Not attempted. |
 
 **Today's rung: 1.** No claim above rung 1 is made anywhere in this document,
 the completion matrix, or the commits accompanying it.
+
+### Rung 2 preparatory renderer evidence
+
+`src/kernel_zero/rung_two_renderer.rs` carries a pure Kernel-0 SEMAPRAX
+candidate for the production formatter's `canonical_char` primitive.  Kernel-0
+cannot own a string or byte buffer, so the candidate deliberately exposes a
+lossless byte-lane interface instead: `render_length(scalar)` and
+`render_byte(scalar, index)`.  Its executable gate compares every produced
+byte against Rust's `format::canonical_char`, including named escapes,
+printable ASCII, and lowercase variable-width `\\u{...}` escapes.  Invalid
+scalars and out-of-range indices deterministically return zero, rather than
+invoking an ambient parser, allocator, or formatter.
+
+The focused test parses and resolves the exact candidate source, verifies each
+helper reifies to Kernel-0, binds and replays the exact translation, then
+compares the ordinary compiler-interpreter result byte-for-byte against the
+authoritative Rust formatter across boundary scalars and a deterministic spread
+of the valid scalar space.  This is intentionally more than an abstract escape
+classification: a wrong quote, delimiter, hex case, digit order, or length is
+an observed disagreement.
+
+It does **not** reach rung 2.  The byte-lane API is not a SEMAPRAX owned-buffer
+renderer, there is no native/Wasm byte-rendering leg or bootstrap-reproducible
+build, and the finite corpus is not a universal equivalence proof.  It is a
+concrete local compiler-formatter fragment toward that gate, not a self-hosted
+formatter or a general self-hosting claim.
 
 ### Rung 0 evidence
 

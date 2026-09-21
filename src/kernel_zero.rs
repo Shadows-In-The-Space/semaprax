@@ -74,6 +74,8 @@ mod graph_projection;
 #[cfg(test)]
 mod lean_fixture;
 #[cfg(test)]
+mod rung_two_renderer;
+#[cfg(test)]
 mod transaction;
 #[cfg(test)]
 mod weights;

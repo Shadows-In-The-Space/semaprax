@@ -35,6 +35,10 @@ pub enum ProcessFailure {
     CapacityExceeded,
     IoFailure,
     SettlementFailed,
+    /// The caller's explicit monotonic cancellation was observed while a
+    /// registered held process was live; its owned process group was then
+    /// killed and settled before this failure was returned.
+    Cancelled,
 }
 
 impl ProcessFailure {
@@ -53,6 +57,7 @@ impl ProcessFailure {
             Self::CapacityExceeded => 5,
             Self::IoFailure => 6,
             Self::SettlementFailed => 7,
+            Self::Cancelled => 8,
         }
     }
 }

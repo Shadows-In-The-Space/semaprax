@@ -70,6 +70,7 @@ impl Leg {
 /// One turn's worth of dispatch, through the single admitted route.
 fn dispatch(
     leg: Leg,
+    native_host: Option<&authorization::NativeStageHost>,
     source: &str,
     program: &hir::ResolvedProgram,
     prepared: &crate::interpreter::retained_call::PreparedRetainedCall,
@@ -77,8 +78,8 @@ fn dispatch(
 ) -> Result<RetainedCallOutcome, Vec<Diagnostic>> {
     let backend = match leg {
         Leg::Interpreter => authorization::StageBackend::Interpreter,
-        Leg::NativeO0 => authorization::StageBackend::Native,
-        Leg::NativeO2 => authorization::StageBackend::NativeAtOptimization("-O2"),
+        Leg::NativeO0 => native_backend(native_host.expect("native leg retains held host")),
+        Leg::NativeO2 => native_o2_backend(native_host.expect("native leg retains held host")),
         Leg::Wasm => authorization::StageBackend::Wasm { source },
     };
     authorization::dispatch_on(backend, program, prepared, arguments, DEFAULT_STAGE_STEPS)
@@ -175,6 +176,7 @@ const fn requested_budget(turn: usize) -> i64 {
 /// matches another empty transcript.
 fn converse(
     leg: Leg,
+    native_host: Option<&authorization::NativeStageHost>,
     compiled: &CompiledAgentLifecycle,
     source: &str,
     dispatches: &mut usize,
@@ -186,13 +188,22 @@ fn converse(
         "initialize",
         dispatch(
             leg,
+            native_host,
             source,
             &compiled.program,
             compiled.binding.initialize.prepared(),
             std::slice::from_ref(&task),
         ),
     );
-    let mut transcript = drive(leg, compiled, source, state.clone(), 1, dispatches);
+    let mut transcript = drive(
+        leg,
+        native_host,
+        compiled,
+        source,
+        state.clone(),
+        1,
+        dispatches,
+    );
     transcript.lines.insert(0, format!("state@0 {state:?}"));
     transcript.checkpoints.insert(0, state);
     transcript
@@ -205,6 +216,7 @@ fn converse(
 /// it. The returned transcript covers only the turns this call drove.
 fn drive(
     leg: Leg,
+    native_host: Option<&authorization::NativeStageHost>,
     compiled: &CompiledAgentLifecycle,
     source: &str,
     start: RetainedValue,
@@ -219,7 +231,14 @@ fn drive(
         returned(
             leg,
             label,
-            dispatch(leg, source, &compiled.program, prepared, arguments),
+            dispatch(
+                leg,
+                native_host,
+                source,
+                &compiled.program,
+                prepared,
+                arguments,
+            ),
         )
     };
 
@@ -323,6 +342,7 @@ fn every_backend_drives_the_same_multi_turn_conversation_to_the_same_transitions
         eprintln!("skipping multi-turn conversation parity: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let compiled = lifecycle();
     // The Wasm leg re-resolves exactly the module text the caller supplies.
     // `CompiledAgentLifecycle::source` is the rendered lifecycle document,
@@ -332,6 +352,7 @@ fn every_backend_drives_the_same_multi_turn_conversation_to_the_same_transitions
     let mut interpreter_dispatches = 0usize;
     let reference = converse(
         Leg::Interpreter,
+        None,
         &compiled,
         source,
         &mut interpreter_dispatches,
@@ -364,7 +385,7 @@ fn every_backend_drives_the_same_multi_turn_conversation_to_the_same_transitions
     let mut counts = Vec::new();
     for leg in [Leg::NativeO0, Leg::NativeO2, Leg::Wasm] {
         let mut dispatches = 0usize;
-        let transcript = converse(leg, &compiled, source, &mut dispatches);
+        let transcript = converse(leg, Some(&native_host), &compiled, source, &mut dispatches);
         // Line by line first, so a divergence reports the exact turn and
         // stage rather than a wall of two whole transcripts.
         for (index, (expected, actual)) in reference
@@ -415,6 +436,7 @@ fn empty_bytes_are_equal_across_interpreter_native_and_wasm_legs() {
         eprintln!("skipping empty-Bytes parity: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let compiled = lifecycle();
     let source = MODULE;
     let empty = payload(&compiled.binding.task, Vec::new(), INITIAL_BUDGET);
@@ -424,6 +446,7 @@ fn empty_bytes_are_equal_across_interpreter_native_and_wasm_legs() {
         "initialize",
         dispatch(
             Leg::Interpreter,
+            None,
             source,
             &compiled.program,
             compiled.binding.initialize.prepared(),
@@ -436,6 +459,7 @@ fn empty_bytes_are_equal_across_interpreter_native_and_wasm_legs() {
             "initialize",
             dispatch(
                 leg,
+                Some(&native_host),
                 source,
                 &compiled.program,
                 compiled.binding.initialize.prepared(),
@@ -450,6 +474,7 @@ fn empty_bytes_are_equal_across_interpreter_native_and_wasm_legs() {
         "initialize",
         dispatch(
             Leg::Wasm,
+            None,
             source,
             &compiled.program,
             compiled.binding.initialize.prepared(),
@@ -492,7 +517,7 @@ fn the_core_wasm_leg_resumes_an_interpreter_conversation_from_a_recorded_carrier
     let source = MODULE;
 
     let mut whole = 0usize;
-    let reference = converse(Leg::Interpreter, &compiled, source, &mut whole);
+    let reference = converse(Leg::Interpreter, None, &compiled, source, &mut whole);
     assert_eq!(whole, 11, "the uninterrupted run's dispatches");
     assert_eq!(
         reference.checkpoints.len(),
@@ -508,6 +533,7 @@ fn the_core_wasm_leg_resumes_an_interpreter_conversation_from_a_recorded_carrier
     let mut resumed_dispatches = 0usize;
     let resumed = drive(
         Leg::Wasm,
+        None,
         &compiled,
         source,
         resume_from,

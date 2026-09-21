@@ -41,6 +41,7 @@ pub mod target_protocol;
 pub(in crate::agent_lifecycle) mod wasm_executor;
 
 use native_executor::NativeStageExecutor;
+pub(in crate::agent_lifecycle) use native_executor::NativeStageHost;
 use wasm_executor::WasmStageExecutor;
 
 const BINDING_DOMAIN: &[u8] = b"semaprax.agent-lifecycle.authorization.v1\0";
@@ -455,7 +456,8 @@ impl StageExecutor for InterpreterStageExecutor {
 /// baked into a second function -- so every backend, including the two
 /// added for #142/#143, is reachable through the exact same single call
 /// point [`dispatch`] already was.
-/// [`StageBackend::Wasm`] carries the module source text its executor is
+/// [`StageBackend::Native`] carries an explicitly injected held compiler
+/// capability; the executor never resolves `clang` from PATH. [`StageBackend::Wasm`] carries the module source text its executor is
 /// allowed to re-check and re-resolve when it must inject a projection
 /// driver (#143/#182). That source is data the caller supplies -- the
 /// lifecycle's own retained `.spx` text -- never something the executor
@@ -464,13 +466,18 @@ impl StageExecutor for InterpreterStageExecutor {
 #[derive(Clone, Copy)]
 pub(super) enum StageBackend<'a> {
     Interpreter,
-    Native,
+    Native {
+        host: &'a NativeStageHost,
+    },
     /// The same native C11 executor as [`StageBackend::Native`], compiled
     /// with an explicit `clang` optimization flag (e.g. `"-O2"`) instead of
     /// the production `-O0` default. Exists for cross-engine parity evidence
     /// (#182/#143): an optimizer is exactly where backend divergence hides,
     /// and no production call site selects this variant.
-    NativeAtOptimization(&'static str),
+    NativeAtOptimization {
+        host: &'a NativeStageHost,
+        optimization: &'static str,
+    },
     Wasm {
         source: &'a str,
     },
@@ -539,7 +546,7 @@ fn dispatch_on_admitted(
             max_steps,
             cancellation,
         ),
-        StageBackend::Native => NativeStageExecutor::o0().execute(
+        StageBackend::Native { host } => NativeStageExecutor::o0(host).execute(
             authority,
             program,
             prepared,
@@ -547,15 +554,16 @@ fn dispatch_on_admitted(
             max_steps,
             cancellation,
         ),
-        StageBackend::NativeAtOptimization(optimization) => NativeStageExecutor { optimization }
-            .execute(
+        StageBackend::NativeAtOptimization { host, optimization } => {
+            NativeStageExecutor { host, optimization }.execute(
                 authority,
                 program,
                 prepared,
                 arguments,
                 max_steps,
                 cancellation,
-            ),
+            )
+        }
         StageBackend::Wasm { source } => WasmStageExecutor { source }.execute(
             authority,
             program,

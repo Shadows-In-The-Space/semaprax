@@ -11,6 +11,7 @@ use std::fs::File;
 use std::fs::Metadata;
 
 use super::{ProcessFailure, ProcessOutput, ProcessProvider, ProcessRequest};
+use crate::agent_runtime::AgentCancellation;
 
 pub const MAX_ENVIRONMENT_ENTRIES: usize = 256;
 pub const MAX_ENVIRONMENT_BYTES: usize = 65_536;
@@ -130,6 +131,25 @@ impl RegisteredProcessProvider {
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
+
+    /// Runs a held tool while observing an explicitly supplied monotonic
+    /// cancellation handle. The platform owns kill-and-settle before it
+    /// reports cancellation, so callers never receive while a child group is
+    /// still live.
+    pub fn run_cancellable(
+        &mut self,
+        request: &ProcessRequest,
+        cancellation: Option<&AgentCancellation>,
+    ) -> Result<ProcessOutput, ProcessFailure> {
+        let tool = self
+            .tools
+            .get(&request.tool())
+            .ok_or(ProcessFailure::AuthorityDenied)?;
+        if !tool.accepts(request.arguments()) {
+            return Err(ProcessFailure::AuthorityDenied);
+        }
+        platform::run(tool, request, cancellation)
+    }
 }
 
 impl ProcessProvider for RegisteredProcessProvider {
@@ -141,7 +161,7 @@ impl ProcessProvider for RegisteredProcessProvider {
         if !tool.accepts(request.arguments()) {
             return Err(ProcessFailure::AuthorityDenied);
         }
-        platform::run(tool, request)
+        platform::run(tool, request, None)
     }
 
     fn settle(&mut self) -> Result<(), ProcessFailure> {

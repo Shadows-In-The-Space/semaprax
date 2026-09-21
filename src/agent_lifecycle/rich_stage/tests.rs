@@ -205,7 +205,7 @@ fn proposal_document(schema_digest: &str, urgent: bool, weight: i64) -> String {
 
 fn run_on(
     stages: &RichProposalStages,
-    backend: RichStageBackend,
+    backend: RichStageBackend<'_>,
     urgent: bool,
     weight: i64,
     cancellation: &AgentCancellation,
@@ -237,7 +237,7 @@ fn admitted_proposal(stages: &RichProposalStages, urgent: bool, weight: i64) -> 
 
 fn raw_stage(
     stages: &RichProposalStages,
-    backend: RichStageBackend,
+    backend: RichStageBackend<'_>,
     prepared: &PreparedRetainedCall,
     arguments: &[RetainedValue],
 ) -> RetainedCallEvaluation {
@@ -277,6 +277,8 @@ fn rich_target_backends_preserve_raw_grant_and_continue_byte_payloads() {
         eprintln!("skipping rich target raw-byte parity: clang or node unavailable");
         return;
     }
+    let native_host = crate::agent_lifecycle::tests::native_stage_host()
+        .expect("availability retains native host");
     let stages = bind("target-raw-payloads");
     let proposal = admitted_proposal(&stages, true, 7);
     let authorize_args = [state(10), proposal.clone()];
@@ -338,8 +340,11 @@ fn rich_target_backends_preserve_raw_grant_and_continue_byte_payloads() {
     );
 
     for (target, backend) in [
-        ("native -O0", RichStageBackend::Native),
-        ("native -O2", RichStageBackend::NativeOptimized),
+        ("native -O0", RichStageBackend::Native(&native_host)),
+        (
+            "native -O2",
+            RichStageBackend::NativeOptimized(&native_host),
+        ),
         ("Core Wasm", RichStageBackend::Wasm),
     ] {
         let actual_decision = raw_stage(&stages, backend, &stages.authorize, &authorize_args);
@@ -363,6 +368,8 @@ fn every_target_backend_executes_rich_proposal_grant_refusal_and_fail_transition
         eprintln!("skipping rich target parity: clang or node unavailable");
         return;
     }
+    let native_host = crate::agent_lifecycle::tests::native_stage_host()
+        .expect("availability retains native host");
     let stages = bind("target-parity");
     for (label, urgent, weight) in [
         ("grant", true, 7),
@@ -379,8 +386,11 @@ fn every_target_backend_executes_rich_proposal_grant_refusal_and_fail_transition
         )
         .unwrap_or_else(|error| panic!("{label}: interpreter: {error:?}"));
         for (target, backend) in [
-            ("native -O0", RichStageBackend::Native),
-            ("native -O2", RichStageBackend::NativeOptimized),
+            ("native -O0", RichStageBackend::Native(&native_host)),
+            (
+                "native -O2",
+                RichStageBackend::NativeOptimized(&native_host),
+            ),
             ("Core Wasm", RichStageBackend::Wasm),
         ] {
             assert_eq!(
@@ -398,11 +408,13 @@ fn every_target_backend_executes_rich_proposal_grant_refusal_and_fail_transition
 /// stage. The exact diagnostic stays backend-independent.
 #[test]
 fn rich_target_backends_keep_cancellation_and_malformed_proposals_pre_dispatch() {
+    let native_host = crate::agent_lifecycle::tests::native_stage_host()
+        .expect("native stage test host is available");
     let stages = bind("target-pre-dispatch");
     for backend in [
         RichStageBackend::Interpreter,
-        RichStageBackend::Native,
-        RichStageBackend::NativeOptimized,
+        RichStageBackend::Native(&native_host),
+        RichStageBackend::NativeOptimized(&native_host),
         RichStageBackend::Wasm,
     ] {
         let cancellation = AgentCancellation::new();

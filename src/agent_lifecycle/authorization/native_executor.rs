@@ -42,9 +42,16 @@
 //! `stage_backend_parity.rs` carries no `requires`/`ensures` -- so this gap
 //! is a scoped, honestly-reported one, not a silently-passing one.
 
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::process_provider::registered::{HeldProcessTool, RegisteredProcessProvider};
+use crate::process_provider::ProcessTermination;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::process_provider::{ProcessFailure, ProcessProvider, ProcessRequest};
 
 use crate::aggregate_layout::{AggregateLayout, AggregateTarget};
 use crate::diagnostic::Diagnostic;
@@ -59,6 +66,315 @@ use crate::agent_lifecycle::stages::invariant;
 
 use super::{sealed, ExecutionAuthority, StageExecutor};
 
+/// Explicit authority to use one trusted native C compiler for one local
+/// stage-execution route.
+///
+/// The caller supplies an already-selected absolute compiler path. Opening it
+/// turns that choice into a held-file capability; native execution never
+/// searches `PATH`, inherits a host environment, or treats a compiler name as
+/// authority. The held file is handed to the registered-process provider,
+/// which executes the descriptor rather than resolving the path again.
+///
+/// This is deliberately crate-private. It is an internal, bounded parity
+/// substrate, not a public promise that arbitrary native targets are admitted.
+#[derive(Debug)]
+pub struct NativeStageHost {
+    compiler: File,
+    identity: String,
+    compiler_digest: [u8; 32],
+    compiler_len: u64,
+    #[cfg(unix)]
+    compiler_device: u64,
+    #[cfg(unix)]
+    compiler_inode: u64,
+}
+
+impl NativeStageHost {
+    /// Holds one caller-selected native compiler. The supplied path must be
+    /// absolute; it is resolved once before the file is held.
+    pub(in crate::agent_lifecycle) fn open(compiler: &Path) -> Result<Self, Diagnostic> {
+        if !compiler.is_absolute() {
+            return Err(invariant("native_executor.host.compiler_path"));
+        }
+        let canonical = compiler
+            .canonicalize()
+            .map_err(|_| invariant("native_executor.host.compiler_path"))?;
+        let held = OpenOptions::new()
+            .read(true)
+            .open(&canonical)
+            .map_err(|_| invariant("native_executor.host.compiler_open"))?;
+        let metadata = held
+            .metadata()
+            .map_err(|_| invariant("native_executor.host.compiler_metadata"))?;
+        if !metadata.is_file() {
+            return Err(invariant("native_executor.host.compiler_regular"));
+        }
+        let compiler_digest = digest_held_file(&held)?;
+        let compiler_len = metadata.len();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o111 == 0 {
+                return Err(invariant("native_executor.host.compiler_executable"));
+            }
+        }
+        let compiler_hex = compiler_digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let identity = format!("native-c11:sha256:{compiler_hex}:{compiler_len}");
+        Ok(Self {
+            compiler: held,
+            identity,
+            compiler_digest,
+            compiler_len,
+            #[cfg(unix)]
+            compiler_device: {
+                use std::os::unix::fs::MetadataExt;
+                metadata.dev()
+            },
+            #[cfg(unix)]
+            compiler_inode: {
+                use std::os::unix::fs::MetadataExt;
+                metadata.ino()
+            },
+        })
+    }
+
+    /// Non-authorizing identity that binds parity target evidence to the held
+    /// compiler selection. It cannot be spent as process authority.
+    pub(in crate::agent_lifecycle) fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn compile(
+        &self,
+        directory: &ProbeDirectory,
+        optimization: &str,
+        cancellation: Option<&crate::agent_runtime::AgentCancellation>,
+    ) -> Result<(), Diagnostic> {
+        self.recheck_compiler()?;
+        directory.recheck()?;
+        let compiler = self
+            .compiler
+            .try_clone()
+            .map_err(|_| invariant("native_executor.host.compiler_clone"))?;
+        let output = run_held(
+            compiler,
+            directory
+                .held
+                .try_clone()
+                .map_err(|_| invariant("native_executor.probe_directory"))?,
+            b"semaprax-stage-clang",
+            &[
+                "-std=c11",
+                optimization,
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-Wno-tautological-compare",
+                "-DSPX_NO_ENTRY_WRAPPER",
+                "native_executor.c",
+                "-o",
+                "native_executor",
+            ],
+            15_000,
+            4 * 1024,
+            60 * 1024 - 32,
+            cancellation,
+        )?;
+        match output.termination {
+            ProcessTermination::Exited(0) => Ok(()),
+            _ => Err(invariant("native_executor.compile")),
+        }
+    }
+
+    fn run(
+        &self,
+        directory: &ProbeDirectory,
+        cancellation: Option<&crate::agent_runtime::AgentCancellation>,
+    ) -> Result<Vec<u8>, Diagnostic> {
+        directory.recheck()?;
+        let executable = directory.open_child(c"native_executor")?;
+        let output = run_held(
+            executable,
+            directory
+                .held
+                .try_clone()
+                .map_err(|_| invariant("native_executor.probe_directory"))?,
+            b"semaprax-stage-program",
+            &[],
+            2_000,
+            48 * 1024,
+            16 * 1024 - 32,
+            cancellation,
+        )?;
+        match output.termination {
+            ProcessTermination::Exited(0) => Ok(output.stdout),
+            _ => Err(invariant("native_executor.run")),
+        }
+    }
+
+    fn recheck_compiler(&self) -> Result<(), Diagnostic> {
+        let metadata = self
+            .compiler
+            .metadata()
+            .map_err(|_| invariant("native_executor.host.compiler_metadata"))?;
+        if !metadata.is_file() || metadata.len() != self.compiler_len {
+            return Err(invariant("native_executor.host.compiler_drift"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if metadata.dev() != self.compiler_device || metadata.ino() != self.compiler_inode {
+                return Err(invariant("native_executor.host.compiler_drift"));
+            }
+        }
+        if digest_held_file(&self.compiler)? != self.compiler_digest {
+            return Err(invariant("native_executor.host.compiler_drift"));
+        }
+        Ok(())
+    }
+}
+
+const MAX_HELD_COMPILER_BYTES: u64 = 64 * 1024 * 1024;
+
+fn digest_held_file(file: &File) -> Result<[u8; 32], Diagnostic> {
+    use sha2::{Digest, Sha256};
+    #[cfg(not(unix))]
+    let mut reader = file
+        .try_clone()
+        .map_err(|_| invariant("native_executor.host.compiler_clone"))?;
+    #[cfg(not(unix))]
+    {
+        use std::io::{Seek, SeekFrom};
+        reader
+            .seek(SeekFrom::Start(0))
+            .map_err(|_| invariant("native_executor.host.compiler_read"))?;
+    }
+    let mut hash = Sha256::new();
+    let mut remaining = MAX_HELD_COMPILER_BYTES;
+    let mut offset = 0_u64;
+    let mut bytes = [0_u8; 16 * 1024];
+    loop {
+        #[cfg(unix)]
+        let read = {
+            use std::os::unix::fs::FileExt;
+            file.read_at(&mut bytes, offset)
+        };
+        #[cfg(not(unix))]
+        let read = reader.read(&mut bytes);
+        let read = read.map_err(|_| invariant("native_executor.host.compiler_read"))?;
+        if read == 0 {
+            break;
+        }
+        let read =
+            u64::try_from(read).map_err(|_| invariant("native_executor.host.compiler_read"))?;
+        if read > remaining {
+            return Err(invariant("native_executor.host.compiler_budget"));
+        }
+        remaining -= read;
+        hash.update(&bytes[..read as usize]);
+        offset = offset
+            .checked_add(read)
+            .ok_or_else(|| invariant("native_executor.host.compiler_budget"))?;
+    }
+    Ok(hash.finalize().into())
+}
+
+/// Encodes the process-provider's closed argv wire. This module owns every
+/// byte it supplies: callers cannot smuggle compiler flags or a second
+/// executable through this boundary.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn argv_wire(arguments: &[&str]) -> Result<Vec<u8>, Diagnostic> {
+    let count = u32::try_from(arguments.len())
+        .map_err(|_| invariant("native_executor.process.arguments"))?;
+    let mut wire = Vec::with_capacity(4 + arguments.iter().map(|arg| arg.len() + 4).sum::<usize>());
+    wire.extend_from_slice(&count.to_le_bytes());
+    for argument in arguments {
+        if argument.as_bytes().contains(&0) {
+            return Err(invariant("native_executor.process.arguments"));
+        }
+        let length = u32::try_from(argument.len())
+            .map_err(|_| invariant("native_executor.process.arguments"))?;
+        wire.extend_from_slice(&length.to_le_bytes());
+        wire.extend_from_slice(argument.as_bytes());
+    }
+    Ok(wire)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn stage_arguments(_: &[Vec<u8>]) -> bool {
+    // `run_held` is private and builds the entire argv wire above. The
+    // registered provider still checks this predicate before its held-fd
+    // launch, so no external caller can select a command through this tool.
+    true
+}
+
+/// Runs one held executable through the repository's process-provider
+/// boundary. That boundary owns process-group cleanup, finite stdout/stderr,
+/// and the deadline; this executor never uses `Command`, `.output()`, PATH,
+/// or an inherited environment.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn run_held(
+    executable: File,
+    directory: File,
+    argv0: &[u8],
+    arguments: &[&str],
+    timeout_ms: u64,
+    stdout_max: usize,
+    stderr_max: usize,
+    cancellation: Option<&crate::agent_runtime::AgentCancellation>,
+) -> Result<crate::process_provider::ProcessOutput, Diagnostic> {
+    let tool = HeldProcessTool::new(
+        executable,
+        directory,
+        argv0.to_vec(),
+        Vec::new(),
+        stage_arguments,
+    )
+    .map_err(|_| invariant("native_executor.process.tool"))?;
+    let mut provider = RegisteredProcessProvider::new([(1_u64, tool)])
+        .map_err(|_| invariant("native_executor.process.tool"))?;
+    let argv = argv_wire(arguments)?;
+    let request = ProcessRequest::from_wire(
+        1,
+        &argv,
+        argv.len(),
+        &[],
+        0,
+        timeout_ms,
+        stdout_max,
+        stderr_max,
+    )
+    .map_err(|_| invariant("native_executor.process.request"))?;
+    let result = provider.run_cancellable(&request, cancellation);
+    let settled = provider.settle();
+    match (result, settled) {
+        (Ok(output), Ok(())) => Ok(output),
+        (Err(ProcessFailure::TimedOut), _) => Err(invariant("native_executor.process.deadline")),
+        (Err(ProcessFailure::CapacityExceeded), _) => {
+            Err(invariant("native_executor.process.output_budget"))
+        }
+        (Err(ProcessFailure::Cancelled), _) => Err(invariant("native_executor.process.cancelled")),
+        (Err(_), _) | (_, Err(_)) => Err(invariant("native_executor.process.run")),
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn run_held(
+    _executable: File,
+    _directory: File,
+    _argv0: &[u8],
+    _arguments: &[&str],
+    _timeout_ms: u64,
+    _stdout_max: usize,
+    _stderr_max: usize,
+    _cancellation: Option<&crate::agent_runtime::AgentCancellation>,
+) -> Result<crate::process_provider::ProcessOutput, Diagnostic> {
+    Err(invariant("native_executor.host.unsupported"))
+}
+
 /// The native C11 executor, parameterized by the `clang` optimization flag
 /// its one compile step uses.
 ///
@@ -71,21 +387,23 @@ use super::{sealed, ExecutionAuthority, StageExecutor};
 /// it. Both construct this same, single `StageExecutor` implementation --
 /// the optimization level is data on an existing seam, not a fourth sealed
 /// executor.
-pub(in crate::agent_lifecycle) struct NativeStageExecutor {
+pub(in crate::agent_lifecycle) struct NativeStageExecutor<'a> {
+    pub(in crate::agent_lifecycle) host: &'a NativeStageHost,
     pub(in crate::agent_lifecycle) optimization: &'static str,
 }
 
-impl NativeStageExecutor {
-    pub(in crate::agent_lifecycle) const fn o0() -> Self {
+impl<'a> NativeStageExecutor<'a> {
+    pub(in crate::agent_lifecycle) const fn o0(host: &'a NativeStageHost) -> Self {
         Self {
+            host,
             optimization: "-O0",
         }
     }
 }
 
-impl sealed::Sealed for NativeStageExecutor {}
+impl sealed::Sealed for NativeStageExecutor<'_> {}
 
-impl StageExecutor for NativeStageExecutor {
+impl StageExecutor for NativeStageExecutor<'_> {
     fn execute(
         &self,
         _authority: ExecutionAuthority,
@@ -100,7 +418,16 @@ impl StageExecutor for NativeStageExecutor {
                 "stage_executor.cancelled",
             )]);
         }
-        run(program, prepared, arguments, max_steps, self.optimization).map_err(|error| vec![error])
+        run(
+            program,
+            prepared,
+            arguments,
+            max_steps,
+            self.host,
+            self.optimization,
+            cancellation,
+        )
+        .map_err(|error| vec![error])
     }
 }
 
@@ -459,12 +786,158 @@ fn probe_root() -> PathBuf {
     ))
 }
 
+/// One private 0700 probe directory held by descriptor. Every transition from
+/// generated source to compiled child rechecks this held directory and opens
+/// its child by `openat(..., NOFOLLOW)`, so replacing the path cannot redirect
+/// the native stage executor into an attacker-selected file.
+#[cfg(unix)]
+struct ProbeDirectory {
+    path: PathBuf,
+    held: File,
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(unix)]
+impl ProbeDirectory {
+    fn create() -> Result<Self, Diagnostic> {
+        use rustix::fs::{mkdir, open, Mode, OFlags};
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let path = probe_root();
+        mkdir(&path, Mode::from_bits_truncate(0o700))
+            .map_err(|_| invariant("native_executor.probe_directory"))?;
+        let held = open(
+            &path,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(|_| invariant("native_executor.probe_directory"))?;
+        let metadata = held
+            .metadata()
+            .map_err(|_| invariant("native_executor.probe_directory"))?;
+        if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
+            return Err(invariant("native_executor.probe_directory"));
+        }
+        Ok(Self {
+            path,
+            held,
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+
+    fn recheck(&self) -> Result<(), Diagnostic> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let metadata = self
+            .held
+            .metadata()
+            .map_err(|_| invariant("native_executor.probe_directory"))?;
+        if !metadata.is_dir()
+            || metadata.permissions().mode() & 0o077 != 0
+            || metadata.dev() != self.device
+            || metadata.ino() != self.inode
+        {
+            return Err(invariant("native_executor.probe_directory"));
+        }
+        Ok(())
+    }
+
+    fn write_source(&self, source: &[u8]) -> Result<(), Diagnostic> {
+        use rustix::fs::{openat, Mode, OFlags};
+        self.recheck()?;
+        let file = openat(
+            &self.held,
+            c"native_executor.c",
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_bits_truncate(0o600),
+        )
+        .map(File::from)
+        .map_err(|_| invariant("native_executor.write_source"))?;
+        let mut file = file;
+        file.write_all(source)
+            .and_then(|()| file.sync_all())
+            .map_err(|_| invariant("native_executor.write_source"))
+    }
+
+    fn open_child(&self, name: &std::ffi::CStr) -> Result<File, Diagnostic> {
+        use rustix::fs::{openat, Mode, OFlags};
+        self.recheck()?;
+        let child = openat(
+            &self.held,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(|_| invariant("native_executor.host.program_open"))?;
+        if !child
+            .metadata()
+            .map_err(|_| invariant("native_executor.host.program_open"))?
+            .is_file()
+        {
+            return Err(invariant("native_executor.host.program_open"));
+        }
+        Ok(child)
+    }
+
+    fn cleanup(&self) {
+        use std::os::unix::fs::MetadataExt;
+        // Never recursively remove a path that could have been replaced by a
+        // same-UID adversary. A drifted probe is intentionally left for the
+        // host's temporary-file cleanup rather than deleting foreign data.
+        let Ok(metadata) = std::fs::symlink_metadata(&self.path) else {
+            return;
+        };
+        if metadata.is_dir() && metadata.dev() == self.device && metadata.ino() == self.inode {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+struct ProbeDirectory {
+    path: PathBuf,
+    held: File,
+}
+
+#[cfg(not(unix))]
+impl ProbeDirectory {
+    fn create() -> Result<Self, Diagnostic> {
+        let path = probe_root();
+        std::fs::create_dir(&path).map_err(|_| invariant("native_executor.probe_directory"))?;
+        let held = OpenOptions::new()
+            .read(true)
+            .open(&path)
+            .map_err(|_| invariant("native_executor.probe_directory"))?;
+        Ok(Self { path, held })
+    }
+    fn recheck(&self) -> Result<(), Diagnostic> {
+        Ok(())
+    }
+    fn write_source(&self, source: &[u8]) -> Result<(), Diagnostic> {
+        std::fs::write(self.path.join("native_executor.c"), source)
+            .map_err(|_| invariant("native_executor.write_source"))
+    }
+    fn open_child(&self, _name: &std::ffi::CStr) -> Result<File, Diagnostic> {
+        OpenOptions::new()
+            .read(true)
+            .open(self.path.join("native_executor"))
+            .map_err(|_| invariant("native_executor.host.program_open"))
+    }
+    fn cleanup(&self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 fn run(
     program: &hir::ResolvedProgram,
     prepared: &PreparedRetainedCall,
     arguments: &[RetainedValue],
     max_steps: usize,
+    host: &NativeStageHost,
     optimization: &str,
+    cancellation: Option<&crate::agent_runtime::AgentCancellation>,
 ) -> Result<RetainedCallEvaluation, Diagnostic> {
     if !(1..=1_000_000).contains(&max_steps) {
         return Err(invariant("native_executor.max_steps"));
@@ -531,10 +1004,9 @@ fn run(
     let generated =
         crate::codegen::emit_hir_c(program).map_err(|_| invariant("native_executor.codegen"))?;
 
-    let root = probe_root();
-    std::fs::create_dir(&root).map_err(|_| invariant("native_executor.probe_directory"))?;
-    let outcome = compile_and_run(&generated, &body, &root, optimization);
-    let _ = std::fs::remove_dir_all(&root);
+    let root = ProbeDirectory::create()?;
+    let outcome = compile_and_run(&generated, &body, &root, host, optimization, cancellation);
+    root.cleanup();
     let stdout = outcome?;
     let result_declaration = nominal_declaration(&entry.return_type)?.clone();
 
@@ -544,38 +1016,25 @@ fn run(
 fn compile_and_run(
     generated: &str,
     driver_body: &str,
-    root: &Path,
+    root: &ProbeDirectory,
+    host: &NativeStageHost,
     optimization: &str,
+    cancellation: Option<&crate::agent_runtime::AgentCancellation>,
 ) -> Result<String, Diagnostic> {
-    let source_path = root.join("native_executor.c");
-    let executable_path = root.join(format!("native_executor{}", std::env::consts::EXE_SUFFIX));
     let source = format!("{generated}\nint main(void) {{\n{driver_body}\n}}\n");
-    std::fs::write(&source_path, source).map_err(|_| invariant("native_executor.write_source"))?;
-    let compiled = Command::new("clang")
-        .args([
-            "-std=c11",
-            optimization,
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-Wno-tautological-compare",
-            "-DSPX_NO_ENTRY_WRAPPER",
-        ])
-        .arg(&source_path)
-        .arg("-o")
-        .arg(&executable_path)
-        .output()
-        .map_err(|_| invariant("native_executor.tool.clang"))?;
-    if !compiled.status.success() {
-        return Err(invariant("native_executor.compile"));
+    root.write_source(source.as_bytes())?;
+    if cancellation.is_some_and(crate::agent_runtime::AgentCancellation::is_cancelled) {
+        return Err(invariant("native_executor.process.cancelled"));
     }
-    let output: Output = Command::new(&executable_path)
-        .output()
-        .map_err(|_| invariant("native_executor.tool.run"))?;
-    if !output.status.success() {
-        return Err(invariant("native_executor.run"));
+    host.compile(root, optimization, cancellation)?;
+    if cancellation.is_some_and(crate::agent_runtime::AgentCancellation::is_cancelled) {
+        return Err(invariant("native_executor.process.cancelled"));
     }
-    String::from_utf8(output.stdout).map_err(|_| invariant("native_executor.output_utf8"))
+    let stdout = host.run(root, cancellation)?;
+    if cancellation.is_some_and(crate::agent_runtime::AgentCancellation::is_cancelled) {
+        return Err(invariant("native_executor.process.cancelled"));
+    }
+    String::from_utf8(stdout).map_err(|_| invariant("native_executor.output_utf8"))
 }
 
 fn decode(

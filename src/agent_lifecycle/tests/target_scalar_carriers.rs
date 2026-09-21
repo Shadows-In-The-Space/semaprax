@@ -151,17 +151,17 @@ fn drive(
     // Reconstruct the backend selector for each dispatch: it is a small
     // `Copy` enum except for its borrowed source text, and every leg must run
     // the stage that produced its own preceding state carrier.
+    let (kind, native_host) = match backend {
+        authorization::StageBackend::Interpreter => (0, None),
+        authorization::StageBackend::Native { host } => (1, Some(host)),
+        authorization::StageBackend::NativeAtOptimization { host, .. } => (2, Some(host)),
+        authorization::StageBackend::Wasm { .. } => (3, None),
+    };
     let select = |kind| match kind {
         0 => authorization::StageBackend::Interpreter,
-        1 => authorization::StageBackend::Native,
-        2 => authorization::StageBackend::NativeAtOptimization("-O2"),
+        1 => native_backend(native_host.expect("native leg retains held host")),
+        2 => native_o2_backend(native_host.expect("native leg retains held host")),
         _ => authorization::StageBackend::Wasm { source },
-    };
-    let kind = match backend {
-        authorization::StageBackend::Interpreter => 0,
-        authorization::StageBackend::Native => 1,
-        authorization::StageBackend::NativeAtOptimization(_) => 2,
-        authorization::StageBackend::Wasm { .. } => 3,
     };
 
     let observed = returned(
@@ -209,15 +209,13 @@ fn all_target_stage_legs_preserve_bool_and_u64_usize_result_leaves() {
         eprintln!("skipping scalar carrier parity: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let source = scalar_source();
     let compiled = compile(&source);
     let expected = drive(authorization::StageBackend::Interpreter, &source, &compiled);
     for (label, backend) in [
-        ("native -O0", authorization::StageBackend::Native),
-        (
-            "native -O2",
-            authorization::StageBackend::NativeAtOptimization("-O2"),
-        ),
+        ("native -O0", native_backend(&native_host)),
+        ("native -O2", native_o2_backend(&native_host)),
         (
             "Core Wasm",
             authorization::StageBackend::Wasm { source: &source },
@@ -252,6 +250,7 @@ fn all_target_stage_legs_preserve_negative_i32_proposal_fields() {
         eprintln!("skipping negative-i32 proposal parity: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let source = i32_proposal_source();
     let compiled = compile(&source);
     let task = payload(&compiled.binding.task, b"i32-minimum".to_vec(), 10);
@@ -299,11 +298,8 @@ fn all_target_stage_legs_preserve_negative_i32_proposal_fields() {
 
     let expected = drive(authorization::StageBackend::Interpreter);
     for (label, backend) in [
-        ("native -O0", authorization::StageBackend::Native),
-        (
-            "native -O2",
-            authorization::StageBackend::NativeAtOptimization("-O2"),
-        ),
+        ("native -O0", native_backend(&native_host)),
+        ("native -O2", native_o2_backend(&native_host)),
         (
             "Core Wasm",
             authorization::StageBackend::Wasm { source: &source },
@@ -316,6 +312,7 @@ fn all_target_stage_legs_preserve_negative_i32_proposal_fields() {
 #[test]
 fn unsupported_target_result_leaf_refuses_before_artifact_execution_and_leaves_healthy_profile_intact(
 ) {
+    let native_host = native_stage_host().expect("native stage test host is available");
     let unsupported = unsupported_source();
     let compiled = compile(&unsupported);
     let task = payload(&compiled.binding.task, b"refuse".to_vec(), 10);
@@ -336,8 +333,8 @@ fn unsupported_target_result_leaf_refuses_before_artifact_execution_and_leaves_h
     ];
     reduce.push(payload(&compiled.binding.outcome, b"observed".to_vec(), 4));
     for backend in [
-        authorization::StageBackend::Native,
-        authorization::StageBackend::NativeAtOptimization("-O2"),
+        native_backend(&native_host),
+        native_o2_backend(&native_host),
         authorization::StageBackend::Wasm {
             source: &unsupported,
         },

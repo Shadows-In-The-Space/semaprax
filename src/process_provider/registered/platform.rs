@@ -2,6 +2,7 @@
 //! The registry supplies every executable, cwd, argument and environment byte.
 #![allow(unsafe_code)]
 use super::HeldProcessTool;
+use crate::agent_runtime::AgentCancellation;
 use crate::process_provider::{ProcessFailure, ProcessOutput, ProcessRequest, ProcessTermination};
 use libc::{c_char, c_int};
 use std::ffi::CString;
@@ -628,6 +629,7 @@ fn set_nonblocking(fd: &Fd) -> io::Result<()> {
 pub(super) fn run(
     tool: &HeldProcessTool,
     request: &ProcessRequest,
+    cancellation: Option<&AgentCancellation>,
 ) -> Result<ProcessOutput, ProcessFailure> {
     settle()?;
     let mut signal_policy = std::mem::MaybeUninit::<libc::sigaction>::zeroed();
@@ -707,6 +709,7 @@ pub(super) fn run(
         pid,
         request,
         deadline,
+        cancellation,
         &mut pipes,
         #[cfg(target_os = "linux")]
         &launch.read,
@@ -757,6 +760,7 @@ fn exchange(
     pid: libc::pid_t,
     request: &ProcessRequest,
     deadline: Instant,
+    cancellation: Option<&AgentCancellation>,
     pipes: &mut [Option<Fd>; 3],
     #[cfg(target_os = "linux")] launch: &Fd,
 ) -> Result<ProcessOutput, ProcessFailure> {
@@ -767,6 +771,9 @@ fn exchange(
     #[cfg(target_os = "linux")]
     let mut launched = false;
     loop {
+        if cancellation.is_some_and(AgentCancellation::is_cancelled) {
+            return Err(ProcessFailure::Cancelled);
+        }
         if Instant::now() >= deadline {
             return Err(ProcessFailure::TimedOut);
         }

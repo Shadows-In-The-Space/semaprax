@@ -22,9 +22,14 @@ pub(super) fn target_backend_identity(
 ) -> String {
     match backend {
         crate::agent_lifecycle::authorization::StageBackend::Interpreter => "interpreter".into(),
-        crate::agent_lifecycle::authorization::StageBackend::Native => "native:-O0".into(),
-        crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization(level) => {
-            format!("native:{level}")
+        crate::agent_lifecycle::authorization::StageBackend::Native { host } => {
+            format!("native:-O0:{}", host.identity())
+        }
+        crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization {
+            host,
+            optimization,
+        } => {
+            format!("native:{optimization}:{}", host.identity())
         }
         crate::agent_lifecycle::authorization::StageBackend::Wasm { source } => format!(
             "core-wasm:{}",

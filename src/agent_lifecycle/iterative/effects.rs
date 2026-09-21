@@ -892,11 +892,13 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             grants: Vec::new(),
         };
         let selected = match backend {
-            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization(_) => None,
+            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization {
+                ..
+            } => None,
             crate::agent_lifecycle::authorization::StageBackend::Interpreter => {
                 Some(TargetStageBackend::Interpreter)
             }
-            crate::agent_lifecycle::authorization::StageBackend::Native => None,
+            crate::agent_lifecycle::authorization::StageBackend::Native { .. } => None,
             crate::agent_lifecycle::authorization::StageBackend::Wasm {
                 source: wasm_source,
             } => {
@@ -938,6 +940,8 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             eprintln!("skipping target stage bridge: clang or node unavailable");
             return;
         }
+        let native_host = crate::agent_lifecycle::tests::native_stage_host()
+            .expect("availability retains native host");
         let module_source = typed_effect_source();
         let compiled = compile_from_source(&module_source);
         let cancellation = AgentCancellation::new();
@@ -975,11 +979,11 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
         for (label, backend) in [
             (
                 "native -O0",
-                crate::agent_lifecycle::authorization::StageBackend::Native,
+                crate::agent_lifecycle::tests::native_backend(&native_host),
             ),
             (
                 "native -O2",
-                crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+                crate::agent_lifecycle::tests::native_o2_backend(&native_host),
             ),
             (
                 "Core Wasm",
@@ -1050,8 +1054,8 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
 
         for backend in [
             crate::agent_lifecycle::authorization::StageBackend::Interpreter,
-            crate::agent_lifecycle::authorization::StageBackend::Native,
-            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+            crate::agent_lifecycle::tests::native_backend(&native_host),
+            crate::agent_lifecycle::tests::native_o2_backend(&native_host),
             crate::agent_lifecycle::authorization::StageBackend::Wasm {
                 source: &module_source,
             },

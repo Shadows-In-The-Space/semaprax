@@ -33,19 +33,16 @@ fn stage_initialize_with_i64_minimum_agrees_on_interpreter_native_and_core_wasm(
         eprintln!("skipping signed-minimum Wasm stage parity: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
 
     let compiled = lifecycle();
     let task = payload(&compiled.binding.task, b"minimum".to_vec(), i64::MIN);
     let interpreter = dispatch(authorization::StageBackend::Interpreter, &compiled, &task)
         .expect("the interpreter initializes the signed-minimum task");
-    let native_o0 = dispatch(authorization::StageBackend::Native, &compiled, &task)
+    let native_o0 = dispatch(native_backend(&native_host), &compiled, &task)
         .expect("native -O0 initializes the signed-minimum task");
-    let native_o2 = dispatch(
-        authorization::StageBackend::NativeAtOptimization("-O2"),
-        &compiled,
-        &task,
-    )
-    .expect("native -O2 initializes the signed-minimum task");
+    let native_o2 = dispatch(native_o2_backend(&native_host), &compiled, &task)
+        .expect("native -O2 initializes the signed-minimum task");
     let wasm = dispatch(
         authorization::StageBackend::Wasm { source: MODULE },
         &compiled,
@@ -79,19 +76,16 @@ fn stage_initialize_with_empty_bytes_agrees_on_interpreter_native_and_core_wasm(
         eprintln!("skipping empty-Bytes Wasm stage parity: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
 
     let compiled = lifecycle();
     let task = payload(&compiled.binding.task, Vec::new(), 0);
     let interpreter = dispatch(authorization::StageBackend::Interpreter, &compiled, &task)
         .expect("the interpreter initializes the empty-Bytes task");
-    let native_o0 = dispatch(authorization::StageBackend::Native, &compiled, &task)
+    let native_o0 = dispatch(native_backend(&native_host), &compiled, &task)
         .expect("native -O0 initializes the empty-Bytes task");
-    let native_o2 = dispatch(
-        authorization::StageBackend::NativeAtOptimization("-O2"),
-        &compiled,
-        &task,
-    )
-    .expect("native -O2 initializes the empty-Bytes task");
+    let native_o2 = dispatch(native_o2_backend(&native_host), &compiled, &task)
+        .expect("native -O2 initializes the empty-Bytes task");
     let wasm = dispatch(
         authorization::StageBackend::Wasm { source: MODULE },
         &compiled,

@@ -11,6 +11,22 @@ fn backend_label(backend: crate::agent_lifecycle::authorization::StageBackend<'_
     super::live::target_backend_identity(backend)
 }
 
+fn native_o0() -> crate::agent_lifecycle::authorization::StageBackend<'static> {
+    let host = Box::leak(Box::new(
+        crate::agent_lifecycle::tests::native_stage_host()
+            .expect("native parity requires an explicit held compiler"),
+    ));
+    crate::agent_lifecycle::tests::native_backend(host)
+}
+
+fn native_o2() -> crate::agent_lifecycle::authorization::StageBackend<'static> {
+    let host = Box::leak(Box::new(
+        crate::agent_lifecycle::tests::native_stage_host()
+            .expect("native parity requires an explicit held compiler"),
+    ));
+    crate::agent_lifecycle::tests::native_o2_backend(host)
+}
+
 fn assert_rebound_model_evidence(
     reference_requests: &[Vec<u8>],
     reference_evidence: &[crate::agent_lifecycle::iterative::model::ModelEvidence],
@@ -463,18 +479,8 @@ fn successful_target_settlement_is_cumulative_and_backend_source_bound() {
         crate::agent_lifecycle::authorization::StageBackend::Interpreter,
         &cancellation,
     );
-    let native_o0 = successful_target_run_on(
-        &compiled,
-        &module_source,
-        crate::agent_lifecycle::authorization::StageBackend::Native,
-        &cancellation,
-    );
-    let native_o2 = successful_target_run_on(
-        &compiled,
-        &module_source,
-        crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
-        &cancellation,
-    );
+    let native_o0 = successful_target_run_on(&compiled, &module_source, native_o0(), &cancellation);
+    let native_o2 = successful_target_run_on(&compiled, &module_source, native_o2(), &cancellation);
     let wasm = successful_target_run_on(
         &compiled,
         &module_source,
@@ -554,14 +560,8 @@ fn target_hostile_proposals_budgets_and_results_settle_without_extra_dispatch_on
             "interpreter",
             crate::agent_lifecycle::authorization::StageBackend::Interpreter,
         ),
-        (
-            "native -O0",
-            crate::agent_lifecycle::authorization::StageBackend::Native,
-        ),
-        (
-            "native -O2",
-            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
-        ),
+        ("native -O0", native_o0()),
+        ("native -O2", native_o2()),
         (
             "Core Wasm",
             crate::agent_lifecycle::authorization::StageBackend::Wasm {
@@ -702,16 +702,8 @@ fn target_grants_reject_stale_program_evidence_on_every_backend() {
             crate::agent_lifecycle::authorization::StageBackend::Interpreter,
             crate::agent_lifecycle::authorization::StageBackend::Interpreter,
         ),
-        (
-            "native -O0",
-            crate::agent_lifecycle::authorization::StageBackend::Native,
-            crate::agent_lifecycle::authorization::StageBackend::Native,
-        ),
-        (
-            "native -O2",
-            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
-            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
-        ),
+        ("native -O0", native_o0(), native_o0()),
+        ("native -O2", native_o2(), native_o2()),
         (
             "Core Wasm",
             crate::agent_lifecycle::authorization::StageBackend::Wasm {
@@ -815,14 +807,8 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
     }
 
     for (label, backend) in [
-        (
-            "native -O0",
-            crate::agent_lifecycle::authorization::StageBackend::Native,
-        ),
-        (
-            "native -O2",
-            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
-        ),
+        ("native -O0", native_o0()),
+        ("native -O2", native_o2()),
         (
             "Core Wasm",
             crate::agent_lifecycle::authorization::StageBackend::Wasm {
@@ -978,14 +964,8 @@ fn model_boundary_settles_every_refusal_before_effect_dispatch_on_all_stage_back
         assert_eq!(reference.5.calls, 0);
 
         for (label, backend) in [
-            (
-                "native -O0",
-                crate::agent_lifecycle::authorization::StageBackend::Native,
-            ),
-            (
-                "native -O2",
-                crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
-            ),
+            ("native -O0", native_o0()),
+            ("native -O2", native_o2()),
             (
                 "Core Wasm",
                 crate::agent_lifecycle::authorization::StageBackend::Wasm {
@@ -1042,14 +1022,8 @@ fn model_boundary_settles_every_refusal_before_effect_dispatch_on_all_stage_back
     assert_eq!(reference.3, Default::default());
     assert_eq!((reference.4, reference.5.calls), (0, 0));
     for (label, backend) in [
-        (
-            "native -O0",
-            crate::agent_lifecycle::authorization::StageBackend::Native,
-        ),
-        (
-            "native -O2",
-            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
-        ),
+        ("native -O0", native_o0()),
+        ("native -O2", native_o2()),
         (
             "Core Wasm",
             crate::agent_lifecycle::authorization::StageBackend::Wasm {

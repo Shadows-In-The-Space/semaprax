@@ -76,11 +76,14 @@ fn task() -> LifecycleTask {
     }
 }
 
-fn legs(source: &str) -> [(&str, StageBackend<'_>); 4] {
+fn legs<'a>(
+    source: &'a str,
+    native_host: &'a authorization::NativeStageHost,
+) -> [(&'a str, StageBackend<'a>); 4] {
     [
         ("interpreter", StageBackend::Interpreter),
-        ("native O0", StageBackend::Native),
-        ("native O2", StageBackend::NativeAtOptimization("-O2")),
+        ("native O0", native_backend(native_host)),
+        ("native O2", native_o2_backend(native_host)),
         ("Core Wasm", StageBackend::Wasm { source }),
     ]
 }
@@ -258,6 +261,7 @@ fn frozen_lifecycle_completes_with_fresh_grants_and_real_read_results_on_every_b
         eprintln!("local lifecycle parity requires clang and node");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let source = source();
     let compiled = compile(&source);
     let proposals = proposals(&compiled);
@@ -341,7 +345,7 @@ fn frozen_lifecycle_completes_with_fresh_grants_and_real_read_results_on_every_b
         .unwrap();
     assert_eq!(ordinary.evidence(), expected.0.evidence());
     assert_eq!(probe.trace, expected.1);
-    for (leg, backend) in legs(&source).into_iter().skip(1) {
+    for (leg, backend) in legs(&source, &native_host).into_iter().skip(1) {
         let actual = run(&compiled, &proposals, budget, backend, false, false);
         assert_parity(&expected, &actual, leg);
         assert!(actual.0.stages().iter().all(|stage| stage.steps_used == 0));
@@ -387,6 +391,7 @@ fn frozen_lifecycle_negative_boundaries_agree_without_unbudgeted_or_malformed_di
         eprintln!("local lifecycle parity requires clang and node");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let source = source();
     let compiled = compile(&source);
     let valid = proposals(&compiled);
@@ -472,7 +477,7 @@ fn frozen_lifecycle_negative_boundaries_agree_without_unbudgeted_or_malformed_di
             "{name}"
         );
         assert!(expected.0.value().is_none(), "{name}");
-        for (leg, backend) in legs(&source).into_iter().skip(1) {
+        for (leg, backend) in legs(&source, &native_host).into_iter().skip(1) {
             let actual = run(
                 &compiled,
                 &proposals,

@@ -530,14 +530,43 @@ fn the_sealed_dispatch_reaches_the_interpreter_and_matches_its_direct_evaluation
 // ---------------------------------------------------------------------------
 
 fn native_wasm_tools_available() -> bool {
-    std::process::Command::new("clang")
-        .arg("--version")
-        .output()
-        .is_ok_and(|output| output.status.success())
+    native_stage_host().is_some()
         && std::process::Command::new("node")
             .arg("--version")
             .output()
             .is_ok_and(|output| output.status.success())
+}
+
+/// Test-only host fixture for the explicitly held native compiler capability.
+/// These are literal, reviewable absolute paths; native stage execution does
+/// not discover `clang` through PATH. CI that installs it elsewhere can set
+/// one explicit fixture path without changing production authority.
+pub(in crate::agent_lifecycle) fn native_stage_host() -> Option<authorization::NativeStageHost> {
+    let configured =
+        std::env::var_os("SEMAPRAX_TEST_NATIVE_STAGE_CLANG").map(std::path::PathBuf::from);
+    configured
+        .into_iter()
+        .chain([
+            std::path::PathBuf::from("/usr/bin/clang"),
+            std::path::PathBuf::from("/usr/local/bin/clang"),
+            std::path::PathBuf::from("/opt/homebrew/opt/llvm/bin/clang"),
+        ])
+        .find_map(|path| authorization::NativeStageHost::open(&path).ok())
+}
+
+pub(in crate::agent_lifecycle) fn native_backend(
+    host: &authorization::NativeStageHost,
+) -> authorization::StageBackend<'_> {
+    authorization::StageBackend::Native { host }
+}
+
+pub(in crate::agent_lifecycle) fn native_o2_backend(
+    host: &authorization::NativeStageHost,
+) -> authorization::StageBackend<'_> {
+    authorization::StageBackend::NativeAtOptimization {
+        host,
+        optimization: "-O2",
+    }
 }
 
 /// Parity evidence for #142: the native C11 executor agrees with the
@@ -551,6 +580,7 @@ fn native_executor_agrees_with_the_interpreter_on_every_deterministic_stage() {
         eprintln!("skipping native executor parity: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let compiled = lifecycle();
 
     let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
@@ -563,7 +593,7 @@ fn native_executor_agrees_with_the_interpreter_on_every_deterministic_stage() {
     )
     .expect("interpreter evaluates initialize");
     let native_initialize = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &compiled.program,
         compiled.binding.initialize.prepared(),
         std::slice::from_ref(&task),
@@ -584,7 +614,7 @@ fn native_executor_agrees_with_the_interpreter_on_every_deterministic_stage() {
     )
     .expect("interpreter evaluates observe");
     let native_observe = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &compiled.program,
         compiled.binding.observe.prepared(),
         std::slice::from_ref(&state),
@@ -611,7 +641,7 @@ fn native_executor_agrees_with_the_interpreter_on_every_deterministic_stage() {
         )
         .unwrap_or_else(|error| panic!("interpreter evaluates authorize ({label}): {error:?}"));
         let native = authorization::dispatch_on(
-            authorization::StageBackend::Native,
+            native_backend(&native_host),
             &compiled.program,
             compiled.binding.authorize.stage().prepared(),
             &arguments,
@@ -638,7 +668,7 @@ fn native_executor_agrees_with_the_interpreter_on_every_deterministic_stage() {
     )
     .expect("interpreter evaluates reduce");
     let native_reduce = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &compiled.program,
         compiled.binding.reduce.prepared(),
         &reduce_arguments,
@@ -662,11 +692,12 @@ fn native_executor_replays_the_same_dispatch_without_repeating_any_effect() {
         eprintln!("skipping native executor replay: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let compiled = lifecycle();
     let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
 
     let first = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &compiled.program,
         compiled.binding.initialize.prepared(),
         std::slice::from_ref(&task),
@@ -674,7 +705,7 @@ fn native_executor_replays_the_same_dispatch_without_repeating_any_effect() {
     )
     .expect("the first native dispatch evaluates initialize");
     let second = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &compiled.program,
         compiled.binding.initialize.prepared(),
         std::slice::from_ref(&task),
@@ -695,6 +726,7 @@ fn native_and_interpreter_executors_refuse_a_prepared_call_whose_entry_is_absent
         eprintln!("skipping native executor wrong-entry refusal: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let compiled = lifecycle();
     let other = hir::resolve(
         &crate::parse(
@@ -707,7 +739,7 @@ fn native_and_interpreter_executors_refuse_a_prepared_call_whose_entry_is_absent
     let task = payload(&compiled.binding.task, b"alpha".to_vec(), 10);
 
     let native_error = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &other,
         compiled.binding.initialize.prepared(),
         std::slice::from_ref(&task),
@@ -739,11 +771,12 @@ fn native_executor_refuses_a_malformed_argument_shape_before_any_compile() {
         eprintln!("skipping native executor malformed-argument refusal: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let compiled = lifecycle();
 
     // Wrong arity.
     let arity_error = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &compiled.program,
         compiled.binding.initialize.prepared(),
         &[],
@@ -755,7 +788,7 @@ fn native_executor_refuses_a_malformed_argument_shape_before_any_compile() {
     // Right arity, wrong runtime shape: `observe` takes one borrowed
     // `State` record, not a bare `i64`.
     let shape_error = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &compiled.program,
         compiled.binding.observe.prepared(),
         &[RetainedValue::I64(0)],
@@ -774,6 +807,7 @@ fn native_executor_refuses_a_result_shape_outside_its_closed_vocabulary() {
         eprintln!("skipping native executor result-shape refusal: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let program = hir::resolve(
         &crate::parse(
             "module test.native_executor_scalar_result;\n@id(\"scalar.fn\") fn scalar_result() -> i64 { 0 }\n@id(\"app.main\") fn main() -> i64 { 0 }\n",
@@ -786,7 +820,7 @@ fn native_executor_refuses_a_result_shape_outside_its_closed_vocabulary() {
         .expect("the scalar-result function prepares");
 
     let error = authorization::dispatch_on(
-        authorization::StageBackend::Native,
+        native_backend(&native_host),
         &program,
         &prepared,
         &[],
@@ -861,6 +895,7 @@ fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_progra
         eprintln!("skipping four-leg stage parity: clang or node unavailable");
         return;
     }
+    let native_host = native_stage_host().expect("availability retains native host");
     let compiled = lifecycle();
     // The Wasm backend re-resolves exactly the module source the caller
     // supplies -- here the same `MODULE` text `lifecycle()` compiled.
@@ -885,7 +920,7 @@ fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_progra
         )
         .unwrap_or_else(|error| panic!("interpreter evaluates {label}: {error:?}"));
         let native_o0 = authorization::dispatch_on(
-            authorization::StageBackend::Native,
+            native_backend(&native_host),
             &compiled.program,
             prepared,
             arguments,
@@ -894,7 +929,7 @@ fn every_stage_executor_agrees_on_every_deterministic_stage_of_one_source_progra
         .unwrap_or_else(|error| panic!("native -O0 evaluates {label}: {error:?}"));
         native_o0_dispatches += 1;
         let native_o2 = authorization::dispatch_on(
-            authorization::StageBackend::NativeAtOptimization("-O2"),
+            native_o2_backend(&native_host),
             &compiled.program,
             prepared,
             arguments,

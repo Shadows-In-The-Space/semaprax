@@ -60,9 +60,11 @@ fn backend(
     selector: u8,
     module_source: &str,
 ) -> crate::agent_lifecycle::authorization::StageBackend<'_> {
+    let native_host = crate::agent_lifecycle::tests::native_stage_host()
+        .expect("durable native parity requires an explicit held compiler");
     match selector {
-        0 => crate::agent_lifecycle::authorization::StageBackend::Native,
-        1 => crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+        0 => crate::agent_lifecycle::tests::native_backend(Box::leak(Box::new(native_host))),
+        1 => crate::agent_lifecycle::tests::native_o2_backend(Box::leak(Box::new(native_host))),
         2 => crate::agent_lifecycle::authorization::StageBackend::Wasm {
             source: module_source,
         },

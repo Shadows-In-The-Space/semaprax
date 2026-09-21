@@ -369,21 +369,27 @@ impl RichProposalStages {
 /// This does not expose arbitrary compiler flags or source bytes: the bound
 /// module owns both. `NativeOptimized` is the fixed `-O2` evidence leg, not a
 /// production policy selector.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RichStageBackend {
+#[derive(Clone, Copy, Debug)]
+pub enum RichStageBackend<'a> {
     Interpreter,
-    Native,
-    NativeOptimized,
+    Native(&'a super::authorization::NativeStageHost),
+    NativeOptimized(&'a super::authorization::NativeStageHost),
     Wasm,
 }
 
 impl RichProposalStages {
-    fn backend(&self, backend: RichStageBackend) -> super::authorization::StageBackend<'_> {
+    fn backend<'a>(
+        &'a self,
+        backend: RichStageBackend<'a>,
+    ) -> super::authorization::StageBackend<'a> {
         match backend {
             RichStageBackend::Interpreter => super::authorization::StageBackend::Interpreter,
-            RichStageBackend::Native => super::authorization::StageBackend::Native,
-            RichStageBackend::NativeOptimized => {
-                super::authorization::StageBackend::NativeAtOptimization("-O2")
+            RichStageBackend::Native(host) => super::authorization::StageBackend::Native { host },
+            RichStageBackend::NativeOptimized(host) => {
+                super::authorization::StageBackend::NativeAtOptimization {
+                    host,
+                    optimization: "-O2",
+                }
             }
             RichStageBackend::Wasm => super::authorization::StageBackend::Wasm {
                 source: &self.source,
@@ -595,7 +601,7 @@ pub fn run_rich_turn_on(
     outcome_bytes: Vec<u8>,
     max_steps: usize,
     cancellation: &AgentCancellation,
-    backend: RichStageBackend,
+    backend: RichStageBackend<'_>,
 ) -> Result<RichTurnOutcome, Diagnostic> {
     if cancellation.is_cancelled() {
         return Err(refused("turn.cancelled"));

@@ -433,6 +433,18 @@ connection. This is a host-owned loopback fixture; it does not claim that the
 task-service fixture configuration (which selects only fixture adapters and no
 capabilities) authorizes a physical send.
 
+The selector also proves the service host-request bridge without treating a
+configuration declaration as authority. A canonical host-mode service
+configuration renders the bounded request-v1 handoff; a separate closed
+decoder retains its OTLP collector origin and exact four required capability
+names. The test then gives the host—not the request—a fresh policy and
+capability. A target absent from that policy, or insecure configuration drift,
+refuses before adapter work; only the separately granted policy matching the
+decoded private-root loopback origin reaches the fixed `/v1/metrics` route.
+This is local physical loopback evidence for the host boundary, not an
+authorization for the credential-free task-service fixture or a hosted
+collector claim.
+
 The checkpoint selector is
 `outbound_host_adapter::ledger::checkpoint::tests::`. Its seven cases cover
 deterministic all-disposition round trips, the empty-state known-answer digest,

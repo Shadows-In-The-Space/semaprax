@@ -291,7 +291,10 @@ fn origin<'a>(object: &'a Map<String, Value>, key: &str) -> Result<Option<&'a st
 }
 
 fn valid_https_origin(value: &str) -> bool {
-    if value.len() > 2048 || !value.starts_with("https://") {
+    // Keep every admitted origin constructible as a telemetry collector
+    // target. The longest fixed collector route is `/v1/metrics` (11 bytes),
+    // and collector endpoints are bounded to 2,048 bytes in total.
+    if value.len() > 2037 || !value.starts_with("https://") {
         return false;
     }
     let authority = &value[8..];
@@ -300,16 +303,21 @@ fn valid_https_origin(value: &str) -> bool {
     let port = parts.next();
     if parts.next().is_some()
         || host.len() < 2
-        || !host.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')
+        || host.split('.').any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || !label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                || !label.as_bytes()[0].is_ascii_alphanumeric()
+                || !label.as_bytes()[label.len() - 1].is_ascii_alphanumeric()
         })
-        || !host.as_bytes()[0].is_ascii_alphanumeric()
-        || !host.as_bytes()[host.len() - 1].is_ascii_alphanumeric()
     {
         return false;
     }
     port.is_none_or(|port| {
         !port.is_empty()
+            && port != "443"
             && port.len() <= 5
             && (port.len() == 1 || !port.starts_with('0'))
             && port.bytes().all(|byte| byte.is_ascii_digit())
@@ -400,6 +408,7 @@ mod tests {
         let valid: Value = serde_json::from_slice(&fixture()).unwrap();
         for (port, accepted) in [
             ("1", true),
+            ("443", false),
             ("65535", true),
             ("0", false),
             ("00001", false),
@@ -424,6 +433,34 @@ mod tests {
             let mut bytes = serde_json::to_vec(&host).unwrap();
             bytes.push(b'\n');
             assert_eq!(decode(&bytes).is_ok(), accepted, "port {port}");
+        }
+    }
+
+    #[test]
+    fn telemetry_origins_must_be_collector_canonical() {
+        let valid: Value = serde_json::from_slice(&fixture()).unwrap();
+        let long_label = "a".repeat(64);
+        for origin in [
+            "https://telemetry.example:443".to_owned(),
+            "https://telemetry..example".to_owned(),
+            format!("https://{long_label}.example"),
+        ] {
+            let mut host = valid.clone();
+            host["mode"] = Value::String("host".into());
+            host["database"]["adapter"] = Value::String("sqlite".into());
+            host["database"]["dsn_secret_ref"] = Value::String("db.primary".into());
+            host["http"]["adapter"] = Value::String("native".into());
+            host["http"]["listen_origin"] = Value::String("https://service.example".into());
+            host["http"]["tls_profile"] = Value::String("modern".into());
+            host["secrets"]["password_pepper_ref"] = Value::String("auth.pepper".into());
+            host["secrets"]["session_signing_key_ref"] = Value::String("auth.session".into());
+            host["secrets"]["webhook_signing_key_ref"] = Value::String("webhook.signing".into());
+            host["telemetry"]["adapter"] = Value::String("otlp".into());
+            host["telemetry"]["endpoint_origin"] = Value::String(origin.clone());
+            host.sort_all_objects();
+            let mut bytes = serde_json::to_vec(&host).unwrap();
+            bytes.push(b'\n');
+            assert!(decode(&bytes).is_err(), "accepted {origin}");
         }
     }
 }

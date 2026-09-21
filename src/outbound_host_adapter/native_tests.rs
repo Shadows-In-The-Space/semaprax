@@ -95,6 +95,13 @@ fn loopback_adapter(tls: rustls::ClientConfig, port: u16) -> NativeHttpsAdapter 
 fn read_request(
     stream: &mut rustls::StreamOwned<rustls::ServerConnection, std::net::TcpStream>,
 ) -> (Vec<u8>, Vec<u8>) {
+    read_request_with_required_header(stream, Some("x-request-kind: loopback"))
+}
+
+fn read_request_with_required_header(
+    stream: &mut rustls::StreamOwned<rustls::ServerConnection, std::net::TcpStream>,
+    required_header: Option<&str>,
+) -> (Vec<u8>, Vec<u8>) {
     let mut headers = Vec::new();
     let mut byte = [0u8; 1];
     while !headers.ends_with(b"\r\n\r\n") {
@@ -105,10 +112,12 @@ fn read_request(
         assert!(headers.len() <= 16_384, "request headers are bounded");
     }
     let text = std::str::from_utf8(&headers).expect("request headers are ASCII");
-    assert!(
-        text.lines().any(|line| line == "x-request-kind: loopback"),
-        "explicit caller header reaches the TLS peer"
-    );
+    if let Some(required_header) = required_header {
+        assert!(
+            text.lines().any(|line| line == required_header),
+            "required typed header reaches the TLS peer"
+        );
+    }
     let length = text
         .lines()
         .find_map(|line| line.strip_prefix("content-length: "))
@@ -165,6 +174,38 @@ fn serve_once(
     (port, worker)
 }
 
+fn serve_metric_once(config: rustls::ServerConfig) -> (u16, JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("loopback bind");
+    let port = listener.local_addr().expect("listener address").port();
+    let worker = std::thread::spawn(move || {
+        let (socket, _) = listener.accept().expect("one TLS client");
+        socket
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .expect("read timeout");
+        let connection = rustls::ServerConnection::new(Arc::new(config)).expect("TLS server");
+        let mut stream = rustls::StreamOwned::new(connection, socket);
+        let (headers, body) = read_request_with_required_header(
+            &mut stream,
+            Some("content-type: application/vnd.semaprax.metric.v1+json"),
+        );
+        assert!(
+            headers.starts_with(b"POST /v1/metrics HTTP/1.1\r\n"),
+            "the decoded collector target owns the fixed metric route"
+        );
+        assert!(
+            std::str::from_utf8(&body)
+                .expect("metric JSON")
+                .contains("service.requests"),
+            "typed metric body reaches the private TLS peer"
+        );
+        stream
+            .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .expect("bounded response write");
+        stream.flush().expect("response flush");
+    });
+    (port, worker)
+}
+
 fn prepared(
     endpoint: String,
     method: HttpMethod,
@@ -208,6 +249,19 @@ fn loopback_policy(port: u16, max_response_bytes: usize) -> OutboundPolicy {
     .expect("explicit loopback policy")
 }
 
+fn loopback_metric_policy(port: u16) -> OutboundPolicy {
+    OutboundPolicy::new(
+        "native.loopback-metric.v1",
+        [format!("https://localhost:{port}")],
+        512,
+        4_096,
+        2_000,
+        1,
+        1,
+    )
+    .expect("explicit loopback metric policy")
+}
+
 fn loopback_capability(policy: OutboundPolicy) -> OutboundCapability {
     OutboundCapability::grant_for_trusted_host(
         "sha256:native-loopback-session",
@@ -215,6 +269,30 @@ fn loopback_capability(policy: OutboundPolicy) -> OutboundCapability {
         policy,
     )
     .expect("trusted host grant")
+}
+
+fn host_service_configuration(telemetry_origin: &str) -> Vec<u8> {
+    let mut value = serde_json::json!({
+        "schema": "semaprax.service-config.v1",
+        "mode": "host",
+        "database": {"adapter":"sqlite","dsn_secret_ref":"db.primary","migration_table":"semaprax_migrations"},
+        "http": {"adapter":"native","listen_origin":"https://service.example","tls_profile":"modern"},
+        "secrets": {"password_pepper_ref":"auth.pepper","session_signing_key_ref":"auth.session","webhook_signing_key_ref":"webhook.signing"},
+        "telemetry": {"adapter":"otlp","endpoint_origin":telemetry_origin},
+    });
+    value.sort_all_objects();
+    let mut bytes = serde_json::to_vec(&value).expect("canonical host configuration");
+    bytes.push(b'\n');
+    bytes
+}
+
+fn collector_metric() -> MetricExport {
+    MetricExport {
+        stable_metric_id: "service.requests".into(),
+        observation_id: "service-loopback-1".into(),
+        labels: vec![("region".into(), "local".into())],
+        kind: MetricKind::CounterIncrement(1),
+    }
 }
 
 #[derive(Default)]
@@ -364,6 +442,65 @@ fn native_adapter_refuses_invalid_prepared_request_before_connection() {
         listener.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock
     );
+}
+
+#[test]
+fn checked_service_host_request_binds_only_a_matching_host_grant_to_private_tls_telemetry() {
+    let (client, server) = trusted_configs();
+    let (port, worker) = serve_metric_once(server);
+    let origin = format!("https://localhost:{port}");
+    let configuration = host_service_configuration(&origin);
+    let request = crate::project::derive_service_host_adapter_request_v1(&configuration)
+        .expect("the checked host configuration renders an independently valid request");
+    assert_eq!(request.canonical_bytes().last(), Some(&b'\n'));
+    assert_eq!(request.requirements().len(), 4);
+    let target = TelemetryCollectorTarget::for_trusted_host(
+        request
+            .telemetry()
+            .expect("host mode declares telemetry intent")
+            .endpoint_origin(),
+    )
+    .expect("checked telemetry origin is a collector target");
+    assert_eq!(target.origin(), origin);
+
+    let wrong_port = if port == u16::MAX { port - 1 } else { port + 1 };
+    let wrong_target =
+        TelemetryCollectorTarget::for_trusted_host(format!("https://localhost:{wrong_port}"))
+            .expect("individually canonical but nonmatching target");
+    assert!(
+        matches!(
+            TelemetryCollectorCapability::bind_for_trusted_host(
+                loopback_capability(loopback_metric_policy(port)),
+                wrong_target,
+            ),
+            Err(CollectorRefusal::AuthorityDenied)
+        ),
+        "a host policy never expands to a drifted request target"
+    );
+
+    let mut drifted: serde_json::Value = serde_json::from_slice(&configuration).unwrap();
+    drifted["telemetry"]["endpoint_origin"] = serde_json::json!("http://localhost:1");
+    drifted.sort_all_objects();
+    let mut drifted = serde_json::to_vec(&drifted).unwrap();
+    drifted.push(b'\n');
+    assert!(
+        crate::project::derive_service_host_adapter_request_v1(&drifted).is_err(),
+        "configuration drift refuses before a target, policy, or adapter exists"
+    );
+
+    let prepared = TelemetryCollectorCapability::bind_for_trusted_host(
+        loopback_capability(loopback_metric_policy(port)),
+        target,
+    )
+    .expect("separately trusted host policy admits the decoded target")
+    .prepare_metric(500, collector_metric())
+    .expect("typed telemetry request stays within the host policy");
+    let mut session = MetricExportSession::new(1).expect("bounded typed telemetry session");
+    let mut adapter = loopback_adapter(client, port);
+    session
+        .reconcile(prepared, &mut adapter)
+        .expect("only the matching separately granted capability dispatches");
+    worker.join().expect("one telemetry TLS server request");
 }
 
 #[test]

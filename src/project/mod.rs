@@ -63,6 +63,7 @@ mod semantic_transaction;
 mod semantic_transaction_composition;
 mod semantic_transaction_v2;
 mod semantic_transaction_v2_workflow;
+pub(crate) mod service_host_adapter_request;
 mod source_hint;
 pub(crate) mod standard_dependencies;
 mod std_collections;
@@ -432,6 +433,7 @@ pub use project_lock::{
     classify_lock_change, render_project_lock, verify_project_lock, LockCompatibility,
     VerifiedProjectLock, MAX_PROJECT_LOCK_BYTES, PROJECT_LOCK_FILE, PROJECT_LOCK_SCHEMA,
 };
+pub(crate) use scaffold::derive_service_host_adapter_request_v1;
 pub use scalar_wit_compare::{
     classify_scalar_wit_change, ScalarWitCompatibility, SCALAR_WIT_COMPATIBILITY_SCHEMA,
 };

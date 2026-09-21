@@ -92,7 +92,11 @@ host configuration boundary explicit:
   no capabilities. From a valid host configuration the same decoder renders a
   separate request naming exactly four capabilities — database connect,
   native TLS serve, host-secret resolve, and telemetry emit — plus only
-  bounded origins and secret references. This is an intent declaration, not a
+  bounded origins and secret references. A separate closed request-v1 decoder
+  replays those bytes for host consumption and retains the telemetry origin as
+  an intent only. It cannot construct an outbound policy or capability: the
+  host must separately grant one whose exact allowed-origin set contains that
+  target before it can bind an adapter. This is an intent declaration, not a
   capability grant or a physical adapter implementation.
 
 This mirrors `examples/task-service-project/`, generalized with the
@@ -144,6 +148,12 @@ byte-for-byte with the other generated assets.
 The decoder's own hostile corpus rejects unknown members, mode/adapter drift,
 credential-shaped DSNs, insecure origins, noncanonical encoding, and max-plus-
 one input before the fixture can enter scaffold derivation.
+The independent host-request decoder separately rejects unknown, duplicate,
+reordered-capability, noncanonical, and max-plus-one request bytes. Its
+private-root loopback integration starts from a checked host configuration,
+then proves that only a separately host-granted outbound policy matching the
+decoded OTLP origin can bind the fixed telemetry route. Neither the scaffold
+fixture (which has no requirements) nor request replay grants network I/O.
 
 ## Nonclaims
 

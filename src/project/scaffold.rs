@@ -18,7 +18,19 @@ use sha2::{Digest, Sha256};
 use crate::agent_skill_bundle::generate_agent_skill_bundle;
 use crate::diagnostic::{quote_json, Diagnostic};
 
+use super::service_host_adapter_request::ServiceHostAdapterRequestV1;
 use super::{validate_owned_project_test, ProjectExecutionOptions, PROJECT_SCHEMA};
+
+/// Decode a canonical service configuration and independently replay its
+/// bounded host-adapter handoff. This returns requirements only: it never
+/// resolves a secret, creates an outbound policy, grants a capability, or
+/// opens an adapter.
+pub(crate) fn derive_service_host_adapter_request_v1(
+    configuration: &[u8],
+) -> Result<ServiceHostAdapterRequestV1, String> {
+    let configuration = service_config::decode(configuration)?;
+    super::service_host_adapter_request::decode(configuration.adapter_request_bytes())
+}
 
 pub const PROJECT_SCAFFOLD_SCHEMA: &str = "semaprax.project-scaffold.v2";
 /// Additive capsule schema for the extensible `semaprax.manifest.v1` table

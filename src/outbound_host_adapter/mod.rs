@@ -1510,6 +1510,8 @@ fn sha256(bytes: &[u8]) -> String {
 }
 
 #[cfg(all(test, not(any(target_arch = "wasm32", target_arch = "wasm64"))))]
+mod native_telemetry_tests;
+#[cfg(all(test, not(any(target_arch = "wasm32", target_arch = "wasm64"))))]
 mod native_tests;
 #[cfg(test)]
 mod tests;

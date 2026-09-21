@@ -441,6 +441,19 @@ names. The test then gives the host—not the request—a fresh policy and
 capability. A target absent from that policy, or insecure configuration drift,
 refuses before adapter work; only the separately granted policy matching the
 decoded private-root loopback origin reaches the fixed `/v1/metrics` route.
+
+The sibling `native_telemetry_tests` corpus completes that local vertical for
+every fixed collector signal: separate matching host grants carry the decoded
+origin to `/v1/metrics`, `/v1/spans`, and `/v1/events`. The private TLS peer
+checks each route, media type, typed identity header, and canonical body marker.
+After those three accepted requests settle, exact typed replay returns from the
+corresponding session after the listener has exited, proving it does not start a
+fourth physical connection. This is still only private-root loopback evidence:
+the request handoff is intent rather than authority, the credential-free
+service fixture grants no physical adapter, and it is not a hosted collector,
+provider-interoperability, durable-storage, public-network, or DNS-rebinding
+claim.
+
 This is local physical loopback evidence for the host boundary, not an
 authorization for the credential-free task-service fixture or a hosted
 collector claim.

@@ -25,6 +25,8 @@ mod malformed_trusted_descriptor;
 /// total-payload guard at all.
 #[path = "public_generic_native_adapter_v1/max_bounds_saturation.rs"]
 mod max_bounds_saturation;
+#[path = "public_generic_native_adapter_v1/native_frame_admission.rs"]
+mod native_frame_admission;
 #[path = "public_generic_native_adapter_v1/result_carrier_hostility.rs"]
 mod result_carrier_hostility;
 /// The generated Rust *calling* consumer (issue #156): a real, standalone

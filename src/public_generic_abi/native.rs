@@ -34,5 +34,6 @@
 //! [Public Generic Carrier v1](../../docs/PUBLIC-GENERIC-CARRIER-V1.md#native-c11-physical-adapter-issue-154)
 //! for the full status-code table, wire format, and deferred-scope note.
 
+pub mod admission;
 pub mod binding;
 pub mod template;

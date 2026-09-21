@@ -478,6 +478,21 @@ impl CarrierFrameBinding {
         &self.leaf_paths
     }
 
+    /// Form a self-digested frame using this plan's trusted binding facts.
+    /// Callers still have to submit the resulting bytes to [`parse_bounded`]
+    /// and [`Self::validate_frame`] at their authority boundary; this helper
+    /// only prevents a producer from re-deriving the five bound facts by hand.
+    pub fn frame_with_leaves(&self, leaves: Vec<CarrierLeaf>) -> LogicalCarrierFrame {
+        LogicalCarrierFrame::new(
+            self.direction,
+            self.descriptor_digest.clone(),
+            self.endpoint_identity_digest.clone(),
+            self.instance_identity_digest.clone(),
+            self.leaf_inventory_digest.clone(),
+            leaves,
+        )
+    }
+
     /// Require `frame` to be bound to exactly this plan: same direction,
     /// same descriptor/endpoint/instance/leaf-inventory digests, and the
     /// exact same leaf-path sequence, in canonical order — one `Vec`

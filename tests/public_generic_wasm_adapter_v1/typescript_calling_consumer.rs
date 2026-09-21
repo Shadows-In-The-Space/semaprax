@@ -49,7 +49,7 @@ use semaprax::public_generic_abi::wasm::binding::WasmProviderBindingV1;
 use semaprax::public_generic_abi::wasm::provider::FIXTURE_ENDPOINT_EXPORT_NAME;
 use semaprax::public_generic_consumer::rust_calling::{OwnedByteField, RecordShape};
 use semaprax::public_generic_consumer::typescript_calling::{
-    CallingConsumer, generate_typescript_calling_consumer,
+    generate_typescript_calling_consumer, CallingConsumer,
 };
 
 use super::reference_wasm_module;

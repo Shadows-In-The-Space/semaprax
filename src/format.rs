@@ -63,35 +63,51 @@ pub(crate) fn canonical_int(value: i64) -> String {
 pub(crate) fn canonical_string(value: &str) -> String {
     let mut text = String::from("\"");
     for ch in value.chars() {
-        match ch {
-            '\\' => text.push_str("\\\\"),
-            '"' => text.push_str("\\\""),
-            '\n' => text.push_str("\\n"),
-            '\r' => text.push_str("\\r"),
-            '\t' => text.push_str("\\t"),
-            _ if (ch as u32) < 0x20 || ch == '\u{7f}' => {
-                write!(text, "\\u{{{:x}}}", ch as u32).expect("writing to String cannot fail");
-            }
-            _ => text.push(ch),
-        }
+        write_string_scalar(&mut text, ch);
     }
     text.push('"');
     text
 }
 fn write_string_escaped(output: &mut impl std::fmt::Write, value: &str) {
     for ch in value.chars() {
-        match ch {
-            '\\' => output.write_str("\\\\").unwrap(),
-            '"' => output.write_str("\\\"").unwrap(),
-            '\n' => output.write_str("\\n").unwrap(),
-            '\r' => output.write_str("\\r").unwrap(),
-            '\t' => output.write_str("\\t").unwrap(),
-            _ if (ch as u32) < 0x20 || ch == '\u{7f}' => {
-                write!(output, "\\u{{{:x}}}", ch as u32).unwrap();
+        write_string_scalar(output, ch);
+    }
+}
+
+/// Writes Rust's authoritative canonical projection for one decoded string
+/// scalar.  The Kernel-0 component is a test-only shadow and never supplies
+/// these bytes to production formatting.
+fn write_string_scalar(output: &mut impl std::fmt::Write, ch: char) {
+    match ch {
+        '\\' => write_string_scalar_fragment(output, ch, "\\\\"),
+        '"' => write_string_scalar_fragment(output, ch, "\\\""),
+        '\n' => write_string_scalar_fragment(output, ch, "\\n"),
+        '\r' => write_string_scalar_fragment(output, ch, "\\r"),
+        '\t' => write_string_scalar_fragment(output, ch, "\\t"),
+        _ if (ch as u32) < 0x20 || ch == '\u{7f}' => {
+            let rust = format!("\\u{{{:x}}}", ch as u32);
+            write_string_scalar_fragment(output, ch, &rust);
+        }
+        _ => {
+            #[cfg(test)]
+            {
+                let mut utf8 = [0; 4];
+                crate::kernel_zero::canonical_string_renderer::verify_shadow(
+                    ch as u32,
+                    ch.encode_utf8(&mut utf8),
+                );
             }
-            _ => output.write_char(ch).unwrap(),
+            output.write_char(ch).unwrap();
         }
     }
+}
+
+fn write_string_scalar_fragment(output: &mut impl std::fmt::Write, ch: char, rust: &str) {
+    #[cfg(not(test))]
+    let _ = ch;
+    #[cfg(test)]
+    crate::kernel_zero::canonical_string_renderer::verify_shadow(ch as u32, rust);
+    output.write_str(rust).unwrap();
 }
 enum ExprFormatFrame<'a> {
     Expr(&'a Expr, u8),

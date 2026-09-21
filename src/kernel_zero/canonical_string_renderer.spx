@@ -1,0 +1,220 @@
+module kernel_zero.canonical_string_renderer;
+
+@id("format.scalar-valid")
+fn scalar_valid(value: i64) -> bool
+{
+    value >= 0 && value <= 1114111 && !(value >= 55296 && value <= 57343)
+}
+
+@id("format.named-escape")
+fn named_escape(value: i64) -> bool
+{
+    value == 9 || value == 10 || value == 13 || value == 34 || value == 92
+}
+
+@id("format.unicode-escape")
+fn unicode_escape(value: i64) -> bool
+{
+    value < 32 || value == 127
+}
+
+@id("format.hex-digits")
+fn hex_digits(value: i64) -> i64
+{
+    if value < 16 {
+        1
+    } else {
+        if value < 256 {
+            2
+        } else {
+            if value < 4096 {
+                3
+            } else {
+                if value < 65536 {
+                    4
+                } else {
+                    if value < 1048576 {
+                        5
+                    } else {
+                        6
+                    }
+                }
+            }
+        }
+    }
+}
+
+@id("format.hex-nibble")
+fn hex_nibble(value: i64, position: i64, digits: i64) -> i64
+{
+    let shift = digits - position - 1;
+    let divisor = if shift == 0 {
+        1
+    } else {
+        if shift == 1 {
+            16
+        } else {
+            if shift == 2 {
+                256
+            } else {
+                if shift == 3 {
+                    4096
+                } else {
+                    if shift == 4 {
+                        65536
+                    } else {
+                        1048576
+                    }
+                }
+            }
+        }
+    };
+    let nibble = (value / divisor) % 16;
+    if nibble < 10 {
+        48 + nibble
+    } else {
+        87 + nibble
+    }
+}
+
+@id("format.utf8-length")
+fn utf8_length(value: i64) -> i64
+{
+    if value < 128 {
+        1
+    } else {
+        if value < 2048 {
+            2
+        } else {
+            if value < 65536 {
+                3
+            } else {
+                4
+            }
+        }
+    }
+}
+
+@id("format.utf8-byte")
+fn utf8_byte(value: i64, index: i64) -> i64
+{
+    let length = utf8_length(value);
+    if index == 0 {
+        if length == 1 {
+            value
+        } else {
+            if length == 2 {
+                192 + value / 64
+            } else {
+                if length == 3 {
+                    224 + value / 4096
+                } else {
+                    240 + value / 262144
+                }
+            }
+        }
+    } else {
+        if length == 2 {
+            128 + value % 64
+        } else {
+            if length == 3 {
+                if index == 1 {
+                    128 + (value / 64) % 64
+                } else {
+                    128 + value % 64
+                }
+            } else {
+                if index == 1 {
+                    128 + (value / 4096) % 64
+                } else {
+                    if index == 2 {
+                        128 + (value / 64) % 64
+                    } else {
+                        128 + value % 64
+                    }
+                }
+            }
+        }
+    }
+}
+
+@id("format.named-byte")
+fn named_byte(value: i64) -> i64
+{
+    if value == 9 {
+        116
+    } else {
+        if value == 10 {
+            110
+        } else {
+            if value == 13 {
+                114
+            } else {
+                value
+            }
+        }
+    }
+}
+
+@id("format.render-length")
+fn render_length(value: i64) -> i64
+{
+    if !scalar_valid(value) {
+        0
+    } else {
+        if named_escape(value) {
+            2
+        } else {
+            if unicode_escape(value) {
+                4 + hex_digits(value)
+            } else {
+                utf8_length(value)
+            }
+        }
+    }
+}
+
+@id("format.render-byte")
+fn render_byte(value: i64, index: i64) -> i64
+{
+    let length = render_length(value);
+    if index < 0 || index >= length {
+        0
+    } else {
+        if named_escape(value) {
+            if index == 0 {
+                92
+            } else {
+                named_byte(value)
+            }
+        } else {
+            if unicode_escape(value) {
+                if index == 0 {
+                    92
+                } else {
+                    if index == 1 {
+                        117
+                    } else {
+                        if index == 2 {
+                            123
+                        } else {
+                            if index == length - 1 {
+                                125
+                            } else {
+                                hex_nibble(value, index - 3, hex_digits(value))
+                            }
+                        }
+                    }
+                }
+            } else {
+                utf8_byte(value, index)
+            }
+        }
+    }
+}
+
+@id("kernel-zero.canonical-string-renderer.main")
+fn main() -> i64
+{
+    render_length(129408)
+}

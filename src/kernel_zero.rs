@@ -67,6 +67,10 @@ pub(crate) mod canonical_char_renderer;
 // shadow boundary. It is not a production authority route.
 #[allow(dead_code)]
 pub(crate) mod canonical_int_renderer;
+// The string-escaping sibling remains a test-only formatter shadow boundary.
+// It has no owned string buffer and is not a production authority route.
+#[allow(dead_code)]
+pub(crate) mod canonical_string_renderer;
 mod eval;
 mod reify;
 mod term;

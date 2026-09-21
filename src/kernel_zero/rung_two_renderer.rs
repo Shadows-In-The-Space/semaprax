@@ -16,6 +16,10 @@ use crate::hir::{self, DeclarationId};
 
 use super::canonical_char_renderer::{self, RendererRefusal, SOURCE};
 use super::canonical_int_renderer::{self as canonical_int_renderer, SOURCE as INT_SOURCE};
+use super::canonical_string_renderer::{
+    self as canonical_string_renderer, RendererRefusal as StringRendererRefusal,
+    SOURCE as STRING_SOURCE,
+};
 use super::reify::BoundTranslation;
 
 fn valid_scalar_corpus() -> Vec<u32> {
@@ -265,7 +269,6 @@ fn classify(value: i64) -> i64
         _ => 0,
     }
 }
-
 @id("test.kernel-zero-integer-formatter-shadow.main")
 fn main() -> i64 { classify(literal()) }
 "#;
@@ -280,5 +283,141 @@ fn main() -> i64 { classify(literal()) }
     assert_eq!(
         comparisons, 19,
         "the canonical formatter's measured and emitted traversals must shadow every raw integer expression and pattern literal"
+    );
+}
+
+fn string_fragment_oracle(value: u32) -> Vec<u8> {
+    // This deliberately does not call the formatter or the component.  It
+    // chooses the escape family directly, then lets Rust's UTF-8 encoder only
+    // encode the non-escaped Unicode scalar branch.
+    let mut bytes = Vec::new();
+    match char::from_u32(value).expect("test corpus contains only scalars") {
+        '\\' => bytes.extend_from_slice(b"\\\\"),
+        '"' => bytes.extend_from_slice(b"\\\""),
+        '\n' => bytes.extend_from_slice(b"\\n"),
+        '\r' => bytes.extend_from_slice(b"\\r"),
+        '\t' => bytes.extend_from_slice(b"\\t"),
+        ch if value < 0x20 || value == 0x7f => {
+            bytes.extend_from_slice(b"\\u{");
+            bytes.extend(format!("{value:x}").bytes());
+            bytes.push(b'}');
+            assert_eq!(ch as u32, value);
+        }
+        ch => {
+            let mut encoded = [0; 4];
+            bytes.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
+        }
+    }
+    bytes
+}
+
+#[test]
+fn exact_source_component_matches_an_independent_string_byte_oracle() {
+    let parsed = crate::parse(STRING_SOURCE, "kernel-zero-canonical-string-renderer.spx")
+        .expect("rung-2 string renderer component must parse");
+    let resolved = hir::resolve(&parsed).expect("rung-2 string renderer component must resolve");
+    for id in [
+        "format.scalar-valid",
+        "format.named-escape",
+        "format.unicode-escape",
+        "format.hex-digits",
+        "format.hex-nibble",
+        "format.utf8-length",
+        "format.utf8-byte",
+        "format.named-byte",
+        "format.render-length",
+        "format.render-byte",
+    ] {
+        let id = DeclarationId::new(id);
+        assert!(
+            super::reifies_into_kernel_zero(&resolved, &id),
+            "rung-2 string renderer declaration {id} must stay in Kernel-0"
+        );
+    }
+    let entry = DeclarationId::new("format.render-byte");
+    let binding = BoundTranslation::derive(STRING_SOURCE, &entry)
+        .expect("rung-2 string renderer must have an exact-source Kernel-0 translation");
+    assert!(binding.replay(STRING_SOURCE, &entry).is_ok());
+
+    let values = valid_scalar_corpus();
+    for scalar in &values {
+        let expected = string_fragment_oracle(*scalar);
+        let actual = canonical_string_renderer::render_bytes(*scalar).unwrap();
+        assert_eq!(
+            actual, expected,
+            "string scalar U+{scalar:04X}: byte lane diverged"
+        );
+        assert_eq!(
+            canonical_string_renderer::render(*scalar)
+                .unwrap()
+                .as_bytes(),
+            expected.as_slice(),
+            "string scalar U+{scalar:04X}: UTF-8 result diverged"
+        );
+        assert!(
+            (1..=10).contains(&actual.len()),
+            "string scalar U+{scalar:04X}: component emitted an invalid fragment length"
+        );
+    }
+    for invalid in [0xd800, 0xdfff, 0x110000] {
+        assert_eq!(
+            canonical_string_renderer::render(invalid),
+            Err(StringRendererRefusal::InvalidScalar)
+        );
+    }
+    assert!(values.len() > 90, "broad scalar corpus became vacuous");
+}
+
+#[test]
+fn string_byte_lane_pins_escapes_and_every_utf8_width_at_each_position() {
+    let expected = [
+        (0, "\\u{0}"),
+        (9, "\\t"),
+        (10, "\\n"),
+        (13, "\\r"),
+        (31, "\\u{1f}"),
+        (34, "\\\""),
+        (92, "\\\\"),
+        (127, "\\u{7f}"),
+        (128, "\u{80}"),
+        (2047, "\u{7ff}"),
+        (2048, "\u{800}"),
+        (65535, "\u{ffff}"),
+        (65536, "\u{10000}"),
+        (0x10ffff, "\u{10ffff}"),
+    ];
+    for (scalar, expected) in expected {
+        let actual = canonical_string_renderer::render_bytes(scalar).unwrap();
+        assert_eq!(actual, expected.as_bytes(), "string scalar U+{scalar:04X}");
+        for (index, (actual, expected)) in actual.iter().zip(expected.bytes()).enumerate() {
+            assert_eq!(
+                *actual, expected,
+                "string scalar U+{scalar:04X}: byte {index} drifted from the independent literal oracle"
+            );
+        }
+    }
+}
+
+#[test]
+fn canonical_formatter_executes_the_kernel_zero_shadow_on_real_string_nodes() {
+    let source = r#"module test.kernel_zero_string_formatter_shadow;
+
+@id("test.kernel-zero-string-formatter-shadow.literal")
+fn literal() -> string { "\t\n\r\\\"\u{7f}é🦀" }
+
+@id("test.kernel-zero-string-formatter-shadow.main")
+fn main() -> string { literal() }
+"#;
+    let parsed = crate::parse(source, "kernel-zero-string-formatter-shadow.spx").unwrap();
+    let expected = crate::format::canonical(&parsed);
+    let (actual, comparisons) =
+        canonical_string_renderer::with_shadow(|| crate::format::canonical(&parsed));
+    assert_eq!(
+        actual, expected,
+        "shadowing changed canonical formatter bytes"
+    );
+    assert_eq!(
+        comparisons, 16,
+        "the canonical formatter's measured and emitted traversals must shadow every decoded string scalar"
     );
 }

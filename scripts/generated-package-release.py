@@ -38,11 +38,13 @@ Two subcommands:
       `cargo publish --dry-run` if an explicit absolute tool path is supplied
       (never discovered from PATH). `--npm-tarball-consumer` additionally
       installs a newly packed tarball into a fresh private consumer offline,
-      with lifecycle scripts disabled, then imports the installed package with
-      an explicit Node binary. `--publish` is always refused: this tool
-      implements no live-publish code path, by design -- registry writes and
-      signing require separate maintainer approval (issue #145 step 6,
-      #168's signing policy) that this repository does not grant here.
+      with lifecycle scripts disabled, structurally binds npm's lockfile to
+      that sole tarball dependency, verifies the complete installed inventory
+      byte-for-byte against the checked archive, then imports the installed
+      package with an explicit Node binary. `--publish` is always refused:
+      this tool implements no live-publish code path, by design -- registry
+      writes and signing require separate maintainer approval (issue #145
+      step 6, #168's signing policy) that this repository does not grant here.
 
 Both subcommands refuse outright, before touching any file, if a live
 publish-credential-shaped environment variable is set: this tooling has no
@@ -847,52 +849,56 @@ def _write_all(file_descriptor, data):
         view = view[written:]
 
 
-def _verify_snapshot_payload(snapshot_payload, expected):
-    """Re-read a private snapshot one bounded file at a time.
+def _verify_flat_payload(payload_dir, expected, label):
+    """Re-read one exact flat payload one bounded file at a time.
 
     ``expected`` already holds the verified payload. Retaining a second
     directory-sized mapping while checking the snapshot would double the
     32 MiB admission budget, so retain only one file's bounded read at once.
     Both directory-read variants retain their usual no-follow/identity rules.
     """
-    label = "private verified snapshot payload"
     allowed_names = frozenset(expected)
     expected_names = sorted(expected)
     maximum_entries = len(expected_names)
     if _descriptor_reads_available():
-        directory_fd = _open_directory(snapshot_payload, label)
+        directory_fd = _open_directory(payload_dir, label)
         try:
             names = _admitted_directory_names(
                 directory_fd, label, allowed_names, maximum_entries
             )
             if names != expected_names:
-                reject("private verified snapshot inventory disagrees with the checked payload")
+                reject(f"{label} inventory disagrees with the checked payload")
             for name in names:
                 copied = _read_regular_file_at(
                     directory_fd, name, f"{label}/{name}", len(expected[name])
                 )
                 if copied != expected[name]:
-                    reject("private verified snapshot bytes disagree with the checked payload")
+                    reject(f"{label} bytes disagree with the checked payload")
         finally:
             os.close(directory_fd)
         return
 
-    before = _lstat_directory(snapshot_payload, label)
-    names = _admitted_directory_names(snapshot_payload, label, allowed_names, maximum_entries)
+    before = _lstat_directory(payload_dir, label)
+    names = _admitted_directory_names(payload_dir, label, allowed_names, maximum_entries)
     if names != expected_names:
-        reject("private verified snapshot inventory disagrees with the checked payload")
+        reject(f"{label} inventory disagrees with the checked payload")
     for name in names:
         copied = _read_regular_file_fallback(
-            Path(snapshot_payload) / name, f"{label}/{name}", len(expected[name])
+            Path(payload_dir) / name, f"{label}/{name}", len(expected[name])
         )
         if copied != expected[name]:
-            reject("private verified snapshot bytes disagree with the checked payload")
-    after = _lstat_directory(snapshot_payload, label)
+            reject(f"{label} bytes disagree with the checked payload")
+    after = _lstat_directory(payload_dir, label)
     names_after = _admitted_directory_names(
-        snapshot_payload, label, allowed_names, maximum_entries
+        payload_dir, label, allowed_names, maximum_entries
     )
     if _identity(after) != _identity(before) or names_after != names:
-        reject("private verified snapshot changed while it was read")
+        reject(f"{label} changed while it was read")
+
+
+def _verify_snapshot_payload(snapshot_payload, expected):
+    """Re-read the release tool's private snapshot exactly."""
+    _verify_flat_payload(snapshot_payload, expected, "private verified snapshot payload")
 
 
 def _write_verified_snapshot(root, payload):
@@ -1029,16 +1035,54 @@ def _write_npm_tarball_consumer(snapshot_root, package_name, tarball):
     return consumer
 
 
-def _require_tarball_lockfile(consumer, tarball):
-    """Require npm's generated lockfile to retain the relative tarball route."""
+def _require_tarball_lockfile(consumer, package_name, package_version, tarball):
+    """Structurally bind npm's lockfile to the sole packed dependency."""
     data = _read_regular_file_fallback(
         Path(consumer) / "package-lock.json",
         "npm tarball consumer package-lock.json",
         MAX_NPM_CONSUMER_LOCK_BYTES,
     )
-    required = f"file:../payload/{tarball.name}".encode("utf-8")
-    if required not in data:
-        reject("npm tarball consumer lockfile does not bind the packed tarball")
+    lock = _parse_json_bytes(data, "npm tarball consumer package-lock.json")
+    if not isinstance(lock, dict) or lock.get("lockfileVersion") != 3:
+        reject("npm tarball consumer lockfile is not npm lockfile v3")
+    packages = lock.get("packages")
+    installed_key = f"node_modules/{package_name}"
+    if not isinstance(packages, dict) or set(packages) != {"", installed_key}:
+        reject("npm tarball consumer lockfile has an unexpected package inventory")
+    route = f"file:../payload/{tarball.name}"
+    root = packages.get("")
+    installed = packages.get(installed_key)
+    if (
+        not isinstance(root, dict)
+        or root.get("dependencies") != {package_name: route}
+        or not isinstance(installed, dict)
+        or installed.get("version") != package_version
+        or installed.get("resolved") != route
+    ):
+        reject("npm tarball consumer lockfile does not bind the packed tarball identity")
+
+
+def _installed_npm_package(consumer, package_name):
+    """Locate one installed package without admitting link-bearing ancestors."""
+    if NPM_PACKAGE_NAME.fullmatch(package_name) is None:
+        reject("generated npm package name is not admitted")
+    node_modules = Path(consumer) / "node_modules"
+    _lstat_directory(node_modules, "npm tarball consumer node_modules")
+    components = package_name.split("/")
+    current = node_modules
+    for index, component in enumerate(components):
+        current /= component
+        label = "npm tarball consumer installed package"
+        if index + 1 != len(components):
+            label = "npm tarball consumer package scope"
+        _lstat_directory(current, label)
+    return current
+
+
+def _verify_installed_npm_payload(consumer, package_name, expected):
+    """Require npm's installed result to preserve the checked archive exactly."""
+    installed = _installed_npm_package(consumer, package_name)
+    _verify_flat_payload(installed, expected, "npm tarball consumer installed package")
 
 
 def _private_tool_environment(snapshot_root):
@@ -1232,7 +1276,12 @@ def check(
                             "npm tarball consumer lockfile generation failed: "
                             f"{lock_result.stderr.decode(errors='replace')}"
                         )
-                    _require_tarball_lockfile(consumer, tarball)
+                    _require_tarball_lockfile(
+                        consumer,
+                        package_json["name"],
+                        package_json["version"],
+                        tarball,
+                    )
                     install_result = run_closed(
                         [npm_bin, "ci", "--ignore-scripts", "--offline", "--no-audit", "--no-fund"],
                         cwd=consumer,
@@ -1244,6 +1293,7 @@ def check(
                             "npm tarball consumer install failed: "
                             f"{install_result.stderr.decode(errors='replace')}"
                         )
+                    _verify_installed_npm_payload(consumer, package_json["name"], payload)
                     execute_result = run_closed(
                         [
                             node_bin,
@@ -1271,7 +1321,7 @@ def check(
                         reject(f"npm pack --dry-run failed: {result.stderr.decode(errors='replace')}")
             if npm_tarball_consumer:
                 report.append(
-                    "npm tarball consumer installed and imported the private packed artifact offline"
+                    "npm tarball consumer installed, byte-verified, and imported the private packed artifact offline"
                 )
             else:
                 report.append("npm pack --dry-run succeeded (no file was written, no network used)")

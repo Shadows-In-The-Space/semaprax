@@ -87,17 +87,23 @@ tamper-detection, and refusal evidence.
    `publish-release`'s pattern of running only after every release blocker
    succeeds, with `contents: write`/registry-publish scope granted to no
    earlier job) is a separate, explicitly maintainer-reviewed change.
-5. **Consumer install-from-tarball evidence.** The existing
+5. **Consumer install-from-tarball evidence.** The release wrapper now has a
+   local real-tool npm gate that packs a synthetic compiler-shaped fixture,
+   verifies the tar stream, structurally binds the generated lockfile,
+   installs offline with lifecycle scripts disabled, verifies the installed
+   inventory byte-for-byte, and imports it. This proves the wrapper's archive
+   consumer mechanics, not execution of genuinely compiler-generated Wasm.
+   The existing
    `tests/release_archive_product_v1/owned_frame.rs` lane proves an external
    Node/Rust consumer builds and runs against the generated package's exact
    bytes, but does so through a path dependency into a freshly built
    directory, not through an installed npm/crates.io tarball. Closing that
-   gap needs either a local file registry (`npm` with a `file:`-scheme
-   tarball dependency and a local `.crate` install via
-   `cargo add --path <extracted tarball>` is not equivalent to a registry
-   install) or real registry credentials in a hosted, maintainer-approved
-   job. Neither exists yet; recording this honestly here rather than closing
-   it with the existing path-dependency lane.
+   genuinely compiler-built npm gap still needs its ignored product gate to
+   run with provisioned Node/npm/TypeScript; a local file tarball is not
+   equivalent to a registry install. The Rust `.crate` extraction consumer is
+   likewise local rather than registry evidence. Real registry evidence still
+   needs credentials in a hosted, maintainer-approved job. Recording these
+   distinctions avoids promoting synthetic or path-dependency evidence.
 
 ## Rollback / deprecation policy (proposed)
 

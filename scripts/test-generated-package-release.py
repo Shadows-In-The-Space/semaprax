@@ -555,9 +555,18 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
                     "lockfileVersion": 3,
                     "packages": {
                         "": {"dependencies": {"frame-payload": "file:../payload/frame-payload-0.1.0.tgz"}},
+                        "node_modules/frame-payload": {
+                            "version": "0.1.0",
+                            "resolved": "file:../payload/frame-payload-0.1.0.tgz",
+                        },
                     },
                 }
                 (cwd / "package-lock.json").write_text(json.dumps(lock), encoding="utf-8")
+            elif command[1] == "ci":
+                installed = cwd / "node_modules" / "frame-payload"
+                installed.mkdir(parents=True)
+                for name in gpr.NPM_OWNED_DATA_FILES:
+                    shutil.copyfile(package_dir / name, installed / name)
             return SimpleNamespace(returncode=0, stderr=b"")
 
         with mock.patch.object(gpr, "run_closed", side_effect=closed):
@@ -585,6 +594,96 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
             self.assertNotIn(str(package_dir), str(cwd))
             self.assertNotIn(str(prepared), str(cwd))
         self.assertTrue(any("packed artifact offline" in line for line in report))
+
+    def test_tarball_consumer_refuses_a_substring_only_lockfile_binding_before_install(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+
+        def closed(command, cwd, *_args, **_kwargs):
+            command = list(command)
+            cwd = Path(cwd)
+            if command[1:3] == ["pack", "--json"]:
+                write_packed_npm_tarball(
+                    cwd / "frame-payload-0.1.0.tgz",
+                    {name: (cwd / name).read_bytes() for name in gpr.NPM_OWNED_DATA_FILES},
+                )
+            elif command[1:3] == ["install", "--package-lock-only"]:
+                (cwd / "package-lock.json").write_text(
+                    json.dumps(
+                        {
+                            "lockfileVersion": 3,
+                            "packages": {"": {"note": "file:../payload/frame-payload-0.1.0.tgz"}},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(gpr, "run_closed", side_effect=closed) as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"unexpected package inventory"):
+                gpr.check(
+                    "npm",
+                    prepared,
+                    publish=False,
+                    npm_bin=Path("/tools/npm"),
+                    npm_tarball_consumer=True,
+                    node_bin=Path("/tools/node"),
+                )
+        self.assertEqual(run_closed.call_count, 2)
+
+    def test_tarball_consumer_refuses_installed_byte_substitution_before_import(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+
+        def closed(command, cwd, *_args, **_kwargs):
+            command = list(command)
+            cwd = Path(cwd)
+            if command[1:3] == ["pack", "--json"]:
+                write_packed_npm_tarball(
+                    cwd / "frame-payload-0.1.0.tgz",
+                    {name: (cwd / name).read_bytes() for name in gpr.NPM_OWNED_DATA_FILES},
+                )
+            elif command[1:3] == ["install", "--package-lock-only"]:
+                route = "file:../payload/frame-payload-0.1.0.tgz"
+                (cwd / "package-lock.json").write_text(
+                    json.dumps(
+                        {
+                            "lockfileVersion": 3,
+                            "packages": {
+                                "": {"dependencies": {"frame-payload": route}},
+                                "node_modules/frame-payload": {
+                                    "version": "0.1.0",
+                                    "resolved": route,
+                                },
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            elif command[1] == "ci":
+                installed = cwd / "node_modules" / "frame-payload"
+                installed.mkdir(parents=True)
+                for name in gpr.NPM_OWNED_DATA_FILES:
+                    shutil.copyfile(package_dir / name, installed / name)
+                original = (installed / "semaprax.js").read_bytes()
+                (installed / "semaprax.js").write_bytes(
+                    bytes([original[0] ^ 1]) + original[1:]
+                )
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(gpr, "run_closed", side_effect=closed) as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"bytes disagree"):
+                gpr.check(
+                    "npm",
+                    prepared,
+                    publish=False,
+                    npm_bin=Path("/tools/npm"),
+                    npm_tarball_consumer=True,
+                    node_bin=Path("/tools/node"),
+                )
+        self.assertEqual(run_closed.call_count, 3)
 
     def test_tarball_consumer_refuses_when_pack_does_not_create_one_regular_tarball(self):
         package_dir = self.npm_package_dir(self.root)
@@ -934,6 +1033,24 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         after = sorted(p.name for p in (prepared / "payload").iterdir())
         self.assertEqual(before, after, "npm pack --dry-run must not write a tarball to disk")
         self.assertTrue(any("dry-run succeeded" in line for line in report))
+
+    @unittest.skipUnless(
+        shutil.which("npm") and shutil.which("node"),
+        "npm and node are not installed on this machine",
+    )
+    def test_real_npm_tarball_consumer_installs_verifies_and_imports_offline(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+        report = gpr.check(
+            "npm",
+            prepared,
+            publish=False,
+            npm_bin=Path(shutil.which("npm")),
+            npm_tarball_consumer=True,
+            node_bin=Path(shutil.which("node")),
+        )
+        self.assertTrue(any("byte-verified" in line for line in report))
 
     def test_real_cargo_publish_dry_run_is_refused_by_cargo_itself(self):
         cargo_bin = actual_toolchain_cargo()

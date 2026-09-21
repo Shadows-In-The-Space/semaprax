@@ -224,6 +224,16 @@ containment, hostile same-principal isolation or a sandbox. No library or
 compiler gains authority from this test helper. Archive hashes and label
 agreement prove self-consistency only; the caller still owns provenance.
 
+The separate generated-package preview checker can exercise an npm archive
+without granting registry authority. After `prepare`, pass explicit absolute
+`--npm-bin` and `--node-bin` paths together with `--npm-tarball-consumer` to
+`scripts/generated-package-release.py check`. The checker packs in a private
+snapshot, verifies the tar stream against the admitted payload, creates a
+fresh offline consumer and lockfile, runs `npm ci --ignore-scripts`, verifies
+the installed package's exact inventory and bytes, and only then imports it.
+This is a local file-tarball consumer gate. It neither contacts npmjs.org nor
+turns a synthetic fixture into evidence for a compiler-built package.
+
 Run the ordinary admission/capture controls without provisioning an archive:
 
 ```sh

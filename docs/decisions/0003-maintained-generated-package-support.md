@@ -90,18 +90,20 @@ native-rust-interop-v1 scalar SDK (calculator/callback profile,
 `semaprax_native_rust_sdk`, its own `native-rust-sdk-v1` CI job) or the
 generic-ABI packages this issue excludes.
 
-**Why Rust only, not npm too.** Real npm-tarball consumption evidence does
-not exist anywhere in this repository today, for any generated package,
-hosted or local. The only tests that install and run from a real npm tarball
+**Why Rust only, not npm too.** A local release-tool regression now packs,
+installs, byte-verifies and imports a real npm tarball made from a synthetic
+compiler-shaped fixture. That is useful tool-path evidence, but it is not
+clean execution evidence for a genuinely compiler-built package. The tests
+that install and run such a package from a real npm tarball
 (`tests/frame_payload_product_v1/npm_installation.rs:60`,
 `tests/image_packaged_typescript_workflow_v1.rs:715`) are both
 `#[ignore]`d pending "provisioned NODE, NPM_CLI and TypeScript 5.8.3
 TSC_CLI", and no CI job passes `--ignored` to unblock them. Recommending npm
 now would make a box-3 support claim ("clean-install executable evidence")
-that nothing backs. The Rust side is not perfect either (see Evidence), but
-it has a defined package-generation wrapper, a dedicated test harness, and a
-CI job wired to run it -- a narrower, fully evidenced proposal beats a wider
-one resting partly on absent evidence.
+that only synthetic evidence backs. The Rust side is not perfect either (see
+Evidence), but it has a defined package-generation wrapper, a dedicated test
+harness, and a CI job wired to run it -- a narrower, fully evidenced proposal
+beats a wider one resting partly on absent evidence.
 
 **Why not the general native-rust-interop-v1 SDK instead.** That profile
 already has better-exercised hosted CI (the dedicated `native-rust-sdk-v1`
@@ -144,7 +146,7 @@ never described as hosted, current-head, or production support.
 | 7 | The separate general native-rust-interop-v1 profile's dedicated hosted job (`native-rust-sdk-v1`, NOT owned-data-api.v1) | Same commit `019fd931db`: `Public Native Rust SDK v1 (windows-latest)` completed **success**; `(ubuntu-latest)` and `(macos-latest)` completed **failure** in `public_native_rust_sdk_ci_contract` (an inventory-count meta-test, e.g. `left: 14, right: 10`) before the substantive `public_native_rust_sdk_v1` test target ran at all on those two OSes | **Hosted evidence, at a prior commit (`019fd931db`, not current HEAD), for a different profile than the one recommended here, 1-of-3 OSes fully green.** Cited only to show CI health context; does not back any claim about owned-data-api.v1. |
 | 8 | External consumer execution against the packaged owned-data-api.v1 artifacts via a path dependency | `tests/release_archive_product_v1/owned_frame.rs`, invoked from `tests/release_archive_product_v1.rs:77` | The two tests that call it are `#[ignore]`d, requiring "an actual unpacked native release in absolute `SEMAPRAX_RELEASE_ROOT` and its exact `SEMAPRAX_RELEASE_COMMIT` label" (or additionally NODE/CLANG/SEMAPRAX_ARCHIVER/CARGO). **No evidence found or produced this session that this has been run recently, hosted or local; it is a manual, release-time procedure, not a routine gate.** |
 | 9 | A packaged-**tarball** (not path-dependency) Rust consumer round trip, per issue #145 step 3's explicit requirement | `packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles` (`tests/public_native_rust_owned_data_sdk_v1.rs`) now packages the generated owned-data SDK offline, extracts the actual `.crate`, compares its descriptor and package manifest to the generated source-derived bytes, and builds/runs a fresh locked consumer against only that extraction. The general SDK test remains separate. | **Local gate added at the current checkout, but not executed in this follow-up.** It needs the dedicated job's explicit Clang/archiver wiring or an equivalent local invocation; until it has run, this is executable coverage rather than clean-install evidence. |
-| 10 | A packaged-tarball npm consumer round trip for this or any profile | `tests/frame_payload_product_v1/npm_installation.rs:60`, `tests/image_packaged_typescript_workflow_v1.rs:715` | Both `#[ignore]`d pending provisioned Node/npm/TypeScript. **No evidence, hosted or local, was found.** |
+| 10 | A packaged-tarball npm consumer round trip | `scripts/test-generated-package-release.py::test_real_npm_tarball_consumer_installs_verifies_and_imports_offline` packs a real `.tgz`, validates every archive member, structurally binds npm lockfile v3 to the sole file-tarball dependency, installs with offline `npm ci --ignore-scripts`, verifies the installed inventory and bytes, and imports the package with Node. Hostile regressions prove a substring-only lockfile reference and installed byte substitution are refused before install/import respectively. The genuinely compiler-built package lanes remain `tests/frame_payload_product_v1/npm_installation.rs:60` and `tests/image_packaged_typescript_workflow_v1.rs:715`. | **Local, current-checkout real-tool evidence for a synthetic compiler-shaped fixture.** The full Python suite passed 54/54 on this host. This is not hosted evidence, does not execute the fixture's fake Wasm, and does not replace the two ignored compiler-generated-product gates. |
 | 11 | Manual validation against a genuinely compiler-built package | Issue comment for `2ae8a968`: "validated by hand against a genuinely compiler-built package (`examples/frame-payload-project` via `target/debug/semaprax-full`)" | **Local, one-off, prior commit, by hand.** Not re-run this session; not a repeatable gate. |
 | 12 | Row 7's exact `left: 14, right: 10` failure, re-run against current HEAD | Reproduced locally, then fixed in commit `7ef1ada2`: `public_native_rust_sdk_ci_contract` had drifted on two checks -- a pinned Cargo-invocation count stale since `e0c7f192` added four more calls, and an overbroad private-dependency ban that flagged the acyclic `semaprax-oci-package` leaf crate added by `f4d9eba4`. Before the fix (this session, this checkout): 5 passed, 2 failed, matching row 7's cited failure exactly. After: `cargo check --manifest-path examples/calculator-rust/Cargo.toml` exit 0; `public_native_rust_sdk_ci_contract` 7 passed, 0 failed; `public_native_rust_sdk_v1` (env guard armed) 10 passed, 0 failed in 395.40s -- not the 0.01s degraded no-op a missing guard would produce | **Local, current session, this host, current HEAD.** Removes one concrete, previously-hosted-observed cause of red on the *native-rust-sdk-v1* job's ubuntu-latest/macos-latest legs -- a different profile than the one this ADR recommends -- but has not itself been observed green in hosted CI yet (see row 13). Does not touch owned-data-api.v1's own harness or evidence. |
 | 13 | Whether `public_native_rust_owned_data_sdk_v1` -- this ADR's actually-recommended profile's own harness -- passes at all, and whether it has a hosted run at or after this session's fix | Run to completion locally this session, this checkout, at HEAD (`0346ae19`, after both `7ef1ada2` and the row-12 write-up): `cargo test --locked --offline -p semaprax --test public_native_rust_owned_data_sdk_v1 -- --test-threads=1 --nocapture` -> **11 passed, 0 failed, finished in 193.49s** (unconditional harness, no env-var gate to arm). Separately, `gh run list --workflow=ci.yml` checked live during this session: recent runs were queued, in-progress, or cancelled by a subsequent push before completing; none observed to reach a `success` conclusion at or after `7ef1ada2` during this session | **A genuine local pass, current session, this host, current HEAD -- and still, by this ADR's own rule, not the evidence answer 5 asks for.** It shows the harness is not currently broken on at least one machine/toolchain, which is worth recording, but a local pass is explicitly **not sufficient** for any support claim per the Maintainer decision: only a specific, recent, confirmed-green **hosted** run across the pinned three-OS matrix satisfies it, and none exists. Answer 6 (isolate the harness into its own CI job so an unrelated failure cannot hide its result) also remains unimplemented. |
@@ -337,10 +339,12 @@ local session can supply on its own.
 ### Recommend Rust and npm together
 
 Rejected because npm's only consumer-execution tests are `#[ignore]`d pending
-provisioned Node/npm/TypeScript and no automated evidence -- hosted or
-local -- of a real npm-tarball install exists for any generated package.
+provisioned Node/npm/TypeScript. The release wrapper now has automated local
+real-tarball install/import coverage for a synthetic compiler-shaped fixture,
+but no hosted or genuinely compiler-built clean-install execution evidence.
 Bundling npm into this decision would attach box 3's support claim to a
-route with zero install evidence.
+route whose strongest automated install evidence does not exercise a real
+generated program.
 
 ### Recommend the general native-rust-interop-v1 SDK instead of owned-data-api.v1
 

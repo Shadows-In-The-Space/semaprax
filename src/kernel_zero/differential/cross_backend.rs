@@ -29,7 +29,7 @@
 //! that agreement.
 //!
 //! **What this proves, and what it does not.** Agreement here is evidence
-//! over this one finite, seeded-and-adversarial 95-program corpus that the native and Wasm
+//! over this one finite, seeded-and-adversarial 100-program corpus that the native and Wasm
 //! backends compute the same values and the same arithmetic fault
 //! (`semaprax.arithmetic.v1` domain and code, byte-for-byte) as the
 //! reference interpreter, for every program the admission predicate accepts.
@@ -47,7 +47,7 @@
 //! demand it run for real. Native compilation happens once per corpus
 //! program per optimization level (every sample runs inside that one
 //! binary), and the Wasm module is built once per corpus program too --
-//! not once per sample -- to keep the 95-program corpus's wall-clock cost
+//! not once per sample -- to keep the 100-program corpus's wall-clock cost
 //! bounded; see `run_case` below.
 
 use std::fmt::Write as _;

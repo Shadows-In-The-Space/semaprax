@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::hir::{DeclarationId, ValueId};
 
-use super::corpus::generated_corpus;
+use super::corpus::{adversarial_structure_corpus, generated_corpus};
 use super::reify::BoundTranslation;
 use super::term::{KernelProgram, KernelType, Term};
 use super::weights;
@@ -420,7 +420,11 @@ fn fixture_source() -> String {
     let mut output =
         String::from("import Kernel0\n\nopen Kernel0\n\nnamespace SemapraxKernel0Witness\n");
     let mut count = 0;
-    for (program_index, generated) in generated_corpus().into_iter().enumerate() {
+    for (program_index, generated) in generated_corpus()
+        .into_iter()
+        .chain(adversarial_structure_corpus())
+        .enumerate()
+    {
         let entry = DeclarationId::new(generated.entry_id);
         let translation = BoundTranslation::derive(&generated.source, &entry)
             .expect("deterministic corpus source must reify before rendering its Lean witness");
@@ -445,7 +449,7 @@ fn real_reified_weight_witnesses_are_deterministic_and_nonvacuous() {
         source.matches("theorem fuel_generated_").count(),
         source.matches("-- exact reification witness ").count()
     );
-    let programs = generated_corpus().len();
+    let programs = generated_corpus().len() + adversarial_structure_corpus().len();
     assert!(programs > 0);
     assert_eq!(
         source.matches(" : WeightedCallCertificate ").count(),

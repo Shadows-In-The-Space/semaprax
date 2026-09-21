@@ -541,6 +541,145 @@ if kind == 7 { -(-9223372036854775807 - 1) } else { 7 }\n                       
     ]
 }
 
+/// Deterministic structural programs aimed at the coverage holes that a
+/// hazard-biased expression generator and the fault-selection matrix leave
+/// behind.  In particular, these cases keep arithmetic *in range* at the
+/// signed boundaries, make several layers of control demonstrably lazy, and
+/// raise the real reified call/lexical structure far above the generator's
+/// ordinary depth.  They therefore exercise the bounded translation and its
+/// weighted-call certificate as concrete input, rather than merely producing
+/// another random mix of small expressions.
+///
+/// Like [`adversarial_fault_corpus`], this remains finite test evidence.  It
+/// intentionally stays below the private certificate harness's 64-function
+/// and 128-depth limits: testing the admitted side of those limits is useful
+/// here; changing the proof-profile refusal boundary is not.
+pub(crate) fn adversarial_structure_corpus() -> Vec<GeneratedProgram> {
+    let module = |name: &str, helpers: &str, parameters: &str, return_type: &str, body: &str| {
+        format!(
+            "module test.kernel_zero_structure;\n\n@id(\"app.main\")\nfn main() -> i64 {{ 0 }}\n\n{helpers}@id(\"app.entry\")\nfn {name}({parameters}) -> {return_type}\n{{\n    {body}\n}}\n"
+        )
+    };
+
+    // Forty non-recursive calls are long enough to make function inventory,
+    // call-target identity, and weighted descent materially observable while
+    // still leaving clear headroom under the proof harness's explicit 64/128
+    // certificate ceilings.  Each edge contributes a fresh arithmetic node
+    // too, so accidentally omitting a callee or charging only immediate calls
+    // cannot be hidden by a constant-return chain.
+    const CALL_DEPTH: usize = 40;
+    let mut deep_call_helpers = String::new();
+    deep_call_helpers.push_str("@id(\"test.call_0\")\nfn call_0(value: i64) -> i64 { value }\n\n");
+    for index in 1..=CALL_DEPTH {
+        deep_call_helpers.push_str(&format!(
+            "@id(\"test.call_{index}\")\nfn call_{index}(value: i64) -> i64 {{ call_{}(value + 1) }}\n\n",
+            index - 1
+        ));
+    }
+
+    // A fresh name at each level is required: the real resolver deliberately
+    // rejects same-scope shadowing.  This is a 48-deep lexical/de-Bruijn
+    // stress shape, not a test of an unsupported shadowing feature.
+    const LET_DEPTH: usize = 48;
+    let mut deep_let_body = format!("value_{LET_DEPTH}");
+    for index in (1..=LET_DEPTH).rev() {
+        let previous = if index == 1 {
+            "0".to_owned()
+        } else {
+            format!("value_{}", index - 1)
+        };
+        deep_let_body = format!("{{ let value_{index} = {previous} + 1; {deep_let_body} }}");
+    }
+
+    let safe_arithmetic = module(
+        "entry",
+        "",
+        "case: i64",
+        "i64",
+        "if case == 0 { (-9223372036854775807 - 1) + 0 } else {\n        \
+if case == 1 { 9223372036854775807 + 0 } else {\n            \
+if case == 2 { (-9223372036854775807 - 1) - 0 } else {\n                \
+if case == 3 { 9223372036854775807 - 0 } else {\n                    \
+if case == 4 { (-9223372036854775807 - 1) * 1 } else {\n                        \
+if case == 5 { 9223372036854775807 * 1 } else {\n                            \
+if case == 6 { (-9223372036854775807 - 1) / 1 } else {\n                                \
+if case == 7 { 9223372036854775807 / 1 } else {\n                                    \
+if case == 8 { (-9223372036854775807 - 1) % 1 } else {\n                                        \
+if case == 9 { 9223372036854775807 % -1 } else {\n                                            \
+if case == 10 { -7 / 3 } else {\n                                                \
+if case == 11 { -7 % 3 } else {\n                                                    \
+if case == 12 { 7 / -3 } else {\n                                                        \
+if case == 13 { 7 % -3 } else { -(-9223372036854775807) }\n                                                    }\n                                                }\n                                            }\n                                        }\n                                    }\n                                }\n                            }\n                        }\n                    }\n                }\n            }\n        }\n    }\n}",
+    );
+
+    let lazy_control = module(
+        "entry",
+        "@id(\"test.fault\")\nfn fault(kind: i64) -> i64\n{\n    if kind == 0 { 1 / 0 } else {\n        if kind == 1 { 5 % 0 } else {\n            if kind == 2 { 9223372036854775807 + 1 } else { 17 }\n        }\n    }\n}\n\n",
+        "pick: bool, kind: i64",
+        "i64",
+        "if pick {\n        let first = if false { fault(kind) } else { 40 };\n        if true { first + (if false { fault(kind) } else { 2 }) } else { fault(kind) }\n    } else {\n        let first = if true { 40 } else { fault(kind) };\n        if false { fault(kind) } else { first + (if true { 2 } else { fault(kind) }) }\n    }",
+    );
+
+    let multi_argument = module(
+        "entry",
+        "@id(\"test.pick\")\nfn pick(flag: bool, when_true: i64, when_false: i64) -> i64\n{\n    if flag { when_true } else { when_false }\n}\n\n@id(\"test.combine\")\nfn combine(left: i64, middle: i64, right: i64) -> i64\n{\n    left + middle - right\n}\n\n",
+        "flag: bool, value: i64",
+        "i64",
+        "combine(pick(flag, value, 10), pick(!flag, 20, value), pick(flag, 3, 4))",
+    );
+
+    vec![
+        GeneratedProgram {
+            source: safe_arithmetic,
+            entry_id: "app.entry".to_owned(),
+            entry_params: vec![GenType::I64],
+            samples: (0..15).map(|case| vec![Value::Int(case)]).collect(),
+        },
+        GeneratedProgram {
+            source: module(
+                "entry",
+                &deep_call_helpers,
+                "value: i64",
+                "i64",
+                &format!("call_{CALL_DEPTH}(value)"),
+            ),
+            entry_id: "app.entry".to_owned(),
+            entry_params: vec![GenType::I64],
+            samples: vec![
+                vec![Value::Int(-1)],
+                vec![Value::Int(0)],
+                vec![Value::Int(1)],
+            ],
+        },
+        GeneratedProgram {
+            source: module("entry", "", "", "i64", &deep_let_body),
+            entry_id: "app.entry".to_owned(),
+            entry_params: vec![],
+            samples: vec![vec![]],
+        },
+        GeneratedProgram {
+            source: lazy_control,
+            entry_id: "app.entry".to_owned(),
+            entry_params: vec![GenType::Bool, GenType::I64],
+            samples: [true, false]
+                .into_iter()
+                .flat_map(|pick| (0..3).map(move |kind| vec![Value::Bool(pick), Value::Int(kind)]))
+                .collect(),
+        },
+        GeneratedProgram {
+            source: multi_argument,
+            entry_id: "app.entry".to_owned(),
+            entry_params: vec![GenType::Bool, GenType::I64],
+            samples: vec![
+                vec![Value::Bool(true), Value::Int(-10)],
+                vec![Value::Bool(false), Value::Int(-10)],
+                vec![Value::Bool(true), Value::Int(42)],
+                vec![Value::Bool(false), Value::Int(42)],
+            ],
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,6 +747,57 @@ mod tests {
                         program.source
                     )
                 },
+            );
+        }
+    }
+
+    #[test]
+    fn adversarial_structure_corpus_reifies_and_replays_weight_certificates() {
+        use super::super::reify::BoundTranslation;
+        use super::super::weights;
+
+        let first = adversarial_structure_corpus();
+        let second = adversarial_structure_corpus();
+        assert_eq!(first.len(), 5);
+        assert_eq!(
+            first
+                .iter()
+                .map(|program| program.source.as_str())
+                .collect::<Vec<_>>(),
+            second
+                .iter()
+                .map(|program| program.source.as_str())
+                .collect::<Vec<_>>(),
+            "adversarial structural source must be byte-identical across runs"
+        );
+        assert_eq!(
+            first.iter().map(|program| program.samples.len()).sum::<usize>(),
+            29,
+            "boundary arithmetic, deep call/let, lazy control, and multi-argument cases must retain their sample matrix"
+        );
+        for program in &first {
+            assert!(program.source.len() < 8192);
+            let parsed = crate::parse(&program.source, "kernel-zero-structure-corpus.spx")
+                .unwrap_or_else(|error| panic!("structural corpus source must parse: {error:?}"));
+            let resolved = crate::hir::resolve(&parsed).unwrap_or_else(|errors| {
+                panic!("structural corpus source must resolve: {errors:?}")
+            });
+            let entry = crate::hir::DeclarationId::new(program.entry_id.clone());
+            assert!(
+                super::super::reifies_into_kernel_zero(&resolved, &entry),
+                "structural corpus entry must remain inside Kernel-0"
+            );
+            let binding = BoundTranslation::derive(&program.source, &entry)
+                .expect("structural corpus must admit a bounded translation");
+            let kernel = binding
+                .replay(&program.source, &entry)
+                .expect("structural corpus translation must replay exact source");
+            let certificate = weights::derive(&kernel)
+                .expect("structural corpus must fit the weighted-call certificate profile");
+            assert_eq!(weights::verify(&kernel, &certificate), Ok(()));
+            assert!(
+                weights::value_call_fuel(&kernel, &certificate, &entry).is_ok(),
+                "every structural entry must have a checked numeric call-fuel witness"
             );
         }
     }

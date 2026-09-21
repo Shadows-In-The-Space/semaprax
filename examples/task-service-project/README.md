@@ -6,6 +6,15 @@ record, enqueue and complete a background job, query its status, log out,
 and reject an unauthorized or invalid request. Every step is deterministic
 fixture mode -- no socket, no file, and no real clock are touched.
 
+`service-config.schema.json` is the closed host-configuration contract.
+`service.config.json` is its credential-free fixture instance: database, HTTP,
+and telemetry adapters are all explicitly `fixture`, every endpoint is absent,
+and every secret is represented only by a nullable host-owned reference. A
+host deployment may select SQLite or PostgreSQL, native HTTP/TLS, and OTLP only
+by supplying a separately validated configuration and resolving its secret
+references outside Semaprax source. Neither generated file carries credentials
+or grants database, network, telemetry, or secret-store authority.
+
 ```sh
 semaprax check examples/task-service-project
 semaprax test  examples/task-service-project

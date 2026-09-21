@@ -90,9 +90,11 @@ lock and manifest examples use.
 `replay_project_scaffold_v1` reads the capsule's `schema`, maps it to the
 frozen or table layout, and re-derives that exact layout, requiring byte and
 digest equality. A v2 digest cannot validate v3 bytes and vice versa. The
-descriptor field set and non-claims are unchanged from v2; v3's `limits.files`
-is six, admitting the calculator's added core module and the existing six-file
-library inventory.
+descriptor field set and non-claims are unchanged from v2. Calculator and
+library v3 capsules carry six files. The additive service template carries
+eight: the same six project files plus its closed host-configuration schema and
+credential-free fixture configuration. `limits.files` is derived from the
+selected exact inventory and replayed byte-for-byte.
 
 ## Evidence and nonclaims
 

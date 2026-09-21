@@ -629,6 +629,8 @@ fn service_template_composes_bundled_dependencies_and_only_derives_under_tables_
             "src/app.spx",
             "src/core.spx",
             "src/tests.spx",
+            "service-config.schema.json",
+            "service.config.json",
         ]
     );
     for file in derived.files() {
@@ -771,6 +773,14 @@ fn checked_in_task_service_matches_the_normalized_service_projection() {
             "src/tests.spx",
             include_str!("../../examples/task-service-project/src/tests.spx"),
         ),
+        (
+            "service-config.schema.json",
+            include_str!("../../examples/task-service-project/service-config.schema.json"),
+        ),
+        (
+            "service.config.json",
+            include_str!("../../examples/task-service-project/service.config.json"),
+        ),
     ] {
         let generated = derived
             .files()
@@ -783,5 +793,75 @@ fn checked_in_task_service_matches_the_normalized_service_projection() {
             normalize(reference, "task-service", "task_service"),
             "the checked-in reference drifted from the normalized service projection at `{path}`"
         );
+    }
+}
+
+#[test]
+fn service_scaffold_configuration_is_closed_and_credential_free() {
+    let derived = derive_project_scaffold_v1_with_layout(
+        "service-config-contract",
+        "service",
+        ScaffoldLayout::Tables,
+    )
+    .unwrap();
+    let file = |path: &str| {
+        derived
+            .files()
+            .iter()
+            .find(|file| file.path() == path)
+            .unwrap_or_else(|| panic!("missing service configuration file `{path}`"))
+            .utf8()
+    };
+    let schema: serde_json::Value =
+        serde_json::from_str(file("service-config.schema.json")).unwrap();
+    let descriptor: serde_json::Value = serde_json::from_slice(&derived.canonical_bytes()).unwrap();
+    assert_eq!(descriptor["limits"]["files"], 8);
+    replay_project_scaffold_v1(
+        "service-config-contract",
+        "service",
+        &derived.canonical_bytes(),
+        derived.digest(),
+    )
+    .unwrap();
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(
+        schema["required"],
+        serde_json::json!(["schema", "mode", "database", "http", "secrets", "telemetry"])
+    );
+    for object in ["database", "http", "secrets", "telemetry"] {
+        assert_eq!(
+            schema["properties"][object]["additionalProperties"], false,
+            "{object} configuration must remain closed"
+        );
+    }
+    assert_eq!(
+        schema["properties"]["database"]["properties"]["adapter"]["enum"],
+        serde_json::json!(["fixture", "sqlite", "postgresql"])
+    );
+
+    let fixture: serde_json::Value = serde_json::from_str(file("service.config.json")).unwrap();
+    assert_eq!(fixture["schema"], "semaprax.service-config.v1");
+    assert_eq!(fixture["mode"], "fixture");
+    assert_eq!(fixture["database"]["adapter"], "fixture");
+    assert_eq!(fixture["http"]["adapter"], "fixture");
+    assert_eq!(fixture["telemetry"]["adapter"], "fixture");
+    for pointer in [
+        "/database/dsn_secret_ref",
+        "/http/listen_origin",
+        "/secrets/password_pepper_ref",
+        "/secrets/session_signing_key_ref",
+        "/secrets/webhook_signing_key_ref",
+        "/telemetry/endpoint_origin",
+    ] {
+        assert_eq!(fixture.pointer(pointer), Some(&serde_json::Value::Null));
+    }
+    for forbidden in [
+        "secret-value",
+        "postgres://",
+        "postgresql://",
+        "http://",
+        "https://",
+    ] {
+        assert!(!file("service.config.json").contains(forbidden));
     }
 }

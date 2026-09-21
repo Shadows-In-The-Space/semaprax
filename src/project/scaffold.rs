@@ -10,6 +10,9 @@
 //! authority.
 
 use serde_json::Value;
+
+#[path = "scaffold/service_config.rs"]
+mod service_config;
 use sha2::{Digest, Sha256};
 
 use crate::agent_skill_bundle::generate_agent_skill_bundle;
@@ -40,7 +43,7 @@ pub const PROJECT_SCAFFOLD_TEMPLATES: [&str; 3] = [
 pub const PROJECT_SCAFFOLD_FILE_COUNT: usize = 5;
 pub const PROJECT_SCAFFOLD_TABLES_FILE_COUNT: usize = 6;
 pub const PROJECT_SCAFFOLD_LIBRARY_FILE_COUNT: usize = 6;
-pub const PROJECT_SCAFFOLD_SERVICE_FILE_COUNT: usize = 6;
+pub const PROJECT_SCAFFOLD_SERVICE_FILE_COUNT: usize = 8;
 pub const MAX_PROJECT_SCAFFOLD_NAME_BYTES: usize = 64;
 pub const MAX_PROJECT_SCAFFOLD_DESCRIPTOR_BYTES: usize = 65_536;
 
@@ -71,8 +74,8 @@ pub const PROJECT_SCAFFOLD_LIBRARY_INVENTORY: [&str; PROJECT_SCAFFOLD_LIBRARY_FI
 ];
 /// The service template mirrors the calculator's table layout shape (a
 /// separate `core` module) so it can carry a `[dependencies]` table; only its
-/// file contents, not its file names, differ from the calculator's own
-/// `Tables` inventory.
+/// semantic source shape. It additionally carries the closed host
+/// configuration schema and a credential-free deterministic fixture instance.
 pub const PROJECT_SCAFFOLD_SERVICE_INVENTORY: [&str; PROJECT_SCAFFOLD_SERVICE_FILE_COUNT] = [
     "README.md",
     "AGENTS.md",
@@ -80,6 +83,8 @@ pub const PROJECT_SCAFFOLD_SERVICE_INVENTORY: [&str; PROJECT_SCAFFOLD_SERVICE_FI
     "src/app.spx",
     "src/core.spx",
     "src/tests.spx",
+    "service-config.schema.json",
+    "service.config.json",
 ];
 
 /// The exact inventory of one built-in template.
@@ -226,6 +231,11 @@ const SERVICE_MANIFEST_TABLES: &str = "schema = \"semaprax.manifest.v1\"\n\n[pac
 const SERVICE_APP: &str = "module {{module}}.app;\nuse function @id(\"{{module}}.core.run_scenario\") from {{module}}.core as run_scenario;\n\n// The acceptance scenario this reference application exists to demonstrate:\n// register, log in, create/update a domain record (a task), enqueue a\n// background job, query its status, log out, then confirm that an\n// unauthorized session and an invalid request are both rejected. Every step\n// runs in deterministic fixture mode: no socket, no file, and no real clock\n// are touched, matching `std.auth` and `std.jobs`'s own non-claims (both are\n// pure decision layers with no host authority of their own). See\n// `{{module}}.core.run_scenario` for the full walk.\n@id(\"{{name}}.app.main\")\nfn main() -> i64\n{\n    run_scenario()\n}\n";
 const SERVICE_CORE: &str = include_str!("../../examples/task-service-project/src/core.spx");
 const SERVICE_TESTS: &str = include_str!("../../examples/task-service-project/src/tests.spx");
+const SERVICE_CONFIG_SCHEMA: &str =
+    include_str!("../../examples/task-service-project/service-config.schema.json");
+const SERVICE_CONFIG_FIXTURE: &str =
+    include_str!("../../examples/task-service-project/service.config.json");
+const SERVICE_CONFIGURATION_GUIDE: &str = "\n## Host configuration\n\n`service-config.schema.json` is the closed host-configuration contract and\n`service.config.json` is its credential-free fixture instance. Database, HTTP,\nand telemetry adapters are explicitly `fixture`; endpoints and secret\nreferences are absent. Selecting SQLite/PostgreSQL, native HTTP/TLS, OTLP, or\nsecret-store references requires a separately validated host configuration and\ngrants no authority to Semaprax source.\n";
 const NONCLAIMS: [&str; 4] = [
     "no_filesystem_or_publication_authority",
     "no_process_environment_or_current_directory_authority",
@@ -337,6 +347,11 @@ pub fn derive_project_scaffold_v1_with_layout(
         ));
     }
     let module = project_name.replace('-', "_");
+    if is_service {
+        let decoded = service_config::decode(SERVICE_CONFIG_FIXTURE.as_bytes())
+            .map_err(|message| scaffold_error(message))?;
+        debug_assert_eq!(decoded.canonical_bytes(), SERVICE_CONFIG_FIXTURE.as_bytes());
+    }
     let manifest = if is_service {
         SERVICE_MANIFEST_TABLES
     } else {
@@ -355,6 +370,8 @@ pub fn derive_project_scaffold_v1_with_layout(
             SERVICE_APP,
             SERVICE_CORE,
             SERVICE_TESTS,
+            SERVICE_CONFIG_SCHEMA,
+            SERVICE_CONFIG_FIXTURE,
         ]
     } else {
         match (template == PROJECT_SCAFFOLD_TEMPLATE_LIBRARY, layout) {
@@ -395,6 +412,9 @@ pub fn derive_project_scaffold_v1_with_layout(
             }
             if *path == "AGENTS.md" && is_service {
                 combined.push_str(SERVICE_DEPENDENCY_GUIDE);
+            }
+            if *path == "README.md" && is_service {
+                combined.push_str(SERVICE_CONFIGURATION_GUIDE);
             }
             if *path == "AGENTS.md" {
                 combined.push_str(&agent_skill_workflow_guide);
@@ -536,8 +556,9 @@ fn validate_rendered_project(
     files: &[ProjectScaffoldFileV1],
 ) -> Result<(), Vec<Diagnostic>> {
     let manifest = files[2].utf8();
-    let sources = files[3..]
+    let sources = files
         .iter()
+        .filter(|file| file.path.ends_with(".spx"))
         .map(|file| (file.path, file.utf8()))
         .collect::<Vec<_>>();
     let execution =
@@ -599,11 +620,7 @@ fn render_descriptor_tail(artifact: &ProjectScaffoldV1) -> String {
         .map(|value| quote_json(value))
         .collect::<Vec<_>>()
         .join(",");
-    let file_limit = if artifact.layout == ScaffoldLayout::Tables {
-        PROJECT_SCAFFOLD_TABLES_FILE_COUNT
-    } else {
-        PROJECT_SCAFFOLD_FILE_COUNT
-    };
+    let file_limit = artifact.files.len();
     format!(
         "{{\"template\":{},\"project_schema\":{},\"project_name\":{},\"files\":[{}],\"limits\":{{\"descriptor_bytes\":{},\"files\":{},\"project_name_bytes\":{}}},\"nonclaims\":[{}]}}",
         quote_json(artifact.template),

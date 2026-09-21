@@ -43,10 +43,11 @@ derive through `ScaffoldLayout::Tables` regardless of template, so `new
 
 ## Inventory and contents
 
-The service template's six-file inventory is byte-identical in shape to the
-calculator's table-layout inventory: `README.md`, `AGENTS.md`,
-`semaprax.toml`, `src/app.spx`, `src/core.spx`, `src/tests.spx`. Only the file
-*contents* differ:
+The service template's eight-file inventory contains `README.md`, `AGENTS.md`,
+`semaprax.toml`, `src/app.spx`, `src/core.spx`, `src/tests.spx`,
+`service-config.schema.json`, and `service.config.json`. The six ordinary
+project files retain the calculator table layout's shape; the two additional
+files make the service's host configuration explicit:
 
 - `semaprax.toml` uses the `useful-data.v1` profile and declares the bundled
   `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.log`, `std.log.redact`,
@@ -72,6 +73,19 @@ calculator's table-layout inventory: `README.md`, `AGENTS.md`,
   layout's "Project v1 function boundaries" section (declared aggregates
   cannot cross a scalar-signature function boundary) plus one more section
   naming all ten bundled dependencies and their non-claims.
+- `service-config.schema.json` is a closed Draft 2020-12 schema for fixture,
+  SQLite/PostgreSQL, native HTTP/TLS, OTLP, and host-owned secret-reference
+  selections. Nested database, HTTP, telemetry, and secret objects all refuse
+  unknown fields and retain finite string bounds.
+- `service.config.json` selects only credential-free fixture adapters, null
+  endpoints, and null secret references. It carries no DSN, password, token,
+  signing material, environment-variable name, or authority to resolve one.
+  `src/project/scaffold/service_config.rs` independently decodes this v1 wire
+  under a 16 KiB pre-parse bound, exact closed objects, canonical sorted JSON,
+  bounded reference/origin grammar, and paired mode rules: fixture mode admits
+  only null/fixture selections, while host mode requires SQLite/PostgreSQL,
+  native modern-TLS HTTP, OTLP, HTTPS origins, and nonempty host-owned secret
+  references. JSON Schema guidance is therefore not the compiler's sole check.
 
 This mirrors `examples/task-service-project/`, generalized with the
 `{{name}}`/`{{module}}` substitution every template uses; the reference
@@ -82,7 +96,7 @@ example is not itself part of the scaffold's compiled-in bytes.
 The service template lowers to the same `semaprax.project.v1` contract and
 [Public Project Scaffold Capsule v3](PROJECT-SCAFFOLD-V3.md) descriptor shape
 as the other two: schema `semaprax.project-scaffold.v3`, digest domain
-`semaprax.project-scaffold.digest.v3`, `limits.files` six, and the rendered
+`semaprax.project-scaffold.digest.v3`, `limits.files` eight, and the rendered
 project passes the same in-memory check-and-test validation
 (`validate_owned_project_test`) before the capsule is returned to the caller,
 using the bundled dependency registry
@@ -114,6 +128,13 @@ pins the same loop through the held-parent authority and is the regression
 test for a prior defect where that authority's `new_project::run` collapsed
 every non-library template to the calculator after `parse` had already
 accepted `--template service`.
+`tests/project/scaffold.rs::service_scaffold_configuration_is_closed_and_credential_free`
+pins the nested closed-schema rules, exact database adapter vocabulary, fixture
+selection, and absence of endpoints and secret values. Descriptor replay binds
+both configuration files byte-for-byte with the other generated assets.
+The decoder's own hostile corpus rejects unknown members, mode/adapter drift,
+credential-shaped DSNs, insecure origins, noncanonical encoding, and max-plus-
+one input before the fixture can enter scaffold derivation.
 
 ## Nonclaims
 

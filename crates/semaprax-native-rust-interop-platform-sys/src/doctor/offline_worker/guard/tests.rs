@@ -170,6 +170,35 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
         };
         assert_eq!(policy.x86_additional, expected, "{:?}", policy.tool);
         assert!(policy.arm_additional.is_empty(), "{:?}", policy.tool);
+        assert_eq!(
+            policy.address_space_limit,
+            if policy.tool == DoctorOfflineTool::Node {
+                NODE_ADDRESS_SPACE_LIMIT
+            } else {
+                DEFAULT_ADDRESS_SPACE_LIMIT
+            },
+            "{:?}",
+            policy.tool
+        );
+    }
+}
+
+#[test]
+fn virtual_address_reservation_budget_is_finite_and_role_scoped() {
+    assert_eq!(DEFAULT_ADDRESS_SPACE_LIMIT, 4 * 1024 * 1024 * 1024);
+    assert_eq!(NODE_ADDRESS_SPACE_LIMIT, 2 * 1024 * 1024 * 1024 * 1024);
+    assert!(NODE_ADDRESS_SPACE_LIMIT > DEFAULT_ADDRESS_SPACE_LIMIT);
+
+    for tool in TOOLS {
+        let guard = Guard::for_arch(expected_role(tool), tool, X86_ARCH).unwrap();
+        assert_eq!(
+            guard.address_space_limit(),
+            if tool == DoctorOfflineTool::Node {
+                NODE_ADDRESS_SPACE_LIMIT
+            } else {
+                DEFAULT_ADDRESS_SPACE_LIMIT
+            }
+        );
     }
 }
 

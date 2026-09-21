@@ -5,14 +5,13 @@ disposable, trusted Linux x86-64 host, or dispatch this gate against a
 GitHub-hosted runner.
 
 Status: **executed, and still failing, but narrowly**, most recently
-2026-09-19 against `3ee2ea85`
-([run 35472257722](https://github.com/wavect/semaprax/actions/runs/35472257722)).
+2026-09-20 against `4496d1a0`
+([run 35477758519](https://github.com/wavect/semaprax/actions/runs/35477758519)).
 Preconditions and settlement pass. Both admitted suites report **12 passed, 1
 failed** of 13. The remaining `real-distributions` fixture shows Clang
-successfully, while Node terminates with `SIGSEGV` (signal 11); Rust remains a
-failed role in the same reply, but the pre-tranche test stopped at Node before
-reporting Rust's termination detail. This is a hosted failure, not promotion
-evidence. See [Executions](#executions).
+successfully, while Node terminates with `SIGSEGV` (signal 11) and rustc exits
+with status 127. This is a hosted failure, not promotion evidence. See
+[Executions](#executions).
 
 Owning contract: [Linux production offline doctor provisioner
 v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md). This document adds the executable
@@ -176,29 +175,25 @@ device. The cause of the `node`/`rust` failure is not established — only that
 it is downstream of `execve` rather than before it, which is where the four
 earlier runs placed it.
 
-### Latest execution: run 35472257722
+### Latest execution: run 35477758519
 
-The latest dispatch ran commit `3ee2ea85` on a GitHub-hosted `ubuntu-24.04`
+The latest dispatch ran commit `4496d1a0` on a GitHub-hosted `ubuntu-24.04`
 runner. All host, release, image, and cgroup preconditions passed, and the
-final delegated cgroup was empty. The new diagnostic reply trailer identified
-the first failing role precisely in the platform-sys suite:
+final delegated cgroup was empty. The diagnostic reply trailer and all-role
+failure collection identify both failing roles in the platform-sys suite:
 
 ```
-real selected tool must complete under confinement (role 2):
-Exit: the tool was killed by signal 11 (SIGSEGV)
+role 2 failed under confinement: Exit: the tool was killed by signal 11 (SIGSEGV)
+role 4 failed under confinement: Exit: the tool's own process exited with status 127
 ```
 
 The collector suite's canonical report agrees on the role split: Clang is
 `ok`, Node and Rust are `failed`, and the collector exits one as required. The
-platform-sys and collector suites each report 12 passed and 1 failed. Because
-the role loop panicked at Node, this run does not establish Rust's individual
-termination signal or exit code. It also does not identify whether Node's
-segmentation fault arises from its runtime/loader or from a denied operation;
-no syscall-policy widening is justified by this evidence.
-
-The follow-up diagnostic tranche changes only the two real-distribution test
-assertions so all role failures are collected into one failure message. It has
-not been hosted-executed yet and makes no completion or promotion claim.
+platform-sys and collector suites each report 12 passed and 1 failed. Node's
+4 GiB `RLIMIT_AS` is below official x86-64 Node 22's V8 sandbox reservation,
+so the next tranche raises only Node's virtual-address ceiling while retaining
+the fixed physical-memory cgroup limit. Rust's status 127 remains separately
+unexplained. No syscall-policy widening is justified by this evidence.
 
 ## What is true today
 

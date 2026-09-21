@@ -126,6 +126,15 @@ not lift resource limits or clear the parent-death signal. A retained supervisor
 pidfd closes the parent-death setup race before executable entry. Unsupported
 syscalls fail; compatibility failures never trigger an unconfined retry.
 
+Virtual-address reservation limits are role-scoped without changing physical
+memory authority. Clang and rustc retain a 4 GiB `RLIMIT_AS`; Node receives a
+finite 2 TiB ceiling because official x86-64 Node 22 builds reserve V8's 1 TiB
+sandbox plus guard regions during startup. This permits address-space
+reservation, not resident allocation: the provisioner's independently fixed
+4 GiB cgroup-v2 `memory.max`, zero swap, output ceiling and execution deadline
+remain unchanged. The larger Node ceiling grants no syscall, path, descriptor,
+process, network or publication authority.
+
 The supervisor fairly drains both streams under one ten-second execution
 deadline, beginning before child creation, and one five-second settlement
 budget. Failure is sticky. PID-namespace init death and exact reap precede any

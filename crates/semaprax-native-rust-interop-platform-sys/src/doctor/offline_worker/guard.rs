@@ -17,6 +17,15 @@ const ALLOW: u32 = 0x7fff_0000;
 const X86_ARCH: u32 = 0xc000_003e;
 const ARM_ARCH: u32 = 0xc000_00b7;
 const CAPACITY: usize = 256;
+const DEFAULT_ADDRESS_SPACE_LIMIT: libc::rlim_t = 4 * 1024 * 1024 * 1024;
+// Official x86-64 Node 22 builds enable V8's sandbox, whose reservation is
+// 1 TiB before its guard regions and ordinary mappings are counted. RLIMIT_AS
+// accounts virtual reservations rather than resident pages. The former 4 GiB
+// ceiling is structurally below that startup requirement and the hosted gate
+// observed `node --version` terminate with SIGSEGV under it. The worker's
+// output/time bounds and delegated cgroup still bound physical cost.
+// Keep this role-local and finite: Clang and rustc retain the tighter ceiling.
+const NODE_ADDRESS_SPACE_LIMIT: libc::rlim_t = 2 * 1024 * 1024 * 1024 * 1024;
 
 // Linux native syscall ABIs: arch/x86/entry/syscalls/syscall_64.tbl and
 // include/uapi/asm-generic/unistd.h. AArch64 has no legacy open/access/readlink.
@@ -76,6 +85,7 @@ const ARM_SAFE_ADDITIONS: &[u32] = &[];
 struct RolePolicy {
     role: u8,
     tool: DoctorOfflineTool,
+    address_space_limit: libc::rlim_t,
     x86_additional: &'static [u32],
     arm_additional: &'static [u32],
 }
@@ -84,18 +94,21 @@ const ROLE_POLICIES: [RolePolicy; 3] = [
     RolePolicy {
         role: 1,
         tool: DoctorOfflineTool::Clang,
+        address_space_limit: DEFAULT_ADDRESS_SPACE_LIMIT,
         x86_additional: &[],
         arm_additional: &[],
     },
     RolePolicy {
         role: 2,
         tool: DoctorOfflineTool::Node,
+        address_space_limit: NODE_ADDRESS_SPACE_LIMIT,
         x86_additional: X86_EVENT_LOOP,
         arm_additional: &[],
     },
     RolePolicy {
         role: 4,
         tool: DoctorOfflineTool::Rustc,
+        address_space_limit: DEFAULT_ADDRESS_SPACE_LIMIT,
         x86_additional: X86_EVENT_LOOP,
         arm_additional: &[],
     },
@@ -118,6 +131,7 @@ const ARM_MANDATORY_DENY: &[u32] = &[
 
 pub(super) struct Guard {
     filter: Vec<libc::sock_filter>,
+    address_space_limit: libc::rlim_t,
 }
 
 impl Guard {
@@ -277,7 +291,17 @@ impl Guard {
             return Err(Error::Limit);
         }
         filter.push(ins(RETURN, DENY, 0, 0));
-        Ok(Self { filter })
+        Ok(Self {
+            filter,
+            address_space_limit: policy.address_space_limit,
+        })
+    }
+
+    /// Finite virtual-address ceiling selected by the authenticated tool role.
+    /// A larger reservation budget grants no new syscall or filesystem access
+    /// and does not increase the delegated cgroup's physical-memory authority.
+    pub(super) fn address_space_limit(&self) -> libc::rlim_t {
+        self.address_space_limit
     }
 
     /// Install only in the exclusively owned child, after all setup syscalls.

@@ -37,7 +37,7 @@ pub(super) unsafe fn enter(
         fail_stop_with(16);
     }
     unsafe { root.close() };
-    if !limits() {
+    if !limits(guard.address_space_limit()) {
         fail_stop_with(17);
     }
     if !remove_capabilities() {
@@ -91,11 +91,11 @@ fn parent_alive(supervisor: i32) -> bool {
     unsafe { libc::poll(&mut event, 1, 0) == 0 }
 }
 
-fn limits() -> bool {
+fn limits(address_space_limit: libc::rlim_t) -> bool {
     for (resource, value) in [
         (libc::RLIMIT_CORE, 0),
         (libc::RLIMIT_NOFILE, 256),
-        (libc::RLIMIT_AS, 4 * 1024 * 1024 * 1024),
+        (libc::RLIMIT_AS, address_space_limit),
     ] {
         let limit = libc::rlimit {
             rlim_cur: value,

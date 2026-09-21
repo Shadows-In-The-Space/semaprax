@@ -212,16 +212,17 @@ namespace, cgroup, sealing, or kernel prerequisites fail rather than skip.
 required executable gate: the host preconditions it asserts before touching
 namespace or cgroup state, the exact serial selection of the twenty-six ignored
 lifecycle fixtures, the evidence it binds, and its refusal to treat absent
-provisioning as anything but a failure. At this audit the workflow has had 40
-dispatches; the latest is [run 35472257722](https://github.com/wavect/semaprax/actions/runs/35472257722)
-against commit `3ee2ea85`. That run reports zero precondition failures, correct
+provisioning as anything but a failure. At this audit the workflow has had 41
+dispatches; the latest is [run 35477758519](https://github.com/wavect/semaprax/actions/runs/35477758519)
+against commit `4496d1a0`. That run reports zero precondition failures, correct
 kernel-feature/cgroup/image evidence, and clean settlement, but both admitted
 suites fail 12/13 on the real-distribution fixture. Clang completes; Node is
-killed by `SIGSEGV` (signal 11), while Rust is also reported failed without an
-individual termination reason because the pre-tranche role loop stops at Node.
-The follow-up test-only diagnostic tranche collects all role failures without
-changing the worker policy. The gate remains red, WP-05 remains unpromoted,
-and no ordinary CLI activation is authorized.
+killed by `SIGSEGV` (signal 11), while rustc exits with status 127. The Node
+worker's 4 GiB virtual-address ceiling is below official Node 22's V8 sandbox
+reservation; the follow-up raises only that role's `RLIMIT_AS`, not the fixed
+physical-memory cgroup ceiling or confinement policy. Rust's failure remains
+separate and unexplained. The gate remains red, WP-05 remains unpromoted, and
+no ordinary CLI activation is authorized.
 
 The local packaging helper accepts only explicit absolute release, tar and gzip
 tools plus artifact paths, builds a fresh no-clobber directory, verifies it,

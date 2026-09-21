@@ -43,11 +43,15 @@ pub(crate) const ZEROED_NAME: &str = "bytes_zeroed";
 pub(crate) const ZEROED_ID: &str = "core.bytes.zeroed";
 pub(crate) const SET_NAME: &str = "bytes_set";
 pub(crate) const SET_ID: &str = "core.bytes.set";
+/// Maximum owned `Bytes` payload. This is deliberately larger than one
+/// borrowed external root: an internal producer may return a bounded result
+/// that expands a valid 64 KiB request without widening the input carrier.
+pub(crate) const MAX_OWNED_BYTE_VALUE_BYTES: u64 = 131_072;
 pub(crate) const MAX_EXTERNAL_ROOT_BYTES: u64 = 65_536;
 pub(crate) const MAX_RANGE_DEPTH: usize = 64;
 /// Owned Bounded Byte Buffer v1 capacity ceiling. One buffer never exceeds the
 /// established owned byte payload extent of a single allocation site.
-pub(crate) const MAX_BUFFER_CAPACITY_BYTES: u64 = MAX_EXTERNAL_ROOT_BYTES;
+pub(crate) const MAX_BUFFER_CAPACITY_BYTES: u64 = MAX_OWNED_BYTE_VALUE_BYTES;
 /// Owned Bounded Byte Buffer v1 fill ceiling. The chain is unrolled source, so
 /// its length is bounded to keep resolution, verification, cleanup planning and
 /// both backends linear in an explicitly stated budget.

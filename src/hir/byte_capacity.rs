@@ -538,7 +538,20 @@ pub(super) fn byte_capacity_expression(
                             Some(CapacityFlow::BytesCopy {
                                 site: expression.id.as_str().to_owned(),
                                 conservative_payload_bytes:
-                                    crate::byte_data_capacity::MAX_ARRAY_BYTES,
+                                    crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES,
+                            })
+                        } else if callee.as_str() == crate::byte_ops::ZEROED_ID {
+                            let conservative_payload_bytes = args
+                                .first()
+                                .and_then(|argument| match &argument.kind {
+                                    ResolvedExprKind::Usize(capacity) => Some(*capacity),
+                                    _ => None,
+                                })
+                                .unwrap_or(crate::byte_ops::MAX_BUFFER_CAPACITY_BYTES)
+                                .min(crate::byte_ops::MAX_BUFFER_CAPACITY_BYTES);
+                            Some(CapacityFlow::BytesCopy {
+                                site: expression.id.as_str().to_owned(),
+                                conservative_payload_bytes,
                             })
                         } else if callee.as_str() == crate::host_io_ops::STDOUT_WRITE_ID {
                             Some(CapacityFlow::StdoutWrite {

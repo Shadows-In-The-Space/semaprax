@@ -64,7 +64,7 @@ target-independent so a backend stack model cannot silently narrow the
 admitted language.
 
 `Bytes` is a uniquely owned, immutable byte buffer with an exact length in
-`0..=65536`. It is non-Copy and NUL-safe. Moving it invalidates the source;
+`0..=131072`. It is non-Copy and NUL-safe. Moving it invalidates the source;
 dropping it releases its payload exactly once. It may be passed or returned by
 ordinary internal monomorphic functions, but v1 forbids storing it in records,
 variants, generic instances, imported signatures, callbacks, async state, or
@@ -182,10 +182,11 @@ Every byte length and budget calculation uses checked arithmetic. The exact
 v1 bounds are:
 
 - 65,536 cumulative external root bytes per invocation;
-- 65,536 bytes per fixed array or owned `Bytes` payload;
+- 65,536 bytes per fixed array;
+- 131,072 bytes per owned `Bytes` payload;
 - 65,536 cumulative inline fixed-array bytes per function frame;
-- 16 allocation-producing `bytes_copy` sites on any executable call path;
-- 1,048,576 maximum source-derived owned-byte payload bytes on any such path.
+- 32 allocation-producing owned-byte sites on any executable call path;
+- 2,097,152 maximum source-derived owned-byte payload bytes on any such path.
 
 The same checked analysis authenticates the active-array call-path budget
 described above. Its per-function and per-root summaries are target-neutral
@@ -285,7 +286,8 @@ the deterministic generated JavaScript runtime. `bytes_copy` snapshots the
 validated guest bytes into a fresh `Uint8Array`; handles are never addresses,
 zero is invalid, stale generations reject, and cleanup removes the exact live
 entry. The arena enforces the same statically authenticated allocation-site
-and payload bounds. This runtime is an explicit required compiler import, not
+and payload bounds: 65,536 bytes for a plain external root and 131,072 bytes
+for an owned handle or its derived range. This runtime is an explicit required compiler import, not
 ambient host or network authority. Raw Core-Wasm consumers must provide the
 same contract; only the generated package is claimed by v1.
 
@@ -359,7 +361,7 @@ The source-facing byte-data family is closed:
 | `SPX-T264` | `Slice<u8>` escapes, is stored, or crosses a closed boundary |
 | `SPX-T265` | an owner or array storage is moved, dropped, or replaced while lexically borrowed |
 | `SPX-T266` | a byte view lacks an admitted source-level provenance origin or has an invalid range |
-| `SPX-T267` | the allocation closure is cyclic, reaches a loop, exceeds 16 sites, or exceeds 1,048,576 bytes |
+| `SPX-T267` | the allocation closure is cyclic, reaches a loop, exceeds 32 sites, or exceeds 2,097,152 bytes |
 | `SPX-T268` | a new data type is used in an unsupported generic, variant, import, callback, async, or public ABI position |
 
 Ordinary unknown-name, reserved-name, arity, move, and hostile-HIR failures
@@ -448,7 +450,8 @@ Completion requires all of the following at one exact head:
    array, frame, allocation-site, and cumulative payload bounds.
 6. `usize` zero/maximum arithmetic, overflow/underflow, unsigned ordering,
    division/remainder-by-zero, and checked physical-offset conversion tests.
-7. Empty, one-byte, 65,536-byte, embedded-NUL, `0xff`, invalid-UTF-8,
+7. Empty, one-byte, 65,536-byte external-root, 131,072-byte owned-buffer,
+   embedded-NUL, `0xff`, invalid-UTF-8,
    aliased-view, nested-forwarding, index `len - 1`, index `len`, and
    `usize::MAX` execution cases.
 8. Interpreter, native C11 O0/O2, and Node/Core-Wasm agreement for every

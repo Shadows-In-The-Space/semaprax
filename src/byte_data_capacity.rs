@@ -10,8 +10,8 @@ use std::fmt;
 pub(crate) const MAX_ARRAY_BYTES: u64 = 65_536;
 pub(crate) const MAX_INLINE_ARRAY_FRAME_BYTES: u64 = 65_536;
 pub(crate) const MAX_ACTIVE_ARRAY_CALL_PATH_BYTES: u64 = 65_536;
-pub(crate) const MAX_BYTES_COPY_SITES: u32 = 16;
-pub(crate) const MAX_OWNED_BYTE_PAYLOAD_BYTES: u64 = 1_048_576;
+pub(crate) const MAX_BYTES_COPY_SITES: u32 = 32;
+pub(crate) const MAX_OWNED_BYTE_PAYLOAD_BYTES: u64 = 2_097_152;
 pub(crate) const MAX_STDOUT_TRANSCRIPT_BYTES: u64 = 65_536;
 pub(crate) const MAX_STDOUT_WRITES_PER_PATH: u64 = 1;
 pub(crate) const MAX_STDERR_WRITES_PER_PATH: u64 = 1;
@@ -530,11 +530,12 @@ fn validate_flow<'a>(
                         format!("duplicate capacity site `{site}`"),
                     ));
                 }
-                if *conservative_payload_bytes > MAX_ARRAY_BYTES {
+                if *conservative_payload_bytes > crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES {
                     return Err(allocation_error(
                         &function.function,
                         format!(
-                            "bytes_copy site `{site}` admits {conservative_payload_bytes} bytes; per-value limit is {MAX_ARRAY_BYTES}"
+                            "bytes_copy site `{site}` admits {conservative_payload_bytes} bytes; per-value limit is {}",
+                            crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES,
                         ),
                     ));
                 }
@@ -551,11 +552,12 @@ fn validate_flow<'a>(
                         format!("duplicate capacity site `{site}`"),
                     ));
                 }
-                if *conservative_payload_bytes > MAX_ARRAY_BYTES {
+                if *conservative_payload_bytes > crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES {
                     return Err(allocation_error(
                         &function.function,
                         format!(
-                            "stdin_read site `{site}` admits {conservative_payload_bytes} bytes; per-value limit is {MAX_ARRAY_BYTES}"
+                            "stdin_read site `{site}` admits {conservative_payload_bytes} bytes; per-value limit is {}",
+                            crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES,
                         ),
                     ));
                 }

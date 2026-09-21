@@ -7224,10 +7224,14 @@ impl Emitter<'_> {
                 .expect("range validation scratch is present");
             self.output.push(0x05);
         }
-        // Tagged carrier: high 32 bits are the root word, low 32 bits length.
+        // Every internal slice may view an owned 128 KiB Bytes result. Entry
+        // roots retain their independent 64 KiB limit in `emit_root_admission`.
         self.get_scalar(value);
         self.output.extend([0xa7, 0xad, 0x42]);
-        write_i64(self.output, crate::byte_ops::MAX_EXTERNAL_ROOT_BYTES as i64);
+        write_i64(
+            self.output,
+            crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES as i64,
+        );
         self.output.push(0x58); // i64.le_u
         self.get_scalar(value);
         self.output.extend([0x42, 0x20, 0x88, 0x42]);

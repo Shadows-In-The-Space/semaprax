@@ -425,12 +425,22 @@ fn capacity_and_element_index_failures_are_compile_time_diagnostics() {
         ),
         "SPX-T271",
     );
+    // The catalog-normalizer needs a bounded 69,710-byte owned result even
+    // though its request root remains 65,536 bytes. The source verifier and
+    // hostile-HIR validator must admit that literal together.
+    let expanded = program_source(
+        "    let buffer = bytes_zeroed(69710usize);\n    let view = bytes_as_slice(buffer);\n    if byte_len(view) == 69710usize { 0 } else { 1 }",
+    );
+    assert!(error_codes(&expanded).is_empty());
+    let expanded = parse(&expanded, "owned-byte-buffer-expanded.spx").unwrap();
+    hir::validate(&hir::resolve(&expanded).unwrap()).unwrap();
+
     // A capacity above the admitted owned byte payload extent: the allocation
     // cannot succeed, and saying so is a diagnostic rather than a backend
     // failure.
     assert_rejected(
         &program_source(
-            "    let buffer = bytes_zeroed(65537usize);\n    let view = bytes_as_slice(buffer);\n    if byte_len(view) == 65537usize { 0 } else { 1 }",
+            "    let buffer = bytes_zeroed(131073usize);\n    let view = bytes_as_slice(buffer);\n    if byte_len(view) == 131073usize { 0 } else { 1 }",
         ),
         "SPX-T271",
     );

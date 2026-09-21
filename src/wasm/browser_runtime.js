@@ -88,7 +88,11 @@ function createByteDataRuntime(options = {}) {
     const word = BigInt.asUintN(64, carrier);
     const length = Number(word & 0xffffffffn);
     const root = Number((word >> 32n) & 0xffffffffn);
-    if (length > 65536) throw new Error("SEMAPRAX byte carrier length invariant");
+    // Plain fixed-memory roots are invocation inputs and retain the 64 KiB
+    // external-root limit. Owned handles and their checked range descriptors
+    // may carry the larger internal `Bytes` result bound.
+    const maximum = (root & 0xc0000000) === 0 ? 65536 : 131072;
+    if (length > maximum) throw new Error("SEMAPRAX byte carrier length invariant");
     return { carrier: word, length, root, tagged: (root & 0x80000000) !== 0, token: root & 0x7fffffff };
   };
   const memory = () => {
@@ -182,7 +186,7 @@ function createByteDataRuntime(options = {}) {
     return bytes;
   };
   const allocate = bytes => {
-    if (!(bytes instanceof Uint8Array) || bytes.byteLength > 65536) {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > 131072) {
       throw new Error("SEMAPRAX owned Bytes length invariant");
     }
     if (entries.size >= maxLiveEntries) throw new Error("SEMAPRAX owned Bytes live entry limit exceeded");
@@ -218,7 +222,7 @@ function createByteDataRuntime(options = {}) {
   const byteImports = Object.freeze({
     spx_bytes_copy: carrier => allocate(read(decode(carrier))),
     spx_bytes_zeroed: count => {
-      if (typeof count !== "bigint" || count < 0n || count > 65536n) {
+      if (typeof count !== "bigint" || count < 0n || count > 131072n) {
         throw new Error("SEMAPRAX owned byte buffer capacity invariant");
       }
       return allocate(new Uint8Array(Number(count)));

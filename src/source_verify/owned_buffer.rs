@@ -136,13 +136,13 @@ pub(super) fn check_call(
 /// The payload one `bytes_zeroed` allocation site contributes to the
 /// target-neutral owned byte capacity analysis. Admitted source always carries
 /// the literal capacity its admission rule requires; an unadmitted site falls
-/// back to the conservative whole-array extent so a rejected program is never
-/// also under-charged.
+/// back to the conservative owned-buffer extent so a rejected program is never
+/// also under-charged. Fixed arrays keep their independent, smaller bound.
 pub(super) fn allocation_payload_bytes(args: &[Expr]) -> u64 {
     match args.first().map(|argument| &argument.kind) {
         Some(ExprKind::Usize(capacity)) => {
-            (*capacity).min(crate::byte_data_capacity::MAX_ARRAY_BYTES)
+            (*capacity).min(crate::byte_ops::MAX_BUFFER_CAPACITY_BYTES)
         }
-        _ => crate::byte_data_capacity::MAX_ARRAY_BYTES,
+        _ => crate::byte_ops::MAX_BUFFER_CAPACITY_BYTES,
     }
 }

@@ -225,7 +225,7 @@ const env = {
   spx_div: (a,b) => a/b, spx_rem: (a,b) => a%b, spx_neg: checked(a => -a),
   spx_contract_fail: selector => { assert.equal(selector, 9); throw failure; },
   spx_bytes_copy: carrier => allocate(read(decode(carrier))),
-  spx_bytes_zeroed: count => { if (count < 0n || count > 65536n) throw Error("byte capacity"); return allocate(new Uint8Array(Number(count))); },
+  spx_bytes_zeroed: count => { if (count < 0n || count > 131072n) throw Error("byte capacity"); return allocate(new Uint8Array(Number(count))); },
   spx_bytes_get: (carrier,index) => { const value = read(decode(carrier)); return index < 0n || index >= BigInt(value.length) ? -1 : value[Number(index)]; },
   spx_bytes_set: (carrier,index,byte) => { const value = read(decode(carrier)); if ((decode(carrier).root & 0x80000000) === 0 || index < 0n || index >= BigInt(value.length) || byte < 0 || byte > 255) throw Error("byte write"); value[Number(index)] = byte; return carrier; },
   spx_bytes_as_slice: carrier => { read(decode(carrier)); return carrier; },

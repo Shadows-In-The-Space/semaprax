@@ -13,6 +13,7 @@ const NATIVE_BYTE_DATA_RUNTIME_C: &str = r#"#include <stddef.h>
 #include <string.h>
 
 #define SPX_SLICE_U8_MAX_BYTES UINT64_C(65536)
+#define SPX_OWNED_BYTES_MAX_BYTES UINT64_C(131072)
 
 typedef struct {
     const uint8_t *ptr;
@@ -24,10 +25,7 @@ typedef struct {
     uint64_t len;
 } spx_bytes_v1;
 
-static __attribute__((unused)) void spx_slice_u8_require_valid(spx_slice_u8_v1 value) {
-    if (value.len > SPX_SLICE_U8_MAX_BYTES) {
-        spx_runtime_invariant_failure("borrowed byte slice exceeds the exact length bound");
-    }
+static __attribute__((unused)) void spx_slice_u8_require_shape(spx_slice_u8_v1 value) {
     if (value.len == UINT64_C(0)) {
         if (value.ptr != NULL) {
             spx_runtime_invariant_failure("empty borrowed byte slice is not normalized");
@@ -35,6 +33,22 @@ static __attribute__((unused)) void spx_slice_u8_require_valid(spx_slice_u8_v1 v
     } else if (value.ptr == NULL) {
         spx_runtime_invariant_failure("non-empty borrowed byte slice has a null pointer");
     }
+}
+
+/* External roots stay at 64 KiB. A view derived from an owned Bytes value may
+   instead span the internal 128 KiB owned-value bound. */
+static __attribute__((unused)) void spx_slice_u8_require_valid(spx_slice_u8_v1 value) {
+    if (value.len > SPX_SLICE_U8_MAX_BYTES) {
+        spx_runtime_invariant_failure("borrowed byte slice exceeds the exact length bound");
+    }
+    spx_slice_u8_require_shape(value);
+}
+
+static __attribute__((unused)) void spx_slice_u8_require_owned_view_valid(spx_slice_u8_v1 value) {
+    if (value.len > SPX_OWNED_BYTES_MAX_BYTES) {
+        spx_runtime_invariant_failure("owned byte view exceeds the exact length bound");
+    }
+    spx_slice_u8_require_shape(value);
 }
 
 static __attribute__((unused)) uint64_t spx_slice_u8_charge_root(
@@ -48,7 +62,7 @@ static __attribute__((unused)) uint64_t spx_slice_u8_charge_root(
 }
 
 static __attribute__((unused)) uint64_t spx_byte_len(spx_slice_u8_v1 value) {
-    spx_slice_u8_require_valid(value);
+    spx_slice_u8_require_owned_view_valid(value);
     return value.len;
 }
 
@@ -59,7 +73,7 @@ static __attribute__((unused)) spx_status_token spx_byte_range_v1(
     uint64_t end,
     spx_slice_u8_v1 *result_out
 ) {
-    spx_slice_u8_require_valid(value);
+    spx_slice_u8_require_owned_view_valid(value);
     if (result_out == NULL) {
         spx_runtime_invariant_failure("byte range result carrier is unavailable");
     }
@@ -91,7 +105,7 @@ static __attribute__((unused)) spx_status_token spx_byte_range_v1(
 }
 
 static __attribute__((unused)) void spx_bytes_require_valid(spx_bytes_v1 value) {
-    if (value.len > SPX_SLICE_U8_MAX_BYTES) {
+    if (value.len > SPX_OWNED_BYTES_MAX_BYTES) {
         spx_runtime_invariant_failure("owned bytes exceed the exact length bound");
     }
     if (value.len == UINT64_C(0)) {
@@ -104,7 +118,7 @@ static __attribute__((unused)) void spx_bytes_require_valid(spx_bytes_v1 value) 
 }
 
 static __attribute__((unused)) spx_bytes_v1 spx_bytes_copy(spx_slice_u8_v1 value) {
-    spx_slice_u8_require_valid(value);
+    spx_slice_u8_require_owned_view_valid(value);
     if (value.len == UINT64_C(0)) {
         return (spx_bytes_v1){ .ptr = NULL, .len = UINT64_C(0) };
     }
@@ -117,7 +131,7 @@ static __attribute__((unused)) spx_bytes_v1 spx_bytes_copy(spx_slice_u8_v1 value
 }
 
 static __attribute__((unused)) spx_bytes_v1 spx_bytes_zeroed(uint64_t count) {
-    if (count > SPX_SLICE_U8_MAX_BYTES) {
+    if (count > SPX_OWNED_BYTES_MAX_BYTES) {
         spx_runtime_invariant_failure("owned byte buffer capacity exceeds the exact length bound");
     }
     if (count == UINT64_C(0)) {

@@ -232,6 +232,18 @@ fn test_checked_total() -> i64
 // These cases are deliberately source-authored rather than copied output
 // fixtures, while the Rust owning gate compares their categories/positions
 // to a live independent-oracle invocation.
+@id("catalog_normalizer.tests.value-mismatch")
+fn value_mismatch(actual: usize, expected: usize) -> i64
+{
+    if actual == expected { 0 } else { 1 }
+}
+
+@id("catalog_normalizer.tests.problem-mismatch")
+fn problem_mismatch(problem: usize, category: usize, offset: usize) -> i64
+{
+    if problem_category(problem) == category && problem_offset(problem) == offset { 0 } else { 1 }
+}
+
 @id("catalog_normalizer.tests.test-record-parser")
 fn test_record_parser() -> i64
 {
@@ -274,7 +286,20 @@ fn test_record_parser() -> i64
     let negative_problem = record_problem(str_as_bytes(negative_text));
     let out_of_range_problem = record_problem(str_as_bytes(out_of_range_text));
     let trailing_comma_problem = record_problem(str_as_bytes(trailing_comma_text));
-    if valid_problem == 0usize && problem_category(missing_problem) == 4usize && problem_offset(missing_problem) == 0usize && problem_category(quantity_problem) == 4usize && problem_offset(quantity_problem) == 33usize && problem_category(escaped_problem) == 4usize && problem_offset(escaped_problem) == 1usize && problem_category(malformed_problem) == 3usize && problem_offset(malformed_problem) == 8usize && problem_category(duplicate_key_problem) == 4usize && problem_offset(duplicate_key_problem) == 11usize && problem_category(unknown_key_problem) == 4usize && problem_offset(unknown_key_problem) == 36usize && problem_category(wrong_id_problem) == 4usize && problem_offset(wrong_id_problem) == 6usize && problem_category(nested_label_problem) == 4usize && problem_offset(nested_label_problem) == 19usize && problem_category(fractional_problem) == 4usize && problem_offset(fractional_problem) == 34usize && problem_category(negative_problem) == 4usize && problem_offset(negative_problem) == 34usize && problem_category(out_of_range_problem) == 4usize && problem_offset(out_of_range_problem) == 34usize && problem_category(trailing_comma_problem) == 3usize && problem_offset(trailing_comma_problem) == 36usize { 0 } else { 1 }
+    let mut failed = value_mismatch(valid_problem, 0usize);
+    failed = failed + problem_mismatch(missing_problem, 4usize, 0usize);
+    failed = failed + problem_mismatch(quantity_problem, 4usize, 33usize);
+    failed = failed + problem_mismatch(escaped_problem, 4usize, 1usize);
+    failed = failed + problem_mismatch(malformed_problem, 3usize, 8usize);
+    failed = failed + problem_mismatch(duplicate_key_problem, 4usize, 11usize);
+    failed = failed + problem_mismatch(unknown_key_problem, 4usize, 36usize);
+    failed = failed + problem_mismatch(wrong_id_problem, 4usize, 6usize);
+    failed = failed + problem_mismatch(nested_label_problem, 4usize, 19usize);
+    failed = failed + problem_mismatch(fractional_problem, 4usize, 34usize);
+    failed = failed + problem_mismatch(negative_problem, 4usize, 34usize);
+    failed = failed + problem_mismatch(out_of_range_problem, 4usize, 34usize);
+    failed = failed + problem_mismatch(trailing_comma_problem, 3usize, 36usize);
+    if failed == 0 { 0 } else { 1 }
 }
 
 // CNORM-014: the second decoded-equivalent id is rejected, even though its

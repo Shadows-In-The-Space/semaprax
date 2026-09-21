@@ -1043,7 +1043,7 @@ fn source_capacity_expr(
                             Some(CapacityFlow::BytesCopy {
                                 site: path.clone(),
                                 conservative_payload_bytes:
-                                    crate::byte_data_capacity::MAX_ARRAY_BYTES,
+                                    crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES,
                             })
                         } else if name == crate::byte_ops::ZEROED_NAME {
                             Some(CapacityFlow::BytesCopy {

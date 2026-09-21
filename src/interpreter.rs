@@ -1619,7 +1619,7 @@ fn settle_interpreted_bytes(
     let Value::Bytes(value) = value else {
         return Err("owned-data result payload is not Bytes");
     };
-    if value.bytes.len() as u64 > crate::byte_ops::MAX_EXTERNAL_ROOT_BYTES {
+    if value.bytes.len() as u64 > crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES {
         return Err("owned-data result exceeds the public output bound");
     }
     let bytes = value.bytes.as_ref().to_vec();
@@ -4517,7 +4517,7 @@ impl Evaluator<'_> {
                             let length = u64::try_from(value.bytes().len()).map_err(|_| {
                                 Flow::Guard("owned byte payload length does not fit u64")
                             })?;
-                            if length > crate::byte_ops::MAX_EXTERNAL_ROOT_BYTES {
+                            if length > crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES {
                                 return Err(Flow::Guard(
                                     "owned byte payload exceeds the verified profile limit",
                                 ));

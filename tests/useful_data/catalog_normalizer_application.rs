@@ -338,7 +338,7 @@ fn maximal_valid_outputs_fit_the_source_bound_exactly() {
     );
     let source = std::fs::read_to_string(fixture().join("src/app.spx")).unwrap();
     assert!(source.contains("fn output_capacity() -> usize\n{\n    69710usize\n}"));
-    assert_eq!(source.matches("bytes_zeroed(output_capacity())").count(), 2);
+    assert_eq!(source.matches("bytes_zeroed(69710usize)").count(), 2);
 
     let body = maximal_output_body();
     let plain = run_oracle_with(&body, false);

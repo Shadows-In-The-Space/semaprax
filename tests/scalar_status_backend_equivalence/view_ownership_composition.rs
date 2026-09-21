@@ -638,7 +638,7 @@ const imports = {
       return BigInt.asIntN(64, d.word);
     },
     spx_bytes_zeroed: (count) => {
-      if (typeof count !== "bigint" || count < 0n || count > 65536n) {
+      if (typeof count !== "bigint" || count < 0n || count > 131072n) {
         throw new Error("owned byte buffer capacity invariant");
       }
       return allocate(new Uint8Array(Number(count)));

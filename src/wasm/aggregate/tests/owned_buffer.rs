@@ -128,7 +128,8 @@ const {instance}=await instantiateBytes(await readFile('./probe.wasm'),{maxOwned
 const {probe_zeroed:zeroed,probe_set:set,probe_drop:drop,probe_get:get}=instance.exports;
 const reject=(action,message)=>{let failed=false;try{action()}catch(error){if(error.message!==message)throw error;failed=true}if(!failed)throw Error(`accepted hostile input: ${message}`)};
 reject(()=>zeroed(-1n),'SEMAPRAX owned byte buffer capacity invariant');
-reject(()=>zeroed(65537n),'SEMAPRAX owned byte buffer capacity invariant');
+const maximum=zeroed(131072n);drop(maximum);
+reject(()=>zeroed(131073n),'SEMAPRAX owned byte buffer capacity invariant');
 let wrongType=false;try{zeroed(1)}catch(error){if(!(error instanceof TypeError))throw error;wrongType=true}if(!wrongType)throw Error('accepted non-i64 capacity');
 let carrier=zeroed(1n);
 if(get(carrier,0n)!==0)throw Error('zeroed byte mismatch');

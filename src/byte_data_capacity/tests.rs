@@ -281,12 +281,15 @@ fn cycle_detection_is_scoped_to_the_relevant_call_closure() {
 #[test]
 fn bytes_copy_site_and_payload_limits_are_inclusive() {
     let sites = usize::try_from(MAX_BYTES_COPY_SITES).expect("site limit fits usize");
-    let saturating = (0..sites)
-        .map(|index| copy(&format!("site-{index}"), MAX_ARRAY_BYTES))
+    let maximal_value = crate::byte_ops::MAX_OWNED_BYTE_VALUE_BYTES;
+    let saturating_sites = usize::try_from(MAX_OWNED_BYTE_PAYLOAD_BYTES / maximal_value)
+        .expect("payload-derived site count fits usize");
+    let saturating = (0..saturating_sites)
+        .map(|index| copy(&format!("site-{index}"), maximal_value))
         .collect::<Vec<_>>();
     let summary = summarize(&[body("f", CapacityFlow::Sequence(saturating))], "f");
-    assert_eq!(summary.bytes_copy_sites, MAX_BYTES_COPY_SITES);
-    // Sixteen maximal per-value copies land exactly on the owned payload limit.
+    assert_eq!(summary.bytes_copy_sites, saturating_sites as u32);
+    // Maximal owned values land exactly on the aggregate payload limit.
     assert_eq!(
         summary.owned_byte_payload_bytes,
         MAX_OWNED_BYTE_PAYLOAD_BYTES
@@ -295,14 +298,14 @@ fn bytes_copy_site_and_payload_limits_are_inclusive() {
     // A stdin read adds payload bytes without adding a bytes_copy site, so it
     // is the only way to push a legal number of sites past the owned payload
     // limit.
-    let mut saturating = (0..sites)
-        .map(|index| copy(&format!("site-{index}"), MAX_ARRAY_BYTES))
+    let mut saturating = (0..saturating_sites)
+        .map(|index| copy(&format!("site-{index}"), maximal_value))
         .collect::<Vec<_>>();
-    saturating.push(stdin("stdin", MAX_ARRAY_BYTES));
+    saturating.push(stdin("stdin", maximal_value));
     rejects(
         &[body("f", CapacityFlow::Sequence(saturating))],
         CapacityDiagnostic::Allocation,
-        "bytes_copy path admits 1114112 payload bytes",
+        "bytes_copy path admits 2228224 payload bytes",
     );
 
     let one_too_many = (0..=sites)
@@ -311,20 +314,20 @@ fn bytes_copy_site_and_payload_limits_are_inclusive() {
     rejects(
         &[body("f", CapacityFlow::Sequence(one_too_many))],
         CapacityDiagnostic::Allocation,
-        "bytes_copy path reaches 17 sites",
+        "bytes_copy path reaches 33 sites",
     );
 
     // The per-value bound is checked while validating the flow, before any
     // path arithmetic runs.
     rejects(
-        &[body("f", copy("site", MAX_ARRAY_BYTES + 1))],
+        &[body("f", copy("site", maximal_value + 1))],
         CapacityDiagnostic::Allocation,
-        "bytes_copy site `site` admits 65537 bytes",
+        "bytes_copy site `site` admits 131073 bytes",
     );
     rejects(
-        &[body("f", stdin("site", MAX_ARRAY_BYTES + 1))],
+        &[body("f", stdin("site", maximal_value + 1))],
         CapacityDiagnostic::Allocation,
-        "stdin_read site `site` admits 65537 bytes",
+        "stdin_read site `site` admits 131073 bytes",
     );
 }
 

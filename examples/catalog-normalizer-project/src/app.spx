@@ -530,7 +530,7 @@ fn success_response(body: borrow Slice<u8>) -> Bytes
     let count = record_count(body);
     let total = success_total(body);
     let length = success_len(body);
-    let mut out = bytes_zeroed(output_capacity());
+    let mut out = bytes_zeroed(69710usize);
     let mut index = 0usize;
     let mut phase = 0usize;
     let mut part = 0usize;
@@ -577,7 +577,7 @@ fn enriched_success_response(body: borrow Slice<u8>) -> Bytes
     let count = record_count(body);
     let total = success_total(body);
     let length = enriched_success_len(body);
-    let mut out = bytes_zeroed(output_capacity());
+    let mut out = bytes_zeroed(69710usize);
     let mut index = 0usize;
     let mut phase = 0usize;
     let mut part = 0usize;

@@ -98,7 +98,7 @@ fn main() -> i64
 
 The admission rules are:
 
-- `bytes_zeroed`'s `count` operand is a `usize` literal of at most `65536`
+- `bytes_zeroed`'s `count` operand is a `usize` literal of at most `131072`
   (`SPX-T271`). The capacity is therefore known at the allocation site, which
   is what the target-neutral capacity analysis and both backends require.
 - `bytes_set`'s `buffer` operand is syntactically the enclosing chain's

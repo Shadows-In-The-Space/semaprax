@@ -121,7 +121,7 @@ const env = {
     spx_bytes_copy: carrier => allocate(read(carrier)),
     spx_bytes_drop: carrier => { read(carrier); if (!entries.delete(owner(carrier))) throw Error("double drop"); },
     spx_bytes_as_slice: carrier => { read(carrier); return carrier; },
-    spx_bytes_zeroed: length => { if (length < 0n || length > 65536n) throw Error("byte capacity"); return allocate(new Uint8Array(Number(length))); },
+    spx_bytes_zeroed: length => { if (length < 0n || length > 131072n) throw Error("byte capacity"); return allocate(new Uint8Array(Number(length))); },
     spx_bytes_set: (carrier,index,value) => { owner(carrier); const bytes = read(carrier); if (index < 0n || index >= BigInt(bytes.length) || !Number.isInteger(value) || value < 0 || value > 255) throw Error("byte element"); bytes[Number(index)] = value; return carrier; },
     spx_bytes_get: (carrier,index) => { const value = read(carrier); const i = BigInt.asUintN(64,index); return i >= BigInt(value.length) ? -1 : value[Number(i)]; }
 };

@@ -12,9 +12,11 @@
 //!
 //! The witness is finite corpus evidence, not a proof that either the parser
 //! or the Rust translator is correct for all admitted programs.  In
-//! particular, HIR typing remains an unproved translation assumption. The
-//! fixture also constructs a concrete Lean `Program` and checks the strict
-//! weighted-call certificate derived from these real terms in Rust.
+//! particular, universal HIR correspondence remains unproved. For each actual
+//! corpus body, the fixture now constructs a named typing derivation, applies
+//! the existing lowering theorem, and establishes the complete concrete
+//! `WellFormedProgram`. Numeric normalization witnesses have no typing premises.
+//! The fixture also checks the strict weighted-call certificate derived in Rust.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -29,6 +31,9 @@ use super::corpus::{adversarial_structure_corpus, generated_corpus};
 use super::reify::BoundTranslation;
 use super::term::{KernelProgram, KernelType, Term};
 use super::weights;
+
+#[path = "lean_fixture/typing.rs"]
+mod typing;
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
@@ -329,6 +334,14 @@ fn lowered_term(
 }
 
 fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -> usize {
+    // Check independent typing and all traversal limits before the recursive
+    // term renderers. Definition names are generated here, never source text.
+    let suffix = label.replace('-', "_");
+    let definition_names = (0..program.functions.len())
+        .map(|index| format!("function_{suffix}_{index}"))
+        .collect::<Vec<_>>();
+    let typing_proofs = typing::derive(program, &definition_names)
+        .expect("real reified bodies must independently type-check before Lean rendering");
     let function_labels = function_labels(program);
     let function_positions = function_positions(program);
     let values = value_ids(program);
@@ -338,7 +351,6 @@ fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -
     let weights = weights::derive(program).expect("reified corpus must have finite u64 weights");
     weights::verify(program, &weights).expect("derived weights must replay on the exact terms");
     // Labels are generated locally, never copied from source identifiers.
-    let suffix = label.replace('-', "_");
     let program_name = format!("program_{suffix}");
     let weight_name = format!("weight_{suffix}");
     let bodies = program
@@ -353,13 +365,14 @@ fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -
         KernelType::I64 => ".int",
         KernelType::Bool => ".bool",
     };
-    let definitions = list(program.functions.iter().zip(&bodies), |(function, body)| {
+    for ((function, body), name) in program.functions.iter().zip(&bodies).zip(&definition_names) {
         let parameters = list(function.params.iter(), |(_, ty)| lean_type(*ty).to_owned());
-        format!(
-            "⟨{parameters}, {}, ({body})⟩",
+        output.push_str(&format!(
+            "\ndef {name} : FunDef := ⟨{parameters}, {}, ({body})⟩\n",
             lean_type(function.return_type)
-        )
-    });
+        ));
+    }
+    let definitions = list(definition_names.iter(), |name| name.to_owned());
     output.push_str(&format!(
         "\ndef {program_name} : Program := {definitions}\n"
     ));
@@ -381,8 +394,30 @@ fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -
         output.push_str(&format!(
             "\n-- exact reification witness {label}, function {function_index}\nexample :\n  lowerNamed {function_scope} {named_parameters} ({named}) = some ({lowered}) := by\n  rfl\n"
         ));
+        let named_context = list(function.params.iter(), |(id, ty)| {
+            format!("({}, {})", values[id], lean_type(*ty))
+        });
+        let parameter_types = list(function.params.iter(), |(_, ty)| lean_type(*ty).to_owned());
+        output.push_str(&format!(
+            "\ntheorem named_typed_{suffix}_{function_index} :\n  NamedHasType {program_name} {function_scope} {named_context} ({named}) {} :=\n  {}\n\ntheorem body_typed_{suffix}_{function_index} :\n  HasType {program_name} {parameter_types} ({lowered}) {} :=\n  named_lower_output_has_type named_typed_{suffix}_{function_index} (by rfl)\n",
+            lean_type(function.return_type), typing_proofs[function_index],
+            lean_type(function.return_type)
+        ));
         count += 1;
     }
+    // Every table entry must have its own checked body. No caller-supplied
+    // well-formedness premise may conceal a bad translation or return type.
+    output.push_str(&format!(
+        "\ntheorem well_formed_{suffix} : WellFormedProgram {program_name} := by\n  intro f fd hf\n"
+    ));
+    for (index, definition) in definition_names.iter().enumerate() {
+        let indent = " ".repeat(2 + index * 4);
+        output.push_str(&format!(
+            "{indent}cases f with\n{indent}| zero =>\n{indent}    simp [{program_name}] at hf\n{indent}    subst fd\n{indent}    change HasType {program_name} {definition}.params {definition}.body {definition}.ret\n{indent}    exact body_typed_{suffix}_{index}\n{indent}| succ f =>\n"
+        ));
+    }
+    let indent = " ".repeat(2 + program.functions.len() * 4);
+    output.push_str(&format!("{indent}simp [{program_name}] at hf\n"));
     // Exhaust the actual finite function table. Each leaf is checked by Lean's
     // reduction of weightedPotential, rather than trusting a Rust boolean or
     // an unbound certificate for a separate hand-authored example program.
@@ -398,8 +433,7 @@ fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -
     let indent = " ".repeat(2 + program.functions.len() * 4);
     output.push_str(&format!("{indent}simp [{program_name}] at hf\n"));
     // Bind each executable Rust budget to Lean's exact call potential, then
-    // apply the numeric theorem. Typing is an explicit premise: a weight
-    // certificate must not silently manufacture a HIR correspondence proof.
+    // apply the numeric theorem to the independently proved table and call.
     for (index, function) in program.functions.iter().enumerate() {
         let arguments = list(function.params.iter(), |(_, ty)| match ty {
             KernelType::I64 => ".intLit 0".to_owned(),
@@ -408,9 +442,17 @@ fn render_witnesses(program: &KernelProgram, label: &str, output: &mut String) -
         let call = format!("(Expr.call {index} {arguments})");
         let fuel = weights::value_call_fuel(program, &weights, &function.id)
             .expect("replayed corpus value call must have representable fuel");
+        let mut argument_typing = "ArgsHaveTypes.nil".to_owned();
+        for (_, ty) in function.params.iter().rev() {
+            let rule = match ty {
+                KernelType::I64 => "intLit",
+                KernelType::Bool => "boolLit",
+            };
+            argument_typing = format!("ArgsHaveTypes.cons HasType.{rule} ({argument_typing})");
+        }
         output.push_str(&format!(
-            "\ntheorem fuel_{suffix}_{index}\n  (hwf : WellFormedProgram {program_name})\n  (ht : HasType {program_name} [] {call} {}) :\n  NormalizesWithin {program_name} {call} {fuel} := by\n  have hp : weightedPotential {weight_name} {call} = {fuel} := by rfl\n  rw [← hp]\n  exact normalizes_within_weighted_potential hwf certificate_{suffix} ht\n",
-            lean_type(function.return_type)
+            "\ntheorem fuel_{suffix}_{index} :\n  NormalizesWithin {program_name} {call} {fuel} := by\n  have ht : HasType {program_name} [] {call} {} :=\n    HasType.call (fd := {}) (by rfl) ({argument_typing})\n  have hp : weightedPotential {weight_name} {call} = {fuel} := by rfl\n  rw [← hp]\n  exact normalizes_within_weighted_potential well_formed_{suffix} certificate_{suffix} ht\n",
+            lean_type(function.return_type), definition_names[index]
         ));
     }
     count
@@ -445,12 +487,23 @@ fn real_reified_weight_witnesses_are_deterministic_and_nonvacuous() {
     assert!(source.contains("def program_generated_0 : Program := ["));
     assert!(source.contains("theorem certificate_generated_0 : WeightedCallCertificate"));
     assert!(source.contains("theorem fuel_generated_0_0"));
+    assert!(!source.contains("(hwf :"));
+    assert!(!source.contains("(ht :"));
+    assert_eq!(
+        source.matches("theorem named_typed_generated_").count(),
+        source.matches("-- exact reification witness ").count()
+    );
+    assert_eq!(
+        source.matches("theorem body_typed_generated_").count(),
+        source.matches("-- exact reification witness ").count()
+    );
     assert_eq!(
         source.matches("theorem fuel_generated_").count(),
         source.matches("-- exact reification witness ").count()
     );
     let programs = generated_corpus().len() + adversarial_structure_corpus().len();
     assert!(programs > 0);
+    assert_eq!(source.matches(" : WellFormedProgram ").count(), programs);
     assert_eq!(
         source.matches(" : WeightedCallCertificate ").count(),
         programs

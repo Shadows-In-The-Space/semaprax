@@ -151,7 +151,7 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
     // `perf_event_open`; see the note on `X86_EVENT_LOOP`.
     assert_eq!(
         X86_SAFE_ADDITIONS,
-        &[232, 233, 281, 283, 284, 286, 287, 290, 291, 292, 293, 294, 295, 296, 297,]
+        &[7, 232, 233, 281, 283, 284, 286, 287, 290, 291, 292, 293, 294, 295, 296, 297,]
     );
     for (name, number) in EVENT_LOOP_NAMES {
         assert!(
@@ -159,7 +159,7 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
             "{name} left the admitted event-loop inventory"
         );
     }
-    assert_eq!(EVENT_LOOP_NAMES.len(), X86_SAFE_ADDITIONS.len());
+    assert_eq!(EVENT_LOOP_NAMES.len() + 1, X86_SAFE_ADDITIONS.len());
     // AArch64 gets nothing: `ARM_COMMON` has no equivalents and none is invented.
     assert!(ARM_SAFE_ADDITIONS.is_empty());
     for policy in ROLE_POLICIES {
@@ -168,7 +168,8 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
         // becoming a union again.
         let expected: &[u32] = match policy.tool {
             DoctorOfflineTool::Clang => &[],
-            DoctorOfflineTool::Node | DoctorOfflineTool::Rustc => X86_SAFE_ADDITIONS,
+            DoctorOfflineTool::Node => X86_EVENT_LOOP,
+            DoctorOfflineTool::Rustc => X86_RUST_STARTUP,
         };
         assert_eq!(policy.x86_additional, expected, "{:?}", policy.tool);
         assert_eq!(
@@ -192,6 +193,23 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
             "{:?}",
             policy.tool
         );
+    }
+
+    // Hosted run 35582699426 observed x86 poll(2) only on Rust 1.88 startup.
+    // Its zero-argument filter rule must not leak to Clang, Node, or AArch64.
+    for tool in TOOLS {
+        let guard = Guard::for_arch(expected_role(tool), tool, X86_ARCH).unwrap();
+        assert_eq!(
+            evaluate(&guard, X86_ARCH, 7, [u64::MAX; 6]),
+            if tool == DoctorOfflineTool::Rustc {
+                ALLOW
+            } else {
+                DENY
+            },
+            "{tool:?} poll scope"
+        );
+        let arm = Guard::for_arch(expected_role(tool), tool, ARM_ARCH).unwrap();
+        assert_eq!(evaluate(&arm, ARM_ARCH, 7, [u64::MAX; 6]), DENY);
     }
 }
 

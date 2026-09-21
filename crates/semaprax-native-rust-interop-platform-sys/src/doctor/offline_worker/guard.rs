@@ -71,6 +71,11 @@ const X86_COMMON: &[u32] = &[
 const X86_EVENT_LOOP: &[u32] = &[
     232, 233, 281, 283, 284, 286, 287, 290, 291, 292, 293, 294, 295, 296, 297,
 ];
+// Hosted exact-head run 35582699426 narrowed the remaining real Rust 1.88
+// startup failure to poll(2). Keep it out of Node and the shared inventory.
+const X86_RUST_STARTUP: &[u32] = &[
+    7, 232, 233, 281, 283, 284, 286, 287, 290, 291, 292, 293, 294, 295, 296, 297,
+];
 const ARM_COMMON: &[u32] = &[
     63, 65, 67, 57, 80, 79, 291, 62, 17, 78, 48, 439, 214, 222, 226, 215, 216, 233, 134, 135, 139,
     132, 113, 169, 101, 115, 172, 173, 178, 174, 175, 176, 177, 160, 124, 123, 98, 96, 99, 293,
@@ -82,14 +87,14 @@ const ARM_COMMON: &[u32] = &[
 // never be enough to widen the executable filter, and `validate_policy`
 // refuses a role addition that is not also listed here. AArch64 admits
 // nothing, so its gate stays closed.
-const X86_SAFE_ADDITIONS: &[u32] = X86_EVENT_LOOP;
+const X86_SAFE_ADDITIONS: &[u32] = X86_RUST_STARTUP;
 const ARM_SAFE_ADDITIONS: &[u32] = &[];
 
 // A role row is the only route from an authenticated worker tool identity to
 // syscall policy. Keep the rows explicit: compatibility work must add a
 // syscall to exactly the reviewed rows that need it rather than widen a
-// union. clang is a static binary with no event loop, so its row stays empty
-// while Node and rustc carry `X86_EVENT_LOOP`.
+// union. clang is a static binary with no event loop, Node carries the common
+// event-loop set, and Rust adds only its separately observed poll startup call.
 #[derive(Clone, Copy)]
 struct RolePolicy {
     role: u8,
@@ -133,7 +138,7 @@ const ROLE_POLICIES: [RolePolicy; 3] = [
         role: 4,
         tool: DoctorOfflineTool::Rustc,
         address_space_limit: DEFAULT_ADDRESS_SPACE_LIMIT,
-        x86_additional: X86_EVENT_LOOP,
+        x86_additional: X86_RUST_STARTUP,
         // Hosted run 35575666208: F_SETFL(O_RDONLY|O_NONBLOCK) on fd 4 only.
         x86_fcntl: X86FcntlPolicy::Rustc,
         arm_additional: &[],

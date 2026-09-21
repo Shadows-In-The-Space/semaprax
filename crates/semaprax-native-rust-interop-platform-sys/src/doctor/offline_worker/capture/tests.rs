@@ -429,22 +429,29 @@ fn uncertain_kill_wait_drain_or_time_never_returns_or_performs_later_actions() {
 #[test]
 fn accounting_rejects_overflow_and_capacity_before_copy_without_growth() {
     let mut output = Vec::new();
+    let mut stderr_truncated = false;
     let mut total = 0;
     assert_eq!(
-        account(&mut total, b"x", Some(&mut output)),
+        account(
+            &mut total,
+            b"x",
+            Some(&mut output),
+            None,
+            &mut stderr_truncated,
+        ),
         Err(ProbeError::OutputLimit)
     );
     assert!(output.is_empty());
     assert_eq!(output.capacity(), 0);
     total = usize::MAX;
     assert_eq!(
-        account(&mut total, b"x", None),
+        account(&mut total, b"x", None, None, &mut stderr_truncated),
         Err(ProbeError::OutputLimit)
     );
     assert_eq!(total, usize::MAX);
     total = 65_536;
     assert_eq!(
-        account(&mut total, b"x", None),
+        account(&mut total, b"x", None, None, &mut stderr_truncated),
         Err(ProbeError::OutputLimit)
     );
 }

@@ -196,22 +196,25 @@ impl CompiledIterativeLifecycle {
                         budget.max_steps_per_stage,
                     )?;
                 }
-                let evaluation = match backend {
-                    authorization::StageBackend::Interpreter => authorization::dispatch(
-                        &inner.program,
-                        $stage.prepared(),
-                        $arguments,
-                        budget.max_steps_per_stage,
-                    ),
-                    _ => authorization::dispatch_on_cancellable(
-                        backend,
-                        &inner.program,
-                        $stage.prepared(),
-                        $arguments,
-                        budget.max_steps_per_stage,
-                        cancellation,
-                    ),
-                }?;
+                // Every public target selector crosses the same cancellable
+                // sealed boundary. Interpreter used to bypass this route,
+                // which made a cancellation racing its stage reservation a
+                // backend-dependent diagnostic instead of a lifecycle
+                // settlement.
+                let evaluation = match authorization::dispatch_on_cancellable(
+                    backend,
+                    &inner.program,
+                    $stage.prepared(),
+                    $arguments,
+                    budget.max_steps_per_stage,
+                    cancellation,
+                ) {
+                    Ok(evaluation) => evaluation,
+                    Err(_) if cancellation.is_cancelled() => {
+                        stop!(IterativeStatus::Cancelled, None);
+                    }
+                    Err(errors) => return Err(errors.into()),
+                };
                 run.stages.push(StageRecord::of($stage, &evaluation));
                 if let Some(session) = session.as_deref_mut() {
                     session.record_stage(run.stages.last().expect("stage just pushed"));
@@ -316,28 +319,23 @@ impl CompiledIterativeLifecycle {
                     budget.max_steps_per_stage,
                 )?;
             }
-            let (decision, record) = match backend {
-                authorization::StageBackend::Interpreter => authorization::run_authorize_stage(
-                    &inner.program,
-                    &inner.binding.authorize,
-                    &args,
-                    budget.max_steps_per_stage,
-                    &policy,
-                    &state,
-                    decoded.canonical_json(),
-                ),
-                _ => authorization::run_authorize_stage_on_cancellable(
-                    backend,
-                    &inner.program,
-                    &inner.binding.authorize,
-                    &args,
-                    budget.max_steps_per_stage,
-                    &policy,
-                    &state,
-                    decoded.canonical_json(),
-                    Some(cancellation),
-                ),
-            }?;
+            let (decision, record) = match authorization::run_authorize_stage_on_cancellable(
+                backend,
+                &inner.program,
+                &inner.binding.authorize,
+                &args,
+                budget.max_steps_per_stage,
+                &policy,
+                &state,
+                decoded.canonical_json(),
+                Some(cancellation),
+            ) {
+                Ok(value) => value,
+                Err(_) if cancellation.is_cancelled() => {
+                    stop!(IterativeStatus::Cancelled, None);
+                }
+                Err(errors) => return Err(errors.into()),
+            };
             if let Some(session) = session.as_deref_mut() {
                 session.record_stage(&record);
             }
@@ -435,6 +433,13 @@ impl CompiledIterativeLifecycle {
                     }
                     run.authorization_bindings.push(authorization_binding);
                     run.effects += 1;
+                    // Cancellation observed after target dispatch is sticky:
+                    // the evidence preserves the charged host call, but no
+                    // result becomes input to `reduce` and no later stage may
+                    // replace the lifecycle's terminal cancellation.
+                    if cancellation.is_cancelled() {
+                        stop!(IterativeStatus::Cancelled, None);
+                    }
                     result
                 }
             };

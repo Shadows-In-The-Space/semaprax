@@ -477,6 +477,9 @@ pub enum TargetHostError {
 pub enum Settlement {
     Returned,
     Cancelled,
+    /// The target call had already crossed the host boundary when cancellation
+    /// was observed. The call remains charged, but its result is not published.
+    CancelledAfterDispatch,
     GrantBudget,
     CallBudget,
     RequestBudget,
@@ -495,6 +498,7 @@ impl Settlement {
         match self {
             Self::Returned => "returned",
             Self::Cancelled => "cancelled",
+            Self::CancelledAfterDispatch => "cancelled_after_dispatch",
             Self::GrantBudget => "grant_budget",
             Self::CallBudget => "call_budget",
             Self::RequestBudget => "request_budget",
@@ -513,6 +517,7 @@ impl Settlement {
         Some(match value {
             "returned" => Self::Returned,
             "cancelled" => Self::Cancelled,
+            "cancelled_after_dispatch" => Self::CancelledAfterDispatch,
             "grant_budget" => Self::GrantBudget,
             "call_budget" => Self::CallBudget,
             "request_budget" => Self::RequestBudget,
@@ -775,7 +780,11 @@ impl TargetEvidence {
             self.settlement,
             Settlement::Returned | Settlement::MalformedResult | Settlement::ResultTypeMismatch
         );
-        let result_forbidden = pre_dispatch || self.settlement == Settlement::ResultBudget;
+        let result_forbidden = pre_dispatch
+            || matches!(
+                self.settlement,
+                Settlement::ResultBudget | Settlement::CancelledAfterDispatch
+            );
         if pre_dispatch != !self.dispatched
             || (result_forbidden && self.result_digest.is_some())
             || (result_required && self.result_digest.is_none())
@@ -875,9 +884,24 @@ pub(in crate::agent_lifecycle) fn dispatch(
     let host_outcome = catch_unwind(AssertUnwindSafe(|| {
         handler.dispatch(&request, &mut response)
     }));
+    // A target handler is synchronous. If cancellation becomes visible after
+    // it returns, its one permitted call has already happened and all observed
+    // response bytes must be charged before cancellation wins settlement. Do
+    // not recast that effect as pre-dispatch cancellation or publish a result.
     if response.overflowed {
         let charged_bytes = response_limit.saturating_add(1);
         let _ = accounting.charge_result(charged_bytes, limits);
+        if cancellation.is_cancelled() {
+            return settled(
+                grant,
+                request_digest,
+                *accounting,
+                true,
+                Settlement::CancelledAfterDispatch,
+                None,
+                None,
+            );
+        }
         return settled(
             grant,
             request_digest,
@@ -889,7 +913,19 @@ pub(in crate::agent_lifecycle) fn dispatch(
         );
     }
     let raw = response.bytes;
-    if let Err(settlement) = accounting.charge_result(raw.len(), limits) {
+    let result_charge = accounting.charge_result(raw.len(), limits);
+    if cancellation.is_cancelled() {
+        return settled(
+            grant,
+            request_digest,
+            *accounting,
+            true,
+            Settlement::CancelledAfterDispatch,
+            None,
+            None,
+        );
+    }
+    if let Err(settlement) = result_charge {
         return settled(
             grant,
             request_digest,
@@ -1293,6 +1329,55 @@ mod tests {
             Settlement::ArgumentTypeMismatch
         );
         assert_eq!(handler.calls, 0);
+    }
+
+    #[test]
+    fn cancellation_observed_after_host_dispatch_is_charged_and_never_publishes_a_result() {
+        struct CancellingHandler<'a> {
+            cancellation: &'a AgentCancellation,
+            calls: usize,
+        }
+        impl TargetHostHandler for CancellingHandler<'_> {
+            fn dispatch(
+                &mut self,
+                request: &TargetHostRequest,
+                response: &mut TargetResponseSink,
+            ) -> Result<(), TargetHostError> {
+                self.calls += 1;
+                self.cancellation.cancel();
+                let result = TypedCarrier::new(request.operation.result_type(), b"ok".to_vec())
+                    .map_err(|_| TargetHostError::Failed)?;
+                response
+                    .write(&result.encode())
+                    .map_err(|_| TargetHostError::Failed)
+            }
+        }
+
+        let cancellation = AgentCancellation::new();
+        let mut handler = CancellingHandler {
+            cancellation: &cancellation,
+            calls: 0,
+        };
+        let mut accounting = TargetAccounting::default();
+        let run = dispatch(
+            grant(),
+            carrier("fixture.Argument", b"request"),
+            4,
+            limits(),
+            &mut accounting,
+            &cancellation,
+            &mut handler,
+        );
+        assert_eq!(handler.calls, 1);
+        assert_eq!(
+            run.evidence().settlement(),
+            Settlement::CancelledAfterDispatch
+        );
+        assert!(run.evidence().dispatched());
+        assert!(run.result().is_none());
+        assert_eq!(run.evidence().accounting(), accounting);
+        assert_eq!(accounting.calls(), 1);
+        assert!(accounting.fuel() > 0);
     }
 
     #[test]

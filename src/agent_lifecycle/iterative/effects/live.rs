@@ -575,6 +575,16 @@ impl CompiledTypedEffects {
             max_iterations: stages.max_iterations.min(self.max_iterations),
             ..stages
         };
+        let per_stage_limit = u64::try_from(stages.max_steps_per_stage)
+            .map_err(|_| error("target.stage_work.per_stage"))?;
+        let run_stage_limit =
+            u64::try_from(stages.max_stages).map_err(|_| error("target.stage_work.stages"))?;
+        // This is an admission envelope, not a synthetic instruction count:
+        // every selector receives the same checked stage cap, and each
+        // recorded stage reserves that cap before any later work can run.
+        let max_reserved_steps = per_stage_limit
+            .checked_mul(run_stage_limit)
+            .ok_or_else(|| error("target.stage_work.capacity"))?;
         let lifecycle = self
             .lifecycle
             .run_with_target_driver_live_on(
@@ -586,8 +596,22 @@ impl CompiledTypedEffects {
                 backend,
             )
             .map_err(crate::agent_lifecycle::iterative::driver::DriverFailure::into_diagnostics)?;
+        let recorded_stages = u64::try_from(lifecycle.stages().len())
+            .map_err(|_| error("target.stage_work.recorded"))?;
+        let reserved_steps = per_stage_limit
+            .checked_mul(recorded_stages)
+            .ok_or_else(|| error("target.stage_work.reservation"))?;
+        if recorded_stages > run_stage_limit || reserved_steps > max_reserved_steps {
+            return Err(error("target.stage_work.bound"));
+        }
+        let stage_work = TargetStageWork {
+            per_stage_limit,
+            run_stage_limit,
+            recorded_stages,
+            reserved_steps,
+        };
         let evidence = format!(
-            "{{\"schema\":\"semaprax.agent-target-effects-evidence.v1\",\"registry\":{},\"lifecycle_evidence\":{},\"limits\":[{},{},{},{},{}],\"accounting\":[{},{},{},{}],\"target_evidence\":[{}],\"failure\":{}}}\n",
+            "{{\"schema\":\"semaprax.agent-target-effects-evidence.v1\",\"registry\":{},\"lifecycle_evidence\":{},\"limits\":[{},{},{},{},{}],\"stage_work\":[{},{},{},{}],\"accounting\":[{},{},{},{}],\"target_evidence\":[{}],\"failure\":{}}}\n",
             quote_json(self.digest()),
             quote_json(lifecycle.evidence_digest()),
             limits.max_calls,
@@ -595,6 +619,10 @@ impl CompiledTypedEffects {
             limits.max_result_bytes,
             limits.max_total_bytes,
             limits.max_fuel,
+            stage_work.per_stage_limit(),
+            stage_work.run_stage_limit(),
+            stage_work.recorded_stages(),
+            stage_work.reserved_steps(),
             dispatch.accounting.calls(),
             dispatch.accounting.request_bytes(),
             dispatch.accounting.result_bytes(),
@@ -609,6 +637,7 @@ impl CompiledTypedEffects {
         Ok(TargetEffectRun {
             lifecycle,
             accounting: dispatch.accounting,
+            stage_work,
             target_evidence: dispatch.evidence,
             failure: dispatch.failure,
             evidence,

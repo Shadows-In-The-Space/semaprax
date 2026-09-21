@@ -115,10 +115,41 @@ pub struct TypedEffectRun {
 pub struct TargetEffectRun {
     lifecycle: IterativeRun,
     accounting: TargetAccounting,
+    stage_work: TargetStageWork,
     target_evidence: Vec<TargetEvidence>,
     failure: Option<&'static str>,
     evidence: String,
     digest: String,
+}
+
+/// Backend-neutral *admission* accounting for deterministic stage work.
+///
+/// This intentionally is not an instruction counter: native C11 and Core
+/// Wasm do not expose the interpreter's instruction stream. A recorded stage
+/// consumes one full checked `max_steps_per_stage` work reservation on every
+/// selector, so the result is finite, comparable, and cannot be mistaken for
+/// a claim of cross-engine instruction parity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TargetStageWork {
+    per_stage_limit: u64,
+    run_stage_limit: u64,
+    recorded_stages: u64,
+    reserved_steps: u64,
+}
+
+impl TargetStageWork {
+    pub fn per_stage_limit(&self) -> u64 {
+        self.per_stage_limit
+    }
+    pub fn run_stage_limit(&self) -> u64 {
+        self.run_stage_limit
+    }
+    pub fn recorded_stages(&self) -> u64 {
+        self.recorded_stages
+    }
+    pub fn reserved_steps(&self) -> u64 {
+        self.reserved_steps
+    }
 }
 
 /// Explicit, held authority to compile one native C11 Agent-stage artifact.
@@ -172,6 +203,11 @@ impl TargetEffectRun {
     }
     pub fn accounting(&self) -> TargetAccounting {
         self.accounting
+    }
+    /// The target-independent finite stage-work reservation, distinct from
+    /// target-host request fuel and from interpreter instruction counts.
+    pub fn stage_work(&self) -> TargetStageWork {
+        self.stage_work
     }
     pub fn target_evidence(&self) -> &[TargetEvidence] {
         &self.target_evidence

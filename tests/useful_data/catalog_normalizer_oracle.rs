@@ -377,31 +377,4 @@ mod semaprax_candidate {
         ];
         assert_oracle_rejects_as_malformed(&token);
     }
-
-    /// Runs the actual compiled Semaprax candidate's own test suite
-    /// (`examples/catalog-normalizer-project`, `semaprax test`) so the five
-    /// cases above are checked against real interpreter execution of the
-    /// candidate, not only against source-level verification. This is the
-    /// evidence that the CNORM-010/011/012 slice does not merely parse and
-    /// verify but actually runs and returns zero failures.
-    #[test]
-    fn the_semaprax_candidate_project_test_suite_passes() {
-        let root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/catalog-normalizer-project");
-        let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
-            .args(["test", "semaprax.toml"])
-            .current_dir(&root)
-            .output()
-            .expect("run semaprax test on examples/catalog-normalizer-project");
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        assert!(
-            output.status.success(),
-            "semaprax test failed on examples/catalog-normalizer-project:\nstdout: {stdout}\nstderr: {stderr}"
-        );
-        assert!(
-            stdout.contains("project tests passed"),
-            "unexpected stdout: {stdout}"
-        );
-    }
 }

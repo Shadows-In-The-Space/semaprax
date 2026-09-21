@@ -17,6 +17,74 @@ pub(crate) mod private_capacity_contract;
 #[allow(dead_code, clippy::all, unexpected_cfgs)]
 #[path = "../../../src/format.rs"]
 pub(crate) mod private_format;
+
+/// The builder path-includes the canonical formatter to retain its private
+/// allocation accounting, but it does not embed or execute Kernel-0 renderer
+/// candidates. Those candidates are non-authoritative and the builder's
+/// bounded formatter must preserve the already-computed Rust token bytes.
+/// This compatibility boundary gives the shared formatter that exact recovery
+/// behavior without importing the compiler's private Kernel-0 interpreter.
+pub(crate) mod kernel_zero {
+    pub(crate) mod rung_two_authority {
+        use crate::ast::{BinaryOp, UnaryOp};
+
+        pub(crate) const MAX_TOKEN_BYTES: usize = 20;
+
+        fn preserve(rust: &str, output: &mut [u8; MAX_TOKEN_BYTES]) -> usize {
+            let bytes = rust.as_bytes();
+            output[..bytes.len()].copy_from_slice(bytes);
+            bytes.len()
+        }
+
+        pub(crate) fn char_into(
+            _value: u32,
+            rust: &str,
+            output: &mut [u8; MAX_TOKEN_BYTES],
+        ) -> usize {
+            preserve(rust, output)
+        }
+
+        pub(crate) fn int_into(
+            _value: i64,
+            rust: &str,
+            output: &mut [u8; MAX_TOKEN_BYTES],
+        ) -> usize {
+            preserve(rust, output)
+        }
+
+        pub(crate) fn bool_into(
+            _value: bool,
+            rust: &str,
+            output: &mut [u8; MAX_TOKEN_BYTES],
+        ) -> usize {
+            preserve(rust, output)
+        }
+
+        pub(crate) fn binary_operator_into(
+            _op: BinaryOp,
+            rust: &str,
+            output: &mut [u8; MAX_TOKEN_BYTES],
+        ) -> usize {
+            preserve(rust, output)
+        }
+
+        pub(crate) fn unary_operator_into(
+            _op: UnaryOp,
+            rust: &str,
+            output: &mut [u8; MAX_TOKEN_BYTES],
+        ) -> usize {
+            preserve(rust, output)
+        }
+
+        pub(crate) fn string_scalar_into(
+            _value: u32,
+            rust: &str,
+            output: &mut [u8; MAX_TOKEN_BYTES],
+        ) -> usize {
+            preserve(rust, output)
+        }
+    }
+}
 use semaprax_native_rust_interop_platform as platform;
 use std::path::Path;
 

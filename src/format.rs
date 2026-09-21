@@ -1,6 +1,6 @@
 use crate::ast::{
     BinaryOp, Expr, ExprKind, ImportFailure, MatchPattern, ModuleUseKind, Program,
-    ResourceLifecycleKind, Statement, TypeDeclarationKind, UnaryOp,
+    ResourceLifecycleKind, Statement, TypeDeclarationKind,
 };
 use std::collections::HashMap;
 use std::fmt::Write as _;

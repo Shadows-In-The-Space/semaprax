@@ -336,9 +336,13 @@ execution harness builds and runs the generated crate with whatever
 toolchain, so it proves the crate is real, external, and executes against
 the real provider, not that 1.88 itself builds it. The type model covers
 flat owned-`Bytes` leaves only (see above); nested records and Copy scalars
-are not yet generated. No maximum-total-payload (16 MiB) case is exercised,
-only the per-leaf (64 KiB) bound — a narrower but still first-over-bound
-proof.
+are not yet generated. The dedicated
+`max_bounds_saturation.rs` harness now drives this generated Rust consumer
+through exactly 256 leaves × 64 KiB = 16 MiB against the real compiled native
+provider, then re-runs the same shape with only the generated consumer's
+total budget reduced by one byte. The latter refuses before provider
+allocation; this is separate from, and deliberately not duplicated by, this
+consumer's historical per-leaf round-trip case.
 
 ## C11 calling consumer (issue #158)
 
@@ -474,12 +478,14 @@ Windows" no longer holds, though the toolchain there is clang, not MSVC. The
 trusted descriptor bytes are a canonical encoded Descriptor-v1 test fixture,
 not derived from a real checked generic export. The type model covers flat
 owned-`Bytes` leaves only (see above); nested records and Copy scalars are
-not yet generated. No maximum-total-payload (16 MiB) case is exercised, only
-the per-leaf (64 KiB) bound — a narrower but still first-over-bound proof,
-matching the Rust calling consumer's own stated limitation. The provisioned
-ASan/UBSan variant is `#[ignore]`d by default and was not run in this round;
-only the plain `-O0`/`-O2` build and run is recorded as executed evidence
-here.
+not yet generated. The dedicated `max_bounds_saturation.rs` harness drives
+this C11 consumer through the exact 16 MiB aggregate against the real compiled
+native provider at both `-O0` and `-O2`, and proves pre-dispatch refusal by
+changing only the generated total budget to one byte below that aggregate. The
+historical per-leaf case remains a distinct, narrower codec control. The
+provisioned ASan/UBSan variant is `#[ignore]`d by default and was not run in
+this round; only the plain `-O0`/`-O2` build and run is recorded as executed
+evidence here.
 
 ## TypeScript/Wasm calling consumer (issue #157)
 
@@ -553,8 +559,9 @@ The type model is scoped identically to the Rust calling consumer's own
 scope note: a flat, descriptor-ordered sequence of owned `Uint8Array`
 leaves (the boundary profile admits exactly one owned input parameter and
 one owned result in v1), so this generator emits exactly two concrete
-interfaces, `Input` and `Output`. A Copy-scalar or nested-record leaf is
-future generator work tracked by the same #119 prerequisite.
+interfaces, `Input` and `Output`. A Copy-scalar or nested-record leaf remains
+future public-generic generator work; #119 closed an internal owned-record
+execution profile and does not itself widen this public calling surface.
 
 **Exact integers.** `leaf_count` and every per-leaf `len` in Logical Carrier
 v1's wire framing are `u64` fields. JavaScript `number` silently rounds
@@ -566,10 +573,9 @@ at `u64::MAX` is rejected by an exact `bigint` comparison against the
 (`"exact-integer carrier decoding rejects a hostile u64::MAX leaf length"`)
 and by one at exactly one byte over the bound. The concrete generic record
 shape this round admits carries no user-facing `i64`/`i32`/`u8`/`char`/`f32`
-scalar leaf yet (the same #119-deferred boundary the Rust consumer states),
-so this is the exact-integer discipline the current wire format has to
-prove; range-checking those scalar domains is future generator work once
-#119 unblocks them, not a gap invented here.
+scalar leaf yet, so this is the exact-integer discipline the current wire
+format has to prove; range-checking those scalar domains is future
+public-generic generator work, not a gap invented here.
 
 **Ownership and settlement (issue #162 continuation).** `Provider.open`
 requires module bytes: a precompiled `WebAssembly.Module` receives the closed
@@ -643,7 +649,14 @@ ordinal `0..=7` matrix (this wrapper's own host-owned pipeline stages) —
 each asserting zero live allocations/handles afterward via
 `Provider.diagnostics`. A second test confirms the generated `package.json`
 declares no runtime dependency at all beyond the pinned `typescript`
-devDependency.
+devDependency. A separate generated-consumer execution pair saturates the
+aggregate bound with 256 owned 64 KiB leaves (exactly 16 MiB) through input
+encoding, the test-only Wasm endpoint, result decoding, and copy-out; mutating
+only the generated total budget to one byte less refuses that same input before
+endpoint dispatch or a live allocation. This is consumer evidence over the
+fixture endpoint, not evidence for the missing compiled provider ABI. The
+TypeScript aggregate pair was added after the recorded hosted milestone run,
+so it is current local evidence rather than a backdated hosted claim.
 
 **Known limitations, stated once.** (Corrected 2026-09-19: hosted evidence
 now exists, see the Status line above.) No browser/Chromium fixture is
@@ -791,11 +804,12 @@ and unmoved; `to_owned(BytesView)` returns an explicit, independent copy
 when a caller needs the bytes to outlive the `Output`. Scope, restating
 [`c_calling`](#c11-calling-consumer-issue-158)'s own: the bound native
 provider implements only a flat, descriptor-ordered sequence of owned-bytes
-leaves (#119 still blocks nested records and Copy-scalar leaves), so
-`Input`/`Output` carry no scalar or nested-record member yet, and no maximum
-total-payload (16 MiB) case is exercised — only the per-leaf (64 KiB) bound,
-narrower but still first-over-bound evidence, and untested for this foreign
-consumer specifically per #226.
+leaves, so `Input`/`Output` carry no scalar or nested-record member yet. The
+dedicated `max_bounds_saturation.rs` harness drives this C++17 facade through
+the exact 16 MiB aggregate against the real compiled native provider, and a
+one-byte-smaller generated total budget refuses that identical input before
+provider allocation. Its historical per-leaf (64 KiB) case remains an
+independent, narrower codec control.
 
 **Generated name safety.** Every field name is `field_<hex-identity>` —
 the exact scheme [`c_calling`](#c11-calling-consumer-issue-158) and
@@ -971,9 +985,15 @@ no independent compiled provider exists yet to hold a separate counter.
 - **#119**: flat owned-`Bytes` leaves only; the shared corpus's
   single-field `RecordShape` carries the same limitation every consumer
   section above already states, not a new one.
-- **#226**: the MSRV claim and the 16 MiB total-payload bound remain
-  untested for every foreign consumer, this shared corpus included; only
-  the 64 KiB per-leaf bound is exercised.
+- **Aggregate-bound scope**: the shared hostile corpus intentionally remains
+  small and does not duplicate saturation. Exact 16 MiB admission plus a
+  one-byte-short pre-dispatch refusal are exercised in the dedicated native
+  Rust/C11/C++17 `max_bounds_saturation.rs` harness and the generated
+  TypeScript/Wasm `typescript_calling_consumer.rs` harness. Those are separate
+  executable consumer tests, not a claim that the small hostile documents
+  themselves materialize a 16 MiB payload. The native saturation harness is
+  within the recorded hosted milestone scope; the later TypeScript aggregate
+  pair is local-only until a hosted run executes that exact revision.
 - The full ordinal failure-injection matrix is deliberately NOT included in
   the shared corpus: native's protocol has 14 injectable ordinals
   (`0..=13`) and Wasm's has 8 (`0..=7`) — different phase counts for

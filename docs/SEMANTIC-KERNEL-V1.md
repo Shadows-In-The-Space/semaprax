@@ -646,6 +646,26 @@ term; the Rust producer cannot make a malformed constructor application true.
 This closes those assumptions only for the finite rendered corpus. It is not a
 universal HIR correspondence theorem and does not promote a self-hosting rung.
 
+### Exact graph-v10 correspondence for the finite corpus (issue #188)
+
+`src/kernel_zero/graph_projection.rs` binds one exact source/reification pair
+to the exact bytes and domain-separated digest of its existing
+`semaprax.graph.v10` projection. Its private decoder does not call the graph
+renderer. It independently checks every selected persistent function identity,
+signature, exact result identity, complete expression and let structure,
+scalar/value identity, authored child order, repeated call occurrence,
+canonical call set, and the exact acyclic closure reached from the entry.
+Duplicate JSON keys, unknown schemas, drifted bytes, extra semantic fields,
+unstable identities, and bounded-capacity violations fail closed.
+
+The gate covers all 65 generated and adversarial structural corpus programs
+plus explicit-ID display rename, declaration reorder, and module-move cases.
+That execution exposed and fixed a malformed extra closing brace in the
+adversarial arithmetic fixture. This is finite executable correspondence
+evidence, not a proof that arbitrary HIR and graph projections agree. Cleanup
+plans and unselected graph metadata remain opaque but byte-bound, and the
+checker introduces no public format, compiler admission rule, or authority.
+
 ### Numeric normalization fuel from the checked weights
 
 `steps_spend_weighted_potential` telescopes the already-proved strict decrease
@@ -664,9 +684,10 @@ the exact Lean potential of a call whose arguments are already scalar values,
 because each value has potential one. Unknown entries, invalid certificates,
 and overflow are refused. The real-corpus witness emits a numeric theorem for
 each function at a zero/false scalar call, checks the computed potential by
-Lean reduction, and applies the general numeric theorem. Program well-formedness
-and call typing remain explicit hypotheses; the witness does not claim to
-prove the Rust HIR type translation.
+Lean reduction, and applies the general numeric theorem. Its bounded typing
+producer now discharges program well-formedness and call typing for each exact
+rendered fixture; it still does not prove the Rust HIR type translation
+universally.
 
 The implementation session checked the two new proofs and a helper-call
 application in a small Lean module importing the existing compiled kernel;

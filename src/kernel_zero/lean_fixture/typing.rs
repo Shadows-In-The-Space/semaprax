@@ -72,6 +72,44 @@ pub(super) fn derive(
         .collect()
 }
 
+/// Independently re-check one closed runtime term against the already-admitted
+/// function signature table. Used by the concrete normalization witness after
+/// every small step; it emits no Lean text and grants no compiler authority.
+pub(super) fn check_closed_term(
+    program: &KernelProgram,
+    term: &Term,
+    expected: KernelType,
+) -> Result<(), TypingError> {
+    if program.functions.len() > MAX_FUNCTIONS {
+        return Err(TypingError::Limit);
+    }
+    let definitions = (0..program.functions.len())
+        .map(|index| format!("runtimeDefinition{index}"))
+        .collect::<Vec<_>>();
+    let mut functions = BTreeMap::new();
+    let mut nodes = 0;
+    for (index, function) in program.functions.iter().enumerate() {
+        if functions.insert(function.id.clone(), index).is_some() {
+            return Err(TypingError::DuplicateFunction);
+        }
+        charge(&mut nodes, function.params.len())?;
+        let mut seen = BTreeSet::new();
+        for (id, _) in &function.params {
+            if !seen.insert(id) {
+                return Err(TypingError::DuplicateParameter);
+            }
+        }
+    }
+    let mut checker = Checker {
+        program,
+        functions,
+        definitions: &definitions,
+        nodes,
+    };
+    let (actual, _) = checker.term(term, &mut Vec::new(), 0)?;
+    same(actual, expected)
+}
+
 fn charge(nodes: &mut usize, amount: usize) -> Result<(), TypingError> {
     *nodes = nodes.checked_add(amount).ok_or(TypingError::Limit)?;
     if *nodes > MAX_NODES {

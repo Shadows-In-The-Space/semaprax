@@ -160,7 +160,7 @@ fn eval_term(program: &KernelProgram, term: &Term, env: &mut Env) -> Result<Valu
     }
 }
 
-fn eval_unary(op: UnaryOp, value: Value) -> Result<Value, Fault> {
+pub(super) fn eval_unary(op: UnaryOp, value: Value) -> Result<Value, Fault> {
     match (op, value) {
         (UnaryOp::Neg, Value::Int(n)) => n
             .checked_neg()
@@ -173,7 +173,7 @@ fn eval_unary(op: UnaryOp, value: Value) -> Result<Value, Fault> {
     }
 }
 
-fn eval_binary(op: BinaryOp, left: Value, right: Value) -> Result<Value, Fault> {
+pub(super) fn eval_binary(op: BinaryOp, left: Value, right: Value) -> Result<Value, Fault> {
     match (op, left, right) {
         (BinaryOp::Add, Value::Int(a), Value::Int(b)) => {
             a.checked_add(b).map(Value::Int).ok_or(Fault::AddOverflow)

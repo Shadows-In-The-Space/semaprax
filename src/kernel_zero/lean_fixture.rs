@@ -32,6 +32,7 @@ use super::reify::BoundTranslation;
 use super::term::{KernelProgram, KernelType, Term};
 use super::weights;
 
+mod normalization;
 #[path = "lean_fixture/typing.rs"]
 mod typing;
 

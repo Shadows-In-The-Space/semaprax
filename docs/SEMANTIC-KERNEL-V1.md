@@ -722,6 +722,43 @@ The complete rebuilt proof and real HIR corpus witness were not run in this
 session. This is a bound on modeled small steps, not compiler interpreter
 steps, machine instructions, elapsed time, memory, or a new self-hosting claim.
 
+### Concrete typed normalization traces from exact source
+
+`src/kernel_zero/lean_fixture/normalization.rs` narrows one remaining bridge
+between the numeric theorem and real reified inputs. A private
+`BoundNormalizer` replays the exact-source translation, the independently
+derived named typing proof terms, and the complete weighted-call certificate.
+For one exact, type-checked scalar argument vector it then starts from the
+literal `Call(entry, values)` term and executes the Kernel-0 small-step rules:
+left-to-right strict operands and call arguments, lazy `&&`/`||` and `if`,
+capture-avoiding scalar substitution for `let` and calls, and the existing
+eight arithmetic fault terminals. After every real reduction it independently
+rechecks the resulting closed term's type and recomputes the certified
+potential; a non-decrease or a trace longer than the initial fuel refuses.
+Replay re-derives the complete normalizer and outcome from the exact source,
+entry identity, and arguments rather than trusting caller-authored trace data.
+
+The focused corpus route covers the 60 seeded programs, nine exhaustive fault-
+selection programs, and five structural/certificate programs: 74 programs and
+750 concrete invocations. A lightweight standalone Rust harness against the
+cached compiler library completed all 750 witnesses: 219 values, 531 modeled
+faults, and a longest trace of 97 reductions. The committed non-vacuity and
+hostile controls require both value and fault traces, retain the 40-edge deep
+call case, and refuse source/entry drift, wrong argument count/type, and a
+forged under- or overweight certificate. The same harness structurally compiled the new
+module, while a separate no-Cargo `rustc` harness structurally compiled its
+test bodies; `rustfmt` and diff checks passed. Cargo, a rebuilt compiler
+library, the Lean build, and the full quality profile did not run in this
+tranche.
+
+This checker deliberately shares the reference evaluator's primitive unary
+and binary arithmetic functions, so it is not a second outcome oracle and does
+not add backend differential evidence. It checks the concrete transition,
+typing, and potential-descent obligations that the prior Rust certificate
+producer did not. It is finite local executable evidence, not a universal
+Rust-to-Lean step-correspondence proof, not a proof of the checker itself, not
+an external proof-kernel judgment, and not progress beyond self-hosting rung 1.
+
 ## Differential testing: reference interpreter vs. the compiler's interpreter
 
 **What ran.** `src/kernel_zero/differential.rs`'s single test,

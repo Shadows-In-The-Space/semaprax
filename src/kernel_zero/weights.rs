@@ -170,6 +170,24 @@ pub(super) fn value_call_fuel(
     add(weights[entry], arity)
 }
 
+/// Replay the certificate and compute the exact modeled potential of one
+/// runtime term. This is private proof-harness support: callers still have to
+/// establish typing and that each claimed transition is a real semantic step.
+pub(super) fn term_potential(
+    program: &KernelProgram,
+    weights: &Weights,
+    term: &Term,
+) -> Result<u64, WeightError> {
+    verify(program, weights)?;
+    let mut nodes = 0;
+    potential(term, &mut nodes, 0, &mut |callee, _, _| {
+        weights
+            .get(callee)
+            .copied()
+            .ok_or(WeightError::MissingFunction)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::term::{KernelFn, KernelType};
@@ -329,6 +347,30 @@ mod tests {
         assert_eq!(
             value_call_fuel(&program, &weights, &DeclarationId::new("a")),
             Err(WeightError::Overflow)
+        );
+    }
+
+    #[test]
+    fn runtime_term_potential_replays_weights_and_preserves_authored_arguments() {
+        let mut entry = function("a", call("b"));
+        entry.params = vec![(
+            crate::hir::ValueId::intrinsic_parameter("a", 0),
+            KernelType::I64,
+        )];
+        let program = KernelProgram {
+            functions: vec![entry, function("b", Term::Int(42))],
+        };
+        let weights = derive(&program).unwrap();
+        let call = Term::Call {
+            callee: DeclarationId::new("a"),
+            args: vec![Term::Int(7)],
+        };
+        assert_eq!(term_potential(&program, &weights, &call), Ok(4));
+        let mut forged = weights;
+        forged.insert(DeclarationId::new("a"), 1);
+        assert_eq!(
+            term_potential(&program, &forged, &call),
+            Err(WeightError::InvalidCertificate)
         );
     }
 

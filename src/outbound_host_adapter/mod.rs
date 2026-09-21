@@ -1509,5 +1509,7 @@ fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{:x}", crate::digest_hex::LowerHex(hash.finalize()))
 }
 
+#[cfg(all(test, not(any(target_arch = "wasm32", target_arch = "wasm64"))))]
+mod native_tests;
 #[cfg(test)]
 mod tests;

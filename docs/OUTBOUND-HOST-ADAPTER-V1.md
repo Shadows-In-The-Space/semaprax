@@ -11,8 +11,10 @@ GET/POST/PUT/PATCH/DELETE requests, structured operational export, signed
 webhook delivery, and a provider-neutral email envelope. The policy layer reads no environment and creates no threads or
 timers. `NativeHttpsAdapter` is the explicit physical HTTPS implementation: its
 host supplies TLS policy, while it disables ambient proxies, redirects, and
-retries. Tests use a deterministic recording fixture and perform no network
-I/O.
+retries. Most policy/session tests use a deterministic recording fixture and
+perform no network I/O. The separate native-adapter integration corpus talks
+only to an explicitly configured private-root loopback TLS listener; it neither
+uses a system root nor reaches a public endpoint.
 
 ## Authority and admission
 
@@ -409,6 +411,15 @@ idempotency conflicts before redispatch. The trace-context selector covers
 bounded hostile `tracestate` admission and paired-header ordering. These use
 recording adapters only and do not claim a hosted collector or remote
 propagation.
+
+`outbound_host_adapter::native_tests::` independently exercises the repository
+`NativeHttpsAdapter` against a private-root loopback TLS peer. It proves a
+successful exact PUT request/body/target projection, a redirect returned as the
+original 302 response, certificate rejection as a post-start transport uncertainty, the
+declared-content-length response maximum, and a malformed prepared request
+rejected before opening a socket. This is local physical loopback evidence
+only: it does not prove DNS pinning, a system trust-store policy, public-PKI
+interoperability, hosted execution, or remote delivery.
 
 The checkpoint selector is
 `outbound_host_adapter::ledger::checkpoint::tests::`. Its seven cases cover

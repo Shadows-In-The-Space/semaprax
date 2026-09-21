@@ -245,5 +245,8 @@ fn native_descriptor_bound_admission_refuses_hostile_tickets() {
     let admitted = admission
         .admit(&valid_ticket())
         .expect("the unmodified frame must admit");
-    assert_eq!(admitted, leaves, "the valid control exposes the bound leaves");
+    assert_eq!(
+        admitted, leaves,
+        "the valid control exposes the bound leaves"
+    );
 }

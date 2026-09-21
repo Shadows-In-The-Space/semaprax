@@ -1476,3 +1476,5 @@ fn webhook_ledger_keeps_unwind_sticky_and_capacity_precedes_dispatch() {
     );
     assert!(capacity_adapter.calls.is_empty());
 }
+
+mod durable_delivery;

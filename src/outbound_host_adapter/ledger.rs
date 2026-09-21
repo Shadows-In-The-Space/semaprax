@@ -21,6 +21,9 @@ pub use durable::{
     CheckpointCommit, DurableLedgerOutcome, DurableLedgerRefusal, LedgerCheckpointStore,
     LedgerRestoreCapability, LedgerRestoreRefusal,
 };
+#[path = "ledger_delivery_session.rs"]
+pub(crate) mod delivery_session;
+pub use delivery_session::DeliverySessionCheckpointRefusal;
 
 const LEDGER_IDENTITY_DOMAIN: &[u8] = b"semaprax.outbound.delivery-ledger.identity.v1\0";
 const LEDGER_STATE_DOMAIN: &str = "semaprax.outbound.delivery-ledger.v1";

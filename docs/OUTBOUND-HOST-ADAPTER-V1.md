@@ -122,6 +122,27 @@ If terminal persistence is known failed or uncertain, the live ledger falls
 back to the already acknowledged provisional uncertainty. No timer, thread, or
 automatic retry is created.
 
+HTTP, webhook, and email sessions add a typed durable envelope above that
+lower ledger. `semaprax.outbound.delivery-session-checkpoint.v1` binds one
+closed delivery kind, the canonical lower checkpoint and its digest, and a
+sorted vector of session-identity, complete-policy, request, and lower-ledger
+identity commitments. It is bounded to 192 KiB and independently rejects a
+wrong kind, capacity, digest, noncanonical JSON, unknown members, or any
+one-to-one binding mismatch before a session can be restored. The typed store
+sees that complete envelope for both the provisional intent and terminal
+observation; it never receives raw identities, request bytes, headers, bodies,
+responses, signing keys, or an adapter capability.
+
+`HttpDeliverySession`, `WebhookDeliverySession`, and `EmailDeliverySession`
+each expose typed `reconcile_durable`, `session_checkpoint`, and
+`restore_authenticated` APIs. A trusted storage host grants the restore
+capability against the exact outer digest and capacity. Exact restored replay
+never enters an adapter; an unacknowledged intent never enters an adapter; and
+an unacknowledged terminal state remains the already persisted uncertainty.
+This closes a local crash window only. It does not prove a remote receipt,
+receiver idempotency, durable-store freshness, or distributed exactly-once
+delivery.
+
 ### Read-only disposition checkpoints
 
 `HostDeliveryLedger::checkpoint` and the corresponding method on the HTTP,
@@ -197,9 +218,11 @@ as email/webhook/export sessions. An exact identity and complete request,
 including method, replays without entering the adapter; changing only the
 method conflicts before dispatch. Accepted response bytes are intentionally
 dropped by the session, while the one-shot `deliver_http` result may return a
-bounded accepted body. Panic, deadline, transport, and response-overflow
-uncertainty stay sticky. This does not claim durable or remote exactly-once
-delivery, DNS pinning, provider authentication, or public-network support.
+bounded accepted body. Its typed durable route persists the complete policy and
+request binding alongside the lower intent/disposition checkpoint; panic,
+deadline, transport, and response-overflow uncertainty stay sticky. This does
+not claim remote exactly-once delivery, DNS pinning, provider authentication,
+or public-network support.
 
 ## Email envelope
 

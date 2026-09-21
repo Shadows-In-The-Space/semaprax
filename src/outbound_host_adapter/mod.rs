@@ -29,21 +29,26 @@ mod webhook;
 
 pub use collector::{CollectorRefusal, TelemetryCollectorCapability, TelemetryCollectorTarget};
 pub use email::{
-    deliver_email, prepare_email_delivery, verify_email_envelope, EmailAttachment,
-    EmailDeliveryReceipt, EmailDeliverySession, EmailEnvelopeMismatch, EmailLedgerRefusal,
-    EmailRequest, PreparedEmailDelivery, MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENT_BYTES,
-    MAX_EMAIL_ATTACHMENT_NAME_BYTES, MAX_EMAIL_BODY_BYTES, MAX_EMAIL_RECIPIENTS,
-    MAX_EMAIL_SUBJECT_BYTES,
+    deliver_email, prepare_email_delivery, verify_email_envelope, DurableEmailDeliveryOutcome,
+    DurableEmailLedgerRefusal, EmailAttachment, EmailDeliveryReceipt, EmailDeliverySession,
+    EmailDeliverySessionCheckpoint, EmailDeliverySessionCheckpointStore,
+    EmailDeliverySessionRestoreCapability, EmailDeliverySessionRestoreRefusal,
+    EmailEnvelopeMismatch, EmailLedgerRefusal, EmailRequest, PreparedEmailDelivery,
+    MAX_EMAIL_ATTACHMENTS, MAX_EMAIL_ATTACHMENT_BYTES, MAX_EMAIL_ATTACHMENT_NAME_BYTES,
+    MAX_EMAIL_BODY_BYTES, MAX_EMAIL_RECIPIENTS, MAX_EMAIL_SUBJECT_BYTES,
 };
 pub use http::{
-    deliver_http, prepare_http_delivery, HttpDeliveryReceipt, HttpDeliverySession, HttpHeader,
-    HttpLedgerRefusal, HttpRequest, PreparedHttpDelivery,
+    deliver_http, prepare_http_delivery, DurableHttpDeliveryOutcome, DurableHttpLedgerRefusal,
+    HttpDeliveryReceipt, HttpDeliverySession, HttpDeliverySessionCheckpoint,
+    HttpDeliverySessionCheckpointStore, HttpDeliverySessionRestoreCapability,
+    HttpDeliverySessionRestoreRefusal, HttpHeader, HttpLedgerRefusal, HttpRequest,
+    PreparedHttpDelivery,
 };
 pub use ledger::{
-    CheckpointCommit, DeliveryIdentity, DurableLedgerOutcome, DurableLedgerRefusal,
-    HostDeliveryLedger, LedgerCheckpoint, LedgerCheckpointRefusal, LedgerCheckpointStore,
-    LedgerOutcome, LedgerRecord, LedgerRefusal, LedgerRestoreCapability, LedgerRestoreRefusal,
-    MAX_LEDGER_CHECKPOINT_BYTES, MAX_LEDGER_ENTRIES,
+    CheckpointCommit, DeliveryIdentity, DeliverySessionCheckpointRefusal, DurableLedgerOutcome,
+    DurableLedgerRefusal, HostDeliveryLedger, LedgerCheckpoint, LedgerCheckpointRefusal,
+    LedgerCheckpointStore, LedgerOutcome, LedgerRecord, LedgerRefusal, LedgerRestoreCapability,
+    LedgerRestoreRefusal, MAX_LEDGER_CHECKPOINT_BYTES, MAX_LEDGER_ENTRIES,
 };
 pub use metrics::{
     prepare_metric_export, verify_metric_export, MetricExport, MetricExportSession, MetricKind,
@@ -65,8 +70,11 @@ pub use tracing::{
     ExportSessionRestoreRefusal, PreparedExportEvent, MAX_EXPORT_SESSION_CHECKPOINT_BYTES,
 };
 pub use webhook::{
-    prepare_webhook_delivery, PreparedWebhookDelivery, WebhookDeliveryReceipt,
-    WebhookDeliverySession, WebhookLedgerRefusal,
+    prepare_webhook_delivery, DurableWebhookDeliveryOutcome, DurableWebhookLedgerRefusal,
+    PreparedWebhookDelivery, WebhookDeliveryReceipt, WebhookDeliverySession,
+    WebhookDeliverySessionCheckpoint, WebhookDeliverySessionCheckpointStore,
+    WebhookDeliverySessionRestoreCapability, WebhookDeliverySessionRestoreRefusal,
+    WebhookLedgerRefusal,
 };
 
 type HmacSha256 = Hmac<Sha256>;

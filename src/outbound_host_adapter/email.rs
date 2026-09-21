@@ -5,6 +5,10 @@ use std::fmt;
 
 use sha2::{Digest as _, Sha256};
 
+use super::ledger::delivery_session::{
+    DeliverySessionCheckpoint, DeliverySessionCheckpointRefusal, DeliverySessionCheckpointStore,
+    DeliverySessionCommitment, TypedDeliveryCheckpointStore,
+};
 use super::*;
 
 pub const MAX_EMAIL_RECIPIENTS: usize = 64;
@@ -157,6 +161,73 @@ pub enum EmailLedgerRefusal {
     ReplayBindingUnavailable,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EmailDeliverySessionCheckpoint {
+    inner: DeliverySessionCheckpoint,
+}
+
+impl EmailDeliverySessionCheckpoint {
+    pub fn render(&self) -> String {
+        self.inner.render()
+    }
+    pub fn digest(&self) -> String {
+        self.inner.digest()
+    }
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+}
+
+pub trait EmailDeliverySessionCheckpointStore {
+    fn commit(&mut self, checkpoint: &EmailDeliverySessionCheckpoint) -> CheckpointCommit;
+}
+
+pub struct EmailDeliverySessionRestoreCapability {
+    expected_digest: String,
+    expected_capacity: usize,
+}
+
+impl EmailDeliverySessionRestoreCapability {
+    pub fn grant_for_trusted_host(
+        expected_digest: impl Into<String>,
+        expected_capacity: usize,
+    ) -> Result<Self, EmailDeliverySessionRestoreRefusal> {
+        let expected_digest = expected_digest.into();
+        if !valid_sha256(&expected_digest)
+            || expected_capacity == 0
+            || expected_capacity > MAX_LEDGER_ENTRIES
+        {
+            return Err(EmailDeliverySessionRestoreRefusal::InvalidCapability);
+        }
+        Ok(Self {
+            expected_digest,
+            expected_capacity,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EmailDeliverySessionRestoreRefusal {
+    InvalidCapability,
+    Checkpoint(DeliverySessionCheckpointRefusal),
+    CapacityMismatch,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DurableEmailDeliveryOutcome {
+    Dispatched(EmailDeliveryReceipt),
+    Replayed(EmailDeliveryReceipt),
+    IntentNotCommitted,
+    IntentUncertain(EmailDeliveryReceipt),
+    SettlementUncertain(EmailDeliveryReceipt),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DurableEmailLedgerRefusal {
+    Session(EmailLedgerRefusal),
+    Durable(DurableLedgerRefusal),
+}
+
 impl From<LedgerRefusal> for EmailLedgerRefusal {
     fn from(value: LedgerRefusal) -> Self {
         Self::Ledger(value)
@@ -168,7 +239,7 @@ impl From<LedgerRefusal> for EmailLedgerRefusal {
 /// no request, identity, credential, or provider response bytes are stored.
 pub struct EmailDeliverySession {
     ledger: HostDeliveryLedger,
-    policy_commitments: BTreeMap<String, String>,
+    policy_commitments: BTreeMap<String, DeliverySessionCommitment>,
 }
 
 impl EmailDeliverySession {
@@ -187,6 +258,37 @@ impl EmailDeliverySession {
     /// An imported checkpoint is read-only and cannot restore this session.
     pub fn checkpoint(&self) -> Result<LedgerCheckpoint, LedgerCheckpointRefusal> {
         self.ledger.checkpoint()
+    }
+
+    pub fn session_checkpoint(
+        &self,
+    ) -> Result<EmailDeliverySessionCheckpoint, DeliverySessionCheckpointRefusal> {
+        Ok(EmailDeliverySessionCheckpoint {
+            inner: DeliverySessionCheckpoint::from_session(
+                "email",
+                &self.ledger,
+                &self.policy_commitments,
+            )?,
+        })
+    }
+
+    pub fn restore_authenticated(
+        bytes: &[u8],
+        capability: EmailDeliverySessionRestoreCapability,
+    ) -> Result<Self, EmailDeliverySessionRestoreRefusal> {
+        let checkpoint =
+            DeliverySessionCheckpoint::decode(bytes, &capability.expected_digest, "email")
+                .map_err(EmailDeliverySessionRestoreRefusal::Checkpoint)?;
+        if checkpoint.capacity() != capability.expected_capacity {
+            return Err(EmailDeliverySessionRestoreRefusal::CapacityMismatch);
+        }
+        let (ledger, policy_commitments) = checkpoint
+            .restore()
+            .map_err(EmailDeliverySessionRestoreRefusal::Checkpoint)?;
+        Ok(Self {
+            ledger,
+            policy_commitments,
+        })
     }
 
     pub fn verify_checkpoint(
@@ -213,7 +315,7 @@ impl EmailDeliverySession {
             .policy_commitments
             .get(&prepared.session_identity_digest)
         {
-            if existing != &prepared.policy_digest {
+            if existing.policy != prepared.policy_digest {
                 return Err(EmailLedgerRefusal::PolicyChanged);
             }
         }
@@ -226,7 +328,10 @@ impl EmailDeliverySession {
         } else {
             self.policy_commitments.insert(
                 prepared.session_identity_digest.clone(),
-                prepared.policy_digest.clone(),
+                DeliverySessionCommitment {
+                    policy: prepared.policy_digest.clone(),
+                    request: request_digest(&prepared.request),
+                },
             );
             true
         };
@@ -266,6 +371,123 @@ impl EmailDeliverySession {
             ),
             replayed,
         })
+    }
+
+    pub fn reconcile_durable(
+        &mut self,
+        prepared: PreparedEmailDelivery,
+        store: &mut impl EmailDeliverySessionCheckpointStore,
+        adapter: &mut impl OutboundAdapter,
+    ) -> Result<DurableEmailDeliveryOutcome, DurableEmailLedgerRefusal> {
+        if email_policy_digest(&prepared.capability.policy) != prepared.policy_digest {
+            return Err(DurableEmailLedgerRefusal::Session(
+                EmailLedgerRefusal::PolicyChanged,
+            ));
+        }
+        if let Some(existing) = self
+            .policy_commitments
+            .get(&prepared.session_identity_digest)
+        {
+            if existing.policy != prepared.policy_digest {
+                return Err(DurableEmailLedgerRefusal::Session(
+                    EmailLedgerRefusal::PolicyChanged,
+                ));
+            }
+        }
+        let inserted = if self
+            .policy_commitments
+            .contains_key(&prepared.session_identity_digest)
+        {
+            false
+        } else {
+            self.policy_commitments.insert(
+                prepared.session_identity_digest.clone(),
+                DeliverySessionCommitment {
+                    policy: prepared.policy_digest.clone(),
+                    request: request_digest(&prepared.request),
+                },
+            );
+            true
+        };
+        let mut wrapper = EmailTypedCheckpointStore { store };
+        let mut typed_store = TypedDeliveryCheckpointStore {
+            store: &mut wrapper,
+            kind: "email",
+            commitments: &self.policy_commitments,
+        };
+        let outcome = self.ledger.reconcile_durable(
+            prepared.identity.clone(),
+            &prepared.request,
+            &mut typed_store,
+            |request| settlement_disposition(request, &adapter.send(request)),
+        );
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if inserted {
+                    self.policy_commitments
+                        .remove(&prepared.session_identity_digest);
+                }
+                return Err(DurableEmailLedgerRefusal::Durable(error));
+            }
+        };
+        if matches!(outcome, DurableLedgerOutcome::IntentNotCommitted) && inserted {
+            self.policy_commitments
+                .remove(&prepared.session_identity_digest);
+        }
+        Ok(match outcome {
+            DurableLedgerOutcome::Dispatched(record) => DurableEmailDeliveryOutcome::Dispatched(
+                durable_email_receipt(prepared, record, false),
+            ),
+            DurableLedgerOutcome::Replayed(record) => {
+                DurableEmailDeliveryOutcome::Replayed(durable_email_receipt(prepared, record, true))
+            }
+            DurableLedgerOutcome::IntentNotCommitted => {
+                DurableEmailDeliveryOutcome::IntentNotCommitted
+            }
+            DurableLedgerOutcome::IntentUncertain(record) => {
+                DurableEmailDeliveryOutcome::IntentUncertain(durable_email_receipt(
+                    prepared, record, false,
+                ))
+            }
+            DurableLedgerOutcome::SettlementUncertain(record) => {
+                DurableEmailDeliveryOutcome::SettlementUncertain(durable_email_receipt(
+                    prepared, record, false,
+                ))
+            }
+        })
+    }
+}
+
+struct EmailTypedCheckpointStore<'a, Store> {
+    store: &'a mut Store,
+}
+
+impl<Store: EmailDeliverySessionCheckpointStore> DeliverySessionCheckpointStore
+    for EmailTypedCheckpointStore<'_, Store>
+{
+    fn commit(&mut self, checkpoint: &DeliverySessionCheckpoint) -> CheckpointCommit {
+        self.store.commit(&EmailDeliverySessionCheckpoint {
+            inner: checkpoint.clone(),
+        })
+    }
+}
+
+fn durable_email_receipt(
+    prepared: PreparedEmailDelivery,
+    record: LedgerRecord,
+    replayed: bool,
+) -> EmailDeliveryReceipt {
+    EmailDeliveryReceipt {
+        evidence: delivery_evidence(
+            prepared.capability,
+            prepared.origin,
+            prepared.delivery_id,
+            prepared.idempotency_key,
+            prepared.request,
+            record.disposition().clone(),
+        ),
+        replayed,
     }
 }
 

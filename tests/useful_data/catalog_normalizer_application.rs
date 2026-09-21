@@ -4,6 +4,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use semaprax::{
     codegen, format,
@@ -28,6 +29,20 @@ const SOURCE_FILES: &[&str] = &[
     "record.spx",
     "tests.spx",
 ];
+
+const PUBLISHED_MANIFESTS: &[&str] = &[
+    "basics.json",
+    "enrichment.json",
+    "errors.json",
+    "limits.json",
+];
+
+struct PublishedCase {
+    name: String,
+    input: Vec<u8>,
+    expected: Vec<u8>,
+    enriched: bool,
+}
 
 struct ScratchRoot(PathBuf);
 
@@ -199,6 +214,59 @@ fn decode_hex(input: &str) -> Vec<u8> {
         .collect()
 }
 
+/// Loads only the frozen, reviewable published corpus. The hidden corpus is
+/// deliberately neither named nor traversed here: it remains a held-back
+/// acceptance control rather than implementation-visible test data.
+fn published_cases() -> &'static [PublishedCase] {
+    static CASES: OnceLock<Vec<PublishedCase>> = OnceLock::new();
+    CASES
+        .get_or_init(|| {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/oracle/catalog_normalizer/cases/published");
+            let mut cases = Vec::new();
+            for manifest_name in PUBLISHED_MANIFESTS {
+                let manifest_path = root.join(manifest_name);
+                let manifest: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+                for case in manifest["cases"].as_array().expect("published cases array") {
+                    let input = match (case.get("input"), case.get("input_hex")) {
+                        (Some(value), None) => value.as_str().unwrap().as_bytes().to_vec(),
+                        (None, Some(value)) => decode_hex(value.as_str().unwrap()),
+                        _ => panic!("published case must contain exactly one input encoding"),
+                    };
+                    let expected = case["expected_output"]
+                        .as_str()
+                        .expect("published expected output")
+                        .as_bytes()
+                        .to_vec();
+                    let enriched = case["enrich"].as_bool().expect("published enrich flag");
+                    let name = case["name"]
+                        .as_str()
+                        .expect("published case name")
+                        .to_owned();
+                    assert_eq!(
+                        run_oracle_with(&input, enriched),
+                        expected,
+                        "frozen published case {name} no longer matches the live independent oracle"
+                    );
+                    cases.push(PublishedCase {
+                        name,
+                        input,
+                        expected,
+                        enriched,
+                    });
+                }
+            }
+            assert_eq!(
+                cases.len(),
+                36,
+                "published catalog-normalizer corpus inventory drifted"
+            );
+            cases
+        })
+        .as_slice()
+}
+
 #[test]
 fn decoded_id_bounds_and_escaped_duplicates_match_the_independent_oracle() {
     let id64 = "x".repeat(64);
@@ -256,31 +324,8 @@ fn record_parser_categories_and_positions_match_the_independent_oracle() {
 }
 
 #[test]
-fn every_published_malformed_input_matches_the_frozen_oracle_byte_for_byte() {
-    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/oracle/catalog_normalizer/cases/published/errors.json");
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(manifest_path).unwrap()).unwrap();
-    let cases = manifest["cases"].as_array().expect("published cases array");
-    assert_eq!(
-        cases.len(),
-        17,
-        "published malformed-case inventory drifted"
-    );
-    for case in cases {
-        let input = match (case.get("input"), case.get("input_hex")) {
-            (Some(value), None) => value.as_str().unwrap().as_bytes().to_vec(),
-            (None, Some(value)) => decode_hex(value.as_str().unwrap()),
-            _ => panic!("case must contain exactly one input encoding"),
-        };
-        let expected = case["expected_output"].as_str().unwrap().as_bytes();
-        assert_eq!(
-            run_oracle_with(&input, case["enrich"].as_bool().unwrap()),
-            expected,
-            "published malformed case {}",
-            case["name"].as_str().unwrap()
-        );
-    }
+fn every_published_input_matches_the_frozen_oracle_byte_for_byte() {
+    let _ = published_cases();
 }
 
 #[test]
@@ -303,27 +348,6 @@ fn maximal_valid_outputs_fit_the_source_bound_exactly() {
     assert!(plain.len() <= OUTPUT_CAPACITY);
     assert!(enriched.len() <= OUTPUT_CAPACITY);
     assert!(OUTPUT_CAPACITY + 1 > OUTPUT_CAPACITY);
-
-    project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
-        for (function, expected) in [
-            ("catalog_normalizer.app.normalize", plain),
-            ("catalog_normalizer.app.normalize-enriched", enriched),
-        ] {
-            let actual = evaluate_resolved_owned_data(
-                snapshot.test_program(),
-                function,
-                &body,
-                MAX_STEPS_LIMIT,
-            )?;
-            assert_eq!(
-                actual.outcome,
-                OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(expected)),
-                "{function} did not emit its maximal valid response exactly"
-            );
-        }
-        Ok(())
-    })
-    .unwrap();
 }
 
 // Exact canonical lines retained in the Semaprax source's `test_canonical_responses`.
@@ -382,8 +406,54 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
     // This is deliberately one test: each backend lane runs serially against
     // one authenticated snapshot, so the capacity-sensitive graph is never
     // built concurrently merely because libtest has multiple worker threads.
+    // It also owns direct application-to-oracle comparisons. Keeping them in
+    // this snapshot avoids a second graph construction racing the backend
+    // lanes, while checking the actual `normalize` entrypoints rather than
+    // only source-authored expected literals.
+    let published = published_cases();
+    let maximal_body = maximal_output_body();
+    let maximal_plain = run_oracle_with(&maximal_body, false);
+    let maximal_enriched = run_oracle_with(&maximal_body, true);
     let scratch = ScratchRoot::new();
     project::with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
+        for case in published {
+            let function = if case.enriched {
+                "catalog_normalizer.app.normalize-enriched"
+            } else {
+                "catalog_normalizer.app.normalize"
+            };
+            let actual = evaluate_resolved_owned_data(
+                snapshot.test_program(),
+                function,
+                &case.input,
+                MAX_STEPS_LIMIT,
+            )?;
+            assert_eq!(
+                actual.outcome,
+                OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(case.expected.clone())),
+                "{function} disagreed with the independent oracle for published case {}",
+                case.name
+            );
+        }
+        for (function, expected) in [
+            ("catalog_normalizer.app.normalize", maximal_plain),
+            (
+                "catalog_normalizer.app.normalize-enriched",
+                maximal_enriched,
+            ),
+        ] {
+            let actual = evaluate_resolved_owned_data(
+                snapshot.test_program(),
+                function,
+                &maximal_body,
+                MAX_STEPS_LIMIT,
+            )?;
+            assert_eq!(
+                actual.outcome,
+                OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(expected)),
+                "{function} did not emit its maximal valid response exactly"
+            );
+        }
         snapshot.check()?;
         {
             let result = snapshot.execute_test(&application_options())?;

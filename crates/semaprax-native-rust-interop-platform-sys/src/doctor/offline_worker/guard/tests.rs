@@ -143,9 +143,11 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
             281, 424, 425, 426, 427, 434, 435, 437, 438,
         ]
     );
-    // The one admitted role-scoped extension, pinned by exact inventory and by
-    // the named operation each number is, so a reader sees what is admitted
-    // rather than finding bare numbers. Issue #270 removed `accept4` and
+    // The admitted role-scoped syscall extension, pinned by exact inventory
+    // and by the named operation each number is, so a reader sees what is
+    // admitted rather than finding bare numbers. `fcntl` stays out of this
+    // list because its commands are argument-constrained below rather than
+    // admitted as a syscall family. Issue #270 removed `accept4` and
     // `perf_event_open`; see the note on `X86_EVENT_LOOP`.
     assert_eq!(
         X86_SAFE_ADDITIONS,
@@ -169,6 +171,16 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
             DoctorOfflineTool::Node | DoctorOfflineTool::Rustc => X86_SAFE_ADDITIONS,
         };
         assert_eq!(policy.x86_additional, expected, "{:?}", policy.tool);
+        assert_eq!(
+            policy.x86_fcntl,
+            match policy.tool {
+                DoctorOfflineTool::Clang => X86FcntlPolicy::None,
+                DoctorOfflineTool::Node => X86FcntlPolicy::Node,
+                DoctorOfflineTool::Rustc => X86FcntlPolicy::Rustc,
+            },
+            "{:?}",
+            policy.tool
+        );
         assert!(policy.arm_additional.is_empty(), "{:?}", policy.tool);
         assert_eq!(
             policy.address_space_limit,
@@ -199,6 +211,176 @@ fn virtual_address_reservation_budget_is_finite_and_role_scoped() {
                 DEFAULT_ADDRESS_SPACE_LIMIT
             }
         );
+    }
+}
+
+#[test]
+fn x86_fcntl_is_role_local_and_exhaustively_argument_constrained() {
+    // These are independent Linux x86-64 ABI values, not references to the
+    // production constants: fcntl(72), F_SETFD(2), F_GETFL(3), F_SETFL(4),
+    // FD_CLOEXEC(1), and O_RDONLY|O_NONBLOCK(0x800).
+    const FCNTL: u32 = 72;
+    const SETFD: u64 = 2;
+    const GETFL: u64 = 3;
+    const SETFL: u64 = 4;
+    const CLOEXEC: u64 = 1;
+    const READONLY_NONBLOCK: u64 = 0x800;
+
+    let clang = Guard::for_arch(1, DoctorOfflineTool::Clang, X86_ARCH).unwrap();
+    let node = Guard::for_arch(2, DoctorOfflineTool::Node, X86_ARCH).unwrap();
+    let rustc = Guard::for_arch(4, DoctorOfflineTool::Rustc, X86_ARCH).unwrap();
+
+    // Clang has no compatibility exception, and Node/rustc cannot borrow one
+    // another's exception.
+    for args in [
+        [0, GETFL, 0, 0, 0, 0],
+        [16, SETFD, CLOEXEC, 0, 0, 0],
+        [4, SETFL, READONLY_NONBLOCK, 0, 0, 0],
+    ] {
+        assert_eq!(evaluate(&clang, X86_ARCH, FCNTL, args), DENY);
+    }
+    assert_eq!(
+        evaluate(
+            &node,
+            X86_ARCH,
+            FCNTL,
+            [4, SETFL, READONLY_NONBLOCK, 0, 0, 0]
+        ),
+        DENY
+    );
+    assert_eq!(
+        evaluate(&rustc, X86_ARCH, FCNTL, [0, GETFL, 0, 0, 0, 0]),
+        DENY
+    );
+    assert_eq!(
+        evaluate(&rustc, X86_ARCH, FCNTL, [16, SETFD, CLOEXEC, 0, 0, 0]),
+        DENY
+    );
+
+    // Node's no-third-argument F_GETFL probe is exactly standard input,
+    // output, and error. All fd and command high words must stay zero.
+    for fd in 0..=2_u64 {
+        let args = [fd, GETFL, 0, 0, 0, 0];
+        assert_eq!(evaluate(&node, X86_ARCH, FCNTL, args), ALLOW);
+        for bit in 0..64 {
+            let mut mutated = args;
+            mutated[0] ^= 1_u64 << bit;
+            assert_eq!(
+                evaluate(&node, X86_ARCH, FCNTL, mutated),
+                if (0..=2).contains(&mutated[0]) {
+                    ALLOW
+                } else {
+                    DENY
+                },
+                "F_GETFL fd {fd}, bit {bit}"
+            );
+            let mut mutated = args;
+            mutated[1] ^= 1_u64 << bit;
+            assert_eq!(
+                evaluate(&node, X86_ARCH, FCNTL, mutated),
+                DENY,
+                "F_GETFL command {fd}, bit {bit}"
+            );
+        }
+    }
+
+    // Node probes F_SETFD through 16. The worker closed 3 and upward before
+    // filter installation, so the startup probes receive EBADF from the
+    // kernel. A later pipe2/dup3 can only receive FD_CLOEXEC through this
+    // rule; no high descriptor can be acquired or duplicated through it.
+    for fd in 0..=16_u64 {
+        let args = [fd, SETFD, CLOEXEC, 0, 0, 0];
+        assert_eq!(evaluate(&node, X86_ARCH, FCNTL, args), ALLOW);
+        for bit in 0..64 {
+            let mut mutated = args;
+            mutated[0] ^= 1_u64 << bit;
+            assert_eq!(
+                evaluate(&node, X86_ARCH, FCNTL, mutated),
+                if (0..=16).contains(&mutated[0]) {
+                    ALLOW
+                } else {
+                    DENY
+                },
+                "F_SETFD fd {fd}, bit {bit}"
+            );
+            let mut mutated = args;
+            mutated[2] ^= 1_u64 << bit;
+            assert_eq!(
+                evaluate(&node, X86_ARCH, FCNTL, mutated),
+                DENY,
+                "F_SETFD flags {fd}, bit {bit}"
+            );
+        }
+    }
+    for command in 0..=0x1000_u64 {
+        if command != GETFL && command != SETFD {
+            assert_eq!(
+                evaluate(&node, X86_ARCH, FCNTL, [16, command, CLOEXEC, 0, 0, 0]),
+                DENY,
+                "Node fcntl command {command}"
+            );
+        }
+    }
+    for bit in 0..64 {
+        let mut args = [16, SETFD, CLOEXEC, 0, 0, 0];
+        args[1] ^= 1_u64 << bit;
+        assert_eq!(
+            evaluate(&node, X86_ARCH, FCNTL, args),
+            DENY,
+            "F_SETFD command bit {bit}"
+        );
+    }
+
+    // rustc receives exactly the fd-4 F_SETFL probe. Mutating any scalar bit
+    // must reject it. fd 4 starts closed; if an already-admitted pipe2/dup3
+    // later populates it, this can only add O_NONBLOCK to that exact fd.
+    let rustc_args = [4, SETFL, READONLY_NONBLOCK, 0, 0, 0];
+    assert_eq!(evaluate(&rustc, X86_ARCH, FCNTL, rustc_args), ALLOW);
+    for argument in 0..3 {
+        for bit in 0..64 {
+            let mut mutated = rustc_args;
+            mutated[argument] ^= 1_u64 << bit;
+            assert_eq!(
+                evaluate(&rustc, X86_ARCH, FCNTL, mutated),
+                DENY,
+                "rustc fcntl argument {argument}, bit {bit}"
+            );
+        }
+    }
+
+    // Explicit hostile controls for every role: no duplication, ownership,
+    // locking, lease, pipe-size, seal, or arbitrary-status-flags operation is
+    // recoverable through the narrow exceptions.
+    for guard in [&clang, &node, &rustc] {
+        for (command, third) in [
+            (0, 3),       // F_DUPFD
+            (6, 0),       // F_SETLK
+            (8, 1),       // F_SETOWN
+            (1024, 1),    // F_SETLEASE
+            (1030, 3),    // F_DUPFD_CLOEXEC
+            (1031, 4096), // F_SETPIPE_SZ
+            (1033, 1),    // F_ADD_SEALS
+            (SETFL, 0),   // arbitrary F_SETFL state
+        ] {
+            assert_eq!(
+                evaluate(guard, X86_ARCH, FCNTL, [0, command, third, 0, 0, 0]),
+                DENY,
+                "unexpected fcntl command {command}"
+            );
+        }
+    }
+
+    // No AArch64 policy is introduced, even for the otherwise role-matched
+    // Node and rustc rows.
+    for tool in TOOLS {
+        let guard = Guard::for_arch(expected_role(tool), tool, ARM_ARCH).unwrap();
+        for args in [
+            [0, GETFL, 0, 0, 0, 0],
+            [16, SETFD, CLOEXEC, 0, 0, 0],
+            [4, SETFL, READONLY_NONBLOCK, 0, 0, 0],
+        ] {
+            assert_eq!(evaluate(&guard, ARM_ARCH, FCNTL, args), DENY, "{tool:?}");
+        }
     }
 }
 

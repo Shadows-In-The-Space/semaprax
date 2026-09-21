@@ -17,6 +17,12 @@ const ALLOW: u32 = 0x7fff_0000;
 const X86_ARCH: u32 = 0xc000_003e;
 const ARM_ARCH: u32 = 0xc000_00b7;
 const CAPACITY: usize = 256;
+const X86_FCNTL: u32 = 72;
+const F_SETFD: u32 = 2;
+const F_GETFL: u32 = 3;
+const F_SETFL: u32 = 4;
+const FD_CLOEXEC: u32 = 1;
+const O_RDONLY_OR_NONBLOCK: u32 = 0x800;
 const DEFAULT_ADDRESS_SPACE_LIMIT: libc::rlim_t = 4 * 1024 * 1024 * 1024;
 // Official x86-64 Node 22 builds enable V8's sandbox, whose 1 TiB reservation
 // must itself be aligned to a 1 TiB boundary. The reservation path can map a
@@ -90,7 +96,18 @@ struct RolePolicy {
     tool: DoctorOfflineTool,
     address_space_limit: libc::rlim_t,
     x86_additional: &'static [u32],
+    x86_fcntl: X86FcntlPolicy,
     arm_additional: &'static [u32],
+}
+
+// `fcntl` is deliberately not an inventory addition: it is a descriptor
+// authority multiplexer. Each nonempty row below has an independently traced,
+// argument-constrained rule emitted only for that authenticated x86 role.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum X86FcntlPolicy {
+    None,
+    Node,
+    Rustc,
 }
 
 const ROLE_POLICIES: [RolePolicy; 3] = [
@@ -99,6 +116,7 @@ const ROLE_POLICIES: [RolePolicy; 3] = [
         tool: DoctorOfflineTool::Clang,
         address_space_limit: DEFAULT_ADDRESS_SPACE_LIMIT,
         x86_additional: &[],
+        x86_fcntl: X86FcntlPolicy::None,
         arm_additional: &[],
     },
     RolePolicy {
@@ -106,6 +124,9 @@ const ROLE_POLICIES: [RolePolicy; 3] = [
         tool: DoctorOfflineTool::Node,
         address_space_limit: NODE_ADDRESS_SPACE_LIMIT,
         x86_additional: X86_EVENT_LOOP,
+        // Hosted run 35575666208: F_GETFL on 0/1/2 and
+        // F_SETFD(FD_CLOEXEC) on 0 through 16 only.
+        x86_fcntl: X86FcntlPolicy::Node,
         arm_additional: &[],
     },
     RolePolicy {
@@ -113,6 +134,8 @@ const ROLE_POLICIES: [RolePolicy; 3] = [
         tool: DoctorOfflineTool::Rustc,
         address_space_limit: DEFAULT_ADDRESS_SPACE_LIMIT,
         x86_additional: X86_EVENT_LOOP,
+        // Hosted run 35575666208: F_SETFL(O_RDONLY|O_NONBLOCK) on fd 4 only.
+        x86_fcntl: X86FcntlPolicy::Rustc,
         arm_additional: &[],
     },
 ];
@@ -166,6 +189,7 @@ impl Guard {
             writev,
             prctl,
             prlimit,
+            fcntl,
             open_flags,
         ) = match arch {
             X86_ARCH => (
@@ -179,6 +203,7 @@ impl Guard {
                 20,
                 157,
                 302,
+                Some(X86_FCNTL),
                 0xb8800 | 0x40000 | 0x200000, // allow O_NOATIME and O_PATH (real Node/Rust loader uses them)
             ),
             ARM_ARCH => (
@@ -192,6 +217,7 @@ impl Guard {
                 66,
                 167,
                 261,
+                None,
                 0xac800 | 0x40000 | 0x200000,
             ),
             _ => return Err(Error::Invalid),
@@ -203,6 +229,7 @@ impl Guard {
             Some(writev),
             Some(prctl),
             Some(prlimit),
+            fcntl,
         ];
         validate_policy(common, additional, safe_additional, deny, &constrained)?;
         // O_RDONLY (zero), CLOEXEC, NONBLOCK, DIRECTORY, NOFOLLOW, LARGEFILE.
@@ -290,6 +317,13 @@ impl Guard {
                 ins(RETURN, ALLOW, 0, 0),
             ],
         )?;
+        if let Some(fcntl) = fcntl {
+            match policy.x86_fcntl {
+                X86FcntlPolicy::None => {}
+                X86FcntlPolicy::Node => node_fcntl_rule(&mut filter, fcntl)?,
+                X86FcntlPolicy::Rustc => rustc_fcntl_rule(&mut filter, fcntl)?,
+            }
+        }
         if filter.len() >= CAPACITY {
             return Err(Error::Limit);
         }
@@ -401,6 +435,103 @@ fn rule(
     filter.push(ins(EQUAL, number, 0, skip));
     filter.extend_from_slice(body);
     Ok(())
+}
+
+// The child closes every descriptor from 3 upward before installing this
+// filter. Node nevertheless probes F_SETFD through 16; admitting those exact
+// calls preserves the kernel's EBADF result for the observed startup topology.
+// If a later already-admitted pipe2/dup3 call creates one of those descriptor
+// numbers, this rule can only set its close-on-exec bit; it cannot duplicate,
+// acquire, lock, lease, or otherwise make that descriptor more capable.
+// F_GETFL is narrower because it was observed only for the three surviving
+// standard streams.
+fn node_fcntl_rule(filter: &mut Vec<libc::sock_filter>, number: u32) -> Result<(), Error> {
+    rule(
+        filter,
+        number,
+        &[
+            ins(LOAD, offset(0) + 4, 0, 0),
+            ins(EQUAL, 0, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(LOAD, offset(1) + 4, 0, 0),
+            ins(EQUAL, 0, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(LOAD, offset(1), 0, 0),
+            // F_GETFL has no third argument. Its observed descriptors are
+            // exactly stdin/stdout/stderr, so do not turn it into a generic
+            // descriptor-status oracle.
+            ins(EQUAL, F_GETFL, 0, 6),
+            ins(LOAD, offset(0), 0, 0),
+            ins(EQUAL, 0, 3, 0),
+            ins(EQUAL, 1, 2, 0),
+            ins(EQUAL, 2, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(RETURN, ALLOW, 0, 0),
+            // FD_CLOEXEC is the sole descriptor-flag mutation observed. The
+            // explicit 0..=16 row keeps the closed-probe EBADF behaviour and
+            // cannot grant F_DUPFD, ownership, locks, leases, seals or pipe
+            // resizing through another fcntl command.
+            ins(EQUAL, F_SETFD, 0, 24),
+            ins(LOAD, offset(2) + 4, 0, 0),
+            ins(EQUAL, 0, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(LOAD, offset(2), 0, 0),
+            ins(EQUAL, FD_CLOEXEC, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(LOAD, offset(0), 0, 0),
+            ins(EQUAL, 0, 17, 0),
+            ins(EQUAL, 1, 16, 0),
+            ins(EQUAL, 2, 15, 0),
+            ins(EQUAL, 3, 14, 0),
+            ins(EQUAL, 4, 13, 0),
+            ins(EQUAL, 5, 12, 0),
+            ins(EQUAL, 6, 11, 0),
+            ins(EQUAL, 7, 10, 0),
+            ins(EQUAL, 8, 9, 0),
+            ins(EQUAL, 9, 8, 0),
+            ins(EQUAL, 10, 7, 0),
+            ins(EQUAL, 11, 6, 0),
+            ins(EQUAL, 12, 5, 0),
+            ins(EQUAL, 13, 4, 0),
+            ins(EQUAL, 14, 3, 0),
+            ins(EQUAL, 15, 2, 0),
+            ins(EQUAL, 16, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(RETURN, ALLOW, 0, 0),
+        ],
+    )
+}
+
+// The post-close-range topology makes fd 4 absent during the observed startup
+// probe. A later already-admitted pipe2/dup3 can populate it, but this exact
+// rule can then only request O_NONBLOCK for that one descriptor. It cannot
+// alter a surviving standard stream, select another descriptor, duplicate,
+// acquire, lock, lease, or widen any other descriptor authority.
+fn rustc_fcntl_rule(filter: &mut Vec<libc::sock_filter>, number: u32) -> Result<(), Error> {
+    rule(
+        filter,
+        number,
+        &[
+            ins(LOAD, offset(0) + 4, 0, 0),
+            ins(EQUAL, 0, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(LOAD, offset(1) + 4, 0, 0),
+            ins(EQUAL, 0, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(LOAD, offset(1), 0, 0),
+            ins(EQUAL, F_SETFL, 0, 8),
+            ins(LOAD, offset(2) + 4, 0, 0),
+            ins(EQUAL, 0, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(LOAD, offset(2), 0, 0),
+            ins(EQUAL, O_RDONLY_OR_NONBLOCK, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(LOAD, offset(0), 0, 0),
+            ins(EQUAL, 4, 1, 0),
+            ins(RETURN, DENY, 0, 0),
+            ins(RETURN, ALLOW, 0, 0),
+        ],
+    )
 }
 
 #[cfg(test)]

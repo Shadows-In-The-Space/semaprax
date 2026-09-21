@@ -18,7 +18,9 @@ use zeroize::Zeroize;
 mod email;
 mod http;
 mod ledger;
+mod metrics;
 mod protected_names;
+mod spans;
 mod tracing;
 mod webhook;
 
@@ -36,6 +38,14 @@ pub use http::{
 pub use ledger::{
     DeliveryIdentity, HostDeliveryLedger, LedgerCheckpoint, LedgerCheckpointRefusal, LedgerOutcome,
     LedgerRecord, LedgerRefusal, MAX_LEDGER_CHECKPOINT_BYTES, MAX_LEDGER_ENTRIES,
+};
+pub use metrics::{
+    prepare_metric_export, verify_metric_export, MetricExport, MetricExportSession, MetricKind,
+    MetricWireMismatch, PreparedMetricExport,
+};
+pub use spans::{
+    prepare_span_export, verify_span_export, PreparedSpanExport, SpanExport, SpanExportSession,
+    SpanStatus, SpanWireMismatch,
 };
 pub use tracing::{
     prepare_export_event, ExportEventLedgerRefusal, ExportEventReceipt, ExportEventSession,

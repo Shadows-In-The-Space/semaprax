@@ -263,6 +263,44 @@ bounded name policy, not content-based secret discovery. The
 `export_after_primary` result keeps the primary application outcome separate
 from export settlement, so exporter failure cannot replace it.
 
+### Typed metrics and completed spans
+
+`prepare_metric_export` adds a closed metric wire rather than asking a host to
+interpret an arbitrary event. Each observation carries a stable metric ID, a
+separate observation ID, sorted duplicate-free labels, and exactly one of
+`counter_increment`, `gauge`, or `histogram_observation`. Counter increments
+must be nonzero. Values are integers, avoiding non-canonical NaN and infinity
+spellings. Label count uses the deployment policy, each label value uses the
+fixed export-value bound, and the session ledger supplies an additional hard
+per-process observation ceiling. Protected names are refused before adapter
+entry; no global metric registry or unbounded cardinality set is allocated.
+
+`prepare_span_export` carries one completed span with canonical lowercase
+nonzero trace and span IDs, an optional distinct parent span ID, a bounded
+name, elapsed microseconds, a closed `unset`/`ok`/`error` status, and sorted
+duplicate-free attributes. Public protected-name attributes refuse, while an
+explicit `ProtectedExportValue` can only become `[REDACTED]` and an optional
+commitment. IDs are caller inputs: this layer deliberately does not read
+ambient randomness or a clock. A trusted host that generates IDs must acquire
+its own declared entropy capability before constructing a span.
+
+Metric observations and spans have separate domain-separated idempotency keys
+and media types. A span's replay identity binds both its trace ID and its
+trace-scoped span ID, while the provider-facing header retains the span ID.
+Their `MetricExportSession` and `SpanExportSession` wrappers
+reuse the same disposition-only ledger semantics: exact replay cannot enter an
+adapter, payload drift conflicts, accepted response bytes are dropped, and
+post-start failure remains uncertain. These are fixture-testable host
+boundaries, not a hosted telemetry provider, durable exporter, global
+aggregator, sampling engine, or claim of delivery.
+
+Their authority-free `verify_metric_export` and `verify_span_export` paths
+independently decode a closed v1 schema, enforce global bounds and canonical
+ordering/JSON bytes, and bind the payload identity and media type to an exact
+prepared request. Unknown, duplicate, reordered, malformed, over-bound, and
+request-mismatched inputs refuse; successful verification cannot reconstruct a
+capability or enter an adapter.
+
 ## Focused evidence
 
 Once the module is wired from `src/lib.rs`, the focused selector is:
@@ -301,3 +339,11 @@ commitment/live-state drift, exact lookup, monotonic union/conflict refusal,
 panic-reserved uncertainty, full-capacity admission and byte/inventory limits,
 hostile schemas/digests/statuses/noncanonical wires, and exports/imports from
 the adapter sessions without extra adapter calls.
+
+The typed telemetry selectors are
+`outbound_host_adapter::metrics::tests::` and
+`outbound_host_adapter::spans::tests::`. They cover canonical label/attribute
+ordering, all three metric kinds, exact no-dispatch replay, response-byte
+discard, protected-name and malformed-context refusal, redaction, sticky
+transport uncertainty, per-record maxima, and session maximum-plus-one. These
+tests inject a recording adapter and perform no network I/O.

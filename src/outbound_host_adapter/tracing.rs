@@ -228,16 +228,48 @@ pub fn prepare_export_event(
     deadline_ms: u64,
     event: ExportEvent,
 ) -> Result<PreparedExportEvent, Refusal> {
-    let origin = validate_common(&capability.policy, &endpoint, deadline_ms)?;
     let body = event.encode(&capability.policy)?;
+    let event_id = event.stable_event_id;
+    prepare_operational_export(
+        capability,
+        endpoint,
+        deadline_ms,
+        event_id,
+        None,
+        "application/json",
+        "x-semaprax-event-id",
+        EXPORT_IDEMPOTENCY_DOMAIN,
+        body,
+    )
+}
+
+/// Shared constructor for closed operational-export schemas. Each caller owns
+/// its schema validation and a distinct idempotency domain; this helper only
+/// binds the already-admitted canonical bytes to the common one-shot session.
+pub(super) fn prepare_operational_export(
+    capability: OutboundCapability,
+    endpoint: String,
+    deadline_ms: u64,
+    record_id: String,
+    replay_identity: Option<String>,
+    content_type: &'static str,
+    identity_header: &'static str,
+    idempotency_domain: &'static [u8],
+    body: Vec<u8>,
+) -> Result<PreparedExportEvent, Refusal> {
+    let origin = validate_common(&capability.policy, &endpoint, deadline_ms)?;
+    let replay_identity = replay_identity.as_deref().unwrap_or(&record_id);
+    if !valid_identity(&record_id) || !valid_identity(replay_identity) {
+        return Err(Refusal::InvalidIdentity);
+    }
     if body.len() > capability.policy.max_request_bytes {
         return Err(Refusal::RequestTooLarge);
     }
-    let event_id = event.stable_event_id;
-    let idempotency_key = export_idempotency_key(
+    let idempotency_key = operational_export_idempotency_key(
+        idempotency_domain,
         &capability.deployment_binding,
         &capability.invocation_id,
-        &event_id,
+        replay_identity,
     );
     let identity = DeliveryIdentity::new(
         capability.deployment_binding.clone(),
@@ -257,9 +289,9 @@ pub fn prepare_export_event(
         method: HttpMethod::Post,
         endpoint,
         headers: vec![
-            ("content-type".into(), "application/json".into()),
+            ("content-type".into(), content_type.into()),
             ("idempotency-key".into(), idempotency_key.clone()),
-            ("x-semaprax-event-id".into(), event_id.clone()),
+            (identity_header.into(), record_id.clone()),
         ],
         body,
         deadline_ms,
@@ -270,7 +302,7 @@ pub fn prepare_export_event(
     Ok(PreparedExportEvent {
         capability,
         origin,
-        event_id,
+        event_id: record_id,
         idempotency_key,
         identity,
         session_identity_digest,
@@ -286,9 +318,23 @@ fn export_idempotency_key(
     invocation_id: &str,
     stable_event_id: &str,
 ) -> String {
+    operational_export_idempotency_key(
+        EXPORT_IDEMPOTENCY_DOMAIN,
+        deployment_binding,
+        invocation_id,
+        stable_event_id,
+    )
+}
+
+fn operational_export_idempotency_key(
+    domain: &[u8],
+    deployment_binding: &str,
+    invocation_id: &str,
+    stable_record_id: &str,
+) -> String {
     let mut hash = Sha256::new();
-    hash.update(EXPORT_IDEMPOTENCY_DOMAIN);
-    for part in [deployment_binding, invocation_id, stable_event_id] {
+    hash.update(domain);
+    for part in [deployment_binding, invocation_id, stable_record_id] {
         digest_part(&mut hash, part.as_bytes());
     }
     format!("sha256:{:x}", crate::digest_hex::LowerHex(hash.finalize()))

@@ -260,6 +260,256 @@ impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler
     }
 }
 
+/// A successful target must be observed once for every turn, rather than
+/// allowing a later backend leg to replay an earlier host response.  Distinct
+/// values make a cached or duplicated callback visible at the protocol edge.
+struct SequentialTargetHandler {
+    calls: usize,
+    request_wires: Vec<Vec<u8>>,
+    grants: Vec<String>,
+    returned_values: Vec<i64>,
+}
+
+impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler
+    for SequentialTargetHandler
+{
+    fn dispatch(
+        &mut self,
+        request: &crate::agent_lifecycle::authorization::target_protocol::TargetHostRequest,
+        sink: &mut crate::agent_lifecycle::authorization::target_protocol::TargetResponseSink,
+    ) -> Result<(), crate::agent_lifecycle::authorization::target_protocol::TargetHostError> {
+        self.calls += 1;
+        self.request_wires.push(request.canonical_wire());
+        self.grants.push(request.grant_id().to_owned());
+        let value = 7 + i64::try_from(self.calls).expect("bounded fixture callback ordinal");
+        self.returned_values.push(value);
+        let payload = encode_fields(&[("value".into(), RetainedValue::I64(value))]);
+        sink.write(
+            &crate::agent_lifecycle::authorization::target_protocol::TypedCarrier::new(
+                request.operation().result_type(),
+                payload.into_bytes(),
+            )
+            .map_err(|_| {
+                crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
+            })?
+            .encode(),
+        )
+        .map_err(|_| {
+            crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
+        })
+    }
+}
+
+fn successful_target_run_on(
+    compiled: &CompiledTypedEffects,
+    module_source: &str,
+    backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+    cancellation: &AgentCancellation,
+) -> (TargetEffectRun, SequentialTargetHandler) {
+    let proposal = crate::agent_lifecycle::tests::proposal(&compiled.lifecycle.inner, "1", "0");
+    let mut source = TargetSource {
+        proposals: vec![proposal; 4],
+        next: 0,
+    };
+    let mut handler = SequentialTargetHandler {
+        calls: 0,
+        request_wires: Vec::new(),
+        grants: Vec::new(),
+        returned_values: Vec::new(),
+    };
+    let run = compiled
+        .run_target_live_on(
+            &LifecycleTask {
+                objective: vec![],
+                budget: 10,
+            },
+            &mut source,
+            &mut handler,
+            IterativeBudget::default(),
+            budgets(),
+            cancellation,
+            backend,
+        )
+        .unwrap_or_else(|errors| panic!("successful target {module_source:?}: {errors:?}"));
+    (run, handler)
+}
+
+fn assert_successful_target_settlements(
+    run: &TargetEffectRun,
+    handler: &SequentialTargetHandler,
+    label: &str,
+) {
+    assert_eq!(
+        run.lifecycle().status(),
+        IterativeStatus::Complete,
+        "{label}"
+    );
+    assert_eq!(run.failure(), None, "{label}: terminal failure");
+    assert_eq!(handler.calls, 3, "{label}: callback count");
+    assert_eq!(
+        handler.returned_values,
+        [8, 9, 10],
+        "{label}: callback values"
+    );
+    assert_eq!(
+        handler.request_wires.len(),
+        handler.calls,
+        "{label}: requests"
+    );
+    assert_eq!(
+        run.target_evidence().len(),
+        handler.calls,
+        "{label}: evidence"
+    );
+    assert_eq!(
+        handler
+            .grants
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        handler.calls,
+        "{label}: fresh grants"
+    );
+
+    let mut previous =
+        crate::agent_lifecycle::authorization::target_protocol::TargetAccounting::default();
+    for (ordinal, (evidence, request_wire)) in run
+        .target_evidence()
+        .iter()
+        .zip(&handler.request_wires)
+        .enumerate()
+    {
+        assert_eq!(
+            evidence.settlement(),
+            crate::agent_lifecycle::authorization::target_protocol::Settlement::Returned,
+            "{label}: callback {ordinal} settlement"
+        );
+        assert!(
+            evidence.dispatched(),
+            "{label}: callback {ordinal} dispatch"
+        );
+        let accounting = evidence.accounting();
+        assert_eq!(accounting.calls(), u64::try_from(ordinal + 1).unwrap());
+        assert!(
+            accounting.request_bytes() > previous.request_bytes()
+                && accounting.result_bytes() > previous.result_bytes()
+                && accounting.fuel() > previous.fuel(),
+            "{label}: callback {ordinal} accounting must remain cumulative"
+        );
+        let decoded =
+            crate::agent_lifecycle::authorization::target_protocol::TargetEvidence::decode(
+                &evidence.canonical_wire(),
+            )
+            .unwrap_or_else(|error| panic!("{label}: callback {ordinal} evidence: {error:?}"));
+        assert_eq!(
+            &decoded, evidence,
+            "{label}: callback {ordinal} evidence bytes"
+        );
+        decoded
+            .replay_wire(request_wire)
+            .unwrap_or_else(|error| panic!("{label}: callback {ordinal} replay: {error:?}"));
+        previous = accounting;
+    }
+    assert_eq!(run.accounting(), previous, "{label}: final accounting");
+    assert_eq!(handler.calls, 3, "{label}: replay must not invoke callback");
+}
+
+#[test]
+fn successful_target_settlement_is_cumulative_and_backend_source_bound() {
+    if !target_backend_tools_available() {
+        eprintln!("skipping successful target settlement parity: clang or node unavailable");
+        return;
+    }
+    let module_source = typed_effect_source();
+    // This remains the same program but has distinct Core Wasm source bytes.
+    // The target grant commits the exact source digest, so its retained
+    // observation cannot be replayed as authority for this sibling input.
+    let equivalent_wasm_source = format!("{module_source}\n");
+    let compiled = compile_from_source(&module_source);
+    let cancellation = AgentCancellation::new();
+    let interpreter = successful_target_run_on(
+        &compiled,
+        &module_source,
+        crate::agent_lifecycle::authorization::StageBackend::Interpreter,
+        &cancellation,
+    );
+    let native_o0 = successful_target_run_on(
+        &compiled,
+        &module_source,
+        crate::agent_lifecycle::authorization::StageBackend::Native,
+        &cancellation,
+    );
+    let native_o2 = successful_target_run_on(
+        &compiled,
+        &module_source,
+        crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+        &cancellation,
+    );
+    let wasm = successful_target_run_on(
+        &compiled,
+        &module_source,
+        crate::agent_lifecycle::authorization::StageBackend::Wasm {
+            source: &module_source,
+        },
+        &cancellation,
+    );
+    let wasm_equivalent_source = successful_target_run_on(
+        &compiled,
+        &equivalent_wasm_source,
+        crate::agent_lifecycle::authorization::StageBackend::Wasm {
+            source: &equivalent_wasm_source,
+        },
+        &cancellation,
+    );
+    let runs = [
+        ("interpreter", &interpreter.0, &interpreter.1),
+        ("native -O0", &native_o0.0, &native_o0.1),
+        ("native -O2", &native_o2.0, &native_o2.1),
+        ("Core Wasm", &wasm.0, &wasm.1),
+        (
+            "Core Wasm equivalent source",
+            &wasm_equivalent_source.0,
+            &wasm_equivalent_source.1,
+        ),
+    ];
+    for (label, run, handler) in &runs {
+        assert_successful_target_settlements(run, handler, label);
+        assert_eq!(
+            run.lifecycle().value(),
+            interpreter.0.lifecycle().value(),
+            "{label}: lifecycle value"
+        );
+        assert_eq!(
+            run.accounting(),
+            interpreter.0.accounting(),
+            "{label}: final accounting"
+        );
+    }
+    for (label, run, handler) in &runs {
+        for (other_label, _, other_handler) in &runs {
+            if label == other_label {
+                continue;
+            }
+            for (ordinal, (evidence, own_request)) in run
+                .target_evidence()
+                .iter()
+                .zip(&handler.request_wires)
+                .enumerate()
+            {
+                let other_request = &other_handler.request_wires[ordinal];
+                assert_ne!(
+                    own_request, other_request,
+                    "{label} / {other_label}: callback {ordinal} grant binding"
+                );
+                assert!(
+                    evidence.replay_wire(other_request).is_err(),
+                    "{label} / {other_label}: callback {ordinal} cross-boundary replay"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn target_hostile_proposals_budgets_and_results_settle_without_extra_dispatch_on_every_backend() {
     if !target_backend_tools_available() {

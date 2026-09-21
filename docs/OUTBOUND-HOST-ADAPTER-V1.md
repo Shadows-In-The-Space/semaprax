@@ -433,6 +433,22 @@ connection. This is a host-owned loopback fixture; it does not claim that the
 task-service fixture configuration (which selects only fixture adapters and no
 capabilities) authorizes a physical send.
 
+The sibling `native_delivery_tests` corpus exercises the two remaining typed
+delivery families over the same kind of private-root loopback TLS boundary.
+One explicit host policy/capability sends a signed webhook and one
+provider-neutral email envelope to their exact paths; the peer checks the
+boundary-owned media type, delivery and idempotency headers, an independently
+calculated exact webhook HMAC, and a body marker without observing a secret.
+The email peer also rejects credential-style headers. Each typed store retains
+the provisional and terminal checkpoints. A tampered stored wire refuses before
+restoration; exact restored replay, changed payload, changed signing secret, and
+changed complete policy produce no second TCP connection. An untrusted private
+peer settles each already-started request as transport uncertainty, never an
+automatic retry. These are host-owned local fixtures only: they do not prove a
+provider accepted a delivery, receiver idempotency, SMTP/MX support, provider
+authentication, public-network behavior, durable-storage support, or authority
+for the credential-free service fixture.
+
 The selector also proves the service host-request bridge without treating a
 configuration declaration as authority. A canonical host-mode service
 configuration renders the bounded request-v1 handoff; a separate closed

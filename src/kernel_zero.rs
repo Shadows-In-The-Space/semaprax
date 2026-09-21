@@ -70,6 +70,8 @@ mod corpus;
 #[cfg(test)]
 mod differential;
 #[cfg(test)]
+mod graph_projection;
+#[cfg(test)]
 mod lean_fixture;
 #[cfg(test)]
 mod weights;

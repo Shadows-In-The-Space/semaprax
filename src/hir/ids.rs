@@ -133,7 +133,7 @@ impl ValueId {
         Self::new(scoped_identity(function, "value:local", path))
     }
 
-    pub(super) fn result(function: &FunctionExecutionId) -> Self {
+    pub(crate) fn result(function: &FunctionExecutionId) -> Self {
         Self::new(scoped_identity(function, "value:result", ""))
     }
 

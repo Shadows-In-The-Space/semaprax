@@ -609,7 +609,7 @@ if case == 9 { 9223372036854775807 % -1 } else {\n                              
 if case == 10 { -7 / 3 } else {\n                                                \
 if case == 11 { -7 % 3 } else {\n                                                    \
 if case == 12 { 7 / -3 } else {\n                                                        \
-if case == 13 { 7 % -3 } else { -(-9223372036854775807) }\n                                                    }\n                                                }\n                                            }\n                                        }\n                                    }\n                                }\n                            }\n                        }\n                    }\n                }\n            }\n        }\n    }\n}",
+if case == 13 { 7 % -3 } else { -(-9223372036854775807) }\n                                                    }\n                                                }\n                                            }\n                                        }\n                                    }\n                                }\n                            }\n                        }\n                    }\n                }\n            }\n        }\n    }",
     );
 
     let lazy_control = module(

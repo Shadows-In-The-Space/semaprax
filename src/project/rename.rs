@@ -174,14 +174,6 @@ pub(super) fn prepare(
     from: &str,
     to: &str,
 ) -> Result<PreparedProjectRename, Vec<Diagnostic>> {
-    // The v1 change envelopes below freeze `semaprax.project.v1` and scalar
-    // ownership conclusions. Refuse newer Project schemas before planning so
-    // their richer profiles are never mislabeled as v1 evidence.
-    if snapshot.manifest.schema() != super::PROJECT_SCHEMA {
-        return Err(rename_error(
-            "Project display-rename evidence currently admits only semaprax.project.v1",
-        ));
-    }
     validate_request_text("target_id", target_id, MAX_STABLE_ID_BYTES)?;
     validate_request_text("from", from, MAX_RENAME_NAME_BYTES)?;
     validate_request_text("to", to, MAX_RENAME_NAME_BYTES)?;
@@ -289,7 +281,7 @@ pub(super) fn prepare(
     let payload = format!(
         "{{\"schema\":{},\"project_schema\":{},\"base_project_revision\":{},\"candidate_project_revision\":{},\"base_workspace_revision\":{},\"candidate_workspace_revision\":{},\"target\":{{\"stable_id\":{},\"from\":{},\"to\":{},\"path\":{}}},\"patch\":{{\"schema\":\"semaprax.semantic-patch.v1\",\"digest\":{},\"bytes\":{}}},\"base_source\":{},\"candidate_source\":{},\"candidate_project_graph\":{{\"schema\":{},\"digest\":{}}},\"limits\":{{\"max_preview_bytes\":{},\"max_target_id_bytes\":{},\"max_name_bytes\":{}}},\"nonclaims\":[\"read_only_plan_no_commit_authority\",\"no_request_selected_path_or_source_bytes\",\"no_multi_file_or_import_alias_rename\",\"no_build_target_or_test_execution\",\"no_provenance_approval_or_exactly_once_effect\"]}}",
         quote_json(PROJECT_RENAME_PREVIEW_SCHEMA),
-        quote_json(super::PROJECT_SCHEMA),
+        quote_json(snapshot.manifest.schema()),
         quote_json(snapshot.project_revision()),
         quote_json(&candidate.project_revision),
         quote_json(snapshot.workspace_revision()),
@@ -324,7 +316,7 @@ pub(super) fn prepare(
     let derivation_payload = format!(
         "{{\"schema\":{},\"project_schema\":{},\"base_project_revision\":{},\"base_workspace_revision\":{},\"target\":{{\"stable_id\":{},\"from\":{},\"to\":{},\"path\":{}}},\"patch\":{{\"schema\":\"semaprax.semantic-patch.v1\",\"digest\":{},\"bytes\":{}}},\"validated_candidate\":{{\"project_revision\":{},\"workspace_revision\":{},\"project_graph_digest\":{},\"preview_digest\":{}}},\"nonclaims\":[\"read_only_server_derived_intent_no_commit_authority\",\"no_request_selected_path_source_or_patch_bytes\",\"single_exported_function_display_rename_only\",\"complete_candidate_validation_occurs_before_derivation_is_retained\"]}}",
         quote_json(PROJECT_RENAME_DERIVATION_SCHEMA),
-        quote_json(super::PROJECT_SCHEMA),
+        quote_json(snapshot.manifest.schema()),
         quote_json(snapshot.project_revision()),
         quote_json(snapshot.workspace_revision()),
         quote_json(target_id),
@@ -367,7 +359,7 @@ pub(super) fn prepare(
     let impact_payload = format!(
         "{{\"schema\":{},\"project_schema\":{},\"operation\":{{\"kind\":\"display_rename\",\"stable_id\":{},\"from\":{},\"to\":{},\"path\":{}}},\"base_project_revision\":{},\"candidate_project_revision\":{},\"base_workspace_revision\":{},\"candidate_workspace_revision\":{},\"base_project_graph_digest\":{},\"candidate_project_graph_digest\":{},\"derivation_digest\":{},\"preview_digest\":{},\"base_dependency_impact\":{},\"candidate_dependency_impact\":{},\"conclusions\":{{\"stable_identity_preserved\":true,\"selected_external_export_preserved\":true,\"behavioral_call_edge_delta\":false,\"source_projection_changed\":true,\"rebuild_required\":true}},\"nonclaims\":[\"bounded_display_rename_delta_not_general_project_impact\",\"structural_reverse_closure_over_six_edge_families_only\",\"no_target_execution_external_consumer_or_compatibility_proof\",\"no_commit_authority\"]}}",
         quote_json(PROJECT_CHANGE_IMPACT_SCHEMA),
-        quote_json(super::PROJECT_SCHEMA),
+        quote_json(snapshot.manifest.schema()),
         quote_json(target_id),
         quote_json(from),
         quote_json(to),
@@ -390,9 +382,9 @@ pub(super) fn prepare(
         "Project change impact",
     )?;
     let review_payload = format!(
-        "{{\"schema\":{},\"project_schema\":{},\"base_project_revision\":{},\"candidate_project_revision\":{},\"preview_digest\":{},\"impact_digest\":{},\"impact\":{},\"sections\":{{\"behavior\":[{{\"code\":\"project_display_rename_behavior_preserved\",\"assessment\":\"unchanged\",\"evidence\":\"impact.conclusions.behavioral_call_edge_delta\"}}],\"api_identity\":[{{\"code\":\"project_stable_export_identity_preserved\",\"assessment\":\"source_display_changed_external_identity_unchanged\",\"evidence\":\"impact.conclusions.stable_identity_preserved\"}}],\"security_authority\":[{{\"code\":\"project_authority_unchanged\",\"assessment\":\"unchanged\",\"evidence\":\"impact.base_dependency_impact\"}}],\"memory_ownership\":[{{\"code\":\"project_scalar_ownership_unchanged\",\"assessment\":\"unchanged\",\"evidence\":\"impact.conclusions.behavioral_call_edge_delta\"}}],\"target_artifact\":[{{\"code\":\"project_rebuild_required\",\"assessment\":\"changed_revision_requires_rebuild\",\"evidence\":\"impact.conclusions.rebuild_required\"}}],\"migration\":[{{\"code\":\"project_source_display_migration\",\"assessment\":\"source_projection_changed_stable_consumers_unchanged\",\"evidence\":\"impact.conclusions.source_projection_changed\"}}],\"unsafe\":[{{\"code\":\"project_unsafe_surface_absent\",\"assessment\":\"not_present_in_admitted_profile\",\"evidence\":\"impact.operation.kind\"}}]}},\"verdict\":\"review_required_rebuild_safe_for_stable_id_consumers_within_bounded_profile\",\"nonclaims\":[\"fixed_bounded_display_rename_review_not_general_security_or_compatibility_audit\",\"no_human_approval_policy_provenance_or_commit_authority\",\"no_target_execution\"]}}",
+        "{{\"schema\":{},\"project_schema\":{},\"base_project_revision\":{},\"candidate_project_revision\":{},\"preview_digest\":{},\"impact_digest\":{},\"impact\":{},\"sections\":{{\"behavior\":[{{\"code\":\"project_display_rename_behavior_preserved\",\"assessment\":\"unchanged\",\"evidence\":\"impact.conclusions.behavioral_call_edge_delta\"}}],\"api_identity\":[{{\"code\":\"project_stable_export_identity_preserved\",\"assessment\":\"source_display_changed_external_identity_unchanged\",\"evidence\":\"impact.conclusions.stable_identity_preserved\"}}],\"security_authority\":[{{\"code\":\"project_authority_facts_unchanged\",\"assessment\":\"unchanged\",\"evidence\":\"display_rename_equivalent\"}}],\"memory_ownership\":[{{\"code\":\"project_ownership_facts_unchanged\",\"assessment\":\"unchanged\",\"evidence\":\"display_rename_equivalent\"}}],\"target_artifact\":[{{\"code\":\"project_rebuild_required\",\"assessment\":\"changed_revision_requires_rebuild\",\"evidence\":\"impact.conclusions.rebuild_required\"}}],\"migration\":[{{\"code\":\"project_source_display_migration\",\"assessment\":\"source_projection_changed_stable_consumers_unchanged\",\"evidence\":\"impact.conclusions.source_projection_changed\"}}],\"unsafe\":[{{\"code\":\"project_unsafe_facts_unchanged\",\"assessment\":\"unchanged\",\"evidence\":\"display_rename_equivalent\"}}]}},\"verdict\":\"review_required_rebuild_safe_for_stable_id_consumers_within_bounded_profile\",\"nonclaims\":[\"fixed_bounded_display_rename_review_not_general_security_or_compatibility_audit\",\"no_human_approval_policy_provenance_or_commit_authority\",\"no_target_execution\"]}}",
         quote_json(PROJECT_CHANGE_REVIEW_SCHEMA),
-        quote_json(super::PROJECT_SCHEMA),
+        quote_json(snapshot.manifest.schema()),
         quote_json(snapshot.project_revision()),
         quote_json(&candidate.project_revision),
         quote_json(&preview_digest),
@@ -408,7 +400,7 @@ pub(super) fn prepare(
     let change_preview_payload = format!(
         "{{\"schema\":{},\"project_schema\":{},\"base_project_revision\":{},\"candidate_project_revision\":{},\"base_workspace_revision\":{},\"candidate_workspace_revision\":{},\"derivation_digest\":{},\"rename_preview_digest\":{},\"impact_digest\":{},\"review_digest\":{},\"rename_preview\":{},\"impact\":{},\"review\":{},\"nonclaims\":[\"bounded_display_rename_change_only\",\"read_only_preview_no_commit_authority\",\"no_general_patch_multi_file_or_target_execution\"]}}",
         quote_json(PROJECT_CHANGE_PREVIEW_SCHEMA),
-        quote_json(super::PROJECT_SCHEMA),
+        quote_json(snapshot.manifest.schema()),
         quote_json(snapshot.project_revision()),
         quote_json(&candidate.project_revision),
         quote_json(snapshot.workspace_revision()),

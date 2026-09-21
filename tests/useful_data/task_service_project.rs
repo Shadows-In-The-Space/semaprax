@@ -25,8 +25,9 @@
 //! could pass CI silently. `entry_and_conformance_return_zero_on_interpreter_native_and_wasm`
 //! below closes that gap the same way the sibling projects already do.
 
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use semaprax::project::{
     ProjectCandidate, SemanticQuery, SemanticTransaction, SemanticTransactionRenameDisplayName,
@@ -36,7 +37,7 @@ use semaprax::workspace_analysis::{
     WorkspaceAnalysisTargetKind, WorkspaceContextOptions, WorkspaceImpactOptions,
 };
 use semaprax::{codegen, project};
-use serde_json::json;
+use serde_json::{json, Value};
 
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/task-service-project")
@@ -50,6 +51,28 @@ fn scratch(label: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).unwrap();
     path.canonicalize().unwrap()
+}
+
+struct ScratchTree(PathBuf);
+
+impl ScratchTree {
+    fn new(label: &str) -> Self {
+        Self(scratch(label))
+    }
+}
+
+impl std::ops::Deref for ScratchTree {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for ScratchTree {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn compile_c(source: &str, output: &Path, optimization: &str) {
@@ -78,6 +101,87 @@ fn run_returns_zero(path: &Path) {
         "{} did not report success",
         path.display()
     );
+}
+
+/// A deliberately small JSON-RPC client for the installed coding-agent
+/// transport. It owns only a child process and is used below to prove the
+/// reference application's workflow through the public transport, rather than
+/// by calling the transaction core directly.
+struct AgentWorkflowDaemon {
+    child: Child,
+    input: ChildStdin,
+    output: BufReader<ChildStdout>,
+}
+
+impl Drop for AgentWorkflowDaemon {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+impl AgentWorkflowDaemon {
+    fn start(manifest: &Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_semapraxd"))
+            .arg("--stdio")
+            .arg("--manifest-path")
+            .arg(manifest)
+            .arg("--allow-project-workflow")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the coding-agent transport must start");
+        Self {
+            input: child.stdin.take().expect("daemon stdin must be piped"),
+            output: BufReader::new(child.stdout.take().expect("daemon stdout must be piped")),
+            child,
+        }
+    }
+
+    fn call(&mut self, request: Value) -> Value {
+        self.input
+            .write_all(&serde_json::to_vec(&request).expect("request must be JSON"))
+            .expect("daemon stdin must accept a request");
+        self.input
+            .write_all(b"\n")
+            .expect("daemon stdin must accept a delimiter");
+        self.input.flush().expect("daemon stdin must flush");
+        let mut response = String::new();
+        if self
+            .output
+            .read_line(&mut response)
+            .expect("daemon stdout must be readable")
+            == 0
+        {
+            let status = self.child.wait().expect("daemon must be waitable");
+            let mut stderr = String::new();
+            self.child
+                .stderr
+                .take()
+                .expect("daemon stderr must be piped")
+                .read_to_string(&mut stderr)
+                .expect("daemon stderr must be readable");
+            panic!("coding-agent transport closed before responding ({status}): {stderr}");
+        }
+        serde_json::from_str(response.trim_end()).expect("daemon response must be JSON")
+    }
+
+    fn finish(mut self) {
+        let response = self.call(json!({"jsonrpc":"2.0","id":99,"method":"shutdown"}));
+        assert_eq!(response["result"]["ok"], true);
+        let status = self.child.wait().expect("daemon must stop");
+        let mut stderr = String::new();
+        self.child
+            .stderr
+            .take()
+            .expect("daemon stderr must be piped")
+            .read_to_string(&mut stderr)
+            .expect("daemon stderr must be readable");
+        assert!(status.success(), "coding-agent transport failed: {stderr}");
+    }
 }
 
 /// `check`, `test`, and `run` all pass on the interpreter, and the manifest's
@@ -458,6 +562,144 @@ fn stable_id_rename_inspect_preview_apply_and_retest_preserve_the_service() {
         Ok(())
     })
     .unwrap();
+}
+
+/// The same feature workflow through the public coding-agent transport: derive
+/// a stable-ID rename, preview it, inspect its impact and review, apply only to
+/// a validated candidate into a disposable project, and retest the applied
+/// revision. This is intentionally a
+/// real service declaration rather than the calculator fixture used by the
+/// transport's unit tests. In particular, it proves the transport keeps the
+/// bundled-dependency closure and the public web-export identity intact while
+/// it moves through its derived/prepared/applied states. The repository fixture
+/// remains read-only and no candidate is published.
+#[test]
+fn coding_agent_transport_completes_service_feature_workflow_in_disposable_project() {
+    let checked_in = fixture();
+    let checked_in_core = std::fs::read(checked_in.join("src/core.spx")).unwrap();
+    let working = ScratchTree::new("agent-transport");
+    std::fs::create_dir_all(working.join("src")).unwrap();
+    std::fs::copy(
+        checked_in.join("semaprax.toml"),
+        working.join("semaprax.toml"),
+    )
+    .unwrap();
+    for relative in ["src/app.spx", "src/core.spx", "src/tests.spx"] {
+        std::fs::copy(checked_in.join(relative), working.join(relative)).unwrap();
+    }
+    let manifest = working.join("semaprax.toml");
+    let core = working.join("src/core.spx");
+    let mut daemon = AgentWorkflowDaemon::start(&manifest);
+
+    let opened = daemon.call(json!({"jsonrpc":"2.0","id":1,"method":"workspace/open"}));
+    let base_project = opened["result"]["project_revision"]
+        .as_str()
+        .expect("workspace/open must return the base project revision")
+        .to_owned();
+    let base_workspace = opened["result"]["workspace_revision"]
+        .as_str()
+        .expect("workspace/open must return the base workspace revision")
+        .to_owned();
+
+    let derivation = daemon.call(json!({
+        "jsonrpc":"2.0","id":2,"method":"rename/derive","params":{
+            "project_revision":base_project,
+            "workspace_revision":base_workspace,
+            "target_id":"task_service.core.identifier_is_valid",
+            "from":"identifier_is_valid",
+            "to":"identifier_name_is_valid"
+        }
+    }));
+    assert!(
+        derivation.get("error").is_none(),
+        "rename/derive failed: {derivation}"
+    );
+    assert_eq!(
+        derivation["result"]["derivation"]["schema"],
+        "semaprax.project-rename-derivation.v1"
+    );
+    let derivation_digest = derivation["result"]["derivation"]["artifact_digest"]
+        .as_str()
+        .expect("rename derivation must be digest-bound")
+        .to_owned();
+
+    let preview = daemon.call(json!({
+        "jsonrpc":"2.0","id":3,"method":"change/preview","params":{
+            "project_revision":base_project,
+            "workspace_revision":base_workspace,
+            "derivation_digest":derivation_digest
+        }
+    }));
+    let change = &preview["result"]["change"];
+    assert_eq!(change["schema"], "semaprax.project-change-preview.v1");
+    assert_eq!(
+        change["impact"]["conclusions"]["stable_identity_preserved"],
+        true
+    );
+    let preview_digest = change["artifact_digest"]
+        .as_str()
+        .expect("change preview must be digest-bound")
+        .to_owned();
+    let candidate_project = change["rename_preview"]["candidate_project_revision"]
+        .as_str()
+        .expect("preview must identify its candidate project")
+        .to_owned();
+    let candidate_workspace = change["rename_preview"]["candidate_workspace_revision"]
+        .as_str()
+        .expect("preview must identify its candidate workspace")
+        .to_owned();
+
+    for (id, method, schema) in [
+        (4, "impact", "semaprax.project-change-impact.v1"),
+        (5, "review", "semaprax.project-change-review.v1"),
+    ] {
+        let response = daemon.call(json!({
+            "jsonrpc":"2.0","id":id,"method":method,"params":{
+                "project_revision":base_project,
+                "workspace_revision":base_workspace,
+                "change_preview_digest":preview_digest
+            }
+        }));
+        assert_eq!(response["result"][method]["schema"], schema);
+    }
+
+    let applied = daemon.call(json!({
+        "jsonrpc":"2.0","id":6,"method":"change/apply","params":{
+            "project_revision":base_project,
+            "workspace_revision":base_workspace,
+            "change_preview_digest":preview_digest
+        }
+    }));
+    assert_eq!(applied["result"]["applied"], true);
+    assert_eq!(
+        applied["result"]["candidate_project_revision"],
+        candidate_project
+    );
+    assert_eq!(
+        applied["result"]["candidate_workspace_revision"],
+        candidate_workspace
+    );
+
+    let retest = daemon.call(json!({
+        "jsonrpc":"2.0","id":7,"method":"test","params":{
+            "project_revision":candidate_project,
+            "workspace_revision":candidate_workspace
+        }
+    }));
+    assert_eq!(retest["result"]["command_succeeded"], true);
+    assert_eq!(
+        retest["result"]["execution"]["outcome"]["value"], "0",
+        "the candidate's complete conformance closure must still pass"
+    );
+    let applied_core = std::fs::read_to_string(&core).unwrap();
+    assert!(applied_core.contains("fn identifier_name_is_valid("));
+    assert!(applied_core.contains("@id(\"task_service.core.identifier_is_valid\")"));
+    assert_eq!(
+        std::fs::read(checked_in.join("src/core.spx")).unwrap(),
+        checked_in_core,
+        "transport workflow must stay inside its disposable project"
+    );
+    daemon.finish();
 }
 
 /// Issue #277's acceptance criterion, using this project's real

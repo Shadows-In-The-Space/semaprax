@@ -105,7 +105,7 @@ replacement_source
 Each base schema/revision/digest tuple must exactly equal the authenticated base
 manifest. Replacement source is the complete canonical source for the same
 path, at most 1,048,576 bytes per file and 4,194,304 bytes in total. The
-candidate has the same 2–16-file path set, remains at most 16,777,216 source
+candidate has the same 2–32-file path set, remains at most 16,777,216 source
 bytes, and still contains the exact canonical `entry_module`.
 
 The proposal digest is lowercase `sha256:` plus 64 hex digits over:
@@ -314,7 +314,7 @@ Every artifact carries this exact ordered `limits` object:
 
 | Key | Value |
 | --- | ---: |
-| `max_managed_files` | 16 |
+| `max_managed_files` | 32 |
 | `max_changed_files` | 16 |
 | `max_source_bytes_per_change` | 1,048,576 |
 | `max_total_base_source_bytes` | 16,777,216 |

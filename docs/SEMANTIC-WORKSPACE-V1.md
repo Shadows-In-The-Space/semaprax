@@ -5,7 +5,7 @@ Status: versioned bounded reference; the completion matrix owns product status.
 Audience: workspace tool authors and compiler contributors.
 
 Semantic Workspace v1 is the managed, read-only source authority for unified
-cross-file SEMAPRAX semantics. It authenticates 2–16 existing canonical `.spx`
+cross-file SEMAPRAX semantics. It authenticates 2–32 existing canonical `.spx`
 files, resolves them together once, and publishes an immutable generation by
 replacing one `ACTIVE` file. Initialization never rewrites the original source
 paths.
@@ -62,7 +62,7 @@ The caller-owned path set has schema
 {"schema":"semaprax.workspace-semantic-path-set.v1","files":[{"path":"a.spx"},{"path":"b.spx"}]}
 ```
 
-`files` contains 2–16 strictly increasing, unique canonical relative managed
+`files` contains 2–32 strictly increasing, unique canonical relative managed
 paths. Absolute paths, `.` or `..` components, empty components, noncanonical
 separators, aliases, symlinks, junctions, reparse points, and duplicate physical
 identities are rejected.
@@ -142,7 +142,7 @@ inventory failures preserve the Workspace `SPX-G150`–`SPX-G153` and
 
 | Field | Maximum |
 | --- | ---: |
-| `managed_files` | 16 |
+| `managed_files` | 32 |
 | `total_source_bytes` | 16,777,216 |
 | `path_set_bytes` | 1,048,576 |
 | `manifest_bytes` | 1,048,576 |
@@ -153,7 +153,7 @@ inventory failures preserve the Workspace `SPX-G150`–`SPX-G153` and
 | unexpected inventory entries | 0 |
 
 Zero or one source reports `SPX-G174` with
-`Semantic Workspace requires 2..16 source files`; more than 16 reports
+`Semantic Workspace requires 2..32 source files`; more than 32 reports
 `SPX-G175` for `managed_files`. Canonical grammar/mode errors are `SPX-G174`.
 Semantic Workspace storage bounds are `SPX-G175`. The unified Workspace
 Semantic Graph build retains its own `SPX-G170`–`SPX-G173` diagnostics.

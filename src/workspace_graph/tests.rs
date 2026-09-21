@@ -1286,7 +1286,7 @@ fn file_limit_fails_before_parse() {
     assert_eq!(error[0].code, "SPX-G170");
     assert_eq!(
         error[0].message,
-        "Workspace Semantic Graph requires 2..16 source files"
+        "Workspace Semantic Graph requires 2..32 source files"
     );
 }
 

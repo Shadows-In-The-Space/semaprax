@@ -124,6 +124,14 @@ database, HTTP, authentication, job, trace, metric, and export-policy facts
 lives here rather than in source comments that a canonical rename would have
 to drop.
 
+The public coding-agent transport is exercised separately against this exact
+project: it opens the authenticated workspace, derives the same public rename,
+renders its preview, impact and review, applies the validated candidate inside
+a disposable project copy, and runs the applied revision's full test closure.
+This confirms the public transport's derived/prepared/applied state flow for a
+real bundled dependency closure; it does not write the checked-in fixture or
+publish a candidate.
+
 **The observability policy closure now fits, but only as pure policy
 dependencies.** Its reached closure includes `std.encoding`, `std.log`,
 `std.log.redact`, and `std.num.overflow`; the checked-in

@@ -1006,7 +1006,11 @@ fn validate_derivation_usage(
         return Err(replay());
     }
     for (field, used, maximum) in [
-        ("managed_files", usage.managed_files, 16),
+        (
+            "managed_files",
+            usage.managed_files,
+            semantic_workspace::MAX_MANAGED_FILES,
+        ),
         ("operations", usage.operations, MAX_OPERATIONS),
         ("affected_paths", usage.affected_paths, MAX_AFFECTED_PATHS),
         ("planned_edits", usage.planned_edits, MAX_PLANNED_EDITS),
@@ -2353,7 +2357,7 @@ fn digest_without_length(domain: &[u8], bytes: &[u8]) -> String {
 }
 
 const DERIVATION_LIMITS: [(&str, usize); 21] = [
-    ("max_managed_files", 16),
+    ("max_managed_files", semantic_workspace::MAX_MANAGED_FILES),
     ("max_operations_proposal_bytes", MAX_PROPOSAL_BYTES),
     ("max_operations", MAX_OPERATIONS),
     ("max_affected_paths", MAX_AFFECTED_PATHS),

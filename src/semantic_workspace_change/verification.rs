@@ -10,7 +10,7 @@ use super::artifact::{
     SemanticWorkspaceChangeArtifacts, EVIDENCE_SCHEMA, MAX_EVIDENCE_BYTES, RECEIPT_SCHEMA,
 };
 use super::{limit, MAX_CHANGED_FILES};
-use crate::diagnostic::Diagnostic;
+use crate::{diagnostic::Diagnostic, semantic_workspace};
 
 const FORMAT_LEAD: &str =
     "Semantic Workspace Change Evidence must be one canonical JSON line with one terminal LF";
@@ -80,7 +80,7 @@ const LIMIT_KEYS: [&str; 27] = [
     "max_unexpected_inventory_entries",
 ];
 const LIMIT_VALUES: [usize; 27] = [
-    16,
+    semantic_workspace::MAX_MANAGED_FILES,
     16,
     1_048_576,
     16_777_216,
@@ -281,7 +281,7 @@ fn validate_claim_bindings(
     }
     let budget = object(&top["budget"])?;
     let maxima = [
-        ("used_managed_files", 16),
+        ("used_managed_files", semantic_workspace::MAX_MANAGED_FILES),
         ("used_changed_files", 16),
         ("used_total_base_source_bytes", 16_777_216),
         ("used_total_candidate_source_bytes", 16_777_216),

@@ -826,7 +826,7 @@ module graph.v14;
                 "{\"caller_path\":\"m/provider.spx\",\"caller\":\"provider.api\",\"target_path\":\"a/types.spx\",\"target\":\"types.point\",\"kind\":\"type_import\",\"site\":\"module\",\"expression\":\"use.0\",\"ast_path\":\"use.0\",\"alias\":\"Point\",\"ordinal\":0}"
             ));
         assert!(json.contains(
-                "\"max_managed_files\":16,\"max_reachable_modules\":16,\"max_entry_module_bytes\":16777216,\"max_total_source_bytes\":16777216"
+                "\"max_managed_files\":32,\"max_reachable_modules\":32,\"max_entry_module_bytes\":16777216,\"max_total_source_bytes\":16777216"
             ));
         assert!(json.contains(
                 "\"used_managed_files\":4,\"used_reachable_modules\":3,\"used_entry_module_bytes\":9,\"used_total_source_bytes\":"

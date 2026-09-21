@@ -156,44 +156,26 @@ fn run_scenario() -> i64
     let update_tick = 1200usize;
     let logout_tick = 1201usize;
     let username = [97u8, 108u8, 105u8, 99u8, 101u8];
-    let registered = registration_admitted(array_as_slice(username), 0usize, 10usize, 65536usize, 3usize, 4usize);
     let active = 0usize;
     let owner_account_id = 1;
-    let usable_at_login = session_is_usable(active, login_tick, idle_deadline, absolute_deadline);
     let table_name = [116u8, 97u8, 115u8, 107u8, 115u8];
-    let table_ok = identifier_is_valid(array_as_slice(table_name));
-    let platform_ready = platform_decisions_admit();
     let task_id = 1;
     let state_at_update = session_next_state_on_access(active, update_tick, idle_deadline, absolute_deadline);
-    let session_usable_at_update = session_is_usable(state_at_update, update_tick, idle_deadline, absolute_deadline);
-    let update_authorized = task_owner_authorized(owner_account_id, owner_account_id, session_usable_at_update);
     let in_progress_status = 1usize;
     let job_key = [1u8, 4u8, 3u8];
-    let enqueue_legal = enqueue_is_legal(0usize, update_tick, update_tick);
     let enqueue_outcome_code = enqueue_outcome(false, array_as_slice(job_key), array_as_slice(job_key));
     let finished_job_state = mark_job_succeeded(0u8, 3u8);
-    let status_done = job_status_is_complete(finished_job_state);
     let logged_out = session_next_state_on_logout(state_at_update);
-    let usable_after_logout = session_is_usable(logged_out, logout_tick, idle_deadline, absolute_deadline);
     let intruder_account_id = 2;
-    let intruder_rejected = !task_owner_authorized(owner_account_id, intruder_account_id, true);
-    let retired_session_rejected = !usable_after_logout;
     let bad_method = [103u8, 101u8, 116u8];
-    let method_rejected = method_is_rejected(array_as_slice(bad_method));
     let bad_identifier = [49u8, 116u8, 97u8, 115u8, 107u8];
-    let identifier_rejected = !identifier_is_valid(array_as_slice(bad_identifier));
     let trace_id = [52u8, 98u8, 102u8, 57u8, 50u8, 102u8, 51u8, 53u8, 55u8, 55u8, 98u8, 51u8, 52u8, 100u8, 97u8, 54u8, 97u8, 51u8, 99u8, 101u8, 57u8, 50u8, 57u8, 100u8, 48u8, 101u8, 48u8, 101u8, 52u8, 55u8, 51u8, 54u8];
     let parent_id = [48u8, 48u8, 102u8, 48u8, 54u8, 55u8, 97u8, 97u8, 48u8, 98u8, 97u8, 57u8, 48u8, 50u8, 98u8, 55u8];
     let trace_flags = [48u8, 49u8];
-    let structured_log_ok = structured_log_policy_is_admitted(2u8, 2u8, 4usize, false, false, false, false, false, false);
-    let trace_context_ok = trace_context_is_admitted(array_as_slice(trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), false);
     let metric_label = [106u8, 111u8, 98u8, 95u8, 115u8, 116u8, 97u8, 116u8, 101u8];
     let metric_value = [115u8, 117u8, 99u8, 99u8, 101u8, 101u8, 100u8, 101u8, 100u8];
-    let metric_ok = completed_job_metric_is_admitted(array_as_slice(metric_label), array_as_slice(metric_value), false);
     let export_target = [116u8, 97u8, 115u8, 107u8, 45u8, 115u8, 101u8, 114u8, 118u8, 105u8, 99u8, 101u8, 45u8, 111u8, 98u8, 115u8, 101u8, 114u8, 118u8, 97u8, 98u8, 105u8, 108u8, 105u8, 116u8, 121u8];
-    let export_ok = completed_job_export_is_admitted(0, 1usize, 32usize, array_as_slice(export_target));
     let webhook_signature = [97u8; 64];
     let delivery_descriptor = [116u8, 97u8, 115u8, 107u8, 45u8, 49u8];
-    let webhook_ok = webhook_delivery_policy_is_admitted(array_as_slice(webhook_signature), 128usize, 1000, 1100, false, array_as_slice(delivery_descriptor), array_as_slice(delivery_descriptor), 1, false);
-    if registered && usable_at_login && table_ok && platform_ready && task_id == 1 && update_authorized && in_progress_status == 1usize && enqueue_legal && enqueue_outcome_code == 0usize && status_done && intruder_rejected && retired_session_rejected && method_rejected && identifier_rejected && structured_log_ok && trace_context_ok && metric_ok && export_ok && webhook_ok { 0 } else { 1 }
+    if registration_admitted(array_as_slice(username), 0usize, 10usize, 65536usize, 3usize, 4usize) { if session_is_usable(active, login_tick, idle_deadline, absolute_deadline) { if identifier_is_valid(array_as_slice(table_name)) { if platform_decisions_admit() { if task_id == 1 { if task_owner_authorized(owner_account_id, owner_account_id, session_is_usable(state_at_update, update_tick, idle_deadline, absolute_deadline)) { if in_progress_status == 1usize { if enqueue_is_legal(0usize, update_tick, update_tick) { if enqueue_outcome_code == 0usize { if job_status_is_complete(finished_job_state) { if !task_owner_authorized(owner_account_id, intruder_account_id, true) { if !session_is_usable(logged_out, logout_tick, idle_deadline, absolute_deadline) { if method_is_rejected(array_as_slice(bad_method)) { if !identifier_is_valid(array_as_slice(bad_identifier)) { if structured_log_policy_is_admitted(2u8, 2u8, 4usize, false, false, false, false, false, false) { if trace_context_is_admitted(array_as_slice(trace_id), array_as_slice(parent_id), array_as_slice(trace_flags), false) { if completed_job_metric_is_admitted(array_as_slice(metric_label), array_as_slice(metric_value), false) { if completed_job_export_is_admitted(0, 1usize, 32usize, array_as_slice(export_target)) { if webhook_delivery_policy_is_admitted(array_as_slice(webhook_signature), 128usize, 1000, 1100, false, array_as_slice(delivery_descriptor), array_as_slice(delivery_descriptor), 1, false) { 0 } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 } } else { 1 }
 }

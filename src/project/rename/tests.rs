@@ -154,13 +154,34 @@ fn wrong_from_non_export_collision_and_invalid_complete_candidate_fail_closed() 
 }
 
 #[test]
-fn newer_project_profiles_fail_before_v1_rename_evidence_is_constructed() {
+fn useful_data_profile_rename_binds_every_artifact_to_its_project_schema() {
     let manifest =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/binary-frame-project/semaprax.toml");
     let snapshot = super::super::load_snapshot(&manifest).unwrap();
-    assert_rename_error(
-        snapshot.prepare_rename("binary-frame.length", "frame_length", "measured_length"),
-        "only semaprax.project.v1",
+    let prepared = snapshot
+        .prepare_rename("binary-frame.length", "frame_length", "measured_length")
+        .unwrap();
+    let project_schema = snapshot.manifest.schema();
+
+    for artifact in [
+        prepared.preview(),
+        prepared.derivation(),
+        prepared.impact(),
+        prepared.review(),
+        prepared.change_preview(),
+    ] {
+        let value: serde_json::Value = serde_json::from_str(artifact).unwrap();
+        assert_eq!(value["project_schema"], project_schema);
+    }
+
+    let review: serde_json::Value = serde_json::from_str(prepared.review()).unwrap();
+    assert_eq!(
+        review["sections"]["memory_ownership"][0]["code"],
+        "project_ownership_facts_unchanged"
+    );
+    assert_eq!(
+        review["sections"]["unsafe"][0]["code"],
+        "project_unsafe_facts_unchanged"
     );
 }
 

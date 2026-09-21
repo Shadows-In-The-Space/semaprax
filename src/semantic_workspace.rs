@@ -20,7 +20,9 @@ use crate::{graph, review, workspace, workspace_graph};
 pub(crate) const PATH_SET_SCHEMA: &str = "semaprax.workspace-semantic-path-set.v1";
 pub(crate) const ROOT_SCHEMA: &str = "semaprax.workspace-semantic-root.v1";
 pub(crate) const MANIFEST_SCHEMA: &str = "semaprax.workspace-semantic-manifest.v1";
-pub(crate) const MAX_MANAGED_FILES: usize = 16;
+/// Bounded to the closed Project source envelope. This admission bound is
+/// separate from Workspace Graph's post-pruning `MAX_FILES` bound.
+pub(crate) const MAX_MANAGED_FILES: usize = 32;
 pub(crate) const MAX_TOTAL_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_CONTROL_JSON_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_JSON_DEPTH: usize = 8;
@@ -459,7 +461,7 @@ fn parse_path_set_inner(source: &str) -> Result<Vec<String>, Vec<Diagnostic>> {
     }
     let values = array(object, "files")?;
     if values.len() < 2 {
-        return Err(grammar("Semantic Workspace requires 2..16 source files"));
+        return Err(grammar("Semantic Workspace requires 2..32 source files"));
     }
     if values.len() > MAX_MANAGED_FILES {
         return Err(storage_limit("managed_files", MAX_MANAGED_FILES));
@@ -567,7 +569,7 @@ fn parse_manifest_inner(source: &str) -> Result<Vec<SemanticWorkspaceFileFact>, 
     }
     let values = array(object, "files")?;
     if values.len() < 2 {
-        return Err(grammar("Semantic Workspace requires 2..16 source files"));
+        return Err(grammar("Semantic Workspace requires 2..32 source files"));
     }
     if values.len() > MAX_MANAGED_FILES {
         return Err(storage_limit("managed_files", MAX_MANAGED_FILES));
@@ -656,7 +658,7 @@ pub(crate) fn render_manifest_facts(
     files: &[(&str, &str, &str, &str, usize)],
 ) -> Result<String, Vec<Diagnostic>> {
     if files.len() < 2 {
-        return Err(grammar("Semantic Workspace requires 2..16 source files"));
+        return Err(grammar("Semantic Workspace requires 2..32 source files"));
     }
     if files.len() > MAX_MANAGED_FILES {
         return Err(storage_limit("managed_files", MAX_MANAGED_FILES));
@@ -703,7 +705,7 @@ pub(crate) fn render_manifest_facts(
 
 fn validate_path_set_values(paths: &[String]) -> Result<(), Vec<Diagnostic>> {
     if paths.len() < 2 {
-        return Err(grammar("Semantic Workspace requires 2..16 source files"));
+        return Err(grammar("Semantic Workspace requires 2..32 source files"));
     }
     if paths.len() > MAX_MANAGED_FILES {
         return Err(storage_limit("managed_files", MAX_MANAGED_FILES));
@@ -736,7 +738,7 @@ fn validate_path_set_values(paths: &[String]) -> Result<(), Vec<Diagnostic>> {
 
 fn validate_manifest_values(files: &[SemanticWorkspaceFileFact]) -> Result<(), Vec<Diagnostic>> {
     if files.len() < 2 {
-        return Err(grammar("Semantic Workspace requires 2..16 source files"));
+        return Err(grammar("Semantic Workspace requires 2..32 source files"));
     }
     if files.len() > MAX_MANAGED_FILES {
         return Err(storage_limit("managed_files", MAX_MANAGED_FILES));
@@ -1047,7 +1049,7 @@ fn normalize_parser_diagnostics(
         .into_iter()
         .map(|diagnostic| {
             if diagnostic.code == "SPX-G174"
-                && diagnostic.message != "Semantic Workspace requires 2..16 source files"
+                && diagnostic.message != "Semantic Workspace requires 2..32 source files"
             {
                 let reason = diagnostic.message;
                 Diagnostic::io("SPX-G174", canonical_message).with_help(reason)

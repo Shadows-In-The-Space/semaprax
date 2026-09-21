@@ -860,7 +860,7 @@ pub(crate) fn derive_candidate_overlay(
     }
     if candidate.len() < MIN_MANAGED_FILES || candidate.len() > MAX_MANAGED_FILES {
         return Err(conflict(
-            "Semantic Workspace Structural Change candidate path set must contain 2..16 files",
+            "Semantic Workspace Structural Change candidate path set must contain 2..32 files",
         ));
     }
     let total_candidate_source_bytes = candidate.values().try_fold(0usize, |total, source| {

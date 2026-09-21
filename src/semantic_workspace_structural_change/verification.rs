@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 
 use super::artifact::SemanticWorkspaceStructuralChangeArtifacts;
 use super::{limit, Diagnostic};
+use crate::semantic_workspace;
 
 const EVIDENCE_SCHEMA: &str = "semaprax.workspace-semantic-structural-change-evidence.v1";
 const VERIFICATION_RECEIPT_SCHEMA: &str =
@@ -87,7 +88,7 @@ const LIMIT_KEYS: [&str; 29] = [
     "max_unexpected_inventory_entries",
 ];
 const LIMIT_VALUES: [usize; 29] = [
-    16,
+    semantic_workspace::MAX_MANAGED_FILES,
     16,
     32,
     240,
@@ -297,8 +298,14 @@ fn validate_claim_bindings(
     }
     let budget = object(&top["budget"])?;
     for (field, maximum) in [
-        ("used_base_managed_files", 16),
-        ("used_candidate_managed_files", 16),
+        (
+            "used_base_managed_files",
+            semantic_workspace::MAX_MANAGED_FILES,
+        ),
+        (
+            "used_candidate_managed_files",
+            semantic_workspace::MAX_MANAGED_FILES,
+        ),
         ("used_operations", 16),
         ("used_affected_paths", 32),
         ("used_created_files", 16),

@@ -59,7 +59,7 @@ define `main`. Malformed entry text is `SPX-G170`; an absent canonical module
 is `SPX-G172`. The length check precedes grammar and never echoes an oversized
 entry.
 
-All 2–16 managed modules are parsed, resolved, cross-file checked, and bounded
+All 2–32 managed modules are parsed, resolved, cross-file checked, and bounded
 before projection. Modules sort by UTF-8 path bytes; permits retain source
 order. Declarations sort by stable ID and contain closure-owned source
 declarations plus the compiler prelude exactly once. Compiler-owned prelude
@@ -118,8 +118,8 @@ The `limits` object has this exact order and values:
 
 | Key | Value |
 | --- | ---: |
-| `max_managed_files` | 16 |
-| `max_reachable_modules` | 16 |
+| `max_managed_files` | 32 |
+| `max_reachable_modules` | 32 |
 | `max_entry_module_bytes` | 16,777,216 |
 | `max_total_source_bytes` | 16,777,216 |
 | `max_declarations` | 4,096 |

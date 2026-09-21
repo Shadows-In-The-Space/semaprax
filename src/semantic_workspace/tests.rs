@@ -228,16 +228,23 @@ fn control_parsers_reject_noncanonical_and_hostile_forms() {
     let error = assert_code(parse_path_set(&raw_path_set(&one)), "SPX-G174");
     assert_eq!(
         error[0].message,
-        "Semantic Workspace requires 2..16 source files"
+        "Semantic Workspace requires 2..32 source files"
     );
-    let over = (0..17)
+    let exact = (0..MAX_MANAGED_FILES)
+        .map(|index| format!("f{index:02}.spx"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parse_path_set(&render_path_set(&exact).unwrap()).unwrap(),
+        exact
+    );
+    let over = (0..=MAX_MANAGED_FILES)
         .map(|index| format!("f{index:02}.spx"))
         .collect::<Vec<_>>();
     assert_code(render_path_set(&over), "SPX-G175");
     let error = assert_code(parse_path_set(&raw_path_set(&over)), "SPX-G175");
     assert_eq!(
         error[0].message,
-        "Semantic Workspace `managed_files` exceeds 16"
+        "Semantic Workspace `managed_files` exceeds 32"
     );
     for paths in [
         vec!["b.spx", "a.spx"],
@@ -376,16 +383,23 @@ fn typed_cardinality_and_manifest_byte_replay_fail_before_unbounded_work() {
     let error = assert_code(parse_manifest(&raw_manifest(&one)), "SPX-G174");
     assert_eq!(
         error[0].message,
-        "Semantic Workspace requires 2..16 source files"
+        "Semantic Workspace requires 2..32 source files"
     );
-    let seventeen = (0..17)
+    let exact = (0..MAX_MANAGED_FILES)
         .map(|index| manifest_fact(&format!("f{index:02}.spx"), 1))
         .collect::<Vec<_>>();
-    assert_code(render_manifest(&seventeen), "SPX-G175");
-    let error = assert_code(parse_manifest(&raw_manifest(&seventeen)), "SPX-G175");
+    assert_eq!(
+        parse_manifest(&render_manifest(&exact).unwrap()).unwrap(),
+        exact
+    );
+    let over = (0..=MAX_MANAGED_FILES)
+        .map(|index| manifest_fact(&format!("f{index:02}.spx"), 1))
+        .collect::<Vec<_>>();
+    assert_code(render_manifest(&over), "SPX-G175");
+    let error = assert_code(parse_manifest(&raw_manifest(&over)), "SPX-G175");
     assert_eq!(
         error[0].message,
-        "Semantic Workspace `managed_files` exceeds 16"
+        "Semantic Workspace `managed_files` exceeds 32"
     );
 }
 

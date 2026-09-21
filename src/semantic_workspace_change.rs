@@ -347,7 +347,7 @@ fn proposal_io_hook(label: &'static str, error: std::io::Error) -> Vec<Diagnosti
 
 pub(crate) const SCHEMA: &str = "semaprax.workspace-semantic-change.v1";
 const MIN_CHANGED_FILES: usize = 2;
-const MAX_CHANGED_FILES: usize = semantic_workspace::MAX_MANAGED_FILES;
+const MAX_CHANGED_FILES: usize = 16;
 const MAX_SOURCE_BYTES_PER_CHANGE: usize = 1024 * 1024;
 const MAX_TOTAL_REPLACEMENT_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ENTRY_MODULE_BYTES: usize = 16 * 1024 * 1024;

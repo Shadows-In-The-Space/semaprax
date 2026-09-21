@@ -52,7 +52,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use validation::{expected_declaration_facts, validate_stub_signatures, WorkspaceValidationIndex};
-const MAX_FILES: usize = 16;
+const MAX_FILES: usize = 32;
 const MAX_TOTAL_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DECLARATIONS: usize = 4096;
 const MAX_CALLABLES: usize = 1024;
@@ -3802,7 +3802,7 @@ fn build_owned_inner(
     if sources.len() < 2 {
         return Err(vec![graph_error(
             "SPX-G170",
-            "Workspace Semantic Graph requires 2..16 source files",
+            "Workspace Semantic Graph requires 2..32 source files",
         )]);
     }
     if sources.len() > MAX_FILES {

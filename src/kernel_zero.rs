@@ -74,6 +74,8 @@ mod graph_projection;
 #[cfg(test)]
 mod lean_fixture;
 #[cfg(test)]
+mod transaction;
+#[cfg(test)]
 mod weights;
 
 /// Returns `true` iff the function declared as `id` in `program` reifies

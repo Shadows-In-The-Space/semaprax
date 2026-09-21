@@ -38,7 +38,7 @@ mod native_executor;
 /// Grant construction and dispatch remain crate-owned so callers cannot mint
 /// or spend authorization outside the lifecycle kernel.
 pub mod target_protocol;
-mod wasm_executor;
+pub(in crate::agent_lifecycle) mod wasm_executor;
 
 use native_executor::NativeStageExecutor;
 use wasm_executor::WasmStageExecutor;

@@ -84,6 +84,10 @@
 //! generic instantiation, a variant `usize` leaf, or a variant case with no
 //! fields -- fails closed with an `SPX-G570`
 //! diagnostic naming the unsupported shape rather than guessing.
+//! A source-synthesized `Bytes` argument is likewise bounded to the same
+//! 65,536-byte stream limit used while decoding a projected `Bytes` result;
+//! an oversized carrier refuses before it is expanded into generated source
+//! or any target artifact is built.
 //!
 //! ## What this is not
 //!
@@ -576,9 +580,11 @@ impl Projection {
     }
 }
 
-/// The bound on one indexed byte stream. Exceeding it throws in the host
-/// script, which fails the whole dispatch; it never truncates a payload.
-const BYTE_STREAM_CAP: usize = 65_536;
+/// The internal bounded Core-Wasm profile's maximum `Bytes` payload. It
+/// bounds both source-synthesized arguments and one indexed result stream;
+/// exceeding it refuses the dispatch rather than truncating a payload. This
+/// is crate-private test/implementation vocabulary, not a public API.
+pub(in crate::agent_lifecycle) const BYTE_STREAM_CAP: usize = 65_536;
 
 /// The helper functions an `IndexedBytes` projection calls from inside a
 /// `match own` arm. They are ordinary checked SPX -- `u8`-to-`i64` and
@@ -887,6 +893,14 @@ fn render_value(
             }
         }
         (ResolvedType::Bytes, RetainedValue::Bytes(item)) => {
+            // An injected driver spells each byte in checked source. Keep
+            // that expansion under the same exact payload bound as the
+            // bounded result-stream reader below; otherwise one untrusted
+            // carrier could turn into arbitrarily large compiler input
+            // before the Node capture limits ever apply.
+            if item.len() > BYTE_STREAM_CAP {
+                return Err(invariant("wasm_executor.argument.bytes_budget"));
+            }
             if item.is_empty() {
                 // Bytes has no literal. Take the exact empty range of one
                 // fixed byte and copy it: this uses the existing owned-data

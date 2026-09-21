@@ -134,3 +134,32 @@ fn core_wasm_stage_executor_keeps_a_malformed_task_carrier_as_a_stable_refusal()
         errors[0].message
     );
 }
+
+/// Source injection renders each input byte as checked `.spx`; the bounded
+/// Core-Wasm profile must reject an oversized carrier before it can expand
+/// into unbounded synthesized compiler input or target work.
+#[test]
+fn core_wasm_stage_executor_refuses_an_oversized_bytes_argument_before_target_work() {
+    let compiled = lifecycle();
+    let task = payload(
+        &compiled.binding.task,
+        vec![0; authorization::wasm_executor::BYTE_STREAM_CAP + 1],
+        0,
+    );
+    let errors = dispatch(
+        authorization::StageBackend::Wasm { source: MODULE },
+        &compiled,
+        &task,
+    )
+    .expect_err("an oversized source-synthesized Bytes carrier must refuse");
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].code, "SPX-G570");
+    assert!(
+        errors[0]
+            .message
+            .contains("wasm_executor.argument.bytes_budget"),
+        "the refusal names the bounded synthesized-input gate: {}",
+        errors[0].message
+    );
+}

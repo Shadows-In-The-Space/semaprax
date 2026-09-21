@@ -90,7 +90,8 @@ fn serialized_replay_refuses_an_authorization_binding_spliced_from_another_grant
         fuel: 4,
     };
     let request_wire = request.canonical_wire();
-    let evidence = TargetEvidence::decode(&run.evidence().canonical_wire()).unwrap();
+    let evidence_wire = run.evidence().canonical_wire();
+    let evidence = TargetEvidence::decode(&evidence_wire).unwrap();
     evidence.replay_wire(&request_wire).unwrap();
 
     // Request v1 did not carry the authorization-binding frame. Its complete
@@ -128,5 +129,78 @@ fn serialized_replay_refuses_an_authorization_binding_spliced_from_another_grant
     assert_eq!(
         handler.calls, 1,
         "serialized replay has no host-dispatch authority"
+    );
+}
+
+#[test]
+fn exchange_replay_binds_result_bytes_and_settlement_shape_without_dispatch() {
+    let response = carrier("fixture.Result", b"ok").encode();
+    let mut handler = Handler { calls: 0 };
+    let mut accounting = TargetAccounting::default();
+    let run = dispatch(
+        grant(),
+        carrier("fixture.Argument", b"request"),
+        4,
+        limits(),
+        &mut accounting,
+        &AgentCancellation::new(),
+        &mut handler,
+    );
+    let request = TargetHostRequest {
+        grant_id: run.evidence().grant_id.clone(),
+        authorization_binding: run.evidence().authorization_binding.clone(),
+        operation: operation(),
+        turn: 3,
+        argument: carrier("fixture.Argument", b"request"),
+        fuel: 4,
+    };
+    let request_wire = request.canonical_wire();
+    let evidence_wire = run.evidence().canonical_wire();
+    let evidence = TargetEvidence::decode(&evidence_wire).unwrap();
+    evidence
+        .replay_exchange_wire(&request_wire, Some(&response))
+        .unwrap();
+
+    let mut substituted = response.clone();
+    *substituted.last_mut().expect("result payload") ^= 1;
+    assert_eq!(
+        evidence.replay_exchange_wire(&request_wire, Some(&substituted)),
+        Err(ProtocolError::ReplayMismatch)
+    );
+    assert_eq!(
+        evidence.replay_exchange_wire(&request_wire, None),
+        Err(ProtocolError::ReplayMismatch)
+    );
+
+    let mut mislabeled = evidence;
+    mislabeled.settlement = Settlement::MalformedResult;
+    mislabeled.digest = mislabeled.compute_digest();
+    assert_eq!(
+        mislabeled.replay_exchange_wire(&request_wire, Some(&response)),
+        Err(ProtocolError::ReplayMismatch),
+        "a matching digest cannot relabel a canonical carrier as malformed"
+    );
+
+    let mut substituted_request = request_wire.clone();
+    *substituted_request.last_mut().expect("request payload") ^= 1;
+    assert_eq!(
+        run.evidence().replay_wire(&substituted_request),
+        Err(ProtocolError::ReplayMismatch)
+    );
+    let mut trailing_request = request_wire;
+    trailing_request.push(0);
+    assert_eq!(
+        run.evidence().replay_wire(&trailing_request),
+        Err(ProtocolError::MalformedRequest)
+    );
+    let mut truncated_evidence = evidence_wire;
+    truncated_evidence.pop();
+    assert_eq!(
+        TargetEvidence::decode(&truncated_evidence),
+        Err(ProtocolError::MalformedEvidence)
+    );
+    assert_eq!(
+        handler.calls, 1,
+        "exchange replay has no dispatch authority"
     );
 }

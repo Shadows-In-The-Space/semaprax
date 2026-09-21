@@ -61,10 +61,16 @@ digest; legacy v1-shaped request bytes fail closed rather than being upgraded
 implicitly. `TargetEvidence::decode` independently rejects malformed, noncanonical
 or internally inconsistent observations; `replay_wire` then rederives the
 request commitment from the retained request wire and checks the observation
-without invoking a handler. It does not receive or independently replay result
-bytes, and cannot construct a grant, run target code, resume a checkpoint, or
-publish an artifact. Decoding a request is deliberately private to replay, so
-request bytes cannot be converted into a dispatch capability.
+without invoking a handler. `replay_exchange_wire` additionally requires the
+exact result carrier whenever the observation commits one, rederives its
+domain-separated digest, and checks that the carrier shape agrees with
+`returned`, `result_type_mismatch`, or `malformed_result`. Missing,
+substituted, unexpected, or settlement-inconsistent result bytes fail closed.
+Overflow settlements deliberately have no complete result commitment because
+the bounded sink never retains bytes beyond its ceiling. Neither replay route
+can construct a grant, run target code, resume a checkpoint, or publish an
+artifact. Decoding a request is deliberately private to replay, so request
+bytes cannot be converted into a dispatch capability.
 
 `TargetEffectRun` retains each complete `TargetEvidence` in execution order as
 well as its digest in the compact aggregate document. A caller that retained
@@ -115,7 +121,10 @@ non-UTF-8 response.
 
 Each model attempt retains a canonical bounded observation with cumulative
 accounting and a normalized settlement. Independent decoding and request-pair
-replay cannot construct a grant or dispatch a host. The combined parity case
+replay cannot construct a grant or dispatch a host. Stronger exchange replay
+also verifies exact returned or malformed response bytes and their UTF-8
+settlement meaning; no-response refusals reject injected response bytes. The
+combined parity case
 compares model request/evidence bytes, target-effect request/evidence bytes,
 terminal values and both accounting ledgers across interpreter, native C11
 `-O0`/`-O2`, and Core Wasm. This remains an injected local seam: it is not the

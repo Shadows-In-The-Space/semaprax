@@ -691,6 +691,51 @@ impl TargetEvidence {
         self.replay(&request)
     }
 
+    /// Independently replay both sides of one observed host exchange without
+    /// acquiring a grant or invoking a handler.
+    ///
+    /// `replay_wire` verifies only the host-visible request because some
+    /// callers retain request and result bytes separately. This stronger form
+    /// also requires the exact result bytes whenever the observation carries
+    /// a result commitment, rejects unexpected bytes for a no-result
+    /// settlement, and rechecks the settlement-specific carrier shape.
+    pub fn replay_exchange_wire(
+        &self,
+        request_wire: &[u8],
+        result_wire: Option<&[u8]>,
+    ) -> Result<(), ProtocolError> {
+        self.replay_wire(request_wire)?;
+        match (self.result_digest.as_deref(), result_wire) {
+            (None, None) => return Ok(()),
+            (Some(expected), Some(result))
+                if result.len() <= MAX_CARRIER_BYTES
+                    && digest(RESULT_DOMAIN, result) == expected => {}
+            _ => return Err(ProtocolError::ReplayMismatch),
+        }
+
+        let result = result_wire.expect("matched committed result bytes");
+        let decoded = TypedCarrier::decode(result, self.operation.result_type());
+        let shape_matches = match self.settlement {
+            Settlement::Returned => decoded.is_ok(),
+            Settlement::ResultTypeMismatch => decoded == Err(ProtocolError::ResultTypeMismatch),
+            Settlement::MalformedResult => {
+                matches!(
+                    decoded,
+                    Err(ProtocolError::MalformedCarrier)
+                        | Err(ProtocolError::CarrierTooLarge)
+                        | Err(ProtocolError::InvalidIdentifier)
+                )
+            }
+            Settlement::HostFailed | Settlement::HostPanicked => true,
+            _ => false,
+        };
+        if shape_matches {
+            Ok(())
+        } else {
+            Err(ProtocolError::ReplayMismatch)
+        }
+    }
+
     /// Independent no-dispatch replay.  It rederives the request commitment
     /// from exact host-visible data and verifies the sealed observation.
     pub fn replay(&self, request: &TargetHostRequest) -> Result<(), ProtocolError> {
@@ -726,9 +771,14 @@ impl TargetEvidence {
                 | Settlement::ArgumentTypeMismatch
                 | Settlement::ArgumentBindingMismatch
         );
+        let result_required = matches!(
+            self.settlement,
+            Settlement::Returned | Settlement::MalformedResult | Settlement::ResultTypeMismatch
+        );
+        let result_forbidden = pre_dispatch || self.settlement == Settlement::ResultBudget;
         if pre_dispatch != !self.dispatched
-            || (!self.dispatched && self.result_digest.is_some())
-            || (self.settlement == Settlement::Returned && self.result_digest.is_none())
+            || (result_forbidden && self.result_digest.is_some())
+            || (result_required && self.result_digest.is_none())
         {
             return Err(ProtocolError::ReplayMismatch);
         }
@@ -1149,60 +1199,6 @@ mod tests {
         assert_eq!(
             handler.calls, 1,
             "evidence replay has no dispatch authority"
-        );
-    }
-
-    #[test]
-    fn canonical_request_and_evidence_wires_replay_without_dispatch_authority() {
-        let response = carrier("fixture.Result", b"ok").encode();
-        let mut handler = Handler {
-            calls: 0,
-            response: Ok(response),
-        };
-        let mut accounting = TargetAccounting::default();
-        let run = dispatch(
-            grant(),
-            carrier("fixture.Argument", b"request"),
-            4,
-            limits(),
-            &mut accounting,
-            &AgentCancellation::new(),
-            &mut handler,
-        );
-        let request = TargetHostRequest {
-            grant_id: run.evidence().grant_id.clone(),
-            authorization_binding: run.evidence().authorization_binding.clone(),
-            operation: operation(),
-            turn: 3,
-            argument: carrier("fixture.Argument", b"request"),
-            fuel: 4,
-        };
-        let request_wire = request.canonical_wire();
-        let evidence_wire = run.evidence().canonical_wire();
-        let decoded = TargetEvidence::decode(&evidence_wire).expect("canonical evidence decodes");
-        assert_eq!(&decoded, run.evidence());
-        decoded
-            .replay_wire(&request_wire)
-            .expect("exact request wire replays");
-        assert_eq!(handler.calls, 1, "replay has no host-dispatch authority");
-
-        let mut substituted = request_wire.clone();
-        *substituted.last_mut().expect("request payload") ^= 1;
-        assert_eq!(
-            decoded.replay_wire(&substituted),
-            Err(ProtocolError::ReplayMismatch)
-        );
-        let mut trailing = request_wire;
-        trailing.push(0);
-        assert_eq!(
-            decoded.replay_wire(&trailing),
-            Err(ProtocolError::MalformedRequest)
-        );
-        let mut truncated = evidence_wire;
-        truncated.pop();
-        assert_eq!(
-            TargetEvidence::decode(&truncated),
-            Err(ProtocolError::MalformedEvidence)
         );
     }
 

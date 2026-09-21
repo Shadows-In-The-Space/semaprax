@@ -4,6 +4,7 @@ struct ParityModelHandler {
     proposal: String,
     calls: usize,
     reply: ModelReply,
+    response_wires: Vec<Vec<u8>>,
 }
 
 fn backend_label(backend: crate::agent_lifecycle::authorization::StageBackend<'_>) -> String {
@@ -15,6 +16,7 @@ fn assert_rebound_model_evidence(
     reference_evidence: &[crate::agent_lifecycle::iterative::model::ModelEvidence],
     actual_requests: &[Vec<u8>],
     actual_evidence: &[crate::agent_lifecycle::iterative::model::ModelEvidence],
+    actual_responses: &[Vec<u8>],
     label: &str,
 ) {
     assert_eq!(
@@ -27,10 +29,15 @@ fn assert_rebound_model_evidence(
         reference_evidence.len(),
         "{label}: evidence"
     );
-    for ((reference_request, reference), (actual_request, actual)) in reference_requests
+    assert!(
+        actual_responses.len() <= actual_evidence.len(),
+        "{label}: responses"
+    );
+    for (ordinal, ((reference_request, reference), (actual_request, actual))) in reference_requests
         .iter()
         .zip(reference_evidence)
         .zip(actual_requests.iter().zip(actual_evidence))
+        .enumerate()
     {
         assert_eq!(
             actual.settlement(),
@@ -47,7 +54,12 @@ fn assert_rebound_model_evidence(
             reference.accounting(),
             "{label}: accounting"
         );
-        actual.replay_wire(actual_request).unwrap();
+        actual
+            .replay_exchange_wire(
+                actual_request,
+                actual_responses.get(ordinal).map(Vec::as_slice),
+            )
+            .unwrap();
         assert!(
             reference.replay_wire(actual_request).is_err(),
             "{label}: cross-backend model evidence replayed"
@@ -128,8 +140,14 @@ impl crate::agent_lifecycle::iterative::model::ModelHostHandler for ParityModelH
         assert!(!request.proposal_schema_digest().is_empty());
         self.calls += 1;
         match self.reply {
-            ModelReply::Valid => sink.write(self.proposal.as_bytes()),
-            ModelReply::Malformed => sink.write(&[0xff]),
+            ModelReply::Valid => {
+                self.response_wires.push(self.proposal.as_bytes().to_vec());
+                sink.write(self.proposal.as_bytes())
+            }
+            ModelReply::Malformed => {
+                self.response_wires.push(vec![0xff]);
+                sink.write(&[0xff])
+            }
             ModelReply::Failed => {
                 return Err(crate::agent_lifecycle::iterative::model::ModelHostError::Failed)
             }
@@ -158,12 +176,14 @@ fn model_target_run_on(
     crate::agent_lifecycle::iterative::model::ModelAccounting,
     usize,
     ParityTargetHandler,
+    Vec<Vec<u8>>,
 ) {
     let proposal = crate::agent_lifecycle::tests::proposal(&compiled.lifecycle.inner, "1", "0");
     let mut model_handler = ParityModelHandler {
         proposal,
         calls: 0,
         reply,
+        response_wires: Vec::new(),
     };
     let backend_label = backend_label(backend);
     let binding = crate::agent_lifecycle::iterative::model::ModelSourceBinding::for_target(
@@ -199,13 +219,16 @@ fn model_target_run_on(
     let evidence = source.evidence().to_vec();
     let accounting = source.accounting();
     drop(source);
+    let model_calls = model_handler.calls;
+    let responses = model_handler.response_wires;
     (
         run,
         requests,
         evidence,
         accounting,
-        model_handler.calls,
+        model_calls,
         target,
+        responses,
     )
 }
 
@@ -266,6 +289,7 @@ impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler
 struct SequentialTargetHandler {
     calls: usize,
     request_wires: Vec<Vec<u8>>,
+    result_wires: Vec<Vec<u8>>,
     grants: Vec<String>,
     returned_values: Vec<i64>,
 }
@@ -284,17 +308,16 @@ impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler
         let value = 7 + i64::try_from(self.calls).expect("bounded fixture callback ordinal");
         self.returned_values.push(value);
         let payload = encode_fields(&[("value".into(), RetainedValue::I64(value))]);
-        sink.write(
-            &crate::agent_lifecycle::authorization::target_protocol::TypedCarrier::new(
-                request.operation().result_type(),
-                payload.into_bytes(),
-            )
-            .map_err(|_| {
-                crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
-            })?
-            .encode(),
+        let result = crate::agent_lifecycle::authorization::target_protocol::TypedCarrier::new(
+            request.operation().result_type(),
+            payload.into_bytes(),
         )
         .map_err(|_| {
+            crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
+        })?
+        .encode();
+        self.result_wires.push(result.clone());
+        sink.write(&result).map_err(|_| {
             crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
         })
     }
@@ -314,6 +337,7 @@ fn successful_target_run_on(
     let mut handler = SequentialTargetHandler {
         calls: 0,
         request_wires: Vec::new(),
+        result_wires: Vec::new(),
         grants: Vec::new(),
         returned_values: Vec::new(),
     };
@@ -357,6 +381,11 @@ fn assert_successful_target_settlements(
         "{label}: requests"
     );
     assert_eq!(
+        handler.result_wires.len(),
+        handler.calls,
+        "{label}: results"
+    );
+    assert_eq!(
         run.target_evidence().len(),
         handler.calls,
         "{label}: evidence"
@@ -373,10 +402,11 @@ fn assert_successful_target_settlements(
 
     let mut previous =
         crate::agent_lifecycle::authorization::target_protocol::TargetAccounting::default();
-    for (ordinal, (evidence, request_wire)) in run
+    for (ordinal, ((evidence, request_wire), result_wire)) in run
         .target_evidence()
         .iter()
         .zip(&handler.request_wires)
+        .zip(&handler.result_wires)
         .enumerate()
     {
         assert_eq!(
@@ -406,7 +436,7 @@ fn assert_successful_target_settlements(
             "{label}: callback {ordinal} evidence bytes"
         );
         decoded
-            .replay_wire(request_wire)
+            .replay_exchange_wire(request_wire, Some(result_wire))
             .unwrap_or_else(|error| panic!("{label}: callback {ordinal} replay: {error:?}"));
         previous = accounting;
     }
@@ -756,6 +786,7 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
     assert_eq!((expected.4, expected.5.calls), (3, 3));
     assert_eq!(expected.1.len(), 3);
     assert_eq!(expected.2.len(), 3);
+    assert_eq!(expected.6.len(), 3);
     assert_eq!(expected.3.calls(), 3);
     assert_eq!(
         expected
@@ -767,10 +798,10 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
         3,
         "per-turn model grants must be distinct"
     );
-    for (wire, evidence) in expected.1.iter().zip(&expected.2) {
+    for ((wire, evidence), response) in expected.1.iter().zip(&expected.2).zip(&expected.6) {
         crate::agent_lifecycle::iterative::model::ModelEvidence::decode(&evidence.canonical_wire())
             .unwrap()
-            .replay_wire(wire)
+            .replay_exchange_wire(wire, Some(response))
             .unwrap();
         let mut forged_request = wire.clone();
         *forged_request.last_mut().unwrap() ^= 1;
@@ -821,7 +852,14 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
             expected_run.lifecycle().value(),
             "{label}"
         );
-        assert_rebound_model_evidence(&expected.1, &expected.2, &actual.1, &actual.2, label);
+        assert_rebound_model_evidence(
+            &expected.1,
+            &expected.2,
+            &actual.1,
+            &actual.2,
+            &actual.6,
+            label,
+        );
         assert_eq!(actual.3, expected.3, "{label}: model accounting");
         assert_rebound_target_evidence(
             expected_run,
@@ -968,7 +1006,14 @@ fn model_boundary_settles_every_refusal_before_effect_dispatch_on_all_stage_back
                     .collect::<Vec<_>>()),
                 "{label}: model refusal"
             );
-            assert_rebound_model_evidence(&reference.1, &reference.2, &actual.1, &actual.2, label);
+            assert_rebound_model_evidence(
+                &reference.1,
+                &reference.2,
+                &actual.1,
+                &actual.2,
+                &actual.6,
+                label,
+            );
             assert_eq!(actual.3, reference.3, "{label}: model accounting");
             assert_eq!(actual.4, reference.4, "{label}: model calls");
             assert_eq!(actual.5.calls, 0, "{label}: effects must not dispatch");

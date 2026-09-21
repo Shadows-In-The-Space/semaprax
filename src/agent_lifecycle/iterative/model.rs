@@ -494,6 +494,40 @@ impl ModelEvidence {
         self.validate()
     }
 
+    /// Replay the exact request/response exchange without acquiring a model
+    /// grant or invoking a model host.
+    ///
+    /// A response is mandatory exactly when the evidence commits one. Besides
+    /// checking its domain-separated digest, replay rechecks the selected
+    /// settlement's UTF-8 meaning so a fabricated observation cannot label
+    /// arbitrary bytes as a returned proposal or a malformed response.
+    pub fn replay_exchange_wire(
+        &self,
+        request_wire: &[u8],
+        response_wire: Option<&[u8]>,
+    ) -> Result<(), ModelProtocolError> {
+        self.replay_wire(request_wire)?;
+        match (self.response_digest.as_deref(), response_wire) {
+            (None, None) => return Ok(()),
+            (Some(expected), Some(response))
+                if response.len() <= MAX_FIELD_BYTES
+                    && digest(RESPONSE_DOMAIN, response) == expected => {}
+            _ => return Err(ModelProtocolError::ReplayMismatch),
+        }
+
+        let response = response_wire.expect("matched committed model response bytes");
+        let shape_matches = match self.settlement {
+            ModelSettlement::Returned => std::str::from_utf8(response).is_ok(),
+            ModelSettlement::MalformedResponse => std::str::from_utf8(response).is_err(),
+            _ => false,
+        };
+        if shape_matches {
+            Ok(())
+        } else {
+            Err(ModelProtocolError::ReplayMismatch)
+        }
+    }
+
     fn validate(&self) -> Result<(), ModelProtocolError> {
         let predispatch = matches!(
             self.settlement,
@@ -793,4 +827,95 @@ fn hex(bytes: &[u8]) -> String {
 
 fn json(value: &str) -> String {
     quote_json(value)
+}
+
+#[cfg(test)]
+mod replay_tests {
+    use super::*;
+
+    fn request() -> ModelHostRequest {
+        ModelHostRequest {
+            grant_id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .into(),
+            turn: 3,
+            attempt: 1,
+            source_revision: "fixture.source".into(),
+            proposal_schema_digest: "fixture.proposal".into(),
+            remaining_iterations: 4,
+            context: b"context".to_vec(),
+        }
+    }
+
+    fn evidence(
+        request: &ModelHostRequest,
+        response: Option<&[u8]>,
+        settlement: ModelSettlement,
+        dispatched: bool,
+    ) -> ModelEvidence {
+        let mut evidence = ModelEvidence {
+            grant_id: request.grant_id.clone(),
+            turn: request.turn,
+            attempt: request.attempt,
+            request_digest: digest(REQUEST_DOMAIN, &request.canonical_wire()),
+            response_digest: response.map(|bytes| digest(RESPONSE_DOMAIN, bytes)),
+            accounting: ModelAccounting {
+                calls: u64::from(dispatched),
+                request_bytes: if dispatched {
+                    request.canonical_wire().len() as u64
+                } else {
+                    0
+                },
+                response_bytes: response.map_or(0, |bytes| bytes.len() as u64),
+                fuel: u64::from(dispatched),
+            },
+            dispatched,
+            settlement,
+            digest: String::new(),
+        };
+        evidence.digest = evidence.compute_digest();
+        evidence
+    }
+
+    #[test]
+    fn exchange_replay_binds_exact_response_bytes_and_settlement_shape() {
+        let request = request();
+        let request_wire = request.canonical_wire();
+        let returned = evidence(&request, Some(b"proposal"), ModelSettlement::Returned, true);
+        returned
+            .replay_exchange_wire(&request_wire, Some(b"proposal"))
+            .unwrap();
+        assert_eq!(
+            returned.replay_exchange_wire(&request_wire, Some(b"changed")),
+            Err(ModelProtocolError::ReplayMismatch)
+        );
+        assert_eq!(
+            returned.replay_exchange_wire(&request_wire, None),
+            Err(ModelProtocolError::ReplayMismatch)
+        );
+
+        let malformed = evidence(
+            &request,
+            Some(&[0xff]),
+            ModelSettlement::MalformedResponse,
+            true,
+        );
+        malformed
+            .replay_exchange_wire(&request_wire, Some(&[0xff]))
+            .unwrap();
+
+        // Matching digests are insufficient if the claimed settlement does
+        // not agree with the exact response's UTF-8 meaning.
+        let mislabeled = evidence(&request, Some(&[0xff]), ModelSettlement::Returned, true);
+        assert_eq!(
+            mislabeled.replay_exchange_wire(&request_wire, Some(&[0xff])),
+            Err(ModelProtocolError::ReplayMismatch)
+        );
+
+        let cancelled = evidence(&request, None, ModelSettlement::Cancelled, false);
+        cancelled.replay_exchange_wire(&request_wire, None).unwrap();
+        assert_eq!(
+            cancelled.replay_exchange_wire(&request_wire, Some(b"unexpected")),
+            Err(ModelProtocolError::ReplayMismatch)
+        );
+    }
 }

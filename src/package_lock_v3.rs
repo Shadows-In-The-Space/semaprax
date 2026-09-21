@@ -78,6 +78,8 @@ pub struct VerifiedDependencySubject {
     pub coordinate: Coordinate,
     pub subject_digest: String,
     pub report_digest: String,
+    /// Exact independently replayed Report-v2 envelope embedded by Subject-v3.
+    pub report: String,
     pub source_revision: String,
     pub canonical_source: String,
     pub dependencies: Vec<DependencyRequirement>,
@@ -155,6 +157,7 @@ pub fn verify_dependency_subject(bytes: &str) -> Result<VerifiedDependencySubjec
             coordinate: subject.coordinate,
             subject_digest: subject.digest,
             report_digest: subject.report_digest,
+            report: subject.report,
             source_revision: subject.revision,
             canonical_source: source.canonical_source,
             dependencies: subject.dependencies,

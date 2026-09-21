@@ -108,6 +108,11 @@
 //! stores and structurally bounds. It does not solve
 //! dependency graphs; [`project_subjects`] hands its output to
 //! [`crate::package_resolver_v2`] for that.
+//!
+//! The additive [`artifact_manifest`] and [`registry_v2`] modules leave every
+//! v1 byte and digest contract intact. They bind one closed, authority-free
+//! linked scalar Core-Wasm build-v2 artifact inventory to each v2 publication;
+//! they do not widen publication, fetching, execution, or signature authority.
 
 use std::collections::BTreeMap;
 
@@ -118,9 +123,11 @@ use crate::diagnostic::{quote_json, Diagnostic, Severity};
 use crate::package_lock_v3;
 use crate::package_range::{self, Version};
 
+pub mod artifact_manifest;
 pub mod binding;
 pub mod catalog;
 pub mod federation;
+pub mod registry_v2;
 pub mod wire;
 
 #[cfg(test)]

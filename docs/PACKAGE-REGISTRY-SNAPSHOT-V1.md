@@ -1,9 +1,15 @@
 # Package Registry Snapshot v1
 
+The additive [Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md) binds a
+closed [Package Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md) to every
+publication while preserving this v1 schema, wire, decoder, digest domain, and
+behavior unchanged.
+
 Status: implemented, **local-only** bounded registry model and read-only CLI
-front. The focused registry module selection contains 103 tests across the
-snapshot, wire, catalog, federation, and binding layers; the CLI front has its
-own focused tests. Neither is hosted or a publication/support decision.
+front. Its v1 snapshot, wire, catalog, federation, and binding layers retain
+their focused tests; additive v2 evidence has separate focused tests. The CLI
+front has its own focused tests. None is hosted or a publication/support
+decision.
 
 Audience: package-tool authors and compiler contributors working on
 issue #195.

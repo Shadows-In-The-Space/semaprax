@@ -63,6 +63,10 @@ use std::collections::HashSet;
 // formatter shadow. Keep dead-code linting from forcing fake production use.
 #[allow(dead_code)]
 pub(crate) mod canonical_char_renderer;
+// The signed-integer sibling has the same deliberately test-only formatter
+// shadow boundary. It is not a production authority route.
+#[allow(dead_code)]
+pub(crate) mod canonical_int_renderer;
 mod eval;
 mod reify;
 mod term;

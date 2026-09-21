@@ -52,6 +52,14 @@ pub(crate) fn canonical_char(value: u32) -> String {
     crate::kernel_zero::canonical_char_renderer::verify_shadow(value, &text);
     text
 }
+/// Canonical signed `i64` literal text. Rust remains authoritative; the
+/// Kernel-0 route is test-only shadow evidence for raw `i64` literals.
+pub(crate) fn canonical_int(value: i64) -> String {
+    let text = value.to_string();
+    #[cfg(test)]
+    crate::kernel_zero::canonical_int_renderer::verify_shadow(value, &text);
+    text
+}
 pub(crate) fn canonical_string(value: &str) -> String {
     let mut text = String::from("\"");
     for ch in value.chars() {
@@ -722,7 +730,7 @@ fn write_expr_measured(
                     ));
                 }
                 match &value.kind {
-                    ExprKind::Int(number) => write!(output, "{number}").unwrap(),
+                    ExprKind::Int(number) => output.write_str(&canonical_int(*number)).unwrap(),
                     ExprKind::Int32(value) => {
                         // The explicit suffix keeps the declared width stable
                         // across canonical round trips.
@@ -1324,7 +1332,7 @@ fn write_match_pattern(output: &mut impl std::fmt::Write, pattern: &MatchPattern
 
 fn write_pattern_literal(output: &mut impl std::fmt::Write, value: crate::ast::PatternLiteral) {
     match value {
-        crate::ast::PatternLiteral::Int(value) => write!(output, "{value}").unwrap(),
+        crate::ast::PatternLiteral::Int(value) => output.write_str(&canonical_int(value)).unwrap(),
         // The explicit suffix keeps the declared width stable across
         // canonical round trips, exactly like expression literals.
         crate::ast::PatternLiteral::Int32(value) => write!(output, "{value}i32").unwrap(),

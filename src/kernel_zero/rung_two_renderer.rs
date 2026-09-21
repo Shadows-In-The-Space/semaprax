@@ -1,11 +1,12 @@
-//! Rung-2 integration evidence for canonical `char` rendering.
+//! Rung-2 integration evidence for canonical literal rendering.
 //!
 //! The component under test is production-compiled code in
-//! `canonical_char_renderer`; it derives and independently replays the exact
-//! embedded Semaprax source into Kernel-0 before evaluating its byte lane.
-//! It replays that source binding at each full byte-lane invocation.  The
-//! second test enables that component as a shadow of the real canonical
-//! formatter path, proving the integration is not an isolated candidate.
+//! `canonical_char_renderer` and `canonical_int_renderer`; each derives and
+//! independently replays its exact embedded Semaprax source into Kernel-0
+//! before evaluating a byte lane. It replays that source binding at each full
+//! byte-lane invocation. The formatter tests enable each component as a
+//! shadow of the real canonical path, proving the integrations are not
+//! isolated candidates.
 //!
 //! Rust output remains authoritative. A mismatch fails the shadow gate, but
 //! the shipped formatter neither depends on nor falls back to the component.
@@ -14,6 +15,7 @@
 use crate::hir::{self, DeclarationId};
 
 use super::canonical_char_renderer::{self, RendererRefusal, SOURCE};
+use super::canonical_int_renderer::{self as canonical_int_renderer, SOURCE as INT_SOURCE};
 use super::reify::BoundTranslation;
 
 fn valid_scalar_corpus() -> Vec<u32> {
@@ -151,5 +153,132 @@ fn main() -> i64 { classify(literal()) }
     assert_eq!(
         comparisons, 8,
         "the canonical traversal must shadow every visit to the literal and pattern characters"
+    );
+}
+
+fn decimal_oracle(value: i64) -> Vec<u8> {
+    // Deliberately independent of `format::canonical_int` and Rust's decimal
+    // formatter. Widening before negation makes the signed minimum ordinary.
+    let mut magnitude = i128::from(value);
+    let negative = magnitude < 0;
+    if negative {
+        magnitude = -magnitude;
+    }
+    let mut reversed = [0u8; 19];
+    let mut digits = 0;
+    loop {
+        reversed[digits] = b'0' + (magnitude % 10) as u8;
+        digits += 1;
+        magnitude /= 10;
+        if magnitude == 0 {
+            break;
+        }
+    }
+    let mut output = Vec::with_capacity(digits + if negative { 1 } else { 0 });
+    if negative {
+        output.push(b'-');
+    }
+    output.extend(reversed[..digits].iter().rev());
+    output
+}
+
+#[test]
+fn exact_source_component_matches_an_independent_decimal_byte_oracle() {
+    let parsed = crate::parse(INT_SOURCE, "kernel-zero-canonical-int-renderer.spx")
+        .expect("rung-2 integer renderer component must parse");
+    let resolved = hir::resolve(&parsed).expect("rung-2 integer renderer component must resolve");
+    for id in [
+        "format.negative",
+        "format.at-least",
+        "format.decimal-digits",
+        "format.power-of-ten",
+        "format.decimal-digit",
+        "format.render-length",
+        "format.render-byte",
+    ] {
+        let id = DeclarationId::new(id);
+        assert!(
+            super::reifies_into_kernel_zero(&resolved, &id),
+            "rung-2 integer renderer declaration {id} must stay in Kernel-0"
+        );
+    }
+    let entry = DeclarationId::new("format.render-byte");
+    let binding = BoundTranslation::derive(INT_SOURCE, &entry)
+        .expect("rung-2 integer renderer must have an exact-source Kernel-0 translation");
+    assert!(binding.replay(INT_SOURCE, &entry).is_ok());
+
+    let mut values = vec![i64::MIN, -1, 0, 1, i64::MAX];
+    // Each transition runs on both sides: the positive comparison path and
+    // the signed-min-safe negative comparison path must agree on digit count.
+    for threshold in [
+        10,
+        100,
+        1_000,
+        10_000,
+        100_000,
+        1_000_000,
+        10_000_000,
+        100_000_000,
+        1_000_000_000,
+        10_000_000_000,
+        100_000_000_000,
+        1_000_000_000_000,
+        10_000_000_000_000,
+        100_000_000_000_000,
+        1_000_000_000_000_000,
+        10_000_000_000_000_000,
+        100_000_000_000_000_000,
+        1_000_000_000_000_000_000,
+    ] {
+        values.extend([threshold - 1, threshold, 1 - threshold, -threshold]);
+    }
+    for value in values {
+        let expected = decimal_oracle(value);
+        let actual = canonical_int_renderer::render_bytes(value).unwrap();
+        assert_eq!(actual, expected, "integer {value}: byte lane diverged");
+        assert_eq!(
+            canonical_int_renderer::render(value).unwrap().as_bytes(),
+            expected.as_slice(),
+            "integer {value}: UTF-8 result diverged"
+        );
+        assert!(
+            (1..=20).contains(&actual.len()),
+            "integer {value}: component emitted an invalid decimal byte length"
+        );
+    }
+}
+
+#[test]
+fn canonical_formatter_executes_the_kernel_zero_shadow_on_real_int_nodes() {
+    let source = r#"module test.kernel_zero_integer_formatter_shadow;
+
+@id("test.kernel-zero-integer-formatter-shadow.literal")
+fn literal() -> i64 { -42 }
+
+@id("test.kernel-zero-integer-formatter-shadow.classify")
+fn classify(value: i64) -> i64
+{
+    match value {
+        -9223372036854775808 => 1,
+        0 => 2,
+        9223372036854775807 => 3,
+        _ => 0,
+    }
+}
+
+@id("test.kernel-zero-integer-formatter-shadow.main")
+fn main() -> i64 { classify(literal()) }
+"#;
+    let parsed = crate::parse(source, "kernel-zero-integer-formatter-shadow.spx").unwrap();
+    let expected = crate::format::canonical(&parsed);
+    let (actual, comparisons) =
+        canonical_int_renderer::with_shadow(|| crate::format::canonical(&parsed));
+    assert_eq!(
+        actual, expected,
+        "shadowing changed canonical formatter bytes"
+    );
+    assert_eq!(
+        comparisons, 19,
+        "the canonical formatter's measured and emitted traversals must shadow every raw integer expression and pattern literal"
     );
 }

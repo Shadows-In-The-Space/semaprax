@@ -399,6 +399,93 @@ fn target_hostile_proposals_budgets_and_results_settle_without_extra_dispatch_on
 }
 
 #[test]
+fn target_grants_reject_stale_program_evidence_on_every_backend() {
+    if !target_backend_tools_available() {
+        eprintln!("skipping stale target binding bridge: clang or node unavailable");
+        return;
+    }
+    let module_source = typed_effect_source();
+    // These two source programs produce the same bounded fixture turns, but
+    // are distinct checked programs. A target grant must bind that program
+    // identity rather than treating matching tool/result bytes as authority.
+    let stale_source = module_source.replace("sequence <= 1usize", "sequence < 2usize");
+    let compiled = compile_from_source(&module_source);
+    let stale = compile_from_source(&stale_source);
+    assert_ne!(
+        compiled.digest(),
+        stale.digest(),
+        "fixture programs must bind different roots"
+    );
+    for (label, backend, stale_backend) in [
+        (
+            "interpreter",
+            crate::agent_lifecycle::authorization::StageBackend::Interpreter,
+            crate::agent_lifecycle::authorization::StageBackend::Interpreter,
+        ),
+        (
+            "native -O0",
+            crate::agent_lifecycle::authorization::StageBackend::Native,
+            crate::agent_lifecycle::authorization::StageBackend::Native,
+        ),
+        (
+            "native -O2",
+            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+        ),
+        (
+            "Core Wasm",
+            crate::agent_lifecycle::authorization::StageBackend::Wasm {
+                source: &module_source,
+            },
+            crate::agent_lifecycle::authorization::StageBackend::Wasm {
+                source: &stale_source,
+            },
+        ),
+    ] {
+        let cancellation = AgentCancellation::new();
+        let (current, current_handler) =
+            target_run_on(&compiled, &module_source, backend, &cancellation);
+        let (stale_run, stale_handler) =
+            target_run_on(&stale, &stale_source, stale_backend, &cancellation);
+        assert_eq!(
+            current.lifecycle().status(),
+            stale_run.lifecycle().status(),
+            "{label}: terminal status"
+        );
+        assert_eq!(
+            current.accounting(),
+            stale_run.accounting(),
+            "{label}: accounting"
+        );
+        assert_eq!(
+            current_handler.calls, stale_handler.calls,
+            "{label}: host calls"
+        );
+        assert_eq!(
+            current.target_evidence().len(),
+            stale_run.target_evidence().len(),
+            "{label}: evidence count"
+        );
+        for ((current_evidence, current_wire), stale_wire) in current
+            .target_evidence()
+            .iter()
+            .zip(&current_handler.request_wires)
+            .zip(&stale_handler.request_wires)
+        {
+            current_evidence.replay_wire(current_wire).unwrap();
+            assert!(
+                current_evidence.replay_wire(stale_wire).is_err(),
+                "{label}: stale program evidence replayed"
+            );
+            assert_ne!(
+                current_wire, stale_wire,
+                "{label}: stale program reused grant wire"
+            );
+        }
+    }
+}
+
+#[test]
 fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
     if !target_backend_tools_available() {
         eprintln!("skipping target model bridge: clang or node unavailable");

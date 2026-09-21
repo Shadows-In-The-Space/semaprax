@@ -240,17 +240,41 @@ fn test_record_parser() -> i64
     let wrong_quantity = "{\"id\":\"a\",\"label\":\"x\",\"quantity\":\"1\"}";
     let escaped_key = "{\"\\u0069d\":\"a\",\"label\":\"x\",\"quantity\":1}";
     let malformed = "{\"id\":\"a";
+    let duplicate_key = "{\"id\":\"a1\",\"id\":\"a2\",\"label\":\"x\",\"quantity\":1}";
+    let unknown_key = "{\"id\":\"a1\",\"label\":\"x\",\"quantity\":1,\"extra\":true}";
+    let wrong_id = "{\"id\":1,\"label\":\"x\",\"quantity\":1}";
+    let nested_label = "{\"id\":\"a1\",\"label\":{\"nested\":true},\"quantity\":1}";
+    let fractional = "{\"id\":\"a1\",\"label\":\"x\",\"quantity\":1.5}";
+    let negative = "{\"id\":\"a1\",\"label\":\"x\",\"quantity\":-1}";
+    let out_of_range = "{\"id\":\"a1\",\"label\":\"x\",\"quantity\":99999999999999999999}";
+    let trailing_comma = "{\"id\":\"a1\",\"label\":\"x\",\"quantity\":1,}";
     let valid_text = string_as_str(valid);
     let missing_text = string_as_str(missing);
     let wrong_quantity_text = string_as_str(wrong_quantity);
     let escaped_key_text = string_as_str(escaped_key);
     let malformed_text = string_as_str(malformed);
+    let duplicate_key_text = string_as_str(duplicate_key);
+    let unknown_key_text = string_as_str(unknown_key);
+    let wrong_id_text = string_as_str(wrong_id);
+    let nested_label_text = string_as_str(nested_label);
+    let fractional_text = string_as_str(fractional);
+    let negative_text = string_as_str(negative);
+    let out_of_range_text = string_as_str(out_of_range);
+    let trailing_comma_text = string_as_str(trailing_comma);
     let valid_problem = record_problem(str_as_bytes(valid_text));
     let missing_problem = record_problem(str_as_bytes(missing_text));
     let quantity_problem = record_problem(str_as_bytes(wrong_quantity_text));
     let escaped_problem = record_problem(str_as_bytes(escaped_key_text));
     let malformed_problem = record_problem(str_as_bytes(malformed_text));
-    if valid_problem == 0usize && problem_category(missing_problem) == 4usize && problem_offset(missing_problem) == 0usize && problem_category(quantity_problem) == 4usize && problem_offset(quantity_problem) == 33usize && problem_category(escaped_problem) == 4usize && problem_offset(escaped_problem) == 1usize && problem_category(malformed_problem) == 3usize && problem_offset(malformed_problem) == 8usize { 0 } else { 1 }
+    let duplicate_key_problem = record_problem(str_as_bytes(duplicate_key_text));
+    let unknown_key_problem = record_problem(str_as_bytes(unknown_key_text));
+    let wrong_id_problem = record_problem(str_as_bytes(wrong_id_text));
+    let nested_label_problem = record_problem(str_as_bytes(nested_label_text));
+    let fractional_problem = record_problem(str_as_bytes(fractional_text));
+    let negative_problem = record_problem(str_as_bytes(negative_text));
+    let out_of_range_problem = record_problem(str_as_bytes(out_of_range_text));
+    let trailing_comma_problem = record_problem(str_as_bytes(trailing_comma_text));
+    if valid_problem == 0usize && problem_category(missing_problem) == 4usize && problem_offset(missing_problem) == 0usize && problem_category(quantity_problem) == 4usize && problem_offset(quantity_problem) == 33usize && problem_category(escaped_problem) == 4usize && problem_offset(escaped_problem) == 1usize && problem_category(malformed_problem) == 3usize && problem_offset(malformed_problem) == 8usize && problem_category(duplicate_key_problem) == 4usize && problem_offset(duplicate_key_problem) == 11usize && problem_category(unknown_key_problem) == 4usize && problem_offset(unknown_key_problem) == 36usize && problem_category(wrong_id_problem) == 4usize && problem_offset(wrong_id_problem) == 6usize && problem_category(nested_label_problem) == 4usize && problem_offset(nested_label_problem) == 19usize && problem_category(fractional_problem) == 4usize && problem_offset(fractional_problem) == 34usize && problem_category(negative_problem) == 4usize && problem_offset(negative_problem) == 34usize && problem_category(out_of_range_problem) == 4usize && problem_offset(out_of_range_problem) == 34usize && problem_category(trailing_comma_problem) == 3usize && problem_offset(trailing_comma_problem) == 36usize { 0 } else { 1 }
 }
 
 // CNORM-014: the second decoded-equivalent id is rejected, even though its

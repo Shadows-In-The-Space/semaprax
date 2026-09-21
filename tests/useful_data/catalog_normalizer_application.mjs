@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const module = new WebAssembly.Module(readFileSync(process.argv[2]));
-const provider = environmentProvider(module);
+const provider = environmentProvider(module, 69710);
+assert.equal(provider.acceptsOwnedLength(69710), true);
+assert.equal(provider.acceptsOwnedLength(69711), false);
+assert.equal(provider.acceptsOwnedLength(Number.MAX_SAFE_INTEGER + 1), false);
 assert.deepEqual(
   WebAssembly.Module.imports(module).map(item => item.name).sort(),
   ['spx_add', 'spx_sub', 'spx_mul', 'spx_div', 'spx_rem', 'spx_neg',

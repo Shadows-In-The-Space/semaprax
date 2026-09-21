@@ -1,5 +1,7 @@
 // Concatenate into the caller's fixture. All authority is passed in explicitly.
-function environmentProvider(module) {
+function environmentProvider(module, maxOwnedBytes = 65536) {
+  if (!Number.isSafeInteger(maxOwnedBytes) || maxOwnedBytes < 0) throw Error('invalid arena capacity');
+  const acceptsOwnedLength=length=>Number.isSafeInteger(length)&&length>=0&&length<=maxOwnedBytes;
   let instance,next=1;const owned=new Map();
   const memory=()=>instance.exports.memory??instance.exports.__spx_byte_memory;
   const view=()=>new DataView(memory().buffer);
@@ -20,7 +22,7 @@ function environmentProvider(module) {
     if(root+length>memory().buffer.byteLength)throw Error('input range');
     return new Uint8Array(memory().buffer,root,length);
   };
-  const allocate=data=>{if(data.length>65536||owned.size>=4096)throw Error('arena capacity');const id=next++;owned.set(id,new Uint8Array(data));return carrier(0x80000000|id,data.length)};
+  const allocate=data=>{if(!acceptsOwnedLength(data.length)||owned.size>=4096)throw Error('arena capacity');const id=next++;owned.set(id,new Uint8Array(data));return carrier(0x80000000|id,data.length)};
   const out=(p,value)=>view().setBigInt64(p,BigInt(value),true);
   const entries=[['A','alpha'],['Z','é']];let refs=[];
   const imports={};for(const item of WebAssembly.Module.imports(module)){if(item.kind!=='function')throw Error('unexpected import kind');imports[item.module]??={};imports[item.module][item.name]=()=>{throw Error(`unexpected import ${item.name}`)}}
@@ -37,5 +39,5 @@ function environmentProvider(module) {
     spx_bytes_drop:value=>{bytes(value);const [root]=split(value);if(!(root&0x80000000)||!owned.delete(root&0x7fffffff))throw Error('double drop')},
     spx_bytes_as_slice:value=>{bytes(value);return value},
   });
-  return {imports,attach(value){instance=value;let cursor=512;refs=entries.map(entry=>entry.map(text=>{const data=new TextEncoder().encode(text);new Uint8Array(memory().buffer).set(data,cursor);const result=carrier(cursor,data.length);cursor+=data.length+1;return result}))},settled(){if(owned.size)throw Error('unsettled byte owners')},live(){return owned.size}};
+  return {imports,acceptsOwnedLength,attach(value){instance=value;let cursor=512;refs=entries.map(entry=>entry.map(text=>{const data=new TextEncoder().encode(text);new Uint8Array(memory().buffer).set(data,cursor);const result=carrier(cursor,data.length);cursor+=data.length+1;return result}))},settled(){if(owned.size)throw Error('unsettled byte owners')},live(){return owned.size}};
 }

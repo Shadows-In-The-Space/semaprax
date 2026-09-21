@@ -7,6 +7,13 @@ use std::process::{Command, Stdio};
 
 use semaprax::{codegen, format, parse, project};
 
+const MAX_REQUEST_BYTES: usize = 65_536;
+const MAX_RECORDS: usize = 256;
+const SUCCESS_ENVELOPE_MAX_BYTES: usize = 78;
+const ENRICHED_FIELD_MAX_BYTES: usize = 16;
+const OUTPUT_CAPACITY: usize =
+    MAX_REQUEST_BYTES + SUCCESS_ENVELOPE_MAX_BYTES + MAX_RECORDS * ENRICHED_FIELD_MAX_BYTES;
+
 const SOURCE_FILES: &[&str] = &[
     "app.spx",
     "batch.spx",
@@ -53,8 +60,34 @@ fn fixture() -> PathBuf {
 }
 
 fn application_options() -> project::ProjectExecutionOptions {
-    project::ProjectExecutionOptions::new(64 * 1024, 1_000_000)
+    project::ProjectExecutionOptions::new(OUTPUT_CAPACITY, 1_000_000)
         .expect("catalog-normalizer's documented bounded interpreter envelope")
+}
+
+fn maximal_output_body() -> Vec<u8> {
+    let mut body = Vec::with_capacity(MAX_REQUEST_BYTES);
+    for record in 0..MAX_RECORDS {
+        if record > 0 {
+            body.push(b'\n');
+        }
+        let id = format!("item-{record:03}");
+        let quantity = if record == 0 {
+            i64::MAX.to_string()
+        } else {
+            "0".to_owned()
+        };
+        let target_line_bytes = if record == 0 { 256 } else { 255 };
+        let fixed = format!("{{\"id\":\"{id}\",\"label\":\"\",\"quantity\":{quantity}}}");
+        let label_bytes = target_line_bytes - fixed.len();
+        let mut encoded_label = "\\u0001".repeat(label_bytes / 6);
+        encoded_label.push_str(&"x".repeat(label_bytes % 6));
+        let line =
+            format!("{{\"id\":\"{id}\",\"label\":\"{encoded_label}\",\"quantity\":{quantity}}}");
+        assert_eq!(line.len(), target_line_bytes);
+        body.extend_from_slice(line.as_bytes());
+    }
+    assert_eq!(body.len(), MAX_REQUEST_BYTES);
+    body
 }
 
 fn copy_fixture(root: &Path, destination: &Path) {
@@ -143,6 +176,23 @@ fn run_oracle(input: &[u8]) -> serde_json::Value {
     serde_json::from_slice(&run_oracle_bytes(input)).expect("oracle emits one JSON response")
 }
 
+fn decode_hex(input: &str) -> Vec<u8> {
+    fn nibble(byte: u8) -> u8 {
+        match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => panic!("published input_hex contains a non-hex byte"),
+        }
+    }
+    let bytes = input.as_bytes();
+    assert_eq!(bytes.len() % 2, 0, "published input_hex has odd length");
+    bytes
+        .chunks_exact(2)
+        .map(|pair| (nibble(pair[0]) << 4) | nibble(pair[1]))
+        .collect()
+}
+
 #[test]
 fn decoded_id_bounds_and_escaped_duplicates_match_the_independent_oracle() {
     let id64 = "x".repeat(64);
@@ -197,6 +247,56 @@ fn record_parser_categories_and_positions_match_the_independent_oracle() {
         assert_eq!(output["record_index"], record_index, "input={input:?}");
         assert_eq!(output["byte_offset"], byte_offset, "input={input:?}");
     }
+}
+
+#[test]
+fn every_published_malformed_input_matches_the_frozen_oracle_byte_for_byte() {
+    let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/oracle/catalog_normalizer/cases/published/errors.json");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(manifest_path).unwrap()).unwrap();
+    let cases = manifest["cases"].as_array().expect("published cases array");
+    assert_eq!(
+        cases.len(),
+        17,
+        "published malformed-case inventory drifted"
+    );
+    for case in cases {
+        let input = match (case.get("input"), case.get("input_hex")) {
+            (Some(value), None) => value.as_str().unwrap().as_bytes().to_vec(),
+            (None, Some(value)) => decode_hex(value.as_str().unwrap()),
+            _ => panic!("case must contain exactly one input encoding"),
+        };
+        let expected = case["expected_output"].as_str().unwrap().as_bytes();
+        assert_eq!(
+            run_oracle_with(&input, case["enrich"].as_bool().unwrap()),
+            expected,
+            "published malformed case {}",
+            case["name"].as_str().unwrap()
+        );
+    }
+}
+
+#[test]
+fn maximal_valid_outputs_fit_the_source_bound_exactly() {
+    assert_eq!(OUTPUT_CAPACITY, 69_710);
+    assert_eq!(
+        OUTPUT_CAPACITY.checked_add(1),
+        Some(69_711),
+        "the +1 rejection boundary must not wrap"
+    );
+    let source = std::fs::read_to_string(fixture().join("src/app.spx")).unwrap();
+    assert!(source.contains("fn output_capacity() -> usize\n{\n    69710usize\n}"));
+    assert_eq!(source.matches("bytes_zeroed(output_capacity())").count(), 2);
+
+    let body = maximal_output_body();
+    let plain = run_oracle_with(&body, false);
+    let enriched = run_oracle_with(&body, true);
+    assert_eq!(plain.len(), MAX_REQUEST_BYTES + SUCCESS_ENVELOPE_MAX_BYTES);
+    assert_eq!(enriched.len(), OUTPUT_CAPACITY);
+    assert!(plain.len() <= OUTPUT_CAPACITY);
+    assert!(enriched.len() <= OUTPUT_CAPACITY);
+    assert!(OUTPUT_CAPACITY + 1 > OUTPUT_CAPACITY);
 }
 
 // Exact canonical lines retained in the Semaprax source's `test_canonical_responses`.

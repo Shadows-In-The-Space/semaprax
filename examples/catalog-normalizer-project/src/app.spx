@@ -374,6 +374,17 @@ fn enriched_value_len(outcome: usize) -> usize
     if enrichment_has_category(outcome) { i64_len(enrichment_category_value(outcome)) } else { 4usize }
 }
 
+// CNORM-002/003/004/011/015/040/041 imply a tight maximum of 69,710
+// response bytes: a 65,536-byte body can preserve every record byte in the
+// canonical projection, the envelope contributes at most 78 bytes, and 256
+// enriched records contribute 16 bytes each. The owning Rust gate constructs
+// that exact valid input and byte-compares both projections with the oracle.
+@id("catalog_normalizer.app.output-capacity")
+fn output_capacity() -> usize
+{
+    69710usize
+}
+
 // CNORM-041's enabled form appends exactly one category field to every
 // record. The source fixture is consulted only after `first_enriched_failure`
 // has accepted the complete batch, so these are projection facts, never
@@ -519,7 +530,7 @@ fn success_response(body: borrow Slice<u8>) -> Bytes
     let count = record_count(body);
     let total = success_total(body);
     let length = success_len(body);
-    let mut out = bytes_zeroed(65536usize);
+    let mut out = bytes_zeroed(output_capacity());
     let mut index = 0usize;
     let mut phase = 0usize;
     let mut part = 0usize;
@@ -566,7 +577,7 @@ fn enriched_success_response(body: borrow Slice<u8>) -> Bytes
     let count = record_count(body);
     let total = success_total(body);
     let length = enriched_success_len(body);
-    let mut out = bytes_zeroed(65536usize);
+    let mut out = bytes_zeroed(output_capacity());
     let mut index = 0usize;
     let mut phase = 0usize;
     let mut part = 0usize;

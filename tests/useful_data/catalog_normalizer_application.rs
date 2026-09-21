@@ -5,7 +5,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use semaprax::{codegen, format, parse, project};
+use semaprax::{
+    codegen, format,
+    interpreter::{
+        evaluate_resolved_owned_data, OwnedDataEvaluationOutcome, OwnedDataValue, MAX_STEPS_LIMIT,
+    },
+    parse, project,
+};
 
 const MAX_REQUEST_BYTES: usize = 65_536;
 const MAX_RECORDS: usize = 256;
@@ -297,6 +303,27 @@ fn maximal_valid_outputs_fit_the_source_bound_exactly() {
     assert!(plain.len() <= OUTPUT_CAPACITY);
     assert!(enriched.len() <= OUTPUT_CAPACITY);
     assert!(OUTPUT_CAPACITY + 1 > OUTPUT_CAPACITY);
+
+    project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
+        for (function, expected) in [
+            ("catalog_normalizer.app.normalize", plain),
+            ("catalog_normalizer.app.normalize-enriched", enriched),
+        ] {
+            let actual = evaluate_resolved_owned_data(
+                snapshot.test_program(),
+                function,
+                &body,
+                MAX_STEPS_LIMIT,
+            )?;
+            assert_eq!(
+                actual.outcome,
+                OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(expected)),
+                "{function} did not emit its maximal valid response exactly"
+            );
+        }
+        Ok(())
+    })
+    .unwrap();
 }
 
 // Exact canonical lines retained in the Semaprax source's `test_canonical_responses`.

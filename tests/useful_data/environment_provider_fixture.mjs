@@ -2,6 +2,14 @@
 function environmentProvider(module, maxOwnedBytes = 65536) {
   if (!Number.isSafeInteger(maxOwnedBytes) || maxOwnedBytes < 0) throw Error('invalid arena capacity');
   const acceptsOwnedLength=length=>Number.isSafeInteger(length)&&length>=0&&length<=maxOwnedBytes;
+  const ownedLength=value=>{
+    if(typeof value==='bigint'){
+      if(value<0n||value>BigInt(maxOwnedBytes))throw Error('arena capacity');
+      return Number(value);
+    }
+    if(!acceptsOwnedLength(value))throw Error('arena capacity');
+    return value;
+  };
   let instance,next=1;const owned=new Map();
   const memory=()=>instance.exports.memory??instance.exports.__spx_byte_memory;
   const view=()=>new DataView(memory().buffer);
@@ -26,6 +34,7 @@ function environmentProvider(module, maxOwnedBytes = 65536) {
   const out=(p,value)=>view().setBigInt64(p,BigInt(value),true);
   const entries=[['A','alpha'],['Z','é']];let refs=[];
   const imports={};for(const item of WebAssembly.Module.imports(module)){if(item.kind!=='function')throw Error('unexpected import kind');imports[item.module]??={};imports[item.module][item.name]=()=>{throw Error(`unexpected import ${item.name}`)}}
+  imports.env??={};
   Object.assign(imports.env,{
     spx_add:(a,b)=>a+b,spx_sub:(a,b)=>a-b,spx_mul:(a,b)=>a*b,spx_div:(a,b)=>a/b,spx_rem:(a,b)=>a%b,spx_neg:a=>-a,
     spx_environment_len_v1:p=>{view().setInt32(p,2,true);return 0},
@@ -33,7 +42,7 @@ function environmentProvider(module, maxOwnedBytes = 65536) {
     spx_environment_value_utf8_v1:(i,p)=>{if(i<0n||i>=2n)return 1;out(p,refs[Number(i)][1]);return 0},
     spx_command_args_len_v1:()=>0n,spx_command_arg_utf8_v1:()=>1,spx_command_stdin_read_v1:()=>3,
     spx_command_owned_bytes_validate_v1:value=>{try{bytes(value);return 0}catch{return 1}},
-    spx_bytes_copy:value=>allocate(bytes(value)),spx_bytes_zeroed:size=>allocate(new Uint8Array(Number(size))),
+    spx_bytes_copy:value=>allocate(bytes(value)),spx_bytes_zeroed:size=>allocate(new Uint8Array(ownedLength(size))),
     spx_bytes_get:(value,index)=>{const data=bytes(value);return index<0n||index>=BigInt(data.length)?-1:data[Number(index)]},
     spx_bytes_set:(value,index,byte)=>{const data=bytes(value);if(index<0n||index>=BigInt(data.length))throw Error('write bounds');data[Number(index)]=byte;return value},
     spx_bytes_drop:value=>{bytes(value);const [root]=split(value);if(!(root&0x80000000)||!owned.delete(root&0x7fffffff))throw Error('double drop')},

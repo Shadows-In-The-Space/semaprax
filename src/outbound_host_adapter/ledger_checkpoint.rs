@@ -1,8 +1,11 @@
-//! Authority-free, read-only transport of disposition-ledger observations.
+//! Authority-free transport of disposition-ledger observations.
 //!
-//! An imported checkpoint cannot become a live ledger. Missing identities are
-//! unknown, not permission to dispatch; commitments need host-authenticated
-//! provenance and do not prove freshness, remote receipt, or crash durability.
+//! The bytes alone cannot become a live ledger. A trusted host may separately
+//! mint an exact digest-and-capacity restore capability; that explicit boundary
+//! can reconstitute observed state but grants no storage, retry, or adapter
+//! authority. Missing identities remain unknown, not permission to dispatch;
+//! commitments need host-authenticated provenance and do not prove freshness,
+//! remote receipt, or crash durability.
 
 use super::*;
 use crate::outbound_host_adapter::{decode_disposition, valid_sha256};
@@ -27,8 +30,9 @@ pub enum LedgerCheckpointRefusal {
     StateChanged,
 }
 
-/// Immutable offline observations, deliberately lacking a dispatch/restore API.
-/// Only digests and closed dispositions are retained; hashes are not secrecy.
+/// Immutable observations with no dispatch API. Only digests and closed
+/// dispositions are retained; hashes are not secrecy. Restoration is exposed
+/// only on `HostDeliveryLedger` behind a separately minted host capability.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LedgerCheckpoint {
     capacity: usize,
@@ -58,6 +62,10 @@ impl LedgerCheckpoint {
 
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    pub(super) fn into_parts(self) -> (usize, BTreeMap<String, LedgerRecord>) {
+        (self.capacity, self.entries)
     }
 
     /// Canonical wire, sorted by identity commitment, containing no raw data.
@@ -90,7 +98,8 @@ impl LedgerCheckpoint {
     }
 
     /// Verify an exact caller-retained commitment, closed schema and canonical
-    /// bytes. No imported state is ever inserted into a dispatch-capable ledger.
+    /// bytes. Decoding alone remains authority-free; authenticated restoration
+    /// is a separate `HostDeliveryLedger` operation.
     pub fn decode(bytes: &[u8], expected_digest: &str) -> Result<Self, LedgerCheckpointRefusal> {
         if bytes.len() > MAX_LEDGER_CHECKPOINT_BYTES {
             return Err(LedgerCheckpointRefusal::TooLarge);

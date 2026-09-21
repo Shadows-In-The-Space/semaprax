@@ -1,9 +1,9 @@
-//! Bounded, host-owned reconciliation for one process-local outbound session.
+//! Bounded, host-owned reconciliation for outbound delivery state.
 //!
 //! This is deliberately below the capability boundary. It remembers only a
 //! canonical request digest and a closed local disposition; it cannot mint an
 //! [`super::OutboundCapability`], prove remote receipt, replay a response, or
-//! recover work after a process restart.
+//! recover work after a process restart without separate host authority.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -15,6 +15,12 @@ use super::{request_digest, valid_identity, DeliveryDisposition, PreparedRequest
 #[path = "ledger_checkpoint.rs"]
 mod checkpoint;
 pub use checkpoint::{LedgerCheckpoint, LedgerCheckpointRefusal, MAX_LEDGER_CHECKPOINT_BYTES};
+#[path = "ledger_durable.rs"]
+mod durable;
+pub use durable::{
+    CheckpointCommit, DurableLedgerOutcome, DurableLedgerRefusal, LedgerCheckpointStore,
+    LedgerRestoreCapability, LedgerRestoreRefusal,
+};
 
 const LEDGER_IDENTITY_DOMAIN: &[u8] = b"semaprax.outbound.delivery-ledger.identity.v1\0";
 const LEDGER_STATE_DOMAIN: &str = "semaprax.outbound.delivery-ledger.v1";
@@ -141,12 +147,13 @@ pub enum LedgerRefusal {
     ConflictingRequest,
 }
 
-/// Process-local, bounded reconciliation state owned by a trusted host.
+/// Bounded reconciliation state owned by a trusted host.
 ///
 /// A fresh identity is admitted only while there is capacity. The closure is
 /// invoked at most once for that identity/request pair, and its resulting
 /// local observation is sticky. In particular, `Uncertain` is never retried by
-/// this type. Dropping this value loses its knowledge by design.
+/// this type. Plain construction is process-local; authenticated checkpoint
+/// restoration is an explicit, separately authorized host action.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HostDeliveryLedger {
     capacity: usize,
@@ -179,6 +186,29 @@ impl HostDeliveryLedger {
     /// Import returns a read-only checkpoint, never another dispatch ledger.
     pub fn checkpoint(&self) -> Result<LedgerCheckpoint, LedgerCheckpointRefusal> {
         LedgerCheckpoint::from_ledger(self)
+    }
+
+    /// Restore dispatch-capable state only through an independently granted
+    /// host capability bound to the exact checkpoint commitment and capacity.
+    /// The checkpoint itself remains authority-free.
+    pub fn restore_authenticated(
+        bytes: &[u8],
+        capability: LedgerRestoreCapability,
+    ) -> Result<Self, LedgerRestoreRefusal> {
+        durable::restore_authenticated(bytes, capability)
+    }
+
+    /// Persist intent before dispatch and terminal observation afterwards.
+    /// No timer or retry is created: a caller must present a distinct trusted
+    /// capability/identity for any later attempt.
+    pub fn reconcile_durable(
+        &mut self,
+        identity: DeliveryIdentity,
+        request: &PreparedRequest,
+        store: &mut impl LedgerCheckpointStore,
+        dispatch: impl FnOnce(&PreparedRequest) -> DeliveryDisposition,
+    ) -> Result<DurableLedgerOutcome, DurableLedgerRefusal> {
+        durable::reconcile(self, identity, request, store, dispatch)
     }
 
     /// Reconcile one exact prepared request before adapter dispatch.
@@ -234,11 +264,12 @@ impl HostDeliveryLedger {
 
     /// Canonical bounded diagnostic state for a trusted host's own storage.
     ///
-    /// This wire form is intentionally one-way: it records no raw identity or
-    /// request material and provides no restore path. Its SHA-256 commitments
-    /// are not confidential redactions; a low-entropy identity can be guessed
-    /// and checked offline. It cannot turn stale state into delivery authority
-    /// after a restart.
+    /// This wire form records no raw identity or request material. Its SHA-256
+    /// commitments are not confidential redactions; a low-entropy identity can
+    /// be guessed and checked offline. The bytes alone carry no authority. An
+    /// exact checkpoint can become live state only through
+    /// `restore_authenticated` and a separately host-minted capability bound to
+    /// its independently retained digest and capacity.
     pub fn render(&self) -> String {
         let entries = self
             .entries

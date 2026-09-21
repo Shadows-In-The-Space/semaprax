@@ -38,8 +38,10 @@ pub use http::{
     HttpLedgerRefusal, HttpRequest, PreparedHttpDelivery,
 };
 pub use ledger::{
-    DeliveryIdentity, HostDeliveryLedger, LedgerCheckpoint, LedgerCheckpointRefusal, LedgerOutcome,
-    LedgerRecord, LedgerRefusal, MAX_LEDGER_CHECKPOINT_BYTES, MAX_LEDGER_ENTRIES,
+    CheckpointCommit, DeliveryIdentity, DurableLedgerOutcome, DurableLedgerRefusal,
+    HostDeliveryLedger, LedgerCheckpoint, LedgerCheckpointRefusal, LedgerCheckpointStore,
+    LedgerOutcome, LedgerRecord, LedgerRefusal, LedgerRestoreCapability, LedgerRestoreRefusal,
+    MAX_LEDGER_CHECKPOINT_BYTES, MAX_LEDGER_ENTRIES,
 };
 pub use metrics::{
     prepare_metric_export, verify_metric_export, MetricExport, MetricExportSession, MetricKind,

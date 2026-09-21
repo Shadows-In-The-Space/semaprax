@@ -47,14 +47,15 @@ origin, canonical request target, exact delivery ID, idempotency key, content
 type, and body. The delivery ID and idempotency key are also included in
 evidence; neither authorizes replay.
 
-Idempotency is receiver-enforced: this adapter sends the key but keeps no durable
-deduplication ledger and cannot prove the receiver honored it. A restart loses
-all local fixture/adapter memory. Uncertain settlement therefore remains
-uncertain and never authorizes an automatic retry, even when a key was sent.
+Idempotency is receiver-enforced: this adapter sends the key but cannot prove
+the receiver honored it. The one-shot helpers keep no durable state. The
+optional host-owned durable ledger described below preserves only local
+intent/disposition knowledge; uncertain settlement remains uncertain and never
+authorizes an automatic retry, even when a key was sent.
 
 ## Host-owned reconciliation ledger
 
-`HostDeliveryLedger` is an optional, process-local reconciliation primitive for
+`HostDeliveryLedger` is an optional bounded reconciliation primitive for
 host code that owns a prepared-request dispatch boundary. It is deliberately
 separate from `OutboundCapability` and `DeliveryEvidence`: a trusted host
 chooses to invoke `reconcile` *before* its one-shot adapter action, supplying
@@ -92,8 +93,7 @@ allowed origins, and every request/response/deadline/export limit, so a host
 cannot silently replay through a changed policy with the same policy ID.
 Policy commitments and session identities are SHA-256 values;
 no request, raw identity, credential, or response bytes are stored. This does
-not silently change legacy helper behavior or invent a cross-process recovery
-route.
+not silently change legacy helper behavior.
 
 For an exact identity and request digest, a later `reconcile` call returns the
 remembered disposition and never enters its dispatch closure. A different
@@ -112,10 +112,15 @@ dispatch, stores no request body, endpoint, headers, response body, or raw
 identity components, and renders a deterministic diagnostic snapshot using
 only SHA-256 identity and request commitments. Those hashes are not
 confidential redaction: low-entropy inputs can be guessed and tested offline.
-It has no restore API and intentionally
-forgets all knowledge when dropped or after a process restart. Consequently it
-is neither durable delivery state nor an exactly-once protocol; it cannot prove
-remote receipt, turn evidence into a capability, or authorize a retry.
+Plain `reconcile` remains process-local. The additive `reconcile_durable`
+requires an injected `LedgerCheckpointStore` and acknowledges the provisional
+`Uncertain { Transport }` checkpoint before entering the physical dispatch
+closure, then acknowledges the terminal observation afterwards. Only
+`CheckpointCommit::Committed` permits dispatch. A known-not-committed intent is
+removed without dispatch; an uncertain intent stays sticky without dispatch.
+If terminal persistence is known failed or uncertain, the live ledger falls
+back to the already acknowledged provisional uncertainty. No timer, thread, or
+automatic retry is created.
 
 ### Read-only disposition checkpoints
 
@@ -151,16 +156,18 @@ either input. Capacity must match, and any request or disposition disagreement
 refuses, including replacing an uncertainty with acceptance. A panic-reserved
 uncertainty is preserved when exported and imported.
 
-This is offline observation transport, **not live-session restoration**. The
-checkpoint does not include session policy/event commitments, cannot construct
-a capability or delivery receipt, and has no dispatch method or conversion into
-a live ledger/session. It does not create a journal, fsync, authenticate its own
-provenance, establish freshness, or prevent external rollback. A digest supplied
-alongside attacker-controlled bytes authenticates nothing; trusted hosts must
-retain/authenticate the expected commitment independently. Missing or stale
-observations never authorize a retry through this API. Exporting a snapshot
-after settlement cannot close the crash window before that export, so durable
-delivery recovery and exactly-once claims remain out of scope.
+The checkpoint by itself remains offline observation transport. It cannot
+construct a capability, delivery receipt, store, or dispatch. A trusted storage
+host may separately grant a move-only `LedgerRestoreCapability` bound to the
+exact independently retained checkpoint digest and capacity, then call
+`restore_authenticated`. That explicit authority restores only commitment and
+disposition state; exact known requests replay without dispatch and conflicting
+requests refuse. Constructing the restore capability around attacker-selected
+bytes authenticates nothing: the host must authenticate provenance/freshness
+and protect against rollback. The module performs no filesystem I/O or fsync,
+does not retain raw identities or request bytes, and cannot prove remote receipt
+or receiver idempotency. It closes the local ACK-before-dispatch crash window
+for a correctly implemented store, not the distributed exactly-once problem.
 
 ## High-level HTTPS requests
 
@@ -185,7 +192,7 @@ provider adapter may apply deployment-owned credentials outside the request
 value; this module does not read a secret store or expose credentials to
 source, debug output, checkpoints, or evidence.
 
-`HttpDeliverySession` gives the same bounded process-local disposition replay
+`HttpDeliverySession` gives the same bounded disposition replay
 as email/webhook/export sessions. An exact identity and complete request,
 including method, replays without entering the adapter; changing only the
 method conflicts before dispatch. Accepted response bytes are intentionally
@@ -387,6 +394,14 @@ commitment/live-state drift, exact lookup, monotonic union/conflict refusal,
 panic-reserved uncertainty, full-capacity admission and byte/inventory limits,
 hostile schemas/digests/statuses/noncanonical wires, and exports/imports from
 the adapter sessions without extra adapter calls.
+
+The durable-ledger selector is
+`outbound_host_adapter::ledger::durable::tests::`. Its four cases prove the
+intent ACK precedes physical adapter entry, known-failed and ambiguous intent
+commits do not dispatch, a lost terminal ACK remains sticky uncertainty, and
+an exact host-authorized restart replays without constructing another physical
+attempt. This injects an in-memory store fixture only; it is not filesystem,
+database, hosted collector, or remote-delivery evidence.
 
 The typed telemetry selectors are
 `outbound_host_adapter::metrics::tests::` and

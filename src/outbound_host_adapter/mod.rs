@@ -15,6 +15,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroize;
 
+mod collector;
 mod email;
 mod http;
 mod ledger;
@@ -26,6 +27,7 @@ mod trace_http;
 mod tracing;
 mod webhook;
 
+pub use collector::{CollectorRefusal, TelemetryCollectorCapability, TelemetryCollectorTarget};
 pub use email::{
     deliver_email, prepare_email_delivery, verify_email_envelope, EmailAttachment,
     EmailDeliveryReceipt, EmailDeliverySession, EmailEnvelopeMismatch, EmailLedgerRefusal,

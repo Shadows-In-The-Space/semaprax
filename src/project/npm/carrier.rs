@@ -316,7 +316,7 @@ impl ProjectNpmBuild {
     ) -> Result<UsefulDataOciSubject, Diagnostic> {
         self.verify()?;
         if !matches!(
-            self.trusted.project_schema,
+            self.trusted.project_schema.as_str(),
             crate::project::PROJECT_SCHEMA_V3 | crate::project::PROJECT_SCHEMA_V16
         ) {
             return Err(package_error(

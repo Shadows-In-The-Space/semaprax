@@ -80,6 +80,23 @@ use super::{
 /// Maximum parameters one retained call may declare.
 pub const MAX_RETAINED_CALL_PARAMETERS: usize = 8;
 
+/// Check the closed evaluation-fuel interval shared by every retained-call
+/// consumer.
+///
+/// Target-stage executors do not expose the interpreter instruction stream,
+/// but they still have to refuse an invalid stage budget before compiling or
+/// launching a target artifact. Keeping this check beside the interpreter's
+/// own evaluator prevents native and Core Wasm from treating zero (or an
+/// oversized) fuel as an unbounded execution request.
+pub(crate) fn validate_step_limit(max_steps: usize) -> Result<(), Vec<Diagnostic>> {
+    if !(1..=MAX_STEPS_LIMIT).contains(&max_steps) {
+        return Err(vec![option_error(format!(
+            "retained call evaluation requires max_steps 1..={MAX_STEPS_LIMIT}"
+        ))]);
+    }
+    Ok(())
+}
+
 /// One argument or result value in the retained call vocabulary.
 ///
 /// Records and variants are keyed exclusively by persistent stable identity.
@@ -320,11 +337,7 @@ pub fn evaluate_retained_call(
     arguments: &[RetainedValue],
     max_steps: usize,
 ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
-    if !(1..=MAX_STEPS_LIMIT).contains(&max_steps) {
-        return Err(vec![option_error(format!(
-            "retained call evaluation requires max_steps 1..={MAX_STEPS_LIMIT}"
-        ))]);
-    }
+    validate_step_limit(max_steps)?;
     if !index_matches_program(
         program,
         &prepared.entry_id,

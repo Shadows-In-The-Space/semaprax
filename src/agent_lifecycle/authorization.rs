@@ -536,6 +536,16 @@ fn dispatch_on_admitted(
     max_steps: usize,
     cancellation: Option<&AgentCancellation>,
 ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
+    // The target executors do not implement the interpreter's instruction
+    // counter, but they share its finite *admission* interval. Check it at
+    // the sealed boundary, before a native compiler or Node process can be
+    // admitted. Cancellation keeps its existing precedence: a cancellation
+    // racing this boundary settles as cancellation rather than as a malformed
+    // fuel request on every backend.
+    if cancellation.is_some_and(AgentCancellation::is_cancelled) {
+        return Err(vec![super::stages::invariant("stage_executor.cancelled")]);
+    }
+    crate::interpreter::retained_call::validate_step_limit(max_steps)?;
     let authority = ExecutionAuthority::grant();
     match backend {
         StageBackend::Interpreter => InterpreterStageExecutor.execute(

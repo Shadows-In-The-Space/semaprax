@@ -69,11 +69,14 @@ This authored local gate compares proposal admission, fresh authorization
 bindings and consumed requests, an injected read operation, continued State,
 terminal Result, stage order, turn/effect counters, cancellation and
 iteration/stage ceilings. It requires `clang` and `node`; a tool-absent skip
-is not execution evidence. Native and Wasm report no interpreter step or
-cleanup-event counts and do not enforce interpreter fuel. The gate compares
-the semantic evidence fields while excluding only stage step counts; it does
-not claim byte-identical cross-engine evidence or cross-engine fuel parity.
-Interpreter fuel exhaustion has a separate preservation case. This private
+is not execution evidence. Native and Wasm report no interpreter instruction
+or cleanup-event counts. The public target-stage route instead records one
+backend-neutral reservation per settled stage: the checked per-stage cap times
+the recorded stage count, bounded by the run-stage cap. Pre-dispatch
+cancellation settles before this accounting; otherwise the sealed dispatch
+rejects an invalid retained-call stage cap before native/Node admission on
+every selector. This is comparable finite admission fuel, not instruction,
+cleanup-event, timing, or byte-identical cross-engine evidence. This private
 selector does not extend the released production or hosted support claim.
 
 The canonical v2 document explicitly records initialize-once, the iteration

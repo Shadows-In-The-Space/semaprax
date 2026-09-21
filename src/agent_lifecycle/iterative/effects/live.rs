@@ -575,6 +575,17 @@ impl CompiledTypedEffects {
             max_iterations: stages.max_iterations.min(self.max_iterations),
             ..stages
         };
+        // Cancellation is the first target-stage settlement check. In
+        // particular, a pre-cancelled invocation carrying an otherwise
+        // invalid (or arithmetic-overflowing) stage-fuel request must settle
+        // as cancellation without admitting a compiler, Node, proposal, or
+        // host effect. For every non-cancelled run, reuse the retained-call
+        // interval before converting or multiplying it, so all selectors
+        // reject the exact same invalid fuel range.
+        let cancelled_before_stage_accounting = cancellation.is_cancelled();
+        if !cancelled_before_stage_accounting {
+            crate::interpreter::retained_call::validate_step_limit(stages.max_steps_per_stage)?;
+        }
         let per_stage_limit = u64::try_from(stages.max_steps_per_stage)
             .map_err(|_| error("target.stage_work.per_stage"))?;
         let run_stage_limit =
@@ -582,9 +593,15 @@ impl CompiledTypedEffects {
         // This is an admission envelope, not a synthetic instruction count:
         // every selector receives the same checked stage cap, and each
         // recorded stage reserves that cap before any later work can run.
-        let max_reserved_steps = per_stage_limit
-            .checked_mul(run_stage_limit)
-            .ok_or_else(|| error("target.stage_work.capacity"))?;
+        let max_reserved_steps = if cancelled_before_stage_accounting {
+            // No target stage is admitted after a pre-dispatch cancellation,
+            // so there is no reservation to multiply or overflow.
+            0
+        } else {
+            per_stage_limit
+                .checked_mul(run_stage_limit)
+                .ok_or_else(|| error("target.stage_work.capacity"))?
+        };
         let lifecycle = self
             .lifecycle
             .run_with_target_driver_live_on(
@@ -598,10 +615,16 @@ impl CompiledTypedEffects {
             .map_err(crate::agent_lifecycle::iterative::driver::DriverFailure::into_diagnostics)?;
         let recorded_stages = u64::try_from(lifecycle.stages().len())
             .map_err(|_| error("target.stage_work.recorded"))?;
-        let reserved_steps = per_stage_limit
-            .checked_mul(recorded_stages)
-            .ok_or_else(|| error("target.stage_work.reservation"))?;
-        if recorded_stages > run_stage_limit || reserved_steps > max_reserved_steps {
+        let reserved_steps = if cancelled_before_stage_accounting {
+            0
+        } else {
+            per_stage_limit
+                .checked_mul(recorded_stages)
+                .ok_or_else(|| error("target.stage_work.reservation"))?
+        };
+        if recorded_stages > run_stage_limit
+            || (!cancelled_before_stage_accounting && reserved_steps > max_reserved_steps)
+        {
             return Err(error("target.stage_work.bound"));
         }
         let stage_work = TargetStageWork {

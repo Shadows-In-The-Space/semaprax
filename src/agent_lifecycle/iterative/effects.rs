@@ -1043,6 +1043,20 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             &cancellation,
         );
         assert_eq!(expected.lifecycle().status(), IterativeStatus::Complete);
+        assert_eq!(
+            expected.stage_work(),
+            TargetStageWork {
+                per_stage_limit: u64::try_from(IterativeBudget::default().max_steps_per_stage)
+                    .unwrap(),
+                run_stage_limit: u64::try_from(IterativeBudget::default().max_stages).unwrap(),
+                recorded_stages: u64::try_from(expected.lifecycle().stages().len()).unwrap(),
+                reserved_steps: u64::try_from(IterativeBudget::default().max_steps_per_stage)
+                    .unwrap()
+                    .checked_mul(u64::try_from(expected.lifecycle().stages().len()).unwrap())
+                    .unwrap(),
+            },
+            "target work is a backend-neutral reservation, not an interpreter instruction count"
+        );
         assert_eq!(expected_handler.calls, 3);
         assert_eq!(
             expected_handler
@@ -1097,6 +1111,7 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
                 "{label}"
             );
             assert_eq!(actual.accounting(), expected.accounting(), "{label}");
+            assert_eq!(actual.stage_work(), expected.stage_work(), "{label}");
             assert_eq!(actual.failure(), expected.failure(), "{label}");
             assert_eq!(handler.calls, expected_handler.calls, "{label}");
             assert_eq!(
@@ -1157,6 +1172,264 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             assert_eq!(run.lifecycle().status(), IterativeStatus::Cancelled);
             assert!(run.target_evidence().is_empty());
             assert_eq!(handler.calls, 0);
+        }
+    }
+
+    #[test]
+    fn public_target_stage_work_is_bounded_and_invalid_step_fuel_refuses_before_target_work() {
+        if !target_backend_tools_available() {
+            eprintln!("skipping target stage bridge: clang or node unavailable");
+            return;
+        }
+        let native_host = crate::agent_lifecycle::tests::native_stage_host()
+            .expect("availability retains native host");
+        let public_native = NativeTargetHost::open(native_host.compiler_path())
+            .expect("fixture compiler is an explicit target capability");
+        let module_source = typed_effect_source();
+        let compiled = compile_from_source(&module_source);
+        let task = LifecycleTask {
+            objective: vec![],
+            budget: 10,
+        };
+
+        // One initialize stage can settle, then the run-stage ceiling stops
+        // every selector before observe or any target host request. Its full
+        // per-stage reservation is therefore a comparable, finite fuel unit
+        // even though native and Wasm expose no interpreter instruction count.
+        let stage_budget = IterativeBudget {
+            max_stages: 1,
+            max_steps_per_stage: 17,
+            ..IterativeBudget::default()
+        };
+        let mut expected_source = TargetSource {
+            proposals: Vec::new(),
+            next: 0,
+        };
+        let mut expected_handler = ParityTargetHandler {
+            calls: 0,
+            request_wires: Vec::new(),
+            grants: Vec::new(),
+        };
+        let expected = compiled
+            .run_target_live_with_backend(
+                &task,
+                &mut expected_source,
+                &mut expected_handler,
+                stage_budget,
+                budgets(),
+                &AgentCancellation::new(),
+                TargetStageBackend::Interpreter,
+            )
+            .expect("interpreter records the one admitted stage");
+        assert_eq!(
+            expected.lifecycle().status(),
+            IterativeStatus::BudgetExhausted
+        );
+        assert_eq!(expected_handler.calls, 0);
+        assert_eq!(
+            expected.stage_work(),
+            TargetStageWork {
+                per_stage_limit: 17,
+                run_stage_limit: 1,
+                recorded_stages: 1,
+                reserved_steps: 17,
+            }
+        );
+
+        for (label, selected) in [
+            ("native", TargetStageBackend::Native(&public_native)),
+            ("Core Wasm", TargetStageBackend::CoreWasm),
+        ] {
+            let mut source = TargetSource {
+                proposals: Vec::new(),
+                next: 0,
+            };
+            let mut handler = ParityTargetHandler {
+                calls: 0,
+                request_wires: Vec::new(),
+                grants: Vec::new(),
+            };
+            let actual = compiled
+                .run_target_live_with_backend(
+                    &task,
+                    &mut source,
+                    &mut handler,
+                    stage_budget,
+                    budgets(),
+                    &AgentCancellation::new(),
+                    selected,
+                )
+                .unwrap_or_else(|errors| panic!("{label}: {errors:?}"));
+            assert_eq!(
+                actual.lifecycle().status(),
+                expected.lifecycle().status(),
+                "{label}"
+            );
+            assert_eq!(actual.stage_work(), expected.stage_work(), "{label}");
+            assert_eq!(handler.calls, 0, "{label}: no target host dispatch");
+        }
+
+        // A zero stage-fuel request must fail before source proposal, target
+        // compilation, Node/native launch, grant minting, or target-handler
+        // dispatch. It is the same retained-call diagnostic on all public
+        // selectors, rather than a backend-specific zero-step execution.
+        for (limit_label, invalid_budget) in [
+            (
+                "zero",
+                IterativeBudget {
+                    max_steps_per_stage: 0,
+                    ..IterativeBudget::default()
+                },
+            ),
+            (
+                "oversized",
+                IterativeBudget {
+                    max_steps_per_stage: usize::MAX,
+                    ..IterativeBudget::default()
+                },
+            ),
+        ] {
+            let mut expected_source = TargetSource {
+                proposals: Vec::new(),
+                next: 0,
+            };
+            let mut expected_handler = ParityTargetHandler {
+                calls: 0,
+                request_wires: Vec::new(),
+                grants: Vec::new(),
+            };
+            let mut expected_errors = match compiled.run_target_live_with_backend(
+                &task,
+                &mut expected_source,
+                &mut expected_handler,
+                invalid_budget,
+                budgets(),
+                &AgentCancellation::new(),
+                TargetStageBackend::Interpreter,
+            ) {
+                Ok(_) => panic!("{limit_label} stage fuel must refuse on the interpreter"),
+                Err(errors) => errors,
+            };
+            assert_eq!(expected_errors.len(), 1);
+            let expected_error = expected_errors.remove(0);
+            assert_eq!(expected_source.next, 0);
+            assert_eq!(expected_handler.calls, 0);
+            for (label, selected) in [
+                ("native", TargetStageBackend::Native(&public_native)),
+                ("Core Wasm", TargetStageBackend::CoreWasm),
+            ] {
+                let mut source = TargetSource {
+                    proposals: Vec::new(),
+                    next: 0,
+                };
+                let mut handler = ParityTargetHandler {
+                    calls: 0,
+                    request_wires: Vec::new(),
+                    grants: Vec::new(),
+                };
+                let errors = match compiled.run_target_live_with_backend(
+                    &task,
+                    &mut source,
+                    &mut handler,
+                    invalid_budget,
+                    budgets(),
+                    &AgentCancellation::new(),
+                    selected,
+                ) {
+                    Ok(_) => panic!(
+                        "{label}: {limit_label} stage fuel must refuse before target execution"
+                    ),
+                    Err(errors) => errors,
+                };
+                assert_eq!(errors.len(), 1, "{label}: {limit_label}");
+                assert_eq!(
+                    errors[0].code, expected_error.code,
+                    "{label}: {limit_label}"
+                );
+                assert_eq!(
+                    errors[0].message, expected_error.message,
+                    "{label}: {limit_label}"
+                );
+                assert_eq!(
+                    source.next, 0,
+                    "{label}: {limit_label}: no proposal acquisition"
+                );
+                assert_eq!(
+                    handler.calls, 0,
+                    "{label}: {limit_label}: no target host dispatch"
+                );
+            }
+        }
+
+        // Cancellation is selected before invalid stage-fuel validation or
+        // reservation arithmetic. All public selectors return the ordinary
+        // terminal cancellation with no stage record, proposal, grant, host
+        // dispatch, or reserved step units.
+        let oversized_budget = IterativeBudget {
+            max_steps_per_stage: usize::MAX,
+            ..IterativeBudget::default()
+        };
+        let cancellation = AgentCancellation::new();
+        cancellation.cancel();
+        let mut expected_source = TargetSource {
+            proposals: Vec::new(),
+            next: 0,
+        };
+        let mut expected_handler = ParityTargetHandler {
+            calls: 0,
+            request_wires: Vec::new(),
+            grants: Vec::new(),
+        };
+        let expected = compiled
+            .run_target_live_with_backend(
+                &task,
+                &mut expected_source,
+                &mut expected_handler,
+                oversized_budget,
+                budgets(),
+                &cancellation,
+                TargetStageBackend::Interpreter,
+            )
+            .expect("pre-cancelled oversized fuel settles as cancellation");
+        assert_eq!(expected.lifecycle().status(), IterativeStatus::Cancelled);
+        assert_eq!(expected.stage_work().recorded_stages(), 0);
+        assert_eq!(expected.stage_work().reserved_steps(), 0);
+        assert_eq!(expected_source.next, 0);
+        assert_eq!(expected_handler.calls, 0);
+        for (label, selected) in [
+            ("native", TargetStageBackend::Native(&public_native)),
+            ("Core Wasm", TargetStageBackend::CoreWasm),
+        ] {
+            let mut source = TargetSource {
+                proposals: Vec::new(),
+                next: 0,
+            };
+            let mut handler = ParityTargetHandler {
+                calls: 0,
+                request_wires: Vec::new(),
+                grants: Vec::new(),
+            };
+            let actual = compiled
+                .run_target_live_with_backend(
+                    &task,
+                    &mut source,
+                    &mut handler,
+                    oversized_budget,
+                    budgets(),
+                    &cancellation,
+                    selected,
+                )
+                .unwrap_or_else(|errors| {
+                    panic!("{label}: pre-cancelled oversized fuel: {errors:?}")
+                });
+            assert_eq!(
+                actual.lifecycle().status(),
+                expected.lifecycle().status(),
+                "{label}"
+            );
+            assert_eq!(actual.stage_work(), expected.stage_work(), "{label}");
+            assert_eq!(source.next, 0, "{label}: no proposal acquisition");
+            assert_eq!(handler.calls, 0, "{label}: no target host dispatch");
         }
     }
 

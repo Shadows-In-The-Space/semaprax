@@ -52,7 +52,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use validation::{expected_declaration_facts, validate_stub_signatures, WorkspaceValidationIndex};
-const MAX_FILES: usize = 32;
+pub(crate) const MAX_FILES: usize = 32;
 const MAX_TOTAL_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DECLARATIONS: usize = 4096;
 const MAX_CALLABLES: usize = 1024;

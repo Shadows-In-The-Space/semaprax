@@ -42,11 +42,6 @@ impl ProjectCandidate {
     }
 
     fn build_source_review(&self) -> Result<String, Vec<Diagnostic>> {
-        if self.base.sources().len() > MAX_SOURCES || self.revision.sources().len() > MAX_SOURCES {
-            return Err(capacity(
-                "candidate source review inventory exceeds sixteen files",
-            ));
-        }
         let replay = Self::replay(
             Arc::clone(&self.base),
             self.base.project_revision(),
@@ -94,6 +89,16 @@ impl ProjectCandidate {
             }
             if before.source() == after.source() {
                 continue;
+            }
+            // The report's ceiling applies to changed-source rows, not the
+            // complete dependency closure being compared. Large retained
+            // projects may safely contribute unchanged sources: every entry
+            // is still replayed, ordered, and digest-checked above, while only
+            // changed bytes enter the bounded review artifact.
+            if files.len() == MAX_SOURCES {
+                return Err(capacity(
+                    "candidate source review exceeds sixteen changed files",
+                ));
             }
             // A lower bound prevents cloning source text that cannot fit the
             // report even before JSON escaping and the diff are considered.

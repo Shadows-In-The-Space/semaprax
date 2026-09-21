@@ -167,6 +167,24 @@ impl SemanticWorkspaceStdioSession {
                     "review_digest": artifacts.review_digest(),
                 }))
             }
+            "workspace/validate-transaction-v2" => {
+                self.require_open()?;
+                let mut params = closed_params(request.params, &["transaction"])?;
+                let transaction = take_string(&mut params, "transaction")?;
+                let artifacts = self
+                    .service
+                    .validate_transaction_v2(transaction.as_bytes())?;
+                self.wrap(json!({
+                    "candidate_revision": artifacts.candidate().revision().project_revision(),
+                    "evidence": exact_json(artifacts.evidence())?,
+                    "impact": exact_json(artifacts.impact())?,
+                    "impact_digest": artifacts.impact_digest(),
+                    "result": exact_json(artifacts.result())?,
+                    "result_digest": artifacts.result_digest(),
+                    "review": exact_json(artifacts.review())?,
+                    "review_digest": artifacts.review_digest(),
+                }))
+            }
             "workspace/validate-transaction-v2-workflow" => {
                 self.require_open()?;
                 let mut params = closed_params(request.params, &["steps"])?;
@@ -346,7 +364,8 @@ fn protocol() -> Value {
         "methods": [
             "service/protocol", "workspace/open", "workspace/status", "workspace/query",
             "workspace/index-query", "workspace/history-query", "workspace/validate-transaction",
-            "workspace/validate-transaction-v2-workflow", "workspace/compact-projection",
+            "workspace/validate-transaction-v2", "workspace/validate-transaction-v2-workflow",
+            "workspace/compact-projection",
             "workspace/refresh", "shutdown"
         ],
         "nonclaims": [

@@ -67,6 +67,8 @@ authority-free instructions.
 | `workspace__index_query` | `workspace/index-query` | `{query: string}` |
 | `workspace__history_query` | `workspace/history-query` | `{query: string}` |
 | `workspace__validate_transaction` | `workspace/validate-transaction` | `{transaction: string}` |
+| `workspace__validate_transaction_v2` | `workspace/validate-transaction-v2` | `{transaction: string}` |
+| `workspace__validate_transaction_v2_workflow` | `workspace/validate-transaction-v2-workflow` | `{steps: [string, ...]}` |
 | `workspace__compact_projection` | `workspace/compact-projection` | `{expected_workspace_revision: string, profile: closed compact-v1 profile, encoding: text|binary, source_path?: retained source label, root?: string, candidate_capsule?: canonical bytes, agent_id?: string}` |
 | `workspace__refresh` | `workspace/refresh` | `{expected_workspace_revision: string, manifest: string, sources: [{path: string, source: string}]}` |
 

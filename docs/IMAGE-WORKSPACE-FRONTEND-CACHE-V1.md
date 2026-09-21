@@ -53,7 +53,7 @@ resolver calls and `checked_HIR_reused` counts actual checked-module hits. Cold
 responses omit the object and keep their existing bytes. Both schemas report
 actual parser/canonicalizer calls, source bytes, AST clones, invalidated source
 paths, and mandatory full cross-file/link/profile work. The
-existing limits remain 16 modules, 16 MiB aggregate source bytes, 16 MiB AST
+existing limits remain 32 modules, 16 MiB aggregate source bytes, 64 MiB AST
 construction prebound, and 64 KiB for the work report. These are logical bounds,
 not allocator/RSS measurements or runtime speed claims. Staging retains old
 and proposed state concurrently and response rendering has its own transport

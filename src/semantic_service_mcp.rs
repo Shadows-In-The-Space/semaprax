@@ -284,44 +284,85 @@ fn list_tools(params: &Map<String, Value>) -> RpcResult {
 
 fn tools() -> Vec<Value> {
     vec![
-        tool("service__protocol", "Report the closed semantic service protocol, limits, and nonclaims.", json!({"type":"object","properties":{},"additionalProperties":false})),
-        tool("workspace__status", "Report the retained active generation without acquiring authority.", json!({"type":"object","properties":{},"additionalProperties":false})),
-        tool("workspace__query", "Run one canonical Universal Semantic Query v1 string against the retained generation.", one_string_schema("query")),
-        tool("workspace__index_query", "Run one canonical retained semantic index query string against the retained generation.", one_string_schema("query")),
-        tool("workspace__history_query", "Run one canonical revision-bound query over successful transaction-validation and refresh outcomes.", one_string_schema("query")),
-        tool("workspace__validate_transaction", "Validate one canonical Universal Semantic Transaction v1 string without adopting its candidate.", one_string_schema("transaction")),
-        tool("workspace__validate_transaction_v2_workflow", "Validate an ordered sequence of canonical Universal Semantic Transaction v2 ReplaceExpression strings as one multi-file workflow, each step reselected against the revision its predecessor produced, without adopting its candidate.", json!({
-            "type":"object",
-            "properties":{
-                "steps":{"type":"array","minItems":1,"maxItems":MAX_SEMANTIC_TRANSACTION_V2_WORKFLOW_STEPS,"items":{"type":"string"}}
-            },
-            "required":["steps"],
-            "additionalProperties":false
-        })),
-        tool("workspace__compact_projection", "Compact one existing authoritative projection selected from the exact retained workspace generation. Source labels select retained Project bytes only; they are not host paths.", json!({
-            "type":"object",
-            "properties":{
-                "expected_workspace_revision":{"type":"string","maxLength":4096},
-                "profile":{"type":"string","maxLength":4096,"enum":["full-graph","agent-context-v2","task-context-v1","api-surface-v8-owned-data","candidate-semantic-delta-catalog","agent-definition-graph"]},
-                "encoding":{"type":"string","enum":["text","binary","model-text"]},
-                "source_path":{"type":"string","maxLength":4096},
-                "root":{"type":"string","maxLength":4096},
-                "candidate_capsule":{"type":"string","maxLength":67108864},
-                "agent_id":{"type":"string","maxLength":4096}
-            },
-            "required":["expected_workspace_revision","profile","encoding"],
-            "additionalProperties":false
-        })),
-        tool("workspace__refresh", "Refresh from caller-owned canonical manifest and source bytes. Source paths are Project-relative identities, never host path selectors.", json!({
-            "type":"object",
-            "properties":{
-                "expected_workspace_revision":{"type":"string"},
-                "manifest":{"type":"string","maxLength":65536},
-                "sources":{"type":"array","maxItems":MAX_SOURCES,"items":{"type":"object","properties":{"path":{"type":"string"},"source":{"type":"string"}},"required":["path","source"],"additionalProperties":false}}
-            },
-            "required":["expected_workspace_revision","manifest","sources"],
-            "additionalProperties":false
-        })),
+        tool(
+            "service__protocol",
+            "Report the closed semantic service protocol, limits, and nonclaims.",
+            json!({"type":"object","properties":{},"additionalProperties":false}),
+        ),
+        tool(
+            "workspace__status",
+            "Report the retained active generation without acquiring authority.",
+            json!({"type":"object","properties":{},"additionalProperties":false}),
+        ),
+        tool(
+            "workspace__query",
+            "Run one canonical Universal Semantic Query v1 string against the retained generation.",
+            one_string_schema("query"),
+        ),
+        tool(
+            "workspace__index_query",
+            "Run one canonical retained semantic index query string against the retained generation.",
+            one_string_schema("query"),
+        ),
+        tool(
+            "workspace__history_query",
+            "Run one canonical revision-bound query over successful transaction-validation and refresh outcomes.",
+            one_string_schema("query"),
+        ),
+        tool(
+            "workspace__validate_transaction",
+            "Validate one canonical Universal Semantic Transaction v1 string without adopting its candidate.",
+            one_string_schema("transaction"),
+        ),
+        tool(
+            "workspace__validate_transaction_v2",
+            "Validate one canonical Universal Semantic Transaction v2 ReplaceExpression string without adopting its candidate.",
+            one_string_schema("transaction"),
+        ),
+        tool(
+            "workspace__validate_transaction_v2_workflow",
+            "Validate an ordered sequence of canonical Universal Semantic Transaction v2 ReplaceExpression strings as one multi-file workflow, each step reselected against the revision its predecessor produced, without adopting its candidate.",
+            json!({
+                "type":"object",
+                "properties":{
+                    "steps":{"type":"array","minItems":1,"maxItems":MAX_SEMANTIC_TRANSACTION_V2_WORKFLOW_STEPS,"items":{"type":"string"}}
+                },
+                "required":["steps"],
+                "additionalProperties":false
+            }),
+        ),
+        tool(
+            "workspace__compact_projection",
+            "Compact one existing authoritative projection selected from the exact retained workspace generation. Source labels select retained Project bytes only; they are not host paths.",
+            json!({
+                "type":"object",
+                "properties":{
+                    "expected_workspace_revision":{"type":"string","maxLength":4096},
+                    "profile":{"type":"string","maxLength":4096,"enum":["full-graph","agent-context-v2","task-context-v1","api-surface-v8-owned-data","candidate-semantic-delta-catalog","agent-definition-graph"]},
+                    "encoding":{"type":"string","enum":["text","binary","model-text"]},
+                    "source_path":{"type":"string","maxLength":4096},
+                    "root":{"type":"string","maxLength":4096},
+                    "candidate_capsule":{"type":"string","maxLength":67108864},
+                    "agent_id":{"type":"string","maxLength":4096}
+                },
+                "required":["expected_workspace_revision","profile","encoding"],
+                "additionalProperties":false
+            }),
+        ),
+        tool(
+            "workspace__refresh",
+            "Refresh from caller-owned canonical manifest and source bytes. Source paths are Project-relative identities, never host path selectors.",
+            json!({
+                "type":"object",
+                "properties":{
+                    "expected_workspace_revision":{"type":"string"},
+                    "manifest":{"type":"string","maxLength":65536},
+                    "sources":{"type":"array","maxItems":MAX_SOURCES,"items":{"type":"object","properties":{"path":{"type":"string"},"source":{"type":"string"}},"required":["path","source"],"additionalProperties":false}}
+                },
+                "required":["expected_workspace_revision","manifest","sources"],
+                "additionalProperties":false
+            }),
+        ),
     ]
 }
 
@@ -343,6 +384,7 @@ fn tool_method(name: &str) -> Option<&'static str> {
         "workspace__index_query" => Some("workspace/index-query"),
         "workspace__history_query" => Some("workspace/history-query"),
         "workspace__validate_transaction" => Some("workspace/validate-transaction"),
+        "workspace__validate_transaction_v2" => Some("workspace/validate-transaction-v2"),
         "workspace__validate_transaction_v2_workflow" => {
             Some("workspace/validate-transaction-v2-workflow")
         }

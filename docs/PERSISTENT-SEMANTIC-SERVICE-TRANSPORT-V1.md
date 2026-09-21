@@ -60,6 +60,8 @@ workspace/query
 workspace/index-query
 workspace/history-query
 workspace/validate-transaction
+workspace/validate-transaction-v2
+workspace/validate-transaction-v2-workflow
 workspace/compact-projection
 workspace/refresh
 shutdown
@@ -101,6 +103,14 @@ containing canonical Universal Semantic Transaction v1 JSON. It returns the
 exact core impact, review, result, and evidence values and their existing
 digests plus the candidate revision. Validation does not adopt the candidate
 or change the service generation.
+
+`workspace/validate-transaction-v2` likewise accepts exactly one canonical
+Universal Semantic Transaction v2 `ReplaceExpression` string. It returns the
+exact v2 impact, review, result, and evidence values with their existing
+digests plus the candidate revision. `workspace/validate-transaction-v2-workflow`
+accepts the existing bounded ordered v2 step array. Both are validation-only:
+they retain a bounded history item but neither adopts, executes, writes, or
+publishes the candidate.
 
 `workspace/compact-projection` accepts `expected_workspace_revision`, one
 closed Compact Semantic Projection v1 profile, and `encoding` (`text` or

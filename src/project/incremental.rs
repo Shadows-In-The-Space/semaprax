@@ -47,7 +47,14 @@ pub const PROJECT_FRONTEND_CACHE_COMPATIBILITY: &str = "semaprax.project-fronten
 pub const PROJECT_SEMANTIC_CACHE_SCHEMA: &str = "semaprax.project-semantic-cache-work.v1";
 pub const PROJECT_SEMANTIC_CACHE_COMPATIBILITY: &str = "semaprax.project-checked-module-hir.v1";
 pub const MAX_PROJECT_FRONTEND_CACHE_SOURCE_BYTES: usize = MAX_TOTAL_SOURCE_BYTES;
-pub const MAX_PROJECT_FRONTEND_CACHE_AST_BUDGET: usize = 16 * 1024 * 1024;
+/// The frontend retains the complete admitted semantic module closure, which
+/// includes bundled/dependency modules beyond the manifest's sixteen authored
+/// source slots. Keep this aligned with the ordinary Workspace Semantic Graph.
+pub const MAX_PROJECT_FRONTEND_CACHE_MODULES: usize = crate::workspace_graph::MAX_FILES;
+/// Synthetic imported stubs make the retained AST larger than authored source.
+/// Share the graph builder's established construction ceiling so the complete
+/// 32-module closure can be cached without creating an unbounded lane.
+pub const MAX_PROJECT_FRONTEND_CACHE_AST_BUDGET: usize = crate::workspace_graph::MAX_BUILDER_BYTES;
 /// Keep checked-cache construction admission aligned with the ordinary
 /// Workspace Semantic Graph builder instead of imposing a smaller independent
 /// ceiling over the cache's retained-work estimate.
@@ -164,7 +171,7 @@ impl ProjectFrontendCache {
         manifest: &ProjectManifest,
         sources: &[ProjectFrontendSource],
     ) -> Result<ProjectFrontendBuild> {
-        if sources.len() > MAX_SOURCES {
+        if sources.len() > MAX_PROJECT_FRONTEND_CACHE_MODULES {
             return Err(capacity(
                 "frontend source inventory exceeds its module bound",
             ));
@@ -296,7 +303,7 @@ impl ProjectFrontendCache {
                 "selective_function_HIR_resolution":self.semantic,"full_source_verification":true,"full_HIR_validation":true,
                 "full_cross_file_checks":true,"full_link_and_profile_admission":true},
             "retained":{"modules":pass.entries.len(),"source_bytes":pass.retained_source_bytes,"AST_construction_prebound":pass.ast_budget},
-            "limits":{"modules":MAX_SOURCES,"source_bytes":MAX_PROJECT_FRONTEND_CACHE_SOURCE_BYTES,"AST_construction_prebound":MAX_PROJECT_FRONTEND_CACHE_AST_BUDGET,"checked_monomorphic_functions":MAX_PROJECT_CHECKED_FUNCTIONS},
+            "limits":{"modules":MAX_PROJECT_FRONTEND_CACHE_MODULES,"source_bytes":MAX_PROJECT_FRONTEND_CACHE_SOURCE_BYTES,"AST_construction_prebound":MAX_PROJECT_FRONTEND_CACHE_AST_BUDGET,"checked_monomorphic_functions":MAX_PROJECT_CHECKED_FUNCTIONS},
             "nonclaims":if self.semantic {vec!["function_reuse_requires_exact_monomorphic_environment","no_cross_file_check_or_profile_bypass","no_implicit_persistence_or_ambient_cache","no_untrusted_HIR_deserialization","not_allocator_or_RSS_accounting","no_source_or_execution_authority"]}else{vec!["not_incremental_semantic_verification","no_checked_HIR_reuse","no_persistent_or_cross_process_cache","not_allocator_or_RSS_accounting","no_source_or_execution_authority"]}
         }),true,MAX_PROJECT_FRONTEND_REPORT_BYTES).map_err(|_|capacity("frontend work report exceeds its byte bound"))?;
         self.context = context;
@@ -515,7 +522,7 @@ impl FrontendPass {
         ast_budget: usize,
     ) -> Result<()> {
         if sources.len() != programs.len()
-            || programs.len() > MAX_SOURCES
+            || programs.len() > MAX_PROJECT_FRONTEND_CACHE_MODULES
             || ast_budget > MAX_PROJECT_FRONTEND_CACHE_AST_BUDGET
         {
             return Err(capacity(

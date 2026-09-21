@@ -126,9 +126,10 @@ These are operation counts, not elapsed-time benchmarks or proof of lower
 overall memory usage. Canonical source bytes are still charged into the frozen
 graph builder accounting on hits, preserving ordinary cold graph/Image bytes.
 
-The cache retains at most 16 modules, at most 16 MiB of exact source bytes, and
-an existing conservative AST-clone/HIR construction prebound of at most 16 MiB.
-The latter is a compiler construction charge, **not** an allocator or RSS bound.
+The cache retains at most 32 modules, at most 16 MiB of exact source bytes, and
+at most 64 MiB of synthetic AST construction work, aligned with the ordinary
+Workspace Semantic Graph builder. It does not treat that construction budget
+as resident-memory or latency evidence.
 Cache hits deep-clone the AST for the fresh build; ordinary parsed sources,
 linked HIR, report values, and staged old/new generations can coexist under
 their existing separate admission bounds. No aggregate process-heap bound or

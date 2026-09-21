@@ -28,6 +28,7 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::Arc;
 
 use semaprax::project::{
     ProjectCandidate, SemanticQuery, SemanticTransaction, SemanticTransactionRenameDisplayName,
@@ -103,10 +104,10 @@ fn run_returns_zero(path: &Path) {
     );
 }
 
-/// A deliberately small JSON-RPC client for the installed coding-agent
-/// transport. It owns only a child process and is used below to prove the
-/// reference application's workflow through the public transport, rather than
-/// by calling the transaction core directly.
+/// A deliberately small JSON-RPC client for the two public, stdio-only agent
+/// transports exercised below. It owns only its caller-selected child process;
+/// neither transport gains filesystem, network, or publication authority from
+/// this relay.
 struct AgentWorkflowDaemon {
     child: Child,
     input: ChildStdin,
@@ -137,6 +138,22 @@ impl AgentWorkflowDaemon {
         Self {
             input: child.stdin.take().expect("daemon stdin must be piped"),
             output: BufReader::new(child.stdout.take().expect("daemon stdout must be piped")),
+            child,
+        }
+    }
+
+    fn start_semantic_service(manifest: &Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_semaprax"))
+            .arg("service")
+            .arg(manifest)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the semantic workspace service must start");
+        Self {
+            input: child.stdin.take().expect("service stdin must be piped"),
+            output: BufReader::new(child.stdout.take().expect("service stdout must be piped")),
             child,
         }
     }
@@ -181,6 +198,23 @@ impl AgentWorkflowDaemon {
             .read_to_string(&mut stderr)
             .expect("daemon stderr must be readable");
         assert!(status.success(), "coding-agent transport failed: {stderr}");
+    }
+
+    fn finish_semantic_service(mut self) {
+        let response = self.call(json!({"jsonrpc":"2.0","id":99,"method":"shutdown"}));
+        assert_eq!(response["result"]["payload"]["shutdown"], true);
+        let status = self.child.wait().expect("semantic service must stop");
+        let mut stderr = String::new();
+        self.child
+            .stderr
+            .take()
+            .expect("service stderr must be piped")
+            .read_to_string(&mut stderr)
+            .expect("service stderr must be readable");
+        assert!(
+            status.success(),
+            "semantic workspace service failed: {stderr}"
+        );
     }
 }
 
@@ -700,6 +734,153 @@ fn coding_agent_transport_completes_service_feature_workflow_in_disposable_proje
         "transport workflow must stay inside its disposable project"
     );
     daemon.finish();
+}
+
+/// Issue #194's semantic-change demonstration has a second, independent
+/// public transport shape beside the stable-ID rename above: a bounded
+/// ReplaceExpression v2 validation over the real service's bundled closure.
+/// The semantic workspace service returns every candidate artifact but never
+/// adopts or writes it. The direct candidate retest below binds that returned
+/// artifact set to the actual application behavior without turning a
+/// read-only transport receipt into publication authority.
+#[test]
+fn semantic_workspace_service_validates_and_retests_service_expression_change() {
+    let checked_in = fixture();
+    let working = ScratchTree::new("semantic-service-expression");
+    std::fs::create_dir_all(working.join("src")).unwrap();
+    std::fs::copy(
+        checked_in.join("semaprax.toml"),
+        working.join("semaprax.toml"),
+    )
+    .unwrap();
+    for relative in ["src/app.spx", "src/core.spx", "src/tests.spx"] {
+        std::fs::copy(checked_in.join(relative), working.join(relative)).unwrap();
+    }
+    let manifest = working.join("semaprax.toml");
+    let base_core = std::fs::read(working.join("src/core.spx")).unwrap();
+    let (workspace, transaction, artifacts) =
+        project::with_authenticated_project(&manifest, |snapshot| {
+            snapshot.check()?;
+            let revision = snapshot.retain_revision();
+            let workspace = revision
+                .canonical_workspace_revision()?
+                .workspace_revision()
+                .to_owned();
+            let candidate =
+                ProjectCandidate::open(Arc::clone(&revision), revision.project_revision())?;
+            let catalog: Value = serde_json::from_str(
+                &candidate.expression_catalog("task_service.core.identifier_byte_ok")?,
+            )
+            .expect("expression catalog must be JSON");
+            let source = revision
+                .sources()
+                .iter()
+                .find(|source| source.path() == "src/core.spx")
+                .expect("task-service core source must be retained")
+                .source();
+            let expression = catalog["expressions"]
+                .as_array()
+                .expect("expression catalog must carry expressions")
+                .iter()
+                .find(|row| {
+                    row["phase"] == "body"
+                        && row["replaceable"] == true
+                        && row["source_span"]["start"]
+                            .as_u64()
+                            .zip(row["source_span"]["end"].as_u64())
+                            .and_then(|(start, end)| source.get(start as usize..end as usize))
+                            == Some("byte == 95u8")
+                })
+                .expect("identifier_byte_ok must expose its underscore disjunct");
+            let expression_id = expression["expression_id"]
+                .as_str()
+                .expect("replaceable expression must have an identity");
+            let transaction = SemanticTransactionV2::replace_expression(
+                &workspace,
+                SemanticTransactionReplaceExpression::new(
+                    "task_service.core.identifier_byte_ok",
+                    expression_id,
+                    "byte == 95u8",
+                    json!({
+                        "kind": "binary",
+                        "op": "||",
+                        "left": {
+                            "kind": "binary",
+                            "op": "==",
+                            "left": {"kind": "place", "name": "byte"},
+                            "right": {"kind": "u8", "value": 95}
+                        },
+                        "right": {"kind": "bool", "value": false}
+                    }),
+                ),
+            )?;
+            let artifacts = transaction.validate(Arc::clone(&revision))?;
+            assert_eq!(
+                artifacts
+                    .candidate()
+                    .revision()
+                    .execute_entry(&project::ProjectExecutionOptions::default())?
+                    .outcome(),
+                &project::ProjectExecutionOutcome::Returned(0),
+                "the validated candidate must preserve the service acceptance entry"
+            );
+            assert_eq!(
+                artifacts
+                    .candidate()
+                    .revision()
+                    .execute_test(&project::ProjectExecutionOptions::default())?
+                    .outcome(),
+                &project::ProjectExecutionOutcome::Returned(0),
+                "the validated candidate must preserve every service conformance case"
+            );
+            Ok((workspace, transaction, artifacts))
+        })
+        .unwrap();
+
+    let mut daemon = AgentWorkflowDaemon::start_semantic_service(&manifest);
+    let opened = daemon.call(json!({"jsonrpc":"2.0","id":1,"method":"workspace/open"}));
+    assert_eq!(opened["result"]["workspace_revision"], workspace);
+    let validated = daemon.call(json!({
+        "jsonrpc":"2.0",
+        "id":2,
+        "method":"workspace/validate-transaction-v2",
+        "params":{"transaction":transaction.to_json()}
+    }));
+    assert!(
+        validated.get("error").is_none(),
+        "semantic workspace service v2 validation failed: {validated}"
+    );
+    let payload = &validated["result"]["payload"];
+    assert_eq!(
+        payload["candidate_revision"],
+        artifacts.candidate().revision().project_revision()
+    );
+    for (field, artifact) in [
+        ("evidence", artifacts.evidence()),
+        ("impact", artifacts.impact()),
+        ("result", artifacts.result()),
+        ("review", artifacts.review()),
+    ] {
+        assert_eq!(
+            payload[field],
+            serde_json::from_str::<Value>(artifact).unwrap(),
+            "public v2 validation must render the exact {field} artifact"
+        );
+    }
+    assert_eq!(
+        payload["impact"]["expression"]["source_outside_expression_preserved"],
+        true
+    );
+    assert_eq!(
+        payload["review"]["review"]["stable_function_identity_preserved"],
+        true
+    );
+    daemon.finish_semantic_service();
+    assert_eq!(
+        std::fs::read(working.join("src/core.spx")).unwrap(),
+        base_core,
+        "read-only semantic-service validation must not write the application source"
+    );
 }
 
 /// Issue #277's acceptance criterion, using this project's real

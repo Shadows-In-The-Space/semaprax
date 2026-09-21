@@ -138,6 +138,7 @@ fn lifecycle_catalogue_and_tools_share_the_retained_authority_free_generation() 
             "workspace__index_query",
             "workspace__history_query",
             "workspace__validate_transaction",
+            "workspace__validate_transaction_v2",
             "workspace__validate_transaction_v2_workflow",
             "workspace__compact_projection",
             "workspace__refresh",
@@ -260,6 +261,19 @@ fn lifecycle_catalogue_and_tools_share_the_retained_authority_free_generation() 
         ),
     )
     .unwrap();
+    let validated_v2 = tool(
+        &mut session,
+        521,
+        "workspace__validate_transaction_v2",
+        json!({"transaction":workflow_step.to_json()}),
+    );
+    assert_eq!(validated_v2["result"]["isError"], false);
+    let validated_v2 = inner(&validated_v2);
+    assert_eq!(validated_v2["result"]["workspace_revision"], before);
+    assert_eq!(
+        validated_v2["result"]["payload"]["result"]["schema"],
+        "semaprax.semantic-transaction-result.v2"
+    );
     let workflow = tool(
         &mut session,
         522,

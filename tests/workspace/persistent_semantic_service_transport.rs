@@ -190,6 +190,7 @@ fn one_session_retains_one_generation_and_delegates_exact_query_and_transaction_
             "workspace/index-query",
             "workspace/history-query",
             "workspace/validate-transaction",
+            "workspace/validate-transaction-v2",
             "workspace/validate-transaction-v2-workflow",
             "workspace/compact-projection",
             "workspace/refresh",
@@ -331,9 +332,44 @@ fn one_session_retains_one_generation_and_delegates_exact_query_and_transaction_
         ),
     )
     .unwrap();
-    let workflowed = result(&call(
+    let direct_v2 = direct
+        .validate_transaction_v2(workflow_step.to_json().as_bytes())
+        .unwrap();
+    let validated_v2 = result(&call(
         &mut session,
         json!(52),
+        "workspace/validate-transaction-v2",
+        json!({"transaction":workflow_step.to_json()}),
+    ))
+    .clone();
+    assert_eq!(validated_v2["workspace_revision"], workspace);
+    for (field, value) in [
+        (
+            "candidate_revision",
+            Value::String(
+                direct_v2
+                    .candidate()
+                    .revision()
+                    .project_revision()
+                    .to_owned(),
+            ),
+        ),
+        (
+            "evidence",
+            serde_json::from_str(direct_v2.evidence()).unwrap(),
+        ),
+        ("impact", serde_json::from_str(direct_v2.impact()).unwrap()),
+        ("result", serde_json::from_str(direct_v2.result()).unwrap()),
+        ("review", serde_json::from_str(direct_v2.review()).unwrap()),
+    ] {
+        assert_eq!(
+            validated_v2["payload"][field], value,
+            "v2 {field} must be exact"
+        );
+    }
+    let workflowed = result(&call(
+        &mut session,
+        json!(53),
         "workspace/validate-transaction-v2-workflow",
         json!({"steps":[workflow_step.to_json()]}),
     ))

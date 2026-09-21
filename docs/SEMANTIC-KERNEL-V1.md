@@ -1109,7 +1109,7 @@ next.
 | Rung | Gate | Reached today? | Evidence |
 |---|---|---|---|
 | **0** | A Kernel-0-shaped `.spx` program is admitted by the unmodified toolchain and produces the *same* observable result on the interpreter, the native backend, and the Wasm backend, for at least one concrete program and input. | **Yes.** | "Rung 0 evidence" below. |
-| **1** | A kernel-sized program (bounded by the ceilings above, not merely "small") implements a non-trivial pure computation (validation, classification, or similar) entirely within Kernel-0/Kernel-1's admitted shapes, still with cross-backend agreement. | **No.** Rung-0 evidence stays deliberately tiny; ceiling 3 above shows how little headroom ordinary comparison-heavy code has before hitting a ceiling this document did not expect going in. | This document's ceiling measurements are the negative evidence. |
+| **1** | A kernel-sized program (bounded by the ceilings above, not merely "small") implements a non-trivial pure computation (validation, classification, or similar) entirely within Kernel-0/Kernel-1's admitted shapes, still with cross-backend agreement. | **No.** The candidate below establishes non-trivial classification and focused cross-backend coverage, but remains far below the measured capacity ceilings. | "Rung 1 candidate evidence" below; capacity-scale evidence remains outstanding. |
 | **2** | A pure, total, pipeline-safe compiler component with no ownership/effects of its own — a canonical formatter or renderer fragment is the issue's own suggested first candidate — is implemented in SEMAPRAX, differential-tested byte-identical against the Rust implementation over a broad corpus, and its build is bootstrap-reproducible under a stated environment. | **No.** | Not attempted this session. |
 | **3** | A parser fragment is self-hosted with the same differential-equivalence and bootstrap-reproducibility bar as rung 2, plus documented fallback/recovery if the self-hosted path disagrees with the Rust reference. | **No.** | Not attempted. |
 | **4** | Semantic projection (HIR → semantic graph) is self-hosted with the same bar, plus stable-ID and determinism regression coverage carried over unchanged. | **No.** | Not attempted. |
@@ -1144,6 +1144,27 @@ agrees across all three backends the completion matrix claims. It is
 deliberately small (two functions, one call each), consistent with rung 0's
 narrow scope; it is not evidence for rung 1, which needs a program actually
 near the ceilings above, not comfortably under them.
+
+### Rung 1 candidate evidence (rung not reached)
+
+`src/kernel_zero/differential.rs` contains a bounded, pure access-policy
+classifier with six typed inputs, four helper declarations, priority-sensitive
+refusals, nested conditionals, lazy boolean operators, and fourteen independent
+decision-table fixtures. The source is below 4 KiB, every declaration is
+mechanically admitted by `reifies_into_kernel_zero`, and
+`rung_one_candidate_reifies_and_matches_reference_and_compiler_interpreters`
+checks every fixture against both the from-scratch Kernel-0 evaluator and the
+ordinary compiler interpreter.
+
+`src/kernel_zero/differential/cross_backend.rs` owns the corresponding
+`rung_one_candidate_agrees_across_native_o0_o2_and_core_wasm`
+gate. It executes all fourteen fixtures through native C11 at `-O0` and `-O2`
+and through Core Wasm, comparing all 42 results with the independent reference
+evaluator. Both focused gates passed locally. This finite classifier and corpus
+are preparatory evidence only: at less than 4 KiB the source is not near the
+documented capacity ceilings, so rung 1 remains unreached. It is also not a
+formatter, parser, compiler component, proof of general backend equivalence,
+or evidence for rung 2.
 
 ## Immediate follow-ups (not done by this document)
 

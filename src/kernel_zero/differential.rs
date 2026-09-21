@@ -28,7 +28,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::hir;
+use crate::hir::{self, DeclarationId};
 use crate::interpreter::{self, InterpreterOptions};
 
 use super::corpus;
@@ -292,6 +292,253 @@ fn deep_if_liveness_chain(depth: u32) -> String {
     body
 }
 
+/// Rung 1's non-trivial pure classifier. Unlike the tiny arithmetic example
+/// used for rung 0, this is an independently specified decision table with
+/// priority-sensitive refusals, helper calls, lazy booleans, and both `bool`
+/// and `i64` inputs. Every declaration stays inside Kernel-0's scalar,
+/// effect-free, acyclic fragment.
+const RUNG_ONE_SOURCE: &str = r#"module test.kernel_zero_rung_one;
+
+@id("policy.role-known")
+fn role_known(role: i64) -> bool
+{
+    role >= 0 && role <= 3
+}
+
+@id("policy.operation-known")
+fn operation_known(operation: i64) -> bool
+{
+    operation >= 0 && operation <= 3
+}
+
+@id("policy.write-operation")
+fn write_operation(operation: i64) -> bool
+{
+    operation == 1 || operation == 2 || operation == 3
+}
+
+@id("policy.units-known")
+fn units_known(units: i64) -> bool
+{
+    units >= 0 && units <= 1000
+}
+
+@id("policy.classify")
+fn classify(role: i64, operation: i64, owner_match: bool, mfa: bool, suspended: bool, units: i64) -> i64
+{
+    if suspended { 10 } else {
+        if !role_known(role) { 11 } else {
+            if !operation_known(operation) { 12 } else {
+                if !units_known(units) { 16 } else {
+                    if operation == 0 { 0 } else {
+                        if role == 0 { 13 } else {
+                            if operation == 3 && (role != 3 || !mfa) { 14 } else {
+                                if write_operation(operation) && !owner_match && role != 3 { 15 } else {
+                                    if units > 100 && role < 2 { 17 } else { 0 }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@id("app.main")
+fn main() -> i64
+{
+    classify(1, 1, true, false, false, 10)
+}
+"#;
+
+fn rung_one_samples() -> Vec<(Vec<Value>, i64)> {
+    use Value::{Bool, Int};
+    vec![
+        (
+            vec![
+                Int(-1),
+                Int(9),
+                Bool(false),
+                Bool(false),
+                Bool(true),
+                Int(-1),
+            ],
+            10,
+        ),
+        (
+            vec![
+                Int(-1),
+                Int(0),
+                Bool(true),
+                Bool(false),
+                Bool(false),
+                Int(0),
+            ],
+            11,
+        ),
+        (
+            vec![Int(1), Int(4), Bool(true), Bool(false), Bool(false), Int(0)],
+            12,
+        ),
+        (
+            vec![
+                Int(1),
+                Int(1),
+                Bool(true),
+                Bool(false),
+                Bool(false),
+                Int(-1),
+            ],
+            16,
+        ),
+        (
+            vec![
+                Int(1),
+                Int(1),
+                Bool(true),
+                Bool(false),
+                Bool(false),
+                Int(1001),
+            ],
+            16,
+        ),
+        (
+            vec![
+                Int(0),
+                Int(0),
+                Bool(false),
+                Bool(false),
+                Bool(false),
+                Int(1000),
+            ],
+            0,
+        ),
+        (
+            vec![Int(0), Int(1), Bool(true), Bool(false), Bool(false), Int(1)],
+            13,
+        ),
+        (
+            vec![Int(3), Int(3), Bool(true), Bool(false), Bool(false), Int(1)],
+            14,
+        ),
+        (
+            vec![Int(2), Int(3), Bool(true), Bool(true), Bool(false), Int(1)],
+            14,
+        ),
+        (
+            vec![
+                Int(1),
+                Int(1),
+                Bool(false),
+                Bool(false),
+                Bool(false),
+                Int(1),
+            ],
+            15,
+        ),
+        (
+            vec![
+                Int(3),
+                Int(2),
+                Bool(false),
+                Bool(false),
+                Bool(false),
+                Int(1),
+            ],
+            0,
+        ),
+        (
+            vec![
+                Int(1),
+                Int(1),
+                Bool(true),
+                Bool(false),
+                Bool(false),
+                Int(101),
+            ],
+            17,
+        ),
+        (
+            vec![
+                Int(2),
+                Int(1),
+                Bool(true),
+                Bool(false),
+                Bool(false),
+                Int(101),
+            ],
+            0,
+        ),
+        (
+            vec![
+                Int(1),
+                Int(2),
+                Bool(true),
+                Bool(false),
+                Bool(false),
+                Int(100),
+            ],
+            0,
+        ),
+    ]
+}
+
+fn rung_one_case() -> Case {
+    Case {
+        source: RUNG_ONE_SOURCE.to_owned(),
+        entry_id: "policy.classify".to_owned(),
+        samples: rung_one_samples()
+            .into_iter()
+            .map(|(arguments, _)| arguments)
+            .collect(),
+    }
+}
+
+#[test]
+fn rung_one_candidate_reifies_and_matches_reference_and_compiler_interpreters() {
+    assert!(RUNG_ONE_SOURCE.len() < 4 * 1024);
+    let ast = crate::parse(RUNG_ONE_SOURCE, "kernel-zero-rung-one.spx").unwrap();
+    let hir = hir::resolve(&ast).unwrap();
+    for id in [
+        "policy.role-known",
+        "policy.operation-known",
+        "policy.write-operation",
+        "policy.units-known",
+        "policy.classify",
+        "app.main",
+    ] {
+        assert!(
+            super::reifies_into_kernel_zero(&hir, &DeclarationId::new(id)),
+            "rung-1 declaration {id} left the Kernel-0 fragment"
+        );
+    }
+    let entry = DeclarationId::new("policy.classify");
+    let binding = BoundTranslation::derive(RUNG_ONE_SOURCE, &entry).unwrap();
+    let program = binding.replay(RUNG_ONE_SOURCE, &entry).unwrap();
+    let function = program.function(&entry).unwrap();
+    let fixtures = rung_one_samples();
+    assert_eq!(fixtures.len(), 14, "the decision-table corpus changed");
+    for (arguments, expected) in fixtures {
+        assert_eq!(
+            eval_program(program, function, &arguments),
+            Ok(Value::Int(expected)),
+            "rung-1 decision table disagreed for {arguments:?}"
+        );
+    }
+
+    let case = rung_one_case();
+    let mut failures = Vec::new();
+    let mut total = 0usize;
+    run_case(&case, &mut failures, &mut total);
+    assert_eq!(total, 14, "the focused interpreter corpus changed");
+    assert!(
+        failures.is_empty(),
+        "rung-1 candidate disagreed with the compiler interpreter:\n{}",
+        failures.join("\n---\n")
+    );
+}
+
 /// Hand-written edge cases the task calls out explicitly: overflow,
 /// division/remainder by zero, short-circuit laziness, evaluation order,
 /// and the documented `bool == bool`/`bool != bool` extension (see
@@ -305,7 +552,7 @@ fn hand_written_cases() -> Vec<Case> {
         )
     };
 
-    vec![
+    let mut cases = vec![
         int_case(
             &module("9223372036854775807 + 1"),
             "app.entry",
@@ -532,7 +779,9 @@ fn hand_written_cases() -> Vec<Case> {
             "app.entry",
             vec![vec![]],
         ),
-    ]
+    ];
+    cases.push(rung_one_case());
+    cases
 }
 
 fn generated_cases() -> Vec<Case> {

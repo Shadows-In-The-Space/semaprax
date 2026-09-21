@@ -62,7 +62,8 @@ use super::super::eval::eval_program;
 use super::super::reify::BoundTranslation;
 use super::super::value::Value;
 use super::{
-    fault_from_status, generated_cases, hand_written_cases, reference_outcome, Case, Outcome,
+    fault_from_status, generated_cases, hand_written_cases, reference_outcome, rung_one_case, Case,
+    Outcome,
 };
 
 const REQUIRE_ENV: &str = "SEMAPRAX_REQUIRE_KERNEL_ZERO_CROSS_BACKEND";
@@ -475,6 +476,41 @@ fn run_case(case: &Case, failures: &mut Vec<String>, total: &mut usize) {
     }
 
     cleanup_dir(&root);
+}
+
+#[test]
+fn rung_one_candidate_agrees_across_native_o0_o2_and_core_wasm() {
+    let missing: Vec<&str> = ["clang", "node"]
+        .into_iter()
+        .filter(|tool| !tool_available(tool))
+        .collect();
+    if !missing.is_empty() {
+        assert!(
+            !required(),
+            "{REQUIRE_ENV} requires clang and node on PATH; missing {}",
+            missing.join(", ")
+        );
+        eprintln!(
+            "kernel-0 rung-1 cross-backend test skipped: missing {} (set {REQUIRE_ENV}=1 to require it)",
+            missing.join(", ")
+        );
+        return;
+    }
+
+    let case = rung_one_case();
+    assert_eq!(case.samples.len(), 14, "the rung-1 decision table changed");
+    let mut failures = Vec::new();
+    let mut total = 0usize;
+    run_case(&case, &mut failures, &mut total);
+    assert_eq!(
+        total, 42,
+        "14 fixtures must execute on all three target legs"
+    );
+    assert!(
+        failures.is_empty(),
+        "kernel-0 rung-1 classifier disagreed across targets:\n{}",
+        failures.join("\n---\n")
+    );
 }
 
 #[test]

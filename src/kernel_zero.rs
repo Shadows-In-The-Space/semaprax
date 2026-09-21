@@ -97,6 +97,8 @@ mod graph_projection;
 mod lean_fixture;
 #[cfg(test)]
 mod rung_two_renderer;
+
+mod rung_two_bootstrap;
 #[cfg(test)]
 mod transaction;
 #[cfg(test)]

@@ -48,7 +48,11 @@ pub const PROJECT_SEMANTIC_CACHE_SCHEMA: &str = "semaprax.project-semantic-cache
 pub const PROJECT_SEMANTIC_CACHE_COMPATIBILITY: &str = "semaprax.project-checked-module-hir.v1";
 pub const MAX_PROJECT_FRONTEND_CACHE_SOURCE_BYTES: usize = MAX_TOTAL_SOURCE_BYTES;
 pub const MAX_PROJECT_FRONTEND_CACHE_AST_BUDGET: usize = 16 * 1024 * 1024;
-pub const MAX_PROJECT_CHECKED_MODULE_CACHE_PREBOUND: usize = 16 * 1024 * 1024;
+/// Keep checked-cache construction admission aligned with the ordinary
+/// Workspace Semantic Graph builder instead of imposing a smaller independent
+/// ceiling over the cache's retained-work estimate.
+pub const MAX_PROJECT_CHECKED_MODULE_CACHE_PREBOUND: usize =
+    crate::workspace_graph::MAX_BUILDER_BYTES;
 pub const MAX_PROJECT_CHECKED_FUNCTIONS: usize = 8192;
 pub const MAX_PROJECT_FRONTEND_REPORT_BYTES: usize = 65_536;
 type Result<T> = std::result::Result<T, Vec<Diagnostic>>;
@@ -596,6 +600,11 @@ mod semantic_tests {
 
     #[test]
     fn retained_checked_entry_requires_exact_stub_and_span_equality() {
+        assert_eq!(
+            MAX_PROJECT_CHECKED_MODULE_CACHE_PREBOUND,
+            crate::workspace_graph::MAX_BUILDER_BYTES,
+            "checked reuse and ordinary graph construction must share a ceiling"
+        );
         // Compiler-created synthetic shape: an imported provider stub has an
         // ordinary checked function representation beside the local entry.
         let source = "module local; @id(\"provider.stub\") fn helper(value: i64) -> i64 { value } @id(\"local.main\") fn main() -> i64 { helper(1) }";

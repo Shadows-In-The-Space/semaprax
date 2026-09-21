@@ -94,19 +94,14 @@ reference compose `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.metrics`,
 decision calls: it does not turn a successful check into database, network,
 or telemetry authority.
 
-Separately, the built-in persistent semantic cache (`semaprax
-semantic-cache-persist`/`-load`, `docs/PERSISTENT-SEMANTIC-CACHE-V1.md`) could
-**not** be exercised on this project at all: even the two-dependency
-(`std.auth` + `std.jobs`) configuration exceeds `SPX-G256`'s separate,
-smaller 16,777,216-byte (`MAX_PROJECT_CHECKED_MODULE_CACHE_PREBOUND` in
-`src/project/incremental.rs`) checked-module-cache construction pre-bound,
-even though the same project fits under `SPX-G171`'s larger 48 MiB workspace
-graph bound for plain `check`/`test`/`run`. This is new evidence for issue
-#241: the persistent-cache path has a tighter ceiling than plain checking,
-so a project that compiles today may still be unable to use the semantic
-cache. See this repository's fast-restart measurement (in the issue #194
-worker report) for the exact reproduction and the calculator-project numbers
-measured in its place.
+The built-in persistent semantic cache (`semaprax semantic-cache-persist`/
+`-load`, `docs/PERSISTENT-SEMANTIC-CACHE-V1.md`) is exercised on this project
+by `tests/semantic_cache_store_cli_v1.rs`. Its checked-module construction
+pre-bound is tied to the same 64 MiB `MAX_BUILDER_BYTES` ceiling as ordinary
+Workspace Semantic Graph admission, removing the smaller independent 16 MiB
+limit that rejected this project. `SPX-G256` still fails closed at one byte
+over the shared finite-resource ceiling; the cache does not bypass graph
+admission, equate the phases' estimates, or claim an allocator/RSS bound.
 
 **The stable-ID semantic-change workflow is exercised end to end.**
 `tests/useful_data/task_service_project.rs::stable_id_rename_inspect_preview_apply_and_retest_preserve_the_service`

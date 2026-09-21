@@ -29,6 +29,10 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
+        Self::from_example("calculator-project")
+    }
+
+    fn from_example(example_name: &str) -> Self {
         // One case deliberately changes the installed image's link and write
         // authority. Keep every test-local install/mutate/execute lifetime
         // disjoint so Linux never observes a writable executable image.
@@ -43,7 +47,9 @@ impl Fixture {
         std::fs::create_dir(&root).unwrap();
         std::fs::create_dir(root.join("src")).unwrap();
         let root = root.canonicalize().unwrap();
-        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/calculator-project");
+        let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join(example_name);
         for path in [
             "semaprax.toml",
             "src/app.spx",
@@ -241,6 +247,25 @@ fn warm(report: &Value) {
     assert_eq!(report["work"]["checked_HIR_reused"], 3);
     assert_eq!(report["work"]["full_cross_file_checks"], true);
     assert_eq!(report["work"]["full_link_and_profile_admission"], true);
+}
+
+#[test]
+fn task_service_project_persists_and_restarts_with_checked_hir_reuse() {
+    let fixture = Fixture::from_example("task-service-project");
+    assert_eq!(fixture.initialize()["source_authority"], false);
+    let receipt = fixture.persist();
+    assert_eq!(receipt["schema"], "semaprax.semantic-cache-receipt.v1");
+    assert_eq!(receipt["source_authority"], false);
+    let digest = receipt["entry_digest"].as_str().unwrap();
+    let restarted = value(fixture.load(digest));
+    assert_eq!(
+        restarted["schema"],
+        "semaprax.project-semantic-cache-work.v1"
+    );
+    assert_eq!(restarted["work"]["modules_resolved"], 0);
+    assert!(restarted["work"]["checked_HIR_reused"].as_u64().unwrap() >= 3);
+    assert_eq!(restarted["work"]["full_cross_file_checks"], true);
+    assert_eq!(restarted["work"]["full_link_and_profile_admission"], true);
 }
 
 #[test]

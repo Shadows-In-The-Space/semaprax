@@ -18,14 +18,17 @@ const X86_ARCH: u32 = 0xc000_003e;
 const ARM_ARCH: u32 = 0xc000_00b7;
 const CAPACITY: usize = 256;
 const DEFAULT_ADDRESS_SPACE_LIMIT: libc::rlim_t = 4 * 1024 * 1024 * 1024;
-// Official x86-64 Node 22 builds enable V8's sandbox, whose reservation is
-// 1 TiB before its guard regions and ordinary mappings are counted. RLIMIT_AS
-// accounts virtual reservations rather than resident pages. The former 4 GiB
-// ceiling is structurally below that startup requirement and the hosted gate
-// observed `node --version` terminate with SIGSEGV under it. The worker's
-// output/time bounds and delegated cgroup still bound physical cost.
+// Official x86-64 Node 22 builds enable V8's sandbox, whose 1 TiB reservation
+// must itself be aligned to a 1 TiB boundary. The reservation path can map a
+// 2 TiB candidate range and trim it after selecting the aligned subrange.
+// RLIMIT_AS charges that transient mapping as well as the loader and ordinary
+// process mappings, so a 2 TiB ceiling is still structurally too small. Hosted
+// run 35568902945 confirmed `node --version` still terminated with SIGSEGV at
+// exactly 2 TiB. Four TiB leaves one complete alignment-sized margin without
+// making the virtual-address budget unbounded. The worker's output/time bounds
+// and delegated cgroup still bound physical cost.
 // Keep this role-local and finite: Clang and rustc retain the tighter ceiling.
-const NODE_ADDRESS_SPACE_LIMIT: libc::rlim_t = 2 * 1024 * 1024 * 1024 * 1024;
+const NODE_ADDRESS_SPACE_LIMIT: libc::rlim_t = 4 * 1024 * 1024 * 1024 * 1024;
 
 // Linux native syscall ABIs: arch/x86/entry/syscalls/syscall_64.tbl and
 // include/uapi/asm-generic/unistd.h. AArch64 has no legacy open/access/readlink.

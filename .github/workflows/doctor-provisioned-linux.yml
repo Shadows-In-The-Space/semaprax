@@ -218,6 +218,30 @@ jobs:
           echo "DOCTOR_NODE=$dist/node/bin/node" >> "$GITHUB_ENV"
           echo "DOCTOR_RUSTC=$dist/rust/bin/rustc" >> "$GITHUB_ENV"
 
+      - name: Record real tool startup syscall inventories
+        # A failed confined tool reports only its settled exit status. Record a
+        # syscall census of the exact staged bytes before the gate goes offline
+        # so compatibility work can be derived from observation instead of
+        # widening the role policy from an opaque SIGSEGV or exit code. This is
+        # evidence only: it grants the confined worker no syscall or authority.
+        run: |
+          set -euo pipefail
+          command -v strace >/dev/null
+          for role in node rustc; do
+            case "$role" in
+              node) tool="$DOCTOR_NODE" ;;
+              rustc) tool="$DOCTOR_RUSTC" ;;
+            esac
+            echo "::group::$role --version syscall census"
+            # -f includes runtime-created threads/processes; -c publishes an
+            # observational summary without pointer values, host paths, or
+            # tool output. Timing and synchronization counts may vary between
+            # runs; only the observed operation inventory guides diagnosis.
+            # The command must still succeed.
+            strace -f -qq -c "$tool" --version >/dev/null
+            echo "::endgroup::"
+          done
+
       - name: Record the independent expected details
         # The fixture must not manufacture its own oracle from the confined
         # report. These are read from the packaged distributions themselves,

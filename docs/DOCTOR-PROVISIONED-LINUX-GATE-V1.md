@@ -175,9 +175,9 @@ device. The cause of the `node`/`rust` failure is not established — only that
 it is downstream of `execve` rather than before it, which is where the four
 earlier runs placed it.
 
-### Latest execution: run 35477758519
+### Latest execution: run 35568902945
 
-The latest dispatch ran commit `4496d1a0` on a GitHub-hosted `ubuntu-24.04`
+The latest dispatch ran commit `ce38c335` on a GitHub-hosted `ubuntu-24.04`
 runner. All host, release, image, and cgroup preconditions passed, and the
 final delegated cgroup was empty. The diagnostic reply trailer and all-role
 failure collection identify both failing roles in the platform-sys suite:
@@ -189,11 +189,15 @@ role 4 failed under confinement: Exit: the tool's own process exited with status
 
 The collector suite's canonical report agrees on the role split: Clang is
 `ok`, Node and Rust are `failed`, and the collector exits one as required. The
-platform-sys and collector suites each report 12 passed and 1 failed. Node's
-4 GiB `RLIMIT_AS` is below official x86-64 Node 22's V8 sandbox reservation,
-so the next tranche raises only Node's virtual-address ceiling while retaining
-the fixed physical-memory cgroup limit. Rust's status 127 remains separately
-unexplained. No syscall-policy widening is justified by this evidence.
+platform-sys and collector suites each report 12 passed and 1 failed. The first
+Node-only `RLIMIT_AS` increase to exactly 2 TiB did not change its termination.
+V8 can transiently map a 2 TiB candidate to obtain a 1 TiB-aligned sandbox
+while loader and ordinary mappings are already charged, so the next tranche
+gives Node a finite 4 TiB ceiling while retaining the fixed 4 GiB physical-
+memory cgroup limit. Rust's status 127 remains separately unexplained. The
+workflow now prints a `strace -f -c` census for the exact staged Node and rustc
+bytes before confinement; this is diagnostic evidence only and grants the
+worker nothing. No syscall-policy widening is justified by the exit evidence.
 
 ## What is true today
 

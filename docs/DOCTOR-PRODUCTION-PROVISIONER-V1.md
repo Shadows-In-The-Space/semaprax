@@ -212,17 +212,21 @@ namespace, cgroup, sealing, or kernel prerequisites fail rather than skip.
 required executable gate: the host preconditions it asserts before touching
 namespace or cgroup state, the exact serial selection of the twenty-six ignored
 lifecycle fixtures, the evidence it binds, and its refusal to treat absent
-provisioning as anything but a failure. At this audit the workflow has had 41
-dispatches; the latest is [run 35477758519](https://github.com/wavect/semaprax/actions/runs/35477758519)
-against commit `4496d1a0`. That run reports zero precondition failures, correct
+provisioning as anything but a failure. At this audit the latest dispatch is
+[run 35568902945](https://github.com/wavect/semaprax/actions/runs/35568902945)
+against commit `ce38c335`. That run reports zero precondition failures, correct
 kernel-feature/cgroup/image evidence, and clean settlement, but both admitted
 suites fail 12/13 on the real-distribution fixture. Clang completes; Node is
 killed by `SIGSEGV` (signal 11), while rustc exits with status 127. The Node
-worker's 4 GiB virtual-address ceiling is below official Node 22's V8 sandbox
-reservation; the follow-up raises only that role's `RLIMIT_AS`, not the fixed
-physical-memory cgroup ceiling or confinement policy. Rust's failure remains
-separate and unexplained. The gate remains red, WP-05 remains unpromoted, and
-no ordinary CLI activation is authorized.
+worker's first role-local increase to exactly 2 TiB was still below the peak
+needed to obtain a 1 TiB-aligned sandbox from a transient 2 TiB candidate while
+other mappings exist. The follow-up raises only that finite role ceiling to
+4 TiB, not the fixed physical-memory cgroup ceiling or confinement policy.
+Rust's failure remains separate and unexplained. The workflow now records a
+`strace -f -c` startup census of the exact staged Node and rustc bytes so any
+later syscall-policy change must be derived from observed operations rather
+than inferred from these exit modes. The gate remains red, WP-05 remains
+unpromoted, and no ordinary CLI activation is authorized.
 
 The local packaging helper accepts only explicit absolute release, tar and gzip
 tools plus artifact paths, builds a fresh no-clobber directory, verifies it,

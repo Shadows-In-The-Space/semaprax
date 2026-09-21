@@ -128,8 +128,11 @@ syscalls fail; compatibility failures never trigger an unconfined retry.
 
 Virtual-address reservation limits are role-scoped without changing physical
 memory authority. Clang and rustc retain a 4 GiB `RLIMIT_AS`; Node receives a
-finite 2 TiB ceiling because official x86-64 Node 22 builds reserve V8's 1 TiB
-sandbox plus guard regions during startup. This permits address-space
+finite 4 TiB ceiling because official x86-64 Node 22 builds can transiently
+reserve a 2 TiB candidate range to obtain the aligned 1 TiB V8 sandbox, while
+the loader and ordinary mappings are already charged. A 2 TiB ceiling was
+therefore still structurally below the peak reservation and remained red in
+hosted run 35568902945. This permits address-space
 reservation, not resident allocation: the provisioner's independently fixed
 4 GiB cgroup-v2 `memory.max`, zero swap, output ceiling and execution deadline
 remain unchanged. The larger Node ceiling grants no syscall, path, descriptor,

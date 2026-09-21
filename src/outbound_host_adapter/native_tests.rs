@@ -182,6 +182,53 @@ fn prepared(
     }
 }
 
+fn loopback_http_request(endpoint: String, body: &[u8]) -> HttpRequest {
+    HttpRequest {
+        method: HttpMethod::Post,
+        endpoint,
+        request_id: "native-loopback-request-1".into(),
+        idempotency_key: "native-loopback-idempotency-1".into(),
+        content_type: Some("application/json".into()),
+        headers: vec![HttpHeader::new("x-request-kind", "loopback").unwrap()],
+        body: body.to_vec(),
+        deadline_ms: 2_000,
+    }
+}
+
+fn loopback_policy(port: u16, max_response_bytes: usize) -> OutboundPolicy {
+    OutboundPolicy::new(
+        "native.loopback-session.v1",
+        [format!("https://localhost:{port}")],
+        128,
+        max_response_bytes,
+        2_000,
+        1,
+        1,
+    )
+    .expect("explicit loopback policy")
+}
+
+fn loopback_capability(policy: OutboundPolicy) -> OutboundCapability {
+    OutboundCapability::grant_for_trusted_host(
+        "sha256:native-loopback-session",
+        "native-loopback-invocation-1",
+        policy,
+    )
+    .expect("trusted host grant")
+}
+
+#[derive(Default)]
+struct CommittedSessionStore {
+    checkpoints: Vec<HttpDeliverySessionCheckpoint>,
+}
+
+impl HttpDeliverySessionCheckpointStore for CommittedSessionStore {
+    fn commit(&mut self, checkpoint: &HttpDeliverySessionCheckpoint) -> CheckpointCommit {
+        self.checkpoints.push(checkpoint.clone());
+        CheckpointCommit::Committed
+    }
+}
+
 #[test]
 fn native_adapter_executes_exact_tls_request_and_returns_redirect_response() {
     let (client, server) = trusted_configs();
@@ -316,5 +363,124 @@ fn native_adapter_refuses_invalid_prepared_request_before_connection() {
     assert_eq!(
         listener.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock
+    );
+}
+
+#[test]
+fn native_adapter_durably_replays_committed_typed_session_without_a_second_tls_connection() {
+    let (client, server) = trusted_configs();
+    let body = b"{\"event\":\"job.completed\"}";
+    let (port, worker) = serve_once(
+        server,
+        b"POST /observability HTTP/1.1\r\n",
+        body,
+        b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+    );
+    let endpoint = format!("https://localhost:{port}/observability");
+    let mut session = HttpDeliverySession::new(2).expect("bounded typed session");
+    let mut store = CommittedSessionStore::default();
+    let mut adapter = loopback_adapter(client, port);
+    let first = session
+        .reconcile_durable(
+            prepare_http_delivery(
+                loopback_capability(loopback_policy(port, 16)),
+                loopback_http_request(endpoint.clone(), body),
+            )
+            .expect("explicit host policy admits the loopback request"),
+            &mut store,
+            &mut adapter,
+        )
+        .expect("native TLS dispatch settles into the typed session");
+    assert!(matches!(first, DurableHttpDeliveryOutcome::Dispatched(_)));
+    assert_eq!(
+        store.checkpoints.len(),
+        2,
+        "intent and terminal session states commit"
+    );
+    worker.join().expect("one TLS server request");
+
+    let checkpoint = store
+        .checkpoints
+        .last()
+        .expect("terminal typed session checkpoint was committed");
+    let wire = checkpoint.render();
+    let digest = checkpoint.digest();
+    let capacity = checkpoint.capacity();
+    let mut tampered = wire.clone();
+    tampered.push(' ');
+    assert!(matches!(
+        HttpDeliverySession::restore_authenticated(
+            tampered.as_bytes(),
+            HttpDeliverySessionRestoreCapability::grant_for_trusted_host(&digest, capacity)
+                .expect("trusted store binds its expected checkpoint"),
+        ),
+        Err(HttpDeliverySessionRestoreRefusal::Checkpoint(
+            DeliverySessionCheckpointRefusal::BindingMismatch
+        ))
+    ));
+    let mut restored = HttpDeliverySession::restore_authenticated(
+        wire.as_bytes(),
+        HttpDeliverySessionRestoreCapability::grant_for_trusted_host(digest, capacity)
+            .expect("storage host binds the exact committed checkpoint"),
+    )
+    .expect("exact typed checkpoint restores");
+
+    // Rebind the same port after the first listener exits. A regression that
+    // enters the real adapter on either replay/refusal would be observable as
+    // an incoming TCP connection, not merely as a recording-adapter call.
+    let listener = TcpListener::bind(("127.0.0.1", port)).expect("rebind loopback port");
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking replay listener");
+    let (client, _) = trusted_configs();
+    let mut replay_adapter = loopback_adapter(client, port);
+    let replay = restored
+        .reconcile(
+            prepare_http_delivery(
+                loopback_capability(loopback_policy(port, 16)),
+                loopback_http_request(endpoint.clone(), body),
+            )
+            .expect("exact replay request remains admitted"),
+            &mut replay_adapter,
+        )
+        .expect("known exact request replays");
+    assert!(replay.was_replayed());
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "restored exact replay must never open another TLS connection"
+    );
+
+    let changed_request = restored.reconcile(
+        prepare_http_delivery(
+            loopback_capability(loopback_policy(port, 16)),
+            loopback_http_request(endpoint.clone(), b"{\"event\":\"job.failed\"}"),
+        )
+        .expect("individually valid but changed request"),
+        &mut replay_adapter,
+    );
+    assert_eq!(
+        changed_request,
+        Err(HttpLedgerRefusal::Ledger(LedgerRefusal::ConflictingRequest))
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "request drift must refuse before native TLS dispatch"
+    );
+
+    let drift = restored.reconcile(
+        prepare_http_delivery(
+            loopback_capability(loopback_policy(port, 15)),
+            loopback_http_request(endpoint, body),
+        )
+        .expect("individually valid but changed policy request"),
+        &mut replay_adapter,
+    );
+    assert_eq!(drift, Err(HttpLedgerRefusal::PolicyChanged));
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock,
+        "policy drift must refuse before native TLS dispatch"
     );
 }

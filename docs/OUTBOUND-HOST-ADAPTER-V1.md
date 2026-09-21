@@ -421,6 +421,18 @@ rejected before opening a socket. This is local physical loopback evidence
 only: it does not prove DNS pinning, a system trust-store policy, public-PKI
 interoperability, hosted execution, or remote delivery.
 
+The same local selector also carries one `HttpDeliverySession` through a real
+TLS POST: its host-owned store retains each exact committed typed checkpoint,
+and restore receives only the final committed bytes, digest, and capacity. A
+one-byte checkpoint mutation refuses before restoration. The exact restored
+request replays through a real `NativeHttpsAdapter` while a replacement loopback
+listener proves no second TCP connection occurred. A separately valid request
+under a changed complete host policy, and a separately valid changed event body
+under the same identity, are both refused before that listener can observe a
+connection. This is a host-owned loopback fixture; it does not claim that the
+task-service fixture configuration (which selects only fixture adapters and no
+capabilities) authorizes a physical send.
+
 The checkpoint selector is
 `outbound_host_adapter::ledger::checkpoint::tests::`. Its seven cases cover
 deterministic all-disposition round trips, the empty-state known-answer digest,

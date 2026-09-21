@@ -108,6 +108,26 @@ fn request_admission_refuses_authority_bounds_and_credential_headers_before_disp
         HttpHeader::new("x-api-key", "private"),
         Err(Refusal::InvalidHeader)
     );
+    for name in [
+        "api-key",
+        "bearer-token",
+        "session-token",
+        "webhook-signing-secret",
+        "smtp-credential",
+        "access-token",
+        "refresh-token",
+        "password",
+    ] {
+        assert!(
+            credential_header_name(name),
+            "shared protected alias was not classified: {name}"
+        );
+        assert_eq!(
+            HttpHeader::new(name, "plaintext-secret"),
+            Err(Refusal::InvalidHeader),
+            "protected header alias reached the public request type: {name}"
+        );
+    }
     assert_eq!(
         HttpHeader::new("x-semaprax-delivery-id", "forged"),
         Err(Refusal::InvalidHeader)

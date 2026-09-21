@@ -12,13 +12,9 @@ use sha2::{Digest as _, Sha256};
 use super::*;
 
 const RESERVED_HEADERS: [&str; 3] = ["content-type", "idempotency-key", "x-semaprax-delivery-id"];
-const CREDENTIAL_HEADERS: [&str; 5] = [
-    "authorization",
-    "cookie",
-    "proxy-authorization",
-    "set-cookie",
-    "x-api-key",
-];
+// Names with an `x-` prefix are not protected-name aliases, but are still
+// explicit credential channels at this caller-controlled boundary.
+const EXPLICIT_CREDENTIAL_HEADERS: [&str; 1] = ["x-api-key"];
 
 /// One public caller-selected header. Credential-bearing header names are not
 /// admitted; a trusted provider adapter may add credentials outside this
@@ -38,7 +34,7 @@ impl HttpHeader {
             || value.len() > MAX_HEADER_VALUE_BYTES
             || contains_control(&value)
             || RESERVED_HEADERS.contains(&name.as_str())
-            || CREDENTIAL_HEADERS.contains(&name.as_str())
+            || credential_header_name(&name)
         {
             return Err(Refusal::InvalidHeader);
         }
@@ -321,11 +317,19 @@ fn validate_http(policy: &OutboundPolicy, request: &HttpRequest) -> Result<Strin
     if request.headers.iter().any(|header| {
         !names.insert(header.name.as_str())
             || RESERVED_HEADERS.contains(&header.name.as_str())
-            || CREDENTIAL_HEADERS.contains(&header.name.as_str())
+            || credential_header_name(&header.name)
     }) {
         return Err(Refusal::InvalidHeader);
     }
     Ok(origin)
+}
+
+/// Reject both the HTTP-specific credential channels and the shared closed
+/// protected-name vocabulary. This keeps caller-selected HTTP headers from
+/// becoming a bypass around the export/redaction boundary while preserving the
+/// deliberately exact (not substring-based) protected-name policy.
+fn credential_header_name(name: &str) -> bool {
+    EXPLICIT_CREDENTIAL_HEADERS.contains(&name) || protected_names::is_protected(name)
 }
 
 fn into_prepared(request: HttpRequest, max_response_bytes: usize) -> PreparedRequest {

@@ -176,10 +176,14 @@ Header admission is deliberately narrow. Names must be canonical lowercase,
 values are bounded and control-free, duplicates refuse, and callers cannot
 supply the boundary-owned `content-type` or `idempotency-key` names.
 Credential-shaped names (`authorization`, `proxy-authorization`, `cookie`,
-`set-cookie`, and `x-api-key`) are refused from the caller-controlled value.
-A trusted provider adapter may apply deployment-owned credentials outside the
-request value; this module does not read a secret store or expose credentials
-to source, debug output, checkpoints, or evidence.
+`set-cookie`, and `x-api-key`) and the shared exact protected-name aliases
+(`api-key`, `bearer-token`, `session-token`, `access-token`, `refresh-token`,
+and deployment-signing/SMTP names) are refused from the caller-controlled
+value. Matching remains exact after ASCII case and dash/underscore
+normalization rather than guessing from arbitrary substrings. A trusted
+provider adapter may apply deployment-owned credentials outside the request
+value; this module does not read a secret store or expose credentials to
+source, debug output, checkpoints, or evidence.
 
 `HttpDeliverySession` gives the same bounded process-local disposition replay
 as email/webhook/export sessions. An exact identity and complete request,

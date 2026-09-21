@@ -3,8 +3,10 @@
 Status: implemented, **local-only** bounded module. Unit-tested in this
 worktree (`cargo test --locked -p semaprax --lib package_registry::binding::`);
 not run through `scripts/quality.sh full`, not released, not hosted, and not
-wired into any CLI route. There is no hosted or production Semaprax registry,
-and this format does not create one.
+wired into any authority-bearing CLI route. `semaprax registry lock` and
+`registry verify` compose this format read-only; `registry lock ... --raw`
+emits its exact canonical bytes. There is no hosted or production Semaprax
+registry, and this format does not create one.
 
 Audience: package-tool authors and compiler contributors working on issue #195.
 
@@ -125,6 +127,6 @@ skipping the byte-for-byte replay comparison turns red the tampered-byte,
 substituted-snapshot, and registry-change tests; and dropping warning
 pass-through turns red only the warning-propagation test.
 
-This is **local evidence** from unit tests in one worktree. No hosted run, no
-published registry, no CLI route, no network path, and no signature
-verification is claimed or implied.
+This is **local evidence** from unit tests in one worktree. The read-only CLI
+route adds no network path, publication, or signature verification, and no
+hosted or published registry is claimed or implied.

@@ -69,8 +69,8 @@ use semaprax::package_registry::{
 
 const USAGE: &str = "registry accepts `search <registry.json> <query>`, \
                      `add <registry.json> <package> <range>`, \
-                     `lock <registry.json> <template.json>`, \
-                     `fetch <registry.json> <package> <version>`, \
+                     `lock <registry.json> <template.json> [--raw]`, \
+                     `fetch <registry.json> <package> <version> [--raw]`, \
                      `verify <registry.json> <snapshot-evidence.json>`, \
                      `verify <registry.json> <template.json> <lock-evidence.json>`, or \
                      `publish <registry.json> <entry.json>`; see `semaprax help registry`";
@@ -102,8 +102,8 @@ fn not_found(message: String) -> Diagnostic {
 pub(crate) enum RegistryCommand {
     Search(PathBuf, String),
     Add(PathBuf, String, String),
-    Lock(PathBuf, PathBuf),
-    Fetch(PathBuf, String, String),
+    Lock(PathBuf, PathBuf, bool),
+    Fetch(PathBuf, String, String, bool),
     VerifySnapshot(PathBuf, PathBuf),
     VerifyLock(PathBuf, PathBuf, PathBuf),
     Publish(PathBuf, PathBuf),
@@ -143,6 +143,16 @@ pub(crate) fn parse(args: &[String]) -> Result<RegistryCommand, u8> {
             return Ok(RegistryCommand::Lock(
                 PathBuf::from(registry),
                 PathBuf::from(template),
+                false,
+            ));
+        }
+        [verb, registry, template, raw]
+            if verb == "lock" && operand(registry) && operand(template) && raw == "--raw" =>
+        {
+            return Ok(RegistryCommand::Lock(
+                PathBuf::from(registry),
+                PathBuf::from(template),
+                true,
             ));
         }
         [verb, registry, package, version]
@@ -152,6 +162,21 @@ pub(crate) fn parse(args: &[String]) -> Result<RegistryCommand, u8> {
                 PathBuf::from(registry),
                 package.clone(),
                 version.clone(),
+                false,
+            ));
+        }
+        [verb, registry, package, version, raw]
+            if verb == "fetch"
+                && operand(registry)
+                && operand(package)
+                && operand(version)
+                && raw == "--raw" =>
+        {
+            return Ok(RegistryCommand::Fetch(
+                PathBuf::from(registry),
+                package.clone(),
+                version.clone(),
+                true,
             ));
         }
         [verb, registry, evidence]
@@ -301,8 +326,9 @@ pub(crate) fn run_add(path: &Path, package: &str, range: &str) -> Result<String,
 
 /// `registry lock <registry.json> <template.json>`: binds the registry
 /// snapshot to one resolver-v2 resolution and prints the canonical
-/// Registry-Bound Resolution v1 document on stdout. Writes nothing -- the
-/// caller redirects it to their lockfile.
+/// Registry-Bound Resolution v1 document inside a human report. `--raw`
+/// prints only the canonical document, so redirecting stdout preserves its
+/// exact bytes. Both forms only read caller-supplied files.
 pub(crate) fn run_lock(registry: &Path, template: &Path) -> Result<String, Diagnostic> {
     let (_, snapshot) = read_snapshot(registry)?;
     let document = read_template(template)?;
@@ -328,12 +354,29 @@ pub(crate) fn run_lock(registry: &Path, template: &Path) -> Result<String, Diagn
     Ok(out)
 }
 
+/// The exact Registry-Bound Resolution v1 envelope for `registry` and
+/// `template`, with no heading, status line, or appended newline. This is the
+/// read-only machine form of `registry lock ... --raw`.
+fn run_lock_raw(registry: &Path, template: &Path) -> Result<String, Diagnostic> {
+    let (_, snapshot) = read_snapshot(registry)?;
+    let document = read_template(template)?;
+    Ok(binding::bind_to_snapshot(
+        &snapshot,
+        document.policy,
+        &document.template,
+        &document.options,
+    )?
+    .envelope()
+    .to_owned())
+}
+
 /// `registry fetch <registry.json> <package> <version>`: the exact published
 /// Subject-v3 bytes for one coordinate, from the supplied registry document
 /// alone. This is the offline mirror path: there is no cache, no network,
 /// and no fallback. The bytes are known to match the published
 /// `content_digest` because `build_snapshot` refuses (`SPX-PKR603`) any
-/// entry where they do not, and the snapshot was rebuilt here.
+/// entry where they do not, and the snapshot was rebuilt here. The default is
+/// a human report; `--raw` prints only those exact Subject-v3 bytes.
 pub(crate) fn run_fetch(path: &Path, package: &str, version: &str) -> Result<String, Diagnostic> {
     let (_, snapshot) = read_snapshot(path)?;
     let Some(subject) = snapshot.subject_bytes(package, version) else {
@@ -367,6 +410,22 @@ pub(crate) fn run_fetch(path: &Path, package: &str, version: &str) -> Result<Str
          digest binding re-derived, signature NOT verified)\n",
     );
     Ok(out)
+}
+
+/// The exact Subject-v3 bytes for one published coordinate, with no heading,
+/// status line, or appended newline. This is the read-only machine form of
+/// `registry fetch ... --raw`.
+fn run_fetch_raw(path: &Path, package: &str, version: &str) -> Result<String, Diagnostic> {
+    let (_, snapshot) = read_snapshot(path)?;
+    snapshot
+        .subject_bytes(package, version)
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            not_found(format!(
+                "`{package}@{version}` is not published in {}",
+                path.display()
+            ))
+        })
 }
 
 /// `registry verify <registry.json> <snapshot-evidence.json>`: independently
@@ -472,8 +531,20 @@ pub(crate) fn run(command: &RegistryCommand) -> Result<String, Diagnostic> {
     match command {
         RegistryCommand::Search(path, query) => run_search(path, query),
         RegistryCommand::Add(path, package, range) => run_add(path, package, range),
-        RegistryCommand::Lock(registry, template) => run_lock(registry, template),
-        RegistryCommand::Fetch(path, package, version) => run_fetch(path, package, version),
+        RegistryCommand::Lock(registry, template, raw) => {
+            if *raw {
+                run_lock_raw(registry, template)
+            } else {
+                run_lock(registry, template)
+            }
+        }
+        RegistryCommand::Fetch(path, package, version, raw) => {
+            if *raw {
+                run_fetch_raw(path, package, version)
+            } else {
+                run_fetch(path, package, version)
+            }
+        }
         RegistryCommand::VerifySnapshot(registry, evidence) => {
             run_verify_snapshot(registry, evidence)
         }

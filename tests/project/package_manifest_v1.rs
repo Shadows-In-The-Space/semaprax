@@ -19,7 +19,7 @@ use semaprax::project::{
     PROJECT_SCHEMA_V4, PROJECT_SCHEMA_V5, PROJECT_SCHEMA_V6, PROJECT_SCHEMA_V7, PROJECT_SCHEMA_V8,
     PROJECT_SCHEMA_V9,
 };
-use semaprax::{package_lock_v3, package_report_v2};
+use semaprax::{audit_capsule, package_lock_v3, package_registry, package_report_v2};
 
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
@@ -634,7 +634,7 @@ fn exact_semaprax_sources_and_rust_crates_are_canonical_manifest_inputs() {
 }
 
 #[test]
-fn exact_local_semaprax_subjects_link_through_every_project_route() {
+fn registry_locked_subjects_link_through_every_project_route() {
     let root = std::env::temp_dir().join(format!(
         "semaprax-external-dependency-{}-{}",
         std::process::id(),
@@ -663,7 +663,204 @@ fn exact_local_semaprax_subjects_link_through_every_project_route() {
         &[],
     )
     .unwrap();
-    std::fs::write(root.join("vendor/acme-math.subject.json"), &subject).unwrap();
+    let registry_entry = package_registry::PublishedEntry {
+        package: "acme.math".to_owned(),
+        version: "1.2.0".to_owned(),
+        content_digest: audit_capsule::sha256_digest(subject.as_bytes()),
+        api_digest: audit_capsule::sha256_digest(b"acme.math.api.v1"),
+        license: "Apache-2.0".to_owned(),
+        provenance_digest: None,
+        signature: package_registry::RegistrySignature {
+            algorithm: "opaque".to_owned(),
+            identity: "fixture.first-party".to_owned(),
+            signature: "unverified-fixture-claim".to_owned(),
+        },
+        status: package_registry::PublicationStatus::Active,
+        subject_bytes: subject.clone(),
+    };
+    std::fs::write(
+        root.join("registry.json"),
+        package_registry::wire::render_registry_document(&[registry_entry]),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("registry-template.json"),
+        r#"{"schema":"semaprax.registry-resolution-template.v1","requirements":[{"package":"acme.math","range":"^1.0.0"}],"target":"wasm32","allowed_capabilities":[],"yank_policy":"exclude_yanked","max_bytes":65536}"#,
+    )
+    .unwrap();
+    let locked = cli(
+        &root,
+        &[
+            "registry",
+            "lock",
+            "registry.json",
+            "registry-template.json",
+            "--raw",
+        ],
+    );
+    assert!(
+        locked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&locked.stderr)
+    );
+    let lock_bytes = String::from_utf8(locked.stdout).expect("raw lock is UTF-8");
+    assert!(lock_bytes.starts_with("{\"schema\":\"semaprax.registry-bound-resolution.v1\""));
+    std::fs::write(root.join("registry.lock.json"), &lock_bytes).unwrap();
+    let lock_verified = cli(
+        &root,
+        &[
+            "registry",
+            "verify",
+            "registry.json",
+            "registry-template.json",
+            "registry.lock.json",
+        ],
+    );
+    assert!(
+        lock_verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&lock_verified.stderr)
+    );
+    let parsed_lock: serde_json::Value =
+        serde_json::from_str(&lock_bytes).expect("raw lock is canonical JSON");
+    let selected = parsed_lock["payload"]["resolution"]["payload"]["selected"]
+        .as_array()
+        .expect("bound lock carries the resolver's selected array");
+    assert_eq!(
+        selected.len(),
+        1,
+        "fixture lock selects exactly one package"
+    );
+    let selected_package = selected[0]["package"]
+        .as_str()
+        .expect("selected package is a string");
+    let selected_version = selected[0]["version"]
+        .as_str()
+        .expect("selected version is a string");
+    let selected_subject_digest = selected[0]["subject_digest"]
+        .as_str()
+        .expect("selected subject digest is a string");
+    let selected_subject_bytes = selected[0]["subject_bytes"]
+        .as_u64()
+        .expect("selected subject byte count is a number");
+    assert_eq!(selected_package, "acme.math");
+    assert_eq!(
+        usize::try_from(selected_subject_bytes).expect("selected byte count fits usize"),
+        subject.len(),
+        "the lock binds the exact fetched-subject byte inventory"
+    );
+    let live_registry_before = std::fs::read(root.join("registry.json")).unwrap();
+
+    // A same-coordinate subject can remain individually valid while no longer
+    // being the subject the already-verified lock selected. The live registry
+    // remains untouched; this hostile response comes from a separate document
+    // and must be rejected by the lock-digest binding before any Project route.
+    let swapped_provider = root.join("swapped-provider.spx");
+    let swapped_source =
+        std::fs::read_to_string(&provider)
+            .unwrap()
+            .replacen("value * 2", "value * 3", 1);
+    std::fs::write(&swapped_provider, swapped_source).unwrap();
+    let swapped_report = package_report_v2::generate(
+        &swapped_provider,
+        &package_report_v2::PackageReportV2Options::default(),
+    )
+    .unwrap();
+    let swapped_subject = package_lock_v3::create_subject(
+        &package_lock_v3::Coordinate {
+            package: selected_package.to_owned(),
+            version: selected_version.to_owned(),
+        },
+        &swapped_report,
+        &[],
+        &[],
+    )
+    .unwrap();
+    let swapped_entry = package_registry::PublishedEntry {
+        package: selected_package.to_owned(),
+        version: selected_version.to_owned(),
+        content_digest: audit_capsule::sha256_digest(swapped_subject.as_bytes()),
+        api_digest: audit_capsule::sha256_digest(b"acme.math.swapped-api.v1"),
+        license: "Apache-2.0".to_owned(),
+        provenance_digest: None,
+        signature: package_registry::RegistrySignature {
+            algorithm: "opaque".to_owned(),
+            identity: "fixture.first-party".to_owned(),
+            signature: "unverified-swapped-fixture-claim".to_owned(),
+        },
+        status: package_registry::PublicationStatus::Active,
+        subject_bytes: swapped_subject,
+    };
+    std::fs::write(
+        root.join("swapped-registry.json"),
+        package_registry::wire::render_registry_document(&[swapped_entry]),
+    )
+    .unwrap();
+    let swapped = cli(
+        &root,
+        &[
+            "registry",
+            "fetch",
+            "swapped-registry.json",
+            selected_package,
+            selected_version,
+            "--raw",
+        ],
+    );
+    assert!(
+        swapped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&swapped.stderr)
+    );
+    let swapped_subject = String::from_utf8(swapped.stdout).expect("swapped raw subject is UTF-8");
+    let bind_fetched_subject_to_lock = |candidate: &str| {
+        let verified =
+            package_lock_v3::verify_dependency_subject(candidate).map_err(|error| error.code)?;
+        if verified.subject_digest != selected_subject_digest {
+            return Err(
+                "fetched subject digest does not match the lock-selected subject".to_owned(),
+            );
+        }
+        Ok(verified)
+    };
+    assert_eq!(
+        bind_fetched_subject_to_lock(&swapped_subject)
+            .expect_err("valid same-coordinate substitution is rejected before Project routes"),
+        "fetched subject digest does not match the lock-selected subject"
+    );
+    assert_eq!(
+        std::fs::read(root.join("registry.json")).unwrap(),
+        live_registry_before,
+        "the hostile registry response must not replace the locked registry used by the happy path"
+    );
+
+    let fetched = cli(
+        &root,
+        &[
+            "registry",
+            "fetch",
+            "registry.json",
+            selected_package,
+            selected_version,
+            "--raw",
+        ],
+    );
+    assert!(
+        fetched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fetched.stderr)
+    );
+    let fetched_subject = String::from_utf8(fetched.stdout).expect("raw fetched subject is UTF-8");
+    let fetched_verified = bind_fetched_subject_to_lock(&fetched_subject)
+        .expect("raw fetched Subject-v3 independently replays and binds to the lock");
+    assert_eq!(fetched_verified.subject_digest, selected_subject_digest);
+    assert_eq!(
+        fetched_subject.len(),
+        usize::try_from(selected_subject_bytes).expect("selected byte count fits usize"),
+        "raw fetched bytes must match the lock-selected byte count"
+    );
+    assert_eq!(fetched_subject, subject);
+    std::fs::write(root.join("vendor/acme-math.subject.json"), fetched_subject).unwrap();
     std::fs::write(
         root.join("src/app.spx"),
         "module consumer.app;\nuse function @id(\"acme.math.double\") from acme.math as double;\n\n@id(\"consumer.answer\")\nfn answer() -> i64\n{\n    double(21)\n}\n\n@id(\"consumer.main\")\nfn main() -> i64\n{\n    answer()\n}\n",

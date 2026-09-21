@@ -100,9 +100,12 @@
 //! "Ownership continuity" section above is a structural claimed-identity
 //! continuity check only, never a proof of who anyone is), no cryptographic
 //! signature or transparency-log verification, no network access, no
-//! filesystem access, no CLI wiring, and no build execution. It does not
-//! itself compute `api_digest` or `provenance_digest`; both are caller-owned
-//! opaque values it stores and structurally bounds. It does not solve
+//! filesystem access, and no build execution. The read-only CLI front in
+//! `src/cli/registry.rs` owns CLI parsing and caller-supplied file reads; its
+//! `lock` and `fetch` raw forms expose exact replayable bytes but grant neither
+//! registry nor publication authority. This module does not itself compute
+//! `api_digest` or `provenance_digest`; both are caller-owned opaque values it
+//! stores and structurally bounds. It does not solve
 //! dependency graphs; [`project_subjects`] hands its output to
 //! [`crate::package_resolver_v2`] for that.
 

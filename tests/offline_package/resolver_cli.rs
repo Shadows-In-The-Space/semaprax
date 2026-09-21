@@ -290,8 +290,8 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
     const REGISTRY_LINES: [&str; 7] = [
         "semaprax registry search <registry.json> <query>\n",
         "semaprax registry add <registry.json> <package> <range>\n",
-        "semaprax registry lock <registry.json> <template.json>\n",
-        "semaprax registry fetch <registry.json> <package> <version>\n",
+        "semaprax registry lock <registry.json> <template.json> [--raw]\n",
+        "semaprax registry fetch <registry.json> <package> <version> [--raw]\n",
         "semaprax registry verify <registry.json> <snapshot-evidence.json>\n",
         "semaprax registry verify <registry.json> <template.json> <lock-evidence.json>\n",
         "semaprax registry publish <registry.json> <entry.json>\n",

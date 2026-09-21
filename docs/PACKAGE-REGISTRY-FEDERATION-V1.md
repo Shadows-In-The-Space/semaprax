@@ -2,9 +2,10 @@
 
 Status: implemented, **local-only** bounded module. Unit-tested in this
 worktree (`cargo test --locked -p semaprax --lib package_registry::`); not run
-through `scripts/quality.sh full`, not released, not hosted, and not wired into
-any CLI route. There is no hosted or production Semaprax registry, and this
-format does not create one.
+through `scripts/quality.sh full`, not released, not hosted, and not exposed
+through a federation CLI route. The single-registry `semaprax registry` CLI
+does not widen this format's scope. There is no hosted or production Semaprax
+registry, and this format does not create one.
 
 Audience: package-tool authors and compiler contributors working on issue #195.
 
@@ -145,6 +146,6 @@ one, five registry-set well-formedness refusals, all three yank policies,
 resolver-v2 composition, and the two nonclaims above. Every refusal test asserts
 the exact diagnostic code.
 
-This is **local evidence** from unit tests in one worktree. No hosted run, no
-published registry, no CLI route, no network path, and no signature
+This is **local evidence** from unit tests in one worktree. No hosted run,
+published registry, federation CLI route, network path, or signature
 verification is claimed or implied.

@@ -1,9 +1,9 @@
 # Package Registry Snapshot v1
 
-Status: implemented, **local-only** bounded module. Unit-tested in this
-worktree (`cargo test --locked -p semaprax --lib package_registry`, 33
-selected tests, all passing); not run through `scripts/quality.sh full`, not
-released, not hosted, and not wired into any CLI route.
+Status: implemented, **local-only** bounded registry model and read-only CLI
+front. The focused registry module selection contains 103 tests across the
+snapshot, wire, catalog, federation, and binding layers; the CLI front has its
+own focused tests. Neither is hosted or a publication/support decision.
 
 Audience: package-tool authors and compiler contributors working on
 issue #195.
@@ -181,8 +181,8 @@ and a registry refusal keeps the owning module's own `SPX-PKR6xx` code.
 | --- | --- | --- |
 | `registry search <registry.json> <query>` | Lists published coordinates whose package name contains `query`, as a plain substring comparison over decoded data. | Reads one file. `query` is an opaque string, never joined into a path. |
 | `registry add <registry.json> <package> <range>` | Reports the highest published version satisfying `range` (`catalog::select_version`) and the requirement to record. | Reads one file. Edits no manifest; there is no implicit "latest". |
-| `registry lock <registry.json> <template.json>` | `binding::bind_to_snapshot`; prints the canonical Registry-Bound Resolution v1 document on stdout. | Reads two files. Writes nothing -- the caller redirects. |
-| `registry fetch <registry.json> <package> <version>` | Prints one coordinate's exact published Subject-v3 bytes. This is the offline mirror path. | Reads one file. No cache, no network, no fallback. |
+| `registry lock <registry.json> <template.json> [--raw]` | `binding::bind_to_snapshot`; the default is a human report, while `--raw` emits exactly the canonical Registry-Bound Resolution v1 bytes. | Reads two files. Writes nothing; only `--raw` is suitable for a redirected lockfile. |
+| `registry fetch <registry.json> <package> <version> [--raw]` | The default is a human report; `--raw` emits exactly one coordinate's published Subject-v3 bytes. This is the offline mirror path. | Reads one file. No cache, no network, no fallback; only `--raw` is suitable for a `[dependency-sources]` file. |
 | `registry verify <registry.json> <evidence.json>` | `verify_snapshot`: independent rebuild plus byte comparison. | Read-only, fails closed with `SPX-PKR608`. |
 | `registry verify <registry.json> <template.json> <lock.json>` | `binding::verify_bound_resolution`, which additionally replays the embedded resolver-v2 evidence. | Read-only, fails closed with `SPX-PKR608`. |
 | `registry publish <registry.json> <entry.json>` | Rebuilds the snapshot the candidate entry would produce -- so `602`/`603`/`604`/`605`/`606` all run -- then prints the registry document that *would* hold it. | **Decide-and-record only.** Publishes nothing, writes nothing, signs nothing, contacts nothing. Making that document real is a separate human act. |
@@ -220,5 +220,9 @@ No network path, no registry URL, no default registry, and no search path --
 a search path is the dependency-confusion vulnerability, so the format has
 none. No cache or mirror directory: a registry document *is* the mirror. No
 cryptography: `signature.identity` is reported as an unverified claim and
-issue #168 still owns the signing key. No publication authority, and no clean
-install-and-build of a reference application from locked packages.
+issue #168 still owns the signing key. No publication authority. The raw
+`lock` and `fetch` forms support a clean local consumer: it independently
+replays the fetched Subject-v3 and requires its digest to equal the exact
+`subject_digest` selected in the already-verified lock before the subject
+reaches `[dependency-sources]`. They do not create a cache, acquire packages,
+or turn local evidence into a hosted/public registry claim.

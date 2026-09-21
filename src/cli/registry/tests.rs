@@ -114,7 +114,21 @@ fn parse_admits_every_documented_shape() {
         Ok(RegistryCommand::Lock(..))
     ));
     assert!(matches!(
+        parse(&strings(&["lock", "r.json", "t.json", "--raw"])),
+        Ok(RegistryCommand::Lock(..))
+    ));
+    assert!(matches!(
         parse(&strings(&["fetch", "r.json", "examples.meaning", "1.0.0"])),
+        Ok(RegistryCommand::Fetch(..))
+    ));
+    assert!(matches!(
+        parse(&strings(&[
+            "fetch",
+            "r.json",
+            "examples.meaning",
+            "1.0.0",
+            "--raw"
+        ])),
         Ok(RegistryCommand::Fetch(..))
     ));
     assert!(matches!(
@@ -141,7 +155,20 @@ fn parse_refuses_everything_else_with_exit_code_two() {
         strings(&["search", "r.json", "q", "extra"]),
         strings(&["add", "r.json", "examples.meaning"]),
         strings(&["lock", "r.json"]),
+        strings(&["lock", "r.json", "t.json", "--json"]),
+        strings(&["lock", "r.json", "--raw", "t.json"]),
+        strings(&["lock", "r.json", "t.json", "--raw", "extra"]),
         strings(&["fetch", "r.json", "examples.meaning"]),
+        strings(&["fetch", "r.json", "examples.meaning", "1.0.0", "--json"]),
+        strings(&["fetch", "r.json", "examples.meaning", "--raw", "1.0.0"]),
+        strings(&[
+            "fetch",
+            "r.json",
+            "examples.meaning",
+            "1.0.0",
+            "--raw",
+            "extra",
+        ]),
         strings(&["publish", "r.json"]),
         strings(&["publish", "r.json", "e.json", "--force"]),
         strings(&["search", "--registry", "q"]),
@@ -223,6 +250,49 @@ fn lock_emits_a_bound_resolution_that_verify_then_replays() {
 }
 
 #[test]
+fn raw_lock_is_the_exact_replayable_bound_resolution_bytes() {
+    let (dir, registry, template) = fixture("lock-raw");
+    let command = parse(&vec![
+        "lock".to_owned(),
+        registry.display().to_string(),
+        template.display().to_string(),
+        "--raw".to_owned(),
+    ])
+    .expect("raw lock grammar");
+    let raw = run(&command).expect("raw lock");
+    let (_, snapshot) = read_snapshot(&registry).expect("snapshot");
+    let template_document = read_template(&template).expect("template");
+    let expected = binding::bind_to_snapshot(
+        &snapshot,
+        template_document.policy,
+        &template_document.template,
+        &template_document.options,
+    )
+    .expect("bound resolution");
+    assert_eq!(raw, expected.envelope());
+    assert!(
+        !raw.ends_with('\n'),
+        "raw output adds no redirect-corrupting newline"
+    );
+
+    let evidence = write(&dir, "lock.json", raw.as_bytes());
+    assert!(run_verify_lock(&registry, &template, &evidence)
+        .expect("raw evidence independently replays")
+        .contains("status: REPLAYED"));
+    let tampered = write(
+        &dir,
+        "tampered-lock.json",
+        raw.replacen("1.2.0", "1.0.0", 1).as_bytes(),
+    );
+    assert_eq!(
+        run_verify_lock(&registry, &template, &tampered)
+            .expect_err("tampered raw lock refused")
+            .code,
+        "SPX-PKR608"
+    );
+}
+
+#[test]
 fn a_tampered_lock_document_is_refused_under_the_binding_layers_own_code() {
     let (dir, registry, template) = fixture("lock-tamper");
     let report = run_lock(&registry, &template).expect("lock");
@@ -266,6 +336,40 @@ fn fetch_serves_the_exact_published_subject_bytes_offline() {
         report.contains(&entry("1.0.0", "alpha").subject_bytes),
         "fetch must serve the published bytes verbatim"
     );
+}
+
+#[test]
+fn raw_fetch_is_the_exact_replayable_subject_bytes() {
+    let (dir, registry, _) = fixture("fetch-raw");
+    let command = parse(&vec![
+        "fetch".to_owned(),
+        registry.display().to_string(),
+        MEANING.to_owned(),
+        "1.0.0".to_owned(),
+        "--raw".to_owned(),
+    ])
+    .expect("raw fetch grammar");
+    let raw = run(&command).expect("raw fetch");
+    let expected = entry("1.0.0", "alpha").subject_bytes;
+    assert_eq!(raw, expected);
+    assert!(!raw.starts_with("registry fetch:"));
+
+    let subject = write(&dir, "meaning.subject.json", raw.as_bytes());
+    let verified = semaprax::package_lock_v3::verify_dependency_subject(
+        &fs::read_to_string(&subject).expect("raw subject bytes"),
+    )
+    .expect("raw fetched bytes independently replay");
+    assert_eq!(verified.coordinate.package, MEANING);
+    assert_eq!(verified.coordinate.version, "1.0.0");
+    let tampered = write(
+        &dir,
+        "tampered.subject.json",
+        raw.replacen("1.0.0", "1.0.1", 1).as_bytes(),
+    );
+    assert!(semaprax::package_lock_v3::verify_dependency_subject(
+        &fs::read_to_string(tampered).expect("tampered raw subject bytes"),
+    )
+    .is_err());
 }
 
 #[test]

@@ -936,8 +936,9 @@ impl ProjectSnapshot {
 
     /// Build and publish one admitted profile as a deterministic, offline OCI
     /// Image Layout carrying the project's already-verified Wasm module as its
-    /// sole content artifact. Project v1 scalar and Project v3 Useful Data
-    /// have separate replayed carrier bridges; no other profile is admitted.
+    /// sole content artifact. Project v1 scalar and Project v3/v16 Useful
+    /// Data have separate replayed carrier bridges; no other profile is
+    /// admitted.
     /// See `docs/OCI-DEPLOYABLE-ARTIFACT-V1.md`.
     pub fn build_oci(&mut self, output: &Path) -> Result<(), Vec<Diagnostic>> {
         match self.manifest.project_profile() {
@@ -946,16 +947,16 @@ impl ProjectSnapshot {
                 self.recheck()?;
                 oci::build_and_publish(&build, output).map_err(|error| vec![error])?;
             }
-            ProjectProfile::UsefulDataV1 => {
+            ProjectProfile::UsefulDataV1 | ProjectProfile::UsefulDataV2 => {
                 let build = self.build_npm_inline(MAX_PROJECT_NPM_BUILD_BYTES)?;
                 self.recheck()?;
-                oci::build_and_publish_useful_data_v1(&build, self.manifest.entry(), output)
+                oci::build_and_publish_useful_data(&build, self.manifest.entry(), output)
                     .map_err(|error| vec![error])?;
             }
             _ => {
                 return Err(vec![Diagnostic::io(
                     "SPX-J142",
-                    "the oci target requires the Project v1 scalar or Project v3 Useful Data profile; no other profile is wired to OCI packaging",
+                    "the oci target requires the Project v1 scalar or Project v3/v16 Useful Data profile; no other profile is wired to OCI packaging",
                 )]);
             }
         }

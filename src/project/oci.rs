@@ -7,8 +7,8 @@
 //! HIR nor Project manifests. This module's only job is to independently
 //! replay an already-produced carrier, extract its identity and `app.wasm`
 //! artifact, and hand them across that boundary exactly as received. The npm
-//! route is deliberately an exact Project v3 Useful Data seam, not a general
-//! npm-to-OCI converter. See `docs/OCI-DEPLOYABLE-ARTIFACT-V1.md`.
+//! route is deliberately an exact Project v3/v16 Useful Data seam, not a
+//! general npm-to-OCI converter. See `docs/OCI-DEPLOYABLE-ARTIFACT-V1.md`.
 
 use std::path::Path;
 
@@ -119,16 +119,16 @@ pub(super) fn build_and_publish(
     publish(plan, output)
 }
 
-/// Independently replay the one admitted Project v3 Useful Data package
+/// Independently replay one admitted Project v3/v16 Useful Data package
 /// carrier and publish its already-verified `app.wasm` as the OCI artifact's
 /// sole content layer. The snapshot supplies `entry_module`; the recovered
 /// project revision commits to the manifest that selected it.
-pub(super) fn build_and_publish_useful_data_v1(
+pub(super) fn build_and_publish_useful_data(
     build: &ProjectNpmBuild,
     entry_module: &str,
     output: &Path,
 ) -> Result<semaprax_oci_package::OciBundle, Diagnostic> {
-    let subject = build.useful_data_v1_oci_subject().map_err(|_| {
+    let subject = build.useful_data_oci_subject().map_err(|_| {
         error(
             "SPX-J145",
             "OCI packaging input failed independent Useful Data package replay",
@@ -224,6 +224,45 @@ mod tests {
         root
     }
 
+    /// A v16 Useful Data fixture keeps an authored owned record private while
+    /// publishing one byte-slice export. That is the profile seam v2 adds
+    /// beyond Project v3, and proves OCI consumes the exact shared data
+    /// carrier rather than treating v2 as scalar or owned-data packaging.
+    fn useful_data_v2_fixture(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "semaprax-oci-glue-{name}-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let root = std::fs::canonicalize(root).unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        let app_source = format!(
+            "module {name}.app;\n@id(\"app.reader\") record Reader {{ @id(\"app.reader.data\") data:Bytes, }}\n@id(\"app.private\") fn private_reader(value:own Reader)->Reader {{value}}\n@id(\"app.length\") fn length(value:borrow Slice<u8>)->usize {{byte_len(value)}}\n@id(\"app.main\") fn main() -> i64 {{ 0 }}\n"
+        );
+        let tests_source =
+            format!("module {name}.tests;\n@id(\"tests.main\") fn main() -> i64 {{ 0 }}\n");
+        for (file, source) in [
+            ("app.spx", app_source.as_str()),
+            ("tests.spx", tests_source.as_str()),
+        ] {
+            let parsed = crate::parse(source, root.join("src").join(file)).unwrap();
+            std::fs::write(
+                root.join("src").join(file),
+                crate::format::canonical(&parsed),
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            root.join("semaprax.toml"),
+            format!(
+                "schema = \"semaprax.project.v16\"\nname = \"{name}\"\nversion = \"1.0.0\"\nprofile = \"useful-data.v2\"\nentry = \"{name}.app\"\nsources = [\"src/app.spx\", \"src/tests.spx\"]\nweb_exports = [\"app.length\"]\ntests = [\"{name}.tests\"]\n"
+            ),
+        )
+        .unwrap();
+        root
+    }
+
     /// Would fail if the emitter dropped a required layout file, wrote fewer
     /// or more than one manifest entry into `index.json`, or if the
     /// `src/project/oci.rs` glue silently swallowed a real project's Wasm
@@ -245,7 +284,29 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    /// Would fail if the `ScalarV1`-only gate in `ProjectSnapshot::build_oci`
+    /// Would fail if Project v16 is left on the generic refusal path, if the
+    /// v2 carrier stops replaying as the closed Useful Data inventory, or if
+    /// private-owned-record admission ceases to compose with a public export.
+    #[test]
+    fn useful_data_v2_project_publishes_a_structurally_valid_oci_layout() {
+        let root = useful_data_v2_fixture("ociv2");
+        let output = root.join("oci-out");
+        with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
+            snapshot.build_oci(&output)
+        })
+        .unwrap();
+        assert!(output.join("oci-layout").is_file());
+        let index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output.join("index.json")).unwrap()).unwrap();
+        assert_eq!(index["manifests"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            index["manifests"][0]["artifactType"],
+            "application/vnd.semaprax.oci-deployable.v1+json"
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Would fail if the closed profile gate in `ProjectSnapshot::build_oci`
     /// were removed or bypassed: a v8 owned-data-api.v1 project must be
     /// refused with `SPX-J142` before any Wasm build or filesystem write is
     /// attempted, not packaged as if it were scalar.

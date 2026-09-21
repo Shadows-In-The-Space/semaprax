@@ -1,8 +1,8 @@
 # OCI Deployable Artifact v1
 
 Status: implemented for exactly the Project v1 scalar and Project v3 Useful
-Data v1 profiles; not wired to any other Project profile, not signed, and not
-published anywhere. Local evidence only -- see [Evidence and
+Data v1 / Project v16 Useful Data v2 profiles; not wired to any other Project
+profile, not signed, and not published anywhere. Local evidence only -- see [Evidence and
 nonclaims](#evidence-and-nonclaims).
 
 GitHub issue [#194](https://github.com/wavect/semaprax/issues/194) asks for a
@@ -62,16 +62,19 @@ an existing directory. Today it admits exactly two source-carrier routes:
 
 - the default frozen `semaprax.project.v1` schema under `ScalarV1`, replayed
   from its pathless scalar-Web carrier; and
-- `semaprax.project.v3` under `UsefulDataV1`, replayed from its exact
-  schema-selected Useful Data npm carrier.
+- `semaprax.project.v3` under `UsefulDataV1` or `semaprax.project.v16` under
+  `UsefulDataV2`, each replayed from the exact schema-selected Useful Data npm
+  carrier.
 
 The latter is an exact profile seam, not a generic npm-to-OCI conversion. Its
 carrier replay rechecks the closed artifact inventory, every artifact byte and
-digest, the canonical package metadata, and the retained Project v3 subject
-before its first `app.wasm` artifact can become the OCI layer. The selected
-entry module comes from the authenticated snapshot; the recovered project
-revision commits to the manifest that selected it. Every other Project profile
-(including Useful Data v2 and the other npm/owned-data/command profiles) is
+digest, the canonical package metadata, and the retained Project v3 or v16
+subject before its first `app.wasm` artifact can become the OCI layer. The
+selected entry module comes from the authenticated snapshot; the recovered
+project revision commits to the manifest that selected it. Project v16 may
+retain private owned records, but only its schema-selected public byte-export
+`app.wasm` crosses this bridge. Every other Project profile (including the
+other npm/owned-data/command profiles) is
 refused with `SPX-J142` rather than silently downgraded to a partial artifact;
 extending this route to them is open follow-up scope, not implemented here.
 
@@ -184,12 +187,12 @@ under any name.
 
 The five identity fields (`project`, `project_revision`, `workspace_revision`,
 `project_graph_digest`, `entry_module`) come from one completely replayed
-profile-selected carrier: the Project v1 scalar Web-build carrier or the
-Project v3 Useful Data npm carrier. In the latter case the snapshot provides
-the entry module, while the carrier's recovered project revision commits to
-the manifest that selected that entry. This keeps the OCI artifact identity
-bound to the exact checked Project subject rather than recomputing identity
-from loosely parsed source.
+profile-selected carrier: the Project v1 scalar Web-build carrier or an exact
+Project v3/v16 Useful Data npm carrier. In the latter cases the snapshot
+provides the entry module, while the carrier's recovered project revision
+commits to the manifest that selected that entry. This keeps the OCI artifact
+identity bound to the exact checked Project subject rather than recomputing
+identity from loosely parsed source.
 
 ## Determinism
 

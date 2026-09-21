@@ -111,11 +111,11 @@ pub struct ProjectNpmBuild {
     pub(super) trusted: TrustedNpmBinding,
 }
 
-/// Exact, replayed input facts that the Useful Data v1 OCI bridge may hand to
+/// Exact, replayed input facts that the Useful Data OCI bridge may hand to
 /// the lower, profile-agnostic OCI emitter. This is intentionally narrower
-/// than a general "npm to OCI" conversion: only the Project v3 Useful Data
-/// carrier is admitted, and recovering these bytes grants no filesystem,
-/// registry, signing, or container-execution authority.
+/// than a general "npm to OCI" conversion: only the Project v3/v16 Useful
+/// Data carriers are admitted, and recovering these bytes grants no
+/// filesystem, registry, signing, or container-execution authority.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::project) struct UsefulDataOciSubject {
     pub(in crate::project) project_name: String,
@@ -308,30 +308,35 @@ impl ProjectNpmBuild {
     }
 
     /// Recover the exact Wasm layer and subject facts from a fully replayed
-    /// Project v3 Useful Data package. This does not make the npm package a
-    /// general deployment input: all other package carriers, including the
-    /// later Useful Data v2 profile, remain outside this bridge.
-    pub(in crate::project) fn useful_data_v1_oci_subject(
+    /// Project v3 or v16 Useful Data package. This does not make the npm
+    /// package a general deployment input: only the two profiles sharing the
+    /// closed Useful Data carrier inventory can cross this bridge.
+    pub(in crate::project) fn useful_data_oci_subject(
         &self,
     ) -> Result<UsefulDataOciSubject, Diagnostic> {
         self.verify()?;
-        if self.trusted.project_schema != crate::project::PROJECT_SCHEMA_V3 {
+        if !matches!(
+            self.trusted.project_schema,
+            crate::project::PROJECT_SCHEMA_V3 | crate::project::PROJECT_SCHEMA_V16
+        ) {
             return Err(package_error(
-                "npm carrier is not the Project v3 Useful Data OCI subject",
+                "npm carrier is not an admitted Useful Data OCI subject",
             ));
         }
         let artifacts = match decode_carrier_artifacts(&self.envelope, self.max_bytes)? {
             ReplayedNpmArtifacts::Data(artifacts) => artifacts,
             _ => {
                 return Err(package_error(
-                    "npm carrier is not the Project v3 Useful Data OCI subject",
+                    "npm carrier is not an admitted Useful Data OCI subject",
                 ))
             }
         };
         let wasm = artifacts
             .first()
             .filter(|artifact| artifact.path == "app.wasm")
-            .ok_or_else(|| package_error("Useful Data npm carrier has no canonical app.wasm"))?;
+            .ok_or_else(|| {
+                package_error("admitted Useful Data npm carrier has no canonical app.wasm")
+            })?;
         let wasm_bytes = wasm.bytes().to_vec();
         let wasm_sha256 = format!(
             "sha256:{:x}",

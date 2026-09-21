@@ -8,6 +8,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Make the push-driven CI and Docs workflows latest-ref only: a newer run now
+  cancels its in-progress predecessor instead of spending hosted runner minutes
+  completing already-superseded matrices or documentation builds.
+
 - Extend the bounded resumable-effect source profile from one site to one to
   eight direct sequential Copy-scalar `yield` sites. The deterministic plan now
   carries ordered per-site states and yield-free resume projections; the public

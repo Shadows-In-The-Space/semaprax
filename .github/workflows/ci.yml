@@ -17,29 +17,11 @@ permissions:
   contents: read
 
 concurrency:
-  # One group per commit on `main`, one group per ref everywhere else.
-  #
-  # Superseding a run is right for a manually dispatched branch run, where only
-  # the tip matters. It is wrong for `main`: this repository takes direct pushes
-  # from many worktrees, and a fast cadence cancelled 98 of 100 consecutive
-  # `main` runs, leaving the required gates with no verdict of either colour for
-  # about twenty hours. Every push to `main` must be allowed to finish.
-  #
-  # `cancel-in-progress: false` alone does NOT achieve that, which is why the
-  # first fix for #169 did not work. GitHub keeps at most one *pending* run per
-  # concurrency group: with one run executing and one queued, a third arrival
-  # cancels the queued one. Turning off cancel-in-progress only protects the run
-  # that already started, so on a matrix that takes hours every commit behind it
-  # is still cancelled. Measured on 2026-09-18, after that fix was in place: 23
-  # of the last 30 `main` CI runs were cancelled.
-  #
-  # Putting the commit in the group removes supersession entirely on `main`, so
-  # each commit gets its own verdict. Runs now queue behind runner capacity
-  # instead of cancelling each other, which is a delay rather than a loss of
-  # evidence. This is what "hosted evidence for an exact implementation commit"
-  # requires: a gate that can only be observed at the tip cannot produce it.
-  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'ref-tip' }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # CI is a latest-ref health signal. A newer push or manual dispatch on the
+  # same ref makes the older run stale, so stop it instead of spending runner
+  # minutes finishing a matrix whose result will immediately be superseded.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always

@@ -436,36 +436,20 @@ fn existing_core_matrix_and_global_authority_remain_bounded() {
     let verify = job(&workflow, "verify");
 
     assert!(workflow.contains("permissions:\n  contents: read\n"));
-    // Pinned exactly. Two separate defects, and the second one hid behind the
-    // fix for the first. `cancel-in-progress: true` cancelled 98 of 100
-    // consecutive `main` runs; scoping it to non-`main` refs fixed that, but
-    // `main` runs kept being cancelled anyway — 23 of the last 30, measured on
-    // 2026-09-18. GitHub keeps at most one *pending* run per concurrency
-    // group, so with one run executing and one queued, a third arrival cancels
-    // the queued one. Turning off cancel-in-progress protects only the run
-    // that already started. On a matrix that takes hours, every commit behind
-    // the leader is still lost. The group must therefore carry the commit on
-    // `main`: a gate whose verdict can only be observed at the tip cannot
-    // produce hosted evidence for an exact implementation commit, which is
-    // what the public-generic milestone's PG-8 requires.
     assert!(
-        workflow.contains(
-            "  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == \
-             'refs/heads/main' && github.sha || 'ref-tip' }}\n"
-        ),
-        "the concurrency group must include the commit so no `main` run is \
-         ever superseded while pending"
+        workflow.contains("concurrency:\n  # CI is a latest-ref health signal."),
+        "the workflow must document its latest-ref cancellation policy"
     );
     assert!(
-        !workflow.contains("  group: ci-${{ github.workflow }}-${{ github.ref }}\n"),
-        "the ref-only group must not return: it lets a later push cancel a \
-         pending `main` run, which is neither a pass nor a failure"
+        workflow.contains("  group: ci-${{ github.workflow }}-${{ github.ref }}\n"),
+        "all runs for one ref must share a concurrency group"
     );
     assert!(
-        workflow.contains("  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}\n"),
-        "`main` runs must never be cancelled by a later push"
+        workflow.contains("  cancel-in-progress: true\n"),
+        "a newer run must cancel the superseded run and save CI minutes"
     );
-    assert!(!workflow.contains("  cancel-in-progress: true\n"));
+    assert!(!workflow.contains("github.sha || 'ref-tip'"));
+    assert!(!workflow.contains("github.ref != 'refs/heads/main'"));
     assert!(verify.contains("fail-fast: false"));
     assert!(verify.contains("os: [ubuntu-latest, macos-latest, windows-latest]"));
     assert!(!workflow.contains("continue-on-error: true"));
@@ -490,54 +474,20 @@ fn existing_core_matrix_and_global_authority_remain_bounded() {
     }
 }
 
-/// `docs.yml`'s `deploy` job publishes the GitHub Pages site and, unlike
-/// `ci.yml`, has no release gate downstream to notice a missed publish. Issue
-/// #169 fixed the identical defect in `ci.yml`: the unconditional
-/// `cancel-in-progress: true` cancelled a `main` run whenever a later push
-/// landed before it finished, and a cancellation is neither a pass nor a
-/// failure, so nothing ever turned red. For `docs.yml` this means a
-/// cancelled run's commit is simply never published to the site, silently,
-/// with the previously published commit left standing and no signal that it
-/// is stale. Pinned exactly, and the negative assertion kept alongside it,
-/// because a weaker positive-only check would not catch a regression that
-/// restored the unconditional form.
 #[test]
-fn docs_workflow_never_cancels_a_completed_main_publish() {
+fn docs_workflow_cancels_superseded_publish_runs() {
     let workflow = docs_workflow();
 
-    // Pinned exactly. The group must carry the commit on `main`, because
-    // `cancel-in-progress: false` alone does not stop a cancellation: GitHub
-    // keeps at most one *pending* run per concurrency group, so with one run
-    // executing and one queued, a third arrival cancels the queued one. Only
-    // the already-started run is protected. `docs.yml` is fast enough that it
-    // usually finishes before the next push, which is why it stayed mostly
-    // green while `ci.yml` was cancelled 23 times in 30 runs — the same latent
-    // defect, hidden by duration rather than absent.
     assert!(
-        workflow.contains(
-            "  group: docs-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == \
-             'refs/heads/main' && github.sha || 'ref-tip' }}\n"
-        ),
-        "the concurrency group must include the commit so no `main` publish is \
-         ever superseded while pending"
+        workflow.contains("  group: docs-${{ github.workflow }}-${{ github.ref }}\n"),
+        "all documentation runs for one ref must share a concurrency group"
     );
     assert!(
-        !workflow.contains("  group: docs-${{ github.workflow }}-${{ github.ref }}\n"),
-        "the ref-only group must not return: it lets a later push cancel a \
-         pending `main` publish"
+        workflow.contains("  cancel-in-progress: true\n"),
+        "only the newest documentation build should spend runner minutes"
     );
-    assert!(
-        workflow.contains("  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}\n"),
-        "a cancelled `Docs` run on `main` means that commit's site is never \
-         published, and a cancellation is neither a pass nor a failure, so \
-         nothing detects the gap; `main` runs must never be cancelled by a \
-         later push"
-    );
-    assert!(
-        !workflow.contains("  cancel-in-progress: true\n"),
-        "the unconditional form must not return once the ref-scoped \
-         expression is in place"
-    );
+    assert!(!workflow.contains("github.sha || 'ref-tip'"));
+    assert!(!workflow.contains("github.ref != 'refs/heads/main'"));
 }
 
 /// Every top-level job identifier declared under `jobs:`, in declaration order.

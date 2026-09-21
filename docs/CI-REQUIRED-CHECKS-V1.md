@@ -343,9 +343,9 @@ ready to adopt the branch-first routine can apply `deletion` and
 `non_fast_forward` alone: they impose no check requirement, block no push that
 CI would have blocked, and still close the force-push and deletion holes that
 `main.protected=false` leaves open today. Add `required_status_checks` in a
-second edit once the branch-first routine is in use. The other half of that
-prerequisite is already satisfied: `concurrency.cancel-in-progress` no longer
-cancels `main` (see [Prerequisite](#prerequisite)).
+second edit once the branch-first routine is in use. The current latest-ref CI
+policy deliberately cancels superseded `main` runs to bound hosted-runner use;
+see [Prerequisite](#prerequisite).
 
 ### Prerequisite
 
@@ -366,13 +366,15 @@ once it exists, and a human skimming `main` for the project's actual health --
 and it means post-push evidence for a released or claimed commit has to be
 re-run by hand.
 
-**Applied fix: scope `cancel-in-progress` to non-default refs, not a merge
-queue.** `.github/workflows/ci.yml`'s `concurrency` block now reads
-`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`, so a branch or
-pull request is still superseded by its own tip while a push to `main` always
-runs to completion. The streak recorded above is what the old setting produced;
-a completed `main` verdict after this change is the evidence that it worked, and
-until such a run exists this paragraph claims only that the setting changed.
+**Current operational policy: cancel superseded runs on every ref.**
+`.github/workflows/ci.yml` groups runs by workflow and ref and sets
+`cancel-in-progress: true`. A newer push to `main`, or a newer manual dispatch
+on the same ref, therefore stops the older run rather than spending runner
+minutes on a result that is already stale. This intentionally restores the
+latest-head tradeoff recorded above: intermediate commits may have no completed
+`main` verdict, so exact-commit evidence must come from a run that is allowed to
+finish without a newer run superseding it.
+
 A GitHub merge queue is **not** recommended
 as a substitute: it requires branch protection with pull requests enabled and
 serializes merges one at a time through the queue, which conflicts with the
@@ -382,13 +384,10 @@ with no pull request required. A queue would either throttle this backlog's
 merge throughput to one commit at a time, defeating the reason the many-worktree
 model exists, or, if agents kept fast-forwarding around it, leave the same
 `concurrency`-driven cancellation in place for the direct pushes that still
-happen. The ref-scoped `cancel-in-progress` change achieves the same end
-(`main` gets a completed verdict) without changing who may push or how, and
-that is why it was chosen. It does change CI compute cost materially: no push
-to `main` cancels a prior one, so overlapping `main` runs now queue up
-back-to-back rather than being killed. It is not required for the
-required-status-check rule itself to function, and that rule is still not
-changed by this proposal.
+happen. Cancellation is not required for the required-status-check rule itself
+to function, and that rule is still not changed by this proposal; it is an
+operational choice to prioritize bounded CI minutes and the newest revision's
+signal over a verdict for every intermediate `main` commit.
 
 ## Bypass and emergency recovery
 

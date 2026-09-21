@@ -57,6 +57,7 @@ import re
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -104,6 +105,10 @@ NPM_OWNED_DATA_FILES = (
     "semaprax.api.json",
     "package.json",
 )
+# The selected npm preview has six regular payload files. ``npm pack`` may
+# optionally record its ``package/`` root as a directory member, but no other
+# archive structure belongs in an installable preview artifact.
+MAX_PACKED_NPM_TARBALL_MEMBERS = len(NPM_OWNED_DATA_FILES) + 1
 NPM_DESCRIPTOR_FILE = "semaprax.api.json"
 NPM_FORBIDDEN_PACKAGE_JSON_KEYS = ("dependencies", "devDependencies", "scripts", "private")
 NPM_PACKAGE_NAME = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$")
@@ -954,6 +959,58 @@ def _packed_npm_tarball(snapshot_payload, expected_payload):
     return tarballs[0]
 
 
+def _verify_npm_tarball_payload(tarball, expected_payload):
+    """Refuse a packed archive whose installable bytes differ from the snapshot.
+
+    The pre-pack snapshot has already been checked through a closed inventory,
+    but ``npm pack`` is an external producer. Merely proving that it wrote one
+    regular ``.tgz`` is not enough to make that archive the artifact our fresh
+    consumer installs: it could add a file, omit one, substitute contents, or
+    carry a link. Inspect the gzip tar stream without extracting it and bind
+    each admitted regular member byte-for-byte to the verified snapshot.
+    """
+    expected = dict(expected_payload)
+    seen = set()
+    members = 0
+    try:
+        with tarfile.open(tarball, mode="r:gz") as archive:
+            for member in archive:
+                members += 1
+                if members > MAX_PACKED_NPM_TARBALL_MEMBERS:
+                    reject("npm tarball contains more than its admitted members")
+                if member.isdir():
+                    if member.name.rstrip("/") != "package":
+                        reject(f"npm tarball contains unexpected directory {member.name!r}")
+                    continue
+                if not member.isfile():
+                    reject(f"npm tarball member {member.name!r} is not a regular file")
+                if not member.name.startswith("package/"):
+                    reject(f"npm tarball member has an unexpected path {member.name!r}")
+                name = member.name.removeprefix("package/")
+                if not name or "/" in name or "\\" in name or name not in expected:
+                    reject(f"npm tarball member has an unadmitted path {member.name!r}")
+                if name in seen:
+                    reject(f"npm tarball contains duplicate payload member {name!r}")
+                if member.size != len(expected[name]):
+                    reject(f"npm tarball payload member {name!r} has an unexpected size")
+                source = archive.extractfile(member)
+                if source is None:
+                    reject(f"npm tarball payload member {name!r} cannot be read")
+                with source:
+                    actual = _read_bounded(
+                        source,
+                        len(expected[name]),
+                        f"npm tarball payload member {name!r}",
+                    )
+                if actual != expected[name]:
+                    reject(f"npm tarball payload member {name!r} does not match the checked snapshot")
+                seen.add(name)
+    except (OSError, tarfile.TarError) as error:
+        reject(f"npm tarball cannot be read as gzip tar: {error}")
+    if seen != set(expected):
+        reject("npm tarball inventory does not match the checked snapshot payload")
+
+
 def _write_npm_tarball_consumer(snapshot_root, package_name, tarball):
     """Create a fresh external consumer whose sole dependency is the tarball."""
     consumer = Path(snapshot_root) / "consumer"
@@ -1153,6 +1210,7 @@ def check(
                     if result.returncode != 0:
                         reject(f"npm pack failed: {result.stderr.decode(errors='replace')}")
                     tarball = _packed_npm_tarball(snapshot_payload, payload)
+                    _verify_npm_tarball_payload(tarball, payload)
                     package_json = validate_npm_package_json(payload["package.json"].decode("utf-8"))
                     consumer = _write_npm_tarball_consumer(snapshot, package_json["name"], tarball)
                     lock_result = run_closed(

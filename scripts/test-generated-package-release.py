@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -45,6 +46,26 @@ gpr = _load("semaprax_generated_package_release", "scripts/generated-package-rel
 def scratch_dir():
     directory = Path(tempfile.mkdtemp(prefix="semaprax-generated-package-release-"))
     return directory
+
+
+def write_packed_npm_tarball(path, payload, *, mutations=(), omissions=(), extras=()):
+    """Write the exact npm-style flat tarball expected by the consumer gate."""
+    contents = dict(payload)
+    contents.update(dict(mutations))
+    for name in omissions:
+        del contents[name]
+    with tarfile.open(path, mode="w:gz") as archive:
+        root = tarfile.TarInfo("package/")
+        root.type = tarfile.DIRTYPE
+        archive.addfile(root)
+        for name, data in sorted(contents.items()):
+            member = tarfile.TarInfo(f"package/{name}")
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+        for name, data in extras:
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
 
 
 def actual_toolchain_cargo():
@@ -522,7 +543,10 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
             cwd = Path(cwd)
             calls.append((command, cwd, list(path_dirs), dict(extra_env)))
             if command[1:3] == ["pack", "--json"]:
-                (cwd / "frame-payload-0.1.0.tgz").write_bytes(b"packed-tarball")
+                write_packed_npm_tarball(
+                    cwd / "frame-payload-0.1.0.tgz",
+                    {name: (cwd / name).read_bytes() for name in gpr.NPM_OWNED_DATA_FILES},
+                )
             elif command[1:3] == ["install", "--package-lock-only"]:
                 consumer_dependencies = json.loads(
                     (cwd / "package.json").read_text(encoding="utf-8")
@@ -570,6 +594,67 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
             gpr, "run_closed", return_value=SimpleNamespace(returncode=0, stderr=b"")
         ) as run_closed:
             with self.assertRaisesRegex(gpr.Rejected, r"exactly one tarball"):
+                gpr.check(
+                    "npm",
+                    prepared,
+                    publish=False,
+                    npm_bin=Path("/tools/npm"),
+                    npm_tarball_consumer=True,
+                    node_bin=Path("/tools/node"),
+                )
+        run_closed.assert_called_once()
+
+    def test_tarball_consumer_refuses_a_packed_archive_with_unchecked_bytes_before_install(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+
+        def closed(command, cwd, *_args, **_kwargs):
+            if list(command)[1:3] == ["pack", "--json"]:
+                cwd = Path(cwd)
+                write_packed_npm_tarball(
+                    cwd / "frame-payload-0.1.0.tgz",
+                    {name: (cwd / name).read_bytes() for name in gpr.NPM_OWNED_DATA_FILES},
+                    mutations=(
+                        (
+                            "semaprax.js",
+                            bytes([(cwd / "semaprax.js").read_bytes()[0] ^ 1])
+                            + (cwd / "semaprax.js").read_bytes()[1:],
+                        ),
+                    ),
+                )
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(gpr, "run_closed", side_effect=closed) as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"does not match the checked snapshot"):
+                gpr.check(
+                    "npm",
+                    prepared,
+                    publish=False,
+                    npm_bin=Path("/tools/npm"),
+                    npm_tarball_consumer=True,
+                    node_bin=Path("/tools/node"),
+                )
+        run_closed.assert_called_once()
+
+    def test_tarball_consumer_refuses_a_packed_archive_with_an_extra_member_before_install(self):
+        package_dir = self.npm_package_dir(self.root)
+        prepared = self.root / "prepared"
+        gpr.prepare("npm", package_dir, "frame-payload", "0.1.0", None, prepared)
+
+        def closed(command, cwd, *_args, **_kwargs):
+            if list(command)[1:3] == ["pack", "--json"]:
+                cwd = Path(cwd)
+                write_packed_npm_tarball(
+                    cwd / "frame-payload-0.1.0.tgz",
+                    {name: (cwd / name).read_bytes() for name in gpr.NPM_OWNED_DATA_FILES},
+                    omissions=("semaprax.js",),
+                    extras=(("package/unadmitted.js", b"not approved"),),
+                )
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with mock.patch.object(gpr, "run_closed", side_effect=closed) as run_closed:
+            with self.assertRaisesRegex(gpr.Rejected, r"unadmitted path"):
                 gpr.check(
                     "npm",
                     prepared,

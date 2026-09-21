@@ -461,11 +461,14 @@ impl CompiledTypedEffects {
         stages: IterativeBudget,
         effects: EffectBudget,
         cancellation: &AgentCancellation,
-        selected: TargetStageBackend,
+        selected: TargetStageBackend<'_>,
     ) -> Result<TargetEffectRun, Vec<Diagnostic>> {
         let backend = match selected {
             TargetStageBackend::Interpreter => {
                 crate::agent_lifecycle::authorization::StageBackend::Interpreter
+            }
+            TargetStageBackend::Native(host) => {
+                crate::agent_lifecycle::authorization::StageBackend::Native { host: &host.host }
             }
             TargetStageBackend::CoreWasm => {
                 let source = self

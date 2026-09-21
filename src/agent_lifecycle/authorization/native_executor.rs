@@ -75,11 +75,15 @@ use super::{sealed, ExecutionAuthority, StageExecutor};
 /// authority. The held file is handed to the registered-process provider,
 /// which executes the descriptor rather than resolving the path again.
 ///
-/// This is deliberately crate-private. It is an internal, bounded parity
-/// substrate, not a public promise that arbitrary native targets are admitted.
+/// This representation remains crate-private. The public target route exposes
+/// it only through `iterative::effects::NativeTargetHost`, preserving the same
+/// bounded held-descriptor substrate without exposing compiler argv or process
+/// control as a public capability.
 #[derive(Debug)]
 pub struct NativeStageHost {
     compiler: File,
+    #[cfg(test)]
+    compiler_path: PathBuf,
     identity: String,
     compiler_digest: [u8; 32],
     compiler_len: u64,
@@ -125,6 +129,8 @@ impl NativeStageHost {
         let identity = format!("native-c11:sha256:{compiler_hex}:{compiler_len}");
         Ok(Self {
             compiler: held,
+            #[cfg(test)]
+            compiler_path: canonical,
             identity,
             compiler_digest,
             compiler_len,
@@ -145,6 +151,13 @@ impl NativeStageHost {
     /// compiler selection. It cannot be spent as process authority.
     pub(in crate::agent_lifecycle) fn identity(&self) -> &str {
         &self.identity
+    }
+
+    /// The canonical path originally used to establish this held capability.
+    /// This is diagnostic/test plumbing only; execution always uses `compiler`.
+    #[cfg(test)]
+    pub(in crate::agent_lifecycle) fn compiler_path(&self) -> &Path {
+        &self.compiler_path
     }
 
     fn compile(

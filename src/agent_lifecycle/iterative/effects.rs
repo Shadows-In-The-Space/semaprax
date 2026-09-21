@@ -9,6 +9,7 @@ use crate::agent_lifecycle::authorization::target_protocol::{TargetAccounting, T
 pub use durable::{DurableTypedFailure, DurableTypedRun};
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EffectScalar {
@@ -120,14 +121,49 @@ pub struct TargetEffectRun {
     digest: String,
 }
 
+/// Explicit, held authority to compile one native C11 Agent-stage artifact.
+///
+/// Opening a host takes an absolute compiler path and immediately turns it
+/// into a descriptor-held capability. It never consults `PATH` at execution
+/// time, inherits no environment, and rechecks the compiler's identity before
+/// every execution. The native executor owns the closed compiler argv, its
+/// output limits, and its compile/run deadlines; this value neither grants
+/// filesystem, network, model, nor arbitrary process authority.
+///
+/// The capability is intentionally supplied by the trusted embedding host,
+/// rather than discovered by a target selector. That makes the process
+/// boundary explicit and binds target evidence to the exact held compiler.
+#[derive(Debug)]
+pub struct NativeTargetHost {
+    host: crate::agent_lifecycle::authorization::NativeStageHost,
+}
+
+impl NativeTargetHost {
+    /// Hold one caller-selected native compiler for target-stage execution.
+    ///
+    /// Relative paths and non-regular or non-executable files fail closed.
+    /// The path is resolved only while establishing this capability; later
+    /// execution uses the held descriptor, not the path.
+    pub fn open(compiler: impl AsRef<Path>) -> Result<Self, Diagnostic> {
+        crate::agent_lifecycle::authorization::NativeStageHost::open(compiler.as_ref())
+            .map(|host| Self { host })
+    }
+
+    /// Non-authorizing compiler identity retained in target evidence.
+    pub fn identity(&self) -> &str {
+        self.host.identity()
+    }
+}
+
 /// Production selector for deterministic Agent stages behind the target host
 /// protocol. The selector carries no compiler flags or source bytes. Core Wasm
 /// reuses the exact checked module source retained by
-/// [`compile_typed_effects`]. Native execution remains parity-only until its
-/// compiler and child-process boundary enforces deadlines and cancellation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TargetStageBackend {
+/// [`compile_typed_effects`]. Native execution requires an explicit
+/// descriptor-held [`NativeTargetHost`] capability.
+#[derive(Clone, Copy, Debug)]
+pub enum TargetStageBackend<'host> {
     Interpreter,
+    Native(&'host NativeTargetHost),
     CoreWasm,
 }
 impl TargetEffectRun {
@@ -891,6 +927,19 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             request_wires: Vec::new(),
             grants: Vec::new(),
         };
+        // The native leg must exercise the same public selector an embedding
+        // host receives. Reopening the absolute fixture path deliberately
+        // establishes a second held descriptor, rather than smuggling the
+        // parity-only executor through the public route.
+        let public_native = match backend {
+            crate::agent_lifecycle::authorization::StageBackend::Native { host } => {
+                let public = NativeTargetHost::open(host.compiler_path())
+                    .expect("fixture held compiler reopens as a native target host");
+                assert_eq!(public.identity(), host.identity());
+                Some(public)
+            }
+            _ => None,
+        };
         let selected = match backend {
             crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization {
                 ..
@@ -898,7 +947,13 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             crate::agent_lifecycle::authorization::StageBackend::Interpreter => {
                 Some(TargetStageBackend::Interpreter)
             }
-            crate::agent_lifecycle::authorization::StageBackend::Native { .. } => None,
+            crate::agent_lifecycle::authorization::StageBackend::Native { .. } => {
+                Some(TargetStageBackend::Native(
+                    public_native
+                        .as_ref()
+                        .expect("native selection retains public held host"),
+                ))
+            }
             crate::agent_lifecycle::authorization::StageBackend::Wasm {
                 source: wasm_source,
             } => {
@@ -1067,6 +1122,11 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             assert!(run.target_evidence().is_empty());
             assert_eq!(handler.calls, 0);
         }
+    }
+
+    #[test]
+    fn native_target_host_refuses_a_relative_compiler_name_before_any_lookup() {
+        assert!(NativeTargetHost::open("clang").is_err());
     }
 
     #[test]

@@ -378,6 +378,24 @@ fn exact_high_risk_syscalls_deny_for_every_role() {
 }
 
 #[test]
+fn clone3_remains_unavailable_after_role_local_compatibility_rules() {
+    const CLONE3: u32 = 435;
+
+    assert!(X86_MANDATORY_DENY.contains(&CLONE3));
+    assert!(!X86_COMMON.contains(&CLONE3));
+    assert!(!X86_SAFE_ADDITIONS.contains(&CLONE3));
+    for policy in ROLE_POLICIES {
+        assert!(
+            !policy.x86_additional.contains(&CLONE3),
+            "{:?}",
+            policy.tool
+        );
+        let guard = Guard::for_arch(policy.role, policy.tool, X86_ARCH).unwrap();
+        assert_eq!(evaluate(&guard, X86_ARCH, CLONE3, [u64::MAX; 6]), DENY);
+    }
+}
+
+#[test]
 fn complete_syscall_selection_is_default_deny_on_both_native_abis() {
     for arch in [X86_ARCH, ARM_ARCH] {
         for tool in TOOLS {

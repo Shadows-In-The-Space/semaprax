@@ -240,6 +240,15 @@ jobs:
             # The command must still succeed.
             strace -f -qq -c "$tool" --version >/dev/null
             echo "::endgroup::"
+            echo "::group::$role --version fcntl command trace"
+            # The aggregate census proves that both real staged tools reach
+            # fcntl, but not which command they request. Record just that
+            # argument-bearing operation before another policy change: this
+            # trace contains no paths or pointer payloads and lets the next
+            # compatibility decision distinguish harmless queries from any
+            # descriptor-mutating command.
+            strace -f -qq -e trace=fcntl "$tool" --version >/dev/null
+            echo "::endgroup::"
           done
 
       - name: Record the independent expected details

@@ -223,10 +223,13 @@ needed to obtain a 1 TiB-aligned sandbox from a transient 2 TiB candidate while
 other mappings exist. The follow-up raises only that finite role ceiling to
 4 TiB, not the fixed physical-memory cgroup ceiling or confinement policy.
 Rust's failure remains separate and unexplained. The workflow now records a
-`strace -f -c` startup census of the exact staged Node and rustc bytes so any
-later syscall-policy change must be derived from observed operations rather
-than inferred from these exit modes. The gate remains red, WP-05 remains
-unpromoted, and no ordinary CLI activation is authorized.
+`strace -f -c` startup census plus a path-free `fcntl` command trace of the
+exact staged Node and rustc bytes. The observed `fcntl` operation supports
+only the role-local x86 query rule for `F_GETFD` and `F_GETFL`; it grants no
+descriptor creation, flag mutation, lease, owner, or process capability. The
+next run's command trace must confirm the actual requests before any broader
+change is considered. The gate remains red, WP-05 remains unpromoted, and no
+ordinary CLI activation is authorized.
 
 The local packaging helper accepts only explicit absolute release, tar and gzip
 tools plus artifact paths, builds a fresh no-clobber directory, verifies it,

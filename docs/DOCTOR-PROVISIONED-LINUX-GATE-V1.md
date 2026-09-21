@@ -195,9 +195,12 @@ V8 can transiently map a 2 TiB candidate to obtain a 1 TiB-aligned sandbox
 while loader and ordinary mappings are already charged, so the next tranche
 gives Node a finite 4 TiB ceiling while retaining the fixed 4 GiB physical-
 memory cgroup limit. Rust's status 127 remains separately unexplained. The
-workflow now prints a `strace -f -c` census for the exact staged Node and rustc
-bytes before confinement; this is diagnostic evidence only and grants the
-worker nothing. No syscall-policy widening is justified by the exit evidence.
+workflow now prints a `strace -f -c` census and a path-free `fcntl` command
+trace for the exact staged Node and rustc bytes before confinement; this is
+diagnostic evidence only and grants the worker nothing. The observed `fcntl`
+operation supports only the role-local x86 `F_GETFD`/`F_GETFL` query rule; it
+does not admit descriptor mutation or creation. The command trace must settle
+the actual requests before any broader policy change is considered.
 
 ## What is true today
 

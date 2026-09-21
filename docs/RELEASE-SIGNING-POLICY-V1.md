@@ -17,8 +17,9 @@ tooling gain no ambient signing authority. The configured GitHub-hosted
 `publish-release` job alone receives a short-lived OIDC token when it runs.
 This document and its paired implementation therefore split the work into what
 is safely buildable without any secret -- the **provenance document**, the
-**identity policy**, and **binding verification** -- and the hosted evidence
-and human review that remain after wiring.
+**identity policy**, **binding verification**, and cryptographic replay against
+caller-supplied historical trusted-root bytes -- and the hosted evidence and
+human review that remain after wiring.
 
 **The release archives remain unsigned.** `docs/RELEASE-PROCESS.md`'s
 nonclaims correctly still say so, and this document must not be read as
@@ -32,11 +33,11 @@ signed release has shipped.
 | **Artifact substitution** (a downloaded archive differs from what CI built) | `scripts/release-manifest.py` binds each archive's exact SHA-256 digest; `src/release_provenance.rs` independently re-hashes archive bytes against the manifest ([`verify_manifest_artifacts_on_disk`]) | No signature over the manifest exists yet, so a compromised mirror could still substitute a manifest *and* its archives together |
 | **Tag movement** (a tag is force-moved to a different commit after release) | `docs/RELEASE-PROCESS.md`'s "Never move or recreate a published release tag" rule; Git tag objects are content-addressed | This is a process rule, not a cryptographic one; nothing here detects a force-pushed tag after the fact |
 | **Compromised workflow** (a modified `ci.yml` builds from unexpected inputs or an unapproved ref) | The identity policy below binds a claimed signature to an exact `issuer`/`subject`/`workflow_ref`, checked by [`verify_signature_claim_binds_provenance`] | No real signature exists to carry that identity yet; a compromised workflow could still forge a structurally valid but unsigned claim, which is exactly why this module never treats claim validity as proof |
-| **Compromised maintainer account** (a valid GitHub credential publishes an unreviewed release) | `release-gate`'s required-check aggregation (`tests/offline_package/ci_release_gate.rs`) still must pass before `publish-release` runs | Keyless signing scoped to the *workflow* identity (not a personal account) is specifically the mitigation Sigstore/Fulcio provides for this threat, and is not wired up yet (see checklist) |
-| **Stale or revoked identity** (a signature claims an identity that was valid in the past but has since been revoked) | The identity policy is a single versioned table (this document), not per-signature configuration, so revoking an identity is one document edit | No revocation list or expiry mechanism exists; Sigstore's own short-lived certificates (minutes, not the lifetime of a long-lived key) are the recommended mitigation, not built here |
+| **Compromised maintainer account** (a valid GitHub credential publishes an unreviewed release) | `release-gate`'s required-check aggregation (`tests/offline_package/ci_release_gate.rs`) still must pass before `publish-release` runs; the configured keyless signing path is scoped to the workflow identity rather than a personal signing key | No qualifying hosted tag run has produced the immutable signed asset set, so the configured mitigation has no release evidence yet |
+| **Stale or revoked identity** (a signature claims an identity that was valid in the past but has since been revoked) | The identity policy is a single versioned table (this document), not per-signature configuration; the offline verifier checks the certificate and transparency evidence against the exact imported trusted-root snapshot | Offline replay has no ambient network or current revocation feed. It establishes validity under that historical root snapshot, not that the identity or key remains trusted today |
 | **Mirror or download corruption** (bit rot, a lossy proxy, an incomplete download) | SHA-256 digests already catch this (`docs/RELEASE-PROCESS.md`'s existing nonclaims) | Unchanged by this document |
 | **Replayed provenance** (an old, validly-signed provenance/signature pair is presented alongside a newer release's artifacts) | [`verify_signature_claim_binds_provenance`]'s `subject_digest` is a byte-exact digest of the *exact* provenance document under test; a claim computed over a different version's provenance bytes cannot match | None identified beyond digest binding, which is sufficient here because there is no shared key material across versions to replay |
-| **Mutable manifest signed too early** (signing an inventory before the final artifact set is known) | `scripts/release-manifest.py` is built only after every target archive exists (`collect_artifacts` fails closed on a missing target); a provenance document's `manifest_digest` binds to that exact, already-complete manifest | The checklist below states this ordering as a hard requirement for the real signing step, since nothing here can enforce workflow step ordering |
+| **Mutable manifest signed too early** (signing an inventory before the final artifact set is known) | `scripts/release-manifest.py` is built only after every target archive exists (`collect_artifacts` fails closed on a missing target); a provenance document's `manifest_digest` binds to that exact, already-complete manifest; the source-locked workflow contract checks the signing order | A real hosted tag run and immutable published assets are still required to show that the configured path executed as specified |
 
 ## Trusted identity policy v1
 
@@ -163,8 +164,8 @@ claim that a signed release already exists.
 | `identity.subject` | string | Must equal `repo:<trusted repository>:ref:refs/tags/<tag>` for the exact tag the provenance document declares. |
 | `identity.workflow_ref` | string | Must equal `<trusted repository>/<trusted workflow path>@refs/tags/<tag>`, and must also agree with the provenance document's own `builder.workflow_identity`. |
 | `algorithm` | string | One recognized value (currently only `sigstore-cosign-bundle-v0.3`); recognizing a value here is a structural admission, not a cryptographic endorsement. |
-| `signature` | string (opaque) | Never decoded or cryptographically verified by this repository's code -- see "What verification does and does not prove" below. |
-| `certificate` | string (opaque) | Same as `signature`. |
+| `signature` | string (opaque) | A deterministic projection copied from the bundle and checked byte-for-byte against it. Cryptographic verification consumes the canonical bundle field rather than treating this duplicate string as another signature. |
+| `certificate` | string (opaque) | Same projection rule as `signature`; certificate parsing and chain verification consume the canonical bundle. |
 
 ### Bundled offline verification material (narrow v0.3 slice)
 
@@ -208,7 +209,8 @@ python3 scripts/release-signature-claim.py \
 The second command requires a byte-exact deterministic rendering. A changed
 provenance byte, a replayed bundle message digest, non-canonical copied base64,
 or a claim serialization drift fails closed. This replay is only preparation
-for a later explicit cryptographic verifier; it is not a cryptographic result.
+for the subsequent explicit cryptographic verifier; it is not itself a
+cryptographic result.
 The builder reads at most 4 MiB of provenance, 2 MiB of bundle material, and
 64 KiB for an existing claim under `--check`, so a hostile replay path cannot
 request an unbounded allocation. It rejects duplicate JSON keys. Output uses a
@@ -243,7 +245,7 @@ time, and proof tree size are canonical nonnegative signed-64-bit values
 or overflow. Predicate parsing establishes that one producer snapshot is
 well-formed, not that its workflow, commit, IDs, builder, or invocation is
 cryptographically trustworthy or semantically bound to this release. Those
-claims remain for the supplied offline capability and its explicit identity.
+claims remain for the offline capability and its explicit identity.
 
 Offline consumers import the exact `trusted_root.jsonl` emitted by
 `gh attestation trusted-root` alongside the archive/bundle, before crossing
@@ -257,10 +259,12 @@ The parser deliberately admits only those v0.3, single-signature,
 single-archive-subject forms. It is not a general Sigstore, DSSE, in-toto,
 SLSA, X.509, certificate-chain, or Rekor client. The complete cryptographic
 replay (signature, certificate identity/chain, Rekor inclusion proof, and
-imported trusted-root relationship) is an explicit
-`OfflineBundleVerificationCapability` supplied by a caller that has a real
-offline verifier. The capability receives the exact subject, bundle, and root
-bytes only after all structural and digest bindings pass.
+imported trusted-root relationship) is implemented by
+`SigstoreOfflineVerifier`, which satisfies the explicit
+`OfflineBundleVerificationCapability` boundary. An embedding caller may still
+inject another implementation. Either verifier receives the exact subject,
+bundle, and root bytes only after all structural and digest bindings pass; it
+receives no filesystem, process, network, signing, or publication authority.
 
 ## The verification module
 
@@ -285,20 +289,17 @@ by `tests/offline_package/release_provenance.rs`) provides:
 - `verify_release_binding`: the two binding checks composed, for a single
   entry point over a manifest/provenance/claim triple.
 - `SignatureVerificationCapability` / `verify_release_binding_with_capability`:
-  an explicit extension point for a *cryptographic* verifier. This module
-  still implements no real algorithm and still creates no key or identity
-  material -- the trait exists so a caller that does hold a real verifier
-  (a `cosign`/Sigstore bundle check, once one is wired up per the checklist
-  below) can supply it explicitly, and so it composes with the binding
-  checks (which still run first and still fail closed on their own) rather
-  than duplicating them. This is the reusable surface #195 (signed package
-  registry) and #209 (signed audit capsule) can implement the trait against
-  without redefining what "verify a signature claim" means. Its only tests
-  today use a throwaway HMAC-SHA256 key generated inside the test module
+  a legacy format-neutral extension point for a caller-supplied verifier. It
+  remains separate from the release-specific Sigstore bundle capability below
+  and creates no key or identity material. It composes with the binding checks
+  (which still run first and fail closed on their own) rather than duplicating
+  them. This is the reusable surface #195 (signed package registry) and #209
+  (signed audit capsule) can implement without redefining what "verify a
+  signature claim" means. Its tests use a throwaway HMAC-SHA256 key generated
+  inside the test module
   (`src/release_provenance/tests.rs`) to prove the interface actually gates
   on cryptographic verification and is not a no-op -- HMAC is a symmetric
-  stand-in for wiring only, never a claim about the real algorithm, which
-  stays Sigstore/cosign per this document.
+  stand-in for that generic wiring only, never the release algorithm.
 - `parse_sigstore_archive_attestation_bundle` /
   `verify_archive_attestation_binds_manifest` /
   `verify_archive_attestation_binds_release`: bounded, closed replay of the
@@ -316,8 +317,12 @@ by `tests/offline_package/release_provenance.rs`) provides:
 - `parse_sigstore_trusted_root_jsonl` plus
   `OfflineBundleVerificationCapability`: accept caller-imported, exact,
   bounded root-package bytes and hand them with the exact subject/bundle bytes
-  to a pure explicit verifier. The module has no built-in Sigstore verifier;
-  absent that supplied capability, these functions establish binding only.
+  to a pure explicit verifier. `SigstoreOfflineVerifier` is the built-in
+  implementation: it performs Sigstore v0.3 certificate-chain, identity,
+  payload-signature, transparency-log, checkpoint, inclusion-proof, and
+  signed-time verification against only those supplied root bytes. It never
+  downloads or refreshes a root. `SPX-Z707` is the stable refusal for a bundle
+  or root that cannot satisfy that cryptographic policy.
 - `verify_offline_release_with_capability`: the only **aggregate** offline
   release API. It requires the manifest/provenance/claim/message bundle,
   one exact trusted-root package, and exactly one archive plus one DSSE
@@ -351,18 +356,16 @@ real bytes. The adapter does not list the directory or reject unrelated files;
 it checks only the exact regular files the admitted manifest names. Nothing a
 document says about itself is trusted.
 
-The standalone binary deliberately has no Sigstore/cosign verifier authority.
-If the directory presents any v0.3 offline material --
-`release-provenance.bundle`, `trusted_root.jsonl`, or a
-`release-attestation-<admitted-target>.json` for one of this policy's three
-closed archive targets -- it refuses with `SPX-Z706` instead of
-continuing into the unsigned report. An embedding host that holds a real
-offline verifier may explicitly provide its
-`OfflineBundleVerificationCapability`; the CLI adapter then reads the complete
-bounded inventory and passes its exact bytes to
-`verify_offline_release_with_capability`. A partial inventory still fails as a
-missing document (`SPX-Z705`), and structural bundle framing alone is never a
-cryptographic success claim.
+The standalone binary uses the pure `SigstoreOfflineVerifier` when the
+directory presents the complete v0.3 offline inventory:
+`release-provenance.bundle`, `trusted_root.jsonl`, and one
+`release-attestation-<admitted-target>.json` for each of this policy's three
+closed archive targets. An embedding host may explicitly replace that default
+with another `OfflineBundleVerificationCapability`; the CLI adapter still reads
+the complete bounded inventory and passes its exact bytes to
+`verify_offline_release_with_capability`. A partial inventory fails as a
+missing document (`SPX-Z705`), malformed or inconsistent framing fails before
+cryptography, and a cryptographic rejection reports `SPX-Z707`.
 
 ```sh
 semaprax release verify dist
@@ -374,63 +377,42 @@ altered manifest, provenance for another commit or tag, replayed claim),
 `SPX-Z703` (identity policy: unapproved issuer, repository, or workflow),
 `SPX-Z704` (artifact: missing, resized, or substituted archive) -- plus its
 own `SPX-Z705` when the directory presents no readable document at all, and
-`SPX-Z706` when signed offline material is present without a caller-supplied
-verification capability. It
+`SPX-Z707` when cryptographic Sigstore verification refuses a bundle or
+trusted-root snapshot. It
 opens only the exact paths the manifest names, lists no directory, touches
 no network, spawns no process, and never executes or unpacks an artifact.
 
-A successful run over a directory with no offline bundle material prints
+A successful run over a complete signed-material directory prints a
+cryptographically verified offline status. That means the exact held subjects
+passed the pinned identity and Sigstore checks against the exact supplied
+historical trusted-root bytes; it does not mean those roots are current, the
+release was downloaded from an official location, or a SEMAPRAX release has
+actually shipped with those assets. A successful run over a directory with no
+offline bundle material prints
 `status: VERIFIED UNSIGNED RELEASE`. That is a
 successful verification of an **unsigned** release, never evidence that a
 release was signed: no SEMAPRAX release is signed today and no signing key
-or keyless identity exists for this repository. The status is unchanged when
-a `semaprax.release-signature-claim.v1` document is present and correctly
-bound -- the command verifies that claim's *binding* only, and never decodes
-or cryptographically verifies its `signature`/`certificate` bytes, exactly
-as the next section describes. Verifying, publishing, signing, and
-installing remain separate: this command performs only the first.
+or qualifying hosted keyless run exists for this repository. Verifying,
+publishing, signing, and installing remain separate: this command performs
+only the first.
 
 ### What verification does and does not prove
 
-**Does prove:** that a manifest, a provenance document, and a signature
-claim name exactly the same commit, tag, version, and artifact digests; that
-none of the three has been altered by even one byte since the triple was
-assembled; that a claim was not lifted from a different release (a replay);
-and that a claim's declared identity matches the pinned trusted-identity
-policy for the exact tag under test.
+**Does prove:** that a manifest, a provenance document, and a signature claim
+name exactly the same commit, tag, version, and artifact digests; that their
+exact held subjects satisfy the admitted Sigstore v0.3 signatures,
+certificate-chain and pinned issuer/identity policy, transparency-log evidence,
+and signed-time checks under the explicitly supplied trusted-root snapshot;
+and that a claim was not lifted from a different release.
 
-**Does not prove:** that `signature`/`certificate` bytes are a real
-cryptographic signature produced by the claimed identity's private key.
-Verifying that honestly requires a signature-verification implementation
-(Sigstore/cosign bundle verification, or raw Ed25519/ECDSA point
-arithmetic), which needs a cryptography dependency this change is not
-permitted to add. **A structurally valid, well-bound claim is not the same
-claim as a cryptographically authentic one** -- conflating the two here
-would be exactly the mistake this repository's own session precedent (no
-toy password hash, no toy MAC -- see the #191 work this issue's assignment
-names) warns against, applied to signing. Closing that gap requires pairing
-this module's binding check with a real external verifier, such as:
-
-```sh
-cosign verify-blob \
-  --certificate-identity "https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z" \
-  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  --bundle release-signature.bundle \
-  release-provenance.json
-```
-
-run by a real signing CI step or by a maintainer, never by this repository's
-own compiler or scripts.
-
-The added offline material framing does **not** change that boundary. Parsing
-a bundle, matching its archive subject/digest, matching a claim's copied
-signature/certificate strings, or accepting a `trusted_root.jsonl` package is
-not cryptographic verification. No built-in implementation validates an X.509
-chain, Fulcio identity, DSSE/message signature, Rekor checkpoint/inclusion
-proof, or revocation state, and no test fixture is a real certificate,
-signature, Rekor proof, or trusted root. Only a supplied real offline
-capability may make those checks; its success remains separate from product
-support, reproducibility, notarization, or publication.
+**Does not prove:** that the supplied trusted-root snapshot reflects later key
+rotation or revocation; that the bytes came from GitHub or an official release
+location; that a hosted SEMAPRAX release containing those bytes exists; or that
+publication and installation policy were satisfied. Parsing and structural
+binding still are not cryptographic verification by themselves: authenticity
+is established only after `SigstoreOfflineVerifier` (or an explicitly injected
+real capability) accepts every bundle. That success remains separate from
+product support, reproducibility, notarization, and publication.
 
 Also not proved by anything in this document: reproducible builds (no
 cross-host byte-identical rebuild is claimed or attempted), notarization or
@@ -513,11 +495,10 @@ historical evidence are changed.
    cannot grow the release workspace without bound.
 5. **Publish verification instructions with the one documented command.**
    The command itself now exists: `semaprax release verify <release-dir>`
-   (see "The one documented command" above) performs the binding, artifact,
-   and identity checks offline. What remains human-owned is pairing it with
-   a real signature check once one exists: `docs/RELEASE-PROCESS.md` should
-   gain a worked `cosign verify-blob` invocation alongside it, and its
-   nonclaims should keep saying releases are unsigned until item 6 holds.
+   (see "The one documented command" above) performs binding, artifact,
+   identity, and cryptographic Sigstore checks offline against explicitly
+   supplied root bytes. The release-process nonclaims must keep saying releases
+   are unsigned until item 6 holds.
 6. **Only after a real signed release has shipped**, update
    `docs/RELEASE-PROCESS.md`'s nonclaims to stop describing releases as
    unsigned, and add that release's own dated hosted-evidence section
@@ -544,9 +525,10 @@ remain five separate claims, exactly as issue #168 requires:
   digests already gave this repository, and what this document's binding
   checks extend across three documents instead of one.
 - **Authenticity** (were these bytes produced by the claimed identity?) is
-  explicitly **not** established by anything in this document or
-  `src/release_provenance.rs` -- see "What verification does and does not
-  prove" above. No release is signed today.
+  established for one held bundle/subject set only when the offline verifier
+  accepts it under the explicitly supplied historical trusted-root bytes. No
+  release is signed today, and local verifier capability is not hosted-release
+  evidence.
 - **Provenance** (what exactly was bound: commit, workflow, toolchain, host
   class, artifact digests) is what `semaprax.release-provenance.v1` records.
 - **Reproducibility** (can a third party rebuild byte-identical artifacts)

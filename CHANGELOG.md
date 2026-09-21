@@ -177,12 +177,13 @@ format: `Unreleased` then release buckets, grouped by impact.
   A bounded offline verifier now closes the Sigstore v0.3 framing, GitHub
   workflow-v1 predicate structure, exact archive inventory, and aggregate
   manifest/provenance/claim bindings before invoking an explicit verifier
-  capability. It does not perform certificate, Rekor-proof, predicate-semantic,
-  or signature verification itself. The CLI now exposes that verifier only as
-  an explicit host-injected capability, uses bounded held no-follow reads for
-  admitted release material, and makes the standalone binary refuse signed
-  input rather than imply built-in cryptographic verification. No signed hosted
-  release is claimed yet (#168).
+  capability. `SigstoreOfflineVerifier` supplies the standalone CLI's default
+  pure implementation, checking certificate-chain and pinned identity,
+  DSSE/message signatures, signed time, and transparency-log evidence against
+  exact caller-supplied historical trusted-root bytes. An embedding host can
+  still inject another capability. Verification performs no network or root
+  refresh and does not establish current revocation state, publication,
+  reproducibility, or support. No signed hosted release is claimed yet (#168).
 
 - Stop Universal Semantic Transaction v1 from refusing every project with a
   commented bundled dependency (#274). `ProjectCandidate::apply`'s

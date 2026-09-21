@@ -507,12 +507,13 @@ python3 scripts/release-provenance.py \
 
 `src/release_provenance.rs` independently verifies the *binding* between a
 manifest, a provenance document, and a claimed signature -- byte-exact
-digest agreement across all three, plus the trusted-identity policy -- but
-never verifies `signature`/`certificate` bytes cryptographically: this
-repository has no signing-verification dependency, and adding one is a
-decision this document explicitly leaves to a maintainer. Binding
-verification is not authenticity; see `docs/RELEASE-SIGNING-POLICY-V1.md`
-for exactly that distinction and its worked `cosign verify-blob` example.
+digest agreement across all three, plus the trusted-identity policy. Its
+`SigstoreOfflineVerifier` then cryptographically verifies each exact held
+Sigstore v0.3 bundle and subject against only the explicitly supplied
+`trusted_root.jsonl` bytes. It performs no network access and does not update
+or discover roots; acceptance is validity under that historical snapshot, not
+proof of current revocation state. See `docs/RELEASE-SIGNING-POLICY-V1.md` for
+the complete verification and nonclaim boundary.
 `tests/offline_package/release_provenance.rs` covers the CLI end to end
 against real synthetic archives, cross-checks the trusted-identity constants
 against both the script and the policy document, and exercises every hostile
@@ -522,8 +523,11 @@ a missing or extra artifact; an unapproved repository/issuer identity; and a
 signature claim replayed from another version).
 
 Building or verifying either document here creates no GitHub Release, signs
-nothing, and grants no authority -- exactly like the manifest and dry-run
-tooling above.
+nothing, and grants no network, signing, or publication authority -- exactly
+like the manifest and dry-run tooling above. In particular, a successful local
+cryptographic replay does not establish that a SEMAPRAX release containing the
+held assets was ever hosted or published, does not refresh a stale root, and
+does not claim reproducible builds or production support.
 
 ## Disposable dry-run harness and simulated recovery
 

@@ -1,4 +1,5 @@
 module std.tracing;
+use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
 use function @id("std.encoding.decode_hex_byte") from std.encoding as decode_hex_byte;
 use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 
@@ -417,4 +418,15 @@ fn tracestate_member_admitted(member: borrow Slice<u8>) -> bool
 fn tracestate_mutation_admitted(mutated_key: borrow Slice<u8>, first_member_key: borrow Slice<u8>, sibling_key: borrow Slice<u8>) -> bool
 {
     slice_equal(mutated_key, first_member_key) && !slice_equal(mutated_key, sibling_key)
+}
+// Named-field projection gate for the bytes proposed for export. The shared
+
+// policy owns protected names, classified values, marker and commitment shape;
+// this package retains its existing byte/size grammar. This does not send,
+// authenticate a commitment, discover secrets in arbitrary content, or make
+// legacy unguarded shape helpers secret-safe.
+@id("std.tracing.tracestate-field-projection-admitted")
+fn tracestate_field_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+{
+    projected_field_admitted(name, classified_secret, projection, commitment) && tracestate_key_shape_admitted(name) && tracestate_value_shape_admitted(projection)
 }

@@ -1,4 +1,5 @@
 module std.email;
+use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
 use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 
 // Issue #193's outbound-email slice: the pure, effect-free decision layer an
@@ -189,4 +190,15 @@ fn envelope_is_complete(has_sender: bool, has_recipient: bool, has_subject: bool
 fn value_is_header_safe_guarded(field: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
 {
     value_is_header_safe(field) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
+}
+// Named-field projection gate for the bytes proposed for export. The shared
+
+// policy owns protected names, classified values, marker and commitment shape;
+// this package retains its existing byte/size grammar. This does not send,
+// authenticate a commitment, discover secrets in arbitrary content, or make
+// legacy unguarded shape helpers secret-safe.
+@id("std.email.header-projection-admitted")
+fn header_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+{
+    projected_field_admitted(name, classified_secret, projection, commitment) && value_is_header_safe(projection)
 }

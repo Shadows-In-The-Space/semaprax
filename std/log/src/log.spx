@@ -1,4 +1,5 @@
 module std.log;
+use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
 use type @id("std.io.reader") from std.io as Reader;
 use type @id("std.io.writer") from std.io as Writer;
 use function @id("std.data.json.utf8.is_utf8") from std.data.json.utf8 as is_utf8;
@@ -160,4 +161,15 @@ fn append_event_guarded(event: own Event, carries_password: bool, carries_api_ke
 {
     let safe = event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential);
     if safe { append_event(event, output) } else { discard_event(event, output) }
+}
+// Named-field projection gate for the bytes proposed for export. The shared
+
+// policy owns protected names, classified values, marker and commitment shape;
+// this package retains its existing byte/size grammar. This does not send,
+// authenticate a commitment, discover secrets in arbitrary content, or make
+// legacy unguarded shape helpers secret-safe.
+@id("std.log.field-projection-admitted")
+fn field_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+{
+    projected_field_admitted(name, classified_secret, projection, commitment) && is_utf8(projection)
 }

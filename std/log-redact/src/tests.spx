@@ -1,4 +1,8 @@
 module std.log.redact.tests;
+use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
+use function @id("std.log.redact.field-name-is-protected") from std.log.redact as field_name_is_protected;
+use function @id("std.log.redact.field-name-admitted") from std.log.redact as field_name_admitted;
+use function @id("std.log.redact.commitment-shape-admitted") from std.log.redact as commitment_shape_admitted;
 use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 use function @id("std.log.redact.bytes_match_marker") from std.log.redact as bytes_match_marker;
 use function @id("std.log.redact.marker_byte") from std.log.redact as marker_byte;
@@ -134,5 +138,81 @@ fn main() -> i64
     failed = failed + if one_flipped_trailing_byte_never_matches_marker() { 0 } else { 16 };
     failed = failed + if budget_boundary() { 0 } else { 32 };
     failed = failed + if marker_is_identical_for_different_secret_lengths() { 0 } else { 64 };
-    failed
+    failed + projection_policy_failures()
+}
+
+@id("std.log.redact.tests.protected-name-aliases")
+fn protected_name_aliases() -> bool
+{
+    let password = [80u8, 65u8, 83u8, 83u8, 87u8, 79u8, 82u8, 68u8];
+    let api_key = [65u8, 112u8, 105u8, 45u8, 75u8, 101u8, 121u8];
+    let bearer = [98u8, 101u8, 97u8, 114u8, 101u8, 114u8, 95u8, 116u8, 111u8, 107u8, 101u8, 110u8];
+    let session = [115u8, 101u8, 115u8, 115u8, 105u8, 111u8, 110u8, 45u8, 116u8, 111u8, 107u8, 101u8, 110u8];
+    let webhook = [119u8, 101u8, 98u8, 104u8, 111u8, 111u8, 107u8, 95u8, 115u8, 105u8, 103u8, 110u8, 105u8, 110u8, 103u8, 95u8, 115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let smtp = [115u8, 109u8, 116u8, 112u8, 45u8, 99u8, 114u8, 101u8, 100u8, 101u8, 110u8, 116u8, 105u8, 97u8, 108u8];
+    field_name_is_protected(array_as_slice(password)) && field_name_is_protected(array_as_slice(api_key)) && field_name_is_protected(array_as_slice(bearer)) && field_name_is_protected(array_as_slice(session)) && field_name_is_protected(array_as_slice(webhook)) && field_name_is_protected(array_as_slice(smtp))
+}
+
+@id("std.log.redact.tests.protected-header-aliases")
+fn protected_header_aliases() -> bool
+{
+    let authorization = [65u8, 117u8, 116u8, 104u8, 111u8, 114u8, 105u8, 122u8, 97u8, 116u8, 105u8, 111u8, 110u8];
+    let proxy = [80u8, 114u8, 111u8, 120u8, 121u8, 45u8, 65u8, 117u8, 116u8, 104u8, 111u8, 114u8, 105u8, 122u8, 97u8, 116u8, 105u8, 111u8, 110u8];
+    let cookie = [67u8, 111u8, 111u8, 107u8, 105u8, 101u8];
+    let set_cookie = [83u8, 101u8, 116u8, 45u8, 67u8, 111u8, 111u8, 107u8, 105u8, 101u8];
+    let access = [97u8, 99u8, 99u8, 101u8, 115u8, 115u8, 95u8, 116u8, 111u8, 107u8, 101u8, 110u8];
+    let refresh = [114u8, 101u8, 102u8, 114u8, 101u8, 115u8, 104u8, 45u8, 116u8, 111u8, 107u8, 101u8, 110u8];
+    field_name_is_protected(array_as_slice(authorization)) && field_name_is_protected(array_as_slice(proxy)) && field_name_is_protected(array_as_slice(cookie)) && field_name_is_protected(array_as_slice(set_cookie)) && field_name_is_protected(array_as_slice(access)) && field_name_is_protected(array_as_slice(refresh))
+}
+
+@id("std.log.redact.tests.projection-shape-bounds")
+fn projection_shape_bounds() -> bool
+{
+    let mut data = bytes_zeroed(65usize);
+    let mut index = 0usize;
+    while index < 65usize {
+        data = bytes_set(data, index, 97u8);
+        index = index + 1usize;
+        index < 65usize
+    }
+    let view = bytes_as_slice(data);
+    let max = byte_range(view, 0usize, 64usize);
+    let empty = byte_range(view, 0usize, 0usize);
+    let name_max = field_name_admitted(max);
+    let name_plus_one = !field_name_admitted(view);
+    let name_empty = !field_name_admitted(empty);
+    let commitment_max = commitment_shape_admitted(max);
+    let commitment_plus_one = !commitment_shape_admitted(view);
+    let commitment_absent = commitment_shape_admitted(empty);
+    name_max && name_plus_one && name_empty && commitment_max && commitment_plus_one && commitment_absent
+}
+
+@id("std.log.redact.tests.projection-commitment-is-not-a-bypass")
+fn projection_commitment_is_not_a_bypass() -> bool
+{
+    let name = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let ordinary = [102u8, 105u8, 101u8, 108u8, 100u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let raw = [110u8, 111u8, 116u8, 45u8, 114u8, 101u8, 100u8, 97u8, 99u8, 116u8, 101u8, 100u8];
+    let mut commitment = bytes_zeroed(64usize);
+    let mut index = 0usize;
+    while index < 64usize {
+        commitment = bytes_set(commitment, index, 97u8);
+        index = index + 1usize;
+        index < 64usize
+    }
+    let bound_marker = projected_field_admitted(array_as_slice(name), false, array_as_slice(marker), bytes_as_slice(commitment));
+    let raw_refused = !projected_field_admitted(array_as_slice(name), false, array_as_slice(raw), bytes_as_slice(commitment));
+    let public_commitment_refused = !projected_field_admitted(array_as_slice(ordinary), false, array_as_slice(raw), bytes_as_slice(commitment));
+    commitment = bytes_set(commitment, 0usize, 65u8);
+    let upper_refused = !commitment_shape_admitted(bytes_as_slice(commitment));
+    commitment = bytes_set(commitment, 0usize, 10u8);
+    let injection_refused = !commitment_shape_admitted(bytes_as_slice(commitment));
+    bound_marker && raw_refused && public_commitment_refused && upper_refused && injection_refused
+}
+
+@id("std.log.redact.tests.projection-policy-failures")
+fn projection_policy_failures() -> i64
+{
+    if protected_name_aliases() && protected_header_aliases() && projection_shape_bounds() && projection_commitment_is_not_a_bypass() { 0 } else { 128 }
 }

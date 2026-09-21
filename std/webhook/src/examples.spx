@@ -1,4 +1,5 @@
 module std.webhook.examples;
+use function @id("std.webhook.payload-field-projection-admitted") from std.webhook as payload_field_projection_admitted;
 use function @id("std.webhook.delivery_admitted") from std.webhook as delivery_admitted;
 use function @id("std.webhook.backoff_seconds") from std.webhook as backoff_seconds;
 use function @id("std.webhook.attempt_admitted") from std.webhook as attempt_admitted;
@@ -25,5 +26,15 @@ fn main() -> i64
     let first_backoff = backoff_seconds(1);
     let last_backoff = backoff_seconds(8);
     let ninth_attempt_refused = !attempt_admitted(9);
-    if fresh_delivery && !replayed_delivery && !oversized_delivery && first_backoff == 1 && last_backoff == 60 && ninth_attempt_refused { 0 } else { 1 }
+    if fresh_delivery && !replayed_delivery && !oversized_delivery && first_backoff == 1 && last_backoff == 60 && ninth_attempt_refused && projected_secret() { 0 } else { 1 }
+}
+
+@id("std.webhook.examples.projected-secret")
+fn projected_secret() -> bool
+{
+    let name = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let marker_view = array_as_slice(marker);
+    let absent = byte_range(marker_view, 0usize, 0usize);
+    payload_field_projection_admitted(array_as_slice(name), false, array_as_slice(marker), absent)
 }

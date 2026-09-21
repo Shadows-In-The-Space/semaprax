@@ -1,4 +1,5 @@
 module std.email.tests;
+use function @id("std.email.header-projection-admitted") from std.email as header_projection_admitted;
 use function @id("std.email.address_admitted") from std.email as address_admitted;
 use function @id("std.email.value_is_header_safe") from std.email as value_is_header_safe;
 use function @id("std.email.at_sign_count") from std.email as at_sign_count;
@@ -239,7 +240,7 @@ fn main() -> i64
     failed = failed + if separator_predicate() { 0 } else { 256 };
     failed = failed + if at_sign_index_positions() { 0 } else { 512 };
     failed = failed + if domain_shape_cases() { 0 } else { 1024 };
-    failed + main_redaction_guard()
+    failed + main_redaction_guard() + projection_policy_failures()
 }
 
 // Split from `main` so the aggregator never combines more than a handful of
@@ -252,4 +253,51 @@ fn main_redaction_guard() -> i64
     failed = failed + if header_value_guarded_refuses_each_secret_flag() { 0 } else { 8192 };
     failed = failed + if header_value_guarded_keeps_separator_refusal() { 0 } else { 16384 };
     failed
+}
+
+@id("std.email.tests.projection-policy-cases")
+fn projection_policy_cases() -> bool
+{
+    let protected = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let public = [102u8, 105u8, 101u8, 108u8, 100u8];
+    let raw = [115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let suffixed = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8, 120u8];
+    let injection = [102u8, 10u8];
+    let invalid_commitment = [103u8];
+    let raw_view = array_as_slice(raw);
+    let absent = byte_range(raw_view, 0usize, 0usize);
+    let refuses_named = !header_projection_admitted(array_as_slice(protected), false, array_as_slice(raw), absent);
+    let refuses_classified = !header_projection_admitted(array_as_slice(public), true, array_as_slice(raw), absent);
+    let admits_named_marker = header_projection_admitted(array_as_slice(protected), false, array_as_slice(marker), absent);
+    let admits_value_marker = header_projection_admitted(array_as_slice(public), true, array_as_slice(marker), absent);
+    let refuses_suffix = !header_projection_admitted(array_as_slice(protected), true, array_as_slice(suffixed), absent);
+    let admits_public = header_projection_admitted(array_as_slice(public), false, array_as_slice(raw), absent);
+    let refuses_injection = !header_projection_admitted(array_as_slice(injection), false, array_as_slice(raw), absent);
+    let refuses_commitment = !header_projection_admitted(array_as_slice(protected), true, array_as_slice(marker), array_as_slice(invalid_commitment));
+    refuses_named && refuses_classified && admits_named_marker && admits_value_marker && refuses_suffix && admits_public && refuses_injection && refuses_commitment
+}
+
+@id("std.email.tests.projection-value-limit")
+fn projection_value_limit() -> bool
+{
+    let name = [102u8, 105u8, 101u8, 108u8, 100u8];
+    let mut value = bytes_zeroed(4097usize);
+    let mut index = 0usize;
+    while index < 4097usize {
+        value = bytes_set(value, index, 97u8);
+        index = index + 1usize;
+        index < 4097usize
+    }
+    let view = bytes_as_slice(value);
+    let absent = byte_range(view, 0usize, 0usize);
+    let at_limit = header_projection_admitted(array_as_slice(name), false, byte_range(view, 0usize, 4096usize), absent);
+    let above_limit = !header_projection_admitted(array_as_slice(name), false, view, absent);
+    at_limit && above_limit
+}
+
+@id("std.email.tests.projection-policy-failures")
+fn projection_policy_failures() -> i64
+{
+    if projection_policy_cases() && projection_value_limit() { 0 } else { 1073741824 }
 }

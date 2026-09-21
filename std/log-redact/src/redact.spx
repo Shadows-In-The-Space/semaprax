@@ -102,3 +102,103 @@ fn field_count_within_budget(count: usize) -> bool
 {
     count <= 32usize
 }
+
+// Additive named-field projection policy. Names are bounded ASCII identifiers;
+// case and '-'/'_' spelling cannot bypass the closed protected-name inventory.
+// This is not content-based secret discovery: unknown secret values still need
+// the caller's explicit classification. No raw secret input is needed here.
+@id("std.log.redact.normalized-name-byte")
+fn normalized_name_byte(value: u8) -> u8
+{
+    if value >= 65u8 && value <= 90u8 { value + 32u8 } else { if value == 45u8 { 95u8 } else { value } }
+}
+
+@id("std.log.redact.name-byte-admitted")
+fn name_byte_admitted(value: u8) -> bool
+{
+    let lowered = normalized_name_byte(value);
+    lowered >= 97u8 && lowered <= 122u8 || lowered >= 48u8 && lowered <= 57u8 || lowered == 95u8 || lowered == 46u8
+}
+
+@id("std.log.redact.field-name-admitted")
+fn field_name_admitted(name: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut admitted = length >= 1usize && length <= 64usize;
+    while index < length && admitted {
+        admitted = match byte_get(name, index) { Option::Some { value } => name_byte_admitted(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+@id("std.log.redact.normalized-name-matches")
+fn normalized_name_matches(name: borrow Slice<u8>, expected: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut same = length <= 64usize && length == byte_len(expected);
+    while index < length && same {
+        let actual = match byte_get(name, index) { Option::Some { value } => normalized_name_byte(value), Option::None {} => 0u8, };
+        let wanted = match byte_get(expected, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        same = actual == wanted;
+        index = index + 1usize;
+        index < length && same
+    }
+    same
+}
+
+@id("std.log.redact.field-name-is-protected")
+fn field_name_is_protected(name: borrow Slice<u8>) -> bool
+{
+    let password = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let api_key = [97u8, 112u8, 105u8, 95u8, 107u8, 101u8, 121u8];
+    let bearer_token = [98u8, 101u8, 97u8, 114u8, 101u8, 114u8, 95u8, 116u8, 111u8, 107u8, 101u8, 110u8];
+    let session_token = [115u8, 101u8, 115u8, 115u8, 105u8, 111u8, 110u8, 95u8, 116u8, 111u8, 107u8, 101u8, 110u8];
+    let webhook_signing_secret = [119u8, 101u8, 98u8, 104u8, 111u8, 111u8, 107u8, 95u8, 115u8, 105u8, 103u8, 110u8, 105u8, 110u8, 103u8, 95u8, 115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let smtp_credential = [115u8, 109u8, 116u8, 112u8, 95u8, 99u8, 114u8, 101u8, 100u8, 101u8, 110u8, 116u8, 105u8, 97u8, 108u8];
+    let authorization = [97u8, 117u8, 116u8, 104u8, 111u8, 114u8, 105u8, 122u8, 97u8, 116u8, 105u8, 111u8, 110u8];
+    let cookie = [99u8, 111u8, 111u8, 107u8, 105u8, 101u8];
+    let set_cookie = [115u8, 101u8, 116u8, 95u8, 99u8, 111u8, 111u8, 107u8, 105u8, 101u8];
+    let proxy_authorization = [112u8, 114u8, 111u8, 120u8, 121u8, 95u8, 97u8, 117u8, 116u8, 104u8, 111u8, 114u8, 105u8, 122u8, 97u8, 116u8, 105u8, 111u8, 110u8];
+    let access_token = [97u8, 99u8, 99u8, 101u8, 115u8, 115u8, 95u8, 116u8, 111u8, 107u8, 101u8, 110u8];
+    let refresh_token = [114u8, 101u8, 102u8, 114u8, 101u8, 115u8, 104u8, 95u8, 116u8, 111u8, 107u8, 101u8, 110u8];
+    let first = match byte_get(name, 0usize) { Option::Some { value } => normalized_name_byte(value), Option::None {} => 0u8, };
+    match first { 112u8 => normalized_name_matches(name, array_as_slice(password)) || normalized_name_matches(name, array_as_slice(proxy_authorization)), 97u8 => normalized_name_matches(name, array_as_slice(api_key)) || normalized_name_matches(name, array_as_slice(authorization)) || normalized_name_matches(name, array_as_slice(access_token)), 98u8 => normalized_name_matches(name, array_as_slice(bearer_token)), 115u8 => normalized_name_matches(name, array_as_slice(session_token)) || normalized_name_matches(name, array_as_slice(smtp_credential)) || normalized_name_matches(name, array_as_slice(set_cookie)), 119u8 => normalized_name_matches(name, array_as_slice(webhook_signing_secret)), 99u8 => normalized_name_matches(name, array_as_slice(cookie)), 114u8 => normalized_name_matches(name, array_as_slice(refresh_token)), _ => false, }
+}
+
+// Optional already-produced commitment: absent, or exactly 64 lowercase hex
+// bytes. This checks shape only. It neither computes a hash nor authenticates
+// a claimed commitment, and callers must not disguise a credential as one.
+@id("std.log.redact.commitment-shape-admitted")
+fn commitment_shape_admitted(commitment: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(commitment);
+    let mut index = 0usize;
+    let mut admitted = length == 0usize || length == 64usize;
+    while index < length && admitted {
+        admitted = match byte_get(commitment, index) { Option::Some { value } => value >= 48u8 && value <= 57u8 || value >= 97u8 && value <= 102u8, Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// Validate the bytes an adapter proposes to emit, never the original secret.
+// Protected fields/values require the exact visible marker, with no prefix,
+// suffix, or secret-length dependence. Public raw values cannot carry a
+// misleading redaction commitment. This adds no serialization/send authority.
+@id("std.log.redact.projected-field-admitted")
+fn projected_field_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+{
+    let bounded = field_name_admitted(name) && projection_len_admitted(byte_len(projection));
+    if bounded && commitment_shape_admitted(commitment) { if classified_secret || field_name_is_protected(name) { bytes_match_marker(projection) } else { byte_len(commitment) == 0usize } } else { false }
+}
+
+@id("std.log.redact.projection-len-admitted")
+fn projection_len_admitted(length: usize) -> bool
+{
+    length <= 4096usize
+}

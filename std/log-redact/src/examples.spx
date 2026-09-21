@@ -1,4 +1,5 @@
 module std.log.redact.examples;
+use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
 use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 use function @id("std.log.redact.field_count_within_budget") from std.log.redact as field_count_within_budget;
 use function @id("std.log.redact.bytes_match_marker") from std.log.redact as bytes_match_marker;
@@ -38,5 +39,9 @@ fn main() -> i64
         index < 10usize
     }
     let marker_renders_as_itself = bytes_match_marker(bytes_as_slice(marker));
-    if request_log_is_safe && request_log_field_count_ok && !webhook_payload_is_safe && !email_failure_log_is_safe && !trace_span_is_safe && marker_renders_as_itself && byte_len(bytes_as_slice(marker)) == marker_len() { 0 } else { 1 }
+    let name = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let marker_view = bytes_as_slice(marker);
+    let absent = byte_range(marker_view, 0usize, 0usize);
+    let projected = projected_field_admitted(array_as_slice(name), false, bytes_as_slice(marker), absent);
+    if request_log_is_safe && request_log_field_count_ok && !webhook_payload_is_safe && !email_failure_log_is_safe && !trace_span_is_safe && marker_renders_as_itself && byte_len(bytes_as_slice(marker)) == marker_len() && projected { 0 } else { 1 }
 }

@@ -1,4 +1,6 @@
 module std.http.tests;
+use function @id("std.http.diagnostic-target-admitted") from std.http as diagnostic_target_admitted;
+use function @id("std.http.header-projection-admitted") from std.http as header_projection_admitted;
 use function @id("std.http.body_len") from std.http as body_len;
 use function @id("std.http.byte_is_at_sign") from std.http as byte_is_at_sign;
 use function @id("std.http.byte_is_request_separator") from std.http as byte_is_request_separator;
@@ -236,5 +238,79 @@ fn main() -> i64
     failed = failed + if header_name_admits_only_tchar() { 0 } else { 128 };
     failed = failed + if request_target_refuses_space_and_separators() { 0 } else { 256 };
     failed = failed + if request_line_needs_both_halves() { 0 } else { 512 };
-    failed + main_userinfo_and_guard()
+    failed + main_userinfo_and_guard() + projection_policy_failures()
+}
+
+@id("std.http.tests.projection-policy-cases")
+fn projection_policy_cases() -> bool
+{
+    let protected = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let public = [102u8, 105u8, 101u8, 108u8, 100u8];
+    let raw = [115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let suffixed = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8, 120u8];
+    let injection = [102u8, 10u8];
+    let invalid_commitment = [103u8];
+    let raw_view = array_as_slice(raw);
+    let absent = byte_range(raw_view, 0usize, 0usize);
+    let refuses_named = !header_projection_admitted(array_as_slice(protected), false, array_as_slice(raw), absent);
+    let refuses_classified = !header_projection_admitted(array_as_slice(public), true, array_as_slice(raw), absent);
+    let admits_named_marker = header_projection_admitted(array_as_slice(protected), false, array_as_slice(marker), absent);
+    let admits_value_marker = header_projection_admitted(array_as_slice(public), true, array_as_slice(marker), absent);
+    let refuses_suffix = !header_projection_admitted(array_as_slice(protected), true, array_as_slice(suffixed), absent);
+    let admits_public = header_projection_admitted(array_as_slice(public), false, array_as_slice(raw), absent);
+    let refuses_injection = !header_projection_admitted(array_as_slice(injection), false, array_as_slice(raw), absent);
+    let refuses_commitment = !header_projection_admitted(array_as_slice(protected), true, array_as_slice(marker), array_as_slice(invalid_commitment));
+    refuses_named && refuses_classified && admits_named_marker && admits_value_marker && refuses_suffix && admits_public && refuses_injection && refuses_commitment
+}
+
+@id("std.http.tests.projection-value-limit")
+fn projection_value_limit() -> bool
+{
+    let name = [102u8, 105u8, 101u8, 108u8, 100u8];
+    let mut value = bytes_zeroed(4097usize);
+    let mut index = 0usize;
+    while index < 4097usize {
+        value = bytes_set(value, index, 97u8);
+        index = index + 1usize;
+        index < 4097usize
+    }
+    let view = bytes_as_slice(value);
+    let absent = byte_range(view, 0usize, 0usize);
+    let at_limit = header_projection_admitted(array_as_slice(name), false, byte_range(view, 0usize, 4096usize), absent);
+    let above_limit = !header_projection_admitted(array_as_slice(name), false, view, absent);
+    at_limit && above_limit
+}
+
+@id("std.http.tests.projection-policy-failures")
+fn projection_policy_failures() -> i64
+{
+    if projection_policy_cases() && projection_value_limit() && diagnostic_target_cases() && diagnostic_target_limit() { 0 } else { 1073741824 }
+}
+
+@id("std.http.tests.diagnostic-target-cases")
+fn diagnostic_target_cases() -> bool
+{
+    let path = [47u8, 116u8, 97u8, 115u8, 107u8, 115u8, 47u8, 55u8];
+    let query = [47u8, 63u8, 116u8, 111u8, 107u8, 101u8, 110u8, 61u8, 115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let fragment = [47u8, 35u8, 115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let escaped = [47u8, 37u8, 55u8, 51u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let userinfo = [47u8, 117u8, 115u8, 101u8, 114u8, 64u8, 104u8, 111u8, 115u8, 116u8];
+    let injection = [47u8, 13u8, 10u8];
+    diagnostic_target_admitted(array_as_slice(path), false) && !diagnostic_target_admitted(array_as_slice(path), true) && !diagnostic_target_admitted(array_as_slice(query), false) && !diagnostic_target_admitted(array_as_slice(fragment), false) && !diagnostic_target_admitted(array_as_slice(escaped), false) && !diagnostic_target_admitted(array_as_slice(userinfo), false) && !diagnostic_target_admitted(array_as_slice(injection), false)
+}
+
+@id("std.http.tests.diagnostic-target-limit")
+fn diagnostic_target_limit() -> bool
+{
+    let mut path = bytes_zeroed(2049usize);
+    let mut index = 0usize;
+    while index < 2049usize {
+        path = bytes_set(path, index, 97u8);
+        index = index + 1usize;
+        index < 2049usize
+    }
+    path = bytes_set(path, 0usize, 47u8);
+    let view = bytes_as_slice(path);
+    diagnostic_target_admitted(byte_range(view, 0usize, 2048usize), false) && !diagnostic_target_admitted(view, false)
 }

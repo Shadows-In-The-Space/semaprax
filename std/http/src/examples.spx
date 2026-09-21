@@ -1,4 +1,5 @@
 module std.http.examples;
+use function @id("std.http.header-projection-admitted") from std.http as header_projection_admitted;
 use function @id("std.http.body_len") from std.http as body_len;
 use function @id("std.http.content_length") from std.http as content_length;
 use function @id("std.http.is_success") from std.http as is_success;
@@ -11,5 +12,15 @@ fn main() -> i64
     let method = [71u8, 69u8, 84u8];
     let response = [72u8, 84u8, 84u8, 80u8, 47u8, 49u8, 46u8, 49u8, 32u8, 50u8, 48u8, 48u8, 32u8, 79u8, 75u8, 13u8, 10u8, 99u8, 111u8, 110u8, 116u8, 101u8, 110u8, 116u8, 45u8, 108u8, 101u8, 110u8, 103u8, 116u8, 104u8, 58u8, 32u8, 53u8, 13u8, 10u8, 13u8, 10u8, 104u8, 101u8, 108u8, 108u8, 111u8];
     let view = array_as_slice(response);
-    if method_is_valid(array_as_slice(method)) && is_success(status_code(view)) && content_length(view) == 5 && body_len(view) == 5usize { 0 } else { 1 }
+    if method_is_valid(array_as_slice(method)) && is_success(status_code(view)) && content_length(view) == 5 && body_len(view) == 5usize && projected_secret() { 0 } else { 1 }
+}
+
+@id("std.http.examples.projected-secret")
+fn projected_secret() -> bool
+{
+    let name = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let marker_view = array_as_slice(marker);
+    let absent = byte_range(marker_view, 0usize, 0usize);
+    header_projection_admitted(array_as_slice(name), false, array_as_slice(marker), absent)
 }

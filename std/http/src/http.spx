@@ -1,4 +1,5 @@
 module std.http;
+use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
 use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 
 @id("std.http.digit_value")
@@ -321,4 +322,42 @@ fn request_line_admitted(method: borrow Slice<u8>, target: borrow Slice<u8>) -> 
 fn value_is_header_safe_guarded(field: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
 {
     value_is_header_safe(field) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
+}
+// Named-field projection gate for the bytes proposed for export. The shared
+
+// policy owns protected names, classified values, marker and commitment shape;
+// this package retains its existing byte/size grammar. This does not send,
+// authenticate a commitment, discover secrets in arbitrary content, or make
+// legacy unguarded shape helpers secret-safe.
+@id("std.http.header-projection-admitted")
+fn header_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+{
+    projected_field_admitted(name, classified_secret, projection, commitment) && header_name_is_token(name) && value_is_header_safe(projection)
+}
+
+// Diagnostic/display target policy, not request routing: only a bounded plain
+// origin path. Queries, fragments, percent escapes and userinfo are refused,
+// never stripped into a misleading URL. A classified secret path is refused
+// even if its spelling passes. This is not endpoint or DNS authorization.
+@id("std.http.diagnostic-target-byte-admitted")
+fn diagnostic_target_byte_admitted(value: u8) -> bool
+{
+    let alpha = value >= 65u8 && value <= 90u8 || value >= 97u8 && value <= 122u8;
+    let digit = value >= 48u8 && value <= 57u8;
+    let punctuation = match value { 45u8 => true, 46u8 => true, 47u8 => true, 95u8 => true, 126u8 => true, _ => false, };
+    alpha || digit || punctuation
+}
+
+@id("std.http.diagnostic-target-admitted")
+fn diagnostic_target_admitted(target: borrow Slice<u8>, classified_secret: bool) -> bool
+{
+    let length = byte_len(target);
+    let mut index = 0usize;
+    let mut admitted = !classified_secret && length >= 1usize && length <= 2048usize && target_is_origin_form(target);
+    while index < length && admitted {
+        admitted = match byte_get(target, index) { Option::Some { value } => diagnostic_target_byte_admitted(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
 }

@@ -1,4 +1,5 @@
 module std.log.examples;
+use function @id("std.log.field-projection-admitted") from std.log as field_projection_admitted;
 use type @id("std.log.event") from std.log as Event;
 use type @id("std.io.writer") from std.io as Writer;
 use function @id("std.log.append-event") from std.log as append_event;
@@ -31,5 +32,15 @@ fn main() -> i64
     let position = writer_position(output);
     let bytes = writer_finish(output);
     let expected = [123u8, 34u8, 108u8, 101u8, 118u8, 101u8, 108u8, 34u8, 58u8, 34u8, 105u8, 110u8, 102u8, 111u8, 34u8, 44u8, 34u8, 115u8, 101u8, 113u8, 117u8, 101u8, 110u8, 99u8, 101u8, 34u8, 58u8, 55u8, 44u8, 34u8, 101u8, 118u8, 101u8, 110u8, 116u8, 34u8, 58u8, 34u8, 115u8, 116u8, 97u8, 114u8, 116u8, 34u8, 44u8, 34u8, 109u8, 101u8, 115u8, 115u8, 97u8, 103u8, 101u8, 34u8, 58u8, 34u8, 114u8, 101u8, 97u8, 100u8, 121u8, 34u8, 125u8, 10u8];
-    if position == 64usize && equal(bytes_as_slice(bytes), array_as_slice(expected)) { 0 } else { 1 }
+    if position == 64usize && equal(bytes_as_slice(bytes), array_as_slice(expected)) && projected_secret() { 0 } else { 1 }
+}
+
+@id("std.log.examples.projected-secret")
+fn projected_secret() -> bool
+{
+    let name = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let marker_view = array_as_slice(marker);
+    let absent = byte_range(marker_view, 0usize, 0usize);
+    field_projection_admitted(array_as_slice(name), false, array_as_slice(marker), absent)
 }

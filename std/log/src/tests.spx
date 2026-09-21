@@ -1,4 +1,6 @@
 module std.log.tests;
+use function @id("std.log.redact.projection-len-admitted") from std.log.redact as projection_len_admitted;
+use function @id("std.log.field-projection-admitted") from std.log as field_projection_admitted;
 use type @id("std.log.event") from std.log as Event;
 use type @id("std.io.writer") from std.io as Writer;
 use function @id("std.log.append-event") from std.log as append_event;
@@ -116,5 +118,43 @@ fn main() -> i64
     failed = failed + if test_line() == 0 { 0 } else { 1 };
     failed = failed + if guarded_writes_through_when_safe() { 0 } else { 2 };
     failed = failed + if guarded_discards_when_unsafe() { 0 } else { 4 };
-    failed
+    failed + projection_policy_failures()
+}
+
+@id("std.log.tests.projection-policy-cases")
+fn projection_policy_cases() -> bool
+{
+    let protected = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let public = [102u8, 105u8, 101u8, 108u8, 100u8];
+    let raw = [115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let suffixed = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8, 120u8];
+    let injection = [102u8, 10u8];
+    let invalid_commitment = [103u8];
+    let raw_view = array_as_slice(raw);
+    let absent = byte_range(raw_view, 0usize, 0usize);
+    let refuses_named = !field_projection_admitted(array_as_slice(protected), false, array_as_slice(raw), absent);
+    let refuses_classified = !field_projection_admitted(array_as_slice(public), true, array_as_slice(raw), absent);
+    let admits_named_marker = field_projection_admitted(array_as_slice(protected), false, array_as_slice(marker), absent);
+    let admits_value_marker = field_projection_admitted(array_as_slice(public), true, array_as_slice(marker), absent);
+    let refuses_suffix = !field_projection_admitted(array_as_slice(protected), true, array_as_slice(suffixed), absent);
+    let admits_public = field_projection_admitted(array_as_slice(public), false, array_as_slice(raw), absent);
+    let refuses_injection = !field_projection_admitted(array_as_slice(injection), false, array_as_slice(raw), absent);
+    let refuses_commitment = !field_projection_admitted(array_as_slice(protected), true, array_as_slice(marker), array_as_slice(invalid_commitment));
+    refuses_named && refuses_classified && admits_named_marker && admits_value_marker && refuses_suffix && admits_public && refuses_injection && refuses_commitment
+}
+
+@id("std.log.tests.projection-value-limit")
+fn projection_value_limit() -> bool
+{
+    // The existing writer closure exhausts the 16-site bytes-builder budget.
+    // Other consumers exercise actual 4096/4097-byte projections; this closure
+    // checks the very same shared bound without adding an owned allocation.
+    projection_len_admitted(4096usize) && !projection_len_admitted(4097usize)
+}
+
+@id("std.log.tests.projection-policy-failures")
+fn projection_policy_failures() -> i64
+{
+    if projection_policy_cases() && projection_value_limit() { 0 } else { 1073741824 }
 }

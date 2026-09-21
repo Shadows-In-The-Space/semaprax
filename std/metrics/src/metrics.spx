@@ -1,4 +1,5 @@
 module std.metrics;
+use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
 use function @id("std.num.overflow.add_overflows") from std.num.overflow as add_overflows;
 use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
 
@@ -240,4 +241,23 @@ fn try_admit_labeled_series_guarded(existing_count: i64, name: borrow Slice<u8>,
     ensures result == -1 || result >= 1 && result <= cardinality_limit()
 {
     if label_admitted_guarded(name, value, carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential) { try_admit_series(existing_count) } else { -1 }
+}
+// Named-field projection gate for the bytes proposed for export. The shared
+
+// policy owns protected names, classified values, marker and commitment shape;
+// this package retains its existing byte/size grammar. This does not send,
+// authenticate a commitment, discover secrets in arbitrary content, or make
+// legacy unguarded shape helpers secret-safe.
+@id("std.metrics.label-projection-admitted")
+fn label_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+{
+    projected_field_admitted(name, classified_secret, projection, commitment) && label_admitted(name, projection)
+}
+
+@id("std.metrics.try-admit-projected-series")
+fn try_admit_projected_series(existing_count: i64, name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> i64
+    requires existing_count >= 0 && existing_count <= cardinality_limit()
+    ensures result == -1 || result >= 1 && result <= cardinality_limit()
+{
+    if label_projection_admitted(name, classified_secret, projection, commitment) { try_admit_series(existing_count) } else { -1 }
 }

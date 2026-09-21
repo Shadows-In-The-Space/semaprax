@@ -300,6 +300,18 @@ any export. `SpanExport::from_trace_context` binds the same typed context into
 the completed-span wire; parsing an inbound header never grants outbound
 authority.
 
+`TracedHttpRequest` binds one `TraceContext` to the ordinary bounded HTTP
+request path. It adds exactly one canonical `traceparent` generated from the
+current local span after ordinary request validation, counts that header toward
+the global header limit, and includes it in the prepared-request digest and
+therefore HTTP replay identity. A caller cannot inject either `traceparent` or
+`tracestate` through `HttpHeader`; the typed path does not represent,
+reconstruct, or forward `tracestate`. This prevents an unbounded or
+unvalidated vendor state string from becoming a propagation bypass. The trace
+context is correlation data, not a permit: constructing it creates no socket,
+and dispatch still requires the deployment-owned `OutboundCapability` plus an
+injected adapter.
+
 Metric observations and spans have separate domain-separated idempotency keys
 and media types. A span's replay identity binds both its trace ID and its
 trace-scoped span ID, while the provider-facing header retains the span ID.
@@ -347,6 +359,12 @@ cover endpoint/body/header/content-type maxima and credential-name refusal,
 redacted debug surfaces, exact no-redispatch reconciliation, method-only
 conflict, bounded response settlement, sticky panic uncertainty, and read-only
 checkpoint verification. They exercise fixtures only, not a public endpoint.
+The typed trace HTTP selector is `outbound_host_adapter::trace_http::tests::`.
+It checks canonical single-header dispatch, raw `traceparent`/`tracestate`
+refusal, trace-header accounting at the shared header ceiling, and a changed
+context's idempotency conflict before redispatch. It uses recording adapters
+only and does not claim a hosted collector, remote propagation, or
+`tracestate` support.
 
 The checkpoint selector is
 `outbound_host_adapter::ledger::checkpoint::tests::`. Its seven cases cover

@@ -11,7 +11,13 @@ use sha2::{Digest as _, Sha256};
 
 use super::*;
 
-const RESERVED_HEADERS: [&str; 3] = ["content-type", "idempotency-key", "x-semaprax-delivery-id"];
+const RESERVED_HEADERS: [&str; 5] = [
+    "content-type",
+    "idempotency-key",
+    "traceparent",
+    "tracestate",
+    "x-semaprax-delivery-id",
+];
 // Names with an `x-` prefix are not protected-name aliases, but are still
 // explicit credential channels at this caller-controlled boundary.
 const EXPLICIT_CREDENTIAL_HEADERS: [&str; 1] = ["x-api-key"];
@@ -242,7 +248,15 @@ pub fn prepare_http_delivery(
     capability: OutboundCapability,
     request: HttpRequest,
 ) -> Result<PreparedHttpDelivery, Refusal> {
-    let origin = validate_http(&capability.policy, &request)?;
+    prepare_http_delivery_with_trace_context(capability, request, None)
+}
+
+pub(super) fn prepare_http_delivery_with_trace_context(
+    capability: OutboundCapability,
+    request: HttpRequest,
+    trace_context: Option<&TraceContext>,
+) -> Result<PreparedHttpDelivery, Refusal> {
+    let origin = validate_http(&capability.policy, &request, trace_context.is_some())?;
     let identity = DeliveryIdentity::new(
         capability.deployment_binding.clone(),
         capability.invocation_id.clone(),
@@ -258,7 +272,7 @@ pub fn prepare_http_delivery(
     let request_id = request.request_id.clone();
     let idempotency_key = request.idempotency_key.clone();
     let max_response_bytes = capability.policy.max_response_bytes;
-    let prepared = into_prepared(request, max_response_bytes);
+    let prepared = into_prepared(request, max_response_bytes, trace_context);
     Ok(PreparedHttpDelivery {
         capability,
         origin,
@@ -278,11 +292,20 @@ pub fn deliver_http(
     request: HttpRequest,
     adapter: &mut impl OutboundAdapter,
 ) -> Result<DeliveryResult, Refusal> {
-    let origin = validate_http(&capability.policy, &request)?;
+    deliver_http_with_trace_context(capability, request, None, adapter)
+}
+
+pub(super) fn deliver_http_with_trace_context(
+    capability: OutboundCapability,
+    request: HttpRequest,
+    trace_context: Option<&TraceContext>,
+    adapter: &mut impl OutboundAdapter,
+) -> Result<DeliveryResult, Refusal> {
+    let origin = validate_http(&capability.policy, &request, trace_context.is_some())?;
     let request_id = request.request_id.clone();
     let idempotency_key = request.idempotency_key.clone();
     let max_response_bytes = capability.policy.max_response_bytes;
-    let prepared = into_prepared(request, max_response_bytes);
+    let prepared = into_prepared(request, max_response_bytes, trace_context);
     let observation = adapter.send(&prepared);
     Ok(settle(
         capability,
@@ -294,7 +317,11 @@ pub fn deliver_http(
     ))
 }
 
-fn validate_http(policy: &OutboundPolicy, request: &HttpRequest) -> Result<String, Refusal> {
+fn validate_http(
+    policy: &OutboundPolicy,
+    request: &HttpRequest,
+    has_trace_context: bool,
+) -> Result<String, Refusal> {
     let origin = validate_common(policy, &request.endpoint, request.deadline_ms)?;
     if !valid_identity(&request.request_id) || !valid_identity(&request.idempotency_key) {
         return Err(Refusal::InvalidIdentity);
@@ -305,7 +332,12 @@ fn validate_http(policy: &OutboundPolicy, request: &HttpRequest) -> Result<Strin
     if request.method == HttpMethod::Get && !request.body.is_empty() {
         return Err(Refusal::InvalidHeader);
     }
-    if request.headers.len() + usize::from(request.content_type.is_some()) + 2 > MAX_HEADERS {
+    if request.headers.len()
+        + usize::from(request.content_type.is_some())
+        + 2
+        + usize::from(has_trace_context)
+        > MAX_HEADERS
+    {
         return Err(Refusal::InvalidHeader);
     }
     if request.content_type.as_ref().is_some_and(|value| {
@@ -332,12 +364,20 @@ fn credential_header_name(name: &str) -> bool {
     EXPLICIT_CREDENTIAL_HEADERS.contains(&name) || protected_names::is_protected(name)
 }
 
-fn into_prepared(request: HttpRequest, max_response_bytes: usize) -> PreparedRequest {
-    let mut headers = Vec::with_capacity(request.headers.len() + 3);
+fn into_prepared(
+    request: HttpRequest,
+    max_response_bytes: usize,
+    trace_context: Option<&TraceContext>,
+) -> PreparedRequest {
+    let mut headers =
+        Vec::with_capacity(request.headers.len() + 3 + usize::from(trace_context.is_some()));
     headers.push(("idempotency-key".into(), request.idempotency_key));
     headers.push(("x-semaprax-delivery-id".into(), request.request_id));
     if let Some(content_type) = request.content_type {
         headers.push(("content-type".into(), content_type));
+    }
+    if let Some(context) = trace_context {
+        headers.push(("traceparent".into(), context.traceparent()));
     }
     headers.extend(
         request

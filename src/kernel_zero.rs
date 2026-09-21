@@ -63,6 +63,10 @@ use std::collections::HashSet;
 // formatter shadow. Keep dead-code linting from forcing fake production use.
 #[allow(dead_code)]
 pub(crate) mod canonical_char_renderer;
+// Boolean literals are also a Kernel-0-shaped, test-only formatter shadow.
+// This remains non-authoritative and owns no output buffer.
+#[allow(dead_code)]
+pub(crate) mod canonical_bool_renderer;
 // The signed-integer sibling has the same deliberately test-only formatter
 // shadow boundary. It is not a production authority route.
 #[allow(dead_code)]

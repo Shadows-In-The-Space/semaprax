@@ -60,6 +60,14 @@ pub(crate) fn canonical_int(value: i64) -> String {
     crate::kernel_zero::canonical_int_renderer::verify_shadow(value, &text);
     text
 }
+/// Canonical boolean literal text. Rust remains authoritative; the Kernel-0
+/// route is a test-only shadow over expression and pattern literal visits.
+pub(crate) fn canonical_bool(value: bool) -> String {
+    let text = value.to_string();
+    #[cfg(test)]
+    crate::kernel_zero::canonical_bool_renderer::verify_shadow(value, &text);
+    text
+}
 pub(crate) fn canonical_string(value: &str) -> String {
     let mut text = String::from("\"");
     for ch in value.chars() {
@@ -785,7 +793,7 @@ fn write_expr_measured(
                     ExprKind::Float64(bits) => {
                         output.write_str(&canonical_f64_bits(*bits)).unwrap()
                     }
-                    ExprKind::Bool(value) => write!(output, "{value}").unwrap(),
+                    ExprKind::Bool(value) => output.write_str(&canonical_bool(*value)).unwrap(),
                     ExprKind::String(value) => {
                         output.write_char('"').unwrap();
                         write_string_escaped(&mut output, value);
@@ -1357,7 +1365,9 @@ fn write_pattern_literal(output: &mut impl std::fmt::Write, value: crate::ast::P
         crate::ast::PatternLiteral::Char(value) => {
             output.write_str(&canonical_char(value)).unwrap()
         }
-        crate::ast::PatternLiteral::Bool(value) => write!(output, "{value}").unwrap(),
+        crate::ast::PatternLiteral::Bool(value) => {
+            output.write_str(&canonical_bool(value)).unwrap()
+        }
     }
 }
 

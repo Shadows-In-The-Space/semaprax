@@ -1156,24 +1156,29 @@ the completion matrix, or the commits accompanying it.
 
 ### Rung 2 renderer integration evidence
 
-`src/kernel_zero/canonical_char_renderer.spx` now owns the pure Kernel-0
-SEMAPRAX component for the production formatter's `canonical_char` primitive;
-`src/kernel_zero/canonical_char_renderer.rs` owns its bounded compiler-side
-boundary. Kernel-0 cannot own a string or byte buffer, so the component exposes
-the smallest lossless interface available at this rung: `render_length(scalar)`
-and `render_byte(scalar, index)`. The Rust boundary parses, resolves, translates,
-and independently replays those exact embedded source bytes once, then evaluates
-the resulting Kernel-0 program without calling the compiler interpreter.
+`src/kernel_zero/canonical_char_renderer.spx`,
+`canonical_bool_renderer.spx`, `canonical_int_renderer.spx`, and
+`canonical_string_renderer.spx` own narrow pure Kernel-0 components for the
+production formatter's character, boolean, signed-integer, and decoded-string-
+scalar primitives. Their Rust siblings own bounded compiler-side boundaries.
+Kernel-0 cannot own a string or byte buffer, so every component exposes the
+smallest lossless interface available at this rung: `render_length(value)` and
+`render_byte(value, index)`. Each Rust boundary parses, resolves, translates,
+and independently replays its exact embedded source bytes before every complete
+byte-lane evaluation, without calling the compiler interpreter.
 
-This is no longer only an isolated finite candidate. Under the test-only shadow
-switch, the real `format::canonical_char` path executes the Kernel-0 component
-for every formatted character and refuses any byte disagreement while still
-returning the Rust result. The integration test formats ordinary literal and
-pattern AST nodes and pins the exact number of shadow comparisons, so bypassing
-the component cannot pass vacuously. The broad scalar corpus separately compares
-the component against Rust for named escapes, printable ASCII, and lowercase
-variable-width `\\u{...}` escapes. A wrong quote, delimiter, hex case, digit
-order, or length is therefore observable at the actual formatter boundary.
+This is no longer only an isolated finite candidate. Under test-only shadow
+switches, the real character, boolean, integer, and decoded-string-scalar
+formatter paths execute their respective Kernel-0 components and refuse any
+byte disagreement while still returning the Rust result. The integration tests
+format ordinary literal and pattern AST nodes and pin exact shadow-comparison
+counts, so bypassing a component cannot pass vacuously. Broad scalar corpora
+separately compare character and string-scalar components against independent
+oracles for named escapes, printable ASCII, lowercase variable-width
+`\\u{...}` escapes, and direct UTF-8; a fixed literal byte oracle covers both
+boolean spellings, while an independent decimal oracle covers signed-integer
+extrema. A wrong delimiter, spelling, hex case, digit order, or length is
+therefore observable at the actual formatter boundary.
 
 It does **not** reach rung 2. Rust remains the only authoritative formatter;
 normal production formatting does not execute or depend on the shadow. The

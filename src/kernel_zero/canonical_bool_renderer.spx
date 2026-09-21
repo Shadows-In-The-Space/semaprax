@@ -1,0 +1,55 @@
+module kernel_zero.canonical_bool_renderer;
+
+@id("format.render-length")
+fn render_length(value: bool) -> i64
+{
+    if value { 4 } else { 5 }
+}
+
+@id("format.true-byte")
+fn true_byte(index: i64) -> i64
+{
+    if index == 0 {
+        116
+    } else {
+        if index == 1 {
+            114
+        } else {
+            if index == 2 { 117 } else { 101 }
+        }
+    }
+}
+
+@id("format.false-byte")
+fn false_byte(index: i64) -> i64
+{
+    if index == 0 {
+        102
+    } else {
+        if index == 1 {
+            97
+        } else {
+            if index == 2 {
+                108
+            } else {
+                if index == 3 { 115 } else { 101 }
+            }
+        }
+    }
+}
+
+@id("format.render-byte")
+fn render_byte(value: bool, index: i64) -> i64
+{
+    if index < 0 || index >= render_length(value) {
+        0
+    } else {
+        if value { true_byte(index) } else { false_byte(index) }
+    }
+}
+
+@id("kernel-zero.canonical-bool-renderer.main")
+fn main() -> i64
+{
+    render_length(true)
+}

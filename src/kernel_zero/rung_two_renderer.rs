@@ -1,8 +1,9 @@
 //! Rung-2 integration evidence for canonical literal rendering.
 //!
-//! The component under test is production-compiled code in
-//! `canonical_char_renderer` and `canonical_int_renderer`; each derives and
-//! independently replays its exact embedded Semaprax source into Kernel-0
+//! The components under test are production-compiled code in
+//! `canonical_char_renderer`, `canonical_bool_renderer`,
+//! `canonical_int_renderer`, and `canonical_string_renderer`; each derives
+//! and independently replays its exact embedded Semaprax source into Kernel-0
 //! before evaluating a byte lane. It replays that source binding at each full
 //! byte-lane invocation. The formatter tests enable each component as a
 //! shadow of the real canonical path, proving the integrations are not
@@ -14,6 +15,7 @@
 
 use crate::hir::{self, DeclarationId};
 
+use super::canonical_bool_renderer::{self as canonical_bool_renderer, SOURCE as BOOL_SOURCE};
 use super::canonical_char_renderer::{self, RendererRefusal, SOURCE};
 use super::canonical_int_renderer::{self as canonical_int_renderer, SOURCE as INT_SOURCE};
 use super::canonical_string_renderer::{
@@ -157,6 +159,120 @@ fn main() -> i64 { classify(literal()) }
     assert_eq!(
         comparisons, 8,
         "the canonical traversal must shadow every visit to the literal and pattern characters"
+    );
+}
+
+fn bool_literal_oracle(value: bool) -> &'static [u8] {
+    // Keep this literal oracle independent of both the Rust formatter and the
+    // component: the only two canonical boolean spellings are intentionally
+    // pinned as byte sequences.
+    if value {
+        b"true"
+    } else {
+        b"false"
+    }
+}
+
+#[test]
+fn exact_source_component_matches_the_independent_boolean_byte_oracle() {
+    let parsed = crate::parse(BOOL_SOURCE, "kernel-zero-canonical-bool-renderer.spx")
+        .expect("rung-2 boolean renderer component must parse");
+    let resolved = hir::resolve(&parsed).expect("rung-2 boolean renderer component must resolve");
+    for id in [
+        "format.render-length",
+        "format.true-byte",
+        "format.false-byte",
+        "format.render-byte",
+    ] {
+        let id = DeclarationId::new(id);
+        assert!(
+            super::reifies_into_kernel_zero(&resolved, &id),
+            "rung-2 boolean renderer declaration {id} must stay in Kernel-0"
+        );
+    }
+    let entry = DeclarationId::new("format.render-byte");
+    let binding = BoundTranslation::derive(BOOL_SOURCE, &entry)
+        .expect("rung-2 boolean renderer must have an exact-source Kernel-0 translation");
+    assert!(binding.replay(BOOL_SOURCE, &entry).is_ok());
+
+    for value in [false, true] {
+        let expected = bool_literal_oracle(value);
+        let actual = canonical_bool_renderer::render_bytes(value).unwrap();
+        assert_eq!(
+            actual, expected,
+            "boolean {value}: exact Kernel-0 byte lane must agree at every position"
+        );
+        assert_eq!(
+            canonical_bool_renderer::render(value).unwrap().as_bytes(),
+            expected,
+            "boolean {value}: UTF-8 result diverged"
+        );
+        assert!(
+            (4..=5).contains(&actual.len()),
+            "boolean {value}: component emitted an invalid canonical byte length"
+        );
+    }
+}
+
+#[test]
+fn boolean_byte_lane_pins_each_canonical_byte_position() {
+    for (value, expected) in [(true, b"true".as_slice()), (false, b"false".as_slice())] {
+        let actual = canonical_bool_renderer::render_bytes(value).unwrap();
+        assert_eq!(actual, expected, "boolean {value}");
+        for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+            assert_eq!(
+                actual, expected,
+                "boolean {value}: byte {index} drifted from the independent literal oracle"
+            );
+        }
+    }
+}
+
+#[test]
+fn canonical_formatter_executes_the_kernel_zero_shadow_on_real_bool_nodes() {
+    let source = r#"module test.kernel_zero_bool_formatter_shadow;
+
+@id("test.kernel-zero-bool-formatter-shadow.literal")
+fn literal() -> bool { true }
+
+@id("test.kernel-zero-bool-formatter-shadow.classify")
+fn classify(value: bool) -> i64
+{
+    match value {
+        true => 1,
+        false => 2,
+    }
+}
+
+@id("test.kernel-zero-bool-formatter-shadow.main")
+fn main() -> i64 { classify(literal()) }
+"#;
+    let parsed = crate::parse(source, "kernel-zero-bool-formatter-shadow.spx").unwrap();
+    let expected = crate::format::canonical(&parsed);
+    let (actual, comparisons) =
+        canonical_bool_renderer::with_shadow(|| crate::format::canonical(&parsed));
+    assert_eq!(
+        actual, expected,
+        "shadowing changed canonical formatter bytes"
+    );
+    // The fixture has exactly three boolean syntax nodes: the `true` body of
+    // `literal`, then the `true` and `false` literal patterns of `classify`.
+    //
+    // The body literal is visited twice: once by `rendered_expr_lengths` in
+    // the canonical capacity census and once by final emission. Each pattern
+    // is visited three times: the match expression's measured rendering,
+    // `rendered_match_pattern_len`'s exact per-arm capacity accounting, and
+    // final emission. Literal patterns contribute nothing to
+    // `legacy_match_pattern_bytes`, so there is no hidden fourth visit. The
+    // `main` body contains no boolean literal.
+    const BODY_LITERAL_VISITS: usize = 2;
+    const PATTERN_LITERAL_VISITS: usize = 3;
+    const BOOL_PATTERN_COUNT: usize = 2;
+    const EXPECTED_COMPARISONS: usize =
+        BODY_LITERAL_VISITS + PATTERN_LITERAL_VISITS * BOOL_PATTERN_COUNT;
+    assert_eq!(
+        comparisons, EXPECTED_COMPARISONS,
+        "the canonical formatter's capacity and emitted traversals must shadow the one boolean expression and two boolean patterns"
     );
 }
 

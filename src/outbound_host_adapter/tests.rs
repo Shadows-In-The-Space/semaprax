@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "protected_name_tests.rs"]
+mod protected_name_tests;
+
 #[test]
 fn legacy_post_request_digest_is_a_fixed_v1_known_answer() {
     let request = PreparedRequest {

@@ -251,6 +251,11 @@ receipt from the remote party, or permission to retry.
 Operational exports encode sorted, duplicate-free labels and fields with fixed
 cardinality and value limits. A protected field has no plaintext variant at the
 boundary: it renders `[REDACTED]` plus an optional SHA-256 commitment. The
+boundary also normalizes ASCII case and `-`/`_` spelling for the closed
+credential-name inventory shared with `std.log.redact`; a protected name cannot
+carry a public field or label value. Matching is exact, not substring-based, so
+an ordinary name such as `password_hash` is not silently classified. This is a
+bounded name policy, not content-based secret discovery. The
 `export_after_primary` result keeps the primary application outcome separate
 from export settlement, so exporter failure cannot replace it.
 

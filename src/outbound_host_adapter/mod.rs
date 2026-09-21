@@ -18,6 +18,7 @@ use zeroize::Zeroize;
 mod email;
 mod http;
 mod ledger;
+mod protected_names;
 mod tracing;
 mod webhook;
 
@@ -75,6 +76,7 @@ pub enum Refusal {
     InvalidHeader,
     CardinalityExceeded,
     SecretUnavailable,
+    ProtectedValue,
     InvalidEmail,
 }
 
@@ -343,6 +345,23 @@ impl ExportEvent {
             })
         {
             return Err(Refusal::InvalidIdentity);
+        }
+        // The host boundary independently applies the same closed protected
+        // name policy as `std.log.redact`. Callers cannot relabel an obvious
+        // credential as a public field or metric label and bypass the typed
+        // `ProtectedExportValue` route. Matching is exact after ASCII case and
+        // '-'/'_' normalization; names such as `password_hash` remain ordinary
+        // public names rather than being rejected by substring guesswork.
+        if self
+            .labels
+            .iter()
+            .any(|(name, _)| protected_names::is_protected(name))
+            || self.fields.iter().any(|field| {
+                protected_names::is_protected(&field.name)
+                    && matches!(&field.value, ExportFieldValue::Public(_))
+            })
+        {
+            return Err(Refusal::ProtectedValue);
         }
         if self
             .labels

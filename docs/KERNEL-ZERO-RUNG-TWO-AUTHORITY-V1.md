@@ -1,0 +1,77 @@
+# Kernel-0 Rung-2 Formatter Authority v1
+
+Status: implemented local compiler boundary for issue #188. This is neither a
+self-hosting-rung promotion nor a public ABI, hosted result, target-runtime
+claim, authority transfer, or owned Kernel-0 buffer.
+
+## Closed subject
+
+`src/kernel_zero/rung_two_authority.rs` owns the one production adapter for
+the five existing embedded-source byte lanes, in bootstrap-v2 order: `char`,
+`bool`, `int`, `operator`, and `string-scalar`. `src/format/kernel_zero_tokens.rs`
+is its only formatter caller. The five sibling renderer modules retain their
+own `BoundTranslation` and replay the exact embedded source before every full
+candidate evaluation.
+
+The adapter accepts a caller-owned fixed token of 20 bytes. Char literals need
+at most 12 bytes, decoded string-scalar fragments at most 10, booleans 5, and
+operators 2. Twenty is the exact justified shared bound because canonical
+decimal `i64::MIN` is `-9223372036854775808`, which is 20 ASCII bytes. A new
+lane or a Rust reference longer than this limit must fail review and extend a
+new versioned contract; it may not silently enlarge the array.
+
+## Selection protocol
+
+For each ordinary formatter token, the adapter evaluates the candidate first.
+That evaluation replays the component's embedded source through its retained
+binding before it can return text. The adapter copies the candidate into its
+fixed private token only if it fits, then byte-compares the entire token with
+the caller-provided Rust reference bytes. Only exact equality selects the
+candidate token for copying to the caller's output.
+
+Candidate refusal, invalid/oversize length, UTF-8 failure in a component, or
+one-byte disagreement selects the original Rust byte borrow. The fallback is
+pointer-identical to the supplied Rust slice before the adapter performs its
+single bounded copy; candidate storage is never returned. Rust therefore
+remains the sole authority for formatter bytes even on a candidate match.
+
+Exact-source replay may canonicalize internal compiler data. A thread-local,
+panic-safe scoped guard surrounds only candidate evaluation. Any formatter
+entry nested under that scope bypasses candidates and copies its authoritative
+Rust bytes directly; the outer call resumes normal byte comparison after the
+scope drops. This prevents recursive candidate derivation without disabling
+ordinary top-level lane traversal or leaking state across calls/threads.
+
+Any active `bounded_output` limit also selects the Rust-only path before
+candidate evaluation. Evidence replay can allocate or reserve compiler work,
+so it must never spend a caller's bounded canonical-output budget. This rule
+leaves bounded callers Rust-authoritative and resumes ordinary candidate
+comparison after their scope exits.
+
+The adapter does not run C, Node, Wasm, a compiler subprocess, or any external
+target. It opens no files, performs no network/process/persistence action, and
+adds no capability. Bootstrap-v2 target execution and its recovery model stay
+test-only evidence under `rung_two_bootstrap/` and are governed separately by
+[Rung-2 Target and Recovery Evidence v1](KERNEL-ZERO-RUNG-TWO-TARGET-RECOVERY-V1.md).
+
+## Required evidence
+
+The authority module tests refusal, mismatch, and oversized candidate recovery
+with pointer-exact Rust fallback, plus a matching candidate copied to a
+caller-owned `[u8; 20]`. The formatter integration test formats ordinary AST
+nodes containing every lane and pins the deterministic counter vector
+`[char, bool, int, operator, string-scalar] = [2, 4, 6, 8, 2]` for one
+canonical formatting operation: the formatter's measured pass and emitted
+pass each traverse the authored `[1, 2, 3, 4, 1]` token inventory. This
+pins both phases of one canonical operation. A nested-canonicalization test
+proves the guard bypasses the inner candidate and restores the outer thread
+state; package-report generation
+from `examples/meaning.spx` pins the former recursive path. A bounded-output
+test pins evidence bypass, zero candidate count inside the scope, and normal
+candidate use after scope restoration. Existing broad
+per-lane component and shadow tests remain separate regression evidence.
+
+This finite comparison route does not prove source/HIR correspondence, backend
+equivalence, an owned-buffer interface, or universal formatter equivalence.
+The self-hosting ladder remains at rung 1 until the independent requirements
+in [Semantic Kernel v1](SEMANTIC-KERNEL-V1.md) are accepted.

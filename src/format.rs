@@ -19,125 +19,19 @@ pub mod comments;
 #[cfg(test)]
 #[path = "format/iterative_tests.rs"]
 mod iterative_tests;
+#[path = "format/kernel_zero_tokens.rs"]
+mod kernel_zero_tokens;
 #[path = "format/literals.rs"]
 mod literals;
 use block_statement::write_block_statement;
 use closure::contains_record_construction;
 
 use capacity::{legacy_canonical_temporary_bytes, legacy_expr_temporary_bytes};
+use kernel_zero_tokens::{canonical_binary_op, canonical_unary_op};
+pub(crate) use kernel_zero_tokens::{
+    canonical_bool, canonical_char, canonical_int, canonical_string, write_string_escaped,
+};
 pub(crate) use literals::{canonical_f32_bits, canonical_f64_bits, write_escaped, write_joined};
-/// Canonical `char` literal text for one Unicode scalar value. Printable
-/// ASCII (except quote and backslash) and the named escapes project directly;
-/// every other scalar projects as lowercase `\u{...}` so the round trip is
-/// exact.
-pub(crate) fn canonical_char(value: u32) -> String {
-    const ESCAPES: &[(u32, &str)] = &[
-        (0x00, "\\0"),
-        (0x09, "\\t"),
-        (0x0A, "\\n"),
-        (0x0D, "\\r"),
-        (0x27, "\\'"),
-        (0x5C, "\\\\"),
-    ];
-    let mut text = String::from("'");
-    if let Some((_, escape)) = ESCAPES.iter().find(|(scalar, _)| *scalar == value) {
-        text.push_str(escape);
-    } else if (0x20..=0x7E).contains(&value) {
-        text.push(char::from_u32(value).expect("printable ASCII is a scalar value"));
-    } else {
-        text.push_str(&format!("\\u{{{:x}}}", value));
-    }
-    text.push('\'');
-    #[cfg(test)]
-    crate::kernel_zero::canonical_char_renderer::verify_shadow(value, &text);
-    text
-}
-/// Canonical signed `i64` literal text. Rust remains authoritative; the
-/// Kernel-0 route is test-only shadow evidence for raw `i64` literals.
-pub(crate) fn canonical_int(value: i64) -> String {
-    let text = value.to_string();
-    #[cfg(test)]
-    crate::kernel_zero::canonical_int_renderer::verify_shadow(value, &text);
-    text
-}
-/// Canonical boolean literal text. Rust remains authoritative; the Kernel-0
-/// route is a test-only shadow over expression and pattern literal visits.
-pub(crate) fn canonical_bool(value: bool) -> String {
-    let text = value.to_string();
-    #[cfg(test)]
-    crate::kernel_zero::canonical_bool_renderer::verify_shadow(value, &text);
-    text
-}
-/// Canonical binary-operator spelling. Rust's enum text remains authoritative;
-/// the Kernel-0 component only shadows the real formatter branch in tests.
-fn canonical_binary_op(op: BinaryOp) -> &'static str {
-    let text = op.text();
-    #[cfg(test)]
-    crate::kernel_zero::canonical_operator_renderer::verify_binary_shadow(op, text);
-    text
-}
-
-/// Canonical unary-operator spelling. This mirrors the Rust formatter's
-/// closed two-variant mapping while retaining it as production authority.
-fn canonical_unary_op(op: UnaryOp) -> &'static str {
-    let text = match op {
-        UnaryOp::Neg => "-",
-        UnaryOp::Not => "!",
-    };
-    #[cfg(test)]
-    crate::kernel_zero::canonical_operator_renderer::verify_unary_shadow(op, text);
-    text
-}
-
-pub(crate) fn canonical_string(value: &str) -> String {
-    let mut text = String::from("\"");
-    for ch in value.chars() {
-        write_string_scalar(&mut text, ch);
-    }
-    text.push('"');
-    text
-}
-fn write_string_escaped(output: &mut impl std::fmt::Write, value: &str) {
-    for ch in value.chars() {
-        write_string_scalar(output, ch);
-    }
-}
-
-/// Writes Rust's authoritative canonical projection for one decoded string
-/// scalar.  The Kernel-0 component is a test-only shadow and never supplies
-/// these bytes to production formatting.
-fn write_string_scalar(output: &mut impl std::fmt::Write, ch: char) {
-    match ch {
-        '\\' => write_string_scalar_fragment(output, ch, "\\\\"),
-        '"' => write_string_scalar_fragment(output, ch, "\\\""),
-        '\n' => write_string_scalar_fragment(output, ch, "\\n"),
-        '\r' => write_string_scalar_fragment(output, ch, "\\r"),
-        '\t' => write_string_scalar_fragment(output, ch, "\\t"),
-        _ if (ch as u32) < 0x20 || ch == '\u{7f}' => {
-            let rust = format!("\\u{{{:x}}}", ch as u32);
-            write_string_scalar_fragment(output, ch, &rust);
-        }
-        _ => {
-            #[cfg(test)]
-            {
-                let mut utf8 = [0; 4];
-                crate::kernel_zero::canonical_string_renderer::verify_shadow(
-                    ch as u32,
-                    ch.encode_utf8(&mut utf8),
-                );
-            }
-            output.write_char(ch).unwrap();
-        }
-    }
-}
-
-fn write_string_scalar_fragment(output: &mut impl std::fmt::Write, ch: char, rust: &str) {
-    #[cfg(not(test))]
-    let _ = ch;
-    #[cfg(test)]
-    crate::kernel_zero::canonical_string_renderer::verify_shadow(ch as u32, rust);
-    output.write_str(rust).unwrap();
-}
 enum ExprFormatFrame<'a> {
     Expr(&'a Expr, u8),
     MeasureEnd(usize, u8, usize),
@@ -854,7 +748,7 @@ fn write_expr_measured(
                         frames.push(Frame::CallArgs(args, 0));
                     }
                     ExprKind::Unary { op, value } => {
-                        output.write_str(canonical_unary_op(*op)).unwrap();
+                        output.write_str(&canonical_unary_op(*op)).unwrap();
                         frames.push(Frame::Expr(value, 7));
                     }
                     ExprKind::Binary { op, left, right } => {

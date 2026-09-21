@@ -58,30 +58,14 @@ use std::collections::HashSet;
 // module's own doc comment, and "Reification: HIR to Kernel-0, and its
 // unproved edge" / "Immediate follow-ups" in
 // `docs/SEMANTIC-KERNEL-V1.md` for why this exists.
-// The first rung-2 integration boundary is production-compiled but remains
-// deliberately non-authoritative; its only current caller is the test-only
-// formatter shadow. Keep dead-code linting from forcing fake production use.
-#[allow(dead_code)]
-pub(crate) mod canonical_char_renderer;
-// Boolean literals are also a Kernel-0-shaped, test-only formatter shadow.
-// This remains non-authoritative and owns no output buffer.
-#[allow(dead_code)]
 pub(crate) mod canonical_bool_renderer;
-// The signed-integer sibling has the same deliberately test-only formatter
-// shadow boundary. It is not a production authority route.
-#[allow(dead_code)]
+pub(crate) mod canonical_char_renderer;
 pub(crate) mod canonical_int_renderer;
-// Operator tokens are a closed Kernel-0-shaped formatter surface. Like the
-// literal siblings this boundary is test-only and never supplies production
-// formatter bytes.
-#[allow(dead_code)]
 pub(crate) mod canonical_operator_renderer;
-// The string-escaping sibling remains a test-only formatter shadow boundary.
-// It has no owned string buffer and is not a production authority route.
-#[allow(dead_code)]
 pub(crate) mod canonical_string_renderer;
 mod eval;
 mod reify;
+pub(crate) mod rung_two_authority;
 mod term;
 mod value;
 

@@ -1168,14 +1168,25 @@ smallest lossless interface available at this rung: `render_length(value)` and
 and independently replays its exact embedded source bytes before every complete
 byte-lane evaluation, without calling the compiler interpreter.
 
-This is no longer only an isolated finite candidate. Under test-only shadow
-switches, the real character, boolean, integer, binary/unary operator, and
-decoded-string-scalar formatter paths execute their respective Kernel-0
-components and refuse any byte disagreement while still returning the Rust
-result. The integration tests format ordinary literal, pattern, and operator
-AST nodes and pin exact shadow-comparison counts, so bypassing a component
-cannot pass vacuously. Broad scalar corpora separately compare character and
-string-scalar components against independent oracles for named escapes,
+This is no longer only an isolated finite candidate. The ordinary character,
+boolean, integer, binary/unary operator, and decoded-string-scalar formatter
+paths now enter the closed production adapter specified by
+[Rung-2 Formatter Authority v1](KERNEL-ZERO-RUNG-TWO-AUTHORITY-V1.md). It
+replays the embedded source before each candidate, uses one caller-owned
+20-byte token (the exact `i64::MIN` exception to the otherwise at-most-12-byte
+lanes), and selects candidate bytes only after complete equality with the
+Rust reference. Refusal, drift, oversize, or mismatch preserves the
+pointer-identical Rust fallback before copying it to the bounded output. No
+target executable is invoked in production. Candidate evaluation has a
+thread-local panic-safe reentrancy scope: any nested canonicalization needed
+by exact-source replay is Rust-only, and only the outer ordinary formatter
+enters a lane. An active bounded-output scope also bypasses evidence before it
+can spend the caller's formatter budget, leaving that caller Rust-authoritative.
+Deterministic normal-formatter counters pin a pass through all five lanes; the
+existing test-only shadows
+continue to make independent disagreement observations. Broad scalar corpora
+separately compare character and string-scalar components against independent
+oracles for named escapes,
 printable ASCII, lowercase variable-width `\\u{...}` escapes, and direct UTF-8;
 a fixed literal byte oracle covers both boolean spellings, while independent
 decimal and closed opcode-oracle tables cover signed-integer extrema and all
@@ -1184,9 +1195,9 @@ case, digit order, token byte, or length is therefore observable at the actual
 formatter boundary.
 
 It does **not** reach rung 2. Rust remains the only authoritative formatter;
-normal production formatting does not execute or depend on the shadow. The
-byte-lane API is not a SEMAPRAX owned-buffer renderer, and the finite corpus is
-not a universal equivalence proof. The private
+production formatting depends only on its Rust reference bytes, never on a
+candidate result. The byte-lane API is not a SEMAPRAX owned-buffer renderer,
+and the finite corpus is not a universal equivalence proof. The private
 [Rung-2 Bootstrap Artifact v2](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V2.md) now
 retains source-bound canonical term, generated C11-source, raw Core-Wasm, and
 private executable scalar-export Core-Wasm payload bytes for all five lanes;

@@ -5,10 +5,10 @@
 //! obtain individual bytes.  It preserves `i64::MIN` exactly by never taking
 //! an absolute value; quotient/remainder signs are normalized per digit.
 //!
-//! This is test-only shadow evidence.  The formatter's Rust decimal rendering
-//! remains authoritative; a later rung still needs reproducibility, durable
-//! artifacts, recovery evidence, and hosted execution before any authority
-//! could move.
+//! The formatter's Rust decimal rendering remains authoritative. The
+//! production adapter accepts this replayed candidate only after full byte
+//! equality and otherwise returns Rust's original bytes; hosted authority
+//! transfer remains a separate later-rung decision.
 
 use std::sync::OnceLock;
 

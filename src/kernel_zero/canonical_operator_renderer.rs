@@ -4,8 +4,9 @@
 //! canonical bytes for every `BinaryOp` and `UnaryOp` spelling. It has no
 //! ambient authority and no output buffer: the host reads a bounded one- or
 //! two-byte lane only after independently replaying the exact embedded source.
-//! Rust remains the formatter authority; test-only shadows make any mismatch
-//! observable at the real formatter branches.
+//! Rust remains the formatter authority; the production adapter requires full
+//! byte equality before it copies a candidate to formatter output, while
+//! test-only shadows make any mismatch independently observable.
 
 use std::sync::OnceLock;
 
@@ -166,6 +167,14 @@ fn render(opcode: i64) -> Result<&'static str, RendererRefusal> {
         .as_ref()
         .map_err(|error| *error)?
         .render(SOURCE, opcode)
+}
+
+pub(crate) fn render_binary(op: BinaryOp) -> Result<String, RendererRefusal> {
+    Ok(render(binary_opcode(op))?.to_owned())
+}
+
+pub(crate) fn render_unary(op: UnaryOp) -> Result<String, RendererRefusal> {
+    Ok(render(unary_opcode(op))?.to_owned())
 }
 
 #[cfg(test)]

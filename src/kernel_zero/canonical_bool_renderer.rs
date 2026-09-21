@@ -2,8 +2,8 @@
 //!
 //! The pure component renders one `bool` through a fixed, bounded byte lane.
 //! It retains and replays its exact embedded source before every complete
-//! evaluation. The production formatter remains Rust-authoritative; this
-//! component is test-only shadow evidence for boolean expressions and patterns.
+//! evaluation. The production adapter byte-compares it with Rust before
+//! copying to its caller-owned output; tests retain an additional shadow hook.
 
 use std::sync::OnceLock;
 

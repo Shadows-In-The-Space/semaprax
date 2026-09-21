@@ -5,11 +5,11 @@
 //! interface remains a scalar byte lane because Kernel-0 has no owned buffer:
 //! one call obtains the length and subsequent calls obtain each byte.
 //!
-//! This component is not authoritative.  The production formatter continues
-//! to return its Rust rendering.  Tests can enable the shadow hook below so the
-//! real formatting path executes this component and refuses disagreement.  A
-//! later rung must add bootstrap reproducibility, a durable generated artifact,
-//! fallback/recovery evidence, and hosted execution before authority can move.
+//! This component is not authoritative. The production formatter passes its
+//! replayed candidate through the bounded authority adapter, which returns it
+//! only after byte equality with Rust and otherwise preserves Rust bytes.
+//! Tests additionally retain the shadow hook. A later rung still needs the
+//! owned-buffer and hosted evidence required before authority can move.
 
 use std::sync::OnceLock;
 

@@ -6,10 +6,10 @@
 //! named escapes, lowercase `\\u{...}` controls, or direct UTF-8.  There is no
 //! Kernel-0 string buffer, ownership route, or formatter authority here.
 //!
-//! The component is deliberately non-authoritative.  The production formatter
-//! still emits Rust's canonical scalar fragment.  Tests can enable the shadow
-//! hook below, which independently derives and replays the exact embedded
-//! source before comparing its bytes at each real formatter visit.
+//! The component is deliberately non-authoritative. The production adapter
+//! byte-compares its replayed scalar fragment against Rust before bounded
+//! output, and falls back to Rust on every refusal or mismatch. Tests retain
+//! the independent shadow hook at each formatter visit.
 
 use std::sync::OnceLock;
 

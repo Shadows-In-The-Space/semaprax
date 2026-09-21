@@ -690,3 +690,30 @@ fn main() -> string { literal() }
         "the canonical formatter's measured and emitted traversals must shadow every decoded string scalar"
     );
 }
+
+#[test]
+fn ordinary_formatter_nodes_traverse_every_production_renderer_lane() {
+    let source = r#"module test.kernel_zero_production_lanes;
+
+@id("test.kernel-zero-production-lanes.main")
+fn main() -> i64
+{
+    let label = "x";
+    let glyph = 'a';
+    if true && !false { -7 + 3 } else { 0 }
+}
+"#;
+    let parsed = crate::parse(source, "kernel-zero-production-lanes.spx").unwrap();
+    let expected = crate::format::canonical(&parsed);
+    let (actual, counts) =
+        super::rung_two_authority::with_counts(|| crate::format::canonical(&parsed));
+    assert_eq!(
+        actual, expected,
+        "candidate comparison changed formatter bytes"
+    );
+    assert_eq!(
+        counts,
+        [2, 4, 6, 8, 2],
+        "the formatter's measured and emitted passes must each visit char, bool, int, operator, and string-scalar lanes in authored traversal order"
+    );
+}

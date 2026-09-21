@@ -34,7 +34,8 @@ What it catches, and how
 3. A headline theorem starts depending on a custom axiom, or on `sorryAx`
    (Lean's marker for an admitted hole).
    -> After `lake build`, the gate writes an unpredictable-marker audit
-      driver that imports `Kernel0` and issues all 48 `#print axioms`
+      driver that imports the registered proof modules and issues every owned
+      `#print axioms`
       commands itself. Only reports inside that invocation's owned marker
       interval are parsed; missing, duplicate, forged source-owned, or
       unexpected reports fail. Each set must be a subset of `propext`,
@@ -105,6 +106,8 @@ PROOF_DIR = REPO_ROOT / "proofs" / "kernel0-lean"
 SOURCE = PROOF_DIR / "Kernel0.lean"
 TRANSACTION_SOURCE = PROOF_DIR / "TransactionReplay.lean"
 TRANSACTION_SOURCE_SHA256 = "ccb2b1cd0ab1a6bad6407260368f84581178d35bbaac54364fbb92068db16bcc"
+GRAPH_SOURCE = PROOF_DIR / "GraphProjection.lean"
+GRAPH_SOURCE_SHA256 = "b5698e7fd6bb24e0592f005d0307d8e63fdc588be3b9f2a6da64c1303f55c75f"
 RECURSIVE_CONTROL = PROOF_DIR / "negative" / "RecursiveCallGraph.lean"
 FUEL_CONTROL = PROOF_DIR / "negative" / "InsufficientNormalizationFuel.lean"
 STRUCTURAL_CONTROL = PROOF_DIR / "negative" / "ForgedStructuralDecrease.lean"
@@ -162,6 +165,14 @@ HEADLINE_THEOREMS = [
     "named_call_preserves_argument_order",
     "named_shadow_has_type",
     "named_helper_reaches_value",
+]
+
+GRAPH_HEADLINE_THEOREMS = [
+    "project_preserves_exact_inventory",
+    "lookupStable_metadata_rewrite",
+    "project_metadata_rewrite",
+    "compiler_fixture_projection_exact",
+    "compiler_fixture_rename_move_preserves_projection",
 ]
 
 # Frozen, byte-exact expected statement text for each headline theorem,
@@ -744,10 +755,16 @@ def check_source_level(source_text: str) -> list[str]:
 
 def render_axiom_audit_driver(begin: str, end: str) -> str:
     commands = "\n".join(f"#print axioms Kernel0.{name}" for name in HEADLINE_THEOREMS)
+    graph_commands = "\n".join(
+        f"#print axioms Kernel0.GraphProjection.{name}"
+        for name in GRAPH_HEADLINE_THEOREMS
+    )
     return (
         "import Kernel0\n"
+        "import GraphProjection\n"
         f'#eval IO.println "{begin}"\n'
         f"{commands}\n"
+        f"{graph_commands}\n"
         f'#eval IO.println "{end}"\n'
     )
 
@@ -778,7 +795,9 @@ def validate_owned_axiom_output(output: str, begin: str, end: str) -> list[str]:
     for match in AXIOM_FREE_INFO_RE.finditer(owned):
         found.setdefault(match.group(1), []).append([])
 
-    expected = {f"Kernel0.{name}" for name in HEADLINE_THEOREMS}
+    expected = {f"Kernel0.{name}" for name in HEADLINE_THEOREMS} | {
+        f"Kernel0.GraphProjection.{name}" for name in GRAPH_HEADLINE_THEOREMS
+    }
     unexpected = sorted(set(found) - expected)
     if unexpected:
         failures.append("unexpected theorem report(s) in owned axiom audit: " + ", ".join(unexpected))
@@ -832,6 +851,11 @@ theorem victim : False := by
         f"info: 'Kernel0.{name}' does not depend on any axioms"
         for name in HEADLINE_THEOREMS
     )
+    graph_empty = "\n".join(
+        f"info: 'Kernel0.GraphProjection.{name}' does not depend on any axioms"
+        for name in GRAPH_HEADLINE_THEOREMS
+    )
+    empty = f"{empty}\n{graph_empty}"
     if validate_owned_axiom_output(f"{begin}\n{empty}\n{end}", begin, end):
         failures.append("self-test: genuine empty axiom reports were refused")
     duplicate = f"{begin}\n{empty}\n{forged}\n{end}"
@@ -841,6 +865,13 @@ theorem victim : False := by
     driver_lines = driver.splitlines()
     if any(driver_lines.count(f"#print axioms Kernel0.{name}") != 1 for name in HEADLINE_THEOREMS):
         failures.append("self-test: gate-owned driver omitted or duplicated a headline theorem")
+    if any(
+        driver_lines.count(f"#print axioms Kernel0.GraphProjection.{name}") != 1
+        for name in GRAPH_HEADLINE_THEOREMS
+    ):
+        failures.append(
+            "self-test: gate-owned driver omitted or duplicated a graph-projection theorem"
+        )
 
     teleport = source_text.replace(
         "inductive Steps (P : Program) : Expr → Expr → Nat → Prop where\n",
@@ -963,10 +994,11 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
         failures.extend(validate_owned_axiom_output(audit_output, begin, end))
 
     if not failures:
+        audited = len(HEADLINE_THEOREMS) + len(GRAPH_HEADLINE_THEOREMS)
         print(f"{TAG}: `lake build` OK (exit 0 in {PROOF_DIR})")
         print(
-            f"{TAG}: gate-owned axiom-set audit OK for {len(HEADLINE_THEOREMS)}/"
-            f"{len(HEADLINE_THEOREMS)} headline theorems (each a subset of "
+            f"{TAG}: gate-owned axiom-set audit OK for {audited}/{audited} "
+            "headline theorems (each a subset of "
             f"{sorted(ALLOWED_AXIOMS)})"
         )
 
@@ -975,11 +1007,17 @@ def check_build_level(require_kernel: bool) -> tuple[list[str], bool]:
     # engine, writes a gate-owned create-new fixture, invokes this pinned Lean,
     # and audits every general and concrete theorem's axiom report.
     if not failures:
-        lean = shutil.which("lean")
         cargo = shutil.which("cargo")
-        if lean is None or cargo is None:
+        lean_lookup = subprocess.run(
+            [lake, "env", "which", "lean"],
+            cwd=str(PROOF_DIR),
+            capture_output=True,
+            text=True,
+        )
+        lean = lean_lookup.stdout.strip() if lean_lookup.returncode == 0 else ""
+        if not lean or cargo is None:
             failures.append(
-                "transaction replay fixture gate requires both `lean` and `cargo` on PATH"
+                "transaction replay fixture gate requires the pinned `lake env lean` and `cargo`"
             )
         else:
             with tempfile.TemporaryDirectory(prefix="semaprax-transaction-lean-") as temporary:
@@ -1139,6 +1177,9 @@ def main() -> int:
     if not TRANSACTION_SOURCE.is_file():
         fail(f"expected transaction proof source not found at {TRANSACTION_SOURCE}")
         return 1
+    if not GRAPH_SOURCE.is_file():
+        fail(f"expected graph-projection proof source not found at {GRAPH_SOURCE}")
+        return 1
 
     source_text = SOURCE.read_text(encoding="utf-8")
     transaction_bytes = TRANSACTION_SOURCE.read_bytes()
@@ -1159,6 +1200,22 @@ def main() -> int:
         print(
             f"{TAG}: transaction replay exact-source pin and hole scan OK"
         )
+    graph_bytes = GRAPH_SOURCE.read_bytes()
+    graph_text = graph_bytes.decode("utf-8")
+    graph_stripped = strip_comments_and_strings(graph_text)
+    graph_failures = []
+    actual_graph_digest = hashlib.sha256(graph_bytes).hexdigest()
+    if actual_graph_digest != GRAPH_SOURCE_SHA256:
+        graph_failures.append(
+            "graph projection proof changed from its exact source pin: "
+            f"expected sha256:{GRAPH_SOURCE_SHA256}, actual sha256:{actual_graph_digest}"
+        )
+    if TOKEN_RE.search(graph_stripped) or AXIOM_DECL_RE.search(graph_stripped):
+        graph_failures.append(
+            "graph projection proof contains sorry/admit/axiom/constant outside comments or strings"
+        )
+    if not graph_failures:
+        print(f"{TAG}: graph projection exact-source pin and hole scan OK")
     self_test_failures = hostile_gate_self_tests(source_text)
     if not self_test_failures:
         print(
@@ -1172,7 +1229,11 @@ def main() -> int:
     build_failures, build_ran = check_build_level(arguments.require_kernel)
 
     all_failures = (
-        self_test_failures + transaction_failures + source_failures + build_failures
+        self_test_failures
+        + transaction_failures
+        + graph_failures
+        + source_failures
+        + build_failures
     )
     if all_failures:
         for msg in all_failures:

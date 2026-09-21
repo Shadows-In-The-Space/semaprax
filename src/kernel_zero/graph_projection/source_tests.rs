@@ -1,5 +1,12 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use super::super::corpus::{adversarial_structure_corpus, generated_corpus};
 use super::*;
+
+static NEXT_LEAN_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
 const SOURCE: &str = r#"module test.graph;
 @id("math.pair")
@@ -12,6 +19,71 @@ fn main() -> i64 {
     if true && answer == 1 { answer } else { pair(1, 0) }
 }
 "#;
+
+fn lean_lake() -> Option<PathBuf> {
+    let candidate = std::env::var_os("SEMAPRAX_KERNEL0_LAKE").unwrap_or_else(|| "lake".into());
+    let candidate = PathBuf::from(candidate);
+    if candidate.components().count() > 1 {
+        return candidate.is_file().then_some(candidate);
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|directory| directory.join(&candidate))
+            .find(|path| path.is_file())
+    })
+}
+
+fn proof_directory() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("proofs/kernel0-lean")
+}
+
+fn lean_string(value: &str) -> String {
+    // The fixed real fixture contains ASCII IDs, and Rust debug quoting is
+    // Lean string-literal syntax for that bounded set. Refuse an expansion
+    // rather than silently generating a different witness language.
+    assert!(value.is_ascii());
+    format!("{value:?}")
+}
+
+fn lean_list(values: impl IntoIterator<Item = String>) -> String {
+    format!("[{}]", values.into_iter().collect::<Vec<_>>().join(", "))
+}
+
+fn lean_fact(fact: &FunctionFact) -> String {
+    format!(
+        "⟨{}, {}⟩",
+        lean_string(&fact.id),
+        lean_list(fact.call_occurrences.iter().map(|id| lean_string(id)))
+    )
+}
+
+fn lean_fixture_source(facts: &ProjectionFacts) -> String {
+    let inventory = lean_list(facts.functions.iter().map(|fact| lean_string(&fact.id)));
+    let facts = lean_list(facts.functions.iter().map(lean_fact));
+    format!(
+        r#"import GraphProjection
+
+open Kernel0.GraphProjection
+
+namespace SemapraxGraphProjectionWitness
+
+def actualInventory : List String := {inventory}
+def actualFacts : List StableFact := {facts}
+
+-- Both equalities are derived from compiler output in Rust. The first
+-- pins actual stable-ID order; the second pins exact call occurrences.
+theorem actual_inventory_is_modeled : actualInventory = compilerFixtureInventory := by rfl
+theorem actual_facts_are_modeled :
+    project actualInventory compilerFixture = some actualFacts := by
+  exact compiler_fixture_projection_exact
+theorem actual_ids_preserved :
+    actualFacts.map StableFact.stableId = actualInventory := by
+  exact project_preserves_exact_inventory actual_facts_are_modeled
+
+end SemapraxGraphProjectionWitness
+"#
+    )
+}
 
 #[test]
 fn real_graph_projection_replays_exact_source_identity_and_bytes() {
@@ -50,6 +122,42 @@ fn real_graph_projection_replays_exact_source_identity_and_bytes() {
     assert_eq!(
         forged.replay(SOURCE, &entry, &forged.graph_bytes),
         Err(ProjectionError::Binding)
+    );
+}
+
+#[test]
+fn real_graph_projection_stable_ids_and_calls_match_the_lean_fixture() {
+    let entry = DeclarationId::new("app.main");
+    let bound = BoundProjection::derive(SOURCE, &entry).unwrap();
+    let source = lean_fixture_source(&bound.facts);
+    assert!(source.contains("theorem actual_ids_preserved"));
+    let Some(lake) = lean_lake() else {
+        eprintln!(
+            "Kernel-0 graph-projection fixture generation passed; Lean NOT RUN \
+             (set SEMAPRAX_KERNEL0_LAKE to require the pinned checker)"
+        );
+        return;
+    };
+    let directory = proof_directory();
+    assert!(directory.join("lakefile.toml").is_file());
+    let fixture = directory.join(format!(
+        ".semaprax-graph-projection-witness-{}-{}.lean",
+        std::process::id(),
+        NEXT_LEAN_FIXTURE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&fixture, &source).expect("write deterministic graph projection witness");
+    let result = Command::new(lake)
+        .args(["env", "lean"])
+        .arg(&fixture)
+        .current_dir(&directory)
+        .output();
+    fs::remove_file(&fixture).ok();
+    let result = result.expect("run pinned Lean against graph projection witness");
+    assert!(
+        result.status.success(),
+        "Lean rejected the compiler-derived stable-ID graph fixture:\nsource:\n{source}\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
     );
 }
 

@@ -666,6 +666,31 @@ evidence, not a proof that arbitrary HIR and graph projections agree. Cleanup
 plans and unselected graph metadata remain opaque but byte-bound, and the
 checker introduces no public format, compiler admission rule, or authority.
 
+### Mechanized stable-ID graph facts for the exact fixture (issue #188)
+
+`proofs/kernel0-lean/GraphProjection.lean` now gives the selected persistent
+function portion of that same finite graph check a small, hole-free Lean model.
+Its `project` is driven by a supplied canonical stable-ID inventory, refuses a
+missing ID, and emits only the stable ID and authored call-occurrence list.
+Lean proves that every successful projection has exactly the requested stable
+identity inventory and that arbitrary display-name/module-location rewrites
+preserve the projection. The concrete theorem uses `app.main`, `math.adjust`,
+and `math.pair`; it fixes `app.main`'s four ordered call occurrences.
+
+`real_graph_projection_stable_ids_and_calls_match_the_lean_fixture` derives
+those IDs and calls from the real exact-source graph projection, renders them
+as a fresh Lean witness, and asks the pinned kernel to apply the concrete and
+general theorems. A changed compiler fixture can therefore not silently reuse
+the handwritten Lean facts. The fixture is deliberately bounded and only runs
+Lean when its pinned executable is available.
+
+This remains a theorem about the finite model and that one compiler-derived
+fixture. It does not prove JSON parsing/rendering, duplicate-ID admission,
+canonical ordering construction, HIR/source correspondence, graph-byte
+binding, call acyclicity, cleanup semantics, or any universal stable-ID claim.
+No public graph format, authority, self-hosting rung, or compiler admission
+rule changes.
+
 ### Numeric normalization fuel from the checked weights
 
 `steps_spend_weighted_potential` telescopes the already-proved strict decrease

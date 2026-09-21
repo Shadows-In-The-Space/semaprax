@@ -99,10 +99,11 @@ fn again(stream: usize) -> Step {
 fn complete(steps: Vec<Step>, expected: Result<Vec<u8>, ProbeError>) {
     let mut script = Script::new(steps);
     let mut output = Vec::with_capacity(65_536);
+    let mut stderr = Vec::with_capacity(wire::MAX_EXIT_STDERR_BYTES);
     let allocation = (output.as_ptr(), output.capacity());
     // `Failure`'s extra diagnostic termination is exercised by wire.rs's own
     // tests; scripted evidence here proves drive()'s ProbeError selection.
-    let result = drive(&mut script, &mut output).map_err(|failure| failure.error);
+    let result = drive(&mut script, &mut output, &mut stderr).map_err(|failure| failure.error);
     assert!(!script.stopped);
     assert!(
         script.steps.is_empty(),
@@ -110,6 +111,7 @@ fn complete(steps: Vec<Step>, expected: Result<Vec<u8>, ProbeError>) {
         script.steps
     );
     assert_eq!((output.as_ptr(), output.capacity()), allocation);
+    assert!(stderr.is_empty());
     match expected {
         Ok(bytes) => {
             assert_eq!(result, Ok(()));
@@ -126,9 +128,10 @@ fn fatal(mut steps: Vec<Step>) {
     steps.push(Stop);
     let mut script = Script::new(steps);
     let mut output = Vec::with_capacity(65_536);
+    let mut stderr = Vec::with_capacity(wire::MAX_EXIT_STDERR_BYTES);
     let mut returned = false;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = drive(&mut script, &mut output);
+        let _ = drive(&mut script, &mut output, &mut stderr);
         returned = true;
     }));
     assert!(result.is_err());
@@ -270,7 +273,7 @@ fn read_and_observation_failures_clear_partial_output_after_settlement() {
 }
 
 #[test]
-fn termination_detail_is_retained_only_for_the_selected_exit_failure() {
+fn exit_diagnostic_is_retained_only_for_the_selected_exit_failure() {
     let steps = vec![
         data(0, 0),
         data(1, 0),
@@ -284,9 +287,12 @@ fn termination_detail_is_retained_only_for_the_selected_exit_failure() {
     ];
     let mut script = Script::with_termination(steps, wire::Termination::Exited(22));
     let mut output = Vec::with_capacity(65_536);
-    let failure = drive(&mut script, &mut output).unwrap_err();
+    let mut stderr = Vec::with_capacity(wire::MAX_EXIT_STDERR_BYTES);
+    let failure = drive(&mut script, &mut output, &mut stderr).unwrap_err();
     assert_eq!(failure.error, ProbeError::Exit);
     assert_eq!(failure.termination, Some(wire::Termination::Exited(22)));
+    assert!(failure.stderr.is_empty());
+    assert!(!failure.stderr_truncated);
     assert!(output.is_empty());
     assert!(script.steps.is_empty());
 
@@ -302,9 +308,42 @@ fn termination_detail_is_retained_only_for_the_selected_exit_failure() {
     ];
     let mut script = Script::with_termination(steps, wire::Termination::Exited(22));
     let mut output = Vec::with_capacity(65_536);
-    let failure = drive(&mut script, &mut output).unwrap_err();
+    let mut stderr = Vec::with_capacity(wire::MAX_EXIT_STDERR_BYTES);
+    let failure = drive(&mut script, &mut output, &mut stderr).unwrap_err();
     assert_eq!(failure.error, ProbeError::Io);
     assert_eq!(failure.termination, None);
+    assert!(failure.stderr.is_empty());
+    assert!(!failure.stderr_truncated);
+    assert!(output.is_empty());
+    assert!(script.steps.is_empty());
+}
+
+#[test]
+fn exit_diagnostic_retains_a_bounded_stderr_prefix_without_changing_accounting() {
+    let mut script = Script::with_termination(
+        vec![
+            data(0, 0),
+            data(1, wire::MAX_EXIT_STDERR_BYTES),
+            Observe(Ok(false)),
+            time(0),
+            Pause,
+            data(1, 1),
+            Observe(Ok(true)),
+            time(0),
+            Kill(Ok(())),
+            Reap(Ok(Some(false))),
+            time(0),
+            data(1, 0),
+        ],
+        wire::Termination::Exited(127),
+    );
+    let mut output = Vec::with_capacity(65_536);
+    let mut stderr = Vec::with_capacity(wire::MAX_EXIT_STDERR_BYTES);
+    let failure = drive(&mut script, &mut output, &mut stderr).unwrap_err();
+    assert_eq!(failure.error, ProbeError::Exit);
+    assert_eq!(failure.termination, Some(wire::Termination::Exited(127)));
+    assert_eq!(failure.stderr, vec![b'b'; wire::MAX_EXIT_STDERR_BYTES]);
+    assert!(failure.stderr_truncated);
     assert!(output.is_empty());
     assert!(script.steps.is_empty());
 }

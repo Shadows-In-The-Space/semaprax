@@ -71,9 +71,16 @@ OS/architecture/target/roles bytes, and one row-count byte. Ordered rows contain
 role byte, status byte, u32 little-endian stdout length and stdout bytes.
 Statuses are success 0, invalid 1, unsupported 2, supervisor launch failure 3,
 unsuccessful child termination 4,
-output-limit 5, timeout 6 and I/O 7. Failure rows contain no payload. Each
-success payload is at most 65,536 bytes; stdout and stderr are charged together
-during execution. Only one exact requested row set is admitted.
+output-limit 5, timeout 6 and I/O 7. Failure rows contain no stdout payload.
+An `Exit` row may carry an optional diagnostic trailer: the exact two-byte
+termination, followed by a one-byte truncation flag and at most 4,096 bytes of
+the child stderr prefix. The flag is exactly 0 or 1; 1 requires the full 4,096
+byte prefix. A zero-length trailer and already-published two-byte
+termination-only trailer remain admitted; all other failure statuses require
+zero length. The trailer is bounded diagnostic evidence only: it never reaches
+`ReplyRow`, the settled observation, or the contracted report. Each success
+payload is at most 65,536 bytes; stdout and stderr are charged together during
+execution. Only one exact requested row set is admitted.
 Child setup and executable entry failures terminate that child and therefore
 use status 4; an executable can itself return the same exit status, so the
 worker does not pretend to distinguish those causes without a setup handshake.

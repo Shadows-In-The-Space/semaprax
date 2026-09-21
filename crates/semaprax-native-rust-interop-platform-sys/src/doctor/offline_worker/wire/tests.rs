@@ -284,8 +284,16 @@ fn reply_payload_and_total_bounds_reject_before_payload_copy() {
     );
 }
 
+fn detail(termination: Termination, stderr: &[u8], stderr_truncated: bool) -> ExitDetail {
+    ExitDetail {
+        termination,
+        stderr: stderr.to_vec(),
+        stderr_truncated,
+    }
+}
+
 #[test]
-fn exit_trailer_round_trips_and_never_appears_outside_an_exit_row() {
+fn exit_trailer_round_trips_bounded_stderr_and_never_appears_outside_an_exit_row() {
     let request = request();
     let rows = vec![
         (1, Ok(vec![9])),
@@ -294,18 +302,32 @@ fn exit_trailer_round_trips_and_never_appears_outside_an_exit_row() {
     ];
     for (exit_detail, expected) in [
         (
-            vec![(2, Termination::Exited(17)), (4, Termination::Signaled(31))],
+            vec![
+                (2, detail(Termination::Exited(17), b"loader missing", false)),
+                (
+                    4,
+                    detail(
+                        Termination::Signaled(31),
+                        &vec![b'x'; MAX_EXIT_STDERR_BYTES],
+                        true,
+                    ),
+                ),
+            ],
             [
-                Some(Termination::Exited(17)),
-                Some(Termination::Signaled(31)),
+                Some(detail(Termination::Exited(17), b"loader missing", false)),
+                Some(detail(
+                    Termination::Signaled(31),
+                    &vec![b'x'; MAX_EXIT_STDERR_BYTES],
+                    true,
+                )),
             ],
         ),
         // A role absent from `exit_detail` gets the same zero-length trailer
         // as before this diagnostic existed; `ReplyRow`'s value is identical
         // either way, and `decode_exit_detail` reports it as `None`.
         (
-            vec![(2, Termination::Exited(0))],
-            [Some(Termination::Exited(0)), None],
+            vec![(2, detail(Termination::Exited(0), b"", false))],
+            [Some(detail(Termination::Exited(0), b"", false)), None],
         ),
         (Vec::new(), [None, None]),
     ] {
@@ -329,7 +351,12 @@ fn exit_trailer_round_trips_and_never_appears_outside_an_exit_row() {
         (7, ProbeError::Io),
     ] {
         let rows = vec![(1, Err(error))];
-        let mut bytes = encode_reply(&single, &rows, &[(1, Termination::Exited(3))]).unwrap();
+        let mut bytes = encode_reply(
+            &single,
+            &rows,
+            &[(1, detail(Termination::Exited(3), b"", false))],
+        )
+        .unwrap();
         assert_eq!(
             bytes[78], status,
             "encode_reply must ignore a mismatched exit_detail role"
@@ -341,12 +368,19 @@ fn exit_trailer_round_trips_and_never_appears_outside_an_exit_row() {
         bytes.extend_from_slice(&[0, 3]);
         assert_eq!(validate_reply(&single, &bytes).unwrap_err(), Error::Invalid);
     }
-    // An Exit row's trailer length must be exactly 0 or EXIT_DETAIL_BYTES.
+    // An Exit row's trailer length must be empty, legacy termination-only, or
+    // a bounded diagnostic with an exact truncation flag.
     let rows = vec![(1, Err(ProbeError::Exit))];
-    let mut bytes = encode_reply(&single, &rows, &[(1, Termination::Exited(3))]).unwrap();
+    let mut bytes = encode_reply(
+        &single,
+        &rows,
+        &[(1, detail(Termination::Exited(3), b"", false))],
+    )
+    .unwrap();
     assert_eq!(bytes[78], 4);
     assert_eq!(&bytes[79..83], &2u32.to_le_bytes());
-    bytes[79] = 1;
+    assert_eq!(&bytes[83..], &[0, 3]);
+    bytes[79] = 2;
     bytes.truncate(bytes.len() - 1);
     assert_eq!(validate_reply(&single, &bytes).unwrap_err(), Error::Invalid);
 }
@@ -356,16 +390,60 @@ fn exit_trailer_rejects_physically_impossible_zero_signal() {
     let request = Request::parse(&request_bytes(1, 1, b"p")).unwrap();
     let rows = vec![(1, Err(ProbeError::Exit))];
     assert_eq!(
-        encode_reply(&request, &rows, &[(1, Termination::Signaled(0))]).unwrap_err(),
+        encode_reply(
+            &request,
+            &rows,
+            &[(1, detail(Termination::Signaled(0), b"", false))],
+        )
+        .unwrap_err(),
         Error::Invalid
     );
-    let mut bytes = encode_reply(&request, &rows, &[(1, Termination::Signaled(9))]).unwrap();
+    let mut bytes = encode_reply(
+        &request,
+        &rows,
+        &[(1, detail(Termination::Signaled(9), b"", false))],
+    )
+    .unwrap();
     // Keep the trailer framing valid while replacing the signal payload with
     // zero. `waitpid` cannot produce WTERMSIG(status) == 0 for a signaled
     // child, so diagnostic decoding must refuse this hostile projection.
     *bytes
         .last_mut()
         .expect("the encoded exit trailer has a signal byte") = 0;
-    assert_eq!(validate_reply(&request, &bytes).unwrap(), rows);
+    assert_eq!(
+        validate_reply(&request, &bytes).unwrap_err(),
+        Error::Invalid
+    );
     assert_eq!(decode_exit_detail(&bytes, 1), None);
+}
+
+#[test]
+fn exit_trailer_rejects_invalid_flags_and_noncanonical_truncation() {
+    let request = Request::parse(&request_bytes(1, 1, b"p")).unwrap();
+    let rows = vec![(1, Err(ProbeError::Exit))];
+    assert_eq!(
+        encode_reply(
+            &request,
+            &rows,
+            &[(1, detail(Termination::Exited(127), b"short", true))],
+        )
+        .unwrap_err(),
+        Error::Limit
+    );
+    let mut bytes = encode_reply(
+        &request,
+        &rows,
+        &[(1, detail(Termination::Exited(127), b"short", false))],
+    )
+    .unwrap();
+    bytes[85] = 2;
+    assert_eq!(
+        validate_reply(&request, &bytes).unwrap_err(),
+        Error::Invalid
+    );
+    bytes[85] = 1;
+    assert_eq!(
+        validate_reply(&request, &bytes).unwrap_err(),
+        Error::Invalid
+    );
 }

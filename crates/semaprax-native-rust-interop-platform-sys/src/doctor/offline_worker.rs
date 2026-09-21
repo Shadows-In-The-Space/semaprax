@@ -77,13 +77,17 @@ fn execute() -> Result<(), Error> {
         output
             .try_reserve_exact(65_536)
             .map_err(|_| Error::Allocation)?;
-        tools.push((role, guard, path, output));
+        let mut stderr = Vec::new();
+        stderr
+            .try_reserve_exact(wire::MAX_EXIT_STDERR_BYTES)
+            .map_err(|_| Error::Allocation)?;
+        tools.push((role, guard, path, output, stderr));
     }
     let mut rows = Vec::new();
     rows.try_reserve_exact(3).map_err(|_| Error::Allocation)?;
     // Diagnostic-only, purely additive: how each `Exit` row's tool actually
-    // terminated. Never read back by this function; carried solely so the
-    // wire reply's `Exit` trailer can attach it for `wire::decode_exit_detail`.
+    // terminated plus its bounded stderr prefix. Never read back by this
+    // function; carried solely by the wire reply's `Exit` trailer.
     let mut exit_detail = Vec::new();
     exit_detail
         .try_reserve_exact(3)
@@ -91,12 +95,19 @@ fn execute() -> Result<(), Error> {
     // No input descriptors enter a tool. Snapshot storage stays immutable.
     close_owned(3);
     close_owned(4);
-    for (role, guard, path, mut output) in tools {
-        match capture::run(&root, &guard, &path, &mut output) {
+    for (role, guard, path, mut output, mut stderr) in tools {
+        match capture::run(&root, &guard, &path, &mut output, &mut stderr) {
             Ok(()) => rows.push((role, Ok(output))),
             Err(failure) => {
                 if let Some(termination) = failure.termination {
-                    exit_detail.push((role, termination));
+                    exit_detail.push((
+                        role,
+                        wire::ExitDetail {
+                            termination,
+                            stderr: failure.stderr,
+                            stderr_truncated: failure.stderr_truncated,
+                        },
+                    ));
                 }
                 rows.push((role, Err(failure.error)));
             }

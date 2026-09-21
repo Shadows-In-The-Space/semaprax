@@ -215,6 +215,12 @@ fn executable(payload: &[u8], socket: bool, spin: bool) -> Vec<u8> {
     executable_image(&code, payload)
 }
 
+/// A physical diagnostic-path oracle: write the supplied bytes only to stderr,
+/// then exit 127. It has no loader, filesystem, process, or network route.
+fn exiting_stderr_executable(stderr: &[u8]) -> Vec<u8> {
+    executable_image(&exiting_stderr_code(stderr.len()), stderr)
+}
+
 fn executable_image(code: &[u8], payload: &[u8]) -> Vec<u8> {
     let mut elf = vec![0; 120];
     elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
@@ -236,6 +242,46 @@ fn executable_image(code: &[u8], payload: &[u8]) -> Vec<u8> {
     elf.extend_from_slice(code);
     elf.extend_from_slice(payload);
     elf
+}
+
+#[cfg(target_arch = "x86_64")]
+fn exiting_stderr_code(length: usize) -> Vec<u8> {
+    let mut code = vec![
+        0xb8, 1, 0, 0, 0, // write
+        0xbf, 2, 0, 0, 0, // stderr
+        0x48, 0x8d, 0x35, // lea rsi,[rip+payload]
+    ];
+    let address = code.len();
+    code.extend_from_slice(&0i32.to_le_bytes());
+    code.push(0xba);
+    code.extend_from_slice(&(length as u32).to_le_bytes());
+    code.extend_from_slice(&[
+        0x0f, 0x05, // syscall
+        0xbf, 127, 0, 0, 0, // exit code
+        0xb8, 60, 0, 0, 0, // exit
+        0x0f, 0x05,
+    ]);
+    let displacement = i32::try_from(code.len() - address - 4).unwrap();
+    code[address..address + 4].copy_from_slice(&displacement.to_le_bytes());
+    code
+}
+
+#[cfg(target_arch = "aarch64")]
+fn exiting_stderr_code(length: usize) -> Vec<u8> {
+    let mov = |register: u32, value: u32| 0xd280_0000 | (value << 5) | register;
+    let mut words = vec![mov(0, 2), 0, mov(2, length as u32 & 0xffff)];
+    let address = words.len() - 2;
+    words.extend([
+        0xf2a0_0002 | (((length as u32 >> 16) & 0xffff) << 5),
+        mov(8, 64),
+        0xd400_0001,
+        mov(0, 127),
+        mov(8, 93),
+        0xd400_0001,
+    ]);
+    let offset = ((words.len() - address) * 4) as u32;
+    words[address] = 0x1000_0001 | ((offset & 3) << 29) | ((offset >> 2) << 5);
+    words.into_iter().flat_map(u32::to_le_bytes).collect()
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -338,6 +384,24 @@ fn provisioned_materializer_exec_and_socket_denial() {
         );
         assert_eq!(&output[83..], VERSION);
     }
+    let diagnostic = b"synthetic exited-127 diagnostic\n";
+    let bundle = bundle(&exiting_stderr_executable(diagnostic));
+    let request = request(&bundle, 1, SELECTOR);
+    let (status, output, errors) = run(&request, &bundle);
+    assert!(status.success());
+    assert!(errors.is_empty());
+    assert_eq!(
+        wire::validate_reply(&wire::Request::parse(&request).unwrap(), &output).unwrap(),
+        vec![(1, Err(ProbeError::Exit))]
+    );
+    assert_eq!(
+        wire::decode_exit_detail(&output, 1),
+        Some(wire::ExitDetail {
+            termination: wire::Termination::Exited(127),
+            stderr: diagnostic.to_vec(),
+            stderr_truncated: false,
+        })
+    );
 }
 
 #[test]
@@ -472,15 +536,31 @@ fn describe_probe_failure(error: ProbeError, output: &[u8], role: u8) -> String 
         // None of these carries a wire trailer to decode.
         return format!("{error:?} (see ProbeError's doc comment for what this variant means)");
     }
-    match wire::decode_exit_detail(output, role) {
-        Some(wire::Termination::Exited(code)) if (10..=23).contains(&code) => format!(
+    let Some(detail) = wire::decode_exit_detail(output, role) else {
+        return "Exit: no termination detail attached to this reply's trailer".to_string();
+    };
+    let stderr = if detail.stderr.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; bounded child stderr{}: {:?}",
+            if detail.stderr_truncated {
+                " (truncated)"
+            } else {
+                ""
+            },
+            String::from_utf8_lossy(&detail.stderr)
+        )
+    };
+    match detail.termination {
+        wire::Termination::Exited(code) if (10..=23).contains(&code) => format!(
             "Exit: the worker's own pre-execve setup failed at child.rs's \
-             fail_stop_with({code}) marker, before the tool ever ran"
+             fail_stop_with({code}) marker, before the tool ever ran{stderr}"
         ),
-        Some(wire::Termination::Exited(code)) => {
-            format!("Exit: the tool's own process exited with status {code}")
+        wire::Termination::Exited(code) => {
+            format!("Exit: the tool's own process exited with status {code}{stderr}")
         }
-        Some(wire::Termination::Signaled(signal)) if signal == libc::SIGSYS => format!(
+        wire::Termination::Signaled(signal) if signal == libc::SIGSYS => format!(
             "Exit: the tool was killed by signal {signal} (SIGSYS). This worker's seccomp \
              filter (guard.rs) raises SIGSYS only from its architecture/bitness guard -- a \
              wrong ELF class, the x32 syscall-number bit, or a foreign audit arch value -- \
@@ -489,15 +569,14 @@ fn describe_probe_failure(error: ProbeError, output: &[u8], role: u8) -> String 
              instruction-set personality, not that one named syscall was denied. No si_syscall \
              is obtainable here: this filter's architecture guard uses SECCOMP_RET_KILL_PROCESS, \
              which force-exits the process without ever delivering a catchable signal (unlike \
-             SECCOMP_RET_TRAP), so no siginfo carrying si_syscall/si_arch reaches any handler."
+             SECCOMP_RET_TRAP), so no siginfo carrying si_syscall/si_arch reaches any handler.{stderr}"
         ),
-        Some(wire::Termination::Signaled(signal)) => {
+        wire::Termination::Signaled(signal) => {
             format!(
-                "Exit: the tool was killed by signal {signal} ({})",
+                "Exit: the tool was killed by signal {signal} ({}){stderr}",
                 signal_name(signal)
             )
         }
-        None => "Exit: no termination detail attached to this reply's trailer".to_string(),
     }
 }
 

@@ -17,6 +17,8 @@ const REPLY_HEADER: usize = 77;
 // what a collector or the contracted `semaprax.doctor.v1` report can observe.
 const EXIT_STATUS_CODE: u8 = 4;
 const EXIT_DETAIL_BYTES: usize = 2;
+const EXIT_DETAIL_FLAGS_BYTES: usize = 1;
+pub(super) const MAX_EXIT_STDERR_BYTES: usize = 4096;
 
 /// How the confined tool child actually terminated, observed by the worker's
 /// own `waitpid` on its exact owned PID. This is strictly richer than the
@@ -41,6 +43,15 @@ impl Termination {
     }
 }
 
+/// Bounded diagnostic information carried only by an `Exit` row. It is not
+/// tool stdout and never reaches `ReplyRow` or a settled doctor report.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ExitDetail {
+    pub(super) termination: Termination,
+    pub(super) stderr: Vec<u8>,
+    pub(super) stderr_truncated: bool,
+}
+
 fn encode_termination(value: Termination) -> Option<[u8; EXIT_DETAIL_BYTES]> {
     match value {
         Termination::Exited(code) => Some([0, code]),
@@ -51,7 +62,57 @@ fn encode_termination(value: Termination) -> Option<[u8; EXIT_DETAIL_BYTES]> {
     }
 }
 
-#[cfg(test)]
+fn encode_exit_detail(detail: &ExitDetail) -> Result<Vec<u8>, Error> {
+    if detail.stderr.len() > MAX_EXIT_STDERR_BYTES
+        || (detail.stderr_truncated && detail.stderr.len() != MAX_EXIT_STDERR_BYTES)
+    {
+        return Err(Error::Limit);
+    }
+    let termination = encode_termination(detail.termination).ok_or(Error::Invalid)?;
+    if detail.stderr.is_empty() && !detail.stderr_truncated {
+        return Ok(termination.to_vec());
+    }
+    let length = EXIT_DETAIL_BYTES
+        .checked_add(EXIT_DETAIL_FLAGS_BYTES)
+        .and_then(|length| length.checked_add(detail.stderr.len()))
+        .ok_or(Error::Limit)?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(length)
+        .map_err(|_| Error::Allocation)?;
+    bytes.extend_from_slice(&termination);
+    bytes.push(u8::from(detail.stderr_truncated));
+    bytes.extend_from_slice(&detail.stderr);
+    Ok(bytes)
+}
+
+fn validate_exit_detail(bytes: &[u8]) -> Result<(), Error> {
+    match bytes.len() {
+        0 => Ok(()),
+        // Preserve already-published termination-only diagnostic frames.
+        EXIT_DETAIL_BYTES => decode_termination(bytes).ok_or(Error::Invalid).map(|_| ()),
+        length
+            if (EXIT_DETAIL_BYTES + EXIT_DETAIL_FLAGS_BYTES
+                ..=EXIT_DETAIL_BYTES + EXIT_DETAIL_FLAGS_BYTES + MAX_EXIT_STDERR_BYTES)
+                .contains(&length) =>
+        {
+            let _ = decode_termination(&bytes[..EXIT_DETAIL_BYTES]).ok_or(Error::Invalid)?;
+            let truncated = match bytes[EXIT_DETAIL_BYTES] {
+                0 => false,
+                1 => true,
+                _ => return Err(Error::Invalid),
+            };
+            if truncated
+                && length != EXIT_DETAIL_BYTES + EXIT_DETAIL_FLAGS_BYTES + MAX_EXIT_STDERR_BYTES
+            {
+                return Err(Error::Invalid);
+            }
+            Ok(())
+        }
+        _ => Err(Error::Invalid),
+    }
+}
+
 fn decode_termination(bytes: &[u8]) -> Option<Termination> {
     match *bytes {
         [0, code] => Some(Termination::Exited(code)),
@@ -74,7 +135,7 @@ fn decode_termination(bytes: &[u8]) -> Option<Termination> {
 /// only callers are `#[cfg(test)]` code (this crate's own wire tests and the
 /// hostile `offline_worker::tests`), so it is compiled only for `cfg(test)`.
 #[cfg(test)]
-pub(in crate::doctor) fn decode_exit_detail(bytes: &[u8], role: u8) -> Option<Termination> {
+pub(in crate::doctor) fn decode_exit_detail(bytes: &[u8], role: u8) -> Option<ExitDetail> {
     let mut cursor = REPLY_HEADER;
     loop {
         let current_role = *bytes.get(cursor)?;
@@ -86,9 +147,26 @@ pub(in crate::doctor) fn decode_exit_detail(bytes: &[u8], role: u8) -> Option<Te
         let payload_start = cursor + 6;
         let payload = bytes.get(payload_start..payload_start.checked_add(length)?)?;
         if current_role == role {
-            return (status == EXIT_STATUS_CODE)
-                .then(|| decode_termination(payload))
-                .flatten();
+            if status != EXIT_STATUS_CODE
+                || validate_exit_detail(payload).is_err()
+                || payload.is_empty()
+            {
+                return None;
+            }
+            let termination = decode_termination(&payload[..EXIT_DETAIL_BYTES])?;
+            let (stderr_truncated, stderr) = if payload.len() == EXIT_DETAIL_BYTES {
+                (false, Vec::new())
+            } else {
+                (
+                    payload[EXIT_DETAIL_BYTES] == 1,
+                    payload[EXIT_DETAIL_BYTES + 1..].to_vec(),
+                )
+            };
+            return Some(ExitDetail {
+                termination,
+                stderr,
+                stderr_truncated,
+            });
         }
         cursor = payload_start + length;
     }
@@ -197,15 +275,14 @@ impl Request {
 
 pub(in crate::doctor) type ReplyRow = (u8, Result<Vec<u8>, ProbeError>);
 
-// `exit_detail` is a diagnostic-only, purely additive supplement: a role/
-// termination pair for a role whose row is `Err(ProbeError::Exit)`. A role
-// with no matching entry (or whose row is not `Exit`) gets the exact zero-
-// length trailer this function always emitted; an empty slice reproduces
-// prior byte-for-byte output.
+// `exit_detail` is a diagnostic-only, purely additive supplement for a role
+// whose row is `Err(ProbeError::Exit)`. A role with no matching entry (or
+// whose row is not `Exit`) gets the exact zero-length trailer this function
+// always emitted; an empty slice reproduces prior byte-for-byte output.
 pub(super) fn encode_reply(
     request: &Request,
     rows: &[ReplyRow],
-    exit_detail: &[(u8, Termination)],
+    exit_detail: &[(u8, ExitDetail)],
 ) -> Result<Vec<u8>, Error> {
     if rows.len() != request.roles().count() {
         return Err(Error::Invalid);
@@ -217,14 +294,7 @@ pub(super) fn encode_reply(
         exit_detail
             .iter()
             .find(|(candidate, _)| *candidate == role)
-            .map_or_else(
-                || Ok(Vec::new()),
-                |(_, termination)| {
-                    encode_termination(*termination)
-                        .map(|bytes| bytes.to_vec())
-                        .ok_or(Error::Invalid)
-                },
-            )
+            .map_or_else(|| Ok(Vec::new()), |(_, detail)| encode_exit_detail(detail))
     };
     let mut length = REPLY_HEADER;
     for ((role, value), (expected, _)) in rows.iter().zip(request.roles()) {
@@ -303,13 +373,13 @@ pub(in crate::doctor) fn validate_reply(
         // which may additionally carry the fixed diagnostic trailer decoded
         // by `decode_exit_detail`. `ReplyRow`'s value is unaffected either
         // way: the trailer bytes are consumed below and never returned.
-        if status > 7
-            || (status != 0 && status != EXIT_STATUS_CODE && length != 0)
-            || (status == EXIT_STATUS_CODE && length != 0 && length != EXIT_DETAIL_BYTES)
-        {
+        if status > 7 || (status != 0 && status != EXIT_STATUS_CODE && length != 0) {
             return Err(Error::Invalid);
         }
-        take(bytes, &mut cursor, length)?;
+        let payload = take(bytes, &mut cursor, length)?;
+        if status == EXIT_STATUS_CODE && validate_exit_detail(payload).is_err() {
+            return Err(Error::Invalid);
+        }
     }
     if cursor != bytes.len() {
         return Err(Error::Invalid);

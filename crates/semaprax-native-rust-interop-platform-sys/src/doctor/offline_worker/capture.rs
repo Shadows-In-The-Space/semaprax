@@ -19,6 +19,11 @@ mod tests;
 pub(super) struct Failure {
     pub(super) error: ProbeError,
     pub(super) termination: Option<wire::Termination>,
+    // Only the selected `Exit` carries this diagnostic prefix. It is never
+    // stdout, never returned on success/non-Exit failure, and cannot affect
+    // the shared output accounting or selected-error precedence.
+    pub(super) stderr: Vec<u8>,
+    pub(super) stderr_truncated: bool,
 }
 
 impl From<ProbeError> for Failure {
@@ -26,6 +31,8 @@ impl From<ProbeError> for Failure {
         Self {
             error,
             termination: None,
+            stderr: Vec::new(),
+            stderr_truncated: false,
         }
     }
 }
@@ -51,13 +58,14 @@ pub(super) fn run(
     guard: &Guard,
     path: &CStr,
     output: &mut Vec<u8>,
+    stderr: &mut Vec<u8>,
 ) -> Result<(), Failure> {
     let (stdin, empty) = pipe()?;
     drop(empty);
     let (stdout, stdout_writer) = pipe()?;
-    let (stderr, stderr_writer) = pipe()?;
+    let (stderr_reader, stderr_writer) = pipe()?;
     nonblocking(stdout.0).map_err(|_| ProbeError::Io)?;
-    nonblocking(stderr.0).map_err(|_| ProbeError::Io)?;
+    nonblocking(stderr_reader.0).map_err(|_| ProbeError::Io)?;
     let supervisor = unsafe { libc::syscall(libc::SYS_pidfd_open, libc::getpid(), 0_u32) };
     if supervisor < 0 {
         return Err(ProbeError::Spawn.into());
@@ -97,17 +105,22 @@ pub(super) fn run(
     if pidfd < 0 || pid > i32::MAX as libc::c_long {
         fail_stop();
     }
-    let mut native = Native::new(pid as i32, pidfd, stdout, stderr, origin);
+    let mut native = Native::new(pid as i32, pidfd, stdout, stderr_reader, origin);
     drop((stdin, stdout_writer, stderr_writer, supervisor));
-    drive(&mut native, output)
+    drive(&mut native, output, stderr)
 }
 
 /// The real supervisor and authority-free scripts use this identical state
 /// machine. Scripted outcomes prove control flow, never physical settlement.
-fn drive(operations: &mut impl Operations, output: &mut Vec<u8>) -> Result<(), Failure> {
+fn drive(
+    operations: &mut impl Operations,
+    output: &mut Vec<u8>,
+    stderr: &mut Vec<u8>,
+) -> Result<(), Failure> {
     let mut selected = None;
     let mut total = 0;
     let mut ended = [false; 2];
+    let mut stderr_truncated = false;
     loop {
         for (index, eof) in ended.iter_mut().enumerate() {
             if !*eof {
@@ -116,6 +129,8 @@ fn drive(operations: &mut impl Operations, output: &mut Vec<u8>) -> Result<(), F
                     index,
                     &mut total,
                     (index == 0).then_some(&mut *output),
+                    (index == 1).then_some(&mut *stderr),
+                    &mut stderr_truncated,
                 ) {
                     Ok(value) => *eof = value,
                     Err(error) => {
@@ -159,6 +174,8 @@ fn drive(operations: &mut impl Operations, output: &mut Vec<u8>) -> Result<(), F
                     index,
                     &mut total,
                     (index == 0 && selected.is_none()).then_some(&mut *output),
+                    (index == 1).then_some(&mut *stderr),
+                    &mut stderr_truncated,
                 ) {
                     Ok(value) => *eof = value,
                     Err(error) => {
@@ -184,8 +201,24 @@ fn drive(operations: &mut impl Operations, output: &mut Vec<u8>) -> Result<(), F
     }
     if let Some(error) = selected {
         output.clear();
-        Err(Failure { error, termination })
+        if error == ProbeError::Exit {
+            Err(Failure {
+                error,
+                termination,
+                stderr: std::mem::take(stderr),
+                stderr_truncated,
+            })
+        } else {
+            stderr.clear();
+            Err(Failure {
+                error,
+                termination: None,
+                stderr: Vec::new(),
+                stderr_truncated: false,
+            })
+        }
     } else {
+        stderr.clear();
         Ok(())
     }
 }
@@ -195,6 +228,8 @@ fn read(
     stream: usize,
     total: &mut usize,
     output: Option<&mut Vec<u8>>,
+    stderr: Option<&mut Vec<u8>>,
+    stderr_truncated: &mut bool,
 ) -> Result<bool, ProbeError> {
     let mut bytes = [0_u8; 8192];
     let Some(count) = operations
@@ -211,7 +246,7 @@ fn read(
     if count > bytes.len() {
         return Err(ProbeError::Io);
     }
-    account(total, &bytes[..count], output)?;
+    account(total, &bytes[..count], output, stderr, stderr_truncated)?;
     Ok(false)
 }
 
@@ -219,6 +254,8 @@ fn account(
     total: &mut usize,
     bytes: &[u8],
     output: Option<&mut Vec<u8>>,
+    stderr: Option<&mut Vec<u8>>,
+    stderr_truncated: &mut bool,
 ) -> Result<(), ProbeError> {
     let count = bytes.len();
     *total = total.checked_add(count).ok_or(ProbeError::OutputLimit)?;
@@ -234,6 +271,21 @@ fn account(
             return Err(ProbeError::OutputLimit);
         }
         output.extend_from_slice(bytes);
+    }
+    if let Some(stderr) = stderr {
+        let remaining = wire::MAX_EXIT_STDERR_BYTES
+            .checked_sub(stderr.len())
+            .ok_or(ProbeError::OutputLimit)?;
+        let retained = bytes.len().min(remaining);
+        if stderr
+            .capacity()
+            .checked_sub(stderr.len())
+            .is_none_or(|remaining| remaining < retained)
+        {
+            return Err(ProbeError::OutputLimit);
+        }
+        stderr.extend_from_slice(&bytes[..retained]);
+        *stderr_truncated |= retained != bytes.len();
     }
     Ok(())
 }

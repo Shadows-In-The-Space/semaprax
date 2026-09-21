@@ -529,10 +529,11 @@ value substitution preserves potential, and every real step strictly
 decreases it. Lean therefore proves finite small-step normalization to a value
 or modeled fault for every closed well-typed term under that certificate, with
 the helper-call fixture as a non-vacuous positive case. The private corpus
-harness described below now derives weights from real reified HIR and emits
-concrete Lean certificates; the general theorem does not prove that derivation
-correct for arbitrary HIR. The numeric extension below bounds real small steps
-by the initial certified potential. Source-to-Lean correspondence,
+harness described below now derives weights and bounded typing proof terms from
+real reified HIR, then emits concrete Lean certificates and a complete
+well-formed table for each finite fixture; the general theorem does not prove
+either derivation correct for arbitrary HIR. The numeric extension below bounds
+real small steps by the initial certified potential. Universal source-to-Lean correspondence,
 resource-limit equivalence, hosted execution, and every self-hosting rung
 above zero remain separate work. See
 [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md#ranked-call-graph-extension-issue-188)
@@ -615,12 +616,35 @@ proofs when its Lean toolchain is available.
 
 This is executable finite-corpus evidence, not a general theorem about the Rust
 derivation, HIR typing, or source translation. A weight certificate alone does
-not discharge `WellFormedProgram` or `HasType`, does not authorize execution,
-and does not establish a concrete runtime or interpreter-fuel bound. No proof
-axiom, language feature, public format, or self-hosting rung is added. The
-implementation session ran the seven weight tests through a small standalone
-Rust harness using the actual term and weight modules; full Cargo/corpus and
-Lean witness execution remain required before quoting those results as passed.
+not discharge `WellFormedProgram` or `HasType`; the bounded fixture producer
+now discharges those separately for the exact table and bodies it renders. It
+does not authorize execution or establish a concrete runtime or
+interpreter-fuel bound. No proof axiom, language feature, public format, or
+self-hosting rung is added. The implementation sessions ran the focused weight
+and typing tests through small standalone Rust harnesses using the actual term,
+weight, and renderer modules. An operator-complete 17-function generated
+fixture was accepted by Lean with the current numeric theorems overlaid because
+the cached `Kernel0.olean` predated them. Full Cargo/corpus and a clean Lean
+build remain unrun.
+
+### Bounded typing witnesses for reified fixtures (issue #188)
+
+`src/kernel_zero/lean_fixture/typing.rs` independently walks each reified named
+term rather than trusting HIR type annotations or the resolver's result. It
+checks variable scope, operator families, branch agreement, return types,
+function identity uniqueness, exact call arity and ordered argument types, and
+the complete function inventory. It refuses more than 64 functions, 8,192
+parameters plus term nodes, or traversal depth 128. These are private harness
+limits and refusals, not compiler diagnostics.
+
+For every admitted body the producer renders a concrete `NamedHasType` proof,
+uses `named_lower_output_has_type` to type the exact lowered expression, and
+constructs `WellFormedProgram` by exhausting the actual function table. The
+numeric fuel witnesses therefore no longer accept caller-supplied `HasType` or
+`WellFormedProgram` premises. Lean remains the checker of every emitted proof
+term; the Rust producer cannot make a malformed constructor application true.
+This closes those assumptions only for the finite rendered corpus. It is not a
+universal HIR correspondence theorem and does not promote a self-hosting rung.
 
 ### Numeric normalization fuel from the checked weights
 

@@ -181,6 +181,7 @@ fn model_target_run_on(
     let mut target = ParityTargetHandler {
         calls: 0,
         request_wires: Vec::new(),
+        grants: Vec::new(),
     };
     let run = compiled.run_target_live_on(
         &LifecycleTask {
@@ -215,6 +216,185 @@ fn model_limits() -> crate::agent_lifecycle::iterative::model::ModelLimits {
         max_response_bytes: 16 * 1024,
         max_total_bytes: 96 * 1024,
         max_fuel: 4,
+    }
+}
+
+fn target_attempt_on(
+    compiled: &CompiledTypedEffects,
+    backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+    cancellation: &AgentCancellation,
+    effects: EffectBudget,
+    proposals: Vec<String>,
+    handler: &mut dyn crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler,
+) -> Result<TargetEffectRun, Vec<Diagnostic>> {
+    let mut source = TargetSource { proposals, next: 0 };
+    compiled.run_target_live_on(
+        &LifecycleTask {
+            objective: vec![],
+            budget: 10,
+        },
+        &mut source,
+        handler,
+        IterativeBudget::default(),
+        effects,
+        cancellation,
+        backend,
+    )
+}
+
+struct MalformedTargetHandler {
+    calls: usize,
+}
+impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler
+    for MalformedTargetHandler
+{
+    fn dispatch(
+        &mut self,
+        _: &crate::agent_lifecycle::authorization::target_protocol::TargetHostRequest,
+        sink: &mut crate::agent_lifecycle::authorization::target_protocol::TargetResponseSink,
+    ) -> Result<(), crate::agent_lifecycle::authorization::target_protocol::TargetHostError> {
+        self.calls += 1;
+        sink.write(b"not a target carrier").map_err(|_| {
+            crate::agent_lifecycle::authorization::target_protocol::TargetHostError::Failed
+        })
+    }
+}
+
+#[test]
+fn target_hostile_proposals_budgets_and_results_settle_without_extra_dispatch_on_every_backend() {
+    if !target_backend_tools_available() {
+        eprintln!("skipping target hostile bridge: clang or node unavailable");
+        return;
+    }
+    let module_source = typed_effect_source();
+    let compiled = compile_from_source(&module_source);
+    let proposal = crate::agent_lifecycle::tests::proposal(&compiled.lifecycle.inner, "1", "0");
+    for (label, backend) in [
+        (
+            "interpreter",
+            crate::agent_lifecycle::authorization::StageBackend::Interpreter,
+        ),
+        (
+            "native -O0",
+            crate::agent_lifecycle::authorization::StageBackend::Native,
+        ),
+        (
+            "native -O2",
+            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
+        ),
+        (
+            "Core Wasm",
+            crate::agent_lifecycle::authorization::StageBackend::Wasm {
+                source: &module_source,
+            },
+        ),
+    ] {
+        let cancellation = AgentCancellation::new();
+        let mut malformed_proposal = ParityTargetHandler {
+            calls: 0,
+            request_wires: Vec::new(),
+            grants: Vec::new(),
+        };
+        let malformed = target_attempt_on(
+            &compiled,
+            backend,
+            &cancellation,
+            budgets(),
+            vec![
+                "not canonical proposal".into();
+                crate::agent_lifecycle::iterative::driver::MAX_PROPOSAL_ATTEMPTS
+            ],
+            &mut malformed_proposal,
+        )
+        .unwrap();
+        assert_eq!(
+            malformed.lifecycle().status(),
+            IterativeStatus::ModelFailed,
+            "{label}: proposal"
+        );
+        assert!(
+            malformed.target_evidence().is_empty(),
+            "{label}: proposal evidence"
+        );
+        assert_eq!(
+            malformed_proposal.calls, 0,
+            "{label}: malformed proposal dispatched host work"
+        );
+
+        let mut budget_handler = ParityTargetHandler {
+            calls: 0,
+            request_wires: Vec::new(),
+            grants: Vec::new(),
+        };
+        let exhausted = target_attempt_on(
+            &compiled,
+            backend,
+            &cancellation,
+            EffectBudget {
+                max_calls: 0,
+                ..budgets()
+            },
+            vec![proposal.clone()],
+            &mut budget_handler,
+        )
+        .unwrap();
+        assert_eq!(
+            exhausted.lifecycle().status(),
+            IterativeStatus::EffectFailed,
+            "{label}: budget status"
+        );
+        assert_eq!(
+            exhausted.target_evidence().len(),
+            1,
+            "{label}: budget evidence"
+        );
+        assert_eq!(
+            exhausted.target_evidence()[0].settlement(),
+            crate::agent_lifecycle::authorization::target_protocol::Settlement::CallBudget,
+            "{label}: budget settlement"
+        );
+        assert!(
+            !exhausted.target_evidence()[0].dispatched(),
+            "{label}: budget dispatch"
+        );
+        assert_eq!(
+            budget_handler.calls, 0,
+            "{label}: exhausted budget dispatched host work"
+        );
+
+        let mut malformed_handler = MalformedTargetHandler { calls: 0 };
+        let malformed_result = target_attempt_on(
+            &compiled,
+            backend,
+            &cancellation,
+            budgets(),
+            vec![proposal.clone()],
+            &mut malformed_handler,
+        )
+        .unwrap();
+        assert_eq!(
+            malformed_result.lifecycle().status(),
+            IterativeStatus::EffectFailed,
+            "{label}: result status"
+        );
+        assert_eq!(
+            malformed_result.target_evidence().len(),
+            1,
+            "{label}: result evidence"
+        );
+        assert_eq!(
+            malformed_result.target_evidence()[0].settlement(),
+            crate::agent_lifecycle::authorization::target_protocol::Settlement::MalformedResult,
+            "{label}: result settlement"
+        );
+        assert!(
+            malformed_result.target_evidence()[0].dispatched(),
+            "{label}: malformed result was not observed"
+        );
+        assert_eq!(
+            malformed_handler.calls, 1,
+            "{label}: malformed result repeated host work"
+        );
     }
 }
 

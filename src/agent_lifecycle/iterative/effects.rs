@@ -801,6 +801,7 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
     struct ParityTargetHandler {
         calls: usize,
         request_wires: Vec<Vec<u8>>,
+        grants: Vec<String>,
     }
 
     impl crate::agent_lifecycle::authorization::target_protocol::TargetHostHandler
@@ -814,6 +815,7 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
         {
             self.calls += 1;
             self.request_wires.push(request.canonical_wire());
+            self.grants.push(request.grant_id().to_owned());
             let payload = encode_fields(&[("value".into(), RetainedValue::I64(8))]);
             sink.write(
                 &crate::agent_lifecycle::authorization::target_protocol::TypedCarrier::new(
@@ -856,6 +858,7 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
         let mut handler = ParityTargetHandler {
             calls: 0,
             request_wires: Vec::new(),
+            grants: Vec::new(),
         };
         let run = compiled
             .run_target_live_on(
@@ -891,6 +894,15 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
         );
         assert_eq!(expected.lifecycle().status(), IterativeStatus::Complete);
         assert_eq!(expected_handler.calls, 3);
+        assert_eq!(
+            expected_handler
+                .grants
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            expected_handler.calls,
+            "each checked turn consumes a distinct target grant"
+        );
         assert_eq!(expected.target_evidence().len(), 3);
         for (evidence, request_wire) in expected
             .target_evidence()
@@ -938,6 +950,15 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             assert_eq!(actual.failure(), expected.failure(), "{label}");
             assert_eq!(handler.calls, expected_handler.calls, "{label}");
             assert_eq!(
+                handler
+                    .grants
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
+                handler.calls,
+                "{label}: target grant reuse"
+            );
+            assert_eq!(
                 handler.request_wires.len(),
                 expected_handler.request_wires.len(),
                 "{label}"
@@ -975,6 +996,7 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
         for backend in [
             crate::agent_lifecycle::authorization::StageBackend::Interpreter,
             crate::agent_lifecycle::authorization::StageBackend::Native,
+            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization("-O2"),
             crate::agent_lifecycle::authorization::StageBackend::Wasm {
                 source: &module_source,
             },

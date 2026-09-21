@@ -76,6 +76,120 @@ fn run(
         10_000_000,
     )
 }
+
+fn run_on(
+    compiled: &CompiledTypedEffects,
+    handler: &mut Handler,
+    store: &mut Store,
+    retained: Option<&str>,
+    backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+) -> Result<DurableTypedRun, DurableTypedFailure> {
+    compiled.run_durable_on(
+        &task(),
+        &proposals(compiled),
+        handler,
+        IterativeBudget::default(),
+        budget(),
+        &AgentCancellation::new(),
+        &root(),
+        &root(),
+        retained,
+        store,
+        10_000_000,
+        backend,
+    )
+}
+
+#[test]
+fn native_durable_recovery_replays_the_checked_grant_without_a_second_handler_call() {
+    let compiled = super::super::tests::compile();
+    let mut handler = Handler::default();
+    let mut store = Store::default();
+    let first = run_on(
+        &compiled,
+        &mut handler,
+        &mut store,
+        None,
+        crate::agent_lifecycle::authorization::StageBackend::Native,
+    )
+    .unwrap();
+    assert_eq!(first.run().lifecycle().status(), IterativeStatus::Complete);
+    assert_eq!(handler.calls, 3);
+    let retained = store.document.clone();
+    let replay = run_on(
+        &compiled,
+        &mut handler,
+        &mut store,
+        Some(&retained),
+        crate::agent_lifecycle::authorization::StageBackend::Native,
+    )
+    .unwrap();
+    assert_eq!(replay.run().lifecycle().status(), IterativeStatus::Complete);
+    assert_eq!((handler.calls, replay.run().dispatched()), (3, 0));
+
+    // A recovered observation is not portable to a different backend. The
+    // checkpoint's invocation identity binds the selected sealed executor
+    // before decode, so this refusal occurs before a host callback.
+    let before = handler.calls;
+    assert!(run_on(
+        &compiled,
+        &mut handler,
+        &mut store,
+        Some(&retained),
+        crate::agent_lifecycle::authorization::StageBackend::Wasm {
+            source: &super::super::tests::typed_effect_source(),
+        },
+    )
+    .is_err());
+    assert_eq!(handler.calls, before);
+}
+
+#[test]
+fn core_wasm_durable_recovery_replays_without_host_delivery() {
+    let module_source = super::super::tests::typed_effect_source();
+    let compiled = super::super::tests::compile_from_source(&module_source);
+    let mut handler = Handler::default();
+    let mut store = Store::default();
+    let first = run_on(
+        &compiled,
+        &mut handler,
+        &mut store,
+        None,
+        crate::agent_lifecycle::authorization::StageBackend::Wasm {
+            source: &module_source,
+        },
+    )
+    .unwrap();
+    assert_eq!(first.run().lifecycle().status(), IterativeStatus::Complete);
+    assert_eq!(handler.calls, 3);
+    let retained = store.document.clone();
+    let replay = run_on(
+        &compiled,
+        &mut handler,
+        &mut store,
+        Some(&retained),
+        crate::agent_lifecycle::authorization::StageBackend::Wasm {
+            source: &module_source,
+        },
+    )
+    .unwrap();
+    assert_eq!(replay.run().lifecycle().status(), IterativeStatus::Complete);
+    assert_eq!((handler.calls, replay.run().dispatched()), (3, 0));
+
+    let altered_source = format!("{module_source}\n");
+    let before = handler.calls;
+    assert!(run_on(
+        &compiled,
+        &mut handler,
+        &mut store,
+        Some(&retained),
+        crate::agent_lifecycle::authorization::StageBackend::Wasm {
+            source: &altered_source,
+        },
+    )
+    .is_err());
+    assert_eq!(handler.calls, before);
+}
 #[test]
 fn durable_three_turn_run_and_completed_replay_do_not_repeat_host_work() {
     let compiled = super::super::tests::compile();

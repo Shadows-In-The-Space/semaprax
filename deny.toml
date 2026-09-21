@@ -38,12 +38,16 @@ highlight = "all"
 # syn entry when the remaining macro dependencies move to syn 3.
 skip = [
   { crate = "getrandom@0.2.17", reason = "ring/rustls retains the pre-0.4 getrandom line" },
+  { crate = "getrandom@0.3.4", reason = "sigstore-verify's cryptographic graph retains rand 0.9's getrandom line" },
   { crate = "block-buffer@0.10.4", reason = "curve25519-dalek/ed25519-dalek digest 0.10 line" },
   { crate = "cpufeatures@0.2.17", reason = "curve25519-dalek/ed25519-dalek digest 0.10 line" },
   { crate = "crypto-common@0.1.7", reason = "curve25519-dalek/ed25519-dalek digest 0.10 line" },
   { crate = "digest@0.10.7", reason = "curve25519-dalek/ed25519-dalek digest 0.10 line" },
   { crate = "sha2@0.10.9", reason = "curve25519-dalek/ed25519-dalek digest 0.10 line" },
+  { crate = "const-oid@0.9.6", reason = "sigstore-verify's X.509 graph retains the der 0.7 OID line" },
+  { crate = "rand_core@0.9.5", reason = "sigstore-verify's cryptographic graph retains rand 0.9" },
   { crate = "syn@2.0.119", reason = "macro dependencies retain syn 2 while newer serde uses syn 3" },
+  { crate = "untrusted@0.7.1", reason = "aws-lc-rs in sigstore-verify retains its compatibility untrusted line" },
 ]
 
 [sources]

@@ -1,7 +1,7 @@
 //! `semaprax release verify <release-dir>`: issue #168's one documented
 //! command over an already-downloaded release directory.
 //!
-//! This front adds **no verification of its own**. It locates the three
+//! This front adds no release-policy decisions of its own. It locates the
 //! documents `docs/RELEASE-SIGNING-POLICY-V1.md` names, then hands their
 //! exact bytes to `semaprax::release_provenance`, the independent decoder
 //! and binding verifier that owns every rule. Everything is re-derived from
@@ -19,14 +19,14 @@
 //! property for the verifier, and this adapter preserves it. It publishes
 //! nothing, signs nothing, and creates no key or identity material.
 //!
-//! **No SEMAPRAX release is signed today** and the standalone CLI carries no
-//! cryptographic verifier. Its successful unsigned path reports
-//! `VERIFIED UNSIGNED RELEASE` -- never evidence that one was signed. A host
-//! with real offline verification authority can inject an
-//! [`OfflineBundleVerificationCapability`]; only that path consumes the
-//! bounded bundle/root/attestation material. If signed material is present
-//! without that explicit authority, this front refuses rather than treating
-//! structural framing as cryptographic verification.
+//! **No published SEMAPRAX release is signed today.** For a directory that
+//! carries the complete offline Sigstore material, the standalone CLI uses
+//! [`SigstoreOfflineVerifier`] to verify signatures, certificate identity and
+//! issuer, certificate chain and SCT, transparency-log proofs and promises,
+//! and bundle consistency against the exact trusted-root snapshot in that
+//! directory. An embedding host may inject another explicit
+//! [`OfflineBundleVerificationCapability`]. A directory without the complete
+//! material stays on the binding-only `VERIFIED UNSIGNED RELEASE` path.
 
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -38,7 +38,7 @@ use semaprax::release_provenance::{
     parse_manifest, parse_sigstore_trusted_root_jsonl, verify_offline_release_with_capability,
     verify_provenance_binds_manifest, verify_release_binding,
     verify_signature_claim_binds_provenance, verify_signature_claim_consumes_sigstore_bundle,
-    OfflineBundleVerificationCapability, OfflineReleaseArchive,
+    OfflineBundleVerificationCapability, OfflineReleaseArchive, SigstoreOfflineVerifier,
 };
 
 const USAGE: &str = "release accepts exactly `verify <release-dir>`; see `semaprax help release`";
@@ -72,13 +72,6 @@ const MAX_OFFLINE_ARCHIVE_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 /// identity, SPX-Z704 artifact), because this front decides none of them.
 fn document_error(message: String) -> Diagnostic {
     Diagnostic::io("SPX-Z705", message)
-}
-
-/// The structural verifier has no ambient cryptographic authority. This code
-/// makes the missing authority explicit instead of falling through to the
-/// unsigned report when a directory presents signed release material.
-fn capability_error(message: String) -> Diagnostic {
-    Diagnostic::io("SPX-Z706", message)
 }
 
 /// `release verify <dir>` and nothing else. An unknown subcommand, a missing
@@ -521,13 +514,20 @@ fn load_offline_release(directory: &Path) -> Result<OfflineRelease, Diagnostic> 
     })
 }
 
-/// Verify signed offline material only through an authority the embedding host
-/// explicitly supplied. This adapter never manufactures a verifier, opens a
-/// network connection, or launches `cosign`; the capability alone decides
-/// cryptographic validity after the aggregate verifier's structural gates.
-pub(crate) fn run_with_offline_capability(
+#[derive(Clone, Copy)]
+enum OfflineVerifierKind {
+    BuiltInSigstore,
+    CallerSupplied,
+}
+
+/// Verify signed offline material through the selected pure capability. This
+/// adapter never opens a network connection or launches `cosign`; the
+/// capability receives only bounded bytes after the aggregate structural
+/// gates have succeeded.
+fn run_with_offline_capability_kind(
     directory: &Path,
     capability: &dyn OfflineBundleVerificationCapability,
+    kind: OfflineVerifierKind,
 ) -> Result<String, Diagnostic> {
     let release = load_offline_release(directory)?;
     let OfflineRelease {
@@ -556,13 +556,27 @@ pub(crate) fn run_with_offline_capability(
         capability,
     )?;
     let parsed_manifest = parse_manifest(&manifest)?;
+    let verification = match kind {
+        OfflineVerifierKind::BuiltInSigstore => {
+            "status: CRYPTOGRAPHICALLY VERIFIED OFFLINE\n\
+             Verification: the built-in Sigstore verifier accepted each exact subject and v0.3 bundle,\n\
+             its signing certificate and pinned identity/issuer, certificate chain and SCT,\n\
+             transparency-log inclusion proof, signed checkpoint and promise, and bundle consistency\n\
+             against the exact trusted-root snapshot supplied in this directory.\n\
+             Boundary: this is historical verification against supplied root bytes, not a network\n\
+             freshness or current-revocation check and not proof that these files were published.\n"
+        }
+        OfflineVerifierKind::CallerSupplied => {
+            "status: OFFLINE RELEASE ACCEPTED BY CALLER-SUPPLIED VERIFICATION CAPABILITY\n\
+             This command made no independent cryptographic claim: the embedding host supplied\n\
+             the verifier and accepted the exact bounded subjects, bundles, and trusted root.\n"
+        }
+    };
     Ok(format!(
         "release verify: {directory}\n\
          manifest: {MANIFEST_FILE} (version {version}, tag {tag}, commit {commit})\n\
          offline material: {MESSAGE_BUNDLE_FILE}, {TRUSTED_ROOT_FILE}, and {artifacts} archive attestations\n\
-         status: OFFLINE RELEASE ACCEPTED BY CALLER-SUPPLIED VERIFICATION CAPABILITY\n\
-         This command made no independent cryptographic claim: the embedding host supplied\n\
-         the verifier and accepted the exact bounded subjects, bundles, and trusted root.\n\
+         {verification}\
          Nothing was published, signed, executed, installed, or fetched.\n",
         directory = directory.display(),
         version = parsed_manifest.version,
@@ -570,6 +584,21 @@ pub(crate) fn run_with_offline_capability(
         commit = parsed_manifest.commit,
         artifacts = parsed_manifest.artifacts.len(),
     ))
+}
+
+pub(crate) fn run_with_offline_capability(
+    directory: &Path,
+    capability: &dyn OfflineBundleVerificationCapability,
+) -> Result<String, Diagnostic> {
+    run_with_offline_capability_kind(directory, capability, OfflineVerifierKind::CallerSupplied)
+}
+
+fn run_with_builtin_offline_verifier(directory: &Path) -> Result<String, Diagnostic> {
+    run_with_offline_capability_kind(
+        directory,
+        &SigstoreOfflineVerifier,
+        OfflineVerifierKind::BuiltInSigstore,
+    )
 }
 
 /// What the directory says about signing. A missing claim document is the
@@ -611,19 +640,17 @@ notarization, and production support are separate claims this command does\n\
 not make. Nothing was published, signed, executed, or installed.\n";
 
 /// Verify one release directory and render its deterministic report. Signed
-/// material requires an explicit verifier supplied by the embedding host;
-/// the standalone command intentionally has none.
+/// material uses an explicit embedding-host verifier when one was supplied,
+/// otherwise the standalone built-in Sigstore verifier.
 pub(crate) fn run(
     directory: &Path,
     capability: Option<&(dyn OfflineBundleVerificationCapability + Sync)>,
 ) -> Result<String, Diagnostic> {
     if material_is_present(directory)? {
-        let capability = capability.ok_or_else(|| {
-            capability_error(
-                "release directory contains offline Sigstore material, but this CLI invocation has no caller-supplied offline verification capability".to_owned(),
-            )
-        })?;
-        return run_with_offline_capability(directory, capability);
+        return match capability {
+            Some(capability) => run_with_offline_capability(directory, capability),
+            None => run_with_builtin_offline_verifier(directory),
+        };
     }
     let manifest_bytes = read_document(directory, MANIFEST_FILE)?;
     let provenance_bytes = read_document(directory, PROVENANCE_FILE)?;
@@ -853,16 +880,16 @@ mod tests {
     }
 
     #[test]
-    fn signed_material_without_explicit_capability_refuses_before_unsigned_reporting() {
+    fn partial_signed_material_refuses_before_builtin_verification_or_unsigned_reporting() {
         let directory = std::env::temp_dir().join(format!(
             "semaprax-release-capability-required-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join(MESSAGE_BUNDLE_FILE), b"present").unwrap();
-        let error = run(&directory, None).expect_err("signed material needs explicit authority");
-        assert_eq!(error.code, "SPX-Z706");
-        assert!(error.message.contains("no caller-supplied"));
+        let error = run(&directory, None).expect_err("partial signed material must fail closed");
+        assert_eq!(error.code, "SPX-Z705");
+        assert!(error.message.contains(MANIFEST_FILE));
         std::fs::remove_dir_all(directory).unwrap();
     }
 

@@ -8,9 +8,8 @@ static HOST: driver::PrivateHost = driver::PrivateHost {
     },
     build_rust: semaprax_toolchain::build_rust,
     source_live: semaprax_toolchain::source_live_cli::run,
-    // This host has no real Sigstore/cosign verifier capability. Keep the
-    // authority absent rather than letting structural bundle parsing look
-    // like cryptographic verification.
+    // No private override: signed release material uses the same pure,
+    // built-in offline Sigstore verifier as the public executable.
     offline_release_verifier: None,
     #[cfg(windows)]
     build_owned_npm: semaprax_toolchain::build_owned_npm,

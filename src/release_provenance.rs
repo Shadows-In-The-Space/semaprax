@@ -1,5 +1,6 @@
-//! Independent, filesystem-light verification of release provenance and
-//! signature *binding* (#168). This module signs nothing and cannot: the
+//! Independent, filesystem-light verification of release provenance,
+//! signature binding, and offline Sigstore authenticity (#168). This module
+//! signs nothing and cannot: the
 //! compiler and generated code carry no ambient signing authority (see
 //! `AGENTS.md`), no signing key or keyless-signing identity is available in
 //! this repository, and this file never spawns a process, opens a network
@@ -20,30 +21,24 @@
 //! provenance bytes (a replay) is rejected because that digest cannot equal
 //! the one recomputed over the provenance under test.
 //!
-//! ## What this module deliberately does **not** do
-//!
-//! It never decodes, parses, or cryptographically verifies `signature` or
-//! `certificate` bytes in a [`ParsedSignatureClaim`]. Doing that honestly
-//! requires a signature-verification implementation (Sigstore/cosign
-//! bundle verification, or raw Ed25519/ECDSA point arithmetic), which needs
-//! a cryptography dependency this change is not permitted to add and which
-//! nobody has requested SEMAPRAX carry today. Treating `signature` and
-//! `certificate` as opaque, structurally-checked byte strings -- present,
-//! non-empty, and bound to the right subject digest and identity -- is a
-//! **binding** check, not an **authenticity** check. A forged claim that
-//! never touched a real private key but happens to name an approved
-//! identity and the right subject digest is *not* rejected by this module
-//! alone; only pairing this binding check with a real external verifier
-//! (e.g. `cosign verify-blob` against the recorded identity) closes that
-//! gap. See `docs/RELEASE-SIGNING-POLICY-V1.md` for the full nonclaims list
-//! and the human-owned checklist this module's callers still depend on.
+//! The structural APIs deliberately treat `signature` and `certificate`
+//! fields as opaque binding material; callers must not present those APIs as
+//! authenticity checks. [`SigstoreOfflineVerifier`] is the separate
+//! cryptographic capability: it verifies v0.3 bundles, exact certificate SAN
+//! and OIDC issuer, certificate chain and SCT, transparency-log evidence,
+//! and subject signatures against caller-supplied trusted-root bytes. It
+//! performs no trust-root discovery and no network access, so success is
+//! historical verification under that exact snapshot, not evidence of
+//! current revocation state or publication.
 //!
 //! Integrity (do these bytes match what was recorded?), authenticity (were
 //! they produced by the claimed identity?), provenance (what exactly was
 //! bound?), and reproducibility (can a third party rebuild the same bytes?)
 //! remain four separate claims here, exactly as
 //! [issue #168](https://github.com/wavect/semaprax/issues/168) requires;
-//! this module only ever advances the first and third.
+//! the structural layer advances the first and third; the explicit Sigstore
+//! capability can additionally establish authenticity under its supplied
+//! historical root snapshot.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -54,6 +49,7 @@ use sha2::{Digest as _, Sha256};
 use crate::diagnostic::Diagnostic;
 
 mod offline_bundle;
+mod sigstore;
 pub use offline_bundle::{
     parse_sigstore_archive_attestation_bundle, parse_sigstore_message_signature_bundle,
     parse_sigstore_trusted_root_jsonl, verify_archive_attestation_binds_manifest,
@@ -65,6 +61,7 @@ pub use offline_bundle::{
     ParsedSigstoreTrustedRoot, DSSE_IN_TOTO_PAYLOAD_TYPE, IN_TOTO_STATEMENT_TYPE,
     SIGSTORE_BUNDLE_MEDIA_TYPE, SLSA_PROVENANCE_V1_PREDICATE_TYPE,
 };
+pub use sigstore::SigstoreOfflineVerifier;
 
 pub const PROVENANCE_SCHEMA: &str = "semaprax.release-provenance.v1";
 pub const SIGNATURE_CLAIM_SCHEMA: &str = "semaprax.release-signature-claim.v1";

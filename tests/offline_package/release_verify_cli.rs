@@ -458,12 +458,11 @@ fn a_bound_signature_claim_is_still_reported_as_an_unsigned_release() {
     fs::remove_dir_all(&directory).ok();
 }
 
-/// The standalone executable has no Sigstore/cosign authority. Once a
-/// directory presents signed offline material it must refuse rather than
-/// continuing down the unsigned, binding-only report path; an embedding host
-/// must supply the explicit offline verification capability instead.
+/// Any signed-material marker selects the closed aggregate route. Incomplete
+/// material must fail before either built-in cryptographic verification or
+/// the unsigned, binding-only report path.
 #[test]
-fn release_verify_refuses_offline_bundle_material_without_a_capability() {
+fn release_verify_refuses_incomplete_offline_bundle_material() {
     let directory = release_directory("offline-material-without-capability");
     fs::write(
         directory.join("release-provenance.bundle"),
@@ -472,9 +471,9 @@ fn release_verify_refuses_offline_bundle_material_without_a_capability() {
     .unwrap();
 
     let output = verify(&directory);
-    assert_rejected(&output, "SPX-Z706");
+    assert_rejected(&output, "SPX-Z705");
     assert!(
-        stderr(&output).contains("no caller-supplied offline verification capability"),
+        stderr(&output).contains("release-signature-claim.json"),
         "{}",
         stderr(&output)
     );

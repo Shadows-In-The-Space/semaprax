@@ -45,6 +45,7 @@ sha2 = "=0.11.0"
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std"] }
 semaprax-oci-package = { version = "=0.1.0", path = "crates/semaprax-oci-package" }
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+sigstore-verify = { version = "=0.11.0", default-features = false }
 webpki-roots = "=1.0.9"
 wasmparser = { version = "=0.258.0", default-features = false, features = ["component-model", "features", "validate"] }
 

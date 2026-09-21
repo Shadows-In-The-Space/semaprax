@@ -51,9 +51,10 @@ mod native_scratch_tests;
 /// Creates a project and returns the destination as spelled plus the
 /// template it published.
 pub type NewProjectHook = fn(&[String]) -> Result<(PathBuf, &'static str), (String, u8)>;
-/// An embedding host's explicit authority for cryptographically verifying
-/// bounded offline release material. The standalone compiler provides none;
-/// structural release parsing must never synthesize this authority.
+/// An embedding host's explicit override for cryptographically verifying
+/// bounded offline release material. When absent, the release command uses
+/// the pure built-in Sigstore verifier; structural parsing alone is never
+/// reported as cryptographic success.
 pub type OfflineReleaseVerifier =
     &'static (dyn semaprax::release_provenance::OfflineBundleVerificationCapability + Sync);
 

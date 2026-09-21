@@ -58,6 +58,11 @@ use std::collections::HashSet;
 // module's own doc comment, and "Reification: HIR to Kernel-0, and its
 // unproved edge" / "Immediate follow-ups" in
 // `docs/SEMANTIC-KERNEL-V1.md` for why this exists.
+// The first rung-2 integration boundary is production-compiled but remains
+// deliberately non-authoritative; its only current caller is the test-only
+// formatter shadow. Keep dead-code linting from forcing fake production use.
+#[allow(dead_code)]
+pub(crate) mod canonical_char_renderer;
 mod eval;
 mod reify;
 mod term;

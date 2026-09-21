@@ -48,6 +48,8 @@ pub(crate) fn canonical_char(value: u32) -> String {
         text.push_str(&format!("\\u{{{:x}}}", value));
     }
     text.push('\'');
+    #[cfg(test)]
+    crate::kernel_zero::canonical_char_renderer::verify_shadow(value, &text);
     text
 }
 pub(crate) fn canonical_string(value: &str) -> String {

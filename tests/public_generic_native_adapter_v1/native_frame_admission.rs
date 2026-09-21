@@ -1,8 +1,10 @@
 //! Issue #173: native-only admission of descriptor-bound logical carrier
 //! frames. Physical consumer dispatch/transfer integration remains open.
 
+use std::cell::Cell;
 use std::path::Path;
 
+use semaprax::diagnostic::Diagnostic;
 use semaprax::public_generic_abi::carrier::frame::{CarrierLeaf, LeafKind};
 use semaprax::public_generic_abi::carrier::{
     CARRIER_CAPACITY, CARRIER_REPLAY_MISMATCH, HANDLE_GENERATION_MISMATCH, ILLEGAL_TRANSITION,
@@ -249,4 +251,137 @@ fn native_descriptor_bound_admission_refuses_hostile_tickets() {
         admitted, leaves,
         "the valid control exposes the bound leaves"
     );
+}
+
+/// The logical admission boundary exposes an effect callback so an installer
+/// can bind its next operation to successful admission. These are deliberately
+/// callback-local counters, not a claim about the rendered C11 provider: that
+/// physical handoff is outside this native-only plumbing and overlaps #229.
+#[test]
+fn native_descriptor_bound_admission_refuses_before_the_installer_callback() {
+    let descriptor = verified_descriptor();
+    let admission = NativeInputAdmission::from_verified_descriptor(&descriptor, 41)
+        .expect("a verified descriptor creates the native input boundary");
+    let leaves = admission
+        .binding()
+        .leaf_paths()
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            CarrierLeaf::new(path.clone(), LeafKind::Bytes, vec![index as u8, 0xff])
+        })
+        .collect::<Vec<_>>();
+    let valid_frame = admission
+        .binding()
+        .frame_with_leaves(leaves.clone())
+        .encode();
+    let valid_ticket = || {
+        NativeInputTicket::new(
+            admission.generation(),
+            NativeCarrierOwnership::Caller,
+            admission.cleanup_plan_digest(),
+            valid_frame.clone(),
+        )
+    };
+
+    let first_path = admission.binding().leaf_paths()[0].as_bytes();
+    let path_offset = valid_frame
+        .windows(first_path.len())
+        .position(|window| window == first_path)
+        .expect("the first trusted path occurs verbatim in its encoded leaf")
+        + first_path.len();
+    let mut unknown_tag_frame = valid_frame.clone();
+    assert_eq!(unknown_tag_frame[path_offset], 0);
+    unknown_tag_frame[path_offset] = 1;
+    let mut overlong_leaf_frame = valid_frame.clone();
+    let length_offset = path_offset + 1;
+    overlong_leaf_frame[length_offset..length_offset + 8]
+        .copy_from_slice(&(65_537u64).to_le_bytes());
+
+    let mut substituted_path = leaves.clone();
+    substituted_path[0] = CarrierLeaf::new(
+        "native.admission.hostile.substituted.path",
+        LeafKind::Bytes,
+        substituted_path[0].payload().to_vec(),
+    );
+    let cases = vec![
+        (
+            CASES[0],
+            NativeInputTicket::new(
+                admission.generation() + 1,
+                NativeCarrierOwnership::Caller,
+                admission.cleanup_plan_digest(),
+                valid_frame.clone(),
+            ),
+        ),
+        (
+            CASES[1],
+            NativeInputTicket::new(
+                admission.generation(),
+                NativeCarrierOwnership::Provider,
+                admission.cleanup_plan_digest(),
+                valid_frame.clone(),
+            ),
+        ),
+        (
+            CASES[2],
+            NativeInputTicket::new(
+                admission.generation(),
+                NativeCarrierOwnership::Caller,
+                admission.cleanup_plan_digest(),
+                admission
+                    .binding()
+                    .frame_with_leaves(substituted_path)
+                    .encode(),
+            ),
+        ),
+        (
+            CASES[3],
+            NativeInputTicket::new(
+                admission.generation(),
+                NativeCarrierOwnership::Caller,
+                admission.cleanup_plan_digest(),
+                unknown_tag_frame,
+            ),
+        ),
+        (
+            CASES[4],
+            NativeInputTicket::new(
+                admission.generation(),
+                NativeCarrierOwnership::Caller,
+                admission.cleanup_plan_digest(),
+                overlong_leaf_frame,
+            ),
+        ),
+        (
+            CASES[5],
+            NativeInputTicket::new(
+                admission.generation(),
+                NativeCarrierOwnership::Caller,
+                format!("{}-substituted", admission.cleanup_plan_digest()),
+                valid_frame.clone(),
+            ),
+        ),
+    ];
+
+    let calls = Cell::new(0);
+    for ((name, expected_code), ticket) in &cases {
+        let error = admission
+            .admit_then(ticket, |_| {
+                calls.set(calls.get() + 1);
+                Ok::<_, Diagnostic>(())
+            })
+            .expect_err("hostile ticket must stop before the installer callback");
+        assert_eq!(error.code, *expected_code, "{name}: stable refusal class");
+        assert_eq!(calls.get(), 0, "{name}: callback must not run");
+    }
+
+    let admitted = admission
+        .admit_then(&valid_ticket(), |admitted| {
+            calls.set(calls.get() + 1);
+            Ok::<_, Diagnostic>(admitted.to_vec())
+        })
+        .expect("the valid ticket reaches the installer callback");
+    assert_eq!(calls.get(), 1, "only the valid ticket invokes the callback");
+    assert_eq!(admitted, leaves, "the callback receives the bound leaves");
 }

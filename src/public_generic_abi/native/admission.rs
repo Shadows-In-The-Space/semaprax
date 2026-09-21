@@ -140,4 +140,21 @@ impl NativeInputAdmission {
         self.binding.validate_frame(&frame)?;
         Ok(frame.leaves().to_vec())
     }
+
+    /// Admit a ticket and invoke `effect` only after every admission check has
+    /// succeeded. This gives an installer one narrow, auditable sequencing
+    /// point: malformed or wrongly bound tickets cannot reach its callback.
+    ///
+    /// The callback is still caller-provided plumbing, not the C11 provider's
+    /// physical allocation, transfer, or dispatch path. In particular, this
+    /// method does not claim that the currently rendered provider is guarded;
+    /// installing it there remains follow-on physical integration work.
+    pub fn admit_then<T>(
+        &self,
+        ticket: &NativeInputTicket,
+        effect: impl FnOnce(&[CarrierLeaf]) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let leaves = self.admit(ticket)?;
+        effect(&leaves)
+    }
 }

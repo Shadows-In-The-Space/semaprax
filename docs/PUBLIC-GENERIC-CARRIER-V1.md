@@ -205,6 +205,17 @@ gap, tracked separately (#154/#155 already drive the state machine and trace
 against fixture endpoints; wiring the frame codec into that same path is
 follow-on work, not performed this round).
 
+`native::admission::NativeInputAdmission` is a narrower native-only staging
+seam: it derives the input binding and settlement digest from a verified
+descriptor, then `admit_then` invokes an installer-provided callback only
+after generation, caller ownership, settlement digest, bounded-frame, and
+semantic-binding checks pass. Its hostile regression proves all six admitted
+ticket substitutions leave that callback at zero calls, while the canonical
+ticket calls it exactly once with the descriptor-bound leaves. This is not a
+claim that the C11 provider's physical allocation, transfer, or endpoint
+dispatch is protected: no production provider installs the seam, and that
+handoff remains separate follow-on work.
+
 ## The logical value state machine
 
 Every handle (root or leaf) is in exactly one of these states:

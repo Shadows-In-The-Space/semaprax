@@ -6,6 +6,108 @@ struct ParityModelHandler {
     reply: ModelReply,
 }
 
+fn backend_label(backend: crate::agent_lifecycle::authorization::StageBackend<'_>) -> String {
+    super::live::target_backend_identity(backend)
+}
+
+fn assert_rebound_model_evidence(
+    reference_requests: &[Vec<u8>],
+    reference_evidence: &[crate::agent_lifecycle::iterative::model::ModelEvidence],
+    actual_requests: &[Vec<u8>],
+    actual_evidence: &[crate::agent_lifecycle::iterative::model::ModelEvidence],
+    label: &str,
+) {
+    assert_eq!(
+        actual_requests.len(),
+        reference_requests.len(),
+        "{label}: requests"
+    );
+    assert_eq!(
+        actual_evidence.len(),
+        reference_evidence.len(),
+        "{label}: evidence"
+    );
+    for ((reference_request, reference), (actual_request, actual)) in reference_requests
+        .iter()
+        .zip(reference_evidence)
+        .zip(actual_requests.iter().zip(actual_evidence))
+    {
+        assert_eq!(
+            actual.settlement(),
+            reference.settlement(),
+            "{label}: settlement"
+        );
+        assert_eq!(
+            actual.dispatched(),
+            reference.dispatched(),
+            "{label}: dispatch"
+        );
+        assert_eq!(
+            actual.accounting(),
+            reference.accounting(),
+            "{label}: accounting"
+        );
+        actual.replay_wire(actual_request).unwrap();
+        assert!(
+            reference.replay_wire(actual_request).is_err(),
+            "{label}: cross-backend model evidence replayed"
+        );
+        assert_ne!(
+            actual_request, reference_request,
+            "{label}: model request binding"
+        );
+    }
+}
+
+fn assert_rebound_target_evidence(
+    reference: &TargetEffectRun,
+    reference_wires: &[Vec<u8>],
+    actual: &TargetEffectRun,
+    actual_wires: &[Vec<u8>],
+    label: &str,
+) {
+    assert_eq!(
+        actual_wires.len(),
+        reference_wires.len(),
+        "{label}: effect requests"
+    );
+    assert_eq!(
+        actual.target_evidence().len(),
+        reference.target_evidence().len(),
+        "{label}: effect evidence"
+    );
+    for ((reference_wire, reference), (actual_wire, actual)) in reference_wires
+        .iter()
+        .zip(reference.target_evidence())
+        .zip(actual_wires.iter().zip(actual.target_evidence()))
+    {
+        assert_eq!(
+            actual.settlement(),
+            reference.settlement(),
+            "{label}: effect settlement"
+        );
+        assert_eq!(
+            actual.dispatched(),
+            reference.dispatched(),
+            "{label}: effect dispatch"
+        );
+        assert_eq!(
+            actual.accounting(),
+            reference.accounting(),
+            "{label}: effect accounting"
+        );
+        actual.replay_wire(actual_wire).unwrap();
+        assert!(
+            reference.replay_wire(actual_wire).is_err(),
+            "{label}: cross-backend effect evidence replayed"
+        );
+        assert_ne!(
+            actual_wire, reference_wire,
+            "{label}: effect request binding"
+        );
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ModelReply {
     Valid,
@@ -63,8 +165,11 @@ fn model_target_run_on(
         calls: 0,
         reply,
     };
-    let binding = crate::agent_lifecycle::iterative::model::ModelSourceBinding::new(
+    let backend_label = backend_label(backend);
+    let binding = crate::agent_lifecycle::iterative::model::ModelSourceBinding::for_target(
         "fixture.agent.model.target-parity",
+        compiled.digest(),
+        &backend_label,
     )
     .unwrap();
     let mut source = crate::agent_lifecycle::iterative::model::TargetModelSource::new(
@@ -199,12 +304,14 @@ fn model_and_effect_host_boundaries_replay_identically_across_stage_backends() {
             expected_run.lifecycle().value(),
             "{label}"
         );
-        assert_eq!(actual.1, expected.1, "{label}: model requests");
-        assert_eq!(actual.2, expected.2, "{label}: model evidence");
+        assert_rebound_model_evidence(&expected.1, &expected.2, &actual.1, &actual.2, label);
         assert_eq!(actual.3, expected.3, "{label}: model accounting");
-        assert_eq!(
-            actual.5.request_wires, expected.5.request_wires,
-            "{label}: effect requests"
+        assert_rebound_target_evidence(
+            expected_run,
+            &expected.5.request_wires,
+            actual_run,
+            &actual.5.request_wires,
+            label,
         );
         assert_eq!(
             actual_run.accounting(),
@@ -344,14 +451,13 @@ fn model_boundary_settles_every_refusal_before_effect_dispatch_on_all_stage_back
                     .collect::<Vec<_>>()),
                 "{label}: model refusal"
             );
-            assert_eq!(actual.1, reference.1, "{label}: model requests");
-            assert_eq!(actual.2, reference.2, "{label}: model evidence");
+            assert_rebound_model_evidence(&reference.1, &reference.2, &actual.1, &actual.2, label);
             assert_eq!(actual.3, reference.3, "{label}: model accounting");
             assert_eq!(actual.4, reference.4, "{label}: model calls");
             assert_eq!(actual.5.calls, 0, "{label}: effects must not dispatch");
-            assert_eq!(
-                actual.5.request_wires, reference.5.request_wires,
-                "{label}: effect requests"
+            assert!(
+                actual.5.request_wires.is_empty(),
+                "{label}: effects must not request"
             );
         }
     }

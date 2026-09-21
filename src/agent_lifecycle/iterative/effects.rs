@@ -936,24 +936,40 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             );
             assert_eq!(actual.accounting(), expected.accounting(), "{label}");
             assert_eq!(actual.failure(), expected.failure(), "{label}");
-            assert_eq!(
-                handler.request_wires, expected_handler.request_wires,
-                "{label}"
-            );
             assert_eq!(handler.calls, expected_handler.calls, "{label}");
             assert_eq!(
-                actual
-                    .target_evidence()
-                    .iter()
-                    .map(crate::agent_lifecycle::authorization::target_protocol::TargetEvidence::canonical_wire)
-                    .collect::<Vec<_>>(),
-                expected
-                    .target_evidence()
-                    .iter()
-                    .map(crate::agent_lifecycle::authorization::target_protocol::TargetEvidence::canonical_wire)
-                    .collect::<Vec<_>>(),
+                handler.request_wires.len(),
+                expected_handler.request_wires.len(),
                 "{label}"
             );
+            for ((expected_evidence, expected_wire), (actual_evidence, actual_wire)) in expected
+                .target_evidence()
+                .iter()
+                .zip(&expected_handler.request_wires)
+                .zip(actual.target_evidence().iter().zip(&handler.request_wires))
+            {
+                assert_eq!(
+                    actual_evidence.settlement(),
+                    expected_evidence.settlement(),
+                    "{label}"
+                );
+                assert_eq!(
+                    actual_evidence.dispatched(),
+                    expected_evidence.dispatched(),
+                    "{label}"
+                );
+                assert_eq!(
+                    actual_evidence.accounting(),
+                    expected_evidence.accounting(),
+                    "{label}"
+                );
+                actual_evidence.replay_wire(actual_wire).unwrap();
+                assert!(
+                    expected_evidence.replay_wire(actual_wire).is_err(),
+                    "{label}: cross-backend replay"
+                );
+                assert_ne!(actual_wire, expected_wire, "{label}: backend grant binding");
+            }
         }
 
         for backend in [

@@ -268,15 +268,20 @@ impl TargetGrant {
     pub(in crate::agent_lifecycle) fn bind(
         authorization: Authorized,
         invocation_root: &str,
+        execution_binding: Option<&str>,
         turn: u64,
         operation: TargetOperation,
         argument: &TypedCarrier,
     ) -> Result<Self, ProtocolError> {
         validate_digest(invocation_root)?;
+        if let Some(binding) = execution_binding {
+            validate_digest(binding)?;
+        }
         let request = authorization.consume();
         Ok(Self::bind_request(
             request,
             invocation_root,
+            execution_binding,
             turn,
             operation,
             argument,
@@ -286,6 +291,7 @@ impl TargetGrant {
     fn bind_request(
         authorization: AuthorizedRequest,
         invocation_root: &str,
+        execution_binding: Option<&str>,
         turn: u64,
         operation: TargetOperation,
         argument: &TypedCarrier,
@@ -295,6 +301,12 @@ impl TargetGrant {
         frame(&mut bytes, authorization.binding().as_bytes());
         frame(&mut bytes, authorization.seal());
         frame(&mut bytes, invocation_root.as_bytes());
+        // The legacy route intentionally has no extra frame, preserving its
+        // established grant and evidence bytes. Explicit target parity binds
+        // a domain-separated execution digest before an opaque grant exists.
+        if let Some(binding) = execution_binding {
+            frame(&mut bytes, binding.as_bytes());
+        }
         frame(&mut bytes, &turn.to_be_bytes());
         operation.canonical(&mut bytes);
         frame(&mut bytes, argument_digest.as_bytes());
@@ -1060,6 +1072,7 @@ mod tests {
         TargetGrant::bind_request(
             request(),
             "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            None,
             3,
             operation(),
             &carrier("fixture.Argument", b"request"),

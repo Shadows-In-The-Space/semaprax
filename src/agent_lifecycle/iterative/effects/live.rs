@@ -17,6 +17,25 @@ use crate::agent_lifecycle::CheckpointStore;
 use crate::live_invocation::source_journal::{SourceIoLimits, SourcePolicyBindingV6};
 use serde_json::Value;
 
+pub(super) fn target_backend_identity(
+    backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+) -> String {
+    match backend {
+        crate::agent_lifecycle::authorization::StageBackend::Interpreter => "interpreter".into(),
+        crate::agent_lifecycle::authorization::StageBackend::Native => "native:-O0".into(),
+        crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization(level) => {
+            format!("native:{level}")
+        }
+        crate::agent_lifecycle::authorization::StageBackend::Wasm { source } => format!(
+            "core-wasm:{}",
+            digest(
+                b"semaprax.agent-target-stage-backend.wasm.v1\0",
+                source.as_bytes(),
+            )
+        ),
+    }
+}
+
 struct LiveDispatch<'a> {
     dispatch: Dispatch<'a>,
     proposal: Option<String>,
@@ -39,6 +58,7 @@ struct TargetLiveDispatch<'a> {
     accounting: TargetAccounting,
     evidence: Vec<target_protocol::TargetEvidence>,
     failure: Option<&'static str>,
+    execution_binding: Option<String>,
 }
 
 impl TargetLiveDispatch<'_> {
@@ -187,6 +207,7 @@ impl IterativeDriver for TargetLiveDispatch<'_> {
         let grant = TargetGrant::bind(
             authorization,
             context.invocation_root,
+            self.execution_binding.as_deref(),
             turn,
             operation,
             &argument,
@@ -415,6 +436,7 @@ impl CompiledTypedEffects {
             effects,
             cancellation,
             crate::agent_lifecycle::authorization::StageBackend::Interpreter,
+            None,
         )
     }
 
@@ -432,6 +454,7 @@ impl CompiledTypedEffects {
         cancellation: &AgentCancellation,
         backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
     ) -> Result<TargetEffectRun, Vec<Diagnostic>> {
+        let execution_binding = self.target_execution_binding(backend);
         self.run_target_live_inner(
             task,
             source,
@@ -440,6 +463,19 @@ impl CompiledTypedEffects {
             effects,
             cancellation,
             backend,
+            Some(execution_binding),
+        )
+    }
+
+    #[cfg(test)]
+    fn target_execution_binding(
+        &self,
+        backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+    ) -> String {
+        let backend = target_backend_identity(backend);
+        digest(
+            b"semaprax.agent-target-stage-execution-binding.v1\0",
+            format!("{}\0{}", self.digest(), backend).as_bytes(),
         )
     }
 
@@ -453,6 +489,7 @@ impl CompiledTypedEffects {
         effects: EffectBudget,
         cancellation: &AgentCancellation,
         backend: crate::agent_lifecycle::authorization::StageBackend<'_>,
+        execution_binding: Option<String>,
     ) -> Result<TargetEffectRun, Vec<Diagnostic>> {
         let effects = EffectBudget {
             max_calls: effects.max_calls.min(self.limits.max_calls),
@@ -482,6 +519,7 @@ impl CompiledTypedEffects {
             accounting: TargetAccounting::default(),
             evidence: Vec::new(),
             failure: None,
+            execution_binding,
         };
         let stages = IterativeBudget {
             max_iterations: stages.max_iterations.min(self.max_iterations),

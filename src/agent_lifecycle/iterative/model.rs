@@ -22,6 +22,7 @@ const GRANT_DOMAIN: &[u8] = b"semaprax.agent-model-host.grant.v1\0";
 const REQUEST_DOMAIN: &[u8] = b"semaprax.agent-model-host.request.v1\0";
 const RESPONSE_DOMAIN: &[u8] = b"semaprax.agent-model-host.response.v1\0";
 const EVIDENCE_DOMAIN: &[u8] = b"semaprax.agent-model-host.evidence.v1\0";
+const TARGET_BINDING_DOMAIN: &[u8] = b"semaprax.agent-model-host.target-execution-binding.v1\0";
 const MAX_FIELD_BYTES: usize = 65_536;
 const MAX_WIRE_BYTES: usize = 1_048_576;
 
@@ -128,13 +129,39 @@ impl ModelAccounting {
 /// binding label, not provider, network, credential, or retry authority.
 pub struct ModelSourceBinding {
     root: String,
+    execution_binding: Option<String>,
 }
 
 impl ModelSourceBinding {
     pub fn new(root: impl Into<String>) -> Result<Self, ModelProtocolError> {
         let root = root.into();
         validate_text(&root)?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            execution_binding: None,
+        })
+    }
+
+    /// Local target-parity binding. It is descriptive proof data, not a
+    /// provider capability: the model host remains the explicitly injected
+    /// handler owned by [`TargetModelSource`].
+    pub(in crate::agent_lifecycle) fn for_target(
+        root: impl Into<String>,
+        program_binding: &str,
+        backend: &str,
+    ) -> Result<Self, ModelProtocolError> {
+        let root = root.into();
+        validate_text(&root)?;
+        validate_digest(program_binding)?;
+        validate_text(backend)?;
+        let execution_binding = digest(
+            TARGET_BINDING_DOMAIN,
+            format!("{}\0{}\0{}", root, program_binding, backend).as_bytes(),
+        );
+        Ok(Self {
+            root,
+            execution_binding: Some(execution_binding),
+        })
     }
 }
 
@@ -146,6 +173,9 @@ impl ModelGrant {
     fn bind(binding: &ModelSourceBinding, request_without_grant: &[u8]) -> Self {
         let mut bytes = Vec::new();
         frame(&mut bytes, binding.root.as_bytes());
+        if let Some(execution_binding) = &binding.execution_binding {
+            frame(&mut bytes, execution_binding.as_bytes());
+        }
         frame(&mut bytes, request_without_grant);
         Self {
             grant_id: digest(GRANT_DOMAIN, &bytes),
@@ -748,10 +778,7 @@ fn digest(domain: &[u8], bytes: &[u8]) -> String {
     let mut hash = Sha256::new();
     hash.update(domain);
     hash.update(bytes);
-    format!(
-        "sha256:{:x}",
-        crate::digest_hex::LowerHex(hash.finalize())
-    )
+    format!("sha256:{:x}", crate::digest_hex::LowerHex(hash.finalize()))
 }
 
 fn hex(bytes: &[u8]) -> String {

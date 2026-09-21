@@ -120,6 +120,12 @@ fn check_test_and_run_pass_on_the_interpreter() {
                 .contains("dependencies/std.export.policy/0.1.0"),
             "the workspace does not carry the bundled std.export.policy source"
         );
+        assert!(
+            snapshot
+                .workspace_manifest()
+                .contains("dependencies/std.webhook/0.1.0"),
+            "the workspace does not carry the bundled std.webhook source"
+        );
         let options = project::ProjectExecutionOptions::default();
         assert_eq!(
             snapshot.execute_entry(&options)?.outcome(),
@@ -590,11 +596,11 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
 }
 
 /// The real reference application composes database, HTTP, metric, exporter,
-/// and tracing decision layers. Pin the direct packages and transitive
-/// closures; source-level tests cover request, migration, metric and export
-/// refusals, while the cross-backend gate below executes them. These remain
-/// pure policy dependencies, not database, transport, emission, export, or
-/// span support.
+/// tracing, and webhook decision layers. Pin the direct packages and transitive
+/// closures; source-level tests cover request, migration, metric, export, and
+/// webhook-policy refusals, while the cross-backend gate below executes them.
+/// These remain pure policy dependencies, not database, transport, emission,
+/// export, span, signing, queue, retry-scheduling, or delivery support.
 #[test]
 fn observability_policy_packages_fit_the_real_reference_application() {
     project::with_authenticated_project(&fixture().join("semaprax.toml"), |snapshot| {
@@ -606,6 +612,7 @@ fn observability_policy_packages_fit_the_real_reference_application() {
             "dependencies/std.metrics/0.1.0",
             "dependencies/std.export.policy/0.1.0",
             "dependencies/std.tracing/0.1.0",
+            "dependencies/std.webhook/0.1.0",
             "dependencies/std.encoding/0.1.0",
             "dependencies/std.log.redact/0.1.0",
             "dependencies/std.num.overflow/0.1.0",

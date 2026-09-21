@@ -257,6 +257,12 @@ const PACKAGES: &[BundledPackage] = &[
         dependencies: &["std.encoding", "std.log.redact"],
     },
     BundledPackage {
+        name: "std.webhook",
+        path: "dependencies/std.webhook/0.1.0/policy.spx",
+        source: include_str!("../../std/webhook/src/policy.spx"),
+        dependencies: &["std.log.redact"],
+    },
+    BundledPackage {
         name: "std.url",
         path: "dependencies/std.url/0.1.0/url.spx",
         source: include_str!("../../std/url/src/url.spx"),
@@ -349,8 +355,8 @@ fn range_error(message: String) -> Diagnostic {
 mod tests {
     use super::*;
 
-    // `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.metrics`, and
-    // `std.export.policy` shipped their pure decision-procedure source under `std/`
+    // `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.metrics`,
+    // `std.export.policy`, and `std.webhook` ship their pure decision-procedure source under `std/`
     // (issues #189-193) but were not
     // yet wired into this closed bundled-dependency registry, so no ordinary
     // consumer project could declare them in `[dependencies]` -- only their
@@ -404,6 +410,7 @@ mod tests {
             "std.jobs",
             "std.metrics",
             "std.export.policy",
+            "std.webhook",
         ] {
             assert!(is_bundled(name), "`{name}` is not a bundled package");
         }
@@ -418,6 +425,7 @@ mod tests {
             ("std.jobs", "jobs.spx"),
             ("std.metrics", "metrics.spx"),
             ("std.export.policy", "policy.spx"),
+            ("std.webhook", "policy.spx"),
         ] {
             let bundled = package(name).unwrap_or_else(|| panic!("`{name}` is not bundled"));
             assert!(
@@ -441,6 +449,10 @@ mod tests {
         assert_eq!(
             package("std.export.policy").unwrap().dependencies,
             &["std.http"]
+        );
+        assert_eq!(
+            package("std.webhook").unwrap().dependencies,
+            &["std.log.redact"]
         );
     }
 

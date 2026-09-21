@@ -13,6 +13,7 @@ use function @id("task_service.core.run_scenario") from task_service.core as run
 use function @id("task_service.core.task_owner_authorized") from task_service.core as task_owner_authorized;
 use function @id("task_service.core.trace_context_is_admitted") from task_service.core as trace_context_is_admitted;
 use function @id("task_service.core.update_is_committed") from task_service.core as update_is_committed;
+use function @id("task_service.core.webhook_delivery_policy_is_admitted") from task_service.core as webhook_delivery_policy_is_admitted;
 
 // The whole acceptance scenario succeeds end to end.
 @id("task_service.tests.scenario_succeeds")
@@ -118,8 +119,27 @@ fn completed_job_export_is_bounded() -> bool
     completed_job_export_is_admitted(0, 1usize, 32usize, array_as_slice(target)) && !completed_job_export_is_admitted(1024, 1usize, 32usize, array_as_slice(target)) && !completed_job_export_is_admitted(0, 1usize, 32usize, array_as_slice(injected_target))
 }
 
+// A webhook is only a policy decision in this reference application. Fresh
+// and exact-duplicate delivery descriptors are admitted, while a key conflict,
+// stale timestamp, ninth retry, or caller-classified secret is refused before
+// any signing, queueing, retry scheduling, or transport could occur.
+@id("task_service.tests.webhook_delivery_is_idempotent_and_bounded")
+fn webhook_delivery_is_idempotent_and_bounded() -> bool
+{
+    let signature = [97u8; 64];
+    let descriptor = [116u8, 97u8, 115u8, 107u8, 45u8, 49u8];
+    let conflicting_descriptor = [116u8, 97u8, 115u8, 107u8, 45u8, 50u8];
+    let fresh = webhook_delivery_policy_is_admitted(array_as_slice(signature), 128usize, 1000, 1100, false, array_as_slice(descriptor), array_as_slice(descriptor), 1, false);
+    let exact_duplicate = webhook_delivery_policy_is_admitted(array_as_slice(signature), 128usize, 1000, 1100, true, array_as_slice(descriptor), array_as_slice(descriptor), 1, false);
+    let conflict_refused = !webhook_delivery_policy_is_admitted(array_as_slice(signature), 128usize, 1000, 1100, true, array_as_slice(descriptor), array_as_slice(conflicting_descriptor), 1, false);
+    let stale_refused = !webhook_delivery_policy_is_admitted(array_as_slice(signature), 128usize, 1000, 1401, false, array_as_slice(descriptor), array_as_slice(descriptor), 1, false);
+    let ninth_attempt_refused = !webhook_delivery_policy_is_admitted(array_as_slice(signature), 128usize, 1000, 1100, false, array_as_slice(descriptor), array_as_slice(descriptor), 9, false);
+    let secret_refused = !webhook_delivery_policy_is_admitted(array_as_slice(signature), 128usize, 1000, 1100, false, array_as_slice(descriptor), array_as_slice(descriptor), 1, true);
+    fresh && exact_duplicate && conflict_refused && stale_refused && ninth_attempt_refused && secret_refused
+}
+
 @id("task_service.tests.main")
 fn main() -> i64
 {
-    if scenario_succeeds() && success_path() && unauthorized_is_rejected() && invalid_is_rejected() && migration_and_transaction_are_checked() && duplicate_enqueue_is_idempotent() && trace_context_is_admitted_test() && trace_context_is_refused_test() && completed_job_metric_is_guarded() && completed_job_export_is_bounded() { 0 } else { 1 }
+    if scenario_succeeds() && success_path() && unauthorized_is_rejected() && invalid_is_rejected() && migration_and_transaction_are_checked() && duplicate_enqueue_is_idempotent() && trace_context_is_admitted_test() && trace_context_is_refused_test() && completed_job_metric_is_guarded() && completed_job_export_is_bounded() && webhook_delivery_is_idempotent_and_bounded() { 0 } else { 1 }
 }

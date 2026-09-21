@@ -20,6 +20,8 @@ use function @id("std.jobs.state.is_terminal") from std.jobs as state_is_termina
 use function @id("std.metrics.counter-increment") from std.metrics as counter_increment;
 use function @id("std.metrics.try-admit-labeled-series-guarded") from std.metrics as try_admit_labeled_series_guarded;
 use function @id("std.tracing.trace_context_fields_admitted_guarded") from std.tracing as trace_context_fields_admitted_guarded;
+use function @id("std.webhook.attempt_admitted") from std.webhook as webhook_attempt_admitted;
+use function @id("std.webhook.delivery_admitted_guarded") from std.webhook as webhook_delivery_admitted_guarded;
 use function @id("std.export.policy.export_admitted") from std.export.policy as export_admitted;
 
 @id("task_service.core.identifier_byte_ok")
@@ -130,6 +132,12 @@ fn completed_job_export_is_admitted(existing_depth: i64, batch_count: usize, bat
     export_admitted(existing_depth, batch_count, batch_bytes, target)
 }
 
+@id("task_service.core.webhook_delivery_policy_is_admitted")
+fn webhook_delivery_policy_is_admitted(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64, key_exists: bool, existing_descriptor: borrow Slice<u8>, candidate_descriptor: borrow Slice<u8>, attempt: i64, carries_secret: bool) -> bool
+{
+    webhook_delivery_admitted_guarded(signature, payload_len, signed_at, now, carries_secret, false, false, false, false, false) && webhook_attempt_admitted(attempt) && enqueue_outcome(key_exists, existing_descriptor, candidate_descriptor) != 2usize
+}
+
 @id("task_service.core.run_scenario")
 fn run_scenario() -> i64
 {
@@ -174,5 +182,8 @@ fn run_scenario() -> i64
     let metric_ok = completed_job_metric_is_admitted(array_as_slice(metric_label), array_as_slice(metric_value), false);
     let export_target = [116u8, 97u8, 115u8, 107u8, 45u8, 115u8, 101u8, 114u8, 118u8, 105u8, 99u8, 101u8, 45u8, 111u8, 98u8, 115u8, 101u8, 114u8, 118u8, 97u8, 98u8, 105u8, 108u8, 105u8, 116u8, 121u8];
     let export_ok = completed_job_export_is_admitted(0, 1usize, 32usize, array_as_slice(export_target));
-    if registered && usable_at_login && table_ok && platform_ready && task_id == 1 && update_authorized && in_progress_status == 1usize && enqueue_legal && enqueue_outcome_code == 0usize && status_done && intruder_rejected && retired_session_rejected && method_rejected && identifier_rejected && trace_context_ok && metric_ok && export_ok { 0 } else { 1 }
+    let webhook_signature = [97u8; 64];
+    let delivery_descriptor = [116u8, 97u8, 115u8, 107u8, 45u8, 49u8];
+    let webhook_ok = webhook_delivery_policy_is_admitted(array_as_slice(webhook_signature), 128usize, 1000, 1100, false, array_as_slice(delivery_descriptor), array_as_slice(delivery_descriptor), 1, false);
+    if registered && usable_at_login && table_ok && platform_ready && task_id == 1 && update_authorized && in_progress_status == 1usize && enqueue_legal && enqueue_outcome_code == 0usize && status_done && intruder_rejected && retired_session_rejected && method_rejected && identifier_rejected && trace_context_ok && metric_ok && export_ok && webhook_ok { 0 } else { 1 }
 }

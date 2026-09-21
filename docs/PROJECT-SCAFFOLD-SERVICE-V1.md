@@ -48,19 +48,21 @@ calculator's table-layout inventory: `README.md`, `AGENTS.md`,
 `semaprax.toml`, `src/app.spx`, `src/core.spx`, `src/tests.spx`. Only the file
 *contents* differ:
 
-- `semaprax.toml` uses the `useful-data.v1` profile, declares
-  `std.auth = "=0.1.0"` and `std.jobs = "=0.1.0"` under `[dependencies]`, and
+- `semaprax.toml` uses the `useful-data.v1` profile and declares the bundled
+  `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.metrics`,
+  `std.export.policy`, `std.tracing`, and `std.webhook` decision packages under
+  `[dependencies]`, and
   exports `<name>.identifier_is_valid` and `<name>.method_is_rejected` under
   `[exports].web` (`Public Useful Data Export v1` admits no authored aggregate
   in a project that also declares a web export, so the domain record and its
   job are modeled as plain scalar facts, not a `record`).
-- `src/core.spx` imports four `std.auth` functions (session lifecycle,
-  password-hash policy bounds) and five `std.jobs` functions
-  (claim/lease/retry/idempotency state machines) by stable `@id`, plus a
-  locally reimplemented identifier and HTTP-method grammar (mirroring, not
-  depending on, `std.db.identifier.is_valid` and `std.http.method_is_valid`;
-  see `examples/task-service-project/README.md` for why a third dependency
-  does not fit).
+- `src/core.spx` composes auth/session, database/migration/transaction,
+  request-line, durable-job/idempotency, metric/export, trace-context, and
+  webhook-admission predicates by stable `@id`. Its webhook step combines the
+  existing exact-descriptor idempotency outcome with a bounded signature
+  envelope, symmetric replay window, attempt count, and caller-classified
+  secret guard; it is a decision before any signing, queueing, retry
+  scheduling, or transport.
 - `src/app.spx` calls the core module's `run_scenario`, which walks
   register/login/create-or-update/enqueue/complete/query/logout end to end and
   confirms both an unauthorized-access and an invalid-request rejection.
@@ -70,7 +72,7 @@ calculator's table-layout inventory: `README.md`, `AGENTS.md`,
 - `AGENTS.md` is the same base guide every template ships, with the table
   layout's "Project v1 function boundaries" section (declared aggregates
   cannot cross a scalar-signature function boundary) plus one more section
-  naming the two bundled dependencies and their non-claims.
+  naming all eight bundled dependencies and their non-claims.
 
 This mirrors `examples/task-service-project/`, generalized with the
 `{{name}}`/`{{module}}` substitution every template uses; the reference
@@ -85,9 +87,9 @@ as the other two: schema `semaprax.project-scaffold.v3`, digest domain
 project passes the same in-memory check-and-test validation
 (`validate_owned_project_test`) before the capsule is returned to the caller,
 using the bundled dependency registry
-(`src/project/standard_dependencies.rs`) to resolve `std.auth`/`std.jobs`
-purely in memory -- no filesystem or network access, exactly like an ordinary
-project naming those packages in `[dependencies]`.
+(`src/project/standard_dependencies.rs`) to resolve all eight decision
+packages purely in memory -- no filesystem or network access, exactly like an
+ordinary project naming those packages in `[dependencies]`.
 
 ## Compatibility
 
@@ -119,7 +121,7 @@ accepted `--template service`.
 Unchanged from [Public Project Scaffold Capsule v3](PROJECT-SCAFFOLD-V3.md):
 the capsule is checked bytes only, owning no filesystem, process, environment,
 current-directory, target-emission, or publication authority, and it makes no
-release or host-support claim. `std.auth` and `std.jobs` are pure decision
-layers with no hashing, signing, socket, database, or job-queue host
-capability of their own; a real deployment performs all of those outside this
-scaffold.
+release or host-support claim. The bundled dependencies are pure decision
+layers with no hashing, signing, socket, database, job-queue,
+retry-scheduling, telemetry-emission, or webhook-delivery host capability of
+their own; a real deployment performs all of those outside this scaffold.

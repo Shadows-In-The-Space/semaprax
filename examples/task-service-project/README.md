@@ -14,7 +14,7 @@ semaprax run   examples/task-service-project
 
 ## What it demonstrates
 
-- **Seven `[dependencies]` edges on bundled standard-library packages**:
+- **Eight `[dependencies]` edges on bundled standard-library packages**:
   `std.auth = "=0.1.0"` (session lifecycle and password-policy bounds),
   `std.db = "=0.1.0"` (identifier, migration, and transaction decisions),
   `std.http = "=0.1.0"` (request-line admission),
@@ -22,11 +22,13 @@ semaprax run   examples/task-service-project
   `std.metrics = "=0.1.0"` (guarded metric-series admission),
   `std.tracing = "=0.1.0"` (pure W3C trace-context shape and caller-classified
   secret policy), and `std.export.policy = "=0.1.0"` (bounded exporter-batch
-  and sink admission). The first four packages became project-selectable when
+  and sink admission), and `std.webhook = "=0.1.0"` (signature-envelope,
+  replay-window, retry-bound, idempotency-composed, and caller-classified
+  secret policy). The first four packages became project-selectable when
   `std.auth`, `std.db`, `std.http`, and `std.jobs` joined the compiler's
   closed bundled-dependency registry; `std.tracing` was already selectable.
-  Metrics and export policy are now likewise compiler-bundled. None of these
-  dependencies contributes telemetry emission authority.
+  Metrics, export policy, and webhook are now likewise compiler-bundled. None
+  of these dependencies contributes telemetry emission or delivery authority.
 - **Row-level authorization**, not just session validity:
   `task_service.core.task_owner_authorized` requires both a usable session
   *and* that the session's own account matches the row's owner. A retired
@@ -34,6 +36,11 @@ semaprax run   examples/task-service-project
 - **Idempotent job enqueue**: a retried request carrying the same
   idempotency key is a harmless duplicate (`std.jobs.idempotency`'s outcome
   `1`), never a second job.
+- **Webhook admission without delivery**: the webhook policy combines an exact
+  descriptor replay outcome from `std.jobs` with `std.webhook`'s signature
+  envelope, replay-window, attempt, and caller-classified-secret rules. A
+  conflicting reuse, stale timestamp, ninth attempt, or classified secret is
+  refused before signing, queueing, scheduling, or transport.
 - **The full acceptance scenario and rejection paths** are exercised twice:
   once end to end in `task_service.core.run_scenario` (driven by
   `task_service.app.main`), and once as focused assertions in
@@ -55,12 +62,14 @@ semaprax run   examples/task-service-project
   performs both outside this decision.
 - No socket, database, or job queue is opened. `run_scenario` is a fixture
   walk over caller-supplied ticks and byte literals, not a running server.
-- No log, metric, or span is emitted, exported, or collected. `std.tracing` only
+- No log, metric, span, or webhook is emitted, exported, collected, signed, or
+  delivered. `std.tracing` only
   checks a caller-supplied trace ID, parent ID, flags, and whether the caller
   has classified the event as secret; an adapter must perform classification
   and any eventual emission outside this pure decision. `std.metrics` and
   `std.export.policy` only admit a safe series and bounded host-owned batch;
-  they do not retain a series, mutate a queue, or deliver a byte.
+  `std.webhook` only admits a caller-owned delivery intent. They do not retain
+  a series, mutate a queue, schedule a retry, or deliver a byte.
 - The domain record and job are modeled as plain scalar facts (an id, an
   owner account id, a status), not an authored `record`, because
   `Public Useful Data Export v1` -- the `[exports].web` gate every
@@ -77,7 +86,7 @@ the selected dependency declarations -- exactly as
 `examples/agent-response-project/README.md` documents. Reachability pruning
 keeps unused bundled declarations out of the builder charge, letting this
 reference compose `std.auth`, `std.db`, `std.http`, `std.jobs`, `std.metrics`,
-`std.tracing`, and `std.export.policy` as real dependencies. The application still makes only pure
+`std.tracing`, `std.export.policy`, and `std.webhook` as real dependencies. The application still makes only pure
 decision calls: it does not turn a successful check into database, network,
 or telemetry authority.
 
@@ -121,7 +130,9 @@ dependencies.** Its reached closure includes `std.encoding`, `std.log.redact`,
 and `std.num.overflow`; the checked-in
 `trace_context_is_admitted` call validates W3C-shaped IDs and refuses a
 caller-classified secret, while the metric and export calls refuse
-secret-classified labels, full queues, and injected target IDs.
+secret-classified labels, full queues, injected target IDs, stale webhook
+timestamps, conflicting idempotency descriptors, over-budget attempts, and
+classified secret payloads.
 `tests/useful_data/task_service_project.rs` pins that real closure and runs
 the application’s tests on the interpreter, native C11, and Core Wasm; the
 entry runs on the interpreter and native C11 only. This is not `std.log`, an emission

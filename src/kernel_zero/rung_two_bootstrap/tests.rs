@@ -1,6 +1,8 @@
 use sha2::{Digest, Sha256};
 
-use super::artifact::{Artifact, BootstrapRefusal, COMPONENT_COUNT, SCHEMA};
+use super::artifact::{
+    Artifact, BootstrapRefusal, Component, COMPONENT_COUNT, MAGIC, MAX_COMPONENT_BYTES, SCHEMA,
+};
 use super::decode::{
     decode_and_replay, maximum_artifact_bytes, maximum_term_bytes, reencode_for_test,
 };
@@ -20,7 +22,20 @@ fn two_exact_local_builds_produce_one_digest_bound_artifact() {
 }
 
 #[test]
-fn artifact_retains_all_real_target_payloads_but_does_not_claim_execution() {
+fn authentic_structurally_valid_v1_fixture_is_intentionally_refused_by_v2() {
+    let artifact = Artifact::derive().expect("closed bootstrap artifact must derive");
+    let v1 = legacy_v1_fixture(artifact.components());
+    assert!(v1
+        .windows(LEGACY_V1_SCHEMA.len())
+        .any(|bytes| bytes == LEGACY_V1_SCHEMA.as_bytes()));
+    assert!(v1
+        .windows(LEGACY_V1_PROFILE.len())
+        .any(|bytes| bytes == LEGACY_V1_PROFILE.as_bytes()));
+    assert_eq!(decode_and_replay(&v1), Err(BootstrapRefusal::Encoding));
+}
+
+#[test]
+fn artifact_retains_all_real_target_payloads_and_the_private_execution_companion() {
     let artifact = Artifact::derive().expect("renderer artifact must derive");
     for component in artifact.components() {
         assert!(
@@ -34,6 +49,11 @@ fn artifact_retains_all_real_target_payloads_but_does_not_claim_execution() {
         assert!(
             component.wasm.starts_with(b"\0asm"),
             "{} must retain an ordinary raw Core-Wasm module",
+            component.name
+        );
+        assert!(
+            component.execution_wasm.starts_with(b"\0asm"),
+            "{} must retain a private executable scalar-export Core-Wasm companion",
             component.name
         );
         assert!(
@@ -77,6 +97,24 @@ fn decoder_refuses_noncanonical_order_duplicates_and_replaced_compiler_outputs()
         decode_and_replay(&replaced_wasm),
         Err(BootstrapRefusal::Drift)
     );
+
+    let mut replaced_execution_wasm = artifact.components().to_vec();
+    replaced_execution_wasm[3].execution_wasm = replaced_execution_wasm[4].execution_wasm.clone();
+    let replaced_execution_wasm =
+        reencode_for_test(&replaced_execution_wasm).expect("test wire re-encoding must work");
+    assert_eq!(
+        decode_and_replay(&replaced_execution_wasm),
+        Err(BootstrapRefusal::Drift)
+    );
+
+    let mut malformed_execution_wasm = artifact.components().to_vec();
+    malformed_execution_wasm[0].execution_wasm[0] ^= 1;
+    let malformed_execution_wasm =
+        reencode_for_test(&malformed_execution_wasm).expect("test wire re-encoding must work");
+    assert_eq!(
+        decode_and_replay(&malformed_execution_wasm),
+        Err(BootstrapRefusal::Target)
+    );
 }
 
 #[test]
@@ -119,6 +157,16 @@ fn decoder_refuses_digest_schema_source_length_and_trailing_hostility() {
     });
     assert_eq!(
         decode_and_replay(&bad_source_length),
+        Err(BootstrapRefusal::Bounds)
+    );
+
+    let bad_execution_wasm_length = mutate_body(artifact.bytes(), |body| {
+        let offset = first_execution_wasm_length_offset(body);
+        body[offset..offset + 4]
+            .copy_from_slice(&(u32::try_from(MAX_COMPONENT_BYTES + 1).unwrap()).to_le_bytes());
+    });
+    assert_eq!(
+        decode_and_replay(&bad_execution_wasm_length),
         Err(BootstrapRefusal::Bounds)
     );
 
@@ -201,6 +249,46 @@ fn find(bytes: &[u8], needle: &[u8]) -> usize {
 }
 
 const TERM_MAGIC: &[u8] = b"SPX-KERNEL-TERM-V1\0";
+const LEGACY_V1_SCHEMA: &str = "semaprax.kernel-zero-rung-two-bootstrap.v1";
+const LEGACY_V1_PROFILE: &str = "c11-source+raw-core-wasm";
+const CARGO_LOCK: &[u8] = include_bytes!("../../../Cargo.lock");
+
+/// Serialize the former documented v1 layout from valid current source, term,
+/// C11, and raw-Core-Wasm payloads. This deliberately omits the v2 companion,
+/// making it a structurally valid v1 fixture rather than a schema-byte edit.
+fn legacy_v1_fixture(components: &[Component]) -> Vec<u8> {
+    assert_eq!(components.len(), COMPONENT_COUNT);
+    let mut body = MAGIC.to_vec();
+    push_legacy_text(&mut body, LEGACY_V1_SCHEMA);
+    push_legacy_text(&mut body, LEGACY_V1_PROFILE);
+    body.extend_from_slice(&Sha256::digest(CARGO_LOCK));
+    body.push(COMPONENT_COUNT as u8);
+    for component in components {
+        push_legacy_text(&mut body, &component.name);
+        push_legacy_text(&mut body, &component.source_name);
+        push_legacy_blob(&mut body, &component.source);
+        body.extend_from_slice(&Sha256::digest(&component.source));
+        push_legacy_text(&mut body, &component.entry);
+        push_legacy_blob(&mut body, &component.term);
+        body.extend_from_slice(&Sha256::digest(&component.term));
+        push_legacy_blob(&mut body, &component.c_source);
+        body.extend_from_slice(&Sha256::digest(&component.c_source));
+        push_legacy_blob(&mut body, &component.wasm);
+        body.extend_from_slice(&Sha256::digest(&component.wasm));
+    }
+    body.extend_from_slice(&Sha256::digest(&body));
+    body
+}
+
+fn push_legacy_text(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(&u16::try_from(value.len()).unwrap().to_le_bytes());
+    bytes.extend_from_slice(value.as_bytes());
+}
+
+fn push_legacy_blob(bytes: &mut Vec<u8>, value: &[u8]) {
+    bytes.extend_from_slice(&u32::try_from(value.len()).unwrap().to_le_bytes());
+    bytes.extend_from_slice(value);
+}
 
 fn first_source_length_offset(body: &[u8]) -> usize {
     let mut offset = 8;
@@ -210,6 +298,21 @@ fn first_source_length_offset(body: &[u8]) -> usize {
     offset += 1;
     offset = after_text(body, offset);
     after_text(body, offset)
+}
+
+fn first_execution_wasm_length_offset(body: &[u8]) -> usize {
+    let mut offset = 8;
+    offset = after_text(body, offset);
+    offset = after_text(body, offset);
+    offset += 32;
+    offset += 1;
+    offset = after_text(body, offset);
+    offset = after_text(body, offset);
+    offset = after_blob_and_digest(body, offset);
+    offset = after_text(body, offset);
+    offset = after_blob_and_digest(body, offset);
+    offset = after_blob_and_digest(body, offset);
+    after_blob_and_digest(body, offset)
 }
 
 fn first_term_tag_offset(bytes: &[u8]) -> usize {
@@ -227,6 +330,14 @@ fn first_term_tag_offset(bytes: &[u8]) -> usize {
 fn after_text(bytes: &[u8], offset: usize) -> usize {
     let length = usize::from(u16::from_le_bytes([bytes[offset], bytes[offset + 1]]));
     offset + 2 + length
+}
+
+fn after_blob_and_digest(bytes: &[u8], offset: usize) -> usize {
+    let length = usize::try_from(u32::from_le_bytes(
+        bytes[offset..offset + 4].try_into().unwrap(),
+    ))
+    .unwrap();
+    offset + 4 + length + 32
 }
 
 fn too_deep_term() -> Vec<u8> {

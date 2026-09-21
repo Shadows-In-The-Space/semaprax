@@ -1146,7 +1146,7 @@ next.
 |---|---|---|---|
 | **0** | A Kernel-0-shaped `.spx` program is admitted by the unmodified toolchain and produces the *same* observable result on the interpreter, the native backend, and the Wasm backend, for at least one concrete program and input. | **Yes.** | "Rung 0 evidence" below. |
 | **1** | A kernel-sized program (bounded by the ceilings above, not merely "small") implements a non-trivial pure computation (validation, classification, or similar) entirely within Kernel-0/Kernel-1's admitted shapes, still with cross-backend agreement. | **Yes.** | "Rung 1 evidence" below: a 35,669-byte, 32-policy classifier passed 72 independent-oracle/interpreter cases and 216 native/Core-Wasm comparisons. |
-| **2** | A pure, total, pipeline-safe compiler component with no ownership/effects of its own — a canonical formatter or renderer fragment is the issue's own suggested first candidate — is implemented in SEMAPRAX, differential-tested byte-identical against the Rust implementation over a broad corpus, and its build is bootstrap-reproducible under a stated environment. | **No.** | The exact-source renderer byte lanes now have a local, exact-source-bound bootstrap artifact that is reproducible across two derivations and independently replayed, but there is still no owned-buffer output, fallback/recovery gate, target-execution evidence for its parameterized payloads, or hosted result. Rust remains authoritative; see “Rung 2 renderer integration evidence”. |
+| **2** | A pure, total, pipeline-safe compiler component with no ownership/effects of its own — a canonical formatter or renderer fragment is the issue's own suggested first candidate — is implemented in SEMAPRAX, differential-tested byte-identical against the Rust implementation over a broad corpus, and its build is bootstrap-reproducible under a stated environment. | **No.** | The exact-source renderer byte lanes now have a local target/recovery gate: it executes retained C11 at `-O0`/`-O2` and the retained bounded private Wasm companion, then preserves Rust bytes on a candidate refusal/mismatch. Exact regeneration checks reproducibility; semantic target-oracle execution compares the retained targets against Rust. This change does not claim the unexecuted gate passed. There is still no owned-buffer output, accepted hosted result, or authority transfer. Rust remains authoritative; see “Rung 2 renderer integration evidence”. |
 | **3** | A parser fragment is self-hosted with the same differential-equivalence and bootstrap-reproducibility bar as rung 2, plus documented fallback/recovery if the self-hosted path disagrees with the Rust reference. | **No.** | Not attempted. |
 | **4** | Semantic projection (HIR → semantic graph) is self-hosted with the same bar, plus stable-ID and determinism regression coverage carried over unchanged. | **No.** | Not attempted. |
 | **5** | The semantic-transaction validator (precondition checking, replay-before-commit, fail-closed staleness) is self-hosted with the same bar. | **No.** | Not attempted. |
@@ -1187,14 +1187,24 @@ It does **not** reach rung 2. Rust remains the only authoritative formatter;
 normal production formatting does not execute or depend on the shadow. The
 byte-lane API is not a SEMAPRAX owned-buffer renderer, and the finite corpus is
 not a universal equivalence proof. The private
-[Rung-2 Bootstrap Artifact v1](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V1.md) now
-retains source-bound canonical term, generated C11-source, and raw Core-Wasm
-payload bytes for all five lanes; two local derivations must be byte-identical
-and an independent bounded decoder recompiles every retained payload. It is
+[Rung-2 Bootstrap Artifact v2](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V2.md) now
+retains source-bound canonical term, generated C11-source, raw Core-Wasm, and
+private executable scalar-export Core-Wasm payload bytes for all five lanes;
+two local derivations must be byte-identical and an independent bounded decoder
+exactly regenerates every retained payload. It is
 only local compiler-output evidence: it carries no target-execution or hosted
 claim, does not supply a public component wrapper, and does not make the
-runtime-derived Kernel-0 program authoritative. Authority must not move until
-the issue's fallback/recovery and hosted gates exist independently.
+runtime-derived Kernel-0 program authoritative. The unexecuted local
+target/recovery gate is specified in
+[Rung-2 Target and Recovery Evidence v1](KERNEL-ZERO-RUNG-TWO-TARGET-RECOVERY-V1.md):
+its checks execute retained C11 at `-O0`/`-O2` and the retained private
+scalar-export Wasm companion through a semantic target oracle against Rust,
+then model candidate refusal/mismatch by preserving Rust bytes. Exact
+regeneration is reproducibility authentication, not an independent semantic
+check: a deterministic self-consistent bad producer is caught only by executed
+Rust-oracle comparison. It is not a production fallback route or an authority
+transfer. An owned-buffer contract and an accepted hosted gate remain
+independent prerequisites before authority moves.
 
 ### Rung 0 evidence
 

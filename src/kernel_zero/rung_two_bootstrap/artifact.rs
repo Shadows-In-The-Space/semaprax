@@ -7,9 +7,9 @@ use crate::kernel_zero::reify::BoundTranslation;
 use crate::kernel_zero::term::{KernelProgram, KernelType, Term};
 use crate::{codegen, hir, wasm};
 
-pub(super) const SCHEMA: &str = "semaprax.kernel-zero-rung-two-bootstrap.v1";
+pub(super) const SCHEMA: &str = "semaprax.kernel-zero-rung-two-bootstrap.v2";
 pub(super) const MAGIC: &[u8; 8] = b"SPXR2BT\0";
-pub(super) const TARGET_PROFILE: &str = "c11-source+raw-core-wasm";
+pub(super) const TARGET_PROFILE: &str = "c11-source+raw-core-wasm+private-scalar-export-core-wasm";
 pub(super) const MAX_ARTIFACT_BYTES: usize = 8 * 1024 * 1024;
 pub(super) const MAX_COMPONENT_BYTES: usize = 1024 * 1024;
 pub(super) const MAX_TEXT_BYTES: usize = 256;
@@ -74,6 +74,7 @@ pub(super) struct ComponentDef {
     pub(super) source_name: &'static str,
     pub(super) source: &'static str,
     pub(super) entry: &'static str,
+    pub(super) length_entry: &'static str,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -85,6 +86,7 @@ pub(super) struct Component {
     pub(super) term: Vec<u8>,
     pub(super) c_source: Vec<u8>,
     pub(super) wasm: Vec<u8>,
+    pub(super) execution_wasm: Vec<u8>,
 }
 
 pub(super) fn component_defs() -> [ComponentDef; COMPONENT_COUNT] {
@@ -94,32 +96,55 @@ pub(super) fn component_defs() -> [ComponentDef; COMPONENT_COUNT] {
             source_name: "canonical_char_renderer.spx",
             source: include_str!("../canonical_char_renderer.spx"),
             entry: "format.render-byte",
+            length_entry: "format.render-length",
         },
         ComponentDef {
             name: "bool",
             source_name: "canonical_bool_renderer.spx",
             source: include_str!("../canonical_bool_renderer.spx"),
             entry: "format.render-byte",
+            length_entry: "format.render-length",
         },
         ComponentDef {
             name: "int",
             source_name: "canonical_int_renderer.spx",
             source: include_str!("../canonical_int_renderer.spx"),
             entry: "format.render-byte",
+            length_entry: "format.render-length",
         },
         ComponentDef {
             name: "operator",
             source_name: "canonical_operator_renderer.spx",
             source: include_str!("../canonical_operator_renderer.spx"),
             entry: "format.operator-render-byte",
+            length_entry: "format.operator-render-length",
         },
         ComponentDef {
             name: "string-scalar",
             source_name: "canonical_string_renderer.spx",
             source: include_str!("../canonical_string_renderer.spx"),
             entry: "format.render-byte",
+            length_entry: "format.render-length",
         },
     ]
+}
+
+/// Derive the retained private scalar-export Core-Wasm target companion.
+/// It has only the closed length/byte wrappers and is not a public package,
+/// component ABI, or formatter authority route.
+pub(super) fn compile_execution_wasm(def: &ComponentDef) -> Result<Vec<u8>, BootstrapRefusal> {
+    let parsed =
+        crate::parse(def.source, def.source_name).map_err(|_| BootstrapRefusal::Profile)?;
+    let resolved = hir::resolve(&parsed).map_err(|_| BootstrapRefusal::Profile)?;
+    let bytes = wasm::emit_resolved_module_with_scalar_exports(
+        &resolved,
+        &[def.length_entry.to_owned(), def.entry.to_owned()],
+    )
+    .map_err(|_| BootstrapRefusal::Target)?;
+    if bytes.len() > MAX_COMPONENT_BYTES {
+        return Err(BootstrapRefusal::Bounds);
+    }
+    Ok(bytes)
 }
 
 pub(super) fn compile_component(def: &ComponentDef) -> Result<Component, BootstrapRefusal> {
@@ -127,6 +152,7 @@ pub(super) fn compile_component(def: &ComponentDef) -> Result<Component, Bootstr
         || def.name.len() > MAX_TEXT_BYTES
         || def.source_name.len() > MAX_TEXT_BYTES
         || def.entry.len() > MAX_TEXT_BYTES
+        || def.length_entry.len() > MAX_TEXT_BYTES
     {
         return Err(BootstrapRefusal::Bounds);
     }
@@ -144,7 +170,8 @@ pub(super) fn compile_component(def: &ComponentDef) -> Result<Component, Bootstr
         .map_err(|_| BootstrapRefusal::Target)?
         .into_bytes();
     let wasm = wasm::emit_module(&parsed).map_err(|_| BootstrapRefusal::Target)?;
-    for payload in [&term, &c_source, &wasm] {
+    let execution_wasm = compile_execution_wasm(def)?;
+    for payload in [&term, &c_source, &wasm, &execution_wasm] {
         if payload.len() > MAX_COMPONENT_BYTES {
             return Err(BootstrapRefusal::Bounds);
         }
@@ -157,6 +184,7 @@ pub(super) fn compile_component(def: &ComponentDef) -> Result<Component, Bootstr
         term,
         c_source,
         wasm,
+        execution_wasm,
     })
 }
 
@@ -182,6 +210,8 @@ pub(super) fn encode(components: &[Component]) -> Result<Vec<u8>, BootstrapRefus
         body.extend_from_slice(&digest(&component.c_source));
         push_blob(&mut body, &component.wasm)?;
         body.extend_from_slice(&digest(&component.wasm));
+        push_blob(&mut body, &component.execution_wasm)?;
+        body.extend_from_slice(&digest(&component.execution_wasm));
     }
     if body.len() > MAX_ARTIFACT_BYTES.saturating_sub(32) {
         return Err(BootstrapRefusal::Bounds);

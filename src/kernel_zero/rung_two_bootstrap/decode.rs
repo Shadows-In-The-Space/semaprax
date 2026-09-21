@@ -20,11 +20,13 @@ const MAX_TERM_NODES: usize = 8192;
 const MAX_TERM_DEPTH: usize = 128;
 
 /// Decode a closed artifact and re-run the ordinary source → HIR → Kernel-0,
-/// C11-source, and raw-Core-Wasm routes before accepting any retained byte.
+/// C11-source, raw-Core-Wasm, and private scalar-export Core-Wasm routes
+/// before accepting any retained byte.
 ///
 /// The decoder does not make an artifact executable and does not give it
-/// formatter authority.  It only authenticates a candidate as reproducible
-/// evidence for the five exact embedded component sources.
+/// formatter authority. It only authenticates a candidate as exactly
+/// reproducible evidence for the five exact embedded component sources; target
+/// execution separately compares those bytes' semantics with Rust.
 pub(crate) fn decode_and_replay(bytes: &[u8]) -> Result<[u8; 32], BootstrapRefusal> {
     if bytes.len() > MAX_ARTIFACT_BYTES || bytes.len() < MAGIC.len() + 32 {
         return Err(BootstrapRefusal::Bounds);
@@ -59,6 +61,9 @@ pub(crate) fn decode_and_replay(bytes: &[u8]) -> Result<[u8; 32], BootstrapRefus
         if reencode_term(&decoded_term)? != decoded.term {
             return Err(BootstrapRefusal::TermEncoding);
         }
+        wasmparser::Validator::new()
+            .validate_all(&decoded.execution_wasm)
+            .map_err(|_| BootstrapRefusal::Target)?;
         // This calls the compiler's ordinary parser, resolver, exact-source
         // BoundTranslation replay, C source emitter, and raw Wasm emitter.
         // None of the decoded term or target bytes are trusted merely because
@@ -68,6 +73,7 @@ pub(crate) fn decode_and_replay(bytes: &[u8]) -> Result<[u8; 32], BootstrapRefus
         if decoded.term != regenerated_term
             || decoded.c_source != regenerated.c_source
             || decoded.wasm != regenerated.wasm
+            || decoded.execution_wasm != regenerated.execution_wasm
         {
             return Err(BootstrapRefusal::Drift);
         }
@@ -90,6 +96,8 @@ fn decode_component(reader: &mut Reader<'_>) -> Result<Component, BootstrapRefus
     reader.digest_for(&c_source)?;
     let wasm = reader.blob()?;
     reader.digest_for(&wasm)?;
+    let execution_wasm = reader.blob()?;
+    reader.digest_for(&execution_wasm)?;
     Ok(Component {
         name,
         source_name,
@@ -98,6 +106,7 @@ fn decode_component(reader: &mut Reader<'_>) -> Result<Component, BootstrapRefus
         term,
         c_source,
         wasm,
+        execution_wasm,
     })
 }
 

@@ -7,6 +7,47 @@ use std::process::{Command, Stdio};
 
 use semaprax::{codegen, format, parse, project};
 
+const SOURCE_FILES: &[&str] = &[
+    "app.spx",
+    "batch.spx",
+    "enrichment.spx",
+    "limits.spx",
+    "record.spx",
+    "tests.spx",
+];
+
+struct ScratchRoot(PathBuf);
+
+impl ScratchRoot {
+    fn new() -> Self {
+        #[cfg(windows)]
+        let base = std::env::temp_dir();
+        #[cfg(not(windows))]
+        let base = std::env::temp_dir().canonicalize().unwrap();
+        let root = base.join(format!(
+            "semaprax-catalog-normalizer-batch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        Self(root)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for ScratchRoot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/catalog-normalizer-project")
 }
@@ -14,6 +55,52 @@ fn fixture() -> PathBuf {
 fn application_options() -> project::ProjectExecutionOptions {
     project::ProjectExecutionOptions::new(64 * 1024, 1_000_000)
         .expect("catalog-normalizer's documented bounded interpreter envelope")
+}
+
+fn copy_fixture(root: &Path, destination: &Path) {
+    std::fs::create_dir_all(destination.join("src")).unwrap();
+    std::fs::copy(
+        root.join("semaprax.toml"),
+        destination.join("semaprax.toml"),
+    )
+    .unwrap();
+    for source in SOURCE_FILES {
+        std::fs::copy(
+            root.join("src").join(source),
+            destination.join("src").join(source),
+        )
+        .unwrap();
+    }
+}
+
+fn assert_batch_mutant_rejected(
+    root: &Path,
+    scratch: &Path,
+    name: &str,
+    expected: &str,
+    replacement: &str,
+) {
+    let mutant = scratch.join(name);
+    copy_fixture(root, &mutant);
+    let batch_path = mutant.join("src/batch.spx");
+    let batch = std::fs::read_to_string(&batch_path).unwrap();
+    let broken = batch.replace(expected, replacement);
+    assert_ne!(
+        broken, batch,
+        "{name} negative-control mutation must be applied"
+    );
+    std::fs::write(&batch_path, broken).unwrap();
+    project::with_authenticated_project(&mutant.join("semaprax.toml"), |snapshot| {
+        snapshot.check()?;
+        let result = snapshot.execute_test(&application_options())?;
+        assert_ne!(
+            result.outcome(),
+            &project::ProjectExecutionOutcome::Returned(0),
+            "{name} mutant unexpectedly passed the application suite"
+        );
+        Ok(())
+    })
+    .unwrap();
 }
 
 fn run_oracle_with(input: &[u8], enriched: bool) -> Vec<u8> {
@@ -144,15 +231,8 @@ fn enriched_response_literals_match_the_independent_oracle() {
 #[test]
 fn batch_boundaries_and_string_normalization_agree_across_backends() {
     let root = fixture();
-    for source in [
-        "src/app.spx",
-        "src/batch.spx",
-        "src/enrichment.spx",
-        "src/limits.spx",
-        "src/record.spx",
-        "src/tests.spx",
-    ] {
-        let path = root.join(source);
+    for source in SOURCE_FILES {
+        let path = root.join("src").join(source);
         let bytes = std::fs::read_to_string(&path).unwrap();
         let (program, comments) = semaprax::parse_with_comments(&bytes, &path).unwrap();
         assert_eq!(
@@ -172,204 +252,111 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
         named_cases, 14,
         "catalog-normalizer application case inventory drifted"
     );
-    #[cfg(windows)]
-    let scratch = std::env::temp_dir().join(format!(
-        "semaprax-catalog-normalizer-batch-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    #[cfg(not(windows))]
-    let scratch = std::env::temp_dir().canonicalize().unwrap().join(format!(
-        "semaprax-catalog-normalizer-batch-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let _ = std::fs::remove_dir_all(&scratch);
-    std::fs::create_dir_all(&scratch).unwrap();
+    // This is deliberately one test: each backend lane runs serially against
+    // one authenticated snapshot, so the capacity-sensitive graph is never
+    // built concurrently merely because libtest has multiple worker threads.
+    let scratch = ScratchRoot::new();
     project::with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         snapshot.check()?;
-        let result = snapshot.execute_test(&application_options())?;
-        assert_eq!(
-            result.outcome(),
-            &project::ProjectExecutionOutcome::Returned(0),
-            "catalog-normalizer application tests failed on the interpreter"
-        );
+        {
+            let result = snapshot.execute_test(&application_options())?;
+            assert_eq!(
+                result.outcome(),
+                &project::ProjectExecutionOutcome::Returned(0),
+                "catalog-normalizer application tests failed on the interpreter"
+            );
+        }
 
-        let c = codegen::emit_hir_c(snapshot.test_program()).map_err(|e| vec![e])?;
-        for optimization in ["-O0", "-O2"] {
-            let c_path = scratch.join(format!("tests-{optimization}.c"));
-            let executable = scratch.join(format!("tests-{optimization}"));
-            std::fs::write(&c_path, &c).unwrap();
-            let build = Command::new("clang")
-                .args(["-std=c11", optimization, "-Wall", "-Wextra", "-Werror"])
-                .arg(&c_path)
-                .arg("-o")
-                .arg(&executable)
+        {
+            let c = codegen::emit_hir_c(snapshot.test_program()).map_err(|e| vec![e])?;
+            for optimization in ["-O0", "-O2"] {
+                let c_path = scratch.path().join(format!("tests-{optimization}.c"));
+                let executable = scratch.path().join(format!("tests-{optimization}"));
+                std::fs::write(&c_path, &c).unwrap();
+                let build = Command::new("clang")
+                    .args(["-std=c11", optimization, "-Wall", "-Wextra", "-Werror"])
+                    .arg(&c_path)
+                    .arg("-o")
+                    .arg(&executable)
+                    .output()
+                    .unwrap();
+                assert!(
+                    build.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&build.stderr)
+                );
+                let run = Command::new(&executable).output().unwrap();
+                assert!(
+                    run.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&run.stderr)
+                );
+                assert_eq!(run.stdout, b"0\n");
+            }
+        }
+
+        {
+            let wasm_path = scratch.path().join("tests.wasm");
+            let wasm = snapshot.test_wasm_module()?;
+            std::fs::write(&wasm_path, &wasm).unwrap();
+            drop(wasm);
+            let script = scratch.path().join("tests.mjs");
+            let mut host = std::fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/useful_data/environment_provider_fixture.mjs"),
+            )
+            .unwrap();
+            host.push('\n');
+            host.push_str(
+                &std::fs::read_to_string(
+                    Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("tests/useful_data/catalog_normalizer_application.mjs"),
+                )
+                .unwrap(),
+            );
+            std::fs::write(&script, host).unwrap();
+            let node = Command::new("node")
+                .arg(&script)
+                .arg(&wasm_path)
                 .output()
                 .unwrap();
             assert!(
-                build.status.success(),
+                node.status.success(),
                 "{}",
-                String::from_utf8_lossy(&build.stderr)
+                String::from_utf8_lossy(&node.stderr)
             );
-            let run = Command::new(&executable).output().unwrap();
-            assert!(
-                run.status.success(),
-                "{}",
-                String::from_utf8_lossy(&run.stderr)
-            );
-            assert_eq!(run.stdout, b"0\n");
         }
-
-        let wasm_path = scratch.join("tests.wasm");
-        std::fs::write(&wasm_path, snapshot.test_wasm_module()?).unwrap();
-        let script = scratch.join("tests.mjs");
-        let host = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/useful_data/environment_provider_fixture.mjs"),
-        )
-        .unwrap();
-        let probe = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/useful_data/catalog_normalizer_application.mjs"),
-        )
-        .unwrap();
-        std::fs::write(&script, format!("{host}\n{probe}")).unwrap();
-        let node = Command::new("node")
-            .arg(&script)
-            .arg(&wasm_path)
-            .output()
-            .unwrap();
-        assert!(
-            node.status.success(),
-            "{}",
-            String::from_utf8_lossy(&node.stderr)
-        );
         Ok(())
     })
     .unwrap();
 
     // A candidate that counts the terminal LF as a record must fail the
     // frozen CNORM-001 case; success above cannot come from an inert harness.
-    let mutant = scratch.join("mutant");
-    std::fs::create_dir_all(mutant.join("src")).unwrap();
-    std::fs::copy(root.join("semaprax.toml"), mutant.join("semaprax.toml")).unwrap();
-    for source in [
-        "app.spx",
-        "batch.spx",
-        "limits.spx",
-        "record.spx",
-        "tests.spx",
-    ] {
-        std::fs::copy(
-            root.join("src").join(source),
-            mutant.join("src").join(source),
-        )
-        .unwrap();
-    }
-    let batch_path = mutant.join("src/batch.spx");
-    let batch = std::fs::read_to_string(&batch_path).unwrap();
-    let broken = batch.replace("if only_line { 0usize } else { count }", "count");
-    assert_ne!(broken, batch, "negative-control mutation must be applied");
-    std::fs::write(&batch_path, broken).unwrap();
-    project::with_authenticated_project(&mutant.join("semaprax.toml"), |snapshot| {
-        snapshot.check()?;
-        let result = snapshot.execute_test(&application_options())?;
-        assert_ne!(
-            result.outcome(),
-            &project::ProjectExecutionOutcome::Returned(0)
-        );
-        Ok(())
-    })
-    .unwrap();
+    assert_batch_mutant_rejected(
+        &root,
+        scratch.path(),
+        "terminal-lf-mutant",
+        "if only_line { 0usize } else { count }",
+        "count",
+    );
 
     // CNORM-005 is not covered by the terminal-LF control. Deliberately
     // accepting every line must make the raw malformed-sequence case fail.
-    let utf8_mutant = scratch.join("utf8-mutant");
-    std::fs::create_dir_all(utf8_mutant.join("src")).unwrap();
-    std::fs::copy(
-        root.join("semaprax.toml"),
-        utf8_mutant.join("semaprax.toml"),
-    )
-    .unwrap();
-    for source in [
-        "app.spx",
-        "batch.spx",
-        "limits.spx",
-        "record.spx",
-        "tests.spx",
-    ] {
-        std::fs::copy(
-            root.join("src").join(source),
-            utf8_mutant.join("src").join(source),
-        )
-        .unwrap();
-    }
-    let batch_path = utf8_mutant.join("src/batch.spx");
-    let batch = std::fs::read_to_string(&batch_path).unwrap();
-    let broken = batch.replace("line_utf8_end(body, record) == end - start", "true");
-    assert_ne!(
-        broken, batch,
-        "UTF-8 negative-control mutation must be applied"
+    assert_batch_mutant_rejected(
+        &root,
+        scratch.path(),
+        "utf8-mutant",
+        "line_utf8_end(body, record) == end - start",
+        "true",
     );
-    std::fs::write(&batch_path, broken).unwrap();
-    project::with_authenticated_project(&utf8_mutant.join("semaprax.toml"), |snapshot| {
-        snapshot.check()?;
-        let result = snapshot.execute_test(&application_options())?;
-        assert_ne!(
-            result.outcome(),
-            &project::ProjectExecutionOutcome::Returned(0)
-        );
-        Ok(())
-    })
-    .unwrap();
 
     // CNORM-015's boundary is likewise independent of record splitting: a
     // checked-total predicate that never reports overflow must be caught.
-    let total_mutant = scratch.join("total-mutant");
-    std::fs::create_dir_all(total_mutant.join("src")).unwrap();
-    std::fs::copy(
-        root.join("semaprax.toml"),
-        total_mutant.join("semaprax.toml"),
-    )
-    .unwrap();
-    for source in [
-        "app.spx",
-        "batch.spx",
-        "limits.spx",
-        "record.spx",
-        "tests.spx",
-    ] {
-        std::fs::copy(
-            root.join("src").join(source),
-            total_mutant.join("src").join(source),
-        )
-        .unwrap();
-    }
-    let batch_path = total_mutant.join("src/batch.spx");
-    let batch = std::fs::read_to_string(&batch_path).unwrap();
-    let broken = batch.replace("total > 9223372036854775807 - quantity", "false");
-    assert_ne!(
-        broken, batch,
-        "total negative-control mutation must be applied"
+    assert_batch_mutant_rejected(
+        &root,
+        scratch.path(),
+        "total-mutant",
+        "total > 9223372036854775807 - quantity",
+        "false",
     );
-    std::fs::write(&batch_path, broken).unwrap();
-    project::with_authenticated_project(&total_mutant.join("semaprax.toml"), |snapshot| {
-        snapshot.check()?;
-        let result = snapshot.execute_test(&application_options())?;
-        assert_ne!(
-            result.outcome(),
-            &project::ProjectExecutionOutcome::Returned(0)
-        );
-        Ok(())
-    })
-    .unwrap();
-
-    let _ = std::fs::remove_dir_all(scratch);
 }

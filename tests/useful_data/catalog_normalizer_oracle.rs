@@ -19,9 +19,6 @@
 //! are frozen and outside this repository's implementation-agent write
 //! authority (see the oracle directory's own README for the exact policy).
 
-#[path = "catalog_normalizer_application.rs"]
-mod application;
-
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};

@@ -49,7 +49,10 @@ pub use spans::{
     prepare_span_export, verify_span_export, PreparedSpanExport, SpanExport, SpanExportSession,
     SpanStatus, SpanWireMismatch,
 };
-pub use trace_context::{TraceContext, TraceContextError, TraceEntropyCapability};
+pub use trace_context::{
+    TraceContext, TraceContextError, TraceEntropyCapability, TraceState, TraceStateError,
+    MAX_TRACESTATE_BYTES, MAX_TRACESTATE_MEMBERS, MAX_TRACESTATE_MEMBER_BYTES,
+};
 pub use trace_http::{deliver_traced_http, prepare_traced_http_delivery, TracedHttpRequest};
 pub use tracing::{
     prepare_export_event, ExportEventLedgerRefusal, ExportEventReceipt, ExportEventSession,

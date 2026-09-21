@@ -65,6 +65,10 @@ fn context() -> TraceContext {
     TraceContext::fresh(&mut Entropy, true).unwrap()
 }
 
+fn tracestate() -> TraceState {
+    TraceState::parse("  rojo=current  ,congo= opaque-value").unwrap()
+}
+
 #[test]
 fn typed_context_emits_one_canonical_traceparent_at_dispatch() {
     let expected = context().traceparent();
@@ -90,6 +94,59 @@ fn typed_context_emits_one_canonical_traceparent_at_dispatch() {
     assert!(!adapter.requests[0]
         .iter()
         .any(|(name, _)| name == "tracestate"));
+}
+
+#[test]
+fn typed_tracestate_is_canonical_accounted_and_bound_to_replay() {
+    let mut adapter = RecordingAdapter::default();
+    let mut session = HttpDeliverySession::new(2).unwrap();
+    let first = session
+        .reconcile(
+            prepare_traced_http_delivery(
+                capability(),
+                TracedHttpRequest::new(request(), context()).with_tracestate(tracestate()),
+            )
+            .unwrap(),
+            &mut adapter,
+        )
+        .unwrap();
+    assert!(!first.was_replayed());
+    assert_eq!(adapter.requests.len(), 1);
+    assert_eq!(
+        adapter.requests[0]
+            .iter()
+            .filter_map(|(name, value)| (name == "tracestate").then_some(value.as_str()))
+            .collect::<Vec<_>>(),
+        vec!["rojo=current,congo= opaque-value"]
+    );
+
+    let mut replay_adapter = RecordingAdapter::default();
+    assert_eq!(
+        session.reconcile(
+            prepare_traced_http_delivery(
+                capability(),
+                TracedHttpRequest::new(request(), context()).with_tracestate(
+                    TraceState::parse("rojo=changed,congo= opaque-value").unwrap(),
+                ),
+            )
+            .unwrap(),
+            &mut replay_adapter,
+        ),
+        Err(HttpLedgerRefusal::Ledger(LedgerRefusal::ConflictingRequest))
+    );
+    assert!(replay_adapter.requests.is_empty());
+
+    let mut header_ceiling = request();
+    header_ceiling.headers = (0..4)
+        .map(|index| HttpHeader::new(format!("x-public-{index}"), "v").unwrap())
+        .collect();
+    assert!(matches!(
+        prepare_traced_http_delivery(
+            capability(),
+            TracedHttpRequest::new(header_ceiling, context()).with_tracestate(tracestate()),
+        ),
+        Err(Refusal::InvalidHeader)
+    ));
 }
 
 #[test]

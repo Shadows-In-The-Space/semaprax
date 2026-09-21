@@ -11,24 +11,42 @@ use super::*;
 /// The public HTTP header type deliberately refuses `traceparent` and
 /// `tracestate`. This wrapper is the only way this adapter emits a
 /// `traceparent`, so the transported parent always comes from a parsed or
-/// entropy-derived [`TraceContext`]. `tracestate` is not represented or
-/// forwarded by this v1 boundary.
+/// entropy-derived [`TraceContext`]. Vendor state may only enter through a
+/// separately parsed [`TraceState`], never through caller-selected headers.
 pub struct TracedHttpRequest {
     request: HttpRequest,
     context: TraceContext,
+    tracestate: Option<TraceState>,
 }
 
 impl TracedHttpRequest {
     pub fn new(request: HttpRequest, context: TraceContext) -> Self {
-        Self { request, context }
+        Self {
+            request,
+            context,
+            tracestate: None,
+        }
     }
 
     pub fn trace_context(&self) -> &TraceContext {
         &self.context
     }
 
-    fn into_parts(self) -> (HttpRequest, TraceContext) {
-        (self.request, self.context)
+    /// Bind one already-admitted vendor state carrier for canonical forwarding.
+    ///
+    /// The type has no raw-string constructor on this request path, so it
+    /// cannot become an unbounded reserved-header injection bypass.
+    pub fn with_tracestate(mut self, tracestate: TraceState) -> Self {
+        self.tracestate = Some(tracestate);
+        self
+    }
+
+    pub fn tracestate(&self) -> Option<&TraceState> {
+        self.tracestate.as_ref()
+    }
+
+    fn into_parts(self) -> (HttpRequest, TraceContext, Option<TraceState>) {
+        (self.request, self.context, self.tracestate)
     }
 }
 
@@ -41,8 +59,13 @@ pub fn prepare_traced_http_delivery(
     capability: OutboundCapability,
     request: TracedHttpRequest,
 ) -> Result<PreparedHttpDelivery, Refusal> {
-    let (request, context) = request.into_parts();
-    super::http::prepare_http_delivery_with_trace_context(capability, request, Some(&context))
+    let (request, context, tracestate) = request.into_parts();
+    super::http::prepare_http_delivery_with_trace_context(
+        capability,
+        request,
+        Some(&context),
+        tracestate.as_ref(),
+    )
 }
 
 /// Validate and dispatch exactly one request with a canonical `traceparent`.
@@ -55,8 +78,14 @@ pub fn deliver_traced_http(
     request: TracedHttpRequest,
     adapter: &mut impl OutboundAdapter,
 ) -> Result<DeliveryResult, Refusal> {
-    let (request, context) = request.into_parts();
-    super::http::deliver_http_with_trace_context(capability, request, Some(&context), adapter)
+    let (request, context, tracestate) = request.into_parts();
+    super::http::deliver_http_with_trace_context(
+        capability,
+        request,
+        Some(&context),
+        tracestate.as_ref(),
+        adapter,
+    )
 }
 
 #[cfg(test)]

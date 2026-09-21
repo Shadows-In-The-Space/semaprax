@@ -300,16 +300,29 @@ any export. `SpanExport::from_trace_context` binds the same typed context into
 the completed-span wire; parsing an inbound header never grants outbound
 authority.
 
-`TracedHttpRequest` binds one `TraceContext` to the ordinary bounded HTTP
-request path. It adds exactly one canonical `traceparent` generated from the
-current local span after ordinary request validation, counts that header toward
-the global header limit, and includes it in the prepared-request digest and
-therefore HTTP replay identity. A caller cannot inject either `traceparent` or
-`tracestate` through `HttpHeader`; the typed path does not represent,
-reconstruct, or forward `tracestate`. This prevents an unbounded or
-unvalidated vendor state string from becoming a propagation bypass. The trace
-context is correlation data, not a permit: constructing it creates no socket,
-and dispatch still requires the deployment-owned `OutboundCapability` plus an
+`TraceState` is the corresponding closed carrier for one W3C `tracestate`
+field. It admits at most 512 serialized bytes, 32 unique members, and 256
+bytes per key or opaque value. Keys use the W3C lowercase identifier alphabet;
+values are printable ASCII without `,` or `=`, and their opaque bytes remain
+unchanged. W3C-permitted empty/OWS-only members are skipped; duplicate keys,
+controls, invalid key/value shapes, and any over-bound input refuse direct
+`TraceState` admission. Only optional whitespace surrounding members is
+removed, yielding one canonical comma-delimited output field.
+`TraceContext::from_headers` parses `traceparent` before attempting its
+companion state, so an invalid parent discards `tracestate` without touching
+the entropy capability, while invalid state is independently discarded and
+does not invalidate a usable parent. This deliberately bounded v1 carrier
+does not accept or reconstruct repeated raw HTTP fields.
+
+`TracedHttpRequest` binds one `TraceContext` and optional admitted
+`TraceState` to the ordinary bounded HTTP request path. It adds canonical
+`traceparent` and, when supplied, canonical `tracestate` generated from typed
+values after ordinary request validation. Both headers count toward the global
+header limit and enter the prepared-request digest and therefore HTTP replay
+identity. A caller cannot inject either through `HttpHeader`; raw repeated or
+unvalidated vendor state has no path to an adapter. The trace context is
+correlation data, not a permit: constructing it creates no socket, and
+dispatch still requires the deployment-owned `OutboundCapability` plus an
 injected adapter.
 
 Metric observations and spans have separate domain-separated idempotency keys
@@ -360,11 +373,12 @@ redacted debug surfaces, exact no-redispatch reconciliation, method-only
 conflict, bounded response settlement, sticky panic uncertainty, and read-only
 checkpoint verification. They exercise fixtures only, not a public endpoint.
 The typed trace HTTP selector is `outbound_host_adapter::trace_http::tests::`.
-It checks canonical single-header dispatch, raw `traceparent`/`tracestate`
-refusal, trace-header accounting at the shared header ceiling, and a changed
-context's idempotency conflict before redispatch. It uses recording adapters
-only and does not claim a hosted collector, remote propagation, or
-`tracestate` support.
+It checks canonical typed `traceparent`/`tracestate` dispatch, raw reserved
+header refusal, shared-header accounting, and changed context or vendor state
+idempotency conflicts before redispatch. The trace-context selector covers
+bounded hostile `tracestate` admission and paired-header ordering. These use
+recording adapters only and do not claim a hosted collector or remote
+propagation.
 
 The checkpoint selector is
 `outbound_host_adapter::ledger::checkpoint::tests::`. Its seven cases cover

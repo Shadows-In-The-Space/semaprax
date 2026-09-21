@@ -145,3 +145,83 @@ fn entropy_failure_zero_and_collision_refuse() {
         Err(TraceContextError::IdentifierCollision)
     );
 }
+
+#[test]
+fn tracestate_admission_preserves_opaque_values_and_canonicalizes_member_ows() {
+    let state = TraceState::parse("  rojo=active  ,\tcongo= opaque value\t").unwrap();
+    assert_eq!(state.member_count(), 2);
+    assert_eq!(state.as_header_value(), "rojo=active,congo= opaque value");
+
+    let mut entropy = FixedEntropy::new([0x77; 8]);
+    let (context, admitted) = TraceContext::from_headers(
+        "00-11111111111111111111111111111111-2222222222222222-01",
+        Some("rojo=active,congo= opaque value"),
+        &mut entropy,
+    )
+    .unwrap();
+    assert_eq!(
+        context.parent_span_id().as_deref(),
+        Some("2222222222222222")
+    );
+    assert_eq!(
+        admitted.unwrap().as_header_value(),
+        "rojo=active,congo= opaque value"
+    );
+}
+
+#[test]
+fn tracestate_hostile_inputs_are_bounded_and_unpaired_parent_fails_closed() {
+    let too_many = (0..=MAX_TRACESTATE_MEMBERS)
+        .map(|index| format!("v{index}=x"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let too_long = format!("v={}", "x".repeat(MAX_TRACESTATE_BYTES));
+    let overlong_key = format!("a{}=x", "a".repeat(MAX_TRACESTATE_MEMBER_BYTES));
+    let overlong_value = format!("v={}", "x".repeat(MAX_TRACESTATE_MEMBER_BYTES + 1));
+    let cases = [
+        ("Vendor=x", TraceStateError::InvalidKey),
+        ("v=x=y", TraceStateError::InvalidValue),
+        ("v=x,v=y", TraceStateError::DuplicateKey),
+        ("v=x\n", TraceStateError::InvalidValue),
+        (&too_many, TraceStateError::TooManyMembers),
+        (&too_long, TraceStateError::TooLong),
+        (&overlong_key, TraceStateError::InvalidKey),
+        (&overlong_value, TraceStateError::InvalidValue),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(TraceState::parse(input), Err(expected), "{input:?}");
+    }
+
+    assert_eq!(TraceState::parse("").unwrap().member_count(), 0);
+    assert_eq!(
+        TraceState::parse("rojo=x, ,\t,congo=y")
+            .unwrap()
+            .as_header_value(),
+        "rojo=x,congo=y"
+    );
+
+    let mut entropy = FixedEntropy::new([0x88; 8]);
+    let (context, state) = TraceContext::from_headers(
+        "00-11111111111111111111111111111111-2222222222222222-01",
+        Some("v=x,v=y"),
+        &mut entropy,
+    )
+    .unwrap();
+    assert_eq!(
+        context.parent_span_id().as_deref(),
+        Some("2222222222222222")
+    );
+    assert!(state.is_none(), "invalid vendor state must be discarded");
+    assert_eq!(entropy.offset, 8);
+
+    let mut invalid_parent_entropy = FixedEntropy::new([0x99; 8]);
+    assert_eq!(
+        TraceContext::from_headers(
+            "not-a-traceparent",
+            Some("v=x,v=y"),
+            &mut invalid_parent_entropy
+        ),
+        Err(TraceContextError::Malformed)
+    );
+    assert_eq!(invalid_parent_entropy.offset, 0);
+}

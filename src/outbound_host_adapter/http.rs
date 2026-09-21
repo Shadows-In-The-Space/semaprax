@@ -248,15 +248,21 @@ pub fn prepare_http_delivery(
     capability: OutboundCapability,
     request: HttpRequest,
 ) -> Result<PreparedHttpDelivery, Refusal> {
-    prepare_http_delivery_with_trace_context(capability, request, None)
+    prepare_http_delivery_with_trace_context(capability, request, None, None)
 }
 
 pub(super) fn prepare_http_delivery_with_trace_context(
     capability: OutboundCapability,
     request: HttpRequest,
     trace_context: Option<&TraceContext>,
+    tracestate: Option<&TraceState>,
 ) -> Result<PreparedHttpDelivery, Refusal> {
-    let origin = validate_http(&capability.policy, &request, trace_context.is_some())?;
+    let origin = validate_http(
+        &capability.policy,
+        &request,
+        trace_context.is_some(),
+        tracestate.is_some(),
+    )?;
     let identity = DeliveryIdentity::new(
         capability.deployment_binding.clone(),
         capability.invocation_id.clone(),
@@ -272,7 +278,7 @@ pub(super) fn prepare_http_delivery_with_trace_context(
     let request_id = request.request_id.clone();
     let idempotency_key = request.idempotency_key.clone();
     let max_response_bytes = capability.policy.max_response_bytes;
-    let prepared = into_prepared(request, max_response_bytes, trace_context);
+    let prepared = into_prepared(request, max_response_bytes, trace_context, tracestate);
     Ok(PreparedHttpDelivery {
         capability,
         origin,
@@ -292,20 +298,26 @@ pub fn deliver_http(
     request: HttpRequest,
     adapter: &mut impl OutboundAdapter,
 ) -> Result<DeliveryResult, Refusal> {
-    deliver_http_with_trace_context(capability, request, None, adapter)
+    deliver_http_with_trace_context(capability, request, None, None, adapter)
 }
 
 pub(super) fn deliver_http_with_trace_context(
     capability: OutboundCapability,
     request: HttpRequest,
     trace_context: Option<&TraceContext>,
+    tracestate: Option<&TraceState>,
     adapter: &mut impl OutboundAdapter,
 ) -> Result<DeliveryResult, Refusal> {
-    let origin = validate_http(&capability.policy, &request, trace_context.is_some())?;
+    let origin = validate_http(
+        &capability.policy,
+        &request,
+        trace_context.is_some(),
+        tracestate.is_some(),
+    )?;
     let request_id = request.request_id.clone();
     let idempotency_key = request.idempotency_key.clone();
     let max_response_bytes = capability.policy.max_response_bytes;
-    let prepared = into_prepared(request, max_response_bytes, trace_context);
+    let prepared = into_prepared(request, max_response_bytes, trace_context, tracestate);
     let observation = adapter.send(&prepared);
     Ok(settle(
         capability,
@@ -321,6 +333,7 @@ fn validate_http(
     policy: &OutboundPolicy,
     request: &HttpRequest,
     has_trace_context: bool,
+    has_tracestate: bool,
 ) -> Result<String, Refusal> {
     let origin = validate_common(policy, &request.endpoint, request.deadline_ms)?;
     if !valid_identity(&request.request_id) || !valid_identity(&request.idempotency_key) {
@@ -332,11 +345,13 @@ fn validate_http(
     if request.method == HttpMethod::Get && !request.body.is_empty() {
         return Err(Refusal::InvalidHeader);
     }
-    if request.headers.len()
-        + usize::from(request.content_type.is_some())
-        + 2
-        + usize::from(has_trace_context)
-        > MAX_HEADERS
+    if (has_tracestate && !has_trace_context)
+        || request.headers.len()
+            + usize::from(request.content_type.is_some())
+            + 2
+            + usize::from(has_trace_context)
+            + usize::from(has_tracestate)
+            > MAX_HEADERS
     {
         return Err(Refusal::InvalidHeader);
     }
@@ -368,9 +383,14 @@ fn into_prepared(
     request: HttpRequest,
     max_response_bytes: usize,
     trace_context: Option<&TraceContext>,
+    tracestate: Option<&TraceState>,
 ) -> PreparedRequest {
-    let mut headers =
-        Vec::with_capacity(request.headers.len() + 3 + usize::from(trace_context.is_some()));
+    let mut headers = Vec::with_capacity(
+        request.headers.len()
+            + 3
+            + usize::from(trace_context.is_some())
+            + usize::from(tracestate.is_some()),
+    );
     headers.push(("idempotency-key".into(), request.idempotency_key));
     headers.push(("x-semaprax-delivery-id".into(), request.request_id));
     if let Some(content_type) = request.content_type {
@@ -378,6 +398,9 @@ fn into_prepared(
     }
     if let Some(context) = trace_context {
         headers.push(("traceparent".into(), context.traceparent()));
+    }
+    if let Some(tracestate) = tracestate {
+        headers.push(("tracestate".into(), tracestate.as_header_value().into()));
     }
     headers.extend(
         request

@@ -7,7 +7,9 @@
 use serde_json::{Map, Value};
 
 pub(super) const MAX_SERVICE_CONFIG_BYTES: usize = 16 * 1024;
+pub(super) const MAX_SERVICE_ADAPTER_REQUEST_BYTES: usize = 16 * 1024;
 const SCHEMA: &str = "semaprax.service-config.v1";
+const ADAPTER_REQUEST_SCHEMA: &str = "semaprax.service-host-adapter-request.v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
@@ -18,11 +20,19 @@ enum Mode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ServiceConfigV1 {
     canonical: Vec<u8>,
+    adapter_request: Vec<u8>,
 }
 
 impl ServiceConfigV1 {
     pub(super) fn canonical_bytes(&self) -> &[u8] {
         &self.canonical
+    }
+
+    /// The bounded, canonical declaration a host adapter must accept before it
+    /// performs anything. It contains only adapter selections, origins, and
+    /// secret *references*; it neither resolves a secret nor grants authority.
+    pub(super) fn adapter_request_bytes(&self) -> &[u8] {
+        &self.adapter_request
     }
 }
 
@@ -106,6 +116,21 @@ pub(super) fn decode(bytes: &[u8]) -> Result<ServiceConfigV1, String> {
         return Err("service configuration mode and adapter selections disagree".into());
     }
 
+    let adapter_request = adapter_request(
+        mode,
+        database_adapter,
+        dsn,
+        text(database, "migration_table")?,
+        http_adapter,
+        listen_origin,
+        tls_profile,
+        password,
+        session,
+        webhook,
+        telemetry_adapter,
+        telemetry_origin,
+    )?;
+
     value.sort_all_objects();
     let mut canonical = serde_json::to_vec(&value)
         .map_err(|_| "service configuration cannot be rendered".to_owned())?;
@@ -113,7 +138,83 @@ pub(super) fn decode(bytes: &[u8]) -> Result<ServiceConfigV1, String> {
     if canonical != bytes {
         return Err("service configuration must use canonical JSON plus one line feed".into());
     }
-    Ok(ServiceConfigV1 { canonical })
+    Ok(ServiceConfigV1 {
+        canonical,
+        adapter_request,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn adapter_request(
+    mode: Mode,
+    database_adapter: &str,
+    dsn: Option<&str>,
+    migration_table: &str,
+    http_adapter: &str,
+    listen_origin: Option<&str>,
+    tls_profile: &str,
+    password: Option<&str>,
+    session: Option<&str>,
+    webhook: Option<&str>,
+    telemetry_adapter: &str,
+    telemetry_origin: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let mut request = match mode {
+        Mode::Fixture => serde_json::json!({
+            "schema": ADAPTER_REQUEST_SCHEMA,
+            "mode": "fixture",
+            "capabilities": [],
+            "database": {"adapter": database_adapter, "migration_table": migration_table},
+            "http": {"adapter": http_adapter, "tls_profile": tls_profile},
+            "telemetry": {"adapter": telemetry_adapter},
+        }),
+        Mode::Host => {
+            let dsn = dsn.ok_or("service host request lacks database reference")?;
+            let listen_origin = listen_origin.ok_or("service host request lacks HTTPS origin")?;
+            let password = password.ok_or("service host request lacks password reference")?;
+            let session = session.ok_or("service host request lacks session reference")?;
+            let webhook = webhook.ok_or("service host request lacks webhook reference")?;
+            let telemetry_origin =
+                telemetry_origin.ok_or("service host request lacks telemetry origin")?;
+            serde_json::json!({
+                "schema": ADAPTER_REQUEST_SCHEMA,
+                "mode": "host",
+                "capabilities": [
+                    "semaprax.service.database.connect.v1",
+                    "semaprax.service.http.serve-tls.v1",
+                    "semaprax.service.secrets.resolve.v1",
+                    "semaprax.service.telemetry.emit.v1",
+                ],
+                "database": {
+                    "adapter": database_adapter,
+                    "dsn_secret_ref": dsn,
+                    "migration_table": migration_table,
+                },
+                "http": {
+                    "adapter": http_adapter,
+                    "listen_origin": listen_origin,
+                    "tls_profile": tls_profile,
+                },
+                "secrets": {
+                    "password_pepper_ref": password,
+                    "session_signing_key_ref": session,
+                    "webhook_signing_key_ref": webhook,
+                },
+                "telemetry": {
+                    "adapter": telemetry_adapter,
+                    "endpoint_origin": telemetry_origin,
+                },
+            })
+        }
+    };
+    request.sort_all_objects();
+    let mut bytes = serde_json::to_vec(&request)
+        .map_err(|_| "service adapter request cannot be rendered".to_owned())?;
+    bytes.push(b'\n');
+    if bytes.len() > MAX_SERVICE_ADAPTER_REQUEST_BYTES {
+        return Err("service adapter request exceeds its exact byte bound".into());
+    }
+    Ok(bytes)
 }
 
 fn closed_object<'a>(
@@ -228,6 +329,12 @@ mod tests {
     fn fixture_replays_exactly_and_host_shape_is_distinct() {
         let decoded = decode(&fixture()).unwrap();
         assert_eq!(decoded.canonical_bytes(), fixture());
+        assert_eq!(
+            decoded.adapter_request_bytes(),
+            include_bytes!(
+                "../../../examples/task-service-project/service-host-adapter-request.json"
+            )
+        );
 
         let host = serde_json::json!({
             "schema": SCHEMA,
@@ -239,7 +346,25 @@ mod tests {
         });
         let mut host = serde_json::to_vec(&host).unwrap();
         host.push(b'\n');
-        assert_eq!(decode(&host).unwrap().canonical_bytes(), host);
+        let decoded = decode(&host).unwrap();
+        assert_eq!(decoded.canonical_bytes(), host);
+        let request: Value = serde_json::from_slice(decoded.adapter_request_bytes()).unwrap();
+        assert_eq!(request["mode"], "host");
+        assert_eq!(request["database"]["adapter"], "postgresql");
+        assert_eq!(request["http"]["listen_origin"], "https://service.example");
+        assert_eq!(
+            request["capabilities"],
+            serde_json::json!([
+                "semaprax.service.database.connect.v1",
+                "semaprax.service.http.serve-tls.v1",
+                "semaprax.service.secrets.resolve.v1",
+                "semaprax.service.telemetry.emit.v1",
+            ])
+        );
+        assert!(!decoded
+            .adapter_request_bytes()
+            .windows(b"secret-value".len())
+            .any(|window| window == b"secret-value"));
     }
 
     #[test]

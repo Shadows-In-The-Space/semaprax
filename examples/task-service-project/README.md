@@ -15,6 +15,13 @@ by supplying a separately validated configuration and resolving its secret
 references outside Semaprax source. Neither generated file carries credentials
 or grants database, network, telemetry, or secret-store authority.
 
+`service-host-adapter-request.json` is the canonical bounded handoff derived
+from that fixture configuration. It declares an empty capability list, so it
+cannot ask a host to open a database, serve TLS, resolve a secret, or emit
+telemetry. A valid host-mode configuration instead renders those four named
+requirements as a request only; providing and executing an adapter remains an
+explicit host responsibility, and this reference does not implement one.
+
 ```sh
 semaprax check examples/task-service-project
 semaprax test  examples/task-service-project

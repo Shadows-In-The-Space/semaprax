@@ -631,6 +631,7 @@ fn service_template_composes_bundled_dependencies_and_only_derives_under_tables_
             "src/tests.spx",
             "service-config.schema.json",
             "service.config.json",
+            "service-host-adapter-request.json",
         ]
     );
     for file in derived.files() {
@@ -781,6 +782,10 @@ fn checked_in_task_service_matches_the_normalized_service_projection() {
             "service.config.json",
             include_str!("../../examples/task-service-project/service.config.json"),
         ),
+        (
+            "service-host-adapter-request.json",
+            include_str!("../../examples/task-service-project/service-host-adapter-request.json"),
+        ),
     ] {
         let generated = derived
             .files()
@@ -815,7 +820,7 @@ fn service_scaffold_configuration_is_closed_and_credential_free() {
     let schema: serde_json::Value =
         serde_json::from_str(file("service-config.schema.json")).unwrap();
     let descriptor: serde_json::Value = serde_json::from_slice(&derived.canonical_bytes()).unwrap();
-    assert_eq!(descriptor["limits"]["files"], 8);
+    assert_eq!(descriptor["limits"]["files"], 9);
     replay_project_scaffold_v1(
         "service-config-contract",
         "service",
@@ -845,6 +850,17 @@ fn service_scaffold_configuration_is_closed_and_credential_free() {
     assert_eq!(fixture["database"]["adapter"], "fixture");
     assert_eq!(fixture["http"]["adapter"], "fixture");
     assert_eq!(fixture["telemetry"]["adapter"], "fixture");
+    let adapter_request: serde_json::Value =
+        serde_json::from_str(file("service-host-adapter-request.json")).unwrap();
+    assert_eq!(
+        adapter_request["schema"],
+        "semaprax.service-host-adapter-request.v1"
+    );
+    assert_eq!(adapter_request["mode"], "fixture");
+    assert_eq!(adapter_request["capabilities"], serde_json::json!([]));
+    assert_eq!(adapter_request["database"]["adapter"], "fixture");
+    assert_eq!(adapter_request["http"]["adapter"], "fixture");
+    assert_eq!(adapter_request["telemetry"]["adapter"], "fixture");
     for pointer in [
         "/database/dsn_secret_ref",
         "/http/listen_origin",

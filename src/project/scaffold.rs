@@ -43,7 +43,7 @@ pub const PROJECT_SCAFFOLD_TEMPLATES: [&str; 3] = [
 pub const PROJECT_SCAFFOLD_FILE_COUNT: usize = 5;
 pub const PROJECT_SCAFFOLD_TABLES_FILE_COUNT: usize = 6;
 pub const PROJECT_SCAFFOLD_LIBRARY_FILE_COUNT: usize = 6;
-pub const PROJECT_SCAFFOLD_SERVICE_FILE_COUNT: usize = 8;
+pub const PROJECT_SCAFFOLD_SERVICE_FILE_COUNT: usize = 9;
 pub const MAX_PROJECT_SCAFFOLD_NAME_BYTES: usize = 64;
 pub const MAX_PROJECT_SCAFFOLD_DESCRIPTOR_BYTES: usize = 65_536;
 
@@ -75,7 +75,8 @@ pub const PROJECT_SCAFFOLD_LIBRARY_INVENTORY: [&str; PROJECT_SCAFFOLD_LIBRARY_FI
 /// The service template mirrors the calculator's table layout shape (a
 /// separate `core` module) so it can carry a `[dependencies]` table; only its
 /// semantic source shape. It additionally carries the closed host
-/// configuration schema and a credential-free deterministic fixture instance.
+/// configuration schema, a credential-free deterministic fixture instance, and
+/// its explicit capability-free host-adapter request.
 pub const PROJECT_SCAFFOLD_SERVICE_INVENTORY: [&str; PROJECT_SCAFFOLD_SERVICE_FILE_COUNT] = [
     "README.md",
     "AGENTS.md",
@@ -85,6 +86,7 @@ pub const PROJECT_SCAFFOLD_SERVICE_INVENTORY: [&str; PROJECT_SCAFFOLD_SERVICE_FI
     "src/tests.spx",
     "service-config.schema.json",
     "service.config.json",
+    "service-host-adapter-request.json",
 ];
 
 /// The exact inventory of one built-in template.
@@ -235,7 +237,9 @@ const SERVICE_CONFIG_SCHEMA: &str =
     include_str!("../../examples/task-service-project/service-config.schema.json");
 const SERVICE_CONFIG_FIXTURE: &str =
     include_str!("../../examples/task-service-project/service.config.json");
-const SERVICE_CONFIGURATION_GUIDE: &str = "\n## Host configuration\n\n`service-config.schema.json` is the closed host-configuration contract and\n`service.config.json` is its credential-free fixture instance. Database, HTTP,\nand telemetry adapters are explicitly `fixture`; endpoints and secret\nreferences are absent. Selecting SQLite/PostgreSQL, native HTTP/TLS, OTLP, or\nsecret-store references requires a separately validated host configuration and\ngrants no authority to Semaprax source.\n";
+const SERVICE_ADAPTER_REQUEST_FIXTURE: &str =
+    include_str!("../../examples/task-service-project/service-host-adapter-request.json");
+const SERVICE_CONFIGURATION_GUIDE: &str = "\n## Host configuration\n\n`service-config.schema.json` is the closed host-configuration contract and\n`service.config.json` is its credential-free fixture instance. Database, HTTP,\nand telemetry adapters are explicitly `fixture`; endpoints and secret\nreferences are absent. `service-host-adapter-request.json` is the compiler\nrendered, bounded handoff for that fixture and declares an empty capability\nset. A host-mode configuration renders the exact database-connect, TLS-serve,\nsecret-resolve, and telemetry-emit capabilities it needs, but the declaration\ngains none of them: a separately validated host must provide and execute every\nadapter outside Semaprax source.\n";
 const NONCLAIMS: [&str; 4] = [
     "no_filesystem_or_publication_authority",
     "no_process_environment_or_current_directory_authority",
@@ -351,6 +355,11 @@ pub fn derive_project_scaffold_v1_with_layout(
         let decoded = service_config::decode(SERVICE_CONFIG_FIXTURE.as_bytes())
             .map_err(|message| scaffold_error(message))?;
         debug_assert_eq!(decoded.canonical_bytes(), SERVICE_CONFIG_FIXTURE.as_bytes());
+        if decoded.adapter_request_bytes() != SERVICE_ADAPTER_REQUEST_FIXTURE.as_bytes() {
+            return Err(scaffold_error(
+                "service adapter request fixture does not match the canonical configuration handoff",
+            ));
+        }
     }
     let manifest = if is_service {
         SERVICE_MANIFEST_TABLES
@@ -372,6 +381,7 @@ pub fn derive_project_scaffold_v1_with_layout(
             SERVICE_TESTS,
             SERVICE_CONFIG_SCHEMA,
             SERVICE_CONFIG_FIXTURE,
+            SERVICE_ADAPTER_REQUEST_FIXTURE,
         ]
     } else {
         match (template == PROJECT_SCAFFOLD_TEMPLATE_LIBRARY, layout) {

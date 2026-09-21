@@ -1,0 +1,1 @@
+{"capabilities":[],"database":{"adapter":"fixture","migration_table":"semaprax_migrations"},"http":{"adapter":"fixture","tls_profile":"fixture"},"mode":"fixture","schema":"semaprax.service-host-adapter-request.v1","telemetry":{"adapter":"fixture"}}

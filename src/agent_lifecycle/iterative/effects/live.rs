@@ -440,6 +440,49 @@ impl CompiledTypedEffects {
         )
     }
 
+    /// Execute deterministic Agent stages on one admitted public backend
+    /// while retaining the same proposal source, target host protocol,
+    /// authorization ordering, budgets, settlement, and replay evidence.
+    ///
+    /// `CoreWasm` never accepts caller-supplied source bytes. It lowers the
+    /// exact checked source retained when this value was compiled. A linked
+    /// project lifecycle currently has no canonical single-module Wasm source,
+    /// so selecting `CoreWasm` for one is refused before proposal or host work.
+    pub fn run_target_live_with_backend(
+        &self,
+        task: &LifecycleTask,
+        source: &mut dyn ProposalSource,
+        handler: &mut dyn TargetHostHandler,
+        stages: IterativeBudget,
+        effects: EffectBudget,
+        cancellation: &AgentCancellation,
+        selected: TargetStageBackend,
+    ) -> Result<TargetEffectRun, Vec<Diagnostic>> {
+        let backend = match selected {
+            TargetStageBackend::Interpreter => {
+                crate::agent_lifecycle::authorization::StageBackend::Interpreter
+            }
+            TargetStageBackend::CoreWasm => {
+                let source = self
+                    .target_source
+                    .as_deref()
+                    .ok_or_else(|| error("target_backend.core_wasm_source"))?;
+                crate::agent_lifecycle::authorization::StageBackend::Wasm { source }
+            }
+        };
+        let execution_binding = self.target_execution_binding(backend);
+        self.run_target_live_inner(
+            task,
+            source,
+            handler,
+            stages,
+            effects,
+            cancellation,
+            backend,
+            Some(execution_binding),
+        )
+    }
+
     /// Local parity-only entry. It does not select a production target: the
     /// caller must supply one sealed stage executor backend and an explicitly
     /// injected host handler, while the target protocol remains unchanged.
@@ -467,7 +510,6 @@ impl CompiledTypedEffects {
         )
     }
 
-    #[cfg(test)]
     fn target_execution_binding(
         &self,
         backend: crate::agent_lifecycle::authorization::StageBackend<'_>,

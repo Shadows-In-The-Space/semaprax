@@ -119,6 +119,17 @@ pub struct TargetEffectRun {
     evidence: String,
     digest: String,
 }
+
+/// Production selector for deterministic Agent stages behind the target host
+/// protocol. The selector carries no compiler flags or source bytes. Core Wasm
+/// reuses the exact checked module source retained by
+/// [`compile_typed_effects`]. Native execution remains parity-only until its
+/// compiler and child-process boundary enforces deadlines and cancellation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TargetStageBackend {
+    Interpreter,
+    CoreWasm,
+}
 impl TargetEffectRun {
     pub fn lifecycle(&self) -> &IterativeRun {
         &self.lifecycle
@@ -165,6 +176,10 @@ impl TypedEffectRun {
 
 pub struct CompiledTypedEffects {
     lifecycle: CompiledIterativeLifecycle,
+    // Exact checked single-module bytes for Core Wasm lowering. Linked project
+    // programs have no equivalent single source projection and retain `None`;
+    // their native route remains available while Core Wasm fails closed.
+    target_source: Option<String>,
     operations: Vec<EffectOperation>,
     selector: String,
     limits: EffectBudget,
@@ -192,7 +207,14 @@ pub fn compile_typed_effects(
         deployment.runtime_v1_definition(),
         step_type_id,
     )?;
-    compile_lifecycle_effects(lifecycle, deployment, selector_field_id, operations, false)
+    compile_lifecycle_effects(
+        lifecycle,
+        Some(module_source.to_owned()),
+        deployment,
+        selector_field_id,
+        operations,
+        false,
+    )
 }
 
 pub(crate) fn compile_linked_typed_effects(
@@ -207,11 +229,19 @@ pub(crate) fn compile_linked_typed_effects(
         deployment.runtime_v1_definition(),
         step_type_id,
     )?;
-    compile_lifecycle_effects(lifecycle, deployment, selector_field_id, operations, true)
+    compile_lifecycle_effects(
+        lifecycle,
+        None,
+        deployment,
+        selector_field_id,
+        operations,
+        true,
+    )
 }
 
 fn compile_lifecycle_effects(
     mut lifecycle: CompiledIterativeLifecycle,
+    target_source: Option<String>,
     deployment: &BoundAgentDeployment,
     selector_field_id: &str,
     operations: Vec<EffectOperation>,
@@ -369,6 +399,7 @@ fn compile_lifecycle_effects(
     lifecycle.inner.source = source;
     Ok(CompiledTypedEffects {
         lifecycle,
+        target_source,
         operations,
         selector: selector_field_id.to_owned(),
         limits,
@@ -860,20 +891,44 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             request_wires: Vec::new(),
             grants: Vec::new(),
         };
-        let run = compiled
-            .run_target_live_on(
-                &LifecycleTask {
-                    objective: vec![],
-                    budget: 10,
-                },
+        let selected = match backend {
+            crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization(_) => None,
+            crate::agent_lifecycle::authorization::StageBackend::Interpreter => {
+                Some(TargetStageBackend::Interpreter)
+            }
+            crate::agent_lifecycle::authorization::StageBackend::Native => None,
+            crate::agent_lifecycle::authorization::StageBackend::Wasm {
+                source: wasm_source,
+            } => {
+                assert_eq!(wasm_source, module_source);
+                Some(TargetStageBackend::CoreWasm)
+            }
+        };
+        let task = LifecycleTask {
+            objective: vec![],
+            budget: 10,
+        };
+        let run = match selected {
+            Some(selected) => compiled.run_target_live_with_backend(
+                &task,
+                &mut source,
+                &mut handler,
+                IterativeBudget::default(),
+                budgets(),
+                cancellation,
+                selected,
+            ),
+            None => compiled.run_target_live_on(
+                &task,
                 &mut source,
                 &mut handler,
                 IterativeBudget::default(),
                 budgets(),
                 cancellation,
                 backend,
-            )
-            .unwrap_or_else(|errors| panic!("target {module_source:?}: {errors:?}"));
+            ),
+        }
+        .unwrap_or_else(|errors| panic!("target {module_source:?}: {errors:?}"));
         (run, handler)
     }
 

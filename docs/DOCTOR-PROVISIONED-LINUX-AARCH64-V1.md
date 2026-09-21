@@ -69,10 +69,12 @@ CI-required job, has no push or pull-request trigger, and has no
 `--skip` exclusions: `doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions`
 and `real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions`.
 Those exclusions define its twenty-four-case boundary. The driver then runs
-the first excluded fixture once to observe its missing-real-bundle
-precondition; it masks only that expected nonzero result, which is not a
-confinement pass. Every selected lifecycle command is otherwise unmasked and
-fail-fast: an unannounced selected-case skip or mask is a contract failure.
+both excluded fixtures individually to observe each missing-real-bundle
+precondition. Each probe is required to fail with its exact missing-bundle or
+missing-selector reason: an unexpected pass or another failure is itself a
+gate failure, and the expected nonzero results are not confinement passes.
+Every selected lifecycle command is otherwise unmasked and fail-fast: an
+unannounced selected-case skip or mask is a contract failure.
 The job first proves that its native host is Linux AArch64, fetches the locked
 dependency graph before setting Cargo offline, and then invokes that driver.
 Missing user namespaces, Cargo, a native AArch64 host, dependencies, or any

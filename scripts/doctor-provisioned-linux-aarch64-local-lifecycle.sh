@@ -161,10 +161,28 @@ main() {
 	echo "== running the platform-sys real-distribution fixture explicitly =="
 	echo "   (expected to fail fast on the missing SEMAPRAX_DOCTOR_REAL_SELECTOR"
 	echo "    precondition unless the caller has provisioned a real bundle)"
-	unshare --user --map-root-user --mount --net --ipc --uts -- \
+	[ -z "${SEMAPRAX_DOCTOR_REAL_BUNDLE+x}" ] || fail "partial probe requires SEMAPRAX_DOCTOR_REAL_BUNDLE to be absent"
+	[ -z "${SEMAPRAX_DOCTOR_REAL_SELECTOR+x}" ] || fail "partial probe requires SEMAPRAX_DOCTOR_REAL_SELECTOR to be absent"
+	local platform_probe_log collector_probe_log
+	platform_probe_log="$(mktemp)"
+	collector_probe_log="$(mktemp)"
+	trap 'rm -f -- "${platform_probe_log}" "${collector_probe_log}"' EXIT
+	if unshare --user --map-root-user --mount --net --ipc --uts -- \
 		cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib -- \
-		--ignored --exact --test-threads=1 doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions ||
-		echo "   (nonzero exit expected without a provisioned real bundle -- not a confinement failure)"
+		--ignored --exact --test-threads=1 doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions >"${platform_probe_log}" 2>&1; then
+		fail "platform real-distribution fixture unexpectedly passed without the contracted provisioned bundle"
+	fi
+	grep -Fq 'provision real bundle' "${platform_probe_log}" || fail "platform probe failed for a reason other than missing provisioning"
+	echo "   observed required missing-platform-bundle refusal (not a confinement pass)"
+
+	echo "== running the collector real-distribution fixture explicitly =="
+	if unshare --user --map-root-user --mount --net --ipc --uts -- \
+		cargo test --locked --offline -p semaprax-doctor-collector --test provisioned -- \
+		--ignored --exact --test-threads=1 real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions >"${collector_probe_log}" 2>&1; then
+		fail "collector real-distribution fixture unexpectedly passed without the contracted provisioned bundle"
+	fi
+	grep -Fq 'provision real selector' "${collector_probe_log}" || fail "collector probe failed for a reason other than missing provisioning"
+	echo "   observed required missing-collector-bundle refusal (not a confinement pass)"
 
 	echo "== done: this is AArch64-local exploratory evidence only =="
 	echo "   It is not the x86-64 gate, does not change WP-05, and must never"

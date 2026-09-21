@@ -671,7 +671,7 @@ fn aarch64_local_driver_boundary(local_driver: &str) -> Result<(), String> {
     if local_driver
         .matches("--ignored --exact --test-threads=1")
         .count()
-        != 3
+        != 4
         || local_driver.contains("doctor::offline_worker doctor::offline_root")
     {
         return Err(
@@ -681,9 +681,9 @@ fn aarch64_local_driver_boundary(local_driver: &str) -> Result<(), String> {
 
     let command_prefix = "unshare --user --map-root-user --mount --net --ipc --uts -- \\\n\t\tcargo test --locked --offline";
     let commands: Vec<_> = local_driver.split(command_prefix).skip(1).collect();
-    if commands.len() != 3 {
+    if commands.len() != 4 {
         return Err(format!(
-            "expected exactly three AArch64 lifecycle test commands, got {}",
+            "expected exactly four AArch64 lifecycle test commands, got {}",
             commands.len()
         ));
     }
@@ -694,15 +694,24 @@ fn aarch64_local_driver_boundary(local_driver: &str) -> Result<(), String> {
             ));
         }
     }
-    if commands[2].contains("--skip ")
-        || !commands[2].contains(
-            "doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions ||\n\t\techo \"   (nonzero exit expected without a provisioned real bundle -- not a confinement failure)\"",
-        )
-    {
-        return Err(
-            "only the explicit missing-real-bundle precondition probe may mask its expected nonzero"
-                .to_owned(),
-        );
+    for (command, fixture, refusal) in [
+        (
+            commands[2],
+            "doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions",
+            "fail \"platform real-distribution fixture unexpectedly passed without the contracted provisioned bundle\"",
+        ),
+        (
+            commands[3],
+            "real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions",
+            "fail \"collector real-distribution fixture unexpectedly passed without the contracted provisioned bundle\"",
+        ),
+    ] {
+        if command.contains("--skip ") || !command.contains(fixture) || !command.contains(refusal) {
+            return Err(
+                "an excluded AArch64 fixture is not a required failing precondition probe"
+                    .to_owned(),
+            );
+        }
     }
     Ok(())
 }
@@ -731,7 +740,7 @@ fn aarch64_tracking_contract_tripwires(
             "GitHub-hosted `ubuntu-24.04-arm` runner",
             "exactly two named\n`--skip` exclusions",
             "Those exclusions define its twenty-four-case boundary.",
-            "masks only that expected nonzero result, which is not a\nconfinement pass.",
+            "Each probe is required to fail with its exact missing-bundle or\nmissing-selector reason",
             "Every selected lifecycle command is otherwise unmasked and\nfail-fast",
             "does **not** call itself a full AArch64 gate",
             "not a production or WP-05 promotion",
@@ -748,7 +757,12 @@ fn aarch64_tracking_contract_tripwires(
             "This is a failure, not a skip.",
             "--skip doctor::offline_worker::tests::provisioned_real_clang_node_rust_distributions",
             "--skip real_launched_handoff::production_launcher_reports_all_roles_from_provisioned_real_distributions",
-            "nonzero exit expected without a provisioned real bundle -- not a confinement failure",
+            "observed required missing-platform-bundle refusal",
+            "observed required missing-collector-bundle refusal",
+            "partial probe requires SEMAPRAX_DOCTOR_REAL_BUNDLE to be absent",
+            "partial probe requires SEMAPRAX_DOCTOR_REAL_SELECTOR to be absent",
+            "grep -Fq 'provision real bundle'",
+            "grep -Fq 'provision real selector'",
         ],
     )?;
     aarch64_local_driver_boundary(local_driver)?;
@@ -962,6 +976,17 @@ fn aarch64_linux_tracking_contract_is_separate_fail_closed_and_non_promotional()
         aarch64_local_driver_boundary(&added_lifecycle_case).is_err(),
         "an added ignored lifecycle case must require an explicit reviewed 24-case-plan update"
     );
+    for refusal in [
+        "fail \"platform real-distribution fixture unexpectedly passed without the contracted provisioned bundle\"",
+        "fail \"collector real-distribution fixture unexpectedly passed without the contracted provisioned bundle\"",
+    ] {
+        let fail_open = local_driver.replacen(refusal, "true", 1);
+        assert_ne!(fail_open, local_driver, "missing refusal mutation anchor");
+        assert!(
+            aarch64_local_driver_boundary(&fail_open).is_err(),
+            "an unexpectedly passing excluded fixture must fail the tracking route"
+        );
+    }
 
     for (name, hostile_tracking, hostile_workflow) in [
         (

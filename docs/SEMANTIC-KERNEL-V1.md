@@ -9,7 +9,7 @@
   `SPX-P207` — see "Ceiling 3"), the Kernel-0 reification predicate
   implemented and tested as an executable HIR admission check
   (`src/kernel_zero.rs`), and the self-hosting gate ladder defined with
-  rung 0 reached and evidenced. No rung above 0 is reached. No proof in this
+  rung 1 reached and evidenced. No rung above 1 is reached. No proof in this
   document is machine-checked. A later session added a from-scratch Kernel-0
   reference interpreter (`src/kernel_zero/{term,value,eval}.rs`), an HIR
   translator (`src/kernel_zero/reify.rs`), and a differential test against
@@ -50,7 +50,7 @@ proof sketch of its safety properties, an explicit compiler-HIR-to-kernel-term
 admission predicate now implemented and tested as executable code (its
 *faithfulness to real evaluation* remains unproved -- see "Reification"), and
 a **self-hosting gate ladder** with an honest statement of which rung is
-reached today: **rung 0**, evidenced below, and no further.
+reached today: **rung 1**, evidenced below, and no further.
 
 Two independently measured compiler capacity ceilings
 ([issue #241](https://github.com/wavect/semaprax/issues/241)) bound what a
@@ -71,10 +71,9 @@ Read this section before citing this document elsewhere.
   progress/preservation argument a reader can follow and attack), not a
   Lean/Coq/Isabelle artifact. Section "What is and is not mechanically
   checked" states the exact boundary.
-- **No self-hosting milestone is reached.** Rung 0 of the ladder below is
-  reached and evidenced; every higher rung, including the formatter
-  self-hosting target the issue names as the first realistic candidate, is
-  unreached and is recorded as a target, not a result.
+- **No compiler-component self-hosting milestone is reached.** Rungs 0 and 1
+  of the ladder below are reached and evidenced; rung 2's formatter target and
+  every higher rung remain targets, not results.
 - **The compiler-to-Kernel-0 translation's *admission* half is mechanically
   checked; its *faithfulness* half now has a differential test, which is
   evidence, not a proof.** `src/kernel_zero.rs` decides, mechanically,
@@ -1109,13 +1108,13 @@ next.
 | Rung | Gate | Reached today? | Evidence |
 |---|---|---|---|
 | **0** | A Kernel-0-shaped `.spx` program is admitted by the unmodified toolchain and produces the *same* observable result on the interpreter, the native backend, and the Wasm backend, for at least one concrete program and input. | **Yes.** | "Rung 0 evidence" below. |
-| **1** | A kernel-sized program (bounded by the ceilings above, not merely "small") implements a non-trivial pure computation (validation, classification, or similar) entirely within Kernel-0/Kernel-1's admitted shapes, still with cross-backend agreement. | **No.** The candidate below establishes non-trivial classification and focused cross-backend coverage, but remains far below the measured capacity ceilings. | "Rung 1 candidate evidence" below; capacity-scale evidence remains outstanding. |
+| **1** | A kernel-sized program (bounded by the ceilings above, not merely "small") implements a non-trivial pure computation (validation, classification, or similar) entirely within Kernel-0/Kernel-1's admitted shapes, still with cross-backend agreement. | **Yes.** | "Rung 1 evidence" below: a 35,669-byte, 32-policy classifier passed 72 independent-oracle/interpreter cases and 216 native/Core-Wasm comparisons. |
 | **2** | A pure, total, pipeline-safe compiler component with no ownership/effects of its own — a canonical formatter or renderer fragment is the issue's own suggested first candidate — is implemented in SEMAPRAX, differential-tested byte-identical against the Rust implementation over a broad corpus, and its build is bootstrap-reproducible under a stated environment. | **No.** | Not attempted this session. |
 | **3** | A parser fragment is self-hosted with the same differential-equivalence and bootstrap-reproducibility bar as rung 2, plus documented fallback/recovery if the self-hosted path disagrees with the Rust reference. | **No.** | Not attempted. |
 | **4** | Semantic projection (HIR → semantic graph) is self-hosted with the same bar, plus stable-ID and determinism regression coverage carried over unchanged. | **No.** | Not attempted. |
 | **5** | The semantic-transaction validator (precondition checking, replay-before-commit, fail-closed staleness) is self-hosted with the same bar. | **No.** | Not attempted. |
 
-**Today's rung: 0.** No claim above rung 0 is made anywhere in this document,
+**Today's rung: 1.** No claim above rung 1 is made anywhere in this document,
 the completion matrix, or the commits accompanying it.
 
 ### Rung 0 evidence
@@ -1145,26 +1144,29 @@ deliberately small (two functions, one call each), consistent with rung 0's
 narrow scope; it is not evidence for rung 1, which needs a program actually
 near the ceilings above, not comfortably under them.
 
-### Rung 1 candidate evidence (rung not reached)
+### Rung 1 evidence
 
-`src/kernel_zero/differential.rs` contains a bounded, pure access-policy
-classifier with six typed inputs, four helper declarations, priority-sensitive
-refusals, nested conditionals, lazy boolean operators, and fourteen independent
-decision-table fixtures. The source is below 4 KiB, every declaration is
-mechanically admitted by `reifies_into_kernel_zero`, and
-`rung_one_candidate_reifies_and_matches_reference_and_compiler_interpreters`
-checks every fixture against both the from-scratch Kernel-0 evaluator and the
-ordinary compiler interpreter.
+`src/kernel_zero/differential.rs` now constructs a pure, capacity-scale
+multi-region access-policy classifier. Its 32 reachable regional variants use
+different resource caps, privileged-operation roles, step-up thresholds, and
+refusal codes; the classifier has seven typed inputs, shared helper
+declarations, and a mutually exclusive dispatch chain. The source-size
+assertion requires **30--35 KiB**, placing it at 75--100% of the documented
+35--40 KiB zero-dependency ceiling without claiming to hit the separate
+workspace-graph limit. It deliberately avoids independently combined branches,
+which would exercise the unrelated cleanup-replay path bound rather than this
+source-capacity question. Every declaration must reify into Kernel-0, and the
+72-fixture known-answer corpus covers every regional policy on both an accepted
+and a high-resource path plus priority and unknown-region boundaries.
 
 `src/kernel_zero/differential/cross_backend.rs` owns the corresponding
-`rung_one_candidate_agrees_across_native_o0_o2_and_core_wasm`
-gate. It executes all fourteen fixtures through native C11 at `-O0` and `-O2`
-and through Core Wasm, comparing all 42 results with the independent reference
-evaluator. Both focused gates passed locally. This finite classifier and corpus
-are preparatory evidence only: at less than 4 KiB the source is not near the
-documented capacity ceilings, so rung 1 remains unreached. It is also not a
-formatter, parser, compiler component, proof of general backend equivalence,
-or evidence for rung 2.
+`rung_one_capacity_classifier_agrees_across_native_o0_o2_and_core_wasm` gate.
+It executes all 72 fixtures through native C11 at `-O0` and `-O2`
+and through Core Wasm, comparing all 216 results with the independent reference
+evaluator. Both focused gates passed locally: 72/72 independent-reference and
+compiler-interpreter cases, then 216/216 native/Core-Wasm comparisons. This
+reaches rung 1 without claiming a formatter, parser, compiler component, proof
+of general backend equivalence, hosted evidence, or any evidence for rung 2.
 
 ## Immediate follow-ups (not done by this document)
 

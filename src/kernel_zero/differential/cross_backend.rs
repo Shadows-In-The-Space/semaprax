@@ -479,7 +479,7 @@ fn run_case(case: &Case, failures: &mut Vec<String>, total: &mut usize) {
 }
 
 #[test]
-fn rung_one_candidate_agrees_across_native_o0_o2_and_core_wasm() {
+fn rung_one_capacity_classifier_agrees_across_native_o0_o2_and_core_wasm() {
     let missing: Vec<&str> = ["clang", "node"]
         .into_iter()
         .filter(|tool| !tool_available(tool))
@@ -498,13 +498,17 @@ fn rung_one_candidate_agrees_across_native_o0_o2_and_core_wasm() {
     }
 
     let case = rung_one_case();
-    assert_eq!(case.samples.len(), 14, "the rung-1 decision table changed");
+    assert_eq!(
+        case.samples.len(),
+        72,
+        "the rung-1 capacity classifier's decision table changed"
+    );
     let mut failures = Vec::new();
     let mut total = 0usize;
     run_case(&case, &mut failures, &mut total);
     assert_eq!(
-        total, 42,
-        "14 fixtures must execute on all three target legs"
+        total, 216,
+        "72 fixtures must execute on all three target legs"
     );
     assert!(
         failures.is_empty(),

@@ -688,7 +688,11 @@ fn aarch64_local_driver_boundary(local_driver: &str) -> Result<(), String> {
         ));
     }
     for (index, command) in commands[..2].iter().enumerate() {
-        if command.contains("||") {
+        // Only the cargo test invocation itself must be unmasked; the
+        // subsequent shell probes for the real-distribution fixtures
+        // legitimately use `|| fail` after the lifecycle suite.
+        let cargo_invocation = command.split("\n\t\techo").next().unwrap_or(command);
+        if cargo_invocation.contains("||") {
             return Err(format!(
                 "selected AArch64 lifecycle command {index} is masked instead of fail-fast"
             ));

@@ -530,7 +530,7 @@ fn public_api_cli_bytes_getters_and_read_only_locking_are_exact() {
         document_digest(graph.to_json().as_bytes()),
         // Exact graph fields and API/CLI byte parity above independently bind
         // this re-pinned whole-document digest.
-        "sha256:ff401305bfc91d4690e5a16a60e5249891079b98dccfea8e94238bdc656a213f"
+        "sha256:b9ce07e7ff7360494d3986e285f94049fc1ec055f6ea607d2d98746f43e12ec9"
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
@@ -944,14 +944,14 @@ fn public_workspace_analysis_api_cli_kats_and_locking_are_exact() {
             document_digest(capability_review.as_bytes()),
         ],
         [
-            "sha256:32028547a02602dec5ac6af5407d33d90a0bcc0849c8920c68814707e1d0c8ea",
-            "sha256:eb8dd9adc08361b56faf46689d8ba3e1a5f0f48977a899cff04705bd8d7752fc",
-            "sha256:cb66766662336ce65d3e74aafa02196876a98e87144dee880c1a51491f752200",
-            "sha256:5f4ff62c5c578c7413f01e7a109ded387d7f11b3c1781a435baf977cb7fc9f78",
-            "sha256:69f85b180127a7e02f91a73810ba9dfe2ead95da4db39a0296d0eda11eb3fca7",
-            "sha256:c77a395689d0307ac8a63d04b19f4562cd48adfafa905a18a4bacb8ade23d44a",
-            "sha256:4509e897f60245374f57bce183e4003881a84da6dd732da9e49ba75b46b9df0f",
-            "sha256:ee408daa9b12093ec71da4649d22b7537430545e8fd17514a617aabf8a59b67f",
+            "sha256:c67ebfbe85854551d5b247c51acc69f1d3fc4036b81970150fb0811fde59e92e",
+            "sha256:b864cdcc3113521a32ff13ca7ff38e7d070fcee2ff52c950bbfc284cca326ed5",
+            "sha256:ff146a9cbcf8ceea4dc1b848362a4598fb03d930377366d27c092f29272c9c8f",
+            "sha256:4cc8ae63b1e28fa3e4ff2a6168a8f81dc4769c284c55447d3ace1b8226779787",
+            "sha256:e227afb935ef6e096ed94295e486c22b9bbe6486f5125a794060131cfa6ef6d2",
+            "sha256:2f740ada41d927c1d0badcc9b28391b5c86c327ae10263411ad54be18e839a07",
+            "sha256:47cc0ac11541002b78f0ebbd4ca19b46c00ce17dbef625fa3a3d56a4313deb11",
+            "sha256:b21fb664cc422e40f0f974352511d6fc307d5b9b88bf2e48a867825a7889516d",
         ]
     );
 

@@ -218,7 +218,7 @@ fn public_api_cli_kat_parity_and_opaque_getters() {
         raw_sha(&preview),
         // Parsed artifact fields and digest-reference parity below independently
         // bind this re-pinned whole-document digest.
-        "sha256:4740ff51d6732f82d85e0d854d8ea1710a7e3cf476cf2c311594d6cd88b5d35f"
+        "sha256:8f1b3eac4d3e9a8a0534ef3acb5a89f93737f75d2b3871e3cf0aa148871b7ed0"
     );
     assert_eq!(
         raw_sha(&evidence),
@@ -455,7 +455,7 @@ fn verification_receipt_api_cli_kat_shared_lock_and_no_write() {
         raw_sha(&receipt),
         // The parsed receipt fields and fixed-point budget below independently
         // bind this re-pinned whole-document digest.
-        "sha256:fb744e1b4e7bca1759d493ce31d3aa039d66cc586518357540dbcb7f29c9e723"
+        "sha256:e6e1791cdf6bd5cd13fdb40735a3807a4fdce5a009487b83f9f6da74aa7f8ab7"
     );
     let value: serde_json::Value = serde_json::from_str(&receipt).unwrap();
     assert_eq!(
@@ -591,7 +591,7 @@ fn evidence_parser_replay_confusion_and_read_hostiles_fail_closed() {
         replace_digest_character(&evidence, "\"proposal\""),
         replace_digest_character(&evidence, "\"change_preview\""),
         replace_digest_character(&evidence, "\"candidate_source_digest\""),
-        evidence.replacen("\"max_managed_files\":16", "\"max_managed_files\":15", 1),
+        evidence.replacen("\"max_managed_files\":32", "\"max_managed_files\":31", 1),
         evidence.replacen(
             "not_signature_or_authenticated_provenance",
             "not_signature_or_authenticated_provenancf",
@@ -668,7 +668,7 @@ fn application_receipt_api_cli_kat_fixed_point_and_raw_no_write() {
         raw_sha(&receipt),
         // The parsed receipt fields and fixed-point budget below independently
         // bind this re-pinned whole-document digest.
-        "sha256:5cff5d51a19a4b46570d883cfdd9f81d62e27bb09a9f323ccf4beac6357ffefd"
+        "sha256:9f2e670d74ddfbc4157ef4da6f6706fd93b56611bc56a2d4b98e545ee8dfcc61"
     );
     let value: serde_json::Value = serde_json::from_str(&receipt).unwrap();
     assert_eq!(

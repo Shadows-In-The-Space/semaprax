@@ -150,7 +150,7 @@ fn public_api_cli_getters_kats_and_no_write_are_exact() {
         bundle.derivation_digest(),
         // Parsed derivation fields and fixed-point replay independently bind
         // this re-pinned whole-document digest.
-        "sha256:a626e31667029f448643dbfe16862cadc748917116581f524cda371e5d0c6390"
+        "sha256:22a1b28f75130ebf43fd020fcf8391eae9f1bcbbd3c4d7f8a08eeea8d8c1ef5b"
     );
     assert!(bundle.derivation().ends_with('\n'));
     assert!(bundle.derived_change_proposal().ends_with('\n'));
@@ -293,7 +293,7 @@ fn public_operations_evidence_verify_apply_api_cli_are_exact() {
         bundle.derivation_digest(),
         // Parsed derivation fields and fixed-point replay independently bind
         // this re-pinned whole-document digest.
-        "sha256:a626e31667029f448643dbfe16862cadc748917116581f524cda371e5d0c6390"
+        "sha256:22a1b28f75130ebf43fd020fcf8391eae9f1bcbbd3c4d7f8a08eeea8d8c1ef5b"
     );
     assert_eq!(
         bundle.derived_change_proposal_digest(),

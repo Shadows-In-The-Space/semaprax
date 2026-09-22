@@ -33,7 +33,14 @@
 //! it. See
 //! [Public Generic Carrier v1](../../docs/PUBLIC-GENERIC-CARRIER-V1.md#native-c11-physical-adapter-issue-154)
 //! for the full status-code table, wire format, and deferred-scope note.
+//!
+//! The additive [`authenticated`] profile now emits an independently replayed
+//! checked identity endpoint, with direct C admission of canonical frames before
+//! physical input allocation. That narrow profile is distinct from the frozen
+//! fixture renderer described above; transforming/allocating endpoints and
+//! public support remain outside its contract.
 
 pub mod admission;
+pub mod authenticated;
 pub mod binding;
 pub mod template;

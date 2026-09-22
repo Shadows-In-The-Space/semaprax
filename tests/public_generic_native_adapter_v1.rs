@@ -34,6 +34,8 @@ mod malformed_trusted_descriptor;
 mod max_bounds_saturation;
 #[path = "public_generic_native_adapter_v1/native_frame_admission.rs"]
 mod native_frame_admission;
+#[path = "public_generic_native_adapter_v1/authenticated_handoff.rs"]
+mod authenticated_handoff;
 /// Shared test-support sources, declared exactly once for this binary.
 /// Each subject module reaches them with `use crate::...`; declaring them
 /// per subject compiled the same file seven times (`clippy::duplicate_mod`).

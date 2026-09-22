@@ -5,9 +5,9 @@
 //! [`LogicalCarrierFrame`] against a real [`VerifiedPublicGenericDescriptor`],
 //! then exposes its leaves for a caller to lower into the physical adapter. It
 //! performs no physical handle mint, ownership transfer, or endpoint
-//! invocation itself. No production caller installs it at the physical C11
-//! handoff yet, so this is admission plumbing rather than evidence that native
-//! dispatch is protected.
+//! invocation itself. The additive [`super::authenticated`] profile embeds the
+//! same verified-descriptor-derived frame plan in its physical C entry point;
+//! this Rust callback helper remains independently useful admission plumbing.
 //!
 //! This is deliberately native-only plumbing, not a new public C ABI.  The
 //! Core-Wasm provider still lacks the compiled provider ABI required to make
@@ -117,7 +117,8 @@ impl NativeInputAdmission {
     /// Parse and bind a caller-owned input ticket. The returned leaves borrow
     /// no ticket state and remain ordinary value bytes; installing this guard
     /// before allocation, transfer, or dispatch and then committing the leaves
-    /// to a physical provider are separate, still-unimplemented operations.
+    /// to a physical provider are separate operations. The authenticated native
+    /// profile implements its own C entry check before that handoff.
     pub fn admit(&self, ticket: &NativeInputTicket) -> Result<Vec<CarrierLeaf>, Diagnostic> {
         if ticket.generation != self.generation {
             return Err(Diagnostic::io(

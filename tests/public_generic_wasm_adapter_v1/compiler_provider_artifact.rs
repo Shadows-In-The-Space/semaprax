@@ -33,6 +33,33 @@ fn transform(value: own Envelope<LeafPair>) -> Envelope<LeafPair> {
 fn main() -> i64 { 0 }
 "#;
 
+const FAILING_SOURCE: &str = r#"module provider.artifact;
+
+@id("provider.leaf-pair")
+record LeafPair {
+    @id("provider.leaf-pair.left")
+    left: Bytes,
+    @id("provider.leaf-pair.right")
+    right: Bytes,
+}
+
+@id("provider.envelope")
+record Envelope<T> {
+    @id("provider.envelope.payload")
+    payload: T,
+}
+
+@id("provider.transform")
+fn transform(value: own Envelope<LeafPair>) -> Envelope<LeafPair>
+    requires false
+{
+    value
+}
+
+@id("provider.main")
+fn main() -> i64 { 0 }
+"#;
+
 fn node_available() -> bool {
     Command::new("node")
         .arg("--version")
@@ -48,15 +75,17 @@ fn generated_field_name(identity: &str) -> String {
     format!("field_{suffix}")
 }
 
-fn resolved_program() -> semaprax::hir::ResolvedProgram {
-    let program = semaprax::check(SOURCE, Path::new("compiler-provider-artifact.spx")).unwrap();
+fn resolved_program(source: &str) -> semaprax::hir::ResolvedProgram {
+    let program = semaprax::check(source, Path::new("compiler-provider-artifact.spx")).unwrap();
     semaprax::hir::resolve(&program).unwrap()
 }
 
-fn endpoint() -> semaprax::public_generic_abi::compiler_endpoint::AdmittedPublicGenericEndpointV1 {
-    let parsed = semaprax::parse(SOURCE, Path::new("compiler-provider-artifact.spx")).unwrap();
+fn endpoint_for(
+    source: &str,
+) -> semaprax::public_generic_abi::compiler_endpoint::AdmittedPublicGenericEndpointV1 {
+    let parsed = semaprax::parse(source, Path::new("compiler-provider-artifact.spx")).unwrap();
     let source_revision = semaprax::format::canonical(&parsed);
-    let program = resolved_program();
+    let program = resolved_program(source);
     let endpoint = semaprax::public_generic_abi::compiler_endpoint::derive_admitted_public_generic_endpoint_v1(
         &program,
         &source_revision,
@@ -66,9 +95,19 @@ fn endpoint() -> semaprax::public_generic_abi::compiler_endpoint::AdmittedPublic
     endpoint
 }
 
+fn endpoint() -> semaprax::public_generic_abi::compiler_endpoint::AdmittedPublicGenericEndpointV1 {
+    endpoint_for(SOURCE)
+}
+
 pub(super) fn artifact() -> semaprax::wasm::PublicGenericWasmProviderArtifactV1 {
-    let program = resolved_program();
+    let program = resolved_program(SOURCE);
     semaprax::wasm::emit_public_generic_wasm_provider_v1(&program, &endpoint()).unwrap()
+}
+
+fn failing_artifact() -> semaprax::wasm::PublicGenericWasmProviderArtifactV1 {
+    let program = resolved_program(FAILING_SOURCE);
+    semaprax::wasm::emit_public_generic_wasm_provider_v1(&program, &endpoint_for(FAILING_SOURCE))
+        .unwrap()
 }
 
 fn frame(
@@ -81,7 +120,7 @@ fn frame(
 
     let parsed = semaprax::parse(SOURCE, Path::new("compiler-provider-artifact.spx")).unwrap();
     let source_revision = semaprax::format::canonical(&parsed);
-    let program = resolved_program();
+    let program = resolved_program(SOURCE);
     let endpoint = semaprax::public_generic_abi::compiler_endpoint::derive_admitted_public_generic_endpoint_v1(
         &program,
         &source_revision,
@@ -296,6 +335,34 @@ const stale = TRUSTED_DESCRIPTOR_BYTES.slice(); stale[0] ^= 1;
 await assert.rejects(() => Provider.open(wasm, {{ descriptorBytes: stale }}), error => error instanceof SemapraxPublicGenericException && error.detail.kind === "descriptor-rejected");
 const binding = TRUSTED_BINDING_BYTES.slice(); binding[binding.length - 1] ^= 1;
 await assert.rejects(() => Provider.open(wasm, {{ bindingBytes: binding }}), error => error instanceof SemapraxPublicGenericException && error.detail.kind === "provider-mismatch");
+const originalInstantiate = WebAssembly.instantiate;
+let resultReleases = 0;
+WebAssembly.instantiate = async (...args) => {{
+  const instance = await Reflect.apply(originalInstantiate, WebAssembly, args);
+  return {{ exports: new Proxy({{}}, {{
+    get(_target, property) {{
+      const value = Reflect.get(instance.exports, property);
+      if (property !== "spx_pg_v1_result_release") return value;
+      return handle => {{
+        resultReleases += 1;
+        assert.equal(Reflect.apply(value, instance.exports, [handle]), 0, "the real compiled release settles first");
+        return 37;
+      }};
+    }},
+  }}) }};
+}};
+try {{
+  const provider = await Provider.open(wasm);
+  assert.throws(
+    () => provider.transform({{ [left]: Uint8Array.from([1, 2]), [right]: Uint8Array.from([7, 8, 9]) }}),
+    error => error instanceof SemapraxPublicGenericException && error.detail.kind === "release-failed" && error.detail.status === 37,
+    "the first physical release status stays primary",
+  );
+  assert.equal(resultReleases, 1, "a failing result release must not be retried by catch cleanup");
+  provider.close();
+}} finally {{
+  WebAssembly.instantiate = originalInstantiate;
+}}
 console.log("GENERATED COMPILED CANONICAL CARRIER PASS");
 "#,
             left = names[0],
@@ -316,6 +383,119 @@ console.log("GENERATED COMPILED CANONICAL CARRIER PASS");
     let execution = Command::new("node")
         .current_dir(&package)
         .args(["test/compiled-provider.mjs", "../provider.wasm"])
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(&root);
+    assert!(
+        execution.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&execution.stdout),
+        String::from_utf8_lossy(&execution.stderr)
+    );
+}
+
+#[test]
+fn generated_typescript_failure_releases_the_preserved_input_before_close() {
+    if !node_available()
+        || !Command::new("tsc")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| {
+                output.status.success() && String::from_utf8_lossy(&output.stdout).contains("5.8.3")
+            })
+    {
+        eprintln!("skipping: generated TypeScript package requires node and tsc 5.8.3");
+        return;
+    }
+    let artifact = failing_artifact();
+    let endpoint = endpoint_for(FAILING_SOURCE);
+    let input = RecordShape::new(
+        endpoint
+            .descriptor()
+            .input_facts()
+            .owned_leaves
+            .iter()
+            .cloned()
+            .map(OwnedByteField::new)
+            .collect(),
+    );
+    let output = RecordShape::new(
+        endpoint
+            .descriptor()
+            .result_facts()
+            .owned_leaves
+            .iter()
+            .cloned()
+            .map(OwnedByteField::new)
+            .collect(),
+    );
+    let consumer = generate_typescript_calling_consumer(
+        artifact.descriptor_bytes(),
+        artifact.binding(),
+        &input,
+        &output,
+    )
+    .unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "semaprax-pg-generated-failing-provider-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
+    ));
+    let package = root.join("package");
+    for (name, contents) in consumer.files() {
+        let path = package.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("provider.wasm"), artifact.wasm()).unwrap();
+    let names = input
+        .fields
+        .iter()
+        .map(|field| generated_field_name(&field.identity))
+        .collect::<Vec<_>>();
+    fs::write(
+        package.join("test/failing-provider.mjs"),
+        format!(
+            r#"import assert from "node:assert/strict";
+import {{ readFileSync }} from "node:fs";
+import {{ Provider }} from "../dist/index.js";
+import {{ SemapraxPublicGenericException }} from "../dist/errors.js";
+const provider = await Provider.open(readFileSync(process.argv[2]));
+try {{
+  for (let attempt = 0; attempt < 2; attempt += 1) {{
+    assert.throws(
+      () => provider.transform({{ ["{left}"]: Uint8Array.from([1]), ["{right}"]: Uint8Array.from([2]) }}),
+      error => error instanceof SemapraxPublicGenericException && error.detail.kind === "execution-failed" && error.detail.status === 11,
+      "the selected checked endpoint must fail without retaining the input",
+    );
+  }}
+  provider.close();
+  provider.close();
+}} finally {{
+  try {{ provider.close(); }} catch {{ /* assertion above owns the failure */ }}
+}}
+console.log("GENERATED COMPILED FAILURE INPUT RELEASE PASS");
+"#,
+            left = names[0],
+            right = names[1],
+        ),
+    )
+    .unwrap();
+    let build = Command::new("tsc")
+        .current_dir(&package)
+        .args(["-p", "tsconfig.json"])
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "tsc stdout={} stderr={}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let execution = Command::new("node")
+        .current_dir(&package)
+        .args(["test/failing-provider.mjs", "../provider.wasm"])
         .output()
         .unwrap();
     let _ = fs::remove_dir_all(&root);

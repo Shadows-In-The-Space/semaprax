@@ -509,11 +509,15 @@ class CompiledProvider {
       const bytes = encodeCanonicalInput(input); if (bytes.length > this.#capacity) throw capacity("carrier-bytes");
       let memory = new Uint8Array(this.#memory.buffer); if (this.#scratch + bytes.length > memory.length) throw mismatch("module-memory"); memory.set(bytes, this.#scratch);
       const inputLane = lane(this.#prepare(this.#provider, this.#scratch, bytes.length)); if (inputLane.status !== 0 || inputLane.value === 0) throw new SemapraxPublicGenericException({ kind: "execution-failed", status: inputLane.status }); prepared = inputLane.value;
-      const callLane = lane(this.#call(this.#provider, prepared)); prepared = 0; if (callLane.status !== 0 || callLane.value === 0) throw new SemapraxPublicGenericException({ kind: "execution-failed", status: callLane.status }); result = callLane.value;
+      const callLane = lane(this.#call(this.#provider, prepared));
+      if (callLane.status !== 0 || callLane.value === 0) throw new SemapraxPublicGenericException({ kind: "execution-failed", status: callLane.status });
+      prepared = 0; result = callLane.value;
       const probe = lane(this.#export(result, this.#scratch, 0)); if (probe.status !== 12 || probe.value > this.#capacity) throw new SemapraxPublicGenericException({ kind: "result-rejected", reason: "carrier-framing" });
       const copied = lane(this.#export(result, this.#scratch, probe.value)); if (copied.status !== 0 || copied.value !== probe.value) throw new SemapraxPublicGenericException({ kind: "result-rejected", reason: "carrier-framing" });
       memory = new Uint8Array(this.#memory.buffer); const output = decodeCanonicalOutput(memory.slice(this.#scratch, this.#scratch + copied.value));
-      if (this.#releaseResult(result) !== 0) throw new SemapraxPublicGenericException({ kind: "release-failed", status: 11 }); result = 0; return output;
+      const releaseStatus = this.#releaseResult(result); result = 0;
+      if (releaseStatus !== 0) throw new SemapraxPublicGenericException({ kind: "release-failed", status: releaseStatus });
+      return output;
     } catch (error) { if (result !== 0) this.#releaseResult(result); else if (prepared !== 0) this.#releaseValue(prepared); throw normalized(error); }
     finally { this.#busy = false; }
   }

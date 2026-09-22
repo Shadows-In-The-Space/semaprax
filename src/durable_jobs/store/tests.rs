@@ -430,13 +430,14 @@ fn a_fault_during_the_joint_commit_leaves_neither_the_job_nor_the_side_record_vi
     ] {
         let dir = tempdir(&format!("txn-fault-{fault_point:?}"));
         let mut store = GenerationJobStore::open(&dir).unwrap();
-        let mut hook: Option<&mut durable_fs::Hook<'_>> = Some(&mut |seen: HookPoint| {
+        let mut closure = |seen: HookPoint| {
             if seen == fault_point {
                 Err(io::Error::other("injected"))
             } else {
                 Ok(())
             }
-        });
+        };
+        let mut hook: Option<&mut durable_fs::Hook<'_>> = Some(&mut closure);
         let mut candidate = store.table.clone();
         let id = JobId(candidate.next_job_id);
         candidate.next_job_id += 1;

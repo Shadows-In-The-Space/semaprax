@@ -190,13 +190,14 @@ mod tests {
         commit_bytes(&dest, "stage-1", b"original").unwrap();
 
         for point in [HookPoint::AfterStageWrite, HookPoint::AfterStageFsync] {
-            let mut hook: Option<&mut Hook<'_>> = Some(&mut |seen: HookPoint| {
+            let mut closure = |seen: HookPoint| {
                 if seen == point {
                     Err(io::Error::other("injected"))
                 } else {
                     Ok(())
                 }
-            });
+            };
+            let mut hook: Option<&mut Hook<'_>> = Some(&mut closure);
             let result =
                 commit_bytes_with_hook(&dest, "stage-fault", b"should never land", &mut hook);
             assert!(result.is_err(), "{point:?}");
@@ -217,13 +218,14 @@ mod tests {
         // of what is already readable in this process.
         let dir = tempdir("fault-after-rename");
         let dest = dir.join("generation-1");
-        let mut hook: Option<&mut Hook<'_>> = Some(&mut |seen: HookPoint| {
+        let mut closure = |seen: HookPoint| {
             if seen == HookPoint::AfterRename {
                 Err(io::Error::other("injected"))
             } else {
                 Ok(())
             }
-        });
+        };
+        let mut hook: Option<&mut Hook<'_>> = Some(&mut closure);
         let result = commit_bytes_with_hook(&dest, "stage-1", b"landed", &mut hook);
         assert!(result.is_err());
         let mut got = Vec::new();

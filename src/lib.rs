@@ -54,18 +54,6 @@ pub(crate) mod box_ops;
 pub(crate) mod byte_data_capacity;
 pub(crate) mod byte_ops;
 pub mod c_header;
-#[cfg(any(
-    test,
-    all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_vendor = "apple",
-            target_os = "redox"
-        )
-    )
-))]
 pub(crate) mod cache_codec;
 pub(crate) mod call_index;
 pub mod candidate_archive_store;

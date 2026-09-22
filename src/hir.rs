@@ -237,18 +237,6 @@ thread_local! {
     static TYPE_FACTS_OUTER_BASELINE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(any(
-    test,
-    all(
-        unix,
-        any(
-            target_os = "linux",
-            target_os = "android",
-            target_vendor = "apple",
-            target_os = "redox"
-        )
-    )
-))]
 mod cache_codec;
 mod declaration_index;
 pub use declaration_index::{dispose_declaration_index_for_private_contract, DeclarationIndex};

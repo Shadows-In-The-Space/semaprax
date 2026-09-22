@@ -135,7 +135,7 @@ fn decode_termination(bytes: &[u8]) -> Option<Termination> {
 /// only callers are `#[cfg(test)]` code (this crate's own wire tests and the
 /// hostile `offline_worker::tests`), so it is compiled only for `cfg(test)`.
 #[cfg(test)]
-pub(in crate::doctor) fn decode_exit_detail(bytes: &[u8], role: u8) -> Option<ExitDetail> {
+pub(super) fn decode_exit_detail(bytes: &[u8], role: u8) -> Option<ExitDetail> {
     let mut cursor = REPLY_HEADER;
     loop {
         let current_role = *bytes.get(cursor)?;

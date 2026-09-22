@@ -751,7 +751,7 @@ jobs:
           echo "$ELAN_SHA256  $archive" | sha256sum --check --strict
           mkdir -p "$RUNNER_TEMP/elan-unpack"
           tar -xzf "$archive" -C "$RUNNER_TEMP/elan-unpack"
-          "$RUNNER_TEMP/elan-unpack/elan-init" --yes --no-modify-path \
+          "$RUNNER_TEMP/elan-unpack/elan-init" -y --no-modify-path \
             --default-toolchain "$toolchain"
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Confirm the provisioned kernel is the pinned one

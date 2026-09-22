@@ -217,7 +217,7 @@ fn common_and_deny_inventories_are_exact_and_role_extensions_are_scoped() {
 fn virtual_address_reservation_budget_is_finite_and_role_scoped() {
     assert_eq!(DEFAULT_ADDRESS_SPACE_LIMIT, 4 * 1024 * 1024 * 1024);
     assert_eq!(NODE_ADDRESS_SPACE_LIMIT, 4 * 1024 * 1024 * 1024 * 1024);
-    assert!(NODE_ADDRESS_SPACE_LIMIT > DEFAULT_ADDRESS_SPACE_LIMIT);
+    const { assert!(NODE_ADDRESS_SPACE_LIMIT > DEFAULT_ADDRESS_SPACE_LIMIT) };
 
     for tool in TOOLS {
         let guard = Guard::for_arch(expected_role(tool), tool, X86_ARCH).unwrap();

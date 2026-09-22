@@ -921,10 +921,62 @@ fn render_recipe_expr(
                         arm_values.insert(fields[0].binding.id.as_str().to_owned(), name.clone());
                         format!("Result::Err {{ error: {name} }}")
                     }
+                    ResolvedMatchPattern::Wildcard => "_".to_owned(),
+                    ResolvedMatchPattern::Literal(value) => match value {
+                        crate::hir::PatternValue::Int(v) => v.to_string(),
+                        crate::hir::PatternValue::Int32(v) => format!("{v}i32"),
+                        crate::hir::PatternValue::Uint8(v) => format!("{v}u8"),
+                        crate::hir::PatternValue::Usize(v) => format!("{v}usize"),
+                        crate::hir::PatternValue::Char(v) => {
+                            let ch = char::from_u32(*v).unwrap_or('\u{FFFD}');
+                            format!("'{}'", ch.escape_default())
+                        }
+                        crate::hir::PatternValue::Bool(v) => v.to_string(),
+                    },
+                    ResolvedMatchPattern::Binding(binding) => {
+                        let name = format!("v{}", *local_index);
+                        *local_index += 1;
+                        arm_values.insert(binding.id.as_str().to_owned(), name.clone());
+                        name
+                    }
+                    ResolvedMatchPattern::Or(alternatives) => {
+                        let mut parts = Vec::new();
+                        for alt in alternatives {
+                            let part = match alt {
+                                ResolvedMatchPattern::Wildcard => "_".to_owned(),
+                                ResolvedMatchPattern::Literal(v) => match v {
+                                    crate::hir::PatternValue::Int(val) => val.to_string(),
+                                    crate::hir::PatternValue::Int32(val) => format!("{val}i32"),
+                                    crate::hir::PatternValue::Uint8(val) => format!("{val}u8"),
+                                    crate::hir::PatternValue::Usize(val) => format!("{val}usize"),
+                                    crate::hir::PatternValue::Char(val) => {
+                                        let ch = char::from_u32(*val).unwrap_or('\u{FFFD}');
+                                        format!("'{}'", ch.escape_default())
+                                    }
+                                    crate::hir::PatternValue::Bool(val) => val.to_string(),
+                                },
+                                ResolvedMatchPattern::Binding(b) => {
+                                    let name = format!("v{}", *local_index);
+                                    *local_index += 1;
+                                    arm_values.insert(b.id.as_str().to_owned(), name.clone());
+                                    name
+                                }
+                                _ => {
+                                    return Err(package_error(format!(
+                                        "npm semantic recipe Or alternative is unsupported: {:?}",
+                                        alt
+                                    )))
+                                }
+                            };
+                            parts.push(part);
+                        }
+                        parts.join(" | ")
+                    }
                     _ => {
-                        return Err(package_error(
-                            "npm semantic recipe match pattern is unsupported",
-                        ))
+                        return Err(package_error(format!(
+                            "npm semantic recipe match pattern is unsupported: {:?}",
+                            arm.pattern
+                        )))
                     }
                 };
                 if arm.guard.is_some() {

@@ -125,7 +125,7 @@ const DESCRIPTOR_VERIFY: &str = r#"fn parse_descriptor_v1(bytes: &[u8]) -> Optio
     if bytes.len() > 131_072 { return None; }
     let mut offset = 0usize;
     let mut fields = [&bytes[0..0]; 12];
-    for field in 0..12usize {
+    for (field, slot) in fields.iter_mut().enumerate() {
         let prefix_end = offset.checked_add(8)?;
         let prefix = bytes.get(offset..prefix_end)?;
         let mut width = [0u8; 8];
@@ -143,7 +143,7 @@ const DESCRIPTOR_VERIFY: &str = r#"fn parse_descriptor_v1(bytes: &[u8]) -> Optio
             _ => None,
         };
         if expected.is_some_and(|version| content != version) { return None; }
-        fields[field] = content;
+        *slot = content;
         offset = end;
     }
     (offset == bytes.len()).then_some(fields)

@@ -377,7 +377,7 @@ fn bytes_copy_branch_sequence_and_exact_limits_are_derived() {
         "too_many",
         vec![],
         CapacityFlow::Sequence(
-            (0..17)
+            (0..33)
                 .map(|index| copy(&format!("copy.{index}"), 1))
                 .collect(),
         ),

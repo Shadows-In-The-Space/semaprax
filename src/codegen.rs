@@ -83,6 +83,7 @@ pub use native_emit::{
     emit_hir_c_with_network_io,
 };
 use native_emit::{emit_hir_c_with_labels, NativeOutputProfile};
+pub(crate) use native_emit::public_generic_bridge::emit_public_generic_identity_bridge;
 use native_scalar_runtime::NATIVE_SCALAR_RUNTIME_C;
 
 pub use native_owned_data_provider::{

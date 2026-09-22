@@ -32,6 +32,7 @@ fn main() { unsafe {
     refused(provider,generation,0,CLEANUP,UNKNOWN_DIRECTION,5);
     refused(provider,generation,0,CLEANUP,DUPLICATE_PATH,5);
     refused(provider,generation,0,CLEANUP,INVALID_UTF8,5);
+    refused(provider,generation,0,CLEANUP,OVERSIZED_METADATA,5);
     refused(provider,generation,0,CLEANUP,WRONG_TAG,5);
     refused(provider,generation,0,CLEANUP,CORRUPT,14);
     refused(provider,generation,0,CLEANUP,OVERSIZED,6);

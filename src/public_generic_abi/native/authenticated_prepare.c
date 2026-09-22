@@ -10,6 +10,14 @@ static spx_pg_status_v1 spx_pg_auth_field(const uint8_t *p, size_t n, size_t *at
     *value = p + *at; *length = (size_t)size; *at += (size_t)size;
     return SPX_PG_STATUS_OK;
 }
+static spx_pg_status_v1 spx_pg_auth_metadata_field(const uint8_t *p, size_t n, size_t *at,
+    const uint8_t **value, size_t *length) {
+    spx_pg_status_v1 status=spx_pg_auth_field(p,n,at,value,length);
+    /* Carrier v1 classifies oversized schema, direction, identity, path and
+     * digest fields as malformed framing. Only leaf payload bounds use the
+     * capacity refusal. */
+    return status==SPX_PG_STATUS_CARRIER_CAPACITY ? SPX_PG_STATUS_MALFORMED_CARRIER : status;
+}
 /* Match Rust str::from_utf8: reject incomplete/overlong sequences, surrogate
  * code points and values beyond U+10FFFF before semantic binding checks. */
 static int spx_pg_auth_utf8(const uint8_t *p, size_t n) {
@@ -40,13 +48,13 @@ static spx_pg_status_v1 spx_pg_auth_frame(const uint8_t *p, size_t n,
     const uint8_t *value, *expected;
     int binding_mismatch=0;
     for (unsigned field=0; field<6; ++field) {
-        spx_pg_status_v1 status = spx_pg_auth_field(p,n,&at,&value,&len);
+        spx_pg_status_v1 status = spx_pg_auth_metadata_field(p,n,&at,&value,&len);
         if (status) return status;
         if (!spx_pg_auth_utf8(value,len)) return SPX_PG_STATUS_MALFORMED_CARRIER;
         if (field==1 && !spx_pg_bytes_equal(value,len,(const uint8_t *)"input",5)
             && !spx_pg_bytes_equal(value,len,(const uint8_t *)"result",6))
             return SPX_PG_STATUS_MALFORMED_CARRIER;
-        status = spx_pg_auth_field(SPX_PG_AUTH_EMPTY_FRAME,SPX_PG_AUTH_EMPTY_FRAME_LEN,&trusted,&expected,&expected_len);
+        status = spx_pg_auth_metadata_field(SPX_PG_AUTH_EMPTY_FRAME,SPX_PG_AUTH_EMPTY_FRAME_LEN,&trusted,&expected,&expected_len);
         if (status) return status;
         if (!spx_pg_bytes_equal(value,len,expected,expected_len)) {
             if (field==0) return SPX_PG_STATUS_MALFORMED_CARRIER;
@@ -60,7 +68,7 @@ static spx_pg_status_v1 spx_pg_auth_frame(const uint8_t *p, size_t n,
     const uint8_t *paths[256]; size_t path_lengths[256];
     size_t sum=0;
     for (size_t leaf=0; leaf<(size_t)count; ++leaf) {
-        spx_pg_status_v1 status = spx_pg_auth_field(p,n,&at,&value,&len);
+        spx_pg_status_v1 status = spx_pg_auth_metadata_field(p,n,&at,&value,&len);
         if (status) return status;
         if (!spx_pg_auth_utf8(value,len)) return SPX_PG_STATUS_MALFORMED_CARRIER;
         for (size_t previous=0; previous<leaf; ++previous) {
@@ -69,7 +77,7 @@ static spx_pg_status_v1 spx_pg_auth_frame(const uint8_t *p, size_t n,
         }
         paths[leaf]=value; path_lengths[leaf]=len;
         if (leaf<SPX_PG_AUTH_LEAF_COUNT) {
-            status=spx_pg_auth_field(SPX_PG_AUTH_EMPTY_FRAME,SPX_PG_AUTH_EMPTY_FRAME_LEN,&trusted,&expected,&expected_len);
+            status=spx_pg_auth_metadata_field(SPX_PG_AUTH_EMPTY_FRAME,SPX_PG_AUTH_EMPTY_FRAME_LEN,&trusted,&expected,&expected_len);
             if (status) return status;
             if (!spx_pg_bytes_equal(value,len,expected,expected_len)) binding_mismatch=1;
             trusted+=9; /* trusted Bytes tag and empty payload's length */
@@ -81,7 +89,7 @@ static spx_pg_status_v1 spx_pg_auth_frame(const uint8_t *p, size_t n,
     }
     if (sum != total) return SPX_PG_STATUS_MALFORMED_CARRIER;
     size_t preimage=at;
-    spx_pg_status_v1 status=spx_pg_auth_field(p,n,&at,&value,&len);
+    spx_pg_status_v1 status=spx_pg_auth_metadata_field(p,n,&at,&value,&len);
     if (status) return status;
     if (!spx_pg_auth_utf8(value,len)) return SPX_PG_STATUS_MALFORMED_CARRIER;
     if (at != n) return SPX_PG_STATUS_MALFORMED_CARRIER;

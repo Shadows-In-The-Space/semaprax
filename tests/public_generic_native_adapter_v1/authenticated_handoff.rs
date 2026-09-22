@@ -101,6 +101,8 @@ fn fixture(guard: bool) -> (String, String) {
     let schema_len = u64::from_le_bytes(frame[..8].try_into().unwrap()) as usize;
     unknown_direction[8 + schema_len + 8] = b'x';
     remint(&mut unknown_direction);
+    let mut oversized_metadata = frame.clone();
+    oversized_metadata[8 + schema_len..8 + schema_len + 8].copy_from_slice(&65537u64.to_le_bytes());
     let mut substituted = leaves.clone();
     substituted[0] = CarrierLeaf::new("forged.path", LeafKind::Bytes, vec![1, 7, 13]);
     let wrong_path = plan.frame_with_leaves(substituted).encode();
@@ -114,7 +116,12 @@ fn fixture(guard: bool) -> (String, String) {
     let mut invalid_utf8 = frame.clone();
     invalid_utf8[tag - path.len()] = 0xff;
     remint(&mut invalid_utf8);
-    for malformed in [&unknown_direction, &duplicate_path, &invalid_utf8] {
+    for malformed in [
+        &unknown_direction,
+        &duplicate_path,
+        &invalid_utf8,
+        &oversized_metadata,
+    ] {
         assert_eq!(
             semaprax::public_generic_abi::carrier::frame::parse_bounded(malformed)
                 .unwrap_err()
@@ -137,6 +144,7 @@ fn fixture(guard: bool) -> (String, String) {
         ("unknown_direction", &unknown_direction),
         ("duplicate_path", &duplicate_path),
         ("invalid_utf8", &invalid_utf8),
+        ("oversized_metadata", &oversized_metadata),
         ("wrong_tag", &wrong_tag),
         ("corrupt", &corrupt),
         ("oversized", &oversized),

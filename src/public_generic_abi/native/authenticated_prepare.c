@@ -10,32 +10,71 @@ static spx_pg_status_v1 spx_pg_auth_field(const uint8_t *p, size_t n, size_t *at
     *value = p + *at; *length = (size_t)size; *at += (size_t)size;
     return SPX_PG_STATUS_OK;
 }
+/* Match Rust str::from_utf8: reject incomplete/overlong sequences, surrogate
+ * code points and values beyond U+10FFFF before semantic binding checks. */
+static int spx_pg_auth_utf8(const uint8_t *p, size_t n) {
+    size_t at=0;
+    while (at<n) {
+        uint8_t first=p[at++];
+        if (first<0x80) continue;
+        unsigned remaining;
+        uint32_t scalar, minimum;
+        if (first>=0xc2 && first<=0xdf) { remaining=1; scalar=first&0x1f; minimum=0x80; }
+        else if (first>=0xe0 && first<=0xef) { remaining=2; scalar=first&0x0f; minimum=0x800; }
+        else if (first>=0xf0 && first<=0xf4) { remaining=3; scalar=first&0x07; minimum=0x10000; }
+        else return 0;
+        if (remaining>n-at) return 0;
+        while (remaining--) {
+            uint8_t next=p[at++];
+            if ((next&0xc0)!=0x80) return 0;
+            scalar=(scalar<<6)|(next&0x3f);
+        }
+        if (scalar<minimum || scalar>0x10ffff || (scalar>=0xd800 && scalar<=0xdfff)) return 0;
+    }
+    return 1;
+}
 static spx_pg_status_v1 spx_pg_auth_frame(const uint8_t *p, size_t n,
     const uint8_t **payloads, size_t *lengths, size_t *flat_size) {
     if (n > (size_t)20*1024*1024) return SPX_PG_STATUS_CARRIER_CAPACITY;
     size_t at=0, trusted=0, len=0, expected_len=0;
     const uint8_t *value, *expected;
+    int binding_mismatch=0;
     for (unsigned field=0; field<6; ++field) {
         spx_pg_status_v1 status = spx_pg_auth_field(p,n,&at,&value,&len);
         if (status) return status;
+        if (!spx_pg_auth_utf8(value,len)) return SPX_PG_STATUS_MALFORMED_CARRIER;
+        if (field==1 && !spx_pg_bytes_equal(value,len,(const uint8_t *)"input",5)
+            && !spx_pg_bytes_equal(value,len,(const uint8_t *)"result",6))
+            return SPX_PG_STATUS_MALFORMED_CARRIER;
         status = spx_pg_auth_field(SPX_PG_AUTH_EMPTY_FRAME,SPX_PG_AUTH_EMPTY_FRAME_LEN,&trusted,&expected,&expected_len);
         if (status) return status;
-        if (!spx_pg_bytes_equal(value,len,expected,expected_len))
-            return field == 0 ? SPX_PG_STATUS_MALFORMED_CARRIER : SPX_PG_AUTH_STATUS_REPLAY_MISMATCH;
+        if (!spx_pg_bytes_equal(value,len,expected,expected_len)) {
+            if (field==0) return SPX_PG_STATUS_MALFORMED_CARRIER;
+            binding_mismatch=1;
+        }
     }
     if (n-at < 16) return SPX_PG_STATUS_MALFORMED_CARRIER;
     uint64_t count=spx_pg_read_u64le(p+at), total=spx_pg_read_u64le(p+at+8); at+=16; trusted+=16;
     if (count>256 || total>SPX_PG_MAX_TOTAL_PAYLOAD_BYTES) return SPX_PG_STATUS_CARRIER_CAPACITY;
-    if (count!=SPX_PG_AUTH_LEAF_COUNT) return SPX_PG_AUTH_STATUS_REPLAY_MISMATCH;
+    if (count!=SPX_PG_AUTH_LEAF_COUNT) binding_mismatch=1;
+    const uint8_t *paths[256]; size_t path_lengths[256];
     size_t sum=0;
     for (size_t leaf=0; leaf<(size_t)count; ++leaf) {
         spx_pg_status_v1 status = spx_pg_auth_field(p,n,&at,&value,&len);
         if (status) return status;
-        status=spx_pg_auth_field(SPX_PG_AUTH_EMPTY_FRAME,SPX_PG_AUTH_EMPTY_FRAME_LEN,&trusted,&expected,&expected_len);
-        if (status) return status;
-        if (!spx_pg_bytes_equal(value,len,expected,expected_len)) return SPX_PG_AUTH_STATUS_REPLAY_MISMATCH;
+        if (!spx_pg_auth_utf8(value,len)) return SPX_PG_STATUS_MALFORMED_CARRIER;
+        for (size_t previous=0; previous<leaf; ++previous) {
+            if (spx_pg_bytes_equal(value,len,paths[previous],path_lengths[previous]))
+                return SPX_PG_STATUS_MALFORMED_CARRIER;
+        }
+        paths[leaf]=value; path_lengths[leaf]=len;
+        if (leaf<SPX_PG_AUTH_LEAF_COUNT) {
+            status=spx_pg_auth_field(SPX_PG_AUTH_EMPTY_FRAME,SPX_PG_AUTH_EMPTY_FRAME_LEN,&trusted,&expected,&expected_len);
+            if (status) return status;
+            if (!spx_pg_bytes_equal(value,len,expected,expected_len)) binding_mismatch=1;
+            trusted+=9; /* trusted Bytes tag and empty payload's length */
+        }
         if (at==n || p[at++]!=0) return SPX_PG_STATUS_MALFORMED_CARRIER;
-        trusted+=9; /* trusted Bytes tag and empty payload's length */
         status=spx_pg_auth_field(p,n,&at,&payloads[leaf],&lengths[leaf]);
         if (status) return status;
         sum+=lengths[leaf];
@@ -44,9 +83,13 @@ static spx_pg_status_v1 spx_pg_auth_frame(const uint8_t *p, size_t n,
     size_t preimage=at;
     spx_pg_status_v1 status=spx_pg_auth_field(p,n,&at,&value,&len);
     if (status) return status;
+    if (!spx_pg_auth_utf8(value,len)) return SPX_PG_STATUS_MALFORMED_CARRIER;
     if (at != n) return SPX_PG_STATUS_MALFORMED_CARRIER;
     uint8_t digest[71]; spx_pg_frame_digest(p,preimage,digest);
     if (!spx_pg_bytes_equal(value,len,digest,sizeof(digest))) return SPX_PG_AUTH_STATUS_REPLAY_MISMATCH;
+    /* The shared codec parses all structural facts and checks its digest
+     * before CarrierFrameBinding can refuse semantic identity/path claims. */
+    if (binding_mismatch) return SPX_PG_AUTH_STATUS_REPLAY_MISMATCH;
     *flat_size=8+8*(size_t)count+sum;
     return SPX_PG_STATUS_OK;
 }

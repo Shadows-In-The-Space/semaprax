@@ -3,6 +3,8 @@
 //! future native-adapter fixtures (issues #155-#159, #162) add modules
 //! rather than new top-level files.
 
+#[path = "public_generic_native_adapter_v1/authenticated_handoff.rs"]
+mod authenticated_handoff;
 /// The generated C11 *calling* consumer (issue #158): a real, standalone
 /// external C11 program built and linked directly against the same compiled
 /// native provider `fixture` exercises, executed end to end.
@@ -34,8 +36,6 @@ mod malformed_trusted_descriptor;
 mod max_bounds_saturation;
 #[path = "public_generic_native_adapter_v1/native_frame_admission.rs"]
 mod native_frame_admission;
-#[path = "public_generic_native_adapter_v1/authenticated_handoff.rs"]
-mod authenticated_handoff;
 /// Shared test-support sources, declared exactly once for this binary.
 /// Each subject module reaches them with `use crate::...`; declaring them
 /// per subject compiled the same file seven times (`clippy::duplicate_mod`).

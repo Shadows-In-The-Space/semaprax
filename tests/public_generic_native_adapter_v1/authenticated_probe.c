@@ -25,6 +25,9 @@ int main(void) {
     refused(provider,generation,1,cleanup,sizeof(cleanup),canonical,sizeof(canonical),7);
     refused(provider,generation,0,descriptor,sizeof(descriptor),canonical,sizeof(canonical),14);
     refused(provider,generation,0,cleanup,sizeof(cleanup),wrong_path,sizeof(wrong_path),14);
+    refused(provider,generation,0,cleanup,sizeof(cleanup),unknown_direction,sizeof(unknown_direction),5);
+    refused(provider,generation,0,cleanup,sizeof(cleanup),duplicate_path,sizeof(duplicate_path),5);
+    refused(provider,generation,0,cleanup,sizeof(cleanup),invalid_utf8,sizeof(invalid_utf8),5);
     refused(provider,generation,0,cleanup,sizeof(cleanup),wrong_tag,sizeof(wrong_tag),5);
     refused(provider,generation,0,cleanup,sizeof(cleanup),corrupt,sizeof(corrupt),14);
     refused(provider,generation,0,cleanup,sizeof(cleanup),oversized,sizeof(oversized),6);

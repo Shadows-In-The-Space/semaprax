@@ -11,6 +11,7 @@ use semaprax::public_generic_abi::{
     },
     native::authenticated::render_authenticated_identity_provider,
 };
+use sha2::{Digest as _, Sha256};
 use std::{fs, path::Path, process::Command};
 
 const REVISION: &str = "r07-native-identity-v1";
@@ -40,6 +41,20 @@ fn array(name: &str, bytes: &[u8]) -> String {
             .collect::<Vec<_>>()
             .join(",")
     )
+}
+
+fn remint(frame: &mut [u8]) {
+    // The final canonical field is the 8-byte length plus 71-byte digest.
+    let preimage_len = frame.len() - 79;
+    let mut hash = Sha256::new();
+    hash.update(b"semaprax.public-generic-carrier.v1.frame\0");
+    hash.update((preimage_len as u64).to_le_bytes());
+    hash.update(&frame[..preimage_len]);
+    let digest = format!(
+        "sha256:{:x}",
+        semaprax::digest_hex::LowerHex(hash.finalize())
+    );
+    frame[preimage_len + 8..].copy_from_slice(digest.as_bytes());
 }
 
 fn fixture(guard: bool) -> (String, String) {
@@ -79,6 +94,13 @@ fn fixture(guard: bool) -> (String, String) {
         .map(|(i, p)| CarrierLeaf::new(p, LeafKind::Bytes, vec![1 + i as u8, 7, 13]))
         .collect();
     let frame = plan.frame_with_leaves(leaves.clone()).encode();
+    let mut duplicates = leaves.clone();
+    duplicates[1] = duplicates[0].clone();
+    let duplicate_path = plan.frame_with_leaves(duplicates).encode();
+    let mut unknown_direction = frame.clone();
+    let schema_len = u64::from_le_bytes(frame[..8].try_into().unwrap()) as usize;
+    unknown_direction[8 + schema_len + 8] = b'x';
+    remint(&mut unknown_direction);
     let mut substituted = leaves.clone();
     substituted[0] = CarrierLeaf::new("forged.path", LeafKind::Bytes, vec![1, 7, 13]);
     let wrong_path = plan.frame_with_leaves(substituted).encode();
@@ -89,6 +111,17 @@ fn fixture(guard: bool) -> (String, String) {
         .position(|w| w == path)
         .unwrap()
         + path.len();
+    let mut invalid_utf8 = frame.clone();
+    invalid_utf8[tag - path.len()] = 0xff;
+    remint(&mut invalid_utf8);
+    for malformed in [&unknown_direction, &duplicate_path, &invalid_utf8] {
+        assert_eq!(
+            semaprax::public_generic_abi::carrier::frame::parse_bounded(malformed)
+                .unwrap_err()
+                .code,
+            "SPX-PG801"
+        );
+    }
     wrong_tag[tag] = 1;
     let mut corrupt = frame.clone();
     *corrupt.last_mut().unwrap() ^= 1;
@@ -101,6 +134,9 @@ fn fixture(guard: bool) -> (String, String) {
         ("cleanup", descriptor.settlement().digest().as_bytes()),
         ("canonical", &frame),
         ("wrong_path", &wrong_path),
+        ("unknown_direction", &unknown_direction),
+        ("duplicate_path", &duplicate_path),
+        ("invalid_utf8", &invalid_utf8),
         ("wrong_tag", &wrong_tag),
         ("corrupt", &corrupt),
         ("oversized", &oversized),
@@ -234,7 +270,7 @@ fn selected_checked_contract_executes_and_settles() {
 #[test]
 fn native_admission_bypass_negative_control_is_detected() {
     let (provider, driver) = fixture(true);
-    let check="if (!spx_pg_bytes_equal(value,len,expected,expected_len)) return SPX_PG_AUTH_STATUS_REPLAY_MISMATCH;";
+    let check = "if (!spx_pg_bytes_equal(value,len,expected,expected_len)) binding_mismatch=1;";
     assert_eq!(provider.matches(check).count(), 1);
     compile_run(
         &provider.replace(check, "/* deliberate admission bypass */"),

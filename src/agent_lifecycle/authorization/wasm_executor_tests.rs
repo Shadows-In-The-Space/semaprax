@@ -1,5 +1,4 @@
 use super::*;
-use std::process::Command;
 use std::time::Duration;
 
 const SOURCE: &str = r#"module test.wasm_target_binding;
@@ -16,6 +15,18 @@ fn other(value: i64) -> i64 { value + 1 }
 @id("app.main")
 fn main() -> i64 { 0 }
 "#;
+
+fn node_host() -> Option<WasmStageHost> {
+    std::env::var_os("SEMAPRAX_TEST_WASM_STAGE_NODE")
+        .map(std::path::PathBuf::from)
+        .into_iter()
+        .chain([
+            std::path::PathBuf::from("/usr/bin/node"),
+            std::path::PathBuf::from("/usr/local/bin/node"),
+            std::path::PathBuf::from("/opt/homebrew/bin/node"),
+        ])
+        .find_map(|path| WasmStageHost::open(&path).ok())
+}
 
 fn program() -> hir::ResolvedProgram {
     let checked =
@@ -134,6 +145,7 @@ fn structured_outcome_rejects_malformed_and_mismatched_status_before_publication
 
 #[test]
 fn direct_and_injected_paths_refuse_cancelled_or_invalid_budget_before_target_work() {
+    let Some(host) = node_host() else { return };
     const INJECTED_SOURCE: &str = r#"module test.wasm_target_binding.admission;
 
 @id("test.wasm_target_binding.admission.result")
@@ -170,6 +182,7 @@ fn main() -> i64 { 0 }
         (INJECTED_SOURCE, &injected_program, &injected_prepared),
     ] {
         let cancelled = run_admitted(
+            &host,
             source,
             program,
             prepared,
@@ -184,6 +197,7 @@ fn main() -> i64 { 0 }
 
         for max_steps in [0, 1_000_001] {
             let budget = run_admitted(
+                &host,
                 source,
                 program,
                 prepared,
@@ -199,43 +213,43 @@ fn main() -> i64 { 0 }
 
 #[test]
 fn node_process_cancellation_and_output_overflow_kill_reap_and_fail_closed() {
-    if Command::new("node").arg("--version").output().is_err() {
-        return;
-    }
-    let root = probe_root();
-    std::fs::create_dir(&root).unwrap();
-    std::fs::write(root.join("observe.mjs"), "setInterval(() => {}, 1000);\n").unwrap();
+    let Some(host) = node_host() else { return };
+    let mut workspace = WasmStageWorkspace::create().unwrap();
+    workspace
+        .write(Path::new("observe.mjs"), b"setInterval(() => {}, 1000);\n")
+        .unwrap();
     let cancellation = AgentCancellation::new();
     let trigger = cancellation.clone();
     let canceller = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(25));
         trigger.cancel();
     });
-    let cancelled = run_node_process(&root, Some(&cancellation), 64)
+    let cancelled = run_node_process(&host, &workspace, Some(&cancellation), 64)
         .expect_err("an in-flight local target must be killed and reaped on cancellation");
     canceller.join().unwrap();
     assert!(cancelled
         .message
         .contains("wasm_executor.process.cancelled"));
 
-    std::fs::write(
-        root.join("observe.mjs"),
-        "const chunk = 'x'.repeat(4096); while (true) process.stdout.write(chunk);\n",
-    )
-    .unwrap();
-    let overflow = run_node_process(&root, None, 32)
+    workspace.cleanup().unwrap();
+    let mut workspace = WasmStageWorkspace::create().unwrap();
+    workspace
+        .write(
+            Path::new("observe.mjs"),
+            b"const chunk = 'x'.repeat(4096); while (true) process.stdout.write(chunk);\n",
+        )
+        .unwrap();
+    let overflow = run_node_process(&host, &workspace, None, 32)
         .expect_err("bounded capture must reject rather than retain oversized target output");
     assert!(overflow
         .message
         .contains("wasm_executor.process.output_budget"));
-    std::fs::remove_dir_all(root).unwrap();
+    workspace.cleanup().unwrap();
 }
 
 #[test]
 fn node_envelope_preserves_compiler_owned_failure_and_fresh_process_recovers() {
-    if Command::new("node").arg("--version").output().is_err() {
-        return;
-    }
+    let Some(host) = node_host() else { return };
     let program = program();
     let prepared = crate::interpreter::retained_call::prepare_retained_call(
         &program,
@@ -243,6 +257,7 @@ fn node_envelope_preserves_compiler_owned_failure_and_fresh_process_recovers() {
     )
     .expect("divide function prepares");
     let failed = run(
+        &host,
         SOURCE,
         &program,
         &prepared,
@@ -257,6 +272,7 @@ fn node_envelope_preserves_compiler_owned_failure_and_fresh_process_recovers() {
         ))
     );
     let healthy = run(
+        &host,
         SOURCE,
         &program,
         &prepared,
@@ -272,9 +288,7 @@ fn node_envelope_preserves_compiler_owned_failure_and_fresh_process_recovers() {
 
 #[test]
 fn injected_aggregate_stops_after_one_checked_failure_before_arena_reuse() {
-    if Command::new("node").arg("--version").output().is_err() {
-        return;
-    }
+    let Some(host) = node_host() else { return };
     const AGGREGATE_SOURCE: &str = r#"module test.wasm_target_binding.aggregate;
 
 @id("test.wasm_target_binding.aggregate.pair")
@@ -304,6 +318,7 @@ fn main() -> i64 { 0 }
     )
     .expect("aggregate divide prepares");
     let failed = run(
+        &host,
         AGGREGATE_SOURCE,
         &program,
         &prepared,

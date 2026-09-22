@@ -156,6 +156,7 @@ fn drive(
         authorization::StageBackend::Native { host } => (1, Some(host)),
         authorization::StageBackend::NativeAtOptimization { host, .. } => (2, Some(host)),
         authorization::StageBackend::Wasm { .. } => (3, None),
+        authorization::StageBackend::WasmHeld { .. } => (3, None),
     };
     let select = |kind| match kind {
         0 => authorization::StageBackend::Interpreter,

@@ -28,6 +28,10 @@ fn backend_binding(backend: crate::agent_lifecycle::authorization::StageBackend<
             b"semaprax.agent-durable-stage-backend.wasm.v1\0",
             source.as_bytes(),
         ),
+        crate::agent_lifecycle::authorization::StageBackend::WasmHeld { host, source } => digest(
+            b"semaprax.agent-durable-stage-backend.wasm-held.v1\0",
+            format!("{}\0{source}", host.identity()).as_bytes(),
+        ),
     }
 }
 

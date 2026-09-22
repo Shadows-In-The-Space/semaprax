@@ -374,7 +374,9 @@ pub enum RichStageBackend<'a> {
     Interpreter,
     Native(&'a super::authorization::NativeStageHost),
     NativeOptimized(&'a super::authorization::NativeStageHost),
+    #[cfg(test)]
     Wasm,
+    WasmHeld(&'a super::authorization::WasmStageHost),
 }
 
 impl RichProposalStages {
@@ -391,7 +393,12 @@ impl RichProposalStages {
                     optimization: "-O2",
                 }
             }
+            #[cfg(test)]
             RichStageBackend::Wasm => super::authorization::StageBackend::Wasm {
+                source: &self.source,
+            },
+            RichStageBackend::WasmHeld(host) => super::authorization::StageBackend::WasmHeld {
+                host,
                 source: &self.source,
             },
         }

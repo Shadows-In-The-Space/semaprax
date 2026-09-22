@@ -95,23 +95,27 @@
 //! not the same as running the Agent *lifecycle* on Wasm. Lifecycle stage
 //! count and effect/model budgets remain in the interpreter-side driver. Its
 //! existing monotonic cancellation is now rechecked at the sealed executor
-//! boundary and while Node is live; observed cancellation kills and reaps the
-//! child. Node stdout is concurrently drained into a bounded buffer, and
-//! aggregate projection fan-out is refused before spawn when its conservative
-//! output bound exceeds that ceiling. This is process admission and cleanup,
-//! not Wasm instruction metering or a wall-clock deadline. `steps_used` is
+//! boundary and by the registered process provider while Node is live;
+//! observed cancellation kills and reaps the child. The embedding host must
+//! open one absolute Node executable up front. Execution rechecks that held
+//! descriptor, uses a fixed argv and empty environment, runs inside a
+//! descriptor-held inventoried private workspace, and enforces a two-second
+//! deadline plus the provider's bounded stdout/stderr ceilings. Aggregate
+//! projection fan-out is refused before spawn when its conservative output
+//! bound exceeds that ceiling. This is process admission and cleanup, not
+//! Wasm instruction metering. `steps_used` is
 //! reported as `0` because Wasm does not count interpreter steps, exactly as
 //! `native_executor.rs` already does. The
 //! Node boundary preserves only returned values and the compiler-owned
 //! arithmetic/contract status table; it authenticates redundant raw and
 //! normalized status fields before constructing an evaluation. It does not
 //! claim contract-detail, fuel, cleanup-event, or lifecycle settlement parity.
-//! The evidence this backend supports is local and re-runnable: it requires a
-//! `node` on PATH and claims nothing about hosted, browser, or production
-//! support.
+//! The evidence this backend supports is local and re-runnable: its trusted
+//! embedding host supplies the runtime capability, and it claims nothing
+//! about hosted or browser support. The 64 KiB process-provider output ceiling
+//! also means general large projected byte streams remain refused.
 
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
@@ -135,14 +139,22 @@ use super::{sealed, ExecutionAuthority, StageExecutor};
 
 #[path = "wasm_executor_process.rs"]
 mod process;
+#[path = "wasm_executor_workspace.rs"]
+mod workspace;
+pub use process::WasmStageHost;
 use process::{run_node_process, MAX_NODE_STDOUT_BYTES};
+use workspace::WasmStageWorkspace;
 
-const MAX_NODE_OUTCOME_ROW_BYTES: usize = BYTE_STREAM_CAP * 2 + 1_024;
+// The registered process provider admits at most 64 KiB total output. Keep a
+// conservative per-projection reservation inside that hard boundary; larger
+// byte-stream projections fail closed before process admission.
+const MAX_NODE_OUTCOME_ROW_BYTES: usize = 4 * 1_024;
 
 /// The Core Wasm stage executor, carrying the exact module source text it is
 /// allowed to re-resolve. It reads no file and opens no network; the source
 /// is data the caller hands it.
 pub(in crate::agent_lifecycle) struct WasmStageExecutor<'a> {
+    pub(super) host: &'a WasmStageHost,
     pub(super) source: &'a str,
 }
 
@@ -341,6 +353,7 @@ impl StageExecutor for WasmStageExecutor<'_> {
         cancellation: Option<&AgentCancellation>,
     ) -> Result<RetainedCallEvaluation, Vec<Diagnostic>> {
         run_admitted(
+            self.host,
             self.source,
             program,
             prepared,
@@ -363,27 +376,20 @@ fn admitted_result(ty: &ResolvedType) -> bool {
     matches!(ty, ResolvedType::I64 | ResolvedType::Bool)
 }
 
-static NEXT_PROBE: AtomicU64 = AtomicU64::new(0);
-
-fn probe_root() -> PathBuf {
-    let ordinal = NEXT_PROBE.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "semaprax-wasm-stage-executor-{}-{ordinal}",
-        std::process::id()
-    ))
-}
-
+#[cfg(test)]
 fn run(
+    host: &WasmStageHost,
     source: &str,
     program: &hir::ResolvedProgram,
     prepared: &PreparedRetainedCall,
     arguments: &[RetainedValue],
     max_steps: usize,
 ) -> Result<RetainedCallEvaluation, Diagnostic> {
-    run_admitted(source, program, prepared, arguments, max_steps, None)
+    run_admitted(host, source, program, prepared, arguments, max_steps, None)
 }
 
 fn run_admitted(
+    host: &WasmStageHost,
     source: &str,
     program: &hir::ResolvedProgram,
     prepared: &PreparedRetainedCall,
@@ -412,9 +418,25 @@ fn run_admitted(
         .all(|parameter| admitted_parameter(&parameter.ty, parameter.ownership))
         && admitted_result(&entry.return_type)
     {
-        return run_direct(&binding, program, entry, arguments, max_steps, cancellation);
+        return run_direct(
+            host,
+            &binding,
+            program,
+            entry,
+            arguments,
+            max_steps,
+            cancellation,
+        );
     }
-    run_through_injected_driver(&binding, program, entry, arguments, max_steps, cancellation)
+    run_through_injected_driver(
+        host,
+        &binding,
+        program,
+        entry,
+        arguments,
+        max_steps,
+        cancellation,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +444,7 @@ fn run_admitted(
 // ---------------------------------------------------------------------------
 
 fn run_direct(
+    host: &WasmStageHost,
     binding: &WasmTargetBinding<'_>,
     program: &hir::ResolvedProgram,
     entry: &ResolvedFunction,
@@ -468,6 +491,7 @@ fn run_direct(
     };
     let selected = vec![entry.id.as_str().to_owned()];
     let value = match build_and_drive(
+        host,
         binding,
         program,
         &selected,
@@ -986,6 +1010,7 @@ fn render_fields(
 }
 
 fn run_through_injected_driver(
+    host: &WasmStageHost,
     binding: &WasmTargetBinding<'_>,
     program: &hir::ResolvedProgram,
     entry: &ResolvedFunction,
@@ -1087,6 +1112,7 @@ fn run_through_injected_driver(
         .map(|driver| driver.id.clone())
         .collect::<Vec<_>>();
     let lines = match build_and_drive(
+        host,
         binding,
         &resolved,
         &selected,
@@ -1203,6 +1229,7 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>, Diagnostic> {
 // ---------------------------------------------------------------------------
 
 fn build_and_drive(
+    host: &WasmStageHost,
     binding: &WasmTargetBinding<'_>,
     program: &hir::ResolvedProgram,
     selected: &[String],
@@ -1237,22 +1264,29 @@ fn build_and_drive(
     let envelope: serde_json::Value =
         serde_json::from_str(build.envelope()).map_err(|_| invariant("wasm_executor.envelope"))?;
 
-    let root = probe_root();
-    std::fs::create_dir(&root).map_err(|_| invariant("wasm_executor.probe_directory"))?;
-    let outcome = drive_node(&envelope, calls, &root, cancellation, output_budget);
-    let _ = std::fs::remove_dir_all(&root);
-    decode_node_outcomes(&outcome?, calls.len())
+    let mut workspace = WasmStageWorkspace::create()?;
+    let outcome = drive_node(
+        host,
+        &envelope,
+        calls,
+        &mut workspace,
+        cancellation,
+        output_budget,
+    );
+    let cleanup = workspace.cleanup();
+    let outcome = outcome?;
+    cleanup?;
+    decode_node_outcomes(&outcome, calls.len())
 }
 
 fn drive_node(
+    host: &WasmStageHost,
     envelope: &serde_json::Value,
     calls: &[String],
-    root: &Path,
+    workspace: &mut WasmStageWorkspace,
     cancellation: Option<&AgentCancellation>,
     output_budget: usize,
 ) -> Result<String, Diagnostic> {
-    let directory = root.join("owned-data");
-    std::fs::create_dir(&directory).map_err(|_| invariant("wasm_executor.artifact_directory"))?;
     for row in envelope["artifacts"]
         .as_array()
         .ok_or_else(|| invariant("wasm_executor.envelope.artifacts"))?
@@ -1263,16 +1297,15 @@ fn drive_node(
         let path = row["path"]
             .as_str()
             .ok_or_else(|| invariant("wasm_executor.envelope.path"))?;
-        std::fs::write(directory.join(path), decode_hex(hex)?)
-            .map_err(|_| invariant("wasm_executor.artifact_write"))?;
+        workspace.write(Path::new(path), &decode_hex(hex)?)?;
     }
     let call_thunks = calls
         .iter()
         .map(|call| format!("() => {call}"))
         .collect::<Vec<_>>()
         .join(",\n");
-    std::fs::write(
-        directory.join("observe.mjs"),
+    workspace.write(
+        Path::new("observe.mjs"),
         format!(
             r#"import fs from 'node:fs';
 import instantiate from './semaprax.bindings.js';
@@ -1303,10 +1336,11 @@ for (const call of calls) {{
 }}
 process.stdout.write(out.map(value => JSON.stringify(value) + '\n').join(''));
 "#
-        ),
+        )
+        .as_bytes(),
     )
-    .map_err(|_| invariant("wasm_executor.driver_write"))?;
-    run_node_process(&directory, cancellation, output_budget)
+    ?;
+    run_node_process(host, workspace, cancellation, output_budget)
 }
 
 #[derive(Debug)]

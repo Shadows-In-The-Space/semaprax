@@ -31,10 +31,19 @@ pub(super) fn target_backend_identity(
         } => {
             format!("native:{optimization}:{}", host.identity())
         }
+        #[cfg(test)]
         crate::agent_lifecycle::authorization::StageBackend::Wasm { source } => format!(
-            "core-wasm:{}",
+            "core-wasm:test:{}",
             digest(
-                b"semaprax.agent-target-stage-backend.wasm.v1\0",
+                b"semaprax.agent-target-stage-backend.wasm.v2\0",
+                source.as_bytes(),
+            )
+        ),
+        crate::agent_lifecycle::authorization::StageBackend::WasmHeld { host, source } => format!(
+            "core-wasm:{}:{}",
+            host.identity(),
+            digest(
+                b"semaprax.agent-target-stage-backend.wasm.v2\0",
                 source.as_bytes(),
             )
         ),
@@ -470,12 +479,23 @@ impl CompiledTypedEffects {
             TargetStageBackend::Native(host) => {
                 crate::agent_lifecycle::authorization::StageBackend::Native { host: &host.host }
             }
+            #[cfg(test)]
             TargetStageBackend::CoreWasm => {
                 let source = self
                     .target_source
                     .as_deref()
                     .ok_or_else(|| error("target_backend.core_wasm_source"))?;
                 crate::agent_lifecycle::authorization::StageBackend::Wasm { source }
+            }
+            TargetStageBackend::CoreWasmHeld(host) => {
+                let source = self
+                    .target_source
+                    .as_deref()
+                    .ok_or_else(|| error("target_backend.core_wasm_source"))?;
+                crate::agent_lifecycle::authorization::StageBackend::WasmHeld {
+                    host: &host.host,
+                    source,
+                }
             }
         };
         let execution_binding = self.target_execution_binding(backend);

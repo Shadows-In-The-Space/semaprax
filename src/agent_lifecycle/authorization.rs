@@ -43,6 +43,7 @@ pub(in crate::agent_lifecycle) mod wasm_executor;
 use native_executor::NativeStageExecutor;
 pub(in crate::agent_lifecycle) use native_executor::NativeStageHost;
 use wasm_executor::WasmStageExecutor;
+pub use wasm_executor::WasmStageHost;
 
 const BINDING_DOMAIN: &[u8] = b"semaprax.agent-lifecycle.authorization.v1\0";
 
@@ -457,9 +458,11 @@ impl StageExecutor for InterpreterStageExecutor {
 /// added for #142/#143, is reachable through the exact same single call
 /// point [`dispatch`] already was.
 /// [`StageBackend::Native`] carries an explicitly injected held compiler
-/// capability; the executor never resolves `clang` from PATH. [`StageBackend::Wasm`] carries the module source text its executor is
-/// allowed to re-check and re-resolve when it must inject a projection
-/// driver (#143/#182). That source is data the caller supplies -- the
+/// capability; the executor never resolves `clang` from PATH.
+/// [`StageBackend::Wasm`] likewise carries an explicitly injected held Node
+/// runtime capability plus the module source text its executor is allowed to
+/// re-check and re-resolve when it must inject a projection driver
+/// (#143/#182). That source is data the caller supplies -- the
 /// lifecycle's own retained `.spx` text -- never something the executor
 /// reads from the filesystem, so selecting the Wasm backend grants no
 /// ambient authority the interpreter backend does not have.
@@ -478,7 +481,14 @@ pub(super) enum StageBackend<'a> {
         host: &'a NativeStageHost,
         optimization: &'static str,
     },
+    /// Test-only compatibility selector. Production callers must supply the
+    /// explicit held runtime through [`StageBackend::WasmHeld`].
+    #[cfg(test)]
     Wasm {
+        source: &'a str,
+    },
+    WasmHeld {
+        host: &'a WasmStageHost,
         source: &'a str,
     },
 }
@@ -574,7 +584,20 @@ fn dispatch_on_admitted(
                 cancellation,
             )
         }
-        StageBackend::Wasm { source } => WasmStageExecutor { source }.execute(
+        #[cfg(test)]
+        StageBackend::Wasm { source } => WasmStageExecutor {
+            host: test_wasm_stage_host(),
+            source,
+        }
+        .execute(
+            authority,
+            program,
+            prepared,
+            arguments,
+            max_steps,
+            cancellation,
+        ),
+        StageBackend::WasmHeld { host, source } => WasmStageExecutor { host, source }.execute(
             authority,
             program,
             prepared,
@@ -583,6 +606,23 @@ fn dispatch_on_admitted(
             cancellation,
         ),
     }
+}
+
+#[cfg(test)]
+pub(super) fn test_wasm_stage_host() -> &'static WasmStageHost {
+    static HOST: std::sync::OnceLock<WasmStageHost> = std::sync::OnceLock::new();
+    HOST.get_or_init(|| {
+        std::env::var_os("SEMAPRAX_TEST_WASM_STAGE_NODE")
+            .map(std::path::PathBuf::from)
+            .into_iter()
+            .chain([
+                std::path::PathBuf::from("/usr/bin/node"),
+                std::path::PathBuf::from("/usr/local/bin/node"),
+                std::path::PathBuf::from("/opt/homebrew/bin/node"),
+            ])
+            .find_map(|path| WasmStageHost::open(&path).ok())
+            .expect("Core Wasm tests require an explicit absolute Node fixture path")
+    })
 }
 
 /// Convenience wrapper over [`dispatch_on`] selecting [`StageBackend::Interpreter`],

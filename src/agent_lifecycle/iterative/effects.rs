@@ -186,16 +186,43 @@ impl NativeTargetHost {
     }
 }
 
+/// Explicit, held authority to run one Core Wasm Agent-stage artifact.
+///
+/// The trusted embedding host supplies an absolute Node executable path. The
+/// capability is opened and identity-bound once; stage execution never
+/// searches `PATH`, inherits the embedding process environment, or grants the
+/// generated module filesystem or network authority beyond its private
+/// bounded workspace.
+#[derive(Debug)]
+pub struct WasmTargetHost {
+    host: crate::agent_lifecycle::authorization::WasmStageHost,
+}
+
+impl WasmTargetHost {
+    /// Hold one caller-selected Node runtime for Core Wasm stage execution.
+    pub fn open(runtime: impl AsRef<Path>) -> Result<Self, Diagnostic> {
+        crate::agent_lifecycle::authorization::WasmStageHost::open(runtime.as_ref())
+            .map(|host| Self { host })
+    }
+
+    /// Non-authorizing runtime identity retained in target evidence.
+    pub fn identity(&self) -> &str {
+        self.host.identity()
+    }
+}
+
 /// Production selector for deterministic Agent stages behind the target host
 /// protocol. The selector carries no compiler flags or source bytes. Core Wasm
 /// reuses the exact checked module source retained by
-/// [`compile_typed_effects`]. Native execution requires an explicit
-/// descriptor-held [`NativeTargetHost`] capability.
+/// [`compile_typed_effects`]. Native and Core Wasm execution require explicit
+/// descriptor-held host capabilities.
 #[derive(Clone, Copy, Debug)]
 pub enum TargetStageBackend<'host> {
     Interpreter,
     Native(&'host NativeTargetHost),
+    #[cfg(test)]
     CoreWasm,
+    CoreWasmHeld(&'host WasmTargetHost),
 }
 impl TargetEffectRun {
     pub fn lifecycle(&self) -> &IterativeRun {
@@ -980,6 +1007,7 @@ fn reduce(state: own State, budget: i64, urgent: bool, sequence: usize, outcome:
             crate::agent_lifecycle::authorization::StageBackend::NativeAtOptimization {
                 ..
             } => None,
+            crate::agent_lifecycle::authorization::StageBackend::WasmHeld { .. } => None,
             crate::agent_lifecycle::authorization::StageBackend::Interpreter => {
                 Some(TargetStageBackend::Interpreter)
             }

@@ -1,86 +1,163 @@
-//! Bounded local Node process control for the Core Wasm stage executor.
+//! Explicit, bounded Node authority for the Core Wasm stage executor.
 
+use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
+
+use sha2::{Digest, Sha256};
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::process_provider::registered::{HeldProcessTool, RegisteredProcessProvider};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use crate::process_provider::{
+    ProcessFailure, ProcessProvider, ProcessRequest, ProcessTermination,
+};
 
 use crate::agent_lifecycle::stages::invariant;
 use crate::agent_runtime::AgentCancellation;
 use crate::diagnostic::Diagnostic;
 
-pub(super) const MAX_NODE_STDOUT_BYTES: usize = 16 * 1024 * 1024;
-const NODE_POLL_INTERVAL: Duration = Duration::from_millis(2);
+use super::workspace::WasmStageWorkspace;
 
-struct ReapedChild {
-    child: Child,
-    reaped: bool,
+pub(super) const MAX_NODE_STDOUT_BYTES: usize = 60 * 1024 - 32;
+const MAX_NODE_STDERR_BYTES: usize = 4 * 1024;
+const NODE_TIMEOUT_MS: u64 = 2_000;
+const MAX_HELD_RUNTIME_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Held authority for exactly one caller-selected Node runtime. Execution
+/// never searches PATH, inherits an environment, or reopens the supplied path.
+#[derive(Debug)]
+pub struct WasmStageHost {
+    runtime: File,
+    identity: String,
+    digest: [u8; 32],
+    len: u64,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
 }
 
-impl ReapedChild {
-    fn terminate_and_reap(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        self.reaped = true;
-    }
-}
-
-impl Drop for ReapedChild {
-    fn drop(&mut self) {
-        if !self.reaped {
-            self.terminate_and_reap();
+impl WasmStageHost {
+    pub fn open(path: &Path) -> Result<Self, Diagnostic> {
+        if !path.is_absolute() {
+            return Err(invariant("wasm_executor.host.runtime_path"));
         }
-    }
-}
-
-struct BoundedOutput {
-    bytes: Vec<u8>,
-    overflowed: bool,
-    read_failed: bool,
-}
-
-fn capture_bounded(
-    mut stdout: impl Read + Send + 'static,
-    limit: usize,
-) -> (thread::JoinHandle<BoundedOutput>, Arc<AtomicBool>) {
-    let overflow_signal = Arc::new(AtomicBool::new(false));
-    let reader_overflow_signal = Arc::clone(&overflow_signal);
-    let capture = thread::spawn(move || {
-        let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
-        let mut overflowed = false;
-        let mut read_failed = false;
-        let mut chunk = [0u8; 8 * 1024];
-        loop {
-            let read = match stdout.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(read) => read,
-                Err(_) => {
-                    read_failed = true;
-                    break;
-                }
-            };
-            let remaining = limit.saturating_sub(bytes.len());
-            let retained = read.min(remaining);
-            bytes.extend_from_slice(&chunk[..retained]);
-            overflowed |= retained != read;
-            if overflowed {
-                reader_overflow_signal.store(true, Ordering::Relaxed);
+        let canonical = path
+            .canonicalize()
+            .map_err(|_| invariant("wasm_executor.host.runtime_path"))?;
+        let runtime = OpenOptions::new()
+            .read(true)
+            .open(canonical)
+            .map_err(|_| invariant("wasm_executor.host.runtime_open"))?;
+        let metadata = runtime
+            .metadata()
+            .map_err(|_| invariant("wasm_executor.host.runtime_metadata"))?;
+        if !metadata.is_file() {
+            return Err(invariant("wasm_executor.host.runtime_regular"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o111 == 0 {
+                return Err(invariant("wasm_executor.host.runtime_executable"));
             }
         }
-        BoundedOutput {
-            bytes,
-            overflowed,
-            read_failed,
+        let digest = digest_file(&runtime)?;
+        let hex = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        Ok(Self {
+            runtime,
+            identity: format!("core-wasm-node:sha256:{hex}:{}", metadata.len()),
+            digest,
+            len: metadata.len(),
+            #[cfg(unix)]
+            device: {
+                use std::os::unix::fs::MetadataExt;
+                metadata.dev()
+            },
+            #[cfg(unix)]
+            inode: {
+                use std::os::unix::fs::MetadataExt;
+                metadata.ino()
+            },
+        })
+    }
+
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn recheck(&self) -> Result<(), Diagnostic> {
+        let metadata = self
+            .runtime
+            .metadata()
+            .map_err(|_| invariant("wasm_executor.host.runtime_metadata"))?;
+        if !metadata.is_file() || metadata.len() != self.len {
+            return Err(invariant("wasm_executor.host.runtime_drift"));
         }
-    });
-    (capture, overflow_signal)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if metadata.dev() != self.device || metadata.ino() != self.inode {
+                return Err(invariant("wasm_executor.host.runtime_drift"));
+            }
+        }
+        if digest_file(&self.runtime)? != self.digest {
+            return Err(invariant("wasm_executor.host.runtime_drift"));
+        }
+        Ok(())
+    }
+}
+
+fn digest_file(file: &File) -> Result<[u8; 32], Diagnostic> {
+    let mut hash = Sha256::new();
+    let mut remaining = MAX_HELD_RUNTIME_BYTES;
+    let mut offset = 0_u64;
+    let mut bytes = [0_u8; 16 * 1024];
+    loop {
+        #[cfg(unix)]
+        let read = {
+            use std::os::unix::fs::FileExt;
+            file.read_at(&mut bytes, offset)
+        };
+        #[cfg(not(unix))]
+        let read = {
+            use std::io::{Seek, SeekFrom};
+            let mut clone = file
+                .try_clone()
+                .map_err(|_| invariant("wasm_executor.host.runtime_clone"))?;
+            clone
+                .seek(SeekFrom::Start(offset))
+                .map_err(|_| invariant("wasm_executor.host.runtime_read"))?;
+            clone.read(&mut bytes)
+        };
+        let read = read.map_err(|_| invariant("wasm_executor.host.runtime_read"))?;
+        if read == 0 {
+            break;
+        }
+        let read =
+            u64::try_from(read).map_err(|_| invariant("wasm_executor.host.runtime_budget"))?;
+        if read > remaining {
+            return Err(invariant("wasm_executor.host.runtime_budget"));
+        }
+        remaining -= read;
+        hash.update(&bytes[..read as usize]);
+        offset += read;
+    }
+    Ok(hash.finalize().into())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn accepts_observer(args: &[Vec<u8>]) -> bool {
+    args.len() == 1 && args[0] == b"observe.mjs"
 }
 
 pub(super) fn run_node_process(
-    directory: &Path,
+    host: &WasmStageHost,
+    workspace: &WasmStageWorkspace,
     cancellation: Option<&AgentCancellation>,
     output_budget: usize,
 ) -> Result<String, Diagnostic> {
@@ -90,59 +167,71 @@ pub(super) fn run_node_process(
     if cancellation.is_some_and(AgentCancellation::is_cancelled) {
         return Err(invariant("wasm_executor.process.cancelled"));
     }
-    let child = Command::new("node")
-        .arg("observe.mjs")
-        .current_dir(directory)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| invariant("wasm_executor.tool.node"))?;
-    let mut child = ReapedChild {
-        child,
-        reaped: false,
+    host.recheck()?;
+    workspace.recheck()?;
+    run_held(host, workspace, cancellation, output_budget)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn run_held(
+    host: &WasmStageHost,
+    workspace: &WasmStageWorkspace,
+    cancellation: Option<&AgentCancellation>,
+    output_budget: usize,
+) -> Result<String, Diagnostic> {
+    let tool = HeldProcessTool::new(
+        host.runtime
+            .try_clone()
+            .map_err(|_| invariant("wasm_executor.host.runtime_clone"))?,
+        workspace.held_directory()?,
+        b"semaprax-stage-node".to_vec(),
+        Vec::new(),
+        accepts_observer,
+    )
+    .map_err(|_| invariant("wasm_executor.process.tool"))?;
+    let mut provider = RegisteredProcessProvider::new([(1, tool)])
+        .map_err(|_| invariant("wasm_executor.process.tool"))?;
+    let mut argv = Vec::from(1_u32.to_le_bytes());
+    argv.extend_from_slice(&11_u32.to_le_bytes());
+    argv.extend_from_slice(b"observe.mjs");
+    let request = ProcessRequest::from_wire(
+        1,
+        &argv,
+        argv.len(),
+        &[],
+        0,
+        NODE_TIMEOUT_MS,
+        output_budget,
+        MAX_NODE_STDERR_BYTES,
+    )
+    .map_err(|_| invariant("wasm_executor.process.request"))?;
+    let result = provider.run_cancellable(&request, cancellation);
+    let settled = provider.settle();
+    let output = match (result, settled) {
+        (Ok(output), Ok(())) => output,
+        (Err(ProcessFailure::TimedOut), _) => {
+            return Err(invariant("wasm_executor.process.deadline"))
+        }
+        (Err(ProcessFailure::CapacityExceeded), _) => {
+            return Err(invariant("wasm_executor.process.output_budget"))
+        }
+        (Err(ProcessFailure::Cancelled), _) => {
+            return Err(invariant("wasm_executor.process.cancelled"))
+        }
+        _ => return Err(invariant("wasm_executor.process.run")),
     };
-    let stdout = child
-        .child
-        .stdout
-        .take()
-        .ok_or_else(|| invariant("wasm_executor.process.stdout"))?;
-    let (capture, overflowed) = capture_bounded(stdout, output_budget);
-    let status = loop {
-        if cancellation.is_some_and(AgentCancellation::is_cancelled) {
-            child.terminate_and_reap();
-            let _ = capture.join();
-            return Err(invariant("wasm_executor.process.cancelled"));
-        }
-        if overflowed.load(Ordering::Relaxed) {
-            child.terminate_and_reap();
-            let _ = capture.join();
-            return Err(invariant("wasm_executor.process.output_budget"));
-        }
-        match child.child.try_wait() {
-            Ok(Some(status)) => {
-                child.reaped = true;
-                break status;
-            }
-            Ok(None) => thread::sleep(NODE_POLL_INTERVAL),
-            Err(_) => {
-                child.terminate_and_reap();
-                let _ = capture.join();
-                return Err(invariant("wasm_executor.process.wait"));
-            }
-        }
-    };
-    let captured = capture
-        .join()
-        .map_err(|_| invariant("wasm_executor.process.capture"))?;
-    if !status.success() {
+    if output.termination != ProcessTermination::Exited(0) {
         return Err(invariant("wasm_executor.run"));
     }
-    if captured.read_failed {
-        return Err(invariant("wasm_executor.process.read"));
-    }
-    if captured.overflowed {
-        return Err(invariant("wasm_executor.process.output_budget"));
-    }
-    String::from_utf8(captured.bytes).map_err(|_| invariant("wasm_executor.output_utf8"))
+    String::from_utf8(output.stdout).map_err(|_| invariant("wasm_executor.output_utf8"))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn run_held(
+    _host: &WasmStageHost,
+    _workspace: &WasmStageWorkspace,
+    _cancellation: Option<&AgentCancellation>,
+    _output_budget: usize,
+) -> Result<String, Diagnostic> {
+    Err(invariant("wasm_executor.host.unsupported"))
 }

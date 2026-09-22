@@ -1385,6 +1385,7 @@ fn the_wasm_executor_has_no_route_to_mint_an_authorization_or_reach_undocumented
     let wasm_executor = [
         include_str!("authorization/wasm_executor.rs"),
         include_str!("authorization/wasm_executor_process.rs"),
+        include_str!("authorization/wasm_executor_workspace.rs"),
     ]
     .join("\n");
     assert_eq!(wasm_executor.matches("Authorized {").count(), 0);
@@ -1405,8 +1406,9 @@ fn the_wasm_executor_has_no_route_to_mint_an_authorization_or_reach_undocumented
     // The only process this backend spawns is the one documented,
     // explicitly provisioned `node` host -- never a second, undocumented
     // executable a compromised build step could substitute.
-    assert_eq!(wasm_executor.matches("Command::new(").count(), 1);
-    assert!(wasm_executor.contains("Command::new(\"node\")"));
+    assert_eq!(wasm_executor.matches("Command::new(").count(), 0);
+    assert!(wasm_executor.contains("HeldProcessTool::new("));
+    assert!(wasm_executor.contains("WasmStageHost"));
 }
 
 #[test]

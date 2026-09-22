@@ -1125,6 +1125,89 @@ fn aggregate_release_rejects_duplicate_or_missing_archives_before_any_capability
     assert!(capability.subjects.borrow().is_empty());
 }
 
+/// Differential proof that `SigstoreOfflineVerifier` is a real cryptographic
+/// engine actually invoked at the aggregate release boundary, not dead code
+/// the aggregate function never calls. This exact fixture -- manifest,
+/// provenance, claim, message-signature bundle, and three archive
+/// attestations -- is fully self-consistent: every digest, tag, commit, and
+/// identity binds, which `AggregateOfflineCapability` proves by asserting on
+/// its recorded identity/root and unconditionally accepting. Its signature,
+/// certificate, and transparency-log bytes are fabricated, never produced by
+/// any real signing operation (this repository has none, per
+/// `docs/RELEASE-SIGNING-POLICY-V1.md`). Swapping in `SigstoreOfflineVerifier`
+/// over the identical bytes must still fail, and specifically with the
+/// cryptographic-layer code `SPX-Z707` rather than an earlier structural or
+/// binding code, because the structural/binding gates already passed under
+/// the caller-supplied capability above.
+#[test]
+fn aggregate_release_actually_invokes_the_built_in_sigstore_verifier() {
+    let archive_bytes = b"0123456789";
+    let manifest = manifest_for_archive_bytes("v9.9.9", archive_bytes);
+    let provenance = provenance_for_archive_bytes("v9.9.9", archive_bytes, manifest.as_bytes());
+    let claim = claim_json("v9.9.9", provenance.as_bytes())
+        .replace(FIXTURE_CLAIM_SIGNATURE, FIXTURE_BUNDLE_SIGNATURE)
+        .replace(FIXTURE_CLAIM_CERTIFICATE, FIXTURE_BUNDLE_CERTIFICATE);
+    let message_bundle = message_signature_bundle(
+        provenance.as_bytes(),
+        FIXTURE_BUNDLE_SIGNATURE,
+        FIXTURE_BUNDLE_CERTIFICATE,
+    );
+    let linux = "semaprax-v9.9.9-x86_64-unknown-linux-gnu.tar.gz";
+    let macos = "semaprax-v9.9.9-aarch64-apple-darwin.tar.gz";
+    let windows = "semaprax-v9.9.9-x86_64-pc-windows-msvc.zip";
+    let linux_bundle = archive_attestation_bundle(linux, archive_bytes);
+    let macos_bundle = archive_attestation_bundle(macos, archive_bytes);
+    let windows_bundle = archive_attestation_bundle(windows, archive_bytes);
+    let archives = [
+        OfflineReleaseArchive {
+            name: linux,
+            bytes: archive_bytes,
+            attestation_bundle_bytes: linux_bundle.as_bytes(),
+        },
+        OfflineReleaseArchive {
+            name: macos,
+            bytes: archive_bytes,
+            attestation_bundle_bytes: macos_bundle.as_bytes(),
+        },
+        OfflineReleaseArchive {
+            name: windows,
+            bytes: archive_bytes,
+            attestation_bundle_bytes: windows_bundle.as_bytes(),
+        },
+    ];
+
+    let accepting_capability = AggregateOfflineCapability {
+        subjects: RefCell::new(Vec::new()),
+    };
+    verify_offline_release_with_capability(
+        manifest.as_bytes(),
+        provenance.as_bytes(),
+        claim.as_bytes(),
+        message_bundle.as_bytes(),
+        FIXTURE_TRUSTED_ROOT,
+        &archives,
+        &accepting_capability,
+    )
+    .expect("the fixture must pass every structural and binding check on its own");
+    assert_eq!(
+        accepting_capability.subjects.borrow().len(),
+        4,
+        "the accepting capability must have been reached for the provenance subject and all three archives"
+    );
+
+    let error = verify_offline_release_with_capability(
+        manifest.as_bytes(),
+        provenance.as_bytes(),
+        claim.as_bytes(),
+        message_bundle.as_bytes(),
+        FIXTURE_TRUSTED_ROOT,
+        &archives,
+        &SigstoreOfflineVerifier,
+    )
+    .expect_err("fabricated signature/certificate material must not cryptographically verify");
+    assert_eq!(error.code, "SPX-Z707");
+}
+
 #[test]
 fn non_base64_bundle_certificate_and_signatures_are_rejected() {
     let fixture = valid_fixture();

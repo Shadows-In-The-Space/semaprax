@@ -521,6 +521,18 @@ case issue #168 names (single-byte mutation to the manifest, an artifact, or
 the provenance document; a provenance statement for a different commit/tag;
 a missing or extra artifact; an unapproved repository/issuer identity; and a
 signature claim replayed from another version).
+`src/release_provenance/tests.rs`'s
+`aggregate_release_actually_invokes_the_built_in_sigstore_verifier` and
+`tests/offline_package/release_verify_cli.rs`'s
+`release_verify_reaches_the_built_in_cryptographic_verifier_and_reports_spx_z707`
+additionally prove that `SigstoreOfflineVerifier` is a real engine actually
+invoked at both the aggregate-function and the standalone-binary boundary,
+not dead code: a directory that is fully structurally and binding-consistent
+but carries fabricated (never really signed) signature, certificate, and
+transparency-log bytes still fails, and specifically with the cryptographic
+code `SPX-Z707`, where an identical fixture accepted by a caller-supplied
+capability shows the earlier structural and binding gates already passed on
+their own.
 
 Building or verifying either document here creates no GitHub Release, signs
 nothing, and grants no network, signing, or publication authority -- exactly

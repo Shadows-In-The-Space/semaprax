@@ -333,6 +333,14 @@ by `tests/offline_package/release_provenance.rs`) provides:
   Every call receives the exact input bytes and an
   `ExpectedReleaseIdentity` derived from the bound trusted issuer,
   repository, workflow path, and exact tag.
+  `aggregate_release_actually_invokes_the_built_in_sigstore_verifier`
+  (`src/release_provenance/tests.rs`) is the differential proof that this
+  function's `SigstoreOfflineVerifier` branch is a real engine and not dead
+  code: the identical fixture that a caller-supplied capability accepts --
+  proving every structural and binding gate already passed on its own --
+  still fails as `SPX-Z707` under the built-in verifier, because only its
+  signature, certificate, and transparency-log bytes are fabricated rather
+  than really signed.
 
 `verify_archive_attestation_with_offline_capability` and
 `verify_signature_claim_with_offline_capability` remain explicitly partial
@@ -366,6 +374,12 @@ the complete bounded inventory and passes its exact bytes to
 `verify_offline_release_with_capability`. A partial inventory fails as a
 missing document (`SPX-Z705`), malformed or inconsistent framing fails before
 cryptography, and a cryptographic rejection reports `SPX-Z707`.
+`release_verify_reaches_the_built_in_cryptographic_verifier_and_reports_spx_z707`
+(`tests/offline_package/release_verify_cli.rs`) proves this default wiring end
+to end through the actual compiled binary: a complete, self-consistent
+directory whose signature/certificate/transparency-log bytes are fabricated
+is rejected as `SPX-Z707`, not silently accepted as
+`CRYPTOGRAPHICALLY VERIFIED OFFLINE`.
 
 ```sh
 semaprax release verify dist

@@ -17,7 +17,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Digest as _, Sha256};
 
 use semaprax::release_provenance::{
-    ARCHIVE_PLATFORMS, TRUSTED_ISSUER, TRUSTED_REPOSITORY, TRUSTED_WORKFLOW_PATH,
+    ARCHIVE_PLATFORMS, DSSE_IN_TOTO_PAYLOAD_TYPE, IN_TOTO_STATEMENT_TYPE,
+    SIGSTORE_BUNDLE_MEDIA_TYPE, SLSA_PROVENANCE_V1_PREDICATE_TYPE, TRUSTED_ISSUER,
+    TRUSTED_REPOSITORY, TRUSTED_WORKFLOW_PATH,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -128,6 +130,117 @@ fn claim_json(subject_digest: &str, issuer: &str) -> String {
   "signature": "FIXTURE-NOT-A-REAL-SIGNATURE",
   "certificate": "FIXTURE-NOT-A-REAL-CERTIFICATE"
 }}"#
+    )
+}
+
+/// Fabricated (not produced by any real signing operation) but base64-shaped
+/// opaque signature/certificate material, matched between the message-
+/// signature bundle below and a claim that consumes it. Reused verbatim from
+/// `src/release_provenance/tests.rs`'s equivalent fixtures so the same
+/// non-cryptographic material is recognizable across both test layers.
+const FIXTURE_BUNDLE_SIGNATURE: &str = "RklYVFVSRS1TSUdTVE9SRS1TSUdOQVRVUkU=";
+const FIXTURE_BUNDLE_CERTIFICATE: &str = "RklYVFVSRS1TSUdTVE9SRS1DRVJUSUZJQ0FURQ==";
+const FIXTURE_ARCHIVE_ATTESTATION_CERTIFICATE: &str =
+    "RklYVFVSRS1BVFRFU1RBVElPTi1DRVJUSUZJQ0FURQ==";
+const FIXTURE_TRUSTED_ROOT: &str = "{\"trustedRoot\":\"fixture\"}\n";
+
+/// A minimal standard (padded, `+`/`/`) base64 encoder, independent of any
+/// crate dependency, sufficient for building small closed-shape Sigstore
+/// bundle fixtures whose exact bytes this test controls.
+fn standard_base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = *chunk.get(1).unwrap_or(&0);
+        let third = *chunk.get(2).unwrap_or(&0);
+        output.push(ALPHABET[(first >> 2) as usize] as char);
+        output.push(ALPHABET[((first & 0x03) << 4 | second >> 4) as usize] as char);
+        if chunk.len() > 1 {
+            output.push(ALPHABET[((second & 0x0f) << 2 | third >> 6) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        if chunk.len() > 2 {
+            output.push(ALPHABET[(third & 0x3f) as usize] as char);
+        } else {
+            output.push('=');
+        }
+    }
+    output
+}
+
+/// One closed-shape v0.3 verification-material block: one certificate and
+/// one complete transparency-log entry of the given kind. Every byte field
+/// is fabricated but canonical base64, so this satisfies the narrow
+/// structural parser without being a real Rekor entry or a real certificate.
+fn verification_material(kind: &str, certificate: &str) -> String {
+    format!(
+        r#"{{"certificate":{{"rawBytes":"{certificate}"}},"tlogEntries":[{{"logIndex":"1","logId":{{"keyId":"RklYVFVSRS1SRUtPUi1LRVk="}},"kindVersion":{{"kind":"{kind}","version":"0.0.1"}},"integratedTime":"1","inclusionPromise":{{"signedEntryTimestamp":"RklYVFVSRS1TRVQ="}},"inclusionProof":{{"logIndex":"1","rootHash":"RklYVFVSRS1ST09U","treeSize":"1","hashes":["RklYVFVSRS1IQVNI"],"checkpoint":{{"envelope":"fixture checkpoint"}}}},"canonicalizedBody":"RklYVFVSRS1SRUtPUi1CT0RZ"}}],"timestampVerificationData":{{"rfc3161Timestamps":[{{"signedTimestamp":"RklYVFVSRS1SRkMzMTYx"}}]}}}}"#
+    )
+}
+
+/// A structurally admissible `cosign sign-blob` v0.3 message-signature
+/// bundle over the exact `provenance_bytes`, whose declared digest is real
+/// (so it binds to the claim and the provenance under test) but whose
+/// signature and certificate are fabricated, not a real Sigstore signing
+/// operation over that digest.
+fn message_signature_bundle(provenance_bytes: &[u8], signature: &str, certificate: &str) -> String {
+    let digest = sha256(provenance_bytes);
+    let raw_digest = digest.strip_prefix("sha256:").unwrap();
+    let digest_bytes: Vec<u8> = (0..raw_digest.len())
+        .step_by(2)
+        .map(|offset| u8::from_str_radix(&raw_digest[offset..offset + 2], 16).unwrap())
+        .collect();
+    let encoded_digest = standard_base64(&digest_bytes);
+    let material = verification_material("hashedrekord", certificate);
+    format!(
+        r#"{{"mediaType":"{SIGSTORE_BUNDLE_MEDIA_TYPE}","verificationMaterial":{material},"messageSignature":{{"messageDigest":{{"algorithm":"SHA2_256","digest":"{encoded_digest}"}},"signature":"{signature}"}}}}"#
+    )
+}
+
+/// A `semaprax.release-signature-claim.v1` document that exactly consumes
+/// `message_signature_bundle`'s fabricated signature/certificate strings, so
+/// binding succeeds and only the cryptographic layer can still refuse it.
+fn signed_claim_json(subject_digest: &str) -> String {
+    let workflow_ref = format!("{TRUSTED_REPOSITORY}/{TRUSTED_WORKFLOW_PATH}@refs/tags/{TAG}");
+    let subject = format!("repo:{TRUSTED_REPOSITORY}:ref:refs/tags/{TAG}");
+    format!(
+        r#"{{
+  "schema": "semaprax.release-signature-claim.v1",
+  "subject_digest": "{subject_digest}",
+  "subject_name": "release-provenance.json",
+  "identity": {{"issuer": "{TRUSTED_ISSUER}", "subject": "{subject}", "workflow_ref": "{workflow_ref}"}},
+  "algorithm": "sigstore-cosign-bundle-v0.3",
+  "signature": "{FIXTURE_BUNDLE_SIGNATURE}",
+  "certificate": "{FIXTURE_BUNDLE_CERTIFICATE}"
+}}"#
+    )
+}
+
+/// The closed GitHub workflow-v1 producer predicate
+/// `verify_archive_attestation_binds_release` requires, naming this test's
+/// exact trusted repository, workflow path, tag, and commit.
+fn github_artifact_predicate() -> String {
+    format!(
+        r#"{{"buildDefinition":{{"buildType":"https://actions.github.io/buildtypes/workflow/v1","externalParameters":{{"workflow":{{"path":"{TRUSTED_WORKFLOW_PATH}","ref":"refs/tags/{TAG}","repository":"https://github.com/{TRUSTED_REPOSITORY}"}}}},"internalParameters":{{"github":{{"event_name":"push","repository_id":"1","repository_owner_id":"1","runner_environment":"github-hosted"}}}},"resolvedDependencies":[{{"digest":{{"gitCommit":"{COMMIT}"}},"uri":"git+https://github.com/{TRUSTED_REPOSITORY}@refs/tags/{TAG}"}}]}},"runDetails":{{"builder":{{"id":"https://github.com/actions/runner/github-hosted"}},"metadata":{{"invocationId":"https://github.com/{TRUSTED_REPOSITORY}/actions/runs/1/attempts/1"}}}}}}"#
+    )
+}
+
+/// A structurally admissible GitHub `actions/attest-build-provenance` DSSE
+/// bundle whose one SLSA subject names the exact archive and its real
+/// digest, but whose DSSE signature and certificate are fabricated.
+fn archive_attestation_bundle(archive_name: &str, archive_bytes: &[u8]) -> String {
+    let digest = sha256(archive_bytes);
+    let raw_digest = digest.strip_prefix("sha256:").unwrap();
+    let predicate = github_artifact_predicate();
+    let statement = format!(
+        r#"{{"_type":"{IN_TOTO_STATEMENT_TYPE}","subject":[{{"name":"{archive_name}","digest":{{"sha256":"{raw_digest}"}}}}],"predicateType":"{SLSA_PROVENANCE_V1_PREDICATE_TYPE}","predicate":{predicate}}}"#
+    );
+    let payload = standard_base64(statement.as_bytes());
+    let material = verification_material("dsse", FIXTURE_ARCHIVE_ATTESTATION_CERTIFICATE);
+    format!(
+        r#"{{"mediaType":"{SIGSTORE_BUNDLE_MEDIA_TYPE}","verificationMaterial":{material},"dsseEnvelope":{{"payload":"{payload}","payloadType":"{DSSE_IN_TOTO_PAYLOAD_TYPE}","signatures":[{{"sig":"RklYVFVSRS1EU1NFLVNJR05BVFVSRQ=="}}]}}}}"#
     )
 }
 
@@ -481,6 +594,62 @@ fn release_verify_refuses_incomplete_offline_bundle_material() {
         !stderr(&output).contains("VERIFIED UNSIGNED RELEASE"),
         "{}",
         stderr(&output)
+    );
+    fs::remove_dir_all(&directory).ok();
+}
+
+/// The standalone binary's default verifier for a complete offline bundle is
+/// the real, network-free `SigstoreOfflineVerifier`, not a stub that accepts
+/// anything shaped like a bundle. This directory is *structurally* complete
+/// and self-consistent -- manifest, provenance, claim, message-signature
+/// bundle, three archive attestations, and trusted root all bind to the same
+/// exact bytes and pass every digest/identity check -- but its signature,
+/// certificate, and transparency-log material are fabricated, never produced
+/// by any real signing operation (this repository has none, per
+/// `docs/RELEASE-SIGNING-POLICY-V1.md`). A correct build refuses this with
+/// exactly the cryptographic-layer code `SPX-Z707`, proving the CLI actually
+/// reaches the built-in cryptographic engine rather than silently treating a
+/// complete-looking directory as `CRYPTOGRAPHICALLY VERIFIED OFFLINE`. A
+/// defect that swapped in a no-op verifier, or that stopped calling it at
+/// all, would instead print that success status or fail with an earlier
+/// structural/binding code -- both of which this test rejects.
+#[test]
+fn release_verify_reaches_the_built_in_cryptographic_verifier_and_reports_spx_z707() {
+    let directory = release_directory("crypto-engine-wiring");
+    let provenance = fs::read(directory.join("release-provenance.json")).unwrap();
+    let subject_digest = sha256(&provenance);
+
+    fs::write(
+        directory.join("release-provenance.bundle"),
+        message_signature_bundle(
+            &provenance,
+            FIXTURE_BUNDLE_SIGNATURE,
+            FIXTURE_BUNDLE_CERTIFICATE,
+        ),
+    )
+    .unwrap();
+    fs::write(directory.join("trusted_root.jsonl"), FIXTURE_TRUSTED_ROOT).unwrap();
+    fs::write(
+        directory.join("release-signature-claim.json"),
+        signed_claim_json(&subject_digest),
+    )
+    .unwrap();
+    for platform in ARCHIVE_PLATFORMS {
+        let name = archive_name(platform);
+        let bytes = fs::read(directory.join(&name)).unwrap();
+        fs::write(
+            directory.join(format!("release-attestation-{platform}.json")),
+            archive_attestation_bundle(&name, &bytes),
+        )
+        .unwrap();
+    }
+
+    let output = verify(&directory);
+    assert_rejected(&output, "SPX-Z707");
+    let message = stderr(&output);
+    assert!(
+        !message.contains("CRYPTOGRAPHICALLY VERIFIED OFFLINE"),
+        "{message}"
     );
     fs::remove_dir_all(&directory).ok();
 }

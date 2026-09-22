@@ -345,34 +345,7 @@ fn clean_installed_toolchain_walks_the_documented_journey() {
     // verified; assert it reports real, source-derived facts (this project's
     // own three `.spx` sources and at least one per-declaration obligation),
     // not an empty or stubbed envelope.
-    //
-    // ISSUE #271, pinned here rather than worked around silently: at the
-    // DEFAULT budget this command REFUSES on a project the toolchain itself
-    // just generated. `DEFAULT_MAX_BYTES` is 262,144 and the `service`
-    // template's manifest is 317,698 bytes. That refusal is asserted first,
-    // so a fix for #271 flips this test loudly instead of leaving a stale
-    // workaround behind; when the default is raised, delete this block and
-    // the `--max-bytes` argument below together.
-    let refused = run(&project, &["project-assurance-manifest", "semaprax.toml"]);
-    assert!(
-        !refused.status.success(),
-        "issue #271 appears fixed: the default budget now admits the service \
-         template. Drop this negative assertion and the explicit --max-bytes below."
-    );
-    assert!(
-        stderr(&refused).contains("SPX-Z102"),
-        "expected the budget refusal of issue #271, got: {}",
-        stderr(&refused)
-    );
-    let assurance = run(
-        &project,
-        &[
-            "project-assurance-manifest",
-            "semaprax.toml",
-            "--max-bytes",
-            "1048576",
-        ],
-    );
+    let assurance = run(&project, &["project-assurance-manifest", "semaprax.toml"]);
     assert!(assurance.status.success(), "{}", stderr(&assurance));
     let assurance_stdout = stdout(&assurance);
     let assurance_json: Value =

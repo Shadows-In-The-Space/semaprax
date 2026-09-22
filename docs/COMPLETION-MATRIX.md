@@ -125,9 +125,11 @@ versioned descriptor/carrier code that now exists. Every physical adapter
 still calls a fixture endpoint rather than a compiler-derived generic export.
 The internal
 [`public-generic-wasm-provider.v1`](PUBLIC-GENERIC-WASM-PROVIDER-TARGET-V1.md)
-profile now admits and independently replays one checked generic endpoint, but
-all artifact routes remain closed and no compiled Wasm artifact implements the
-provider ABI (#229).
+profile now admits and independently replays one checked generic endpoint and
+emits a deterministic zero-import Core Wasm provider implementing the complete
+lifecycle ABI. Legacy artifact routes remain closed. The generated TypeScript
+runtime delegates lifecycle to the module, but its canonical carrier generator
+is still pending, so #229 remains open.
 The [runtime settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
 records the implemented native fixture subset, including bounded non-recycled
 identity/recreation, sibling settlement, explicit release-status propagation and

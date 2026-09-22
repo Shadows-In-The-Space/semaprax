@@ -19,6 +19,7 @@ use super::{ProjectSource, ProjectWebBuild, ScalarWitInterfaceArtifactV1};
 use crate::public_generic_abi::compiler_endpoint::{
     replay_admitted_public_generic_endpoint_v1, AdmittedPublicGenericEndpointV1,
 };
+use crate::wasm::PublicGenericWasmProviderArtifactV1;
 
 /// One immutable, fully admitted Project revision without ambient authority.
 pub struct ProjectRevision {
@@ -122,8 +123,7 @@ impl ProjectRevision {
     }
 
     /// Re-derive and independently verify the exact compiler-owned endpoint
-    /// retained for `public-generic-wasm-provider.v1`. This returns admission
-    /// facts only; no provider artifact or runtime is available at this layer.
+    /// retained for `public-generic-wasm-provider.v1`.
     pub fn public_generic_wasm_provider_endpoint_v1(
         &self,
     ) -> Result<AdmittedPublicGenericEndpointV1, Vec<Diagnostic>> {
@@ -149,6 +149,18 @@ impl ProjectRevision {
             retained.descriptor_bytes(),
         )
         .map_err(|error| vec![error])
+    }
+
+    /// Deterministically compile the retained public-generic endpoint into its
+    /// closed, import-free Core Wasm provider artifact. Endpoint replay happens
+    /// before emission so retained Rust admission state is never an authority
+    /// shortcut.
+    pub fn public_generic_wasm_provider_artifact_v1(
+        &self,
+    ) -> Result<PublicGenericWasmProviderArtifactV1, Vec<Diagnostic>> {
+        let endpoint = self.public_generic_wasm_provider_endpoint_v1()?;
+        crate::wasm::emit_public_generic_wasm_provider_v1(&self.public_api_program, &endpoint)
+            .map_err(|error| vec![error])
     }
 
     pub fn test_program(&self) -> &crate::hir::ResolvedProgram {

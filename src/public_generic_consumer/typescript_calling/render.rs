@@ -100,16 +100,13 @@ pub(super) fn descriptor_ts(
     out.push_str(&template(DESCRIPTOR_HEADER));
     out.push('\n');
     out.push_str(
-        "const MODULE_ARTIFACT_DIGEST_DOMAIN = new TextEncoder().encode(\n  \"semaprax.public-generic-typescript-wasm-consumer.v1.module-artifact\\0\",\n);\n\n",
+        "const MODULE_ARTIFACT_DIGEST_DOMAIN = new TextEncoder().encode(\n  \"semaprax.public-generic-wasm-provider.v1.artifact\\0\",\n);\n\n",
     );
     out.push_str("export const TRUSTED_DESCRIPTOR_BYTES: Uint8Array = ");
     out.push_str(&uint8_array_literal(descriptor_bytes));
     out.push_str(";\n\n");
     out.push_str("export const TRUSTED_BINDING_BYTES: Uint8Array = ");
     out.push_str(&uint8_array_literal(binding_bytes));
-    out.push_str(";\n\n");
-    out.push_str("export const TRUSTED_ENDPOINT_EXPORT_NAME: string = ");
-    out.push_str(&ts_string_literal(binding.exported_endpoint_export_name()));
     out.push_str(";\n\n");
     out.push_str("export const TRUSTED_PROVIDER_ARTIFACT_DIGEST: string = ");
     out.push_str(&ts_string_literal(binding.provider_artifact_digest()));
@@ -209,31 +206,25 @@ fn sample_input_fn(input: &RecordShape) -> String {
     out
 }
 
-fn input_with_first_field_fn(input: &RecordShape) -> String {
+fn assert_output_shape_fn(output: &RecordShape) -> String {
     let mut out = String::new();
-    out.push_str("function inputWithFirstField(bytes) {\n");
-    out.push_str("  return {\n");
-    for (index, field) in input.fields.iter().enumerate() {
-        if index == 0 {
-            let _ = writeln!(out, "    {}: bytes,", field_name(field));
-        } else {
-            let _ = writeln!(out, "    {}: new Uint8Array(0),", field_name(field));
-        }
+    out.push_str("function assertOutputShape(output) {\n");
+    out.push_str("  assert.deepEqual(Object.keys(output), [\n");
+    for field in &output.fields {
+        let _ = writeln!(out, "    {:?},", field_name(field));
     }
-    out.push_str("  };\n");
-    out.push_str("}\n");
-    out
-}
-
-fn assert_reversed_fn(input: &RecordShape, output: &RecordShape) -> String {
-    let mut out = String::new();
-    out.push_str("function assertReversed(output, original) {\n");
-    for (in_field, out_field) in input.fields.iter().zip(output.fields.iter()) {
+    out.push_str("  ]);\n");
+    for field in &output.fields {
+        let name = field_name(field);
+        let _ = writeln!(out, "  assert.ok(output.{name} instanceof Uint8Array);");
         let _ = writeln!(
             out,
-            "  assert.deepEqual(output.{}, reversed(original.{}));",
-            field_name(out_field),
-            field_name(in_field)
+            "  assert.strictEqual(Object.getPrototypeOf(output.{name}), Uint8Array.prototype);"
+        );
+        let _ = writeln!(out, "  assert.strictEqual(Object.getPrototypeOf(output.{name}.buffer), ArrayBuffer.prototype);");
+        let _ = writeln!(
+            out,
+            "  assert.strictEqual(output.{name}.buffer.resizable, false);"
         );
     }
     out.push_str("}\n");
@@ -242,27 +233,14 @@ fn assert_reversed_fn(input: &RecordShape, output: &RecordShape) -> String {
 
 const ROUND_TRIP_BODY: &str = include_str!("render/round_trip_body.mjs.txt");
 
-/// Generated (not part of the fixed [`ROUND_TRIP_BODY`] template) because
-/// the memory-growth and per-leaf-bound assertions have to name that
-/// record's actual first field.
-fn first_output_field_fn(output: &RecordShape) -> String {
-    format!(
-        "function FIRST_OUTPUT_FIELD(output) {{\n  return output.{};\n}}\n",
-        field_name(&output.fields[0])
-    )
-}
-
 pub(super) fn round_trip_mjs(input: &RecordShape, output: &RecordShape) -> String {
     let mut out = String::new();
     out.push_str(&template(ROUND_TRIP_HEADER));
     out.push('\n');
     out.push_str(&sample_input_fn(input));
     out.push('\n');
-    out.push_str(&input_with_first_field_fn(input));
+    out.push_str(&assert_output_shape_fn(output));
     out.push('\n');
-    out.push_str(&assert_reversed_fn(input, output));
-    out.push('\n');
-    out.push_str(&first_output_field_fn(output));
     out.push_str(&template(ROUND_TRIP_BODY));
     out
 }

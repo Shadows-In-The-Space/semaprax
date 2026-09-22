@@ -8,6 +8,15 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Emit the internal `public-generic-wasm-provider.v1` endpoint as a
+  deterministic zero-import Core Wasm module with exact descriptor/binding
+  replay, normalized artifact binding, canonical carrier SHA-256 validation,
+  module-owned scratch and opaque lifecycle handles, checked HIR invocation,
+  two-pass result export, and explicit release/close operations. The generated
+  TypeScript runtime now delegates provider lifecycle to those exports. Its
+  older flat carrier generator remains intentionally incompatible with the
+  descriptor-bound module, so #229 and the broader #162 matrix remain open.
+
 - Add the internal `public-generic-wasm-provider.v1` Project profile as the
   first compiler-owned target foundation for #229. Package Manifest v1 now
   selects exactly one concrete checked generic owned-record endpoint, derives

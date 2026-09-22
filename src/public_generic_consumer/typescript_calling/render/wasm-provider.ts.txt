@@ -1,180 +1,165 @@
-/** Generated TypeScript/Wasm REFERENCE caller. Allocation, ownership and
- * settlement remain host-side. Only leaf reversal executes in Wasm bytecode;
- * this is NOT the compiled open/prepare/call/export/release ABI (#229).
- * One synchronous in-flight call per Provider; no cancellation or execution
- * retries. Existing Module objects are refused because their bytes cannot be
- * authenticated. Immutable copies of supplied module bytes are verified first.
+/** Generated TypeScript client for the frozen module-owned public-generic
+ * Wasm provider ABI. The compiled module owns provider state, allocations,
+ * handles, call settlement, and physical release. This client only validates
+ * the artifact, marshals the public carrier through the reserved scratch
+ * region, and guarantees that every acquired opaque value is released.
  */
-import { FIELD_COUNT, MAX_CARRIER_BYTES, decodeOutput, encodeInput, locateLeaves } from "./carrier.js";
-import { MAX_MODULE_BYTES, TRUSTED_ENDPOINT_EXPORT_NAME, trustedDescriptorAndBinding,
+import { MAX_CARRIER_BYTES, decodeOutput, encodeInput } from "./carrier.js";
+import { MAX_MODULE_BYTES, trustedDescriptorAndBinding,
   verifyDescriptorAndBinding, verifyModuleArtifactDigest } from "./descriptor.js";
 import { SemapraxPublicGenericException } from "./errors.js";
-import type { CapacityReason, CarrierReason, ProviderReason, SemapraxPublicGenericError } from "./errors.js";
+import type { CarrierReason, ProviderReason, SemapraxPublicGenericError } from "./errors.js";
 import type { Input, Output } from "./types.js";
 
 const PAGE_BYTES = 65536;
-// Payload is 16 MiB, but a canonical frame needs 8 + 8*256 extra bytes.
-const MAX_PAGES = Math.ceil(MAX_CARRIER_BYTES / PAGE_BYTES);
-const MAX_GENERATION = 0xffff_ffff;
-const MAX_TRACE_EVENTS = 4096;
-type EndpointFn = (ptr: number, len: number) => void;
+// The frozen emitter reserves a public scratch arena and an equal private
+// provider arena after its fixed prefix.
+const SCRATCH_BASE_BYTES = 393216;
+const MAX_MEMORY_BYTES = SCRATCH_BASE_BYTES + 2 * MAX_CARRIER_BYTES;
+const STATUS_OK = 0;
+const STATUS_BUFFER_TOO_SMALL = 12;
+const ABI_EXPORTS = [
+  ["memory", "memory"],
+  ["spx_pg_v1_scratch_ptr", "function"],
+  ["spx_pg_v1_scratch_reserve", "function"],
+  ["spx_pg_v1_scratch_capacity", "function"],
+  ["spx_pg_v1_open", "function"],
+  ["spx_pg_v1_input_prepare", "function"],
+  ["spx_pg_v1_call", "function"],
+  ["spx_pg_v1_result_export", "function"],
+  ["spx_pg_v1_value_release", "function"],
+  ["spx_pg_v1_result_release", "function"],
+  ["spx_pg_v1_provider_close", "function"],
+] as const;
 
-/** Legacy test IDs retain their exact original meaning/status. */
-export const FAILURE_ORDINALS = {
-  AFTER_INPUT_VALIDATED: 0, AFTER_INPUT_ALLOCATED: 1, AFTER_INPUT_WRITTEN: 2,
-  AFTER_ENDPOINT_CALLED: 3, AFTER_INPUT_RELEASED: 4, AFTER_RESULT_ALLOCATED: 5,
-  AFTER_RESULT_WRITTEN: 6, AFTER_RESULT_COPIED_OUT: 7,
-} as const;
-export type FailureOrdinal = (typeof FAILURE_ORDINALS)[keyof typeof FAILURE_ORDINALS];
-
-/** Host observation vocabulary, deliberately NOT CarrierCallMachine events. */
-export type SettlementEvent = "input-validated" | "input-allocation-started"
-  | "input-allocation-committed" | "input-payload-copied" | "input-prepared"
-  | "input-transfer-pending" | "input-transfer-committed" | "endpoint-started"
-  | "endpoint-finished" | "input-release" | "result-allocation-started"
-  | "result-allocation-committed" | "result-leaf-copy-started" | "result-leaf-copied"
-  | "result-prepared" | "result-commit-pending" | "result-committed"
-  | "export-pending" | "export-copied" | "result-release";
-const INJECTABLE: readonly SettlementEvent[] = Object.freeze([
-  "input-validated", "input-allocation-started", "input-allocation-committed",
-  "input-payload-copied", "input-prepared", "input-transfer-pending",
-  "input-transfer-committed", "endpoint-started", "endpoint-finished",
-  "input-release", "result-allocation-started", "result-allocation-committed",
-  "result-leaf-copy-started", "result-leaf-copied", "result-prepared",
-  "result-commit-pending", "export-pending", "export-copied", "result-release",
-]);
-export interface FailurePoint { readonly event: SettlementEvent; readonly leaf: number | null; }
-interface TraceRow { readonly ordinal: number; readonly event: SettlementEvent; readonly leaf: number | null; }
-export interface SettlementSnapshot {
-  readonly endpoint_calls: number;
-  readonly live_allocations: number;
-  readonly live_handles: number;
-  readonly live_bytes: number;
-  readonly peak_allocations: number;
-  readonly peak_bytes: number;
-  readonly zeroed_bytes: number;
-  readonly retained_pages: number;
-  readonly release_order: readonly string[];
-  readonly trace: readonly TraceRow[];
-  readonly secondary_cleanup_statuses: readonly number[];
+type I32Fn = (...args: number[]) => number;
+type LaneFn = (...args: number[]) => bigint;
+interface ProviderAbi {
+  readonly scratchPtr: I32Fn;
+  readonly scratchReserve: LaneFn;
+  readonly scratchCapacity: I32Fn;
+  readonly open: LaneFn;
+  readonly inputPrepare: LaneFn;
+  readonly call: LaneFn;
+  readonly resultExport: LaneFn;
+  readonly valueRelease: I32Fn;
+  readonly resultRelease: I32Fn;
+  readonly providerClose: I32Fn;
 }
-export interface SettlementReport extends SettlementSnapshot {
-  readonly accepted: boolean;
-  readonly primary: SemapraxPublicGenericError | null;
-}
+interface Lane { readonly status: number; readonly value: number; }
 
-function capacity(reason: CapacityReason): SemapraxPublicGenericException {
-  return new SemapraxPublicGenericException({ kind: "capacity-exceeded", reason });
+function failure(detail: SemapraxPublicGenericError): SemapraxPublicGenericException {
+  return new SemapraxPublicGenericException(detail);
 }
 function carrier(reason: CarrierReason): SemapraxPublicGenericException {
-  return new SemapraxPublicGenericException({ kind: "carrier-rejected", reason });
+  return failure({ kind: "carrier-rejected", reason });
 }
 function mismatch(reason: ProviderReason): SemapraxPublicGenericException {
-  return new SemapraxPublicGenericException({ kind: "provider-mismatch", reason });
+  return failure({ kind: "provider-mismatch", reason });
 }
 function normalized(error: unknown): SemapraxPublicGenericException {
-  return error instanceof SemapraxPublicGenericException ? error
-    : new SemapraxPublicGenericException({ kind: "execution-failed", status: 11 });
+  return error instanceof SemapraxPublicGenericException
+    ? error
+    : failure({ kind: "execution-failed", status: 11 });
 }
-interface Span { readonly offset: number; readonly length: number; released: boolean; }
+function readLane(raw: bigint): Lane {
+  const bits = BigInt.asUintN(64, raw);
+  return {
+    status: Number(bits & 0xffff_ffffn),
+    value: Number((bits >> 32n) & 0xffff_ffffn),
+  };
+}
+function statusFailure(status: number, phase: "open" | "prepare" | "call" | "export"): SemapraxPublicGenericException {
+  switch (status) {
+    case 1: return failure({ kind: "descriptor-rejected", reason: "descriptor-framing" });
+    case 2: return failure({ kind: "descriptor-rejected", reason: "descriptor-replay" });
+    case 3:
+    case 4: return mismatch("binding-replay");
+    case 5: return phase === "export"
+      ? failure({ kind: "result-rejected", reason: "carrier-framing" })
+      : carrier("carrier-framing");
+    case 6: return failure({ kind: "capacity-exceeded", reason: "carrier-bytes" });
+    case 7: return carrier("state-invalid");
+    case 8: return carrier("handle-invalid");
+    case 12: return failure({ kind: "capacity-exceeded", reason: "carrier-bytes" });
+    default: return failure({ kind: "execution-failed", status });
+  }
+}
+function releaseFailure(status: number): SemapraxPublicGenericException {
+  return failure({ kind: "release-failed", status });
+}
+function snapshotModuleBytes(value: BufferSource): Uint8Array {
+  try {
+    if (value instanceof ArrayBuffer) {
+      const length = value.byteLength;
+      if (length > MAX_MODULE_BYTES
+        || ((value as ArrayBuffer & { readonly resizable?: boolean }).resizable ?? false)) {
+        throw mismatch("module-buffer");
+      }
+      return new Uint8Array(value.slice(0));
+    }
+    if (!ArrayBuffer.isView(value) || !(value.buffer instanceof ArrayBuffer)
+      || ((value.buffer as ArrayBuffer & { readonly resizable?: boolean }).resizable ?? false)) {
+      throw mismatch("module-buffer");
+    }
+    const view = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    if (view.length > MAX_MODULE_BYTES) throw mismatch("module-bound");
+    return Uint8Array.prototype.slice.call(view) as Uint8Array;
+  } catch (error) {
+    if (error instanceof SemapraxPublicGenericException) throw error;
+    throw mismatch("module-buffer");
+  }
+}
+function nonnegativeI32(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff;
+}
+function exactAbi(module: WebAssembly.Module): void {
+  const actual = WebAssembly.Module.exports(module)
+    .map(({ name, kind }) => `${name}\0${kind}`)
+    .sort();
+  const expected = ABI_EXPORTS.map(([name, kind]) => `${name}\0${kind}`).sort();
+  if (actual.length !== expected.length || actual.some((value, index) => value !== expected[index])) {
+    throw mismatch("module-exports");
+  }
+  if (WebAssembly.Module.imports(module).length !== 0) throw mismatch("module-imports");
+}
 
-/** The existing exact-LIFO contract, now explicitly one outstanding frame.
- * Zeroing must succeed BEFORE an allocation is forgotten. Pages are retained
- * by WebAssembly.Memory; zero live spans does not claim a shrinking JS heap.
+/** An opaque JS wrapper around a module-issued ID. It does not track ID
+ * validity or ownership; all such decisions remain inside the Wasm module.
  */
-class HostAllocator {
-  readonly #memory: WebAssembly.Memory;
-  #span: Span | null = null;
-  #peakBytes = 0;
-  #peakAllocations = 0;
-  #zeroed = 0;
-  #highWater = 0;
-  constructor(memory: WebAssembly.Memory) { this.#memory = memory; }
-  reset(): void {
-    if (this.#span !== null) throw carrier("provider-busy");
-    this.#peakBytes = 0; this.#peakAllocations = 0; this.#zeroed = 0;
+class OpaqueValue {
+  readonly #providerTag: object;
+  readonly #id: number;
+  readonly #kind: "input" | "result";
+  constructor(providerTag: object, id: number, kind: "input" | "result") {
+    this.#providerTag = providerTag;
+    this.#id = id;
+    this.#kind = kind;
   }
-  alloc(length: number): Span {
-    if (this.#span !== null) throw carrier("provider-busy");
-    if (!Number.isSafeInteger(length) || length < 8 || length > MAX_CARRIER_BYTES) throw capacity("carrier-bytes");
-    const required = Math.ceil(length / PAGE_BYTES);
-    if (required > MAX_PAGES) throw capacity("carrier-bytes");
-    const current = this.#memory.buffer.byteLength / PAGE_BYTES;
-    try { if (required > current) this.#memory.grow(required - current); }
-    catch { throw capacity("memory-growth"); }
-    const span = { offset: 0, length, released: false };
-    this.#span = span;
-    this.#peakBytes = Math.max(this.#peakBytes, length);
-    this.#peakAllocations = 1;
-    this.#highWater = Math.max(this.#highWater, length);
-    return span;
+  static read(value: unknown): readonly [object, number, "input" | "result"] {
+    if (value === null || typeof value !== "object" || !(#providerTag in value)) {
+      throw carrier("handle-invalid");
+    }
+    return [value.#providerTag, value.#id, value.#kind];
   }
-  dealloc(span: Span): void {
-    if (span.released || this.#span !== span) throw carrier("lifo-release");
-    this.view().fill(0, span.offset, span.offset + span.length);
-    span.released = true;
-    this.#span = null;
-    this.#zeroed += span.length;
-  }
-  view(): Uint8Array { return new Uint8Array(this.#memory.buffer); }
-  snapshot(): Pick<SettlementSnapshot, "live_allocations" | "live_bytes" | "peak_allocations" | "peak_bytes" | "zeroed_bytes" | "retained_pages"> {
-    return { live_allocations: this.#span ? 1 : 0, live_bytes: this.#span?.length ?? 0,
-      peak_allocations: this.#peakAllocations, peak_bytes: this.#peakBytes,
-      zeroed_bytes: this.#zeroed, retained_pages: this.#memory.buffer.byteLength / PAGE_BYTES };
-  }
-  releasedMemoryIsZero(): boolean {
-    if (this.#span !== null) return false;
-    return this.view().subarray(0, this.#highWater).every(byte => byte === 0);
-  }
-}
-
-/** Runtime private-field brand, not instanceof or attacker-controlled methods. */
-export class OpaqueHandle {
-  readonly #id: number; readonly #generation: number; readonly #tag: object;
-  private constructor(id: number, generation: number, tag: object) {
-    this.#id = id; this.#generation = generation; this.#tag = tag;
-  }
-  static mint(id: number, generation: number, tag: object): OpaqueHandle {
-    return new OpaqueHandle(id, generation, tag);
-  }
-  static read(value: unknown, tag: object): readonly [number, number] {
-    if (value === null || typeof value !== "object" || !(#tag in value)) throw carrier("handle-invalid");
-    if (value.#tag !== tag) throw carrier("handle-provider");
-    return [value.#id, value.#generation];
-  }
-  belongsTo(tag: object): boolean { return this.#tag === tag; }
-  id(): number { return this.#id; }
-  generation(): number { return this.#generation; }
-}
-interface Active {
-  readonly handle: OpaqueHandle;
-  readonly generation: number;
-  readonly role: "input" | "result";
-  readonly span: Span;
-  transferred: boolean;
 }
 
 export class Provider {
-  #closed = false;
-  #busy = false;
-  readonly #allocator: HostAllocator;
-  readonly #endpoint: EndpointFn;
+  readonly #memory: WebAssembly.Memory;
+  readonly #abi: ProviderAbi;
   readonly #tag = {};
-  #active: Active | null = null;
-  #nextGeneration = 1;
-  #armedLegacy: FailureOrdinal | null = null;
-  #legacy: FailureOrdinal | null = null;
-  #armed: FailurePoint[] = [];
-  #faults: FailurePoint[] = [];
-  #exportMutation = 0;
-  #trace: TraceRow[] = [];
-  #releases: string[] = [];
-  #secondary: number[] = [];
-  #endpointCalls = 0;
-  #last: SettlementReport | null = null;
+  readonly #providerId: number;
+  readonly #scratchPtr: number;
+  readonly #scratchCapacity: number;
+  #closed = false;
 
-  private constructor(memory: WebAssembly.Memory, endpoint: EndpointFn) {
-    this.#allocator = new HostAllocator(memory); this.#endpoint = endpoint;
+  private constructor(memory: WebAssembly.Memory, abi: ProviderAbi, providerId: number,
+    scratchPtr: number, scratchCapacity: number) {
+    this.#memory = memory;
+    this.#abi = abi;
+    this.#providerId = providerId;
+    this.#scratchPtr = scratchPtr;
+    this.#scratchCapacity = scratchCapacity;
   }
 
   static async open(moduleOrBytes: WebAssembly.Module | BufferSource,
@@ -182,311 +167,195 @@ export class Provider {
     const [descriptor, binding] = trustedDescriptorAndBinding();
     verifyDescriptorAndBinding(options.descriptorBytes ?? descriptor, options.bindingBytes ?? binding);
     if (moduleOrBytes instanceof WebAssembly.Module) throw mismatch("module-bytes-required");
-    // Copy BEFORE the first await. Hashing one mutable view and instantiating
-    // it later would authenticate one module but execute a different one.
+    // Snapshot before the first await so authenticated bytes and compiled bytes
+    // cannot diverge through a caller mutation.
     const bytes = snapshotModuleBytes(moduleOrBytes);
     await verifyModuleArtifactDigest(bytes);
     let module: WebAssembly.Module;
-    try { module = await WebAssembly.compile(bytes); } catch { throw mismatch("module-compile"); }
-    if (WebAssembly.Module.imports(module).length !== 0) throw mismatch("module-imports");
-    const exports = WebAssembly.Module.exports(module);
-    if (exports.length !== 2 || !exports.some(row => row.name === "memory" && row.kind === "memory")
-      || !exports.some(row => row.name === TRUSTED_ENDPOINT_EXPORT_NAME && row.kind === "function")) throw mismatch("module-exports");
+    try { module = await WebAssembly.compile(bytes); }
+    catch { throw mismatch("module-compile"); }
+    exactAbi(module);
     let instance: WebAssembly.Instance;
-    try { instance = await WebAssembly.instantiate(module, {}); } catch { throw mismatch("module-instance"); }
-    const memory = instance.exports["memory"];
+    try { instance = await WebAssembly.instantiate(module, {}); }
+    catch { throw mismatch("module-instance"); }
+
+    const exports = instance.exports;
+    const memory = exports.memory;
     if (!(memory instanceof WebAssembly.Memory) || !(memory.buffer instanceof ArrayBuffer)
-      || memory.buffer.byteLength < PAGE_BYTES || memory.buffer.byteLength > MAX_PAGES * PAGE_BYTES) throw mismatch("module-memory");
-    const endpoint = instance.exports[TRUSTED_ENDPOINT_EXPORT_NAME];
-    if (typeof endpoint !== "function") throw mismatch("module-endpoint");
-    return new Provider(memory, endpoint as EndpointFn);
+      || memory.buffer.byteLength < PAGE_BYTES || memory.buffer.byteLength > MAX_MEMORY_BYTES) {
+      throw mismatch("module-memory");
+    }
+    const fn = (name: string): I32Fn | LaneFn => {
+      const value = exports[name];
+      if (typeof value !== "function") throw mismatch("module-abi");
+      return value as I32Fn | LaneFn;
+    };
+    const abi: ProviderAbi = {
+      scratchPtr: fn("spx_pg_v1_scratch_ptr") as I32Fn,
+      scratchReserve: fn("spx_pg_v1_scratch_reserve") as LaneFn,
+      scratchCapacity: fn("spx_pg_v1_scratch_capacity") as I32Fn,
+      open: fn("spx_pg_v1_open") as LaneFn,
+      inputPrepare: fn("spx_pg_v1_input_prepare") as LaneFn,
+      call: fn("spx_pg_v1_call") as LaneFn,
+      resultExport: fn("spx_pg_v1_result_export") as LaneFn,
+      valueRelease: fn("spx_pg_v1_value_release") as I32Fn,
+      resultRelease: fn("spx_pg_v1_result_release") as I32Fn,
+      providerClose: fn("spx_pg_v1_provider_close") as I32Fn,
+    };
+
+    // Reserve the frozen maximum carrier once, before open creates a live
+    // provider. Subsequent calls reuse only this public scratch span.
+    const required = MAX_CARRIER_BYTES;
+    const reserved = readLane(abi.scratchReserve(required));
+    if (reserved.status !== STATUS_OK) throw statusFailure(reserved.status, "open");
+    const scratchPtr = abi.scratchPtr();
+    const scratchCapacity = abi.scratchCapacity();
+    if (!nonnegativeI32(scratchPtr) || !nonnegativeI32(scratchCapacity)
+      || reserved.value !== scratchPtr || scratchCapacity < required
+      || memory.buffer.byteLength > MAX_MEMORY_BYTES
+      || scratchPtr + scratchCapacity > memory.buffer.byteLength) throw mismatch("module-memory");
+
+    const descriptorPtr = scratchPtr;
+    const bindingPtr = descriptorPtr + descriptor.length;
+    if (bindingPtr + binding.length > scratchPtr + scratchCapacity) throw mismatch("module-memory");
+    let view = new Uint8Array(memory.buffer);
+    view.set(descriptor, descriptorPtr);
+    view.set(binding, bindingPtr);
+    // The open export independently replays the exact descriptor and binding.
+    const opened = readLane(abi.open(descriptorPtr, descriptor.length, bindingPtr, binding.length));
+    if (opened.status !== STATUS_OK || opened.value === 0) {
+      const primary = opened.status === STATUS_OK
+        ? mismatch("module-abi")
+        : statusFailure(opened.status, "open");
+      if (opened.value !== 0) {
+        const cleanup = abi.providerClose(opened.value);
+        if (cleanup !== STATUS_OK) primary.recordSecondaryCleanup(cleanup);
+      }
+      throw primary;
+    }
+    return new Provider(memory, abi, opened.value, scratchPtr, scratchCapacity);
   }
 
-  #live(): void { if (this.#closed) throw carrier("provider-closed"); }
-  #lookup(handle: unknown, role: "input" | "result"): Active {
-    this.#live();
-    const [id, generation] = OpaqueHandle.read(handle, this.#tag);
-    const active = this.#active;
-    if (!active || active.generation !== generation || active.span.released) throw carrier("handle-invalid");
-    if (active.role !== role || id !== (role === "input" ? 0 : 1000)) throw carrier("handle-kind");
-    if (active.transferred && role === "input") throw carrier("state-invalid");
-    return active;
+  #live(): void {
+    if (this.#closed) throw carrier("provider-closed");
   }
-  #legacyAt(ordinal: FailureOrdinal): void {
-    if (this.#legacy === ordinal) {
-      this.#legacy = null;
-      throw new SemapraxPublicGenericException({ kind: "execution-failed", status: ordinal });
+  #memoryView(): Uint8Array {
+    if (!(this.#memory.buffer instanceof ArrayBuffer)
+      || this.#memory.buffer.byteLength > MAX_MEMORY_BYTES) throw mismatch("module-memory");
+    const view = new Uint8Array(this.#memory.buffer);
+    if (this.#scratchPtr + this.#scratchCapacity > view.length) throw mismatch("module-memory");
+    return view;
+  }
+  #copyIntoScratch(bytes: Uint8Array): void {
+    if (bytes.length > this.#scratchCapacity) {
+      throw failure({ kind: "capacity-exceeded", reason: "carrier-bytes" });
     }
+    // Reacquire after every module call: Wasm memory growth detaches old views.
+    this.#memoryView().set(bytes, this.#scratchPtr);
   }
-  #event(event: SettlementEvent, leaf: number | null = null, injectable = true): void {
-    // Reserve two final rows for bounded cleanup; never silently truncate proof.
-    if (this.#trace.length >= MAX_TRACE_EVENTS - 2 && !event.endsWith("-release")) throw capacity("trace-events");
-    this.#trace.push(Object.freeze({ ordinal: this.#trace.length, event, leaf }));
-    const index = injectable ? this.#faults.findIndex(point => point.event === event && point.leaf === leaf) : -1;
-    if (index < 0) return;
-    this.#faults.splice(index, 1);
-    const allocation = event === "input-allocation-started" || event === "input-allocation-committed"
-      || event === "result-allocation-started" || event === "result-allocation-committed";
-    throw new SemapraxPublicGenericException({ kind: event.endsWith("-release") ? "release-failed" : "execution-failed",
-      status: allocation ? 10 : 11 });
+  #requireValue(value: unknown, kind: "input" | "result"): number {
+    this.#live();
+    const [providerTag, id, actualKind] = OpaqueValue.read(value);
+    if (providerTag !== this.#tag) throw carrier("handle-provider");
+    if (actualKind !== kind) throw carrier("handle-kind");
+    return id;
   }
-  #release(span: Span, role: "input" | "result"): SemapraxPublicGenericException | null {
+  #prepareInput(input: Input): OpaqueValue {
+    this.#live();
+    const carrierBytes = encodeInput(input);
+    this.#copyIntoScratch(carrierBytes);
+    const prepared = readLane(this.#abi.inputPrepare(this.#providerId, this.#scratchPtr, carrierBytes.length));
+    if (prepared.status !== STATUS_OK) {
+      const primary = statusFailure(prepared.status, "prepare");
+      if (prepared.value !== 0) {
+        const cleanup = this.#abi.valueRelease(prepared.value);
+        if (cleanup !== STATUS_OK) primary.recordSecondaryCleanup(cleanup);
+      }
+      throw primary;
+    }
+    if (prepared.value === 0) throw mismatch("module-abi");
+    return new OpaqueValue(this.#tag, prepared.value, "input");
+  }
+  #call(input: OpaqueValue): OpaqueValue {
+    const inputId = this.#requireValue(input, "input");
+    const result = readLane(this.#abi.call(this.#providerId, inputId));
+    if (result.status !== STATUS_OK) {
+      const primary = statusFailure(result.status, "call");
+      if (result.value !== 0) {
+        const cleanup = this.#abi.resultRelease(result.value);
+        if (cleanup !== STATUS_OK) primary.recordSecondaryCleanup(cleanup);
+      }
+      throw primary;
+    }
+    if (result.value === 0) throw mismatch("module-abi");
+    return new OpaqueValue(this.#tag, result.value, "result");
+  }
+  #exportResult(result: OpaqueValue): Output {
+    const resultId = this.#requireValue(result, "result");
+    const probe = readLane(this.#abi.resultExport(resultId, this.#scratchPtr, 0));
+    if (probe.status !== STATUS_BUFFER_TOO_SMALL || probe.value === 0
+      || probe.value > MAX_CARRIER_BYTES || probe.value > this.#scratchCapacity) {
+      throw probe.status === STATUS_BUFFER_TOO_SMALL
+        ? failure({ kind: "capacity-exceeded", reason: "carrier-bytes" })
+        : statusFailure(probe.status, "export");
+    }
+    const copied = readLane(this.#abi.resultExport(resultId, this.#scratchPtr, probe.value));
+    if (copied.status !== STATUS_OK || copied.value !== probe.value) {
+      throw copied.status === STATUS_OK ? mismatch("module-abi") : statusFailure(copied.status, "export");
+    }
+    // Detach output ownership from Wasm scratch before releasing the module
+    // result or reusing scratch for the next request.
+    const ownedCarrier = this.#memoryView().slice(this.#scratchPtr, this.#scratchPtr + copied.value);
+    return decodeOutput(ownedCarrier);
+  }
+  #releaseInput(value: OpaqueValue): SemapraxPublicGenericException | null {
     try {
-      this.#allocator.dealloc(span);
-      if (this.#active?.span === span) this.#active = null;
-      this.#releases.push(role);
-      // Release injection reports failure AFTER physical settlement. It cannot
-      // skip zeroing, resurrect a handle, or create a deliberately leaked state.
-      this.#event(role === "input" ? "input-release" : "result-release");
-      return null;
+      const id = this.#requireValue(value, "input");
+      const status = this.#abi.valueRelease(id);
+      return status === STATUS_OK ? null : releaseFailure(status);
     } catch (error) { return normalized(error); }
   }
-  #combine(primary: SemapraxPublicGenericException | null, cleanup: SemapraxPublicGenericException | null): SemapraxPublicGenericException | null {
+  #releaseResult(value: OpaqueValue): SemapraxPublicGenericException | null {
+    try {
+      const id = this.#requireValue(value, "result");
+      const status = this.#abi.resultRelease(id);
+      return status === STATUS_OK ? null : releaseFailure(status);
+    } catch (error) { return normalized(error); }
+  }
+  #combine(primary: SemapraxPublicGenericException | null,
+    cleanup: SemapraxPublicGenericException | null): SemapraxPublicGenericException | null {
     if (!cleanup) return primary;
     if (!primary) return cleanup;
     const status = "status" in cleanup.detail ? cleanup.detail.status : 11;
-    primary.recordSecondaryCleanup(status); this.#secondary.push(status);
+    primary.recordSecondaryCleanup(status);
     return primary;
-  }
-  #snapshot(): SettlementSnapshot {
-    return Object.freeze({ endpoint_calls: this.#endpointCalls, live_handles: this.#active ? 1 : 0,
-      ...this.#allocator.snapshot(), release_order: Object.freeze(this.#releases.slice()),
-      trace: Object.freeze(this.#trace.slice()), secondary_cleanup_statuses: Object.freeze(this.#secondary.slice()) });
-  }
-  #finish(primary: SemapraxPublicGenericException | null): void {
-    this.#last = Object.freeze({ ...this.#snapshot(), accepted: primary === null, primary: primary?.detail ?? null });
-    this.#faults = []; this.#legacy = null; this.#exportMutation = 0;
-  }
-  settlement(): SettlementReport | null { return this.#last; }
-
-  #prepareInput(input: Input): OpaqueHandle {
-    const armed = this.#armed; const legacy = this.#armedLegacy;
-    this.#armed = []; this.#armedLegacy = null;
-    this.#live();
-    if (this.#busy || this.#active) throw carrier("provider-busy");
-    this.#busy = true;
-    this.#faults = armed; this.#legacy = legacy;
-    this.#trace = []; this.#releases = []; this.#secondary = []; this.#endpointCalls = 0;
-    this.#allocator.reset();
-    let span: Span | null = null;
-    try {
-      if (this.#nextGeneration > MAX_GENERATION) throw capacity("generation");
-      const bytes = encodeInput(input);
-      this.#event("input-validated"); this.#legacyAt(FAILURE_ORDINALS.AFTER_INPUT_VALIDATED);
-      this.#event("input-allocation-started");
-      span = this.#allocator.alloc(bytes.length);
-      this.#event("input-allocation-committed"); this.#legacyAt(FAILURE_ORDINALS.AFTER_INPUT_ALLOCATED);
-      this.#allocator.view().set(bytes, span.offset);
-      this.#event("input-payload-copied"); this.#legacyAt(FAILURE_ORDINALS.AFTER_INPUT_WRITTEN);
-      this.#event("input-prepared");
-      const generation = this.#nextGeneration++;
-      const handle = OpaqueHandle.mint(0, generation, this.#tag);
-      this.#active = { handle, generation, role: "input", span, transferred: false };
-      return handle;
-    } catch (error) {
-      const primary = this.#combine(normalized(error), span && !span.released ? this.#release(span, "input") : null)!;
-      this.#finish(primary); throw primary;
-    } finally { this.#busy = false; }
-  }
-
-  #call(handle: unknown): OpaqueHandle {
-    const input = this.#lookup(handle, "input");
-    if (this.#busy) throw carrier("provider-busy");
-    this.#busy = true;
-    let resultSpan: Span | null = null;
-    try {
-      this.#event("input-transfer-pending");
-      input.transferred = true;
-      this.#event("input-transfer-committed");
-      const view = this.#allocator.view().subarray(input.span.offset, input.span.offset + input.span.length);
-      const spans = locateLeaves(view, FIELD_COUNT);
-      for (let index = 0; index < spans.length; index += 1) {
-        const leaf = spans[index]!;
-        this.#event("endpoint-started", index);
-        this.#endpointCalls += 1;
-        this.#endpoint(input.span.offset + leaf.offset, leaf.length);
-        this.#event("endpoint-finished", index);
-      }
-      this.#legacyAt(FAILURE_ORDINALS.AFTER_ENDPOINT_CALLED);
-      // Reacquire after endpoint calls: never retain a memory view across grow.
-      const resultBytes = this.#allocator.view().slice(input.span.offset, input.span.offset + input.span.length);
-      const resultLeaves = locateLeaves(resultBytes, FIELD_COUNT);
-      const cleanup = this.#release(input.span, "input");
-      if (cleanup) throw cleanup;
-      this.#legacyAt(FAILURE_ORDINALS.AFTER_INPUT_RELEASED);
-      this.#event("result-allocation-started");
-      resultSpan = this.#allocator.alloc(resultBytes.length);
-      this.#event("result-allocation-committed"); this.#legacyAt(FAILURE_ORDINALS.AFTER_RESULT_ALLOCATED);
-      this.#allocator.view().set(resultBytes.subarray(0, 8), resultSpan.offset);
-      for (let index = 0; index < resultLeaves.length; index += 1) {
-        const leaf = resultLeaves[index]!;
-        this.#event("result-leaf-copy-started", index);
-        this.#allocator.view().set(resultBytes.subarray(leaf.offset - 8, leaf.offset + leaf.length), resultSpan.offset + leaf.offset - 8);
-        this.#event("result-leaf-copied", index);
-      }
-      this.#event("result-prepared"); this.#legacyAt(FAILURE_ORDINALS.AFTER_RESULT_WRITTEN);
-      this.#event("result-commit-pending");
-      const result = OpaqueHandle.mint(1000, input.generation, this.#tag);
-      this.#active = { handle: result, generation: input.generation, role: "result", span: resultSpan, transferred: false };
-      this.#event("result-committed", null, false);
-      return result;
-    } catch (error) {
-      let primary = normalized(error);
-      if (resultSpan && !resultSpan.released) primary = this.#combine(primary, this.#release(resultSpan, "result"))!;
-      if (!input.span.released) primary = this.#combine(primary, this.#release(input.span, "input"))!;
-      this.#finish(primary); throw primary;
-    } finally { this.#busy = false; }
-  }
-
-  #exportResult(handle: unknown): Output {
-    const entry = this.#lookup(handle, "result");
-    if (this.#busy) throw carrier("provider-busy");
-    this.#busy = true;
-    try {
-      this.#event("export-pending");
-      const bytes = this.#allocator.view().slice(entry.span.offset, entry.span.offset + entry.span.length);
-      const mutation = this.#exportMutation; this.#exportMutation = 0;
-      const exported = mutateExportForTest(bytes, mutation);
-      const output = decodeOutput(exported);
-      this.#event("export-copied"); this.#legacyAt(FAILURE_ORDINALS.AFTER_RESULT_COPIED_OUT);
-      return output;
-    } catch (error) { throw normalized(error); }
-    finally { this.#busy = false; }
-  }
-  #releaseHandle(handle: unknown, role: "input" | "result"): void {
-    const entry = this.#lookup(handle, role);
-    if (this.#busy) throw carrier("provider-busy");
-    const error = this.#release(entry.span, role);
-    if (error) throw error;
-  }
-
-  #releaseIfOwned(handle: OpaqueHandle | null, role: "input" | "result"): SemapraxPublicGenericException | null {
-    const active = this.#active;
-    return handle && active?.handle === handle ? this.#release(active.span, role) : null;
   }
 
   transform(input: Input): Output {
-    // Refusal before starting a new call must not settle someone else's input.
-    if (this.#busy || this.#active) {
-      this.#armed = []; this.#armedLegacy = null;
-      throw carrier("provider-busy");
-    }
-    let prepared: OpaqueHandle | null = null;
-    let result: OpaqueHandle | null = null;
+    this.#live();
+    let prepared: OpaqueValue | null = null;
+    let result: OpaqueValue | null = null;
     let output: Output | null = null;
     let primary: SemapraxPublicGenericException | null = null;
     try {
       prepared = this.#prepareInput(input);
-      result = this.#call(prepared); prepared = null;
+      result = this.#call(prepared);
+      // Successful module call consumes the input handle at its transfer
+      // boundary; only the result remains for explicit release.
+      prepared = null;
       output = this.#exportResult(result);
     } catch (error) { primary = normalized(error); }
-    primary = this.#combine(primary, this.#releaseIfOwned(result, "result"));
-    primary = this.#combine(primary, this.#releaseIfOwned(prepared, "input"));
-    this.#finish(primary);
+    if (result) primary = this.#combine(primary, this.#releaseResult(result));
+    if (prepared) primary = this.#combine(primary, this.#releaseInput(prepared));
     if (primary) throw primary;
     if (output === null) throw carrier("state-invalid");
     return output;
   }
+
   close(): void {
     if (this.#closed) return;
-    if (this.#busy || this.#active || this.#allocator.snapshot().live_allocations !== 0) {
-      throw new SemapraxPublicGenericException({ kind: "release-failed", status: 7 });
-    }
+    const status = this.#abi.providerClose(this.#providerId);
+    if (status !== STATUS_OK) throw releaseFailure(status);
     this.#closed = true;
-    this.#armed = []; this.#faults = []; this.#armedLegacy = null; this.#legacy = null;
   }
-
-  /** Test-only observations, not ownership authority or production ABI exports. */
-  static readonly diagnostics = Object.freeze({
-    liveAllocations(provider: Provider): number { return provider.#allocator.snapshot().live_allocations; },
-    liveHandles(provider: Provider): number { return provider.#active ? 1 : 0; },
-    liveBytes(provider: Provider): number { return provider.#allocator.snapshot().live_bytes; },
-    snapshot(provider: Provider): SettlementSnapshot { return provider.#snapshot(); },
-    releasedMemoryIsZero(provider: Provider): boolean { return provider.#allocator.releasedMemoryIsZero(); },
-    injectFailure(provider: Provider, ordinal: FailureOrdinal): void {
-      if (!Number.isInteger(ordinal) || ordinal < 0 || ordinal > 7) throw carrier("failure-injection");
-      provider.#armedLegacy = ordinal;
-    },
-    injectEvents(provider: Provider, points: readonly FailurePoint[]): void {
-      const copy: FailurePoint[] = [];
-      try {
-        if (!Array.isArray(points) || points.length > 2) throw carrier("failure-injection");
-        for (const point of points) {
-          if (point === null || typeof point !== "object" || Object.keys(point).sort().join(",") !== "event,leaf"
-            || !INJECTABLE.includes(point.event)) throw carrier("failure-injection");
-          const leafEvent = ["endpoint-started", "endpoint-finished", "result-leaf-copy-started", "result-leaf-copied"].includes(point.event);
-          if (leafEvent ? (!Number.isInteger(point.leaf) || point.leaf === null || point.leaf < 0 || point.leaf >= FIELD_COUNT)
-            : point.leaf !== null) throw carrier("failure-injection");
-          if (copy.some(prior => prior.event === point.event && prior.leaf === point.leaf)) throw carrier("failure-injection");
-          copy.push(Object.freeze({ event: point.event, leaf: point.leaf }));
-        }
-      } catch { throw carrier("failure-injection"); }
-      if (provider.#active) provider.#faults = copy; else provider.#armed = copy;
-    },
-    clearFailureInjection(provider: Provider): void {
-      provider.#armed = []; provider.#faults = []; provider.#armedLegacy = null; provider.#legacy = null;
-    },
-    foreignHandle(id: number, generation: number): OpaqueHandle { return OpaqueHandle.mint(id, generation, {}); },
-    prepareInput(provider: Provider, input: Input): OpaqueHandle { return provider.#prepareInput(input); },
-    call(provider: Provider, handle: unknown): OpaqueHandle { return provider.#call(handle); },
-    exportResult(provider: Provider, handle: unknown): Output { return provider.#exportResult(handle); },
-    releaseInput(provider: Provider, handle: unknown): void { provider.#releaseHandle(handle, "input"); },
-    releaseResult(provider: Provider, handle: unknown): void { provider.#releaseHandle(handle, "result"); },
-    /** Test-only direct path through the generated result decoder. It never
-     * opens a module, allocates a carrier span, mints a handle, or calls an
-     * endpoint; malformed bytes are refused before result leaf copies. */
-    validateResultCarrier(bytes: Uint8Array): void { decodeOutput(bytes); },
-    mutateNextExport(provider: Provider, mutation: number): void {
-      if (!Number.isInteger(mutation) || mutation < 0 || mutation > 6) throw carrier("failure-injection");
-      provider.#exportMutation = mutation;
-    },
-    setNextGeneration(provider: Provider, generation: number): void {
-      if (provider.#active || provider.#busy || !Number.isInteger(generation) || generation < provider.#nextGeneration
-        || generation > MAX_GENERATION + 1) throw carrier("failure-injection");
-      provider.#nextGeneration = generation;
-    },
-  });
-}
-
-/** Copy the exact viewed range using built-in getters, without user iterators,
- * and reject mutable shared/resizable storage before async verification. */
-function snapshotModuleBytes(source: BufferSource): Uint8Array {
-  let view: Uint8Array;
-  try {
-    let buffer: unknown; let offset = 0; let length: number;
-    const bufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength")!.get!;
-    if (ArrayBuffer.isView(source)) {
-      const proto = source instanceof DataView ? DataView.prototype : Object.getPrototypeOf(Uint8Array.prototype) as object;
-      buffer = Reflect.apply(Object.getOwnPropertyDescriptor(proto, "buffer")!.get!, source, []);
-      offset = Reflect.apply(Object.getOwnPropertyDescriptor(proto, "byteOffset")!.get!, source, []);
-      length = Reflect.apply(Object.getOwnPropertyDescriptor(proto, "byteLength")!.get!, source, []);
-      Reflect.apply(bufferLength, buffer, []);
-    } else { buffer = source; length = Reflect.apply(bufferLength, buffer, []); }
-    const resizable = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "resizable")?.get;
-    if (resizable && Reflect.apply(resizable, buffer, [])) throw mismatch("module-buffer");
-    if (length > MAX_MODULE_BYTES) throw mismatch("module-bound");
-    view = new Uint8Array(buffer as ArrayBuffer, offset, length);
-    const copy = new Uint8Array(length); copy.set(view); return copy;
-  } catch (error) {
-    if (error instanceof SemapraxPublicGenericException) throw error;
-    throw mismatch("module-buffer");
-  }
-}
-
-function mutateExportForTest(bytes: Uint8Array, mutation: number): Uint8Array {
-  if (mutation === 0) return bytes;
-  if (mutation === 1) return bytes.subarray(0, 7);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (mutation === 2) view.setBigUint64(0, BigInt(FIELD_COUNT + 1), true);
-  if (mutation === 3) view.setBigUint64(8, 0xffff_ffff_ffff_ffffn, true);
-  if (mutation === 4) view.setBigUint64(8, 65537n, true);
-  if (mutation === 5) {
-    const spans = locateLeaves(bytes, FIELD_COUNT);
-    const last = spans[spans.length - 1]!;
-    view.setBigUint64(last.offset - 8, BigInt(last.length + 1), true);
-  }
-  if (mutation === 6) {
-    const extra = new Uint8Array(bytes.length + 1); extra.set(bytes); return extra;
-  }
-  return bytes;
 }

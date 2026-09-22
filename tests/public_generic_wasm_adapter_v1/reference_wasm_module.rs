@@ -7,10 +7,9 @@
 //! (`Cargo.toml` is coordinator-owned), so this module builds the bytes
 //! itself, section by section, rather than compiling text.
 //!
-//! The module exports exactly two things, matching what
-//! `typescript_calling`'s generated `wasm-provider.ts` requires and nothing
-//! more ("Do not access private allocator exports or internal record
-//! offsets" -- there are none to access):
+//! The module exports exactly two things, matching the retired endpoint-only
+//! adapter inventory and nothing more ("Do not access private allocator
+//! exports or internal record offsets" -- there are none to access):
 //!
 //! - `memory`: one growable linear memory (initial 1 page, max 256 pages --
 //!   the same 16 MiB bound `boundary_profile.rs::MAX_TOTAL_PAYLOAD_BYTES`
@@ -23,15 +22,10 @@
 //!   in-bounds two-pointer swap loop, real Wasm bytecode, not a JS
 //!   function pretending to be one.
 //!
-//! This is a TEST-ONLY fixture standing in for a genuinely compiled Wasm
-//! artifact of issue #155's Core Wasm physical adapter, which does not
-//! exist (see `typescript_calling.rs`'s own module documentation for the
-//! full accounting). It implements only the one endpoint issue #155
-//! already names and documents as a real Wasm export
-//! (`FIXTURE_ENDPOINT_EXPORT_NAME`); it never reimplements
-//! `WasmProvider`'s allocator, handle registry, or carrier/lifecycle state
-//! machine -- those stay host-side, in the generated `wasm-provider.ts`
-//! this harness exercises against this fixture.
+//! This is now a retired TEST-ONLY legacy fixture. The compiler-owned full
+//! provider artifact exists in `crate::wasm::public_generic_provider`; this
+//! narrower module remains for frozen endpoint-byte tests and as a negative
+//! compatibility subject that the new exact ABI must reject.
 
 /// LEB128-encode an unsigned integer.
 fn uleb128(mut value: u64) -> Vec<u8> {

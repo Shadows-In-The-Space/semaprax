@@ -28,33 +28,16 @@
 //! scalar or nested-record leaf is future work tracked by that same
 //! prerequisite, not a limitation invented here.
 //!
-//! **A load-bearing honest limitation, stated once here rather than hidden
-//! in prose.** Unlike [`super::rust_calling`], which links against a
-//! genuinely *compiled* native provider artifact (issue #154's
-//! `provider_body.c`, built into a real static library the generated crate
-//! links against), issue #155's Core Wasm physical adapter
-//! (`public_generic_abi::wasm::provider::WasmProvider`) has never been
-//! compiled to an actual `.wasm` binary exposing an open/input_prepare/
-//! call/result_export/release ABI a JS host could `WebAssembly.instantiate`
-//! and call: it is a Rust struct exercised only in-process by Rust test
-//! code (`wasm/provider/tests.rs`). No `#[no_mangle] extern "C"` export and
-//! no compiled Wasm artifact for this protocol exists anywhere in this
-//! repository. The one genuinely real, named Wasm export issue #155 *does*
-//! define is `FIXTURE_ENDPOINT_EXPORT_NAME` ("spx_pg_wasm_endpoint_reverse_bytes_v1"),
-//! proven only by `reverse_probe.mjs`'s narrower, handle-free memory-primitive
-//! script. This generator's `wasm-provider.ts` therefore keeps the
-//! allocator/handle-registry/lifecycle bookkeeping host-side in generated
-//! TypeScript (exactly mirroring `reverse_probe.mjs`'s own host-owned
-//! bookkeeping over real `WebAssembly.Memory`, elevated to a bounded
-//! exact-LIFO allocator and a private handle registry) and calls into real,
-//! genuinely compiled Wasm bytecode only for that one already-named
-//! endpoint export. It never reimplements or modifies
-//! `public_generic_abi::wasm::provider::WasmProvider` itself, and nothing
-//! under `src/public_generic_abi/wasm/**` is touched by this module. See
-//! [Public Generic Consumers
-//! v1](../../docs/PUBLIC-GENERIC-CONSUMERS-V1.md#typescriptwasm-calling-consumer-issue-157)
-//! for the full accounting of what this proves and what remains blocked on
-//! a genuinely compiled Wasm provider artifact.
+//! The generated `wasm-provider.ts` now authenticates and instantiates the
+//! compiler-owned zero-import provider artifact and delegates scratch,
+//! open/prepare/call/export, handles, and release/close transitions to that
+//! module. It contains no host allocator or provider state machine. One
+//! integration limitation remains explicit: `carrier.ts` still emits the
+//! predecessor flat leaf frame, while the compiler module accepts only the
+//! canonical descriptor-bound Logical Carrier v1 frame. The two therefore
+//! fail closed until #229's final TypeScript carrier-codec migration lands;
+//! the hand-assembled reference module is retained only as a negative legacy
+//! fixture, never as the provider implementation.
 //!
 //! Determinism and authority: like [`super::rust_calling::generate_rust_calling_consumer`],
 //! this is a pure function from already-trusted bytes to source text. It

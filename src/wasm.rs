@@ -41,6 +41,7 @@ mod owned;
 mod owned_data_exports;
 mod owned_data_public;
 pub(crate) mod process_io;
+mod public_generic_provider;
 #[cfg(any(test, feature = "unstable-wit-component-harness"))]
 mod record_pattern_component_v8;
 #[cfg(any(test, feature = "unstable-wit-component-harness"))]
@@ -85,6 +86,7 @@ pub use owned_data_public::{
     emit_resolved_module_with_nested_owned_record_exports,
     emit_resolved_module_with_owned_data_exports,
 };
+pub use public_generic_provider::{BindingDigestSlotV1, PublicGenericWasmProviderArtifactV1};
 #[cfg(any(test, feature = "unstable-wit-component-harness"))]
 pub(crate) use record_pattern_component_v8::{
     emit_private_record_pattern_core_v8,
@@ -871,6 +873,17 @@ pub fn emit_module_with_byte_exports(
 /// hold HIR and keeps all backend lowering independent of source-level names.
 pub fn emit_resolved_module(program: &ResolvedProgram) -> Result<Vec<u8>, Diagnostic> {
     emit_resolved_module_internal(program, &[], &[])
+}
+
+/// Emit the closed Core Wasm artifact for one already replayed
+/// public-generic provider endpoint. This is intentionally separate from
+/// legacy Web/public-export profiles: it neither relaxes their admission nor
+/// changes their calling conventions.
+pub fn emit_public_generic_wasm_provider_v1(
+    program: &ResolvedProgram,
+    endpoint: &crate::public_generic_abi::compiler_endpoint::AdmittedPublicGenericEndpointV1,
+) -> Result<PublicGenericWasmProviderArtifactV1, Diagnostic> {
+    public_generic_provider::emit(program, endpoint)
 }
 
 /// Test-only raw target projection; not a public semantic runtime API.

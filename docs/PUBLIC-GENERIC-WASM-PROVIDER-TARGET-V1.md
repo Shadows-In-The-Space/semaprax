@@ -1,11 +1,11 @@
 # Public Generic Wasm Provider Target v1
 
-Status: **internal admission implemented; artifact emission unavailable**.
+Status: **internal admission and compiler-owned Core Wasm artifact implemented**.
 
 This document owns the additive compiler target selected by the Package
 Manifest v1 profile `public-generic-wasm-provider.v1`. It creates a checked,
-replayable compiler subject for issues #162 and #229. It does not publish a
-public generic ABI and does not make a provider executable.
+replayable compiler subject and a closed executable provider for issues #162
+and #229. It does not publish a supported public generic ABI.
 
 ## Manifest contract
 
@@ -49,27 +49,27 @@ retained checked program and exact project revision before returning a new
 admitted value. Project Lock v1 records the replayed descriptor digest as the
 profile's interface identity.
 
-## Closed execution boundary
+## Artifact boundary
 
-Phase A provides no emitter. The following routes must fail before staging or
-creating output:
+`ProjectRevision::public_generic_wasm_provider_artifact_v1` replays the
+retained endpoint and deterministically emits the dedicated artifact. The
+following unrelated publication routes still fail before staging or creating
+output:
 
 - pathless and filesystem Web builds;
 - npm/package builds;
 - native executable builds; and
 - Agent Transport build requests.
 
-The refusal names `public-generic-wasm-provider.v1` and the missing
-compiler-owned Core Wasm provider emitter. A successful `check`, endpoint
-inspection, or Project Lock render is proof of admission only, never proof of
-execution or publication.
+Their refusal names `public-generic-wasm-provider.v1`; this internal artifact
+does not silently reopen legacy Web/npm/native/transport contracts.
 
-## Required Phase B artifact
+## Implemented Phase B artifact
 
-The next revision may consume only `AdmittedPublicGenericEndpointV1`; it may
-not regenerate a fixture descriptor or accept caller-selected endpoint facts.
-It must deterministically emit one closed Core Wasm module with no ambient
-imports and the versioned provider operations for:
+The emitter consumes only `AdmittedPublicGenericEndpointV1`; it does not
+regenerate a fixture descriptor or accept caller-selected endpoint facts. It
+deterministically emits one closed Core Wasm module with no ambient imports and
+the versioned provider operations for:
 
 1. provider open and exact descriptor/binding replay;
 2. bounded canonical input preparation and copy-in;
@@ -77,17 +77,24 @@ imports and the versioned provider operations for:
 4. private result staging followed by exact non-consuming copy-out; and
 5. explicit value, result, and provider release.
 
-The module owns its allocator, handle registry, generation checks, sticky
-failure selection, and canonical cleanup. Its binding must cover the exact
-artifact bytes, endpoint export, compiler backend, descriptor, runtime
-identity, and Core Wasm target. TypeScript must call these exports rather than
-retain an independent host-side provider state machine.
+The module owns scratch growth, opaque non-recycled handles, carrier SHA-256
+replay, checked source invocation, result staging/export, and explicit
+release/close transitions. Its binding covers normalized exact artifact bytes,
+endpoint export, compiler backend, descriptor, runtime identity, and Core Wasm
+target. The generated TypeScript runtime now calls these exports and no longer
+contains an allocator or handle registry.
+
+The remaining #229 integration gap is canonical carrier generation in the
+TypeScript package: its older flat leaf codec is deliberately rejected by the
+new module. The retired hand-assembled reference module is now a negative
+compatibility fixture only. The compiler artifact's full successful lifecycle
+is executed directly under Node, but #229 is not closed until the generated
+TypeScript carrier codec emits the canonical descriptor-bound frames too.
 
 ## Nonclaims
 
 The implemented Phase A product is not:
 
-- a compiled `.wasm` provider;
 - a public or supported generic ABI;
 - a replacement for the C11 reference provider or in-process Wasm model;
 - proof that any physical adapter invokes the selected Semaprax function;
@@ -108,13 +115,17 @@ The repository pins this phase with:
 ```sh
 cargo test --locked -p semaprax --test project -- \
   public_generic_wasm_provider --test-threads=1
+cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1 -- \
+  compiler_provider_artifact --test-threads=1
 cargo test --locked -p semaprax --test public_generic_native_adapter_v1 -- \
   consumer_settlement:: --test-threads=1
 ```
 
-The first gate covers manifest selection, checked admission, independent
-replay, Project Lock binding, source-drift identity, shape/count refusals, and
-fail-closed output routes. The second proves that executed native generated
+The first gate covers manifest selection, checked admission, deterministic
+artifact derivation, Project Lock binding, source-drift identity, shape/count
+refusals, and fail-closed legacy output routes. The second validates the exact
+zero-import export inventory and executes open/prepare/checked-call/export/
+release/close under Node. The third proves that executed native generated
 callers and their provider use the same compiler-derived descriptor, binding,
 instance, leaf, and settlement identities while retaining the fixture endpoint
 nonclaim.

@@ -1,15 +1,14 @@
 /** Generated, closed caller error vocabulary. Messages never determine status.
- * This is the host-owned reference caller, not a compiled provider ABI.
- * Cleanup failures are retained on the exception and in Provider.settlement().
+ * Provider execution and cleanup statuses originate in the compiled module.
  */
 export type DescriptorReason = "descriptor-bound" | "descriptor-framing" | "descriptor-replay";
 export type ProviderReason = "binding-replay" | "binding-bound" | "module-bytes-required"
   | "module-buffer" | "module-bound" | "module-digest" | "module-compile"
-  | "module-imports" | "module-exports" | "module-memory" | "module-endpoint"
+  | "module-imports" | "module-exports" | "module-memory" | "module-abi"
   | "module-instance";
 export type CarrierReason = "input-shape" | "input-field" | "input-bytes"
-  | "provider-closed" | "provider-busy" | "handle-invalid" | "handle-provider"
-  | "handle-kind" | "lifo-release" | "state-invalid" | "failure-injection"
+  | "provider-closed" | "handle-invalid" | "handle-provider"
+  | "handle-kind" | "state-invalid"
   | "carrier-framing" | "carrier-count" | "carrier-trailing";
 export type CapacityReason = "leaf-count" | "leaf-bytes" | "total-payload"
   | "carrier-bytes" | "trace-events" | "memory-growth" | "generation" | "host-allocation";

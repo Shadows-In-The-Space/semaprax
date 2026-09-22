@@ -1,229 +1,166 @@
-
-async function run() {
-  await test("success round trip reverses every owned leaf and copies it out fresh", async () => {
-    const provider = await Provider.open(wasmBytes);
-    const input = sampleInput();
-    const expected = sampleInput();
-    const output = provider.transform(input);
-    assertReversed(output, expected);
-    // Mutating the original input's buffer after the call must never
-    // mutate the already-returned, already-copied-out result -- proof the
-    // result is a fresh JS-owned copy, not a live alias into anything.
-    for (const key of Object.keys(input)) {
-      input[key].fill(0xff);
-    }
-    assertReversed(output, expected);
-    provider.close();
-    assert.equal(Provider.diagnostics.liveAllocations(provider), 0);
-    assert.equal(Provider.diagnostics.liveHandles(provider), 0);
-  });
-
-  await test("open rejects a mutated descriptor before any Wasm allocation", async () => {
-    const mutated = Uint8Array.from(TRUSTED_DESCRIPTOR_BYTES);
-    mutated[0] ^= 0xff;
-    await assert.rejects(
-      () => Provider.open(wasmBytes, { descriptorBytes: mutated }),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "descriptor-rejected");
-        return true;
-      },
-    );
-  });
-
-  await test("open rejects a mutated provider binding before any Wasm allocation", async () => {
-    const mutated = Uint8Array.from(TRUSTED_BINDING_BYTES);
-    mutated[mutated.length - 1] ^= 0xff;
-    await assert.rejects(
-      () => Provider.open(wasmBytes, { bindingBytes: mutated }),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "provider-mismatch");
-        return true;
-      },
-    );
-  });
-
-  await test("open rejects a well-formed descriptor naming a different document", async () => {
-    const different = new Uint8Array(TRUSTED_DESCRIPTOR_BYTES.length + 8);
-    different.set(TRUSTED_DESCRIPTOR_BYTES);
-    different.set(new TextEncoder().encode("EXTENDED"), TRUSTED_DESCRIPTOR_BYTES.length);
-    await assert.rejects(
-      () => Provider.open(wasmBytes, { descriptorBytes: different }),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "descriptor-rejected");
-        return true;
-      },
-    );
-  });
-
-  await test("open rejects a module whose bytes do not replay the trusted provider-artifact digest", async () => {
-    const mutatedModule = Uint8Array.from(wasmBytes);
-    // Flip a byte inside the code section (well past the fixed header),
-    // producing a well-formed-looking but different module.
-    mutatedModule[mutatedModule.length - 1] ^= 0xff;
-    await assert.rejects(
-      () => Provider.open(mutatedModule),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "provider-mismatch");
-        return true;
-      },
-    );
-  });
-
-  await test("a stale/foreign handle is rejected rather than reused", async () => {
-    const provider = await Provider.open(wasmBytes);
-    const foreign = Provider.diagnostics.foreignHandle(0, 1);
-    assert.throws(
-      () => Provider.diagnostics.call(provider, foreign),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "carrier-rejected");
-        return true;
-      },
-    );
-    provider.close();
-    assert.equal(Provider.diagnostics.liveAllocations(provider), 0);
-  });
-
-  await test("a released input handle cannot be reused (a cast through unknown does not help)", async () => {
-    const provider = await Provider.open(wasmBytes);
-    const handle = Provider.diagnostics.prepareInput(provider, sampleInput());
-    Provider.diagnostics.releaseInput(provider, handle);
-    const smuggled = /** @type {any} */ (handle);
-    assert.throws(
-      () => Provider.diagnostics.call(provider, smuggled),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "carrier-rejected");
-        return true;
-      },
-    );
-    provider.close();
-    assert.equal(Provider.diagnostics.liveAllocations(provider), 0);
-    assert.equal(Provider.diagnostics.liveHandles(provider), 0);
-  });
-
-  await test("call after close is rejected", async () => {
-    const provider = await Provider.open(wasmBytes);
-    provider.close();
-    assert.throws(
-      () => provider.transform(sampleInput()),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        return true;
-      },
-    );
-  });
-
-  await test("memory growth across a page boundary does not invalidate result decoding", async () => {
-    // One page is 65536 bytes. A leaf at the exact per-leaf bound (also
-    // 65536 bytes) plus this carrier's own framing overhead (leaf-count and
-    // per-leaf length fields) exceeds one page, forcing a real
-    // `memory.grow` during `#prepareInput`'s allocation -- the fresh view
-    // this wrapper always reacquires after `alloc` must still see the
-    // correct, freshly grown buffer, and the later `#call`/`#exportResult`
-    // steps (each also reacquiring their own fresh view) must decode
-    // correctly across that grow.
-    const provider = await Provider.open(wasmBytes);
-    const bigLeaf = new Uint8Array(65536).fill(0xcd);
-    const output = provider.transform(inputWithFirstField(bigLeaf));
-    assert.deepEqual(FIRST_OUTPUT_FIELD(output), reversed(bigLeaf));
-    provider.close();
-    assert.equal(Provider.diagnostics.liveAllocations(provider), 0);
-  });
-
-  await test("exact-integer carrier decoding rejects a hostile u64::MAX leaf length", async () => {
-    // A hand-forged carrier: leaf_count = 1, then a leaf length field set
-    // to u64::MAX. Must be rejected by an exact bigint comparison, never
-    // by first narrowing the length to a JS `Number`.
-    const forged = new Uint8Array(16);
-    const view = new DataView(forged.buffer);
-    view.setBigUint64(0, 1n, true);
-    view.setBigUint64(8, 0xffffffffffffffffn, true);
-    const { locateLeaves } = await import("../dist/carrier.js");
-    assert.throws(
-      () => locateLeaves(forged, 1),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "result-rejected");
-        return true;
-      },
-    );
-  });
-
-  await test("exact-integer carrier decoding rejects a leaf length exactly one over the per-leaf bound", async () => {
-    const overBound = new Uint8Array(16 + 65537);
-    const view = new DataView(overBound.buffer, 0, 16);
-    view.setBigUint64(0, 1n, true);
-    view.setBigUint64(8, 65537n, true);
-    const { locateLeaves } = await import("../dist/carrier.js");
-    assert.throws(
-      () => locateLeaves(overBound, 1),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "result-rejected");
-        return true;
-      },
-    );
-  });
-
-  await test("exactly the per-leaf byte bound is accepted", async () => {
-    const provider = await Provider.open(wasmBytes);
-    const atBound = inputWithFirstField(new Uint8Array(65536).fill(0x5a));
-    const output = provider.transform(atBound);
-    assert.equal(FIRST_OUTPUT_FIELD(output).length, 65536);
-    provider.close();
-    assert.equal(Provider.diagnostics.liveAllocations(provider), 0);
-  });
-
-  await test("one byte over the per-leaf bound is rejected locally before any Wasm allocation", async () => {
-    const provider = await Provider.open(wasmBytes);
-    const overBound = inputWithFirstField(new Uint8Array(65537).fill(0x5a));
-    const before = Provider.diagnostics.liveAllocations(provider);
-    assert.throws(
-      () => provider.transform(overBound),
-      (error) => {
-        assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "capacity-exceeded");
-        return true;
-      },
-    );
-    assert.equal(Provider.diagnostics.liveAllocations(provider), before);
-    provider.close();
-  });
-
-  await test("the failure-injection matrix settles every ordinal with zero live resources", async () => {
-    for (const ordinal of Object.values(FAILURE_ORDINALS)) {
-      const provider = await Provider.open(wasmBytes);
-      Provider.diagnostics.injectFailure(provider, ordinal);
-      assert.throws(
-        () => provider.transform(sampleInput()),
-        `ordinal ${ordinal} must fail`,
-      );
-      Provider.diagnostics.clearFailureInjection(provider);
-      assert.equal(
-        Provider.diagnostics.liveHandles(provider),
-        0,
-        `ordinal ${ordinal} left a live handle`,
-      );
-      assert.equal(
-        Provider.diagnostics.liveAllocations(provider),
-        0,
-        `ordinal ${ordinal} left a live allocation`,
-      );
-      provider.close();
-    }
-  });
-
-  if (failed > 0) {
-    console.error(`${failed} test(s) failed, ${passed} passed`);
-    process.exitCode = 1;
-  } else {
-    console.log(`${passed} test(s) passed`);
+function inputForLengths(lengths) {
+  const input = {};
+  const names = Object.keys(sampleInput());
+  for (let index = 0; index < names.length; index += 1) {
+    input[names[index]] = new Uint8Array(lengths[index] ?? 0).fill(index + 1);
   }
+  return input;
 }
 
-await run();
+let failed = 0;
+let passed = 0;
+async function test(name, run) {
+  try { await run(); passed += 1; console.log(`ok - ${name}`); }
+  catch (error) { failed += 1; console.error(`FAIL - ${name}`); console.error(error); }
+}
+async function rejects(operation, kind) {
+  await assert.rejects(operation, error => {
+    assert.ok(error instanceof SemapraxPublicGenericException);
+    assert.equal(error.detail.kind, kind);
+    return true;
+  });
+}
+
+await test("compiled provider executes the checked endpoint and returns independent copies", async () => {
+  const provider = await Provider.open(wasmBytes);
+  const input = sampleInput();
+  const output = provider.transform(input);
+  assertOutputShape(output);
+  const expected = Object.fromEntries(Object.entries(output).map(([name, value]) => [name, Uint8Array.from(value)]));
+  for (const value of Object.values(input)) value.fill(0xff);
+  for (const [name, value] of Object.entries(output)) assert.deepEqual(value, expected[name]);
+  provider.close();
+});
+
+await test("the module-owned provider can execute successive calls", async () => {
+  const provider = await Provider.open(wasmBytes);
+  for (let count = 0; count < 3; count += 1) {
+    const input = sampleInput();
+    assertOutputShape(provider.transform(input));
+  }
+  provider.close();
+});
+
+await test("empty owned byte leaves survive the compiled provider lifecycle", async () => {
+  const provider = await Provider.open(wasmBytes);
+  const input = inputForLengths(Array.from({ length: FIELD_COUNT }, () => 0));
+  const output = provider.transform(input);
+  assertOutputShape(output);
+  provider.close();
+});
+
+await test("the per-leaf byte bound is admitted", async () => {
+  const provider = await Provider.open(wasmBytes);
+  const lengths = Array.from({ length: FIELD_COUNT }, () => 0);
+  lengths[0] = MAX_BYTES_PER_LEAF;
+  const input = inputForLengths(lengths);
+  assertOutputShape(provider.transform(input));
+  provider.close();
+});
+
+await test("a leaf above the frozen byte bound is refused before provider execution", async () => {
+  const provider = await Provider.open(wasmBytes);
+  const lengths = Array.from({ length: FIELD_COUNT }, () => 0);
+  lengths[0] = MAX_BYTES_PER_LEAF + 1;
+  await assert.rejects(() => provider.transform(inputForLengths(lengths)), error => {
+    assert.ok(error instanceof SemapraxPublicGenericException);
+    assert.equal(error.detail.kind, "capacity-exceeded");
+    return true;
+  });
+  const input = sampleInput();
+  assertOutputShape(provider.transform(input));
+  provider.close();
+});
+
+await test("the exact aggregate payload bound is admitted when the descriptor has 256 leaves", async () => {
+  const provider = await Provider.open(wasmBytes);
+  const lengths = Array.from({ length: FIELD_COUNT }, () => 0);
+  if (FIELD_COUNT === 256) lengths.fill(MAX_BYTES_PER_LEAF);
+  const input = inputForLengths(lengths);
+  assertOutputShape(provider.transform(input));
+  if (FIELD_COUNT === 256) assert.equal(MAX_TOTAL_PAYLOAD_BYTES, lengths.reduce((a, b) => a + b, 0));
+  provider.close();
+});
+
+await test("an input with an extra property is rejected and the provider remains usable", async () => {
+  const provider = await Provider.open(wasmBytes);
+  const malformed = { ...sampleInput(), unexpected: new Uint8Array(0) };
+  await assert.rejects(() => provider.transform(malformed), error => {
+    assert.ok(error instanceof SemapraxPublicGenericException);
+    assert.equal(error.detail.kind, "carrier-rejected");
+    return true;
+  });
+  const input = sampleInput();
+  assertOutputShape(provider.transform(input));
+  provider.close();
+});
+
+await test("a modified trusted descriptor is refused before module compilation", async () => {
+  const mutated = TRUSTED_DESCRIPTOR_BYTES.slice();
+  mutated[0] = mutated[0] ^ 0xff;
+  await rejects(() => Provider.open(wasmBytes, { descriptorBytes: mutated }), "descriptor-rejected");
+});
+
+await test("a modified trusted binding is refused before module compilation", async () => {
+  const mutated = TRUSTED_BINDING_BYTES.slice();
+  mutated[mutated.length - 1] = mutated[mutated.length - 1] ^ 0xff;
+  await rejects(() => Provider.open(wasmBytes, { bindingBytes: mutated }), "provider-mismatch");
+});
+
+await test("a changed descriptor document is refused", async () => {
+  const mutated = new Uint8Array(TRUSTED_DESCRIPTOR_BYTES.length + 8);
+  mutated.set(TRUSTED_DESCRIPTOR_BYTES);
+  mutated.set(new TextEncoder().encode("EXTENDED"), TRUSTED_DESCRIPTOR_BYTES.length);
+  await rejects(() => Provider.open(wasmBytes, { descriptorBytes: mutated }), "descriptor-rejected");
+});
+
+await test("a module digest mismatch is refused before instantiation", async () => {
+  const mutated = Uint8Array.from(wasmBytes);
+  mutated[mutated.length - 1] = mutated[mutated.length - 1] ^ 0xff;
+  const original = WebAssembly.instantiate;
+  let instantiated = 0;
+  WebAssembly.instantiate = function (...args) { instantiated += 1; return Reflect.apply(original, WebAssembly, args); };
+  try { await rejects(() => Provider.open(mutated), "provider-mismatch"); }
+  finally { WebAssembly.instantiate = original; }
+  assert.equal(instantiated, 0);
+});
+
+await test("a precompiled module is refused because its original bytes are unavailable", async () => {
+  const module = await WebAssembly.compile(wasmBytes);
+  await rejects(() => Provider.open(module), "provider-mismatch");
+});
+
+await test("module bytes are snapshotted before asynchronous digest and compilation", async () => {
+  const mutable = Uint8Array.from(wasmBytes);
+  const opening = Provider.open(mutable);
+  mutable.fill(0);
+  const provider = await opening;
+  const input = sampleInput();
+  assertOutputShape(provider.transform(input));
+  provider.close();
+});
+
+await test("close is idempotent and later calls are refused", async () => {
+  const provider = await Provider.open(wasmBytes);
+  provider.close();
+  provider.close();
+  assert.throws(() => provider.transform(sampleInput()), error => {
+    assert.ok(error instanceof SemapraxPublicGenericException);
+    assert.equal(error.detail.kind, "carrier-rejected");
+    return true;
+  });
+});
+
+await test("independent providers keep module-issued handles isolated", async () => {
+  const first = await Provider.open(wasmBytes);
+  const second = await Provider.open(wasmBytes);
+  const input = sampleInput();
+  assertOutputShape(first.transform(input));
+  assertOutputShape(second.transform(input));
+  first.close();
+  second.close();
+});
+
+if (failed !== 0 || passed !== 14) {
+  throw new Error(`compiled provider round-trip had ${failed} failures and ${passed} passes`);
+}

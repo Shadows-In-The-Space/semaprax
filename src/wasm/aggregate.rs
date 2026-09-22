@@ -2,9 +2,7 @@
 //!
 //! This is deliberately isolated from the scalar encoder so existing scalar,
 //! owned-resource, callable, and Component byte contracts remain unchanged.
-
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-
 mod cleanup;
 #[path = "closure.rs"]
 mod closure;
@@ -33,6 +31,10 @@ mod owned_stack;
 mod owned_strings;
 mod post_transitions;
 mod process_io;
+mod provider_lowering;
+pub(super) use provider_lowering::{
+    lower_public_generic_provider_closure, PUBLIC_GENERIC_PROVIDER_SOURCE_INDEX_MIN,
+};
 pub(crate) fn owned_arena_capacity(
     program: &ResolvedProgram,
     roots: &[crate::hir::DeclarationId],
@@ -40,7 +42,10 @@ pub(crate) fn owned_arena_capacity(
     let layouts = VariantLayoutCache::build(program, crate::variant_layout::VariantTarget::Wasm32)?;
     owned_stack::arena_capacity(program, &layouts, roots)
 }
-
+use super::{
+    function_import, intern_type, section, write_bytes, write_i64, write_name, write_u32,
+    Signature, F32, F64, I32, I64, SCALAR_IMPORT_COUNT,
+};
 use crate::aggregate_layout::{AggregateLayout, AggregateLayoutCache, AggregateTarget};
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::cleanup_plan::StatusLane;
@@ -51,11 +56,6 @@ use crate::hir::{
     ResolvedTypeDeclarationKind, ValueId,
 };
 use crate::variant_layout::{VariantLayout, VariantLayoutCache, VariantTarget};
-
-use super::{
-    function_import, intern_type, section, write_bytes, write_i64, write_name, write_u32,
-    Signature, F32, F64, I32, I64, SCALAR_IMPORT_COUNT,
-};
 
 mod box_ops;
 mod scalar_shape;
@@ -146,12 +146,11 @@ pub(super) const STATUS_BYTE_BUFFER_INDEX_OUT_OF_BOUNDS: i32 = 16;
 pub(super) const STATUS_BOX_ALLOCATION_FAILURE: i32 = 17;
 pub(super) const STATUS_INTERNAL_INVALID_TAG: i32 = -1;
 
-#[cfg(any(test, feature = "unstable-wit-component-harness"))]
-pub(super) struct SelectedAggregateLowering {
-    pub(super) types: Vec<Signature>,
-    pub(super) function_type_indexes: Vec<u32>,
-    pub(super) bodies: Vec<Vec<u8>>,
-    pub(super) selected_index: u32,
+pub(in crate::wasm) struct SelectedAggregateLowering {
+    pub(in crate::wasm) types: Vec<Signature>,
+    pub(in crate::wasm) function_type_indexes: Vec<u32>,
+    pub(in crate::wasm) bodies: Vec<Vec<u8>>,
+    pub(in crate::wasm) selected_index: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -8685,18 +8684,14 @@ fn emit_wrapper(main_index: u32, host_output: bool) -> Vec<u8> {
     write_u32(&mut body, 6);
     body.push(0x00);
     body.push(0x0b);
-
     body.push(0x20);
     write_u32(&mut body, frame_base);
     body.extend([0x29, 0x03, 0x00, 0x0b]);
     body
 }
-
 use expressions::emit_arithmetic_trap_case;
-
 #[cfg(test)]
 #[path = "aggregate_range_tests.rs"]
 mod range_tests;
-
 #[cfg(test)]
 mod tests;

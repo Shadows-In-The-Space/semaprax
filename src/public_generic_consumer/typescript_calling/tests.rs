@@ -83,11 +83,8 @@ fn every_file_is_lf_only_and_ends_with_a_trailing_newline() {
 
 #[test]
 fn no_any_appears_in_the_generated_typescript_public_surface() {
-    // "no `any` in generated public surface except tightly justified
-    // WebAssembly host types" -- this generator never spells the literal
-    // type `any` anywhere; the one place a WebAssembly host value is
-    // narrowed (`instance.exports[...]`) uses `instanceof`/`typeof`
-    // narrowing and an `as EndpointFn` cast, never `any`.
+    // WebAssembly exports are narrowed with `typeof` and explicit ABI
+    // function signatures; generated code never weakens the boundary to any.
     for (name, contents) in generate().files() {
         if !name.ends_with(".ts") {
             continue;
@@ -159,7 +156,50 @@ fn embeds_the_exact_trusted_descriptor_and_binding_bytes() {
             "descriptor.ts must embed byte {needle} of the trusted binding"
         );
     }
-    assert!(descriptor_source.contains(FIXTURE_ENDPOINT_EXPORT_NAME));
+    assert!(descriptor_source.contains("TRUSTED_PROVIDER_ARTIFACT_DIGEST"));
+    assert!(!descriptor_source.contains("TRUSTED_ENDPOINT_EXPORT_NAME"));
+}
+
+#[test]
+fn generated_typescript_runtime_uses_only_the_module_owned_provider_lifecycle() {
+    let consumer = generate();
+    let runtime = &consumer
+        .files()
+        .iter()
+        .find(|(name, _)| name == "src/wasm-provider.ts")
+        .unwrap()
+        .1;
+    for symbol in [
+        "spx_pg_v1_scratch_ptr",
+        "spx_pg_v1_scratch_reserve",
+        "spx_pg_v1_scratch_capacity",
+        "spx_pg_v1_open",
+        "spx_pg_v1_input_prepare",
+        "spx_pg_v1_call",
+        "spx_pg_v1_result_export",
+        "spx_pg_v1_value_release",
+        "spx_pg_v1_result_release",
+        "spx_pg_v1_provider_close",
+    ] {
+        assert!(runtime.contains(symbol), "runtime must call {symbol}");
+    }
+    for host_owned_state in [
+        "class HostAllocator",
+        "#active",
+        "#trace",
+        "#endpointCalls",
+        "SettlementReport",
+        "FAILURE_ORDINALS",
+        "TRUSTED_ENDPOINT_EXPORT_NAME",
+    ] {
+        assert!(
+            !runtime.contains(host_owned_state),
+            "provider state must remain module-owned; found {host_owned_state}"
+        );
+    }
+    assert!(runtime.contains("WebAssembly.Module.imports(module)"));
+    assert!(runtime.contains("WebAssembly.Module.exports(module)"));
+    assert!(runtime.contains("this.#memoryView().slice("));
 }
 
 #[test]
@@ -336,8 +376,9 @@ fn authentication_and_cleanup_guards_are_emitted_from_fixed_assets() {
         .contains("EXPECTED_DESCRIPTOR_BYTES = TRUSTED_DESCRIPTOR_BYTES.slice()"));
     assert!(source("src/descriptor.ts")
         .contains("EXPECTED_BINDING_BYTES = TRUSTED_BINDING_BYTES.slice()"));
-    assert!(provider.contains("this.#releaseIfOwned(result, \"result\")"));
-    assert!(provider.contains("throw carrier(\"provider-busy\")"));
+    assert!(provider.contains("this.#releaseResult(result)"));
+    assert!(provider.contains("this.#releaseInput(prepared)"));
+    assert!(provider.contains("throw carrier(\"state-invalid\")"));
     assert!(source("src/errors.ts").contains("secondaryCleanupStatuses"));
     assert!(source("src/carrier.ts").contains("const spans = locateLeaves(checked, expectedCount)"));
 }

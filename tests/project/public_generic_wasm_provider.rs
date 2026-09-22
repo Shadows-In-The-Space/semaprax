@@ -1,9 +1,7 @@
-//! Phase-A admission for the compiler-owned public-generic Wasm provider.
-//!
-//! These tests deliberately stop before artifact emission. They prove that
-//! the new profile owns one checked generic endpoint and its independently
-//! replayed descriptor, while every executable/publication route stays
-//! closed until the provider emitter exists.
+//! Admission and artifact derivation for the compiler-owned public-generic
+//! Wasm provider. The dedicated revision product emits the closed provider;
+//! legacy Web, npm, native, and transport publication routes remain separate
+//! and fail closed for this internal profile.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -136,6 +134,33 @@ fn checked_generic_endpoint_is_retained_replayed_and_lock_bound() {
             lock["payload"]["interface"]["digest"],
             endpoint.descriptor().descriptor_digest()
         );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn retained_revision_deterministically_emits_the_closed_provider_artifact() {
+    let fixture = Fixture::new("artifact", MANIFEST, APP);
+    with_authenticated_project(&fixture.manifest(), |snapshot| {
+        let retained = snapshot.retain_revision();
+        let first = retained.public_generic_wasm_provider_artifact_v1()?;
+        let second = retained.public_generic_wasm_provider_artifact_v1()?;
+
+        assert_eq!(first.wasm(), second.wasm());
+        assert_eq!(first.descriptor_bytes(), second.descriptor_bytes());
+        assert_eq!(first.binding_bytes(), second.binding_bytes());
+        assert_eq!(first.artifact_digest(), second.artifact_digest());
+        assert_eq!(first.binding_digest(), second.binding_digest());
+        first.verify().map_err(|error| vec![error])?;
+
+        let mut imports = 0usize;
+        for payload in wasmparser::Parser::new(0).parse_all(first.wasm()) {
+            if matches!(payload.unwrap(), wasmparser::Payload::ImportSection(_)) {
+                imports += 1;
+            }
+        }
+        assert_eq!(imports, 0, "the provider must not gain ambient imports");
         Ok(())
     })
     .unwrap();

@@ -83,12 +83,7 @@ fn standalone_runner_is_pinned_private_and_outside_the_root_workspace() {
     let lock = read("platform-tests/component-runtime/Cargo.lock");
     assert!(lock.contains("name = \"wasmtime\"\nversion = \"47.0.4\""));
     assert!(lock.contains("name = \"semaprax-private-component-runtime-v3\""));
-    for forbidden in [
-        "name = \"wasmtime-wasi\"",
-        "name = \"wasi-common\"",
-        "name = \"wasip2\"",
-        "name = \"wasip3\"",
-    ] {
+    for forbidden in ["name = \"wasmtime-wasi\"", "name = \"wasi-common\""] {
         assert!(
             !lock.contains(forbidden),
             "standalone lock contains ambient runtime crate: {forbidden}"

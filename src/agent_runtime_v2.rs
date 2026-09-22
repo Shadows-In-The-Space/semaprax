@@ -12,6 +12,8 @@ pub use crate::execution_revision::typed_repair::{
 };
 
 pub mod checkpoint;
+pub mod live_smoke;
+pub mod repair_approval;
 pub mod source_model;
 
 pub use source_model::{
@@ -24,4 +26,19 @@ pub use crate::execution_revision::typed::{
     migrate_suspended_agent_runtime_v2, resume_migrated_agent_runtime_v2,
     AgentRuntimeV2MigrationEvidence, AgentRuntimeV2MigrationFailure, DurableMigrationFailure,
     MigratedAgentRuntimeV2, ResumedMigratedAgentRuntimeV2,
+};
+
+pub use live_smoke::{
+    AuthorizedLiveRepairSmoke, LiveRepairSmokeOutcome, LiveRepairSmokePlan,
+    LiveRepairSmokePreflight, LiveRepairSmokePrerequisite, LiveRepairSmokeRecord,
+    LiveRepairSmokeTarget, LiveRepairSmokeUsage, OperatorLiveSmokeGrant,
+    LIVE_REPAIR_SMOKE_GRANT_SCHEMA, LIVE_REPAIR_SMOKE_PLAN_SCHEMA,
+    LIVE_REPAIR_SMOKE_PREFLIGHT_SCHEMA, LIVE_REPAIR_SMOKE_RECORD_SCHEMA,
+    LIVE_REPAIR_SMOKE_TARGET_SCHEMA, MAX_LIVE_REPAIR_SMOKE_BYTES,
+};
+
+pub use repair_approval::{
+    apply_approved_repair_publication, prepare_approved_repair_publication,
+    RepairCandidateApproval, RepairCandidateReview, RepairValidationOutcome,
+    RepairValidationStatus, REPAIR_CANDIDATE_APPROVAL_SCHEMA, REPAIR_CANDIDATE_REVIEW_SCHEMA,
 };

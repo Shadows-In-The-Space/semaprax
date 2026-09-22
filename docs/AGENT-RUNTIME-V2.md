@@ -105,6 +105,40 @@ contract; a suspended value alone still grants no resume authority. Hosted
 evidence for the admitted runtime is green at the v0.4.0 baseline, without
 promoting unimplemented provider transports or general public ABI support.
 
+## Live Repair Smoke v1 and the repair publication boundary
+
+[Live Repair Smoke v1](LIVE-REPAIR-SMOKE-V1.md) adds `agent_runtime_v2::live_smoke`
+and `agent_runtime_v2::repair_approval`. Neither adds a runtime root, a transport,
+or a provider: they are the gate in front of a paid call and the gate in front of
+publishing a repaired candidate.
+
+`LiveRepairSmokeTarget` binds one retained-Project selection, resolving its source
+path inside the retained inventory and its repair target through the ordinary
+candidate semantic-delta route, and fails closed on drift. `LiveRepairSmokePlan`
+joins that target to one bound `SourceModelBinding` and *derives* its effective
+ceiling through the existing `policy_binding` intersection rather than accepting
+one. `LiveRepairSmokePlan::preflight` evaluates readiness, dispatches nothing, and
+states `dispatched: false` and `provider_dispatch_count: 0` as facts of its own
+receipt. `OperatorLiveSmokeGrant` is the separate human act: minted only by an
+explicit host call or its own canonical replay, it binds one plan digest and may
+only narrow, never widen, the derived ceiling. `LiveRepairSmokeRecord` records the
+true outcome, including provider failure, budget exhaustion and cancellation, and
+refuses a record whose reported usage exceeds what was authorized.
+
+No live provider call has been made through this route in this repository. The
+preflight's honest current answer is `ready: false`, blocked on
+`operator_grant_present`.
+
+`repair_approval` keeps publication a separate act again. `RepairCandidateReview`
+regenerates the source diff, semantic delta and impact summary from the candidate
+itself and records the host's validation results, declared blind spots and journal
+binding. `RepairCandidateApproval::approve` is distinct from deriving a review and
+names one exact candidate digest, and
+`prepare_approved_repair_publication`/`apply_approved_repair_publication` refuse an
+unnamed candidate before delegating to the unmodified `project` publication
+boundary, which performs its own independent replay and remains the only authority
+that pivots `ACTIVE`.
+
 [Durable migration v3](AGENT-STATE-MIGRATION-V3.md) adds a persisted handoff
 and trusted-store recovery for checked migrated State. Its joined evidence
 retains the handoff digest and exposes the complete recoverable checkpoint.

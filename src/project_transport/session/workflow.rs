@@ -249,6 +249,13 @@ impl Session {
                     "Project v10 owned-UTF-8 builds require descriptor-bound agent transport methods",
                 ));
             }
+            if snapshot.manifest().project_profile()
+                == crate::project::ProjectProfile::PublicGenericWasmProviderV1
+            {
+                return Err(super::parameter_diagnostic(
+                    "public-generic-wasm-provider.v1 has no Agent Transport build route until its compiler Core Wasm provider emitter exists",
+                ));
+            }
             let target = take_string(&mut params, "target")?;
             let max_bytes = take_optional_usize(&mut params, "max_bytes")?
                 .unwrap_or(DEFAULT_INLINE_BUILD_BYTES);

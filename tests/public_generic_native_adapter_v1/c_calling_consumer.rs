@@ -13,49 +13,43 @@
 //! -- no Rust FFI boundary at all, exactly what a genuinely external C
 //! toolchain would do.
 //!
-//! Known limitation, stated once here rather than hidden in prose: like
-//! `fixture.rs` and `rust_calling_consumer.rs`, the trusted descriptor bytes
-//! are a FIXTURE placeholder (#119 still blocks deriving one from a real
-//! checked generic export), and this harness assumes a Unix-like host with
-//! `clang` (or `$CLANG`) and `ar` (or `$AR`) on `PATH` -- Windows/MSVC is
-//! untried.
+//! The descriptor and binding are independently verified against a real
+//! parsed/resolved generic owned-record export. The provider body remains the
+//! adapter's fixture endpoint, not code generated from that export. This
+//! harness assumes a Unix-like host with `clang` (or `$CLANG`) and `ar` (or
+//! `$AR`) on `PATH` -- Windows/MSVC is untried.
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
-use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 use semaprax::public_generic_abi::native::binding::NativeProviderBindingV1;
 use semaprax::public_generic_abi::native::template::render_reference_provider;
 use semaprax::public_generic_consumer::c_calling::{generate_c_calling_consumer, CallingConsumer};
 use semaprax::public_generic_consumer::rust_calling::{OwnedByteField, RecordShape};
 
+#[path = "../support/public_generic_admitted_subject.rs"]
+mod public_generic_admitted_subject;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-pub(super) fn fixture_descriptor_bytes() -> Vec<u8> {
-    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
-}
-
-pub(super) fn fixture_binding() -> NativeProviderBindingV1 {
-    NativeProviderBindingV1::new(
-        CarrierBindingV1::new(
-            "sha256:9999999999999999999999999999999999999999999999999999999999999999",
-            TargetProfile::NativeC11,
-            "runtime:native-c11-fixture-issue-158",
-        ),
-        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "spx_pg_endpoint_reverse_bytes_v1",
-        "semaprax-0.4.1",
-    )
+fn admitted_subject(
+    owned_leaf_count: usize,
+) -> public_generic_admitted_subject::NativeAdmittedSubject {
+    public_generic_admitted_subject::native_admitted_subject(owned_leaf_count)
 }
 
 fn shapes() -> (RecordShape, RecordShape) {
-    let input = RecordShape::new(vec![
-        OwnedByteField::new("consumers.c_calling.head"),
-        OwnedByteField::new("consumers.c_calling.tail"),
-    ]);
+    let subject = admitted_subject(2);
+    let input = RecordShape::new(
+        subject
+            .leaf_identities()
+            .iter()
+            .cloned()
+            .map(OwnedByteField::new)
+            .collect(),
+    );
     let output = input.clone();
     (input, output)
 }
@@ -150,10 +144,14 @@ fn build_and_run(sanitized: bool) {
     };
 
     let (input, output) = shapes();
-    let binding = fixture_binding();
-    let consumer =
-        generate_c_calling_consumer(&fixture_descriptor_bytes(), &binding, &input, &output)
-            .expect("a well-formed shape must generate");
+    let subject = admitted_subject(input.fields.len());
+    let consumer = generate_c_calling_consumer(
+        subject.descriptor_bytes(),
+        subject.binding(),
+        &input,
+        &output,
+    )
+    .expect("a well-formed shape must generate");
 
     let workspace = Workspace::new(if sanitized { "sanitized" } else { "plain" });
     eprintln!(
@@ -161,8 +159,12 @@ fn build_and_run(sanitized: bool) {
         workspace.0.display()
     );
     write_generated_files(&workspace.0, &consumer);
-    let provider_object =
-        compile_provider_object(&workspace.0, &fixture_descriptor_bytes(), &binding, &clang);
+    let provider_object = compile_provider_object(
+        &workspace.0,
+        subject.descriptor_bytes(),
+        subject.binding(),
+        &clang,
+    );
 
     for optimization in ["-O0", "-O2"] {
         let executable = workspace.path(&format!(
@@ -266,9 +268,10 @@ fn provisioned_c_calling_consumer_asan_ubsan() {
 fn consumer_header_compiles_standalone_as_c11() {
     let clang = tool("CLANG", "clang");
     let (input, output) = shapes();
+    let subject = admitted_subject(input.fields.len());
     let consumer = generate_c_calling_consumer(
-        &fixture_descriptor_bytes(),
-        &fixture_binding(),
+        subject.descriptor_bytes(),
+        subject.binding(),
         &input,
         &output,
     )

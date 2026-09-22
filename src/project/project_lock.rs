@@ -80,6 +80,15 @@ pub fn render_project_lock(snapshot: &ProjectSnapshot) -> Result<String, Vec<Dia
             "nested-owned-record-api.v1",
             Some(snapshot.nested_owned_record_api_descriptor()?.digest()),
         ),
+        ProjectProfile::PublicGenericWasmProviderV1 => (
+            "public-generic-wasm-provider.v1",
+            Some(
+                snapshot
+                    .public_generic_wasm_provider_endpoint_v1()?
+                    .descriptor()
+                    .descriptor_digest(),
+            ),
+        ),
         ProjectProfile::UsefulTextConsumerV1
         | ProjectProfile::UsefulDataV1
         | ProjectProfile::UsefulDataV2

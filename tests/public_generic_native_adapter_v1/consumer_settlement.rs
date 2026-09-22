@@ -13,7 +13,8 @@ use semaprax::public_generic_consumer::rust_calling::{
     generate_rust_calling_consumer, OwnedByteField, RecordShape,
 };
 
-use super::c_calling_consumer::{fixture_binding, fixture_descriptor_bytes};
+#[path = "../support/public_generic_admitted_subject.rs"]
+mod public_generic_admitted_subject;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Workspace(PathBuf);
@@ -51,10 +52,33 @@ fn write_files(root: &Path, files: &[(String, String)]) {
         fs::write(path, contents).unwrap();
     }
 }
-fn shape(count: usize) -> RecordShape {
+fn write_verified_subject(
+    root: &Path,
+    subject: &public_generic_admitted_subject::NativeAdmittedSubject,
+) {
+    fs::create_dir_all(root).unwrap();
+    fs::write(
+        root.join("verified-descriptor.bin"),
+        subject.descriptor_bytes(),
+    )
+    .unwrap();
+    fs::write(
+        root.join("verified-binding.bin"),
+        subject.binding().encode(),
+    )
+    .unwrap();
+    fs::write(
+        root.join("verified-identities.json"),
+        serde_json::to_vec(subject.leaf_identities()).unwrap(),
+    )
+    .unwrap();
+}
+fn shape(leaf_identities: &[String]) -> RecordShape {
     RecordShape::new(
-        (0..count)
-            .map(|index| OwnedByteField::new(format!("settlement.field{index}")))
+        leaf_identities
+            .iter()
+            .cloned()
+            .map(OwnedByteField::new)
             .collect(),
     )
 }
@@ -62,13 +86,19 @@ fn shape(count: usize) -> RecordShape {
 #[test]
 fn generated_c_and_cpp_match_fixture_bytes_and_execute_the_settlement_matrix() {
     let workspace = Workspace::new();
-    let descriptor = fixture_descriptor_bytes();
-    let binding = fixture_binding();
     for count in [1, 2, 3, 256] {
-        let shape = shape(count);
-        let generated =
-            generate_cxx_calling_consumer(&descriptor, &binding, &shape, &shape).unwrap();
-        write_files(&workspace.0.join(count.to_string()), generated.files());
+        let subject = public_generic_admitted_subject::native_admitted_subject(count);
+        let shape = shape(subject.leaf_identities());
+        let generated = generate_cxx_calling_consumer(
+            subject.descriptor_bytes(),
+            subject.binding(),
+            &shape,
+            &shape,
+        )
+        .unwrap();
+        let root = workspace.0.join(count.to_string());
+        write_files(&root, generated.files());
+        write_verified_subject(&root, &subject);
     }
     // --generated compares every executed C/C++ asset byte-for-byte against
     // actual generator output before any compiler sees it. It fails on drift.
@@ -86,13 +116,18 @@ fn generated_c_and_cpp_match_fixture_bytes_and_execute_the_settlement_matrix() {
 #[test]
 fn generated_rust_explicit_settlement_executes_against_the_physical_provider() {
     let workspace = Workspace::new();
-    let descriptor = fixture_descriptor_bytes();
-    let binding = fixture_binding();
-    let shape = shape(2);
-    let generated = generate_rust_calling_consumer(&descriptor, &binding, &shape, &shape).unwrap();
+    let subject = public_generic_admitted_subject::native_admitted_subject(2);
+    let shape = shape(subject.leaf_identities());
+    let generated = generate_rust_calling_consumer(
+        subject.descriptor_bytes(),
+        subject.binding(),
+        &shape,
+        &shape,
+    )
+    .unwrap();
     write_files(&workspace.0, generated.files());
-    let field = |index| {
-        let identity = format!("settlement.field{index}");
+    let field = |index: usize| {
+        let identity = &subject.leaf_identities()[index];
         let suffix: String = identity.bytes().map(|byte| format!("{byte:02x}")).collect();
         format!("field_{suffix}")
     };
@@ -104,7 +139,7 @@ fn generated_rust_explicit_settlement_executes_against_the_physical_provider() {
         "{}\n{}\n#define spx_pg_result_export_v1 rs_real_export\n#define spx_pg_provider_close_v1 rs_real_close\n{}\n{}",
         include_str!("allocations.c"),
         include_str!("settlement_corpus/observations.c"),
-        render_reference_provider(&descriptor, &binding),
+        render_reference_provider(subject.descriptor_bytes(), subject.binding()),
         include_str!("consumer_settlement/rust_shim.c")
     );
     fs::write(workspace.0.join("provider.c"), source).unwrap();
@@ -152,5 +187,37 @@ fn generated_rust_explicit_settlement_executes_against_the_physical_provider() {
                 "--",
                 "--test-threads=1",
             ]),
+    );
+}
+
+#[test]
+fn generated_callers_share_verified_descriptor_instance_and_cleanup_facts() {
+    let first = public_generic_admitted_subject::native_admitted_subject(2);
+    let again = public_generic_admitted_subject::native_admitted_subject(2);
+    assert_eq!(first.descriptor_bytes(), again.descriptor_bytes());
+    assert_eq!(first.descriptor_digest(), again.descriptor_digest());
+    assert_eq!(
+        first
+            .binding()
+            .carrier_binding()
+            .descriptor_identity_digest(),
+        first.descriptor_digest(),
+        "the physical binding must name the independently verified descriptor identity"
+    );
+    assert_eq!(first.input_instance_term(), first.result_instance_term());
+    assert!(
+        first
+            .input_instance_term()
+            .contains("admitted.subject.envelope"),
+        "the fixture must retain the generic envelope instance identity"
+    );
+    assert!(!first.cleanup_plan_digest().is_empty());
+    assert_eq!(first.leaf_identities().len(), 2);
+    assert_eq!(
+        public_generic_admitted_subject::native_admitted_subject(3)
+            .leaf_identities()
+            .len(),
+        3,
+        "each generated caller shape comes from a matching admitted source subject"
     );
 }

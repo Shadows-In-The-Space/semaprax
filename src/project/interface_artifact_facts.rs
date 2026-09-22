@@ -339,7 +339,8 @@ fn derive_source_interface(
         | ProjectProfile::FilesystemIoV1
         | ProjectProfile::FilesystemIoV2
         | ProjectProfile::FilesystemIoV3
-        | ProjectProfile::EnvironmentIoV1 => return Ok(None),
+        | ProjectProfile::EnvironmentIoV1
+        | ProjectProfile::PublicGenericWasmProviderV1 => return Ok(None),
         ProjectProfile::ProcessIoV1 => return Ok(None),
     };
     let canonical_bytes = String::from_utf8(bytes)

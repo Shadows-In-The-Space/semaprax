@@ -16,6 +16,9 @@ use super::{
 };
 use super::{ProjectExecution, ProjectExecutionOptions, ProjectExecutionRole, ProjectProfile};
 use super::{ProjectSource, ProjectWebBuild, ScalarWitInterfaceArtifactV1};
+use crate::public_generic_abi::compiler_endpoint::{
+    replay_admitted_public_generic_endpoint_v1, AdmittedPublicGenericEndpointV1,
+};
 
 /// One immutable, fully admitted Project revision without ambient authority.
 pub struct ProjectRevision {
@@ -116,6 +119,36 @@ impl ProjectRevision {
     /// owns executable entry semantics and cleanup ordering.
     pub fn public_api_program(&self) -> &crate::hir::ResolvedProgram {
         &self.public_api_program
+    }
+
+    /// Re-derive and independently verify the exact compiler-owned endpoint
+    /// retained for `public-generic-wasm-provider.v1`. This returns admission
+    /// facts only; no provider artifact or runtime is available at this layer.
+    pub fn public_generic_wasm_provider_endpoint_v1(
+        &self,
+    ) -> Result<AdmittedPublicGenericEndpointV1, Vec<Diagnostic>> {
+        if self.manifest.project_profile() != ProjectProfile::PublicGenericWasmProviderV1 {
+            return Err(vec![Diagnostic::io(
+                "SPX-J105",
+                "public-generic Wasm provider endpoint requires public-generic-wasm-provider.v1",
+            )]);
+        }
+        let retained = self
+            .profile_admission
+            .public_generic_wasm_provider_endpoint()
+            .ok_or_else(|| {
+                vec![Diagnostic::io(
+                    "SPX-J105",
+                    "retained public-generic Wasm provider admission has no endpoint facts",
+                )]
+            })?;
+        replay_admitted_public_generic_endpoint_v1(
+            &self.public_api_program,
+            &self.project_revision,
+            retained.export_id(),
+            retained.descriptor_bytes(),
+        )
+        .map_err(|error| vec![error])
     }
 
     pub fn test_program(&self) -> &crate::hir::ResolvedProgram {
@@ -282,10 +315,16 @@ impl ProjectRevision {
                 ProjectProfile::FilesystemIoV3 => "v19",
                 ProjectProfile::EnvironmentIoV1 => "v17",
                 ProjectProfile::ProcessIoV1 => "v18",
+                ProjectProfile::PublicGenericWasmProviderV1 => "v20",
             };
             return Err(vec![Diagnostic::io(
                 "SPX-W120",
-                format!("Project {version} pathless Web builds use build_npm_inline"),
+                if self.manifest.project_profile() == ProjectProfile::PublicGenericWasmProviderV1 {
+                    "public-generic-wasm-provider.v1 has no Core Wasm provider emitter yet"
+                        .to_owned()
+                } else {
+                    format!("Project {version} pathless Web builds use build_npm_inline")
+                },
             )]);
         }
         crate::wasm::prepare_project_web_with_scalar_exports(
@@ -312,6 +351,12 @@ impl ProjectRevision {
 
     /// Build one deterministic, pathless, context-bound npm carrier.
     pub fn build_npm_inline(&self, max_bytes: usize) -> Result<ProjectNpmBuild, Vec<Diagnostic>> {
+        if self.manifest.project_profile() == ProjectProfile::PublicGenericWasmProviderV1 {
+            return Err(vec![Diagnostic::io(
+                "SPX-W120",
+                "public-generic-wasm-provider.v1 has no npm/package provider route yet",
+            )]);
+        }
         npm::prepare(
             &self.manifest,
             &self.public_api_program,

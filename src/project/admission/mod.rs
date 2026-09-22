@@ -10,6 +10,7 @@ mod legacy;
 mod native_callback;
 mod nested_record;
 mod owned;
+mod public_generic_wasm;
 
 #[cfg(test)]
 mod tests;
@@ -21,6 +22,7 @@ use super::{
     FlatOwnedRecordApiDescriptor, NestedOwnedRecordApiDescriptor, ProjectManifest, ProjectProfile,
     PublicApiDescriptor, PublicApiSubject, ScalarWitInterfaceArtifactV1,
 };
+use crate::public_generic_abi::compiler_endpoint::AdmittedPublicGenericEndpointV1;
 
 /// One completely admitted schema-selected Project profile.
 ///
@@ -53,6 +55,7 @@ pub(super) enum PreparedProjectAdmission {
     FlatOwnedRecordApiV1(Box<FlatOwnedRecordApiDescriptor>),
     OwnedUtf8ApiV1(Box<PublicApiDescriptor>),
     NestedOwnedRecordApiV1(Box<NestedOwnedRecordApiDescriptor>),
+    PublicGenericWasmProviderV1(Box<AdmittedPublicGenericEndpointV1>),
 }
 
 impl PreparedProjectAdmission {
@@ -77,6 +80,7 @@ impl PreparedProjectAdmission {
             Self::FlatOwnedRecordApiV1(_descriptor) => ProjectProfile::FlatOwnedRecordApiV1,
             Self::OwnedUtf8ApiV1(_descriptor) => ProjectProfile::OwnedUtf8ApiV1,
             Self::NestedOwnedRecordApiV1(_descriptor) => ProjectProfile::NestedOwnedRecordApiV1,
+            Self::PublicGenericWasmProviderV1(_) => ProjectProfile::PublicGenericWasmProviderV1,
         }
     }
 
@@ -106,6 +110,15 @@ impl PreparedProjectAdmission {
     pub(super) fn scalar_wit_descriptor(&self) -> Option<&ScalarWitInterfaceArtifactV1> {
         match self {
             Self::ScalarV1(descriptor) => Some(descriptor.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub(super) fn public_generic_wasm_provider_endpoint(
+        &self,
+    ) -> Option<&AdmittedPublicGenericEndpointV1> {
+        match self {
+            Self::PublicGenericWasmProviderV1(endpoint) => Some(endpoint.as_ref()),
             _ => None,
         }
     }
@@ -222,6 +235,11 @@ pub(super) fn prepare(
             nested_record::prepare(program, manifest, subject)
                 .map(Box::new)
                 .map(PreparedProjectAdmission::NestedOwnedRecordApiV1)
+        }
+        ProjectProfile::PublicGenericWasmProviderV1 => {
+            public_generic_wasm::prepare(program, manifest, subject)
+                .map(Box::new)
+                .map(PreparedProjectAdmission::PublicGenericWasmProviderV1)
         }
     }
 }

@@ -5,44 +5,21 @@
 //! providers. This validates the reference provider template itself; the
 //! generated production C client is #158's separate acceptance surface.
 //!
-//! Known limitation, stated once here rather than hidden in prose: the
-//! trusted descriptor bytes below are a FIXTURE placeholder, not real bytes
-//! produced by `descriptor::verify` against a checked, admitted public
-//! generic export. No such export can be built yet: #119 (owned-record
-//! ownership evidence) still blocks the resolver/HIR path a real public
-//! generic function would need. The provider's descriptor/binding replay
-//! behavior — the property under test here — is exactly the same whichever
-//! trusted bytes it is generated from; only the *source* of those bytes
-//! (compiler-verified vs. hand-constructed) differs, and only that half is
-//! deferred to #119's unblock.
+//! The descriptor and binding come from a real parsed/resolved generic
+//! owned-record export and are independently verified before rendering. The
+//! bound endpoint remains a byte-reversal fixture: this test does not claim
+//! that its C body was generated from that export.
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
-use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
-use semaprax::public_generic_abi::native::binding::NativeProviderBindingV1;
 use semaprax::public_generic_abi::native::template::render_reference_provider;
 
+#[path = "../support/public_generic_admitted_subject.rs"]
+mod public_generic_admitted_subject;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
-
-fn fixture_descriptor_bytes() -> Vec<u8> {
-    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
-}
-
-fn fixture_binding() -> NativeProviderBindingV1 {
-    NativeProviderBindingV1::new(
-        CarrierBindingV1::new(
-            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-            TargetProfile::NativeC11,
-            "runtime:native-c11-fixture-issue-154",
-        ),
-        "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-        "spx_pg_endpoint_reverse_bytes_v1",
-        "semaprax-0.4.1",
-    )
-}
 
 fn run(sanitized: bool) {
     let compiler = if sanitized {
@@ -56,8 +33,8 @@ fn run(sanitized: bool) {
         std::env::var_os("CLANG").map_or_else(|| PathBuf::from("clang"), PathBuf::from)
     };
 
-    let provider_source =
-        render_reference_provider(&fixture_descriptor_bytes(), &fixture_binding());
+    let subject = public_generic_admitted_subject::native_admitted_subject(2);
+    let provider_source = render_reference_provider(subject.descriptor_bytes(), subject.binding());
 
     let root = std::env::temp_dir().join(format!(
         "semaprax-public-generic-native-adapter-{}-{}-{}",

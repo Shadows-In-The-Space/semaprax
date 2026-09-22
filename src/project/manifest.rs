@@ -64,6 +64,9 @@ pub const PROJECT_SCHEMA_V17: &str = "semaprax.project.v17";
 /// Additive Project Manifest v18 schema for explicit bounded process commands.
 pub const PROJECT_SCHEMA_V18: &str = "semaprax.project.v18";
 pub const PROJECT_SCHEMA_V19: &str = "semaprax.project.v19";
+/// Additive contract selected only by Package Manifest v1's closed profile
+/// catalog. No frozen whole-file Project manifest is widened by this target.
+pub const PROJECT_SCHEMA_V20: &str = "semaprax.project.v20";
 pub const PROJECT_SCHEMA_V16: &str = "semaprax.project.v16";
 pub const PROJECT_SCHEMA_V15: &str = "semaprax.project.v15";
 pub const PROJECT_SCHEMA_V14: &str = "semaprax.project.v14";

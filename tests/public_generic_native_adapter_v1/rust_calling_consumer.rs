@@ -7,10 +7,10 @@
 //! reimplementing the provider (issue #154 is the provider; this harness is
 //! only ever its external consumer).
 //!
-//! Known limitation, stated once here: like `fixture.rs`, the trusted
-//! descriptor bytes are a fixture placeholder (`#119` still blocks deriving
-//! one from a real checked generic export), and this harness runs on the one
-//! Unix-like host this round ran on -- Linux/macOS with `clang`, `ar`, and
+//! The descriptor and binding are independently verified against a real
+//! parsed/resolved generic owned-record export. The provider body remains the
+//! adapter's fixture endpoint, not code generated from that export. This
+//! harness runs on one Unix-like host -- Linux/macOS with `clang`, `ar`, and
 //! `cargo` on `PATH` -- not cross-platform hosted evidence.
 //!
 //! Issue #226 follow-up: the generated crate's `rust-version =
@@ -33,8 +33,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use semaprax::public_generic_abi::carrier::{CarrierBindingV1, TargetProfile};
-use semaprax::public_generic_abi::descriptor::{DescriptorV1, InstanceBinding};
 use semaprax::public_generic_abi::native::binding::NativeProviderBindingV1;
 use semaprax::public_generic_abi::native::template::render_reference_provider;
 use semaprax::public_generic_consumer::rust_calling::{
@@ -43,28 +41,31 @@ use semaprax::public_generic_consumer::rust_calling::{
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
+#[path = "../support/public_generic_admitted_subject.rs"]
+mod public_generic_admitted_subject;
+
 fn fixture_descriptor_bytes() -> Vec<u8> {
-    DescriptorV1::new("sample.transform", "transform", "sha256:1111111111111111111111111111111111111111111111111111111111111111", "sha256:2222222222222222222222222222222222222222222222222222222222222222", "sha256:3333333333333333333333333333333333333333333333333333333333333333", InstanceBinding { term: "@11:sample.pair<bytes,bool>".to_owned(), instance_digest: "sha256:4444444444444444444444444444444444444444444444444444444444444444".to_owned() }, InstanceBinding { term: "@11:sample.pair<bytes,i64>".to_owned(), instance_digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555".to_owned() }).encode()
+    public_generic_admitted_subject::native_admitted_subject(2)
+        .descriptor_bytes()
+        .to_vec()
 }
 
 fn fixture_binding() -> NativeProviderBindingV1 {
-    NativeProviderBindingV1::new(
-        CarrierBindingV1::new(
-            "sha256:5555555555555555555555555555555555555555555555555555555555555555",
-            TargetProfile::NativeC11,
-            "runtime:native-c11-fixture-issue-156",
-        ),
-        "sha256:6666666666666666666666666666666666666666666666666666666666666666",
-        "spx_pg_endpoint_reverse_bytes_v1",
-        "semaprax-0.4.1",
-    )
+    public_generic_admitted_subject::native_admitted_subject(2)
+        .binding()
+        .clone()
 }
 
 fn shapes() -> (RecordShape, RecordShape) {
-    let input = RecordShape::new(vec![
-        OwnedByteField::new("consumers.calling.head"),
-        OwnedByteField::new("consumers.calling.tail"),
-    ]);
+    let subject = public_generic_admitted_subject::native_admitted_subject(2);
+    let input = RecordShape::new(
+        subject
+            .leaf_identities()
+            .iter()
+            .cloned()
+            .map(OwnedByteField::new)
+            .collect(),
+    );
     let output = input.clone();
     (input, output)
 }

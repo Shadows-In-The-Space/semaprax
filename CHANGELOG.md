@@ -8,6 +8,18 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add the internal `public-generic-wasm-provider.v1` Project profile as the
+  first compiler-owned target foundation for #229. Package Manifest v1 now
+  selects exactly one concrete checked generic owned-record endpoint, derives
+  its Public Generic Descriptor v1, independently replays it against the exact
+  linked program and project revision, and binds the verified digest into
+  Project Lock v1. Web, npm, native, and Agent Transport artifact routes remain
+  fail-closed until the Core Wasm provider emitter exists. The #162 native
+  generated-caller settlement gate now shares this compiler-derived descriptor,
+  binding, instance, cleanup, and leaf identity across C, C++, Rust, and the
+  executed reference provider; the endpoint body remains the explicit reversal
+  fixture, so neither issue is closed by this phase.
+
 - Make the push-driven CI and Docs workflows latest-ref only: a newer run now
   cancels its in-progress predecessor instead of spending hosted runner minutes
   completing already-superseded matrices or documentation builds.

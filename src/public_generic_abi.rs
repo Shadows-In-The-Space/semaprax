@@ -6,14 +6,11 @@
 //! This module started as scope reconciliation and contract freeze made
 //! executable, not a compiler implementation, and most of it still is:
 //! [`descriptor`] and [`carrier`] encode, decode, and independently replay
-//! values; [`native`] and [`wasm`] adapt them to two physical targets. It
-//! touches no resolver or backend code and admits no program source itself.
-//! [`classifier`] is the one exception: it reads checked HIR (`ResolvedProgram`)
-//! directly, as the pure Public Generic Boundary Profile v1 admission
-//! predicate issue #150 requires, and it is the trusted common input the
-//! rest of this module's producers and adapters are expected to share going
-//! forward. Public generic ownership remains unsupported and unpublished;
-//! nothing here is a public ABI, and nothing here executes a real boundary.
+//! values; [`native`] and [`wasm`] adapt them to two physical targets.
+//! [`classifier`] and [`compiler_endpoint`] are the compiler-facing
+//! exceptions: they read checked HIR (`ResolvedProgram`) to derive and replay
+//! a future provider endpoint, without emitting it. Public generic ownership
+//! remains unsupported and unpublished; nothing here executes a real boundary.
 //!
 //! | Document | Module |
 //! | --- | --- |
@@ -28,6 +25,7 @@
 pub mod boundary_profile;
 pub mod carrier;
 pub mod classifier;
+pub mod compiler_endpoint;
 pub mod descriptor;
 pub mod interpreter;
 pub mod native;

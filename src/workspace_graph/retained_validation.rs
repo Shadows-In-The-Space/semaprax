@@ -1328,28 +1328,25 @@ pub(super) fn project_effects_admitted(
 }
 
 pub(super) fn project_linker_name(profile: crate::project::ProjectProfile) -> &'static str {
+    use crate::project::ProjectProfile as P;
     match profile {
-        crate::project::ProjectProfile::EnvironmentIoV1 => "Environment I/O v1 linker",
-        crate::project::ProjectProfile::ProcessIoV1 => "Process I/O v1 linker",
-        crate::project::ProjectProfile::FilesystemIoV1
-        | crate::project::ProjectProfile::FilesystemIoV2
-        | crate::project::ProjectProfile::FilesystemIoV3 => "Filesystem I/O v1 linker",
-        crate::project::ProjectProfile::ScalarV1 => "pure scalar linker",
-        crate::project::ProjectProfile::UsefulTextConsumerV1 => "Useful Text Consumer linker",
-        crate::project::ProjectProfile::UsefulDataV1
-        | crate::project::ProjectProfile::UsefulDataV2 => "Useful Data linker",
-        crate::project::ProjectProfile::UsefulDataCommandV1 => "Useful Data Command linker",
-        crate::project::ProjectProfile::UsefulDataCommandV2 => "Useful Data Command v2 linker",
-        crate::project::ProjectProfile::LanguageCommandIoV1 => "Language Command I/O v1 linker",
-        crate::project::ProjectProfile::LineCommandIoV1 => "Line Command I/O v1 linker",
-        crate::project::ProjectProfile::NetworkCommandIoV1 => "Network Command I/O v1 linker",
-        crate::project::ProjectProfile::HttpsCommandIoV1 => "HTTPS Command I/O v1 linker",
-        crate::project::ProjectProfile::OwnedDataApiV1 => "Owned Data API v1 linker",
-        crate::project::ProjectProfile::FlatOwnedRecordApiV1 => "Flat Owned Record API v1 linker",
-        crate::project::ProjectProfile::OwnedUtf8ApiV1 => "Owned UTF-8 API v1 linker",
-        crate::project::ProjectProfile::NestedOwnedRecordApiV1 => {
-            "Nested Owned Record API v1 linker"
-        }
+        P::EnvironmentIoV1 => "Environment I/O v1 linker",
+        P::ProcessIoV1 => "Process I/O v1 linker",
+        P::FilesystemIoV1 | P::FilesystemIoV2 | P::FilesystemIoV3 => "Filesystem I/O v1 linker",
+        P::ScalarV1 => "pure scalar linker",
+        P::UsefulTextConsumerV1 => "Useful Text Consumer linker",
+        P::UsefulDataV1 | P::UsefulDataV2 => "Useful Data linker",
+        P::UsefulDataCommandV1 => "Useful Data Command linker",
+        P::UsefulDataCommandV2 => "Useful Data Command v2 linker",
+        P::LanguageCommandIoV1 => "Language Command I/O v1 linker",
+        P::LineCommandIoV1 => "Line Command I/O v1 linker",
+        P::NetworkCommandIoV1 => "Network Command I/O v1 linker",
+        P::HttpsCommandIoV1 => "HTTPS Command I/O v1 linker",
+        P::OwnedDataApiV1 => "Owned Data API v1 linker",
+        P::FlatOwnedRecordApiV1 => "Flat Owned Record API v1 linker",
+        P::OwnedUtf8ApiV1 => "Owned UTF-8 API v1 linker",
+        P::NestedOwnedRecordApiV1 => "Nested Owned Record API v1 linker",
+        P::PublicGenericWasmProviderV1 => "Public Generic Wasm Provider v1 linker",
     }
 }
 

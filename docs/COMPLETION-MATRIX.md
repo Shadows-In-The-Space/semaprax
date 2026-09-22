@@ -122,8 +122,12 @@ predates the current head and is not a frozen candidate under issue #164; no
 public generic signature, descriptor, carrier, calling convention, or support
 claim follows from any of it, and no public support follows from the
 versioned descriptor/carrier code that now exists. Every physical adapter
-still calls a fixture endpoint rather than a compiler-derived generic export,
-and no compiled Wasm artifact implements the admitted provider ABI (#229).
+still calls a fixture endpoint rather than a compiler-derived generic export.
+The internal
+[`public-generic-wasm-provider.v1`](PUBLIC-GENERIC-WASM-PROVIDER-TARGET-V1.md)
+profile now admits and independently replays one checked generic endpoint, but
+all artifact routes remain closed and no compiled Wasm artifact implements the
+provider ABI (#229).
 The [runtime settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
 records the implemented native fixture subset, including bounded non-recycled
 identity/recreation, sibling settlement, explicit release-status propagation and

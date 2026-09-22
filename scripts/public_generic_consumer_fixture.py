@@ -57,10 +57,22 @@ def c_bytes(name: str, length_name: str, data: bytes) -> str:
     return result + f'const size_t {length_name} = {len(data)};\n'
 
 
-def render(count: int) -> dict[str, str]:
-    ids = identities(count)
+def render(count: int, *, field_identities: list[str] | None = None,
+           descriptor_bytes: bytes | None = None,
+           binding_bytes: bytes | None = None) -> dict[str, str]:
+    ids = identities(count) if field_identities is None else field_identities
+    if (not isinstance(ids, list) or len(ids) != count
+            or any(type(value) is not str or not value or len(value.encode('utf-8')) > 256
+                   for value in ids)
+            or len(set(ids)) != count):
+        raise ValueError('fixture-identity-bound')
     fields = ['field_' + name.encode('utf-8').hex() for name in ids]
-    descriptor, binding = bindings()
+    default_descriptor, default_binding = bindings()
+    descriptor = default_descriptor if descriptor_bytes is None else descriptor_bytes
+    binding = default_binding if binding_bytes is None else binding_bytes
+    if (type(descriptor) is not bytes or not descriptor or len(descriptor) > 4 * 1024 * 1024
+            or type(binding) is not bytes or not binding or len(binding) > 4 * 1024 * 1024):
+        raise ValueError('fixture-binding-bound')
     def struct_type(name: str) -> str:
         return (f'typedef struct {name} {{\n' + ''.join(
             f'    /* Field identity: {json.dumps(identity)} */\n    spx_pg_owned_bytes {field};\n'

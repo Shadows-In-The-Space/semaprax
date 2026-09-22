@@ -163,6 +163,8 @@ mod profile_admission;
 mod project_local_aggregates;
 #[path = "project/project_lock_v1.rs"]
 mod project_lock_v1;
+#[path = "project/public_generic_wasm_provider.rs"]
+mod public_generic_wasm_provider;
 #[path = "project/resource_free_record_evolution.rs"]
 mod resource_free_record_evolution;
 #[path = "project/retained_owned_api.rs"]

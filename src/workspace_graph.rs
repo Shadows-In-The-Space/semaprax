@@ -1468,7 +1468,8 @@ impl WorkspaceGraphBuild {
             | crate::project::ProjectProfile::FilesystemIoV3
             | crate::project::ProjectProfile::EnvironmentIoV1
             | crate::project::ProjectProfile::ProcessIoV1
-            | crate::project::ProjectProfile::OwnedDataApiV1 => {
+            | crate::project::ProjectProfile::OwnedDataApiV1
+            | crate::project::ProjectProfile::PublicGenericWasmProviderV1 => {
                 unreachable!("Project v8 uses the exact function-reachable linker")
             }
             crate::project::ProjectProfile::FlatOwnedRecordApiV1 => {
@@ -1485,7 +1486,6 @@ impl WorkspaceGraphBuild {
         self.attach_project_agents(&mut linked)?;
         Ok(linked)
     }
-
     fn attach_project_agents(
         &self,
         linked: &mut hir::ResolvedProgram,
@@ -1505,7 +1505,6 @@ impl WorkspaceGraphBuild {
         linked.agents = agents;
         hir::validate(linked).map_err(|error| vec![error])
     }
-
     /// Link the entry closure plus exact persistent additional roots.
     pub(crate) fn linked_scalar_program_with_roots(
         &self,
@@ -1722,7 +1721,8 @@ impl WorkspaceGraphBuild {
             | crate::project::ProjectProfile::FilesystemIoV3
             | crate::project::ProjectProfile::EnvironmentIoV1
             | crate::project::ProjectProfile::ProcessIoV1
-            | crate::project::ProjectProfile::OwnedDataApiV1 => {
+            | crate::project::ProjectProfile::OwnedDataApiV1
+            | crate::project::ProjectProfile::PublicGenericWasmProviderV1 => {
                 unreachable!("Project v8 uses the exact function-reachable linker")
             }
             crate::project::ProjectProfile::FlatOwnedRecordApiV1 => {
@@ -1737,7 +1737,6 @@ impl WorkspaceGraphBuild {
         }
         .map_err(|error| vec![error])
     }
-
     /// Link exactly the union of the Project-v8 entry closure and selected
     /// public roots. Older Project profiles deliberately retain their frozen
     /// module-oriented behavior; v8's owned-data runtime must be absent for
@@ -2048,7 +2047,8 @@ impl WorkspaceGraphBuild {
                     | crate::project::ProjectProfile::OwnedDataApiV1
                     | crate::project::ProjectProfile::FlatOwnedRecordApiV1
                     | crate::project::ProjectProfile::OwnedUtf8ApiV1
-                    | crate::project::ProjectProfile::NestedOwnedRecordApiV1 => {
+                    | crate::project::ProjectProfile::NestedOwnedRecordApiV1
+                    | crate::project::ProjectProfile::PublicGenericWasmProviderV1 => {
                         hir::useful_data_workspace_parameter_admitted(
                             &parameter.ty,
                             parameter.ownership,
@@ -2078,7 +2078,8 @@ impl WorkspaceGraphBuild {
                     | crate::project::ProjectProfile::FilesystemIoV3
                     | crate::project::ProjectProfile::EnvironmentIoV1
                     | crate::project::ProjectProfile::ProcessIoV1
-                    | crate::project::ProjectProfile::OwnedDataApiV1 => {
+                    | crate::project::ProjectProfile::OwnedDataApiV1
+                    | crate::project::ProjectProfile::PublicGenericWasmProviderV1 => {
                         hir::owned_data_api_workspace_return_admitted(&function.return_type)
                     }
                     crate::project::ProjectProfile::FlatOwnedRecordApiV1 => true,

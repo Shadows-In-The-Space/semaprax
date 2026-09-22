@@ -387,8 +387,9 @@ pub use manifest::{
     PACKAGE_TARGET_NATIVE64, PACKAGE_TARGET_WASM32, PROJECT_SCHEMA, PROJECT_SCHEMA_V10,
     PROJECT_SCHEMA_V11, PROJECT_SCHEMA_V12, PROJECT_SCHEMA_V13, PROJECT_SCHEMA_V14,
     PROJECT_SCHEMA_V15, PROJECT_SCHEMA_V16, PROJECT_SCHEMA_V17, PROJECT_SCHEMA_V18,
-    PROJECT_SCHEMA_V19, PROJECT_SCHEMA_V2, PROJECT_SCHEMA_V3, PROJECT_SCHEMA_V4, PROJECT_SCHEMA_V5,
-    PROJECT_SCHEMA_V6, PROJECT_SCHEMA_V7, PROJECT_SCHEMA_V8, PROJECT_SCHEMA_V9,
+    PROJECT_SCHEMA_V19, PROJECT_SCHEMA_V2, PROJECT_SCHEMA_V20, PROJECT_SCHEMA_V3,
+    PROJECT_SCHEMA_V4, PROJECT_SCHEMA_V5, PROJECT_SCHEMA_V6, PROJECT_SCHEMA_V7, PROJECT_SCHEMA_V8,
+    PROJECT_SCHEMA_V9,
 };
 pub use native_sdk::{
     with_native_owned_data_sdk_subject, ProjectNativeRustPackage, ProjectNativeRustPackageMode,
@@ -542,9 +543,10 @@ pub use profile::{
     PROJECT_PROFILE_LANGUAGE_COMMAND_IO_V1, PROJECT_PROFILE_LINE_COMMAND_IO_V1,
     PROJECT_PROFILE_NESTED_OWNED_RECORD_API_V1, PROJECT_PROFILE_NETWORK_COMMAND_IO_V1,
     PROJECT_PROFILE_OWNED_DATA_API_V1, PROJECT_PROFILE_OWNED_UTF8_API_V1,
-    PROJECT_PROFILE_PROCESS_IO_V1, PROJECT_PROFILE_USEFUL_DATA_COMMAND_V1,
-    PROJECT_PROFILE_USEFUL_DATA_COMMAND_V2, PROJECT_PROFILE_USEFUL_DATA_V1,
-    PROJECT_PROFILE_USEFUL_DATA_V2, PROJECT_PROFILE_USEFUL_TEXT_CONSUMER_V1,
+    PROJECT_PROFILE_PROCESS_IO_V1, PROJECT_PROFILE_PUBLIC_GENERIC_WASM_PROVIDER_V1,
+    PROJECT_PROFILE_USEFUL_DATA_COMMAND_V1, PROJECT_PROFILE_USEFUL_DATA_COMMAND_V2,
+    PROJECT_PROFILE_USEFUL_DATA_V1, PROJECT_PROFILE_USEFUL_DATA_V2,
+    PROJECT_PROFILE_USEFUL_TEXT_CONSUMER_V1,
 };
 pub use public_api::{
     derive_public_api_descriptor, replay_public_api_descriptor, PublicApiDescriptor,
@@ -879,6 +881,12 @@ impl ProjectSnapshot {
     /// Build the authenticated project entry closure as its profile-selected
     /// Web product.
     pub fn build_web(&mut self, output: &Path) -> Result<(), Vec<Diagnostic>> {
+        if self.manifest.project_profile() == ProjectProfile::PublicGenericWasmProviderV1 {
+            return Err(vec![Diagnostic::io(
+                "SPX-W120",
+                "public-generic-wasm-provider.v1 has no Core Wasm provider emitter yet",
+            )]);
+        }
         // Project v2-v7 each have one public JavaScript product: their exact
         // schema-selected npm/Web package. Keeping `web` and the default route as
         // aliases avoids a scalar-v1 fallback while `npm` remains the explicit
@@ -920,6 +928,12 @@ impl ProjectSnapshot {
 
     /// Build and publish the exact installable schema-selected npm package.
     pub fn build_npm(&mut self, output: &Path) -> Result<(), Vec<Diagnostic>> {
+        if self.manifest.project_profile() == ProjectProfile::PublicGenericWasmProviderV1 {
+            return Err(vec![Diagnostic::io(
+                "SPX-W120",
+                "public-generic-wasm-provider.v1 has no npm/package provider route yet",
+            )]);
+        }
         let prepared = npm::prepare(
             &self.manifest,
             &self.public_api_program,
@@ -1012,6 +1026,12 @@ impl ProjectSnapshot {
     /// destination must not exist, so publication never clobbers a file the
     /// caller did not create for this exact operation.
     pub fn build_native(&mut self, output: &Path) -> Result<(), Vec<Diagnostic>> {
+        if self.manifest.project_profile() == ProjectProfile::PublicGenericWasmProviderV1 {
+            return Err(vec![Diagnostic::io(
+                "SPX-B104",
+                "public-generic-wasm-provider.v1 does not admit native executable publication",
+            )]);
+        }
         if self.manifest.project_profile() == ProjectProfile::OwnedDataApiV1 {
             return Err(vec![Diagnostic::io(
                 "SPX-I308",

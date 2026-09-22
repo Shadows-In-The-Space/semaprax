@@ -10,6 +10,7 @@ sources and compares all records. It never executes submitted binaries.
 from __future__ import annotations
 import argparse
 import copy
+import json
 import os
 from pathlib import Path
 import shutil
@@ -94,7 +95,19 @@ def source_files() -> list[Path]:
 
 def prepare(work: Path, fields: int, rows: list[dict], generated: Path | None) -> None:
     work.mkdir(parents=True)
-    expected = fixture.render(fields)
+    descriptor, binding = fixture.bindings()
+    field_identities = fixture.identities(fields)
+    if generated is not None:
+        subject = generated / str(fields)
+        descriptor = read_bounded(subject / 'verified-descriptor.bin', 4 * 1024 * 1024)
+        binding = read_bounded(subject / 'verified-binding.bin', 4 * 1024 * 1024)
+        identity_bytes = read_bounded(subject / 'verified-identities.json', 256 * 1024)
+        try:
+            field_identities = json.loads(identity_bytes)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError('generated-subject-identities') from error
+    expected = fixture.render(fields, field_identities=field_identities,
+                              descriptor_bytes=descriptor, binding_bytes=binding)
     for name, text in expected.items():
         data = text.encode('utf-8')
         if generated is not None:
@@ -107,7 +120,7 @@ def prepare(work: Path, fields: int, rows: list[dict], generated: Path | None) -
     for name in ['hooks.h','client.c']:
         shutil.copyfile(TESTS / name, work / name)
     (work/'cases.inc').write_text(cases_header(rows))
-    fields_names = ['field_' + value.encode().hex() for value in fixture.identities(fields)]
+    fields_names = ['field_' + value.encode().hex() for value in field_identities]
     for suffix in ['c','cpp']:
         driver = (TESTS/f'driver.{suffix}').read_text().replace('@COUNT@', str(fields))
         driver = driver.replace('@INPUT_REFS@', ','.join('&input.'+n for n in fields_names))
@@ -115,7 +128,6 @@ def prepare(work: Path, fields: int, rows: list[dict], generated: Path | None) -
         driver = driver.replace('@CPP_INPUT_REFS@', ','.join('&input.'+n for n in fields_names))
         driver = driver.replace('@CPP_VIEWS@', ','.join('first.'+n+'()' for n in fields_names))
         (work/f'driver.{suffix}').write_text(driver)
-    descriptor, binding = fixture.bindings()
     provider = (NATIVE/'allocations.c').read_text() + '\n' + (NATIVE/'settlement_corpus/observations.c').read_text()
     provider += '\n#include "spx_pg_v1.h"\n' + c_array('SPX_PG_TRUSTED_DESCRIPTOR_BYTES', descriptor, 'SPX_PG_TRUSTED_DESCRIPTOR_LEN')
     provider += c_array('SPX_PG_TRUSTED_BINDING_BYTES', binding, 'SPX_PG_TRUSTED_BINDING_LEN')

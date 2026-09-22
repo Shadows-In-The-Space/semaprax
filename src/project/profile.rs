@@ -50,6 +50,11 @@ pub const PROJECT_PROFILE_OWNED_DATA_API_V1: &str = "owned-data-api.v1";
 pub const PROJECT_PROFILE_FLAT_OWNED_RECORD_API_V1: &str = "flat-owned-record-api.v1";
 pub const PROJECT_PROFILE_OWNED_UTF8_API_V1: &str = "owned-utf8-api.v1";
 pub const PROJECT_PROFILE_NESTED_OWNED_RECORD_API_V1: &str = "nested-owned-record-api.v1";
+/// Compiler-owned public-generic endpoint admission for the future Core Wasm
+/// provider artifact. This profile currently retains verified endpoint facts
+/// only; it does not make a Wasm build or runtime route available.
+pub const PROJECT_PROFILE_PUBLIC_GENERIC_WASM_PROVIDER_V1: &str =
+    crate::public_generic_abi::compiler_endpoint::PUBLIC_GENERIC_WASM_PROVIDER_PROFILE;
 
 /// Frozen Project-v4 semantic stdout authority.
 pub const PROJECT_COMMAND_STDOUT_CAPABILITY: &str = "process.stdout.write";
@@ -115,6 +120,7 @@ pub enum ProjectProfile {
     FlatOwnedRecordApiV1,
     OwnedUtf8ApiV1,
     NestedOwnedRecordApiV1,
+    PublicGenericWasmProviderV1,
 }
 
 impl ProjectProfile {
@@ -140,6 +146,7 @@ impl ProjectProfile {
                 | Self::FlatOwnedRecordApiV1
                 | Self::OwnedUtf8ApiV1
                 | Self::NestedOwnedRecordApiV1
+                | Self::PublicGenericWasmProviderV1
         )
     }
 
@@ -164,6 +171,9 @@ impl ProjectProfile {
             Self::FlatOwnedRecordApiV1 => Some(PROJECT_PROFILE_FLAT_OWNED_RECORD_API_V1),
             Self::OwnedUtf8ApiV1 => Some(PROJECT_PROFILE_OWNED_UTF8_API_V1),
             Self::NestedOwnedRecordApiV1 => Some(PROJECT_PROFILE_NESTED_OWNED_RECORD_API_V1),
+            Self::PublicGenericWasmProviderV1 => {
+                Some(PROJECT_PROFILE_PUBLIC_GENERIC_WASM_PROVIDER_V1)
+            }
         }
     }
 }

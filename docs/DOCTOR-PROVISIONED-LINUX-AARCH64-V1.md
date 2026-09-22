@@ -73,7 +73,8 @@ both excluded fixtures individually to observe each missing-real-bundle
 precondition. Each probe is required to fail with its exact missing-bundle or
 missing-selector reason: an unexpected pass or another failure is itself a
 gate failure, and the expected nonzero results are not confinement passes.
-Every selected lifecycle command is otherwise unmasked and fail-fast: an
+Every selected lifecycle command is otherwise unmasked and
+fail-fast: an
 unannounced selected-case skip or mask is a contract failure.
 The job first proves that its native host is Linux AArch64, fetches the locked
 dependency graph before setting Cargo offline, and then invokes that driver.

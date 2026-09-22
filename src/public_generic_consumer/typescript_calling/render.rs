@@ -100,7 +100,7 @@ pub(super) fn descriptor_ts(
     out.push_str(&template(DESCRIPTOR_HEADER));
     out.push('\n');
     out.push_str(
-        "const MODULE_ARTIFACT_DIGEST_DOMAIN = new TextEncoder().encode(\n  \"semaprax.public-generic-wasm-provider.v1.artifact\\0\",\n);\n\n",
+        "const MODULE_ARTIFACT_DIGEST_DOMAIN = new TextEncoder().encode(\n  \"semaprax.public-generic-typescript-wasm-consumer.v1.module-artifact\\0\",\n);\n\n",
     );
     out.push_str("export const TRUSTED_DESCRIPTOR_BYTES: Uint8Array = ");
     out.push_str(&uint8_array_literal(descriptor_bytes));

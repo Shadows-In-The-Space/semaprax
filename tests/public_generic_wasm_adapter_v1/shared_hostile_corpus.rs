@@ -818,7 +818,7 @@ fn shared_hostile_corpus_agrees_with_the_native_manifest() {
 
     let round_trip_path = package_root.join("test/round-trip.mjs");
     let mut contents = fs::read_to_string(&round_trip_path).unwrap();
-    let anchor = "  if (failed > 0) {";
+    let anchor = "if (failed !== 0 || passed !== 14) {";
     let position = contents.find(anchor).unwrap_or_else(|| {
         panic!("splice anchor {anchor:?} not found in generated round-trip.mjs")
     });

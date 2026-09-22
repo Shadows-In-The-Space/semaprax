@@ -422,8 +422,7 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
         native_rust_cargo::cargo_command()
             .args(["package", "--offline", "--no-verify", "--manifest-path"])
             .arg(generated.join("Cargo.toml"))
-            .arg("--target-dir")
-            .arg(package_target.path()),
+            .env("CARGO_TARGET_DIR", package_target.path()),
         "package owned-data SDK tarball",
     );
     let packaged_tarball = package_target

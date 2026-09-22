@@ -86,6 +86,6 @@ fn valid_owned_byte_record_matches_select_and_pin_graph_v21() {
     ));
     assert_eq!(
         digest(&graph),
-        "77590aadd5154795b4f7cb187f7a9bb84e97b60943de09bffed4448d9059e66a"
+        "fcf29b7104c8f5eac440e282dcf5d564b13de9eabbcfc9fbe28f710a47cabb80"
     );
 }

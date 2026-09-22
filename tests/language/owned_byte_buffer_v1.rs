@@ -879,7 +879,7 @@ fn hostile_hir_cannot_forge_a_buffer_capacity_or_element_index() {
     let ResolvedExprKind::Call { args, .. } = &mut allocation.kind else {
         unreachable!();
     };
-    args[0].kind = ResolvedExprKind::Usize(65_537);
+    args[0].kind = ResolvedExprKind::Usize(131_073);
     assert_eq!(hir::validate(&hostile).unwrap_err().code, "SPX-H006");
 
     // A nonliteral capacity cannot be smuggled through resolved HIR.

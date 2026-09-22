@@ -81,7 +81,7 @@ fn program_root(program: &semaprax::hir::ResolvedProgram) -> String {
     )
 }
 
-fn verified_descriptor() -> VerifiedPublicGenericDescriptor {
+pub(crate) fn verified_descriptor() -> VerifiedPublicGenericDescriptor {
     let parsed = semaprax::parse(SOURCE, Path::new("issue173-native-admission.spx"))
         .expect("the native admission fixture must parse");
     let program =

@@ -7,6 +7,12 @@
 /// native provider `fixture` exercises, executed end to end.
 #[path = "public_generic_native_adapter_v1/c_calling_consumer.rs"]
 mod c_calling_consumer;
+/// Issue #173: [Hostile Carrier Corpus v1](../docs/PUBLIC-GENERIC-CARRIER-HOSTILE-CORPUS-V1.md)
+/// driven against a real `VerifiedPublicGenericDescriptor`, with a
+/// five-counter effect ledger proving no hostile ticket reaches allocation,
+/// target invocation, ownership commit, a host call, or cleanup.
+#[path = "public_generic_native_adapter_v1/carrier_hostile_corpus.rs"]
+mod carrier_hostile_corpus;
 /// The generated C++17 move-only *calling* consumer (issue #159): a real,
 /// standalone external C++17 program that WRAPS the generated C11 calling
 /// consumer above, built and linked directly against the same compiled

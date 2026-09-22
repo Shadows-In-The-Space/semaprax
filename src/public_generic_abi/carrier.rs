@@ -20,10 +20,18 @@ use crate::public_generic_abi::{digest, frame, read_frame};
 /// derived binding. See [`frame::LogicalCarrierFrame`] and
 /// [`frame::CarrierFrameBinding`].
 pub mod frame;
+/// Issue #173: [Hostile Carrier Corpus v1](../../docs/PUBLIC-GENERIC-CARRIER-HOSTILE-CORPUS-V1.md) —
+/// the canonical versioned manifest of hostile carrier documents and
+/// admission tickets. See [`hostile_corpus`].
+pub mod hostile_corpus;
 /// The call-level orchestration that ties the state machine below and the
 /// phase ledger together with a normalized event trace. See
 /// [`machine::CarrierCallMachine`].
 pub mod machine;
+/// Issue #173: the independent reference decoder and replayer for
+/// [`frame::LogicalCarrierFrame`] documents, sharing no code with the
+/// production codec. See [`reference_decoder`].
+pub mod reference_decoder;
 /// The engine-neutral normalized trace vocabulary. See [`trace::Trace`].
 pub mod trace;
 

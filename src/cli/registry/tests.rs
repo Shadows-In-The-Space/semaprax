@@ -252,7 +252,7 @@ fn lock_emits_a_bound_resolution_that_verify_then_replays() {
 #[test]
 fn raw_lock_is_the_exact_replayable_bound_resolution_bytes() {
     let (dir, registry, template) = fixture("lock-raw");
-    let command = parse(&vec![
+    let command = parse(&[
         "lock".to_owned(),
         registry.display().to_string(),
         template.display().to_string(),
@@ -341,7 +341,7 @@ fn fetch_serves_the_exact_published_subject_bytes_offline() {
 #[test]
 fn raw_fetch_is_the_exact_replayable_subject_bytes() {
     let (dir, registry, _) = fixture("fetch-raw");
-    let command = parse(&vec![
+    let command = parse(&[
         "fetch".to_owned(),
         registry.display().to_string(),
         MEANING.to_owned(),

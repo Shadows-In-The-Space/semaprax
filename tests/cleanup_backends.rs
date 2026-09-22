@@ -29,6 +29,21 @@
 //! `mod` in a test crate root resolves against `tests/`, so each module names
 //! its file explicitly.
 
+/// `src/byte_data_capacity.rs` is path-included below to exercise it directly,
+/// and it reads the owned-byte ceiling from `crate::byte_ops`. That module is
+/// `pub(crate)` in the compiler and pulls in `crate::{ast, hir, prelude}`, so
+/// it cannot be path-included here without dragging in the whole crate. This
+/// mirrors only the one constant it needs.
+///
+/// Source of truth: `src/byte_ops.rs`. This mirror cannot be checked from
+/// inside this harness -- the path-included source reads THIS module, so any
+/// value here is trivially self-consistent. The guard therefore lives in the
+/// crate that owns the real constant:
+/// `byte_ops::tests::the_cleanup_backends_mirror_matches_this_ceiling`.
+mod byte_ops {
+    pub(crate) const MAX_OWNED_BYTE_VALUE_BYTES: u64 = 131_072;
+}
+
 #[path = "cleanup_backends/arc_zones_model.rs"]
 mod arc_zones_model;
 #[path = "cleanup_backends/byte_data_capacity_v1.rs"]

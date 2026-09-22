@@ -14,8 +14,7 @@ use super::shared_hostile_corpus::{
     splice_main_call, tool, write_generated_files, Workspace,
 };
 
-#[path = "../support/public_generic_hostile_corpus.rs"]
-mod public_generic_hostile_corpus;
+use crate::public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
     baseline_descriptor_bytes, malformed_result_carrier_cases, EXPECTED,
 };

@@ -52,8 +52,7 @@ use semaprax::public_generic_consumer::rust_calling::{
     generate_rust_calling_consumer, OwnedByteField, RecordShape,
 };
 
-#[path = "../support/public_generic_hostile_corpus.rs"]
-pub(crate) mod public_generic_hostile_corpus;
+use crate::public_generic_hostile_corpus;
 use public_generic_hostile_corpus::{
     assert_matches_expected, baseline_descriptor_bytes, malformed_result_carrier_cases,
     parse_shared_corpus_lines, structured_descriptor_cases, valid_result_carrier_cases, EXPECTED,

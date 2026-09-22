@@ -19,6 +19,18 @@ use function @id("std.io.writer.cursor") from std.io as writer_position;
 use function @id("std.io.writer.finish") from std.io as writer_finish;
 use function @id("std.io.writer.from-bytes") from std.io as writer_from_bytes;
 use function @id("std.io.writer.write-u8") from std.io as writer_write_u8;
+use function @id("std.log.event-name-admitted") from std.log as event_name_admitted;
+use function @id("std.log.event-name-byte-admitted") from std.log as event_name_byte_admitted;
+use function @id("std.log.level-admitted") from std.log as level_admitted;
+use function @id("std.log.message-len-admitted") from std.log as message_len_admitted;
+use function @id("std.log.message-len-limit") from std.log as message_len_limit;
+use function @id("std.log.field-bytes-admitted") from std.log as field_bytes_admitted;
+use function @id("std.log.field-bytes-limit") from std.log as field_bytes_limit;
+use function @id("std.log.field-count-admitted") from std.log as field_count_admitted;
+use function @id("std.log.field-projection-admitted") from std.log as field_projection_admitted;
+use function @id("std.log.structured-event-admitted") from std.log as structured_event_admitted;
+use function @id("std.log.structured-event-admitted-guarded") from std.log as structured_event_admitted_guarded;
+use function @id("std.log.observed-status") from std.log as observed_status;
 
 @id("std.log.tests.equal")
 fn equal(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool
@@ -277,6 +289,97 @@ fn test_guarded_redacted() -> i64
     let bytes = writer_finish(written);
     let reference = bytes_zeroed(64usize);
     if position == 0usize && byte_len(bytes_as_slice(bytes)) == 64usize && equal(bytes_as_slice(bytes), bytes_as_slice(reference)) { 0 } else { 1 }
+}
+
+@id("std.log.tests.test-event-name-rules")
+fn test_event_name_rules() -> i64
+{
+    let name = [104u8, 116u8, 116u8, 112u8, 46u8, 103u8, 101u8, 116u8];
+    let upper = [72u8];
+    let empty = [];
+    let mut failed = 0;
+    failed = failed + if event_name_admitted(array_as_slice(name)) { 0 } else { 1 };
+    failed = failed + if event_name_admitted(array_as_slice(upper)) { 2 } else { 0 };
+    failed = failed + if event_name_admitted(array_as_slice(empty)) { 4 } else { 0 };
+    failed = failed + if event_name_byte_admitted(97u8) { 0 } else { 8 };
+    failed = failed + if event_name_byte_admitted(95u8) { 0 } else { 16 };
+    failed = failed + if event_name_byte_admitted(65u8) { 32 } else { 0 };
+    failed
+}
+
+@id("std.log.tests.test-level-admission")
+fn test_level_admission() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if level_admitted(0u8) { 0 } else { 1 };
+    failed = failed + if level_admitted(5u8) { 0 } else { 2 };
+    failed = failed + if level_admitted(6u8) { 4 } else { 0 };
+    failed
+}
+
+@id("std.log.tests.test-message-budget")
+fn test_message_budget() -> i64
+{
+    let limit = message_len_limit();
+    let mut failed = 0;
+    failed = failed + if limit == 4096usize { 0 } else { 1 };
+    failed = failed + if message_len_admitted(limit) { 0 } else { 2 };
+    failed = failed + if message_len_admitted(limit + 1usize) { 4 } else { 0 };
+    failed
+}
+
+@id("std.log.tests.test-field-budgets")
+fn test_field_budgets() -> i64
+{
+    let limit = field_bytes_limit();
+    let mut failed = 0;
+    failed = failed + if limit == 16384usize { 0 } else { 1 };
+    failed = failed + if field_bytes_admitted(limit) { 0 } else { 2 };
+    failed = failed + if field_bytes_admitted(limit + 1usize) { 4 } else { 0 };
+    failed = failed + if field_count_admitted(32usize) { 0 } else { 8 };
+    failed = failed + if field_count_admitted(33usize) { 16 } else { 0 };
+    failed
+}
+
+@id("std.log.tests.test-projection-policy")
+fn test_projection_policy() -> i64
+{
+    let public = [102u8, 105u8, 101u8, 108u8, 100u8];
+    let protected = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let value = [118u8, 97u8, 108u8, 117u8, 101u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let empty = [];
+    let mut failed = 0;
+    failed = failed + if field_projection_admitted(array_as_slice(public), false, array_as_slice(value), array_as_slice(empty)) { 0 } else { 1 };
+    failed = failed + if field_projection_admitted(array_as_slice(protected), false, array_as_slice(value), array_as_slice(empty)) { 2 } else { 0 };
+    failed = failed + if field_projection_admitted(array_as_slice(public), true, array_as_slice(value), array_as_slice(empty)) { 4 } else { 0 };
+    failed = failed + if field_projection_admitted(array_as_slice(protected), false, array_as_slice(marker), array_as_slice(empty)) { 0 } else { 8 };
+    failed
+}
+
+@id("std.log.tests.test-structured-admission")
+fn test_structured_admission() -> i64
+{
+    let name = [104u8, 116u8, 116u8, 112u8];
+    let mut failed = 0;
+    failed = failed + if structured_event_admitted(array_as_slice(name), 2u8, 16usize, 4usize, 256usize) { 0 } else { 1 };
+    failed = failed + if structured_event_admitted(array_as_slice(name), 6u8, 16usize, 4usize, 256usize) { 2 } else { 0 };
+    failed = failed + if structured_event_admitted(array_as_slice(name), 2u8, 16usize, 33usize, 256usize) { 4 } else { 0 };
+    failed = failed + if structured_event_admitted_guarded(array_as_slice(name), 2u8, 16usize, 4usize, 256usize, false, false, false, false, false, false) { 0 } else { 8 };
+    failed = failed + if structured_event_admitted_guarded(array_as_slice(name), 2u8, 16usize, 4usize, 256usize, true, false, false, false, false, false) { 16 } else { 0 };
+    failed = failed + if structured_event_admitted_guarded(array_as_slice(name), 2u8, 16usize, 4usize, 256usize, false, false, false, false, false, true) { 32 } else { 0 };
+    failed
+}
+
+@id("std.log.tests.test-observed-status")
+fn test_observed_status() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if observed_status(7, 3, false) == 7 { 0 } else { 1 };
+    failed = failed + if observed_status(7, 3, true) == 7 { 0 } else { 2 };
+    failed = failed + if observed_status(0, 3, false) == 0 { 0 } else { 4 };
+    failed = failed + if observed_status(0, 3, true) == 3 { 0 } else { 8 };
+    failed
 }
 
 @id("std.log.tests.main")

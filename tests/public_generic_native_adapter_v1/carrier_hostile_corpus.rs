@@ -26,6 +26,11 @@
 //! production caller installs this guard there yet; that integration remains
 //! open and overlaps issue #229.
 
+//! `clippy::result_large_err` is allowed here: the `Err` type is the
+//! production admission error returned by `admit_then`. Boxing it only in
+//! tests would misrepresent the real API surface under test.
+#![allow(clippy::result_large_err)]
+
 use std::cell::Cell;
 
 use semaprax::diagnostic::Diagnostic;
@@ -578,7 +583,7 @@ fn every_hostile_ticket_is_refused_identically_by_both_guards_with_no_effect() {
                 Ok::<_, Diagnostic>(())
             })
             .expect_err("a hostile ticket must never reach the installer callback");
-        let native_class = CarrierRefusal::from_code(&error.code).unwrap_or_else(|| {
+        let native_class = CarrierRefusal::from_code(error.code).unwrap_or_else(|| {
             panic!(
                 "{}: the native guard refused with {}, outside the closed carrier class",
                 case.id, error.code

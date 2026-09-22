@@ -1,6 +1,11 @@
 //! Issue #173: native-only admission of descriptor-bound logical carrier
 //! frames. Physical consumer dispatch/transfer integration remains open.
 
+//! `clippy::result_large_err` is allowed here: the `Err` type is the
+//! production admission error returned by `admit_then`. Boxing it only in
+//! tests would misrepresent the real API surface under test.
+#![allow(clippy::result_large_err)]
+
 use std::cell::Cell;
 use std::path::Path;
 
@@ -70,7 +75,6 @@ fn program_root(program: &semaprax::hir::ResolvedProgram) -> String {
     for id in ids {
         append(id.as_bytes());
     }
-    drop(append);
     let mut hasher = Sha256::new();
     hasher.update(b"semaprax.public-generic-descriptor.v1.program-root\0");
     hasher.update((preimage.len() as u64).to_le_bytes());

@@ -16,8 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use semaprax::public_generic_abi::native::template::render_reference_provider;
 
-#[path = "../support/public_generic_admitted_subject.rs"]
-mod public_generic_admitted_subject;
+use crate::public_generic_admitted_subject;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 

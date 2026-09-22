@@ -84,6 +84,42 @@ pub(crate) mod kernel_zero {
             preserve(rust, output)
         }
     }
+
+    // The shared canonical formatter cross-checks each rendered token against
+    // the Kernel-0 renderer candidate. The builder deliberately does not embed
+    // those candidates -- see this module's doc comment -- so there is nothing
+    // here to disagree with and the shadow check is a no-op. These stubs keep
+    // that boundary explicit: the builder preserves the already-computed Rust
+    // token bytes and claims no Kernel-0 verification. They are `cfg(test)`
+    // because the shared formatter's shadow calls are.
+    #[cfg(test)]
+    pub(crate) mod canonical_char_renderer {
+        pub(crate) fn verify_shadow(_value: u32, _rust: &str) {}
+    }
+
+    #[cfg(test)]
+    pub(crate) mod canonical_int_renderer {
+        pub(crate) fn verify_shadow(_value: i64, _rust: &str) {}
+    }
+
+    #[cfg(test)]
+    pub(crate) mod canonical_bool_renderer {
+        pub(crate) fn verify_shadow(_value: bool, _rust: &str) {}
+    }
+
+    #[cfg(test)]
+    pub(crate) mod canonical_string_renderer {
+        pub(crate) fn verify_shadow(_value: u32, _rust: &str) {}
+    }
+
+    #[cfg(test)]
+    pub(crate) mod canonical_operator_renderer {
+        use crate::ast::{BinaryOp, UnaryOp};
+
+        pub(crate) fn verify_binary_shadow(_op: BinaryOp, _rust: &str) {}
+
+        pub(crate) fn verify_unary_shadow(_op: UnaryOp, _rust: &str) {}
+    }
 }
 use semaprax_native_rust_interop_platform as platform;
 use std::path::Path;

@@ -209,7 +209,9 @@ fn decode_hex(input: &str) -> Vec<u8> {
     let bytes = input.as_bytes();
     assert_eq!(bytes.len() % 2, 0, "published input_hex has odd length");
     bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| (nibble(pair[0]) << 4) | nibble(pair[1]))
         .collect()
 }
@@ -347,7 +349,6 @@ fn maximal_valid_outputs_fit_the_source_bound_exactly() {
     assert_eq!(enriched.len(), OUTPUT_CAPACITY);
     assert!(plain.len() <= OUTPUT_CAPACITY);
     assert!(enriched.len() <= OUTPUT_CAPACITY);
-    assert!(OUTPUT_CAPACITY + 1 > OUTPUT_CAPACITY);
 }
 
 // Exact canonical lines retained in the Semaprax source's `test_canonical_responses`.

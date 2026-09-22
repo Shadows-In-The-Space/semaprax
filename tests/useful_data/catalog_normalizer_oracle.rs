@@ -234,8 +234,6 @@ fn hardcoding_the_published_example_fails_a_hidden_case() {
 /// never committed as a regression.
 mod semaprax_candidate {
     use super::run_oracle;
-    use std::path::Path;
-    use std::process::Command;
 
     /// Wraps one label token (a complete, possibly deliberately malformed,
     /// JSON string literal including its own quotes) in a minimal

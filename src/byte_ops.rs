@@ -559,3 +559,35 @@ pub(crate) fn is_same_owner_set_hir(value: &crate::hir::ResolvedExpr, owner: &Va
                 )
     )
 }
+
+#[cfg(test)]
+mod tests {
+    /// `tests/cleanup_backends.rs` path-includes `src/byte_data_capacity.rs`,
+    /// which reads this ceiling through `crate::byte_ops`. That harness cannot
+    /// reach the real module, so it mirrors the constant, and nothing there can
+    /// detect drift: the included source reads the mirror itself. This is the
+    /// guard, next to the source of truth.
+    #[test]
+    fn the_cleanup_backends_mirror_matches_this_ceiling() {
+        let harness = include_str!("../tests/cleanup_backends.rs");
+        let needle = "pub(crate) const MAX_OWNED_BYTE_VALUE_BYTES: u64 = ";
+        let start = harness
+            .find(needle)
+            .expect("the cleanup_backends harness must mirror the owned-byte ceiling")
+            + needle.len();
+        let mirrored = harness[start..]
+            .split(';')
+            .next()
+            .expect("the mirrored constant must be terminated")
+            .trim()
+            .replace('_', "")
+            .parse::<u64>()
+            .expect("the mirrored constant must be a plain integer literal");
+        assert_eq!(
+            mirrored,
+            super::MAX_OWNED_BYTE_VALUE_BYTES,
+            "tests/cleanup_backends.rs mirrors MAX_OWNED_BYTE_VALUE_BYTES; the two \
+             must be updated together"
+        );
+    }
+}

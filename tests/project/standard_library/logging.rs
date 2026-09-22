@@ -126,12 +126,33 @@ pub(super) fn conformance_manifests(scratch: &Path, manifest: &Path, module: &st
     }
 }
 
+/// Issue #193's admission surface is pure predicates over scalars and borrowed
+/// array slices: no writer, no `Bytes` allocation, so no byte-arena import.
+/// Listing them explicitly keeps the audit an exact equality in both
+/// directions - if one of these ever starts allocating, the audit fails.
+const PREDICATE_ONLY_CASES: &[&str] = &[
+    "test_event_name_rules",
+    "test_level_admission",
+    "test_message_budget",
+    "test_field_budgets",
+    "test_projection_policy",
+    "test_structured_admission",
+    "test_observed_status",
+];
+
 pub(super) fn uses_byte_writes(manifest: &Path) -> bool {
-    !matches!(case_name(manifest), "test_helpers" | "test_event_len")
+    let case = case_name(manifest);
+    !matches!(case, "test_helpers" | "test_event_len") && !PREDICATE_ONLY_CASES.contains(&case)
 }
 
 pub(super) fn live_byte_bound(manifest: &Path) -> usize {
-    match case_name(manifest) {
+    let case = case_name(manifest);
+    if PREDICATE_ONLY_CASES.contains(&case) {
+        // Checked before the `test_level_` prefix arm below, which
+        // `test_level_admission` would otherwise match.
+        return 0;
+    }
+    match case {
         "test_helpers" => 0,
         "test_event_len" | "test_quote_utf8" => 2,
         name if name.starts_with("test_level_") || name == "test_fixed" => 1,
@@ -174,6 +195,13 @@ fn log_conformance_manifests(scratch: &Path, manifest: &Path) -> Vec<PathBuf> {
         "test_thresholds",
         "test_guarded_safe",
         "test_guarded_redacted",
+        "test_event_name_rules",
+        "test_level_admission",
+        "test_message_budget",
+        "test_field_budgets",
+        "test_projection_policy",
+        "test_structured_admission",
+        "test_observed_status",
     ];
     let parsed = semaprax::parse(SOURCE, "log-cases.spx").unwrap();
     assert_eq!(semaprax::format::canonical(&parsed), SOURCE);

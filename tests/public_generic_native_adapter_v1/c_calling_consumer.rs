@@ -29,8 +29,7 @@ use semaprax::public_generic_abi::native::template::render_reference_provider;
 use semaprax::public_generic_consumer::c_calling::{generate_c_calling_consumer, CallingConsumer};
 use semaprax::public_generic_consumer::rust_calling::{OwnedByteField, RecordShape};
 
-#[path = "../support/public_generic_admitted_subject.rs"]
-mod public_generic_admitted_subject;
+use crate::public_generic_admitted_subject;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 

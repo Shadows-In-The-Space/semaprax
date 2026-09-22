@@ -2,6 +2,7 @@
 //! is a module here, per docs/ARCHITECTURE.md#integration-test-harnesses;
 //! future native-adapter fixtures (issues #155-#159, #162) add modules
 //! rather than new top-level files.
+
 /// The generated C11 *calling* consumer (issue #158): a real, standalone
 /// external C11 program built and linked directly against the same compiled
 /// native provider `fixture` exercises, executed end to end.
@@ -33,6 +34,13 @@ mod malformed_trusted_descriptor;
 mod max_bounds_saturation;
 #[path = "public_generic_native_adapter_v1/native_frame_admission.rs"]
 mod native_frame_admission;
+/// Shared test-support sources, declared exactly once for this binary.
+/// Each subject module reaches them with `use crate::...`; declaring them
+/// per subject compiled the same file seven times (`clippy::duplicate_mod`).
+#[path = "support/public_generic_admitted_subject.rs"]
+pub(crate) mod public_generic_admitted_subject;
+#[path = "support/public_generic_hostile_corpus.rs"]
+pub(crate) mod public_generic_hostile_corpus;
 #[path = "public_generic_native_adapter_v1/result_carrier_hostility.rs"]
 mod result_carrier_hostility;
 /// The generated Rust *calling* consumer (issue #156): a real, standalone

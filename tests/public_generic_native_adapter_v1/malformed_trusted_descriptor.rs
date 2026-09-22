@@ -32,7 +32,7 @@ use semaprax::public_generic_consumer::rust_calling::{
     generate_rust_calling_consumer, OwnedByteField, RecordShape,
 };
 
-use crate::shared_hostile_corpus::public_generic_hostile_corpus::{
+use crate::public_generic_hostile_corpus::{
     malformed_trusted_descriptor_cases, malformed_trusted_descriptor_mutation_cases,
 };
 

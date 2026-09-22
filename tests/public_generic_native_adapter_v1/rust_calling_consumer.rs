@@ -41,8 +41,7 @@ use semaprax::public_generic_consumer::rust_calling::{
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-#[path = "../support/public_generic_admitted_subject.rs"]
-mod public_generic_admitted_subject;
+use crate::public_generic_admitted_subject;
 
 fn fixture_descriptor_bytes() -> Vec<u8> {
     public_generic_admitted_subject::native_admitted_subject(2)

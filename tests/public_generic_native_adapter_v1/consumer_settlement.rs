@@ -13,8 +13,7 @@ use semaprax::public_generic_consumer::rust_calling::{
     generate_rust_calling_consumer, OwnedByteField, RecordShape,
 };
 
-#[path = "../support/public_generic_admitted_subject.rs"]
-mod public_generic_admitted_subject;
+use crate::public_generic_admitted_subject;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Workspace(PathBuf);

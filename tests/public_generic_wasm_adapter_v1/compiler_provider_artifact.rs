@@ -3,6 +3,9 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use semaprax::public_generic_consumer::rust_calling::{OwnedByteField, RecordShape};
+use semaprax::public_generic_consumer::typescript_calling::generate_typescript_calling_consumer;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 const SOURCE: &str = r#"module provider.artifact;
@@ -37,12 +40,20 @@ fn node_available() -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
+fn generated_field_name(identity: &str) -> String {
+    let suffix = identity
+        .bytes()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("field_{suffix}")
+}
+
 fn resolved_program() -> semaprax::hir::ResolvedProgram {
     let program = semaprax::check(SOURCE, Path::new("compiler-provider-artifact.spx")).unwrap();
     semaprax::hir::resolve(&program).unwrap()
 }
 
-pub(super) fn artifact() -> semaprax::wasm::PublicGenericWasmProviderArtifactV1 {
+fn endpoint() -> semaprax::public_generic_abi::compiler_endpoint::AdmittedPublicGenericEndpointV1 {
     let parsed = semaprax::parse(SOURCE, Path::new("compiler-provider-artifact.spx")).unwrap();
     let source_revision = semaprax::format::canonical(&parsed);
     let program = resolved_program();
@@ -52,7 +63,12 @@ pub(super) fn artifact() -> semaprax::wasm::PublicGenericWasmProviderArtifactV1 
         "provider.transform",
     )
     .unwrap();
-    semaprax::wasm::emit_public_generic_wasm_provider_v1(&program, &endpoint).unwrap()
+    endpoint
+}
+
+pub(super) fn artifact() -> semaprax::wasm::PublicGenericWasmProviderArtifactV1 {
+    let program = resolved_program();
+    semaprax::wasm::emit_public_generic_wasm_provider_v1(&program, &endpoint()).unwrap()
 }
 
 fn frame(
@@ -193,5 +209,120 @@ if (instance.exports.spx_pg_v1_provider_close(opened.value) !== 0) throw new Err
         "stdout={} stderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn generated_typescript_package_uses_canonical_frames_with_the_compiled_provider() {
+    let node = Command::new("node").arg("--version").output();
+    let tsc = Command::new("tsc").arg("--version").output();
+    if !node.is_ok_and(|output| output.status.success())
+        || !tsc.is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("5.8.3")
+        })
+    {
+        eprintln!("skipping: generated TypeScript package requires node and tsc 5.8.3");
+        return;
+    }
+    let artifact = artifact();
+    let endpoint = endpoint();
+    let input = RecordShape::new(
+        endpoint
+            .descriptor()
+            .input_facts()
+            .owned_leaves
+            .iter()
+            .cloned()
+            .map(OwnedByteField::new)
+            .collect(),
+    );
+    let output = RecordShape::new(
+        endpoint
+            .descriptor()
+            .result_facts()
+            .owned_leaves
+            .iter()
+            .cloned()
+            .map(OwnedByteField::new)
+            .collect(),
+    );
+    let consumer = generate_typescript_calling_consumer(
+        artifact.descriptor_bytes(),
+        artifact.binding(),
+        &input,
+        &output,
+    )
+    .unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "semaprax-pg-generated-compiled-provider-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
+    ));
+    let package = root.join("package");
+    for (name, contents) in consumer.files() {
+        let path = package.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("provider.wasm"), artifact.wasm()).unwrap();
+    let names = input
+        .fields
+        .iter()
+        .map(|field| generated_field_name(&field.identity))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names.len(),
+        2,
+        "the Phase-B compiler provider has two owned leaves"
+    );
+    fs::write(
+        package.join("test/compiled-provider.mjs"),
+        format!(
+            r#"import assert from "node:assert/strict";
+import {{ readFileSync }} from "node:fs";
+import {{ Provider }} from "../dist/index.js";
+import {{ TRUSTED_DESCRIPTOR_BYTES, TRUSTED_BINDING_BYTES }} from "../dist/descriptor.js";
+import {{ SemapraxPublicGenericException }} from "../dist/errors.js";
+const wasm = readFileSync(process.argv[2]);
+const left = "{left}", right = "{right}";
+const provider = await Provider.open(wasm);
+try {{
+  const output = provider.transform({{ [left]: Uint8Array.from([1, 2]), [right]: Uint8Array.from([7, 8, 9]) }});
+  assert.deepEqual([...output[left]], [7, 8, 9], "compiled checked endpoint swaps the first owned leaf");
+  assert.deepEqual([...output[right]], [1, 2], "compiled checked endpoint swaps the second owned leaf");
+}} finally {{ provider.close(); }}
+const stale = TRUSTED_DESCRIPTOR_BYTES.slice(); stale[0] ^= 1;
+await assert.rejects(() => Provider.open(wasm, {{ descriptorBytes: stale }}), error => error instanceof SemapraxPublicGenericException && error.detail.kind === "descriptor-rejected");
+const binding = TRUSTED_BINDING_BYTES.slice(); binding[binding.length - 1] ^= 1;
+await assert.rejects(() => Provider.open(wasm, {{ bindingBytes: binding }}), error => error instanceof SemapraxPublicGenericException && error.detail.kind === "provider-mismatch");
+console.log("GENERATED COMPILED CANONICAL CARRIER PASS");
+"#,
+            left = names[0],
+            right = names[1],
+        ),
+    )
+    .unwrap();
+    let build = Command::new("tsc")
+        .current_dir(&package)
+        .args(["-p", "tsconfig.json"])
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "tsc stderr={}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let execution = Command::new("node")
+        .current_dir(&package)
+        .args(["test/compiled-provider.mjs", "../provider.wasm"])
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(&root);
+    assert!(
+        execution.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&execution.stdout),
+        String::from_utf8_lossy(&execution.stderr)
     );
 }

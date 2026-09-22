@@ -5,9 +5,10 @@
  * retries. Existing Module objects are refused because their bytes cannot be
  * authenticated. Immutable copies of supplied module bytes are verified first.
  */
-import { FIELD_COUNT, MAX_CARRIER_BYTES, decodeOutput, encodeInput, locateLeaves } from "./carrier.js";
+import { FIELD_COUNT, MAX_CARRIER_BYTES, decodeOutput, encodeInput, locateLeaves,
+  decodeCanonicalOutput, encodeCanonicalInput } from "./carrier.js";
 import { MAX_MODULE_BYTES, TRUSTED_ENDPOINT_EXPORT_NAME, trustedDescriptorAndBinding,
-  verifyDescriptorAndBinding, verifyModuleArtifactDigest } from "./descriptor.js";
+  TRUSTED_COMPILED_PROVIDER, verifyDescriptorAndBinding, verifyModuleArtifactDigest } from "./descriptor.js";
 import { SemapraxPublicGenericException } from "./errors.js";
 import type { CapacityReason, CarrierReason, ProviderReason, SemapraxPublicGenericError } from "./errors.js";
 import type { Input, Output } from "./types.js";
@@ -178,7 +179,8 @@ export class Provider {
   }
 
   static async open(moduleOrBytes: WebAssembly.Module | BufferSource,
-    options: { descriptorBytes?: Uint8Array; bindingBytes?: Uint8Array } = {}): Promise<Provider> {
+    options: { descriptorBytes?: Uint8Array; bindingBytes?: Uint8Array } = {}): Promise<Provider | CompiledProvider> {
+    if (TRUSTED_COMPILED_PROVIDER) return CompiledProvider.open(moduleOrBytes, options);
     const [descriptor, binding] = trustedDescriptorAndBinding();
     verifyDescriptorAndBinding(options.descriptorBytes ?? descriptor, options.bindingBytes ?? binding);
     if (moduleOrBytes instanceof WebAssembly.Module) throw mismatch("module-bytes-required");
@@ -443,6 +445,82 @@ export class Provider {
     },
   });
 }
+
+/** The compiler-owned route delegates allocation, handles, dispatch and
+ * settlement to the closed Wasm ABI. The reference Provider above remains
+ * selected only for an explicitly reference-bound artifact. */
+class CompiledProvider {
+  #closed = false;
+  #busy = false;
+  readonly #memory: WebAssembly.Memory;
+  readonly #scratch: number;
+  readonly #capacity: number;
+  readonly #provider: number;
+  readonly #prepare: (provider: number, ptr: number, len: number) => bigint;
+  readonly #call: (provider: number, input: number) => bigint;
+  readonly #export: (result: number, ptr: number, len: number) => bigint;
+  readonly #releaseValue: (value: number) => number;
+  readonly #releaseResult: (result: number) => number;
+  readonly #close: (provider: number) => number;
+
+  private constructor(memory: WebAssembly.Memory, scratch: number, capacity: number, provider: number,
+    prepare: (provider: number, ptr: number, len: number) => bigint, call: (provider: number, input: number) => bigint,
+    exported: (result: number, ptr: number, len: number) => bigint, releaseValue: (value: number) => number,
+    releaseResult: (result: number) => number, close: (provider: number) => number) {
+    this.#memory = memory; this.#scratch = scratch; this.#capacity = capacity; this.#provider = provider;
+    this.#prepare = prepare; this.#call = call; this.#export = exported; this.#releaseValue = releaseValue;
+    this.#releaseResult = releaseResult; this.#close = close;
+  }
+
+  static async open(moduleOrBytes: WebAssembly.Module | BufferSource,
+    options: { descriptorBytes?: Uint8Array; bindingBytes?: Uint8Array } = {}): Promise<CompiledProvider> {
+    const [descriptor, binding] = trustedDescriptorAndBinding();
+    verifyDescriptorAndBinding(options.descriptorBytes ?? descriptor, options.bindingBytes ?? binding);
+    if (moduleOrBytes instanceof WebAssembly.Module) throw mismatch("module-bytes-required");
+    const bytes = snapshotModuleBytes(moduleOrBytes); await verifyModuleArtifactDigest(bytes);
+    let module: WebAssembly.Module; try { module = await WebAssembly.compile(bytes); } catch { throw mismatch("module-compile"); }
+    if (WebAssembly.Module.imports(module).length !== 0) throw mismatch("module-imports");
+    const expected = ["memory","spx_pg_v1_scratch_ptr","spx_pg_v1_scratch_reserve","spx_pg_v1_scratch_capacity","spx_pg_v1_open","spx_pg_v1_input_prepare","spx_pg_v1_call","spx_pg_v1_result_export","spx_pg_v1_value_release","spx_pg_v1_result_release","spx_pg_v1_provider_close"].sort();
+    const actual = WebAssembly.Module.exports(module).map(item => item.name).sort();
+    if (actual.length !== expected.length || actual.some((name, index) => name !== expected[index])) throw mismatch("module-exports");
+    let instance: WebAssembly.Instance; try { instance = await WebAssembly.instantiate(module, {}); } catch { throw mismatch("module-instance"); }
+    const memory = instance.exports["memory"];
+    const exportAt = (name: string): WebAssembly.ExportValue => instance.exports[name] as WebAssembly.ExportValue;
+    const scratchPtr = exportAt("spx_pg_v1_scratch_ptr"), reserve = exportAt("spx_pg_v1_scratch_reserve"), capacityFn = exportAt("spx_pg_v1_scratch_capacity");
+    const prepare = exportAt("spx_pg_v1_input_prepare"), call = exportAt("spx_pg_v1_call"), exported = exportAt("spx_pg_v1_result_export"), open = exportAt("spx_pg_v1_open");
+    const releaseValue = exportAt("spx_pg_v1_value_release"), releaseResult = exportAt("spx_pg_v1_result_release"), close = exportAt("spx_pg_v1_provider_close");
+    if (!(memory instanceof WebAssembly.Memory) || !(memory.buffer instanceof ArrayBuffer) || [scratchPtr,reserve,capacityFn,prepare,call,exported,open,releaseValue,releaseResult,close].some(value => typeof value !== "function")) throw mismatch("module-abi");
+    const reserved = lane((reserve as (length: number) => bigint)(MAX_CARRIER_BYTES)); if (reserved.status !== 0) throw mismatch("module-abi");
+    const scratch = (scratchPtr as () => number)(), capacity = (capacityFn as () => number)();
+    if (!Number.isSafeInteger(scratch) || !Number.isSafeInteger(capacity) || scratch < 0 || capacity < MAX_CARRIER_BYTES || descriptor.length + binding.length > capacity) throw mismatch("module-abi");
+    const view = new Uint8Array(memory.buffer); if (scratch + descriptor.length + binding.length > view.length) throw mismatch("module-memory");
+    view.set(descriptor, scratch); view.set(binding, scratch + descriptor.length);
+    const opened = lane((open as (ptr: number, descriptorLen: number, bindingPtr: number, bindingLen: number) => bigint)(scratch, descriptor.length, scratch + descriptor.length, binding.length));
+    if (opened.status !== 0 || opened.value === 0) throw mismatch("module-abi");
+    return new CompiledProvider(memory, scratch, capacity, opened.value, prepare as (provider: number, ptr: number, len: number) => bigint,
+      call as (provider: number, input: number) => bigint, exported as (result: number, ptr: number, len: number) => bigint,
+      releaseValue as (value: number) => number, releaseResult as (result: number) => number, close as (provider: number) => number);
+  }
+
+  transform(input: Input): Output {
+    if (this.#closed) throw carrier("provider-closed"); if (this.#busy) throw carrier("provider-busy"); this.#busy = true;
+    let prepared = 0; let result = 0;
+    try {
+      const bytes = encodeCanonicalInput(input); if (bytes.length > this.#capacity) throw capacity("carrier-bytes");
+      let memory = new Uint8Array(this.#memory.buffer); if (this.#scratch + bytes.length > memory.length) throw mismatch("module-memory"); memory.set(bytes, this.#scratch);
+      const inputLane = lane(this.#prepare(this.#provider, this.#scratch, bytes.length)); if (inputLane.status !== 0 || inputLane.value === 0) throw new SemapraxPublicGenericException({ kind: "execution-failed", status: inputLane.status }); prepared = inputLane.value;
+      const callLane = lane(this.#call(this.#provider, prepared)); prepared = 0; if (callLane.status !== 0 || callLane.value === 0) throw new SemapraxPublicGenericException({ kind: "execution-failed", status: callLane.status }); result = callLane.value;
+      const probe = lane(this.#export(result, this.#scratch, 0)); if (probe.status !== 12 || probe.value > this.#capacity) throw new SemapraxPublicGenericException({ kind: "result-rejected", reason: "carrier-framing" });
+      const copied = lane(this.#export(result, this.#scratch, probe.value)); if (copied.status !== 0 || copied.value !== probe.value) throw new SemapraxPublicGenericException({ kind: "result-rejected", reason: "carrier-framing" });
+      memory = new Uint8Array(this.#memory.buffer); const output = decodeCanonicalOutput(memory.slice(this.#scratch, this.#scratch + copied.value));
+      if (this.#releaseResult(result) !== 0) throw new SemapraxPublicGenericException({ kind: "release-failed", status: 11 }); result = 0; return output;
+    } catch (error) { if (result !== 0) this.#releaseResult(result); else if (prepared !== 0) this.#releaseValue(prepared); throw normalized(error); }
+    finally { this.#busy = false; }
+  }
+  close(): void { if (this.#closed) return; if (this.#busy || this.#close(this.#provider) !== 0) throw new SemapraxPublicGenericException({ kind: "release-failed", status: 7 }); this.#closed = true; }
+}
+
+function lane(raw: bigint): { readonly status: number; readonly value: number } { return Object.freeze({ status: Number(raw & 0xffff_ffffn), value: Number((raw >> 32n) & 0xffff_ffffn) }); }
 
 /** Copy the exact viewed range using built-in getters, without user iterators,
  * and reject mutable shared/resizable storage before async verification. */

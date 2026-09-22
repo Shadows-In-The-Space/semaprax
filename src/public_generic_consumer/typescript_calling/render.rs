@@ -6,6 +6,7 @@
 
 use std::fmt::Write as _;
 
+use crate::public_generic_abi::descriptor::decode as decode_descriptor;
 use crate::public_generic_abi::wasm::binding::WasmProviderBindingV1;
 
 use super::{field_name, RecordShape};
@@ -110,6 +111,16 @@ pub(super) fn descriptor_ts(
     out.push_str(";\n\n");
     out.push_str("export const TRUSTED_PROVIDER_ARTIFACT_DIGEST: string = ");
     out.push_str(&ts_string_literal(binding.provider_artifact_digest()));
+    out.push_str(";\nexport const TRUSTED_ENDPOINT_EXPORT_NAME: string = ");
+    out.push_str(&ts_string_literal(binding.exported_endpoint_export_name()));
+    out.push_str(";\nexport const TRUSTED_COMPILED_PROVIDER: boolean = ");
+    out.push_str(
+        if binding.exported_endpoint_export_name() == "spx_pg_v1_call" {
+            "true"
+        } else {
+            "false"
+        },
+    );
     out.push_str(";\n");
     out.push_str(&template(DESCRIPTOR_VERIFY));
     out
@@ -168,8 +179,36 @@ fn output_from_leaves_fn(output: &RecordShape) -> String {
     out
 }
 
-pub(super) fn carrier_ts(input: &RecordShape, output: &RecordShape) -> String {
+pub(super) fn carrier_ts(
+    descriptor_bytes: &[u8],
+    input: &RecordShape,
+    output: &RecordShape,
+) -> String {
     let count = input.fields.len();
+    // The descriptor bytes are independently replayed by the generated
+    // package before a provider is opened. Rendering these facts from the
+    // same canonical descriptor lets the package form the frozen carrier
+    // identities without inventing a second descriptor format. Deliberately
+    // leave hostile/malformed fixture bytes renderable: their generated
+    // package must refuse during descriptor admission, before this codec is
+    // ever asked to construct a frame.
+    let descriptor = decode_descriptor(descriptor_bytes).ok();
+    let descriptor_digest = descriptor
+        .as_ref()
+        .map(|value| value.identity_digest())
+        .unwrap_or_default();
+    let export_id = descriptor
+        .as_ref()
+        .map(|value| value.export_id().to_owned())
+        .unwrap_or_default();
+    let input_instance_digest = descriptor
+        .as_ref()
+        .map(|value| value.input().instance_digest.clone())
+        .unwrap_or_default();
+    let output_instance_digest = descriptor
+        .as_ref()
+        .map(|value| value.result().instance_digest.clone())
+        .unwrap_or_default();
     let mut out = String::new();
     out.push_str(&template(CARRIER_HEADER));
     out.push('\n');
@@ -185,6 +224,25 @@ pub(super) fn carrier_ts(input: &RecordShape, output: &RecordShape) -> String {
     out.push_str(
         "export function decodeOutput(bytes: Uint8Array): Output {\n  return outputFromLeaves(decodeLeaves(bytes, FIELD_COUNT));\n}\n",
     );
+    out.push_str("\nexport const CARRIER_DESCRIPTOR_DIGEST = ");
+    out.push_str(&ts_string_literal(&descriptor_digest));
+    out.push_str(";\nexport const CARRIER_EXPORT_ID = ");
+    out.push_str(&ts_string_literal(&export_id));
+    out.push_str(";\nexport const INPUT_INSTANCE_DIGEST = ");
+    out.push_str(&ts_string_literal(&input_instance_digest));
+    out.push_str(";\nexport const OUTPUT_INSTANCE_DIGEST = ");
+    out.push_str(&ts_string_literal(&output_instance_digest));
+    out.push_str(";\nexport const INPUT_LEAF_PATHS = Object.freeze([\n");
+    for field in &input.fields {
+        let _ = writeln!(out, "  {},", ts_string_literal(&field.identity));
+    }
+    out.push_str("]);\nexport const OUTPUT_LEAF_PATHS = Object.freeze([\n");
+    for field in &output.fields {
+        let _ = writeln!(out, "  {},", ts_string_literal(&field.identity));
+    }
+    out.push_str("]);\n\n");
+    out.push_str("export function encodeCanonicalInput(value: Input): Uint8Array {\n  return encodeCanonicalFrame(\"input\", CARRIER_DESCRIPTOR_DIGEST, CARRIER_EXPORT_ID, INPUT_INSTANCE_DIGEST, INPUT_LEAF_PATHS, inputLeaves(value));\n}\n\n");
+    out.push_str("export function decodeCanonicalOutput(bytes: Uint8Array): Output {\n  return outputFromLeaves(decodeCanonicalFrame(\"result\", CARRIER_DESCRIPTOR_DIGEST, CARRIER_EXPORT_ID, OUTPUT_INSTANCE_DIGEST, OUTPUT_LEAF_PATHS, bytes));\n}\n");
     out
 }
 

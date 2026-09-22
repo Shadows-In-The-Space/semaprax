@@ -139,7 +139,7 @@ pub fn generate_typescript_calling_consumer(
         ("src/types.ts".to_owned(), render::types_ts(input, output)),
         (
             "src/carrier.ts".to_owned(),
-            render::carrier_ts(input, output),
+            render::carrier_ts(descriptor_bytes, input, output),
         ),
         (
             "src/wasm-provider.ts".to_owned(),

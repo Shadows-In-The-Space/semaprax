@@ -5,11 +5,12 @@ export type DescriptorReason = "descriptor-bound" | "descriptor-framing" | "desc
 export type ProviderReason = "binding-replay" | "binding-bound" | "module-bytes-required"
   | "module-buffer" | "module-bound" | "module-digest" | "module-compile"
   | "module-imports" | "module-exports" | "module-memory" | "module-abi"
-  | "module-instance";
+  | "module-instance" | "module-endpoint";
 export type CarrierReason = "input-shape" | "input-field" | "input-bytes"
   | "provider-closed" | "handle-invalid" | "handle-provider"
   | "handle-kind" | "state-invalid"
-  | "carrier-framing" | "carrier-count" | "carrier-trailing";
+  | "carrier-framing" | "carrier-count" | "carrier-trailing" | "provider-busy"
+  | "lifo-release" | "failure-injection";
 export type CapacityReason = "leaf-count" | "leaf-bytes" | "total-payload"
   | "carrier-bytes" | "trace-events" | "memory-growth" | "generation" | "host-allocation";
 /** Incoming result frames use their own closed refusal class. A hostile

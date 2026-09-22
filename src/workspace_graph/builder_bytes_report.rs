@@ -204,6 +204,7 @@ pub(crate) fn own_bytes_without(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project::ProjectManifest;
     use crate::workspace_graph::{
         build_owned_with_builder_limit, index_authored, MAX_BUILDER_BYTES,
     };
@@ -396,32 +397,13 @@ mod tests {
     /// `std.io`). Run with
     /// `cargo test --lib workspace_graph::builder_bytes_report::tests::catalog_normalizer_project_reference -- --ignored --nocapture`.
     ///
-    /// On an unmodified tree this measured:
-    /// - Mode 0 (the most conservative accounting, tried first) refuses:
-    ///   summed module costs alone are ~26.7MB against a 67,108,864-byte cap.
-    /// - The real build succeeds at mode 2 (`retention_prebound_mode`'s third
-    ///   rung), the first rung that fits: ~17.50MB used, ~1.34MB (7.3%)
-    ///   margin. `build_owned` on the real sources confirms this: it verifies.
-    /// - Of `std.data.json.dec`'s 27 functions, only 7 are imported by this
-    ///   project; the transitive internal-call closure from those 7 reaches
-    ///   20; 7 functions are never imported and never called by a reached
-    ///   one. Of `std.io`'s 11 functions, this project imports *types* only
-    ///   (`Reader`/`Writer`), never a function, so all 11 are unreached.
-    /// - Removing exactly those unreached declarations and re-measuring the
-    ///   same mode 2 the real build lands on drops the total from ~17.50MB to
-    ///   ~10.59MB: a ~6.9MB (39.5%) recovery, turning a 7.3% margin into a
-    ///   44% margin. That is real, substantial, safe-to-identify waste
-    ///   (SPX-G171 charges full module cost regardless of use), but *not* a
-    ///   safe narrow accounting fix to ship blind: recovering it in
-    ///   production requires the resolver itself to skip building HIR for a
-    ///   bundled dependency's unreached declarations, and every declaration
-    ///   this project's own source contains must stay resolvable for
-    ///   AGENTS.md's "semantic impact and review are read-only and bound to
-    ///   exact source ... bytes" invariant — this measurement does not
-    ///   distinguish "unreached from this workspace" from "a bundled
-    ///   dependency file whose other declarations a reviewer may still ask
-    ///   about", so pruning them from real resolution is a maintainer
-    ///   decision, not an accounting correction.
+    /// The report is intentionally diagnostic rather than a limit-changing
+    /// regression gate. It uses the complete current project manifest closure
+    /// and prints bounded per-module attribution. The application gate has
+    /// reproduced a live `SPX-G171` during graph construction; this test
+    /// checks only that the refusal names the existing cap, not that any
+    /// accounting mode is accepted or that a particular byte estimate stays
+    /// fixed.
     #[test]
     #[ignore = "diagnostic measurement tool, not a regression gate; run with --ignored --nocapture"]
     fn catalog_normalizer_project_reference() {
@@ -437,8 +419,16 @@ mod tests {
                 &read("examples/catalog-normalizer-project/src/batch.spx"),
             ),
             (
+                "examples/catalog-normalizer-project/src/enrichment.spx",
+                &read("examples/catalog-normalizer-project/src/enrichment.spx"),
+            ),
+            (
                 "examples/catalog-normalizer-project/src/limits.spx",
                 &read("examples/catalog-normalizer-project/src/limits.spx"),
+            ),
+            (
+                "examples/catalog-normalizer-project/src/record.spx",
+                &read("examples/catalog-normalizer-project/src/record.spx"),
             ),
             (
                 "examples/catalog-normalizer-project/src/tests.spx",
@@ -448,8 +438,51 @@ mod tests {
                 "std/data-json-dec/src/dec.spx",
                 &read("std/data-json-dec/src/dec.spx"),
             ),
+            (
+                "std/data-json-doc/src/doc.spx",
+                &read("std/data-json-doc/src/doc.spx"),
+            ),
             ("std/io/src/io.spx", &read("std/io/src/io.spx")),
         ]);
+        let project_manifest =
+            ProjectManifest::parse(&read("examples/catalog-normalizer-project/semaprax.toml"))
+                .unwrap();
+        let project_source_paths: Vec<_> = programs
+            .iter()
+            .filter(|program| program.module.starts_with("catalog_normalizer."))
+            .map(|program| {
+                program
+                    .path
+                    .strip_prefix("examples/catalog-normalizer-project/")
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            project_source_paths,
+            project_manifest.sources(),
+            "every manifest source must be present in the builder-byte report input"
+        );
+        let expected_modules: BTreeSet<_> = [
+            "catalog_normalizer.app",
+            "catalog_normalizer.batch",
+            "catalog_normalizer.enrichment",
+            "catalog_normalizer.limits",
+            "catalog_normalizer.record",
+            "catalog_normalizer.tests",
+            "std.data.json.dec",
+            "std.data.json.doc",
+            "std.io",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            programs
+                .iter()
+                .map(|program| program.module.as_str())
+                .collect::<BTreeSet<_>>(),
+            expected_modules,
+            "builder-byte report input must include the full Project and bundled dependency closure"
+        );
         let authored = index_authored(&programs).unwrap();
         let budget = builder_bytes_breakdown(&programs, &authored).unwrap();
         let mut grand_total = 0usize;
@@ -503,10 +536,9 @@ mod tests {
             );
         }
 
-        // The real end-to-end path (`build_owned`), with the exact logical
-        // paths the bundled dependency table and the project manifest use,
-        // to see the actual fallback-mode-adjusted charge rather than the
-        // mode-0 ceiling computed above.
+        // Mirror the complete nine-module closure used by the project: all
+        // six manifest sources, both declared JSON dependencies, and the
+        // transitive std.io source.
         let sources = vec![
             crate::workspace_graph::WorkspaceSource {
                 path: "src/app.spx".to_owned(),
@@ -517,8 +549,16 @@ mod tests {
                 source: read("examples/catalog-normalizer-project/src/batch.spx"),
             },
             crate::workspace_graph::WorkspaceSource {
+                path: "src/enrichment.spx".to_owned(),
+                source: read("examples/catalog-normalizer-project/src/enrichment.spx"),
+            },
+            crate::workspace_graph::WorkspaceSource {
                 path: "src/limits.spx".to_owned(),
                 source: read("examples/catalog-normalizer-project/src/limits.spx"),
+            },
+            crate::workspace_graph::WorkspaceSource {
+                path: "src/record.spx".to_owned(),
+                source: read("examples/catalog-normalizer-project/src/record.spx"),
             },
             crate::workspace_graph::WorkspaceSource {
                 path: "src/tests.spx".to_owned(),
@@ -527,6 +567,10 @@ mod tests {
             crate::workspace_graph::WorkspaceSource {
                 path: "dependencies/std.data.json.dec/0.1.0/dec.spx".to_owned(),
                 source: read("std/data-json-dec/src/dec.spx"),
+            },
+            crate::workspace_graph::WorkspaceSource {
+                path: "dependencies/std.data.json.doc/0.1.0/doc.spx".to_owned(),
+                source: read("std/data-json-doc/src/doc.spx"),
             },
             crate::workspace_graph::WorkspaceSource {
                 path: "dependencies/std.io/0.1.0/io.spx".to_owned(),
@@ -538,19 +582,6 @@ mod tests {
             "mode 0 is expected to refuse this project; if it now fits, the \
              margin numbers in this test's doc comment are stale"
         );
-        let mode2_total = match retention_prebound_mode(&programs, &authored, true, 2) {
-            Ok((resolve, total)) => {
-                eprintln!(
-                    "mode2 (the mode the real build below lands on): resolve={resolve} total={total} fits={}",
-                    total <= MAX_BUILDER_BYTES
-                );
-                total
-            }
-            Err(errors) => panic!(
-                "expected mode2 to fit this project; refused with {}",
-                errors[0].code
-            ),
-        };
         for (label, layout_mode) in [("mode3", 3u8), ("mode4", 4u8)] {
             match retention_prebound_mode(&programs, &authored, true, layout_mode) {
                 Ok((resolve, total)) => eprintln!(
@@ -560,112 +591,23 @@ mod tests {
                 Err(errors) => eprintln!("{label}: refused ({})", errors[0].code),
             }
         }
-        // Now prune the same unreached declarations from the real programs
-        // and re-measure mode2 (the mode the real build above actually
-        // lands on) end to end, to see what pruning would really be worth
-        // at the exact fallback mode that gates this project today.
-        let unreached_ids: BTreeSet<&str> = unreached
+        let diagnostics = match crate::workspace_graph::build_owned(sources) {
+            Ok(_) => panic!("the current full manifest closure unexpectedly fits the builder cap"),
+            Err(diagnostics) => diagnostics,
+        };
+        let diagnostic = diagnostics
             .iter()
-            .map(|entry| entry.stable_id.as_str())
-            .collect();
-        let trimmed_programs: Vec<Program> = programs
-            .iter()
-            .map(|program| {
-                let mut trimmed = program.clone();
-                trimmed
-                    .functions
-                    .retain(|function| !unreached_ids.contains(function.stable_id.as_str()));
-                trimmed
-            })
-            .collect();
-        let trimmed_authored = index_authored(&trimmed_programs).unwrap();
-        let pruned_mode2_total =
-            retention_prebound_mode(&trimmed_programs, &trimmed_authored, true, 2)
-                .expect("pruning only removes provably-unreached functions, so this must still fit")
-                .1;
-        eprintln!(
-            "mode2 AFTER PRUNING unreached declarations: total={pruned_mode2_total} fits={} (was {mode2_total})",
-            pruned_mode2_total <= MAX_BUILDER_BYTES
-        );
-        // Conservative threshold well under the ~6.9MB measured on an
-        // unmodified tree: catches a regression that silently makes the
-        // waste this test exists to document disappear or invert, without
-        // pinning to a byte-exact figure that any unrelated cost-accounting
-        // change would immediately break.
+            .find(|diagnostic| diagnostic.code == "SPX-G171")
+            .expect("the bounded graph refusal keeps its stable diagnostic code");
         assert!(
-            mode2_total.saturating_sub(pruned_mode2_total) > 5_000_000,
-            "expected pruning unreached bundled-dependency declarations to recover \
-             several megabytes of builder_bytes; recovered only {} \
-             (before={mode2_total}, after={pruned_mode2_total})",
-            mode2_total.saturating_sub(pruned_mode2_total)
+            diagnostic.message.contains(&MAX_BUILDER_BYTES.to_string()),
+            "the report should name the unchanged builder cap, got: {}",
+            diagnostic.message
         );
-
-        match crate::workspace_graph::build_owned(sources.clone()) {
-            Ok(_) => eprintln!("build_owned (baseline): OK (fits within MAX_BUILDER_BYTES)"),
-            Err(diagnostics) => {
-                for diagnostic in &diagnostics {
-                    eprintln!(
-                        "build_owned (baseline) error: {} {} help={:?}",
-                        diagnostic.code, diagnostic.message, diagnostic.help
-                    );
-                }
-                panic!("expected the unmodified real project to verify");
-            }
-        }
-
-        // Reproduce issue #124's exact report on the real project, end to
-        // end through `build_owned`: a pure-scalar function with no caller
-        // anywhere still verifies, but wiring the single smallest possible
-        // cross-module call to it does not.
-        let mut app_with_uncalled_function = sources.clone();
-        let app_source = &mut app_with_uncalled_function
-            .iter_mut()
-            .find(|source| source.path == "src/app.spx")
-            .unwrap()
-            .source;
-        app_source.push_str(
-            "\n@id(\"catalog_normalizer.app.g171_probe\") fn g171_probe(input: i64) -> i64 { input + 1 }\n",
+        eprintln!(
+            "build_owned (complete manifest closure): refused with {} under unchanged cap {}: {} help={:?}",
+            diagnostic.code, MAX_BUILDER_BYTES, diagnostic.message, diagnostic.help
         );
-        *app_source = canonical_source("src/app.spx", app_source);
-        match crate::workspace_graph::build_owned(app_with_uncalled_function.clone()) {
-            Ok(_) => eprintln!(
-                "build_owned (uncalled function added): OK, exactly as issue #124 reported"
-            ),
-            Err(diagnostics) => {
-                panic!("expected an uncalled function to still fit; got {diagnostics:?}")
-            }
-        }
-        let mut with_wired_call = app_with_uncalled_function;
-        let tests_source = &mut with_wired_call
-            .iter_mut()
-            .find(|source| source.path == "src/tests.spx")
-            .unwrap()
-            .source;
-        // Module uses must sit immediately after the module declaration, so
-        // insert the new `use` right after the `module ...;` line rather
-        // than appending it at the end of the file.
-        let module_line_end = tests_source.find('\n').unwrap() + 1;
-        tests_source.insert_str(
-            module_line_end,
-            "use function @id(\"catalog_normalizer.app.g171_probe\") from catalog_normalizer.app as g171_probe;\n",
-        );
-        tests_source.push_str(
-            "@id(\"catalog_normalizer.tests.g171_probe_call\") fn g171_probe_call() -> i64 { g171_probe(1) }\n",
-        );
-        *tests_source = canonical_source("src/tests.spx", tests_source);
-        match crate::workspace_graph::build_owned(with_wired_call) {
-            Ok(_) => eprintln!(
-                "build_owned (call site wired): unexpectedly OK -- issue #124's margin may have \
-                 changed; re-measure before relying on this reproduction"
-            ),
-            Err(diagnostics) => {
-                assert_eq!(diagnostics[0].code, "SPX-G171");
-                eprintln!(
-                    "build_owned (call site wired): refused with SPX-G171, exactly as issue #124 reported: {}",
-                    diagnostics[0].message
-                );
-            }
-        }
     }
 
     /// Negative control: this module is read-only replay of the existing

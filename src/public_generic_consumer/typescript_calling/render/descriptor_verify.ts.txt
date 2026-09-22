@@ -68,41 +68,26 @@ export function verifyDescriptorAndBinding(
 }
 
 /**
- * Independently replay the provider's normalized artifact identity. The
- * binding's fixed-width 71-byte artifact digest occurs exactly once in the
- * authenticated module and is zeroed before domain-separated SHA-256, which
- * breaks the binding/artifact self-reference without trusting a raw offset.
+ * This generator's OWN module-artifact-identity convention: domain-separated
+ * SHA-256 over `len(bytes) as u64 little-endian || bytes`, rendered as
+ * `sha256:<hex>`. Async: the platform Web Crypto API's `digest` is
+ * Promise-based.
  */
 export async function computeModuleArtifactDigest(
   wasmBytes: Uint8Array,
 ): Promise<string> {
   wasmBytes = byteView(wasmBytes);
   if (wasmBytes.length > MAX_MODULE_BYTES) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "module-bound" });
-  const normalized = wasmBytes.slice();
-  const slot = new TextEncoder().encode(TRUSTED_PROVIDER_ARTIFACT_DIGEST);
-  if (slot.length !== 71) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "module-digest" });
-  let found = -1;
-  for (let offset = 0; offset + slot.length <= normalized.length; offset += 1) {
-    let equal = true;
-    for (let index = 0; index < slot.length; index += 1) {
-      if (normalized[offset + index] !== slot[index]) { equal = false; break; }
-    }
-    if (!equal) continue;
-    if (found !== -1) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "module-digest" });
-    found = offset;
-  }
-  if (found === -1) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "module-digest" });
-  normalized.fill(0, found, found + slot.length);
   const preimage = new Uint8Array(
-    MODULE_ARTIFACT_DIGEST_DOMAIN.length + 8 + normalized.length,
+    MODULE_ARTIFACT_DIGEST_DOMAIN.length + 8 + wasmBytes.length,
   );
   preimage.set(MODULE_ARTIFACT_DIGEST_DOMAIN, 0);
   new DataView(preimage.buffer).setBigUint64(
     MODULE_ARTIFACT_DIGEST_DOMAIN.length,
-    BigInt(normalized.length),
+    BigInt(wasmBytes.length),
     true,
   );
-  preimage.set(normalized, MODULE_ARTIFACT_DIGEST_DOMAIN.length + 8);
+  preimage.set(wasmBytes, MODULE_ARTIFACT_DIGEST_DOMAIN.length + 8);
   const digestBytes = new Uint8Array(
     await crypto.subtle.digest("SHA-256", preimage),
   );

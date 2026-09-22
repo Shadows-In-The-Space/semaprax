@@ -2,6 +2,7 @@ module std.tracing;
 use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
 use function @id("std.encoding.decode_hex_byte") from std.encoding as decode_hex_byte;
 use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
+use function @id("std.log.redact.field_count_within_budget") from std.log.redact as field_count_within_budget;
 
 // Issue #193's tracing slice: the pure, effect-free decision layer that
 // admits or refuses a W3C Trace Context `traceparent`/`tracestate` header,
@@ -429,4 +430,171 @@ fn tracestate_mutation_admitted(mutated_key: borrow Slice<u8>, first_member_key:
 fn tracestate_field_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
 {
     projected_field_admitted(name, classified_secret, projection, commitment) && tracestate_key_shape_admitted(name) && tracestate_value_shape_admitted(projection)
+}
+
+// ---------------------------------------------------------------------
+// Spans (issue #193)
+// ---------------------------------------------------------------------
+// Everything above is propagation: the bytes that travel between processes.
+// A span is what a process records about its own work, and none of its own
+// fields -- an operation name, a kind, a status, a duration, an attribute
+// set -- has had a rule until here. Each of them is caller-controlled, and
+// three of them are the direct analogue of metric label cardinality: an
+// operation name assembled from a request path, an attribute set with
+// unbounded arity, and a duration read from an untrusted clock.
+//
+// Nothing here starts, ends, records, or exports a span. These are
+// decisions about values a caller has already assembled, and this package
+// still declares no `permit` and performs no I/O.
+@id("std.tracing.span-name-byte-admitted")
+fn span_name_byte_admitted(candidate: u8) -> bool
+{
+    let lower = candidate >= 97u8 && candidate <= 122u8;
+    let digit = candidate >= 48u8 && candidate <= 57u8;
+    let punctuation = match candidate { 45u8 => true, 46u8 => true, 47u8 => true, 95u8 => true, _ => false, };
+    lower || digit || punctuation
+}
+
+// A span name identifies an *operation*, not an occurrence of one. The
+// alphabet is deliberately narrow and lowercase so that `GET /users/4711`
+// cannot be a span name: a name carrying an identifier makes every request
+// its own series downstream, which is metric-label cardinality wearing a
+// different hat. Uppercase is refused rather than folded, because folding
+// hides the caller's mistake instead of reporting it.
+@id("std.tracing.span-name-admitted")
+fn span_name_admitted(name: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut admitted = length >= 1usize && length <= 64usize;
+    while index < length && admitted {
+        admitted = match byte_get(name, index) { Option::Some { value } => span_name_byte_admitted(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// The closed kind vocabulary: 0 internal, 1 server, 2 client, 3 producer,
+// 4 consumer. A sixth kind means changing this function, not passing a
+// larger number.
+@id("std.tracing.span-kind-admitted")
+fn span_kind_admitted(kind: i64) -> bool
+{
+    kind >= 0 && kind <= 4
+}
+
+// 0 unset, 1 ok, 2 error. `unset` is distinct from `ok` on purpose: a span
+// nobody judged is not a span that succeeded.
+@id("std.tracing.span-status-admitted")
+fn span_status_admitted(status: i64) -> bool
+{
+    status >= 0 && status <= 2
+}
+
+// One hour in nanoseconds. A span longer than this is far likelier to be a
+// clock that moved, an end timestamp that was never written, or an
+// attacker-supplied duration than a unit of work, and admitting it lets one
+// bad value dominate every latency aggregate built from the trace.
+@id("std.tracing.span-duration-limit-nanos")
+fn span_duration_limit_nanos() -> i64
+{
+    3600000000000
+}
+
+// A span's clock readings are data, not authority: an end before its start
+// is refused rather than clamped, so a negative duration never becomes a
+// zero-duration span that silently disappears from a latency distribution.
+@id("std.tracing.span-duration-admitted")
+fn span_duration_admitted(start_nanos: i64, end_nanos: i64) -> bool
+{
+    if start_nanos >= 0 && end_nanos >= start_nanos { end_nanos - start_nanos <= span_duration_limit_nanos() } else { false }
+}
+
+// The same per-observation arity budget the shared redaction policy already
+// owns, reused rather than restated so a span's attribute set and a log
+// event's field set cannot drift to different ceilings.
+@id("std.tracing.span-attribute-count-admitted")
+fn span_attribute_count_admitted(count: usize) -> bool
+{
+    field_count_within_budget(count)
+}
+
+// A span attribute is a named field proposed for export, so it is judged by
+// exactly the shared projection policy -- protected names, classified
+// values, the visible marker, commitment shape -- with this package's own
+// name grammar layered on top. A secret attribute is refused, never
+// truncated or hashed into something that looks harmless.
+@id("std.tracing.span-attribute-admitted")
+fn span_attribute_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+{
+    projected_field_admitted(name, classified_secret, projection, commitment) && span_name_admitted(name)
+}
+
+// ---------------------------------------------------------------------
+// Fresh identity and hostile inbound propagation
+// ---------------------------------------------------------------------
+// A trace-id or span-id this process mints must come from a declared
+// randomness capability, not from a counter, a clock, or an echo of
+// whatever arrived on the wire. `randomness_declared` is the caller's
+// statement that it holds one; this package cannot generate an identifier
+// itself and does not pretend to. The generated value must also differ from
+// the inbound one it replaces, so "generate a fresh id" cannot be satisfied
+// by reusing the attacker's.
+@id("std.tracing.fresh-span-id-admitted")
+fn fresh_span_id_admitted(span_id: borrow Slice<u8>, inbound_span_id: borrow Slice<u8>, randomness_declared: bool) -> bool
+{
+    let shaped = byte_len(span_id) == 16usize && hex_run_admitted(span_id, 0usize, 16usize) && !field_is_all_zero(span_id, 0usize, 16usize);
+    randomness_declared && shaped && !slice_equal(span_id, inbound_span_id)
+}
+
+@id("std.tracing.fresh-trace-id-admitted")
+fn fresh_trace_id_admitted(trace_id: borrow Slice<u8>, inbound_trace_id: borrow Slice<u8>, randomness_declared: bool) -> bool
+{
+    let shaped = byte_len(trace_id) == 32usize && hex_run_admitted(trace_id, 0usize, 32usize) && !field_is_all_zero(trace_id, 0usize, 32usize);
+    randomness_declared && shaped && !slice_equal(trace_id, inbound_trace_id)
+}
+
+// Two separate questions that a naive implementation collapses into one.
+// Whether an inbound `traceparent` is well-formed is a parsing question,
+// answered above. Whether this process should *continue* that trace is a
+// trust question: a well-formed header from an unauthenticated peer is a
+// caller-chosen trace-id, which lets anyone on the internet stitch their
+// traffic into an internal trace, replay a trace-id to correlate internal
+// work, or inflate a backend's per-trace storage at will. A well-formed
+// context is adopted only from a trusted peer.
+@id("std.tracing.inbound-context-adoption-admitted")
+fn inbound_context_adoption_admitted(inbound_shape_admitted: bool, peer_is_trusted: bool) -> bool
+{
+    inbound_shape_admitted && peer_is_trusted
+}
+
+// The complement, and the reason the two questions are separate: whenever a
+// context is not adopted -- malformed, or well-formed but untrusted -- this
+// process starts a fresh root rather than repairing, partially reusing, or
+// silently dropping the inbound one. A repaired hostile context is still a
+// hostile context.
+@id("std.tracing.fresh-root-required")
+fn fresh_root_required(inbound_shape_admitted: bool, peer_is_trusted: bool) -> bool
+{
+    !inbound_context_adoption_admitted(inbound_shape_admitted, peer_is_trusted)
+}
+
+// The composed span judgement. Every clause is one of the named predicates
+// above, so a refusal is attributable to a stated rule.
+@id("std.tracing.span-admitted")
+fn span_admitted(name: borrow Slice<u8>, kind: i64, status: i64, start_nanos: i64, end_nanos: i64, attribute_count: usize) -> bool
+{
+    let shaped = span_name_admitted(name) && span_kind_admitted(kind) && span_status_admitted(status);
+    shaped && span_duration_admitted(start_nanos, end_nanos) && span_attribute_count_admitted(attribute_count)
+}
+
+// The same judgement with the shared redaction policy's six caller-declared
+// flags applied: a span the caller has classified as carrying a secret in
+// its name or attributes is refused before it is recorded, independent of
+// every shape rule above.
+@id("std.tracing.span-admitted-guarded")
+fn span_admitted_guarded(name: borrow Slice<u8>, kind: i64, status: i64, start_nanos: i64, end_nanos: i64, attribute_count: usize, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+{
+    span_admitted(name, kind, status, start_nanos, end_nanos, attribute_count) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
 }

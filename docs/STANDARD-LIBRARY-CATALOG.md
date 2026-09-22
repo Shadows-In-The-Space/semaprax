@@ -2381,6 +2381,189 @@ is ever assembled into a message.
 fn value_is_header_safe_guarded(field: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
 ```
 
+### `std.email.header-projection-admitted`
+
+policy owns protected names, classified values, marker and commitment shape;
+this package retains its existing byte/size grammar. This does not send,
+authenticate a commitment, discover secrets in arbitrary content, or make
+legacy unguarded shape helpers secret-safe.
+
+```semaprax
+fn header_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.email.subject-len-admitted`
+
+---------------------------------------------------------------------
+Message budgets, header fields, and attachments (issue #193)
+---------------------------------------------------------------------
+Everything above judges an address and a header value's injection safety.
+A message is more than its envelope: a subject long enough to fold across
+lines, a body big enough to exhaust a provider's quota, and an attachment
+whose declared filename is the one byte sequence that reaches a recipient's
+filesystem are all caller-controlled and all unbounded until stated here.
+
+This slice states them. It sends nothing, encodes nothing, and opens no
+connection: every function is scalar-in/scalar-out or
+`borrow Slice<u8>`-in/scalar-out, and a `true` answer is a decision about
+an already-assembled value, never authority to transmit it.
+
+```semaprax
+fn subject_len_admitted(length: usize) -> bool
+```
+
+### `std.email.header-line-len-admitted`
+
+RFC 5322's 998-octet line ceiling, stated rather than assumed. A header
+value longer than this is refused instead of being folded by the adapter:
+folding is a rewrite, and a rewrite of a caller's value is exactly where
+an injected sequence gets reassembled into something else.
+
+```semaprax
+fn header_line_len_admitted(length: usize) -> bool
+```
+
+### `std.email.body-len-limit`
+
+```semaprax
+fn body_len_limit() -> usize
+```
+
+### `std.email.body-len-admitted`
+
+```semaprax
+fn body_len_admitted(length: usize) -> bool
+```
+
+### `std.email.attachment-count-admitted`
+
+An adapter that accepts an unbounded attachment list turns one caller into
+a provider-quota amplifier, exactly as an unbounded recipient list turns
+it into a fan-out amplifier.
+
+```semaprax
+fn attachment_count_admitted(count: usize) -> bool
+```
+
+### `std.email.attachment-len-limit`
+
+```semaprax
+fn attachment_len_limit() -> usize
+```
+
+### `std.email.attachment-len-admitted`
+
+```semaprax
+fn attachment_len_admitted(length: usize) -> bool
+```
+
+### `std.email.total-size-limit`
+
+```semaprax
+fn total_size_limit() -> usize
+```
+
+### `std.email.total-size-admitted`
+
+The per-part ceilings do not compose into a whole-message ceiling on their
+own: sixteen attachments each inside their own limit still exceed what a
+provider will accept. The total is checked separately, with both operands
+already bounded so the sum cannot wrap.
+
+```semaprax
+fn total_size_admitted(body_len: usize, attachment_bytes: usize) -> bool
+```
+
+### `std.email.header-name-byte-admitted`
+
+---------------------------------------------------------------------
+Header fields
+---------------------------------------------------------------------
+A field name is an RFC 5322 printable-ASCII token with no colon: a name
+that can carry a colon can carry a whole second header.
+
+```semaprax
+fn header_name_byte_admitted(candidate: u8) -> bool
+```
+
+### `std.email.header-name-admitted`
+
+```semaprax
+fn header_name_admitted(name: borrow Slice<u8>) -> bool
+```
+
+### `std.email.header-field-admitted`
+
+A complete field: a token name, an injection-safe value, and a line that
+fits. All three, because each alone lets a different malformed header out.
+
+```semaprax
+fn header_field_admitted(name: borrow Slice<u8>, value: borrow Slice<u8>) -> bool
+```
+
+### `std.email.filename-byte-admitted`
+
+---------------------------------------------------------------------
+Attachments
+---------------------------------------------------------------------
+A filename reaches a recipient's filesystem. Path separators, quotes,
+backslashes, semicolons and control bytes are refused rather than escaped:
+escaping is a rewrite, and a `Content-Disposition` parameter is exactly
+where a rewrite gets un-escaped by someone else's parser.
+
+```semaprax
+fn filename_byte_admitted(candidate: u8) -> bool
+```
+
+### `std.email.filename-admitted`
+
+```semaprax
+fn filename_admitted(name: borrow Slice<u8>) -> bool
+```
+
+### `std.email.media-type-byte-admitted`
+
+`type/subtype`, exactly one solidus, each half a non-empty token. A media
+type carrying parameters is refused here: a parameter is another place a
+caller-controlled value crosses into a header.
+
+```semaprax
+fn media_type_byte_admitted(candidate: u8) -> bool
+```
+
+### `std.email.media-type-admitted`
+
+```semaprax
+fn media_type_admitted(value: borrow Slice<u8>) -> bool
+```
+
+### `std.email.attachment-admitted`
+
+```semaprax
+fn attachment_admitted(filename: borrow Slice<u8>, media_type: borrow Slice<u8>, length: usize) -> bool
+```
+
+### `std.email.message-admitted`
+
+The composed message judgement. Every clause is one of the predicates
+above, so a refusal is attributable to a named rule rather than to this
+function as a whole, and a caller learns which budget it exceeded.
+
+```semaprax
+fn message_admitted(subject: borrow Slice<u8>, recipient_count: usize, body_len: usize, attachment_count: usize, attachment_bytes: usize) -> bool
+```
+
+### `std.email.message-admitted-guarded`
+
+The same judgement with the shared redaction policy's six caller-declared
+flags applied, so a message the caller has classified as carrying a secret
+in its subject or body is refused before it is assembled, independent of
+every budget above.
+
+```semaprax
+fn message_admitted_guarded(subject: borrow Slice<u8>, recipient_count: usize, body_len: usize, attachment_count: usize, attachment_bytes: usize, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+```
+
 ## `std.encoding`
 
 Package `std/encoding`, tier `core`, status partial. Required project profile: `scalar`. Dependency: `std.encoding = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
@@ -3381,6 +3564,324 @@ its bytes would otherwise pass the separator scan.
 fn value_is_header_safe_guarded(field: borrow Slice<u8>, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
 ```
 
+### `std.http.header-projection-admitted`
+
+policy owns protected names, classified values, marker and commitment shape;
+this package retains its existing byte/size grammar. This does not send,
+authenticate a commitment, discover secrets in arbitrary content, or make
+legacy unguarded shape helpers secret-safe.
+
+```semaprax
+fn header_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.http.diagnostic-target-byte-admitted`
+
+Diagnostic/display target policy, not request routing: only a bounded plain
+origin path. Queries, fragments, percent escapes and userinfo are refused,
+never stripped into a misleading URL. A classified secret path is refused
+even if its spelling passes. This is not endpoint or DNS authorization.
+
+```semaprax
+fn diagnostic_target_byte_admitted(value: u8) -> bool
+```
+
+### `std.http.diagnostic-target-admitted`
+
+```semaprax
+fn diagnostic_target_admitted(target: borrow Slice<u8>, classified_secret: bool) -> bool
+```
+
+### `std.http.scheme-byte-matches`
+
+---------------------------------------------------------------------
+Outbound client policy (issue #193)
+---------------------------------------------------------------------
+Everything above judges bytes a server or a client already has: a request
+line, a header name, a status line, a body length read off a parsed
+message. None of it decides whether an outbound request should be made at
+all. This slice is that decision layer: transport, deadline, body budget,
+redirect policy, a normalized outcome taxonomy, and the retry rule that
+keeps an at-most-once effect from becoming an at-least-once one.
+
+It performs no I/O, declares no `permit`, calls no `uses`-gated operation,
+and resolves no name. Endpoint *identity* -- whether a host and port were
+allowlisted at all, and whether the target is an internal address -- is
+`std.net`'s job and is passed in here as the caller's already-made
+decision rather than re-derived, so there is exactly one allowlist rule in
+the standard library instead of two that can disagree.
+
+```semaprax
+fn scheme_byte_matches(scheme: borrow Slice<u8>, index: usize, expected: u8) -> bool
+```
+
+### `std.http.scheme-is-https`
+
+Exactly `https`, case-folded. A scheme check that accepts a prefix admits
+`https-evil`, and one that is case-sensitive is bypassed by `HTTPS`.
+
+```semaprax
+fn scheme_is_https(scheme: borrow Slice<u8>) -> bool
+```
+
+### `std.http.scheme-is-http`
+
+```semaprax
+fn scheme_is_http(scheme: borrow Slice<u8>) -> bool
+```
+
+### `std.http.transport-admitted`
+
+Cleartext is refused rather than upgraded. Silently rewriting `http` to
+`https` hides a deployment's mistake; refusing it surfaces one.
+
+```semaprax
+fn transport_admitted(scheme: borrow Slice<u8>) -> bool
+```
+
+### `std.http.deadline-millis-max`
+
+---------------------------------------------------------------------
+Deadlines
+---------------------------------------------------------------------
+An outbound call with no deadline is an unbounded hold on the caller's
+own budget. The ceiling is stated so that a caller cannot pass a
+"deadline" of a day and call the request bounded.
+
+```semaprax
+fn deadline_millis_max() -> i64
+```
+
+### `std.http.deadline-admitted`
+
+```semaprax
+fn deadline_admitted(budget_millis: i64) -> bool
+```
+
+### `std.http.deadline-remaining`
+
+The budget left, never negative and never larger than the budget itself,
+so a caller that passes a clock reading older than its own start cannot
+manufacture extra time.
+
+```semaprax
+fn deadline_remaining(started_at: i64, now: i64, budget_millis: i64) -> i64
+    requires started_at >= 0
+    requires now >= started_at
+    requires deadline_admitted(budget_millis)
+```
+
+### `std.http.deadline-expired`
+
+```semaprax
+fn deadline_expired(started_at: i64, now: i64, budget_millis: i64) -> bool
+    requires started_at >= 0
+    requires now >= started_at
+    requires deadline_admitted(budget_millis)
+```
+
+### `std.http.request-body-limit`
+
+---------------------------------------------------------------------
+Body budgets
+---------------------------------------------------------------------
+Two separate ceilings on purpose: what this process is willing to send is
+a different decision from how much of a remote answer it is willing to
+buffer, and a response budget derived from the request budget is how a
+small request ends up authorizing a large allocation.
+
+```semaprax
+fn request_body_limit() -> usize
+```
+
+### `std.http.response-body-limit`
+
+```semaprax
+fn response_body_limit() -> usize
+```
+
+### `std.http.request-body-admitted`
+
+```semaprax
+fn request_body_admitted(length: usize) -> bool
+```
+
+### `std.http.response-body-admitted`
+
+```semaprax
+fn response_body_admitted(length: usize) -> bool
+```
+
+### `std.http.redirect-depth-max`
+
+---------------------------------------------------------------------
+Redirects
+---------------------------------------------------------------------
+A redirect is a second request to an address the caller never chose. Each
+hop is re-judged against the same endpoint policy as the first, the chain
+is bounded, and credentials do not travel across an origin boundary.
+
+```semaprax
+fn redirect_depth_max() -> i64
+```
+
+### `std.http.redirect-depth-admitted`
+
+```semaprax
+fn redirect_depth_admitted(depth: i64) -> bool
+```
+
+### `std.http.status-is-redirect`
+
+```semaprax
+fn status_is_redirect(code: i64) -> bool
+```
+
+### `std.http.redirect-preserves-method`
+
+307 and 308 replay the original method and body; 301, 302 and 303 are the
+codes clients historically rewrite to GET. Stating which is which keeps a
+redirect from silently turning a POST into a GET, or a GET into a replayed
+POST.
+
+```semaprax
+fn redirect_preserves_method(code: i64) -> bool
+    requires status_is_redirect(code)
+```
+
+### `std.http.redirect-forwards-credentials`
+
+All three components must match. A redirect that keeps the host but drops
+to cleartext, or keeps the name but changes the port, is a different
+origin and must not carry the first request's Authorization header.
+
+```semaprax
+fn redirect_forwards_credentials(same_scheme: bool, same_host: bool, same_port: bool) -> bool
+```
+
+### `std.http.redirect-admitted`
+
+The whole hop. `target_endpoint_admitted` is `std.net.endpoint-admitted`'s
+answer for the *new* location, not the original one: re-checking the
+allowlist at every hop is the property that stops a redirect from being
+the way out of it.
+
+```semaprax
+fn redirect_admitted(code: i64, depth: i64, target_scheme: borrow Slice<u8>, target: borrow Slice<u8>, target_endpoint_admitted: bool) -> bool
+```
+
+### `std.http.outcome-admitted`
+
+---------------------------------------------------------------------
+Normalized outcomes
+---------------------------------------------------------------------
+One closed vocabulary instead of a transport's own error strings, so a
+caller's retry logic is written against a stable code and a diagnostic
+never carries a URL, a header, or a credential out of the adapter.
+
+ 0 completed              9 protocol-error
+ 1 endpoint-refused      10 server-transient
+ 2 dns-failed            11 uncertain
+ 3 tls-failed
+ 4 connect-failed
+ 5 deadline-exceeded
+ 6 cancelled
+ 7 redirect-refused
+ 8 body-limit-exceeded
+
+```semaprax
+fn outcome_admitted(outcome: i64) -> bool
+```
+
+### `std.http.outcome-may-have-reached-origin`
+
+Whether the request may already have been processed by the origin. This
+is the distinction that decides whether retrying a non-idempotent request
+risks a duplicate effect: a DNS failure never reached anything, a
+deadline may have.
+
+```semaprax
+fn outcome_may_have_reached_origin(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+```
+
+### `std.http.outcome-is-uncertain`
+
+An outcome whose delivery state is genuinely unknown. `uncertain` is a
+first-class answer rather than a failure: an adapter that reports "failed"
+for a request that may have succeeded invites exactly the duplicate the
+retry rule below exists to prevent.
+
+```semaprax
+fn outcome_is_uncertain(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+```
+
+### `std.http.outcome-is-retryable`
+
+A retry can only help when the condition is transient. An endpoint refused
+by policy, a refused redirect, and an over-budget body are all decisions
+that will be made again identically, so retrying them is pure amplification.
+
+```semaprax
+fn outcome_is_retryable(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+```
+
+### `std.http.method-equals`
+
+---------------------------------------------------------------------
+Idempotence and retry
+---------------------------------------------------------------------
+
+```semaprax
+fn method_equals(method: borrow Slice<u8>, expected: borrow Slice<u8>) -> bool
+```
+
+### `std.http.method-is-idempotent`
+
+The closed idempotent set. POST and PATCH are absent on purpose: repeating
+either is a second external effect, which is exactly what this issue's
+"no automatic retries of non-idempotent outbound requests" rule forbids.
+
+```semaprax
+fn method_is_idempotent(method: borrow Slice<u8>) -> bool
+```
+
+### `std.http.attempt-admitted`
+
+```semaprax
+fn attempt_admitted(attempt: i64) -> bool
+```
+
+### `std.http.retry-admitted`
+
+The rule with teeth. A retry is admitted only when the outcome is
+transient, the attempt budget is not spent, and one of three things is
+true: the request never reached the origin, the method is idempotent by
+definition, or the caller supplied an idempotency key the origin can
+deduplicate against. A non-idempotent request with no key that may already
+have been processed is refused, which is the uncertain-delivery case.
+
+```semaprax
+fn retry_admitted(method: borrow Slice<u8>, outcome: i64, attempt: i64, has_idempotency_key: bool) -> bool
+    requires outcome_admitted(outcome)
+```
+
+### `std.http.outbound-request-admitted`
+
+---------------------------------------------------------------------
+The composed outbound request
+---------------------------------------------------------------------
+Every clause is one of the named predicates above, so a refusal is always
+attributable to a stated rule rather than to this function as a whole. A
+`true` answer is a decision about a request's shape and policy, never a
+capability to perform it.
+
+```semaprax
+fn outbound_request_admitted(method: borrow Slice<u8>, scheme: borrow Slice<u8>, target: borrow Slice<u8>, endpoint_allowlisted: bool, body_len: usize, budget_millis: i64) -> bool
+```
+
 ## `std.io`
 
 Package `std/io`, tier `portable`, status partial. Required project profile: `owned-data-api.v1`. Dependency: `std.io = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
@@ -3925,6 +4426,137 @@ fn append_event_guarded(event: own Event, carries_password: bool, carries_api_ke
     requires match borrow output { Writer { data, position } => position <= byte_len(bytes_as_slice(data)) && event_json_len(event) <= byte_len(bytes_as_slice(data)) - position, }
 ```
 
+### `std.log.field-projection-admitted`
+
+policy owns protected names, classified values, marker and commitment shape;
+this package retains its existing byte/size grammar. This does not send,
+authenticate a commitment, discover secrets in arbitrary content, or make
+legacy unguarded shape helpers secret-safe.
+
+```semaprax
+fn field_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.log.event-name-byte-admitted`
+
+---------------------------------------------------------------------
+Stable event identities and structured fields (issue #193)
+---------------------------------------------------------------------
+This package's `Event` carries a `name` and a `message`, and until here
+neither had a grammar. That is the difference between a log a query can be
+written against and a log a human greps: a stable event identity is the
+one field an alert, a dashboard, and a regression test all bind to, so it
+has to be a closed spelling rather than whatever string the call site
+happened to interpolate. The `message` stays free text for a reader; the
+identity does not.
+
+The field budget below is the structured-logging analogue of metric label
+cardinality. An event whose field set is assembled from attacker-supplied
+keys is an unbounded-arity observation, and the shared redaction policy
+already owns the ceiling, so it is reused here rather than restated.
+
+Nothing here writes, ships, or stores anything. These are decisions about
+values a caller has already assembled, made before `append_event` is
+reached.
+
+```semaprax
+fn event_name_byte_admitted(candidate: u8) -> bool
+```
+
+### `std.log.event-name-admitted`
+
+A dotted lowercase identifier: `http.request.rejected`, not
+`Rejected request from 203.0.113.9`. Uppercase, spaces and punctuation are
+refused rather than folded or stripped, because an identity that two call
+sites spell differently is two identities, and one an adapter rewrote is
+an identity nobody can predict from the source.
+
+```semaprax
+fn event_name_admitted(name: borrow Slice<u8>) -> bool
+```
+
+### `std.log.level-admitted`
+
+```semaprax
+fn level_admitted(level: u8) -> bool
+```
+
+### `std.log.field-count-admitted`
+
+The same per-observation arity budget the shared redaction policy owns,
+reused rather than restated so a log event's field set and a span's
+attribute set cannot drift to different ceilings.
+
+```semaprax
+fn field_count_admitted(count: usize) -> bool
+```
+
+### `std.log.field-bytes-limit`
+
+Arity alone does not bound an event: thirty-two fields of a megabyte each
+are inside every count budget and still exhaust a log pipeline. The total
+serialized field payload is bounded separately.
+
+```semaprax
+fn field_bytes_limit() -> usize
+```
+
+### `std.log.field-bytes-admitted`
+
+```semaprax
+fn field_bytes_admitted(total: usize) -> bool
+```
+
+### `std.log.message-len-limit`
+
+The message stays free text, but not unbounded free text: a message is
+what a reader sees, and one large enough to dominate a log line is a
+denial of service on the reader as much as on the pipeline.
+
+```semaprax
+fn message_len_limit() -> usize
+```
+
+### `std.log.message-len-admitted`
+
+```semaprax
+fn message_len_admitted(length: usize) -> bool
+```
+
+### `std.log.structured-event-admitted`
+
+The composed judgement a structured-logging caller makes before it
+assembles an Event at all. Every clause is one of the named predicates
+above, so a refusal is attributable to a stated rule.
+
+```semaprax
+fn structured_event_admitted(name: borrow Slice<u8>, level: u8, message_len: usize, field_count: usize, field_bytes: usize) -> bool
+```
+
+### `std.log.structured-event-admitted-guarded`
+
+The same judgement with the shared redaction policy's six caller-declared
+flags applied. None of the shape rules above has any notion of classified
+content: an event whose fields carry a session token passes every one of
+them, which is exactly the gap `append_event_guarded` closes at the writer
+and this closes one step earlier, before the event is built.
+
+```semaprax
+fn structured_event_admitted_guarded(name: borrow Slice<u8>, level: u8, message_len: usize, field_count: usize, field_bytes: usize, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+```
+
+### `std.log.observed-status`
+
+A telemetry sink's failure is not the application's failure. The primary
+status survives unless the deployment explicitly chose to fail closed on
+export, in which case the export failure is reported as itself rather than
+disguised as an application error. Stated here, at the observability root,
+because every adapter in this family can reach it.
+
+```semaprax
+fn observed_status(primary_status: i64, export_status: i64, fail_closed_on_export: bool) -> i64
+```
+
 ## `std.log.redact`
 
 Package `std/log-redact`, tier `portable`, status partial. Required project profile: `useful-data.v2`. Dependency: `std.log.redact = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
@@ -4025,6 +4657,68 @@ never to leave it unstated.
 
 ```semaprax
 fn field_count_within_budget(count: usize) -> bool
+```
+
+### `std.log.redact.normalized-name-byte`
+
+Additive named-field projection policy. Names are bounded ASCII identifiers;
+case and '-'/'_' spelling cannot bypass the closed protected-name inventory.
+This is not content-based secret discovery: unknown secret values still need
+the caller's explicit classification. No raw secret input is needed here.
+
+```semaprax
+fn normalized_name_byte(value: u8) -> u8
+```
+
+### `std.log.redact.name-byte-admitted`
+
+```semaprax
+fn name_byte_admitted(value: u8) -> bool
+```
+
+### `std.log.redact.field-name-admitted`
+
+```semaprax
+fn field_name_admitted(name: borrow Slice<u8>) -> bool
+```
+
+### `std.log.redact.normalized-name-matches`
+
+```semaprax
+fn normalized_name_matches(name: borrow Slice<u8>, expected: borrow Slice<u8>) -> bool
+```
+
+### `std.log.redact.field-name-is-protected`
+
+```semaprax
+fn field_name_is_protected(name: borrow Slice<u8>) -> bool
+```
+
+### `std.log.redact.commitment-shape-admitted`
+
+Optional already-produced commitment: absent, or exactly 64 lowercase hex
+bytes. This checks shape only. It neither computes a hash nor authenticates
+a claimed commitment, and callers must not disguise a credential as one.
+
+```semaprax
+fn commitment_shape_admitted(commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.log.redact.projected-field-admitted`
+
+Validate the bytes an adapter proposes to emit, never the original secret.
+Protected fields/values require the exact visible marker, with no prefix,
+suffix, or secret-length dependence. Public raw values cannot carry a
+misleading redaction commitment. This adds no serialization/send authority.
+
+```semaprax
+fn projected_field_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.log.redact.projection-len-admitted`
+
+```semaprax
+fn projection_len_admitted(length: usize) -> bool
 ```
 
 ## `std.mem`
@@ -4287,6 +4981,261 @@ fn try_admit_labeled_series_guarded(existing_count: i64, name: borrow Slice<u8>,
     ensures result == -1 || result >= 1 && result <= cardinality_limit()
 ```
 
+### `std.metrics.label-projection-admitted`
+
+policy owns protected names, classified values, marker and commitment shape;
+this package retains its existing byte/size grammar. This does not send,
+authenticate a commitment, discover secrets in arbitrary content, or make
+legacy unguarded shape helpers secret-safe.
+
+```semaprax
+fn label_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.metrics.try-admit-projected-series`
+
+```semaprax
+fn try_admit_projected_series(existing_count: i64, name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> i64
+    requires existing_count >= 0 && existing_count <= cardinality_limit()
+    ensures result == -1 || result >= 1 && result <= cardinality_limit()
+```
+
+### `std.metrics.byte-is-metric-name-start`
+
+---------------------------------------------------------------------
+Metric identity, counter monotonicity, and histogram buckets (issue #193)
+---------------------------------------------------------------------
+Everything above judges a label and a series budget. A metric is more
+than its labels: it has a name that has to stay the same across releases
+for a dashboard to keep working, a unit that has to be stated for a value
+to mean anything, a kind that decides how a consumer may aggregate it, and
+-- for a histogram -- a bucket layout that has to be monotonic for a
+quantile computed from it to be anything but noise.
+
+A metric name is the highest-leverage cardinality decision in the whole
+package: a name assembled from a request path creates a new metric per
+request, which no per-metric series budget can contain because each one is
+its own metric. The grammar below refuses that shape by construction.
+
+Nothing here records, aggregates, or exports a measurement.
+
+```semaprax
+fn byte_is_metric_name_start(byte: u8) -> bool
+```
+
+### `std.metrics.byte-is-metric-name-char`
+
+```semaprax
+fn byte_is_metric_name_char(byte: u8) -> bool
+```
+
+### `std.metrics.metric-name-max-len`
+
+```semaprax
+fn metric_name_max_len() -> usize
+```
+
+### `std.metrics.metric-name-admitted`
+
+Lowercase only, and never starting with a digit. Uppercase is refused
+rather than folded for the same reason a span name refuses it: folding
+hides a caller's mistake, and two names that differ only in case would
+otherwise become two metrics that look like one on a dashboard.
+
+```semaprax
+fn metric_name_admitted(name: borrow Slice<u8>) -> bool
+```
+
+### `std.metrics.byte-is-unit-char`
+
+A unit is optional but never arbitrary: `ms`, `by`, `1`, `req/s`. An empty
+unit is admitted and means "dimensionless", stated rather than left to a
+consumer to guess.
+
+```semaprax
+fn byte_is_unit_char(byte: u8) -> bool
+```
+
+### `std.metrics.metric-unit-admitted`
+
+```semaprax
+fn metric_unit_admitted(unit: borrow Slice<u8>) -> bool
+```
+
+### `std.metrics.metric-kind-admitted`
+
+0 counter, 1 gauge, 2 histogram, 3 up-down counter. The kind is what tells
+a consumer whether summing two values is meaningful, so it is a closed
+vocabulary rather than a free-form string.
+
+```semaprax
+fn metric_kind_admitted(kind: i64) -> bool
+```
+
+### `std.metrics.counter-delta-admitted`
+
+---------------------------------------------------------------------
+Counter monotonicity
+---------------------------------------------------------------------
+A counter only ever goes up. A negative delta is refused rather than
+applied, because a consumer computing a rate from a decreasing counter
+reads it as a process restart and silently discards the interval.
+
+```semaprax
+fn counter_delta_admitted(delta: i64) -> bool
+```
+
+### `std.metrics.counter-reset-detected`
+
+The reset a consumer must actually handle: a value lower than the last one
+it saw. Reporting this as data, rather than papering over it, is what lets
+a rate calculation restart deliberately instead of producing a negative
+rate or an enormous one.
+
+```semaprax
+fn counter_reset_detected(previous: i64, current: i64) -> bool
+    requires previous >= 0
+    requires current >= 0
+```
+
+### `std.metrics.delta-admitted-for-kind`
+
+An up-down counter is the one kind for which a negative delta is
+legitimate, which is precisely why it is a different kind rather than a
+counter with a relaxed rule.
+
+```semaprax
+fn delta_admitted_for_kind(kind: i64, delta: i64) -> bool
+    requires metric_kind_admitted(kind)
+```
+
+### `std.metrics.bucket-count-max`
+
+---------------------------------------------------------------------
+Histogram buckets
+---------------------------------------------------------------------
+Bucket bounds are checked pairwise, in the order a caller supplies them,
+rather than as a whole array: this package has no array-of-i64 parameter
+shape, and a pairwise rule is the same property stated one step at a time.
+A caller walks its own bounds and asks once per adjacent pair.
+
+```semaprax
+fn bucket_count_max() -> usize
+```
+
+### `std.metrics.bucket-count-admitted`
+
+At least one finite bound, and a stated ceiling: an unbounded bucket
+layout is per-metric cardinality by another name, since every bucket is a
+series in most exposition formats.
+
+```semaprax
+fn bucket_count_admitted(count: usize) -> bool
+```
+
+### `std.metrics.bucket-bound-follows`
+
+Strictly increasing, not merely non-decreasing. Two equal adjacent bounds
+create a bucket that can never be selected, and a quantile interpolated
+across it divides by its zero width.
+
+```semaprax
+fn bucket_bound_follows(previous: i64, next: i64) -> bool
+```
+
+### `std.metrics.bucket-selects`
+
+Upper-inclusive, lower-exclusive, matching the cumulative convention every
+mainstream exposition format uses. Stating it here keeps a caller from
+choosing the other convention and shifting every quantile by one bucket.
+
+```semaprax
+fn bucket_selects(value: i64, lower_bound: i64, upper_bound: i64) -> bool
+    requires bucket_bound_follows(lower_bound, upper_bound)
+```
+
+### `std.metrics.cumulative-count-follows`
+
+Cumulative bucket counts are non-decreasing by construction: a later
+bucket contains every observation an earlier one did. A pair that
+decreases is a corrupt or reordered histogram, not a small one.
+
+```semaprax
+fn cumulative_count_follows(previous: i64, next: i64) -> bool
+```
+
+### `std.metrics.histogram-totals-admitted`
+
+A histogram's own consistency: the count in its final cumulative bucket
+can never exceed the observation count, and the observation count can
+never be negative. A caller that reports more bucketed observations than
+it made has a counting bug this refuses to export.
+
+```semaprax
+fn histogram_totals_admitted(observation_count: i64, final_cumulative_count: i64) -> bool
+```
+
+### `std.metrics.overflow-series-slot`
+
+---------------------------------------------------------------------
+Deterministic overflow aggregation
+---------------------------------------------------------------------
+`try_admit_series` above refuses past the per-metric limit. Refusal is one
+deterministic answer; the other the issue names is aggregation, and this
+is it: excess series fold into one reserved slot rather than vanishing, so
+the total stays correct even though the attribution is lost. The slot is a
+fixed index, so the same overflowing sequence produces the same layout on
+every run and on every backend.
+
+```semaprax
+fn overflow_series_slot() -> i64
+```
+
+### `std.metrics.series-slot`
+
+The slot an incoming series is written to: its own next index while the
+budget holds, and the reserved overflow slot afterwards. Deterministic in
+both branches and total over every admitted count, so no caller has to
+invent behaviour for the overflowing case.
+
+```semaprax
+fn series_slot(existing_count: i64) -> i64
+    requires existing_count >= 0
+    ensures result >= 0 && result <= cardinality_limit()
+```
+
+### `std.metrics.series-was-aggregated`
+
+```semaprax
+fn series_was_aggregated(existing_count: i64) -> bool
+    requires existing_count >= 0
+```
+
+### `std.metrics.deployment-series-limit`
+
+A whole-deployment ceiling above the per-metric one. A process holding a
+hundred metrics each inside `cardinality_limit()` is still well past what
+a collector will accept, and no per-metric budget can see that.
+
+```semaprax
+fn deployment_series_limit() -> i64
+```
+
+### `std.metrics.deployment-series-admitted`
+
+```semaprax
+fn deployment_series_admitted(total_series: i64) -> bool
+```
+
+### `std.metrics.metric-admitted`
+
+The composed metric judgement. Every clause is one of the named
+predicates above, so a refusal is attributable to a stated rule.
+
+```semaprax
+fn metric_admitted(name: borrow Slice<u8>, unit: borrow Slice<u8>, kind: i64, label_count: i64) -> bool
+```
+
 ## `std.net`
 
 Package `std/net`, tier `portable`, status partial. Required project profile: `useful-data.v1`. Dependency: `std.net = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
@@ -4338,6 +5287,191 @@ fn digit_or_ten(byte: u8) -> usize
 
 ```semaprax
 fn is_ipv4(host: borrow Slice<u8>) -> bool
+```
+
+### `std.net.ipv4-octet`
+
+---------------------------------------------------------------------
+Literal-address classification and endpoint allowlists (issue #193)
+---------------------------------------------------------------------
+`host_is_valid` and `is_ipv4` above judge spelling. Spelling is not
+reachability policy: `127.0.0.1`, `169.254.169.254`, `10.0.0.1`, and
+`localhost` are all perfectly well-spelled and are exactly the targets a
+server-side request forgery aims an outbound client at. This slice adds
+the classification an outbound adapter consults BEFORE it resolves or
+connects, plus the exact-match allowlist rule that decides whether a
+caller-supplied endpoint was authorized at all.
+
+Nothing here resolves a name, opens a socket, or grants network
+authority. Every function is scalar-in/scalar-out or
+`borrow Slice<u8>`-in/scalar-out. A `true` answer is a decision about a
+spelling, never a permission to connect: the capability model still owns
+that, and this package declares no `permit`.
+
+What this deliberately does NOT do: it does not decide anything about a
+name's *resolved* address. A hostname that passes `host_is_public_target`
+can still resolve to a loopback address (DNS rebinding). Defending that
+requires re-checking the resolved literal at connect time, which is the
+host adapter's job; this package supplies the literal classifier that
+check must use, and says so rather than implying the name check is enough.
+
+```semaprax
+fn ipv4_octet(host: borrow Slice<u8>, group: usize) -> usize
+    requires is_ipv4(host)
+    requires group < 4usize
+```
+
+### `std.net.ipv4-is-loopback`
+
+127.0.0.0/8. The whole /8 is loopback, not only 127.0.0.1: an adapter that
+refuses the one canonical spelling and admits 127.0.0.2 has refused
+nothing.
+
+```semaprax
+fn ipv4_is_loopback(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+```
+
+### `std.net.ipv4-is-private`
+
+RFC 1918: 10/8, 172.16/12, 192.168/16. The 172 range is a /12, not a /8 or
+a /16, so both ends of its second octet are checked rather than assumed.
+
+```semaprax
+fn ipv4_is_private(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+```
+
+### `std.net.ipv4-is-link-local`
+
+169.254.0.0/16. This is the range that carries cloud instance-metadata
+services, which is why an outbound client that forgets it leaks
+credentials rather than merely reaching a private host.
+
+```semaprax
+fn ipv4_is_link_local(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+```
+
+### `std.net.ipv4-is-unspecified`
+
+0.0.0.0/8: "this network". On many stacks 0.0.0.0 connects to localhost.
+
+```semaprax
+fn ipv4_is_unspecified(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+```
+
+### `std.net.ipv4-is-shared`
+
+100.64.0.0/10, the carrier-grade NAT shared address space.
+
+```semaprax
+fn ipv4_is_shared(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+```
+
+### `std.net.ipv4-is-multicast`
+
+224.0.0.0/4 multicast and 240.0.0.0/4 reserved, including the
+255.255.255.255 limited broadcast address at the top of the reserved
+range. Neither is a legitimate unicast target for an outbound client.
+
+```semaprax
+fn ipv4_is_multicast(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+```
+
+### `std.net.ipv4-is-reserved`
+
+```semaprax
+fn ipv4_is_reserved(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+```
+
+### `std.net.ipv4-is-internal`
+
+The closed refusal an outbound adapter actually calls on a literal
+address. Adding a newly-reserved range means adding it here; the check is
+exhaustive over this stated list, not over whatever a caller remembers.
+
+```semaprax
+fn ipv4_is_internal(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+```
+
+### `std.net.lowered-label-byte`
+
+```semaprax
+fn lowered_label_byte(byte: u8) -> u8
+```
+
+### `std.net.host-equals-ignoring-case`
+
+Case-insensitive exact equality over host spellings. DNS names are
+case-insensitive, so an allowlist that compares bytes literally admits
+`example.com` and refuses `EXAMPLE.com`, or worse, is bypassed by a
+deployment that wrote its entry in a different case.
+
+```semaprax
+fn host_equals_ignoring_case(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool
+```
+
+### `std.net.host-is-loopback-name`
+
+The reserved loopback *name*. A host that never looks at literals still
+reaches its own loopback interface through this spelling.
+
+```semaprax
+fn host_is_loopback_name(host: borrow Slice<u8>) -> bool
+```
+
+### `std.net.host-is-public-target`
+
+A well-spelled host that is neither a reserved name nor an internal
+literal. This is a spelling judgement about the target a caller asked for,
+not about the address it will resolve to; see this section's opening note
+on DNS rebinding.
+
+```semaprax
+fn host_is_public_target(host: borrow Slice<u8>) -> bool
+```
+
+### `std.net.allowlist-entry-admitted`
+
+---------------------------------------------------------------------
+Endpoint allowlist
+---------------------------------------------------------------------
+An allowlist entry is a well-spelled host and a valid port, both stated.
+A entry with an unstated port is not an entry: "example.com" with the port
+left to the caller authorizes port 22 as readily as port 443.
+
+```semaprax
+fn allowlist_entry_admitted(entry_host: borrow Slice<u8>, entry_port: usize) -> bool
+```
+
+### `std.net.endpoint-matches-allowlist-entry`
+
+Exact host and exact port, deliberately with no suffix or wildcard rule.
+A suffix match on `example.com` admits `evil-example.com` under a naive
+implementation and `example.com.attacker.test` under a careless one; both
+are the standard way endpoint allowlists are bypassed. A deployment that
+needs several subdomains states several entries.
+
+```semaprax
+fn endpoint_matches_allowlist_entry(host: borrow Slice<u8>, port: usize, entry_host: borrow Slice<u8>, entry_port: usize) -> bool
+```
+
+### `std.net.endpoint-admitted`
+
+The composed judgement. `allow_internal` is the deployment's explicit,
+separate decision to authorize an internal target (a sidecar, a test
+fixture); it defaults to nothing and must be passed as `true` on purpose,
+so an internal endpoint is never reachable merely because someone wrote it
+into an allowlist by accident.
+
+```semaprax
+fn endpoint_admitted(host: borrow Slice<u8>, port: usize, entry_host: borrow Slice<u8>, entry_port: usize, allow_internal: bool) -> bool
 ```
 
 ## `std.num`
@@ -5764,6 +6898,183 @@ enforcing this across N members calls it once per sibling with
 fn tracestate_mutation_admitted(mutated_key: borrow Slice<u8>, first_member_key: borrow Slice<u8>, sibling_key: borrow Slice<u8>) -> bool
 ```
 
+### `std.tracing.tracestate-field-projection-admitted`
+
+policy owns protected names, classified values, marker and commitment shape;
+this package retains its existing byte/size grammar. This does not send,
+authenticate a commitment, discover secrets in arbitrary content, or make
+legacy unguarded shape helpers secret-safe.
+
+```semaprax
+fn tracestate_field_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.span-name-byte-admitted`
+
+---------------------------------------------------------------------
+Spans (issue #193)
+---------------------------------------------------------------------
+Everything above is propagation: the bytes that travel between processes.
+A span is what a process records about its own work, and none of its own
+fields -- an operation name, a kind, a status, a duration, an attribute
+set -- has had a rule until here. Each of them is caller-controlled, and
+three of them are the direct analogue of metric label cardinality: an
+operation name assembled from a request path, an attribute set with
+unbounded arity, and a duration read from an untrusted clock.
+
+Nothing here starts, ends, records, or exports a span. These are
+decisions about values a caller has already assembled, and this package
+still declares no `permit` and performs no I/O.
+
+```semaprax
+fn span_name_byte_admitted(candidate: u8) -> bool
+```
+
+### `std.tracing.span-name-admitted`
+
+A span name identifies an *operation*, not an occurrence of one. The
+alphabet is deliberately narrow and lowercase so that `GET /users/4711`
+cannot be a span name: a name carrying an identifier makes every request
+its own series downstream, which is metric-label cardinality wearing a
+different hat. Uppercase is refused rather than folded, because folding
+hides the caller's mistake instead of reporting it.
+
+```semaprax
+fn span_name_admitted(name: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.span-kind-admitted`
+
+The closed kind vocabulary: 0 internal, 1 server, 2 client, 3 producer,
+4 consumer. A sixth kind means changing this function, not passing a
+larger number.
+
+```semaprax
+fn span_kind_admitted(kind: i64) -> bool
+```
+
+### `std.tracing.span-status-admitted`
+
+0 unset, 1 ok, 2 error. `unset` is distinct from `ok` on purpose: a span
+nobody judged is not a span that succeeded.
+
+```semaprax
+fn span_status_admitted(status: i64) -> bool
+```
+
+### `std.tracing.span-duration-limit-nanos`
+
+One hour in nanoseconds. A span longer than this is far likelier to be a
+clock that moved, an end timestamp that was never written, or an
+attacker-supplied duration than a unit of work, and admitting it lets one
+bad value dominate every latency aggregate built from the trace.
+
+```semaprax
+fn span_duration_limit_nanos() -> i64
+```
+
+### `std.tracing.span-duration-admitted`
+
+A span's clock readings are data, not authority: an end before its start
+is refused rather than clamped, so a negative duration never becomes a
+zero-duration span that silently disappears from a latency distribution.
+
+```semaprax
+fn span_duration_admitted(start_nanos: i64, end_nanos: i64) -> bool
+```
+
+### `std.tracing.span-attribute-count-admitted`
+
+The same per-observation arity budget the shared redaction policy already
+owns, reused rather than restated so a span's attribute set and a log
+event's field set cannot drift to different ceilings.
+
+```semaprax
+fn span_attribute_count_admitted(count: usize) -> bool
+```
+
+### `std.tracing.span-attribute-admitted`
+
+A span attribute is a named field proposed for export, so it is judged by
+exactly the shared projection policy -- protected names, classified
+values, the visible marker, commitment shape -- with this package's own
+name grammar layered on top. A secret attribute is refused, never
+truncated or hashed into something that looks harmless.
+
+```semaprax
+fn span_attribute_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.tracing.fresh-span-id-admitted`
+
+---------------------------------------------------------------------
+Fresh identity and hostile inbound propagation
+---------------------------------------------------------------------
+A trace-id or span-id this process mints must come from a declared
+randomness capability, not from a counter, a clock, or an echo of
+whatever arrived on the wire. `randomness_declared` is the caller's
+statement that it holds one; this package cannot generate an identifier
+itself and does not pretend to. The generated value must also differ from
+the inbound one it replaces, so "generate a fresh id" cannot be satisfied
+by reusing the attacker's.
+
+```semaprax
+fn fresh_span_id_admitted(span_id: borrow Slice<u8>, inbound_span_id: borrow Slice<u8>, randomness_declared: bool) -> bool
+```
+
+### `std.tracing.fresh-trace-id-admitted`
+
+```semaprax
+fn fresh_trace_id_admitted(trace_id: borrow Slice<u8>, inbound_trace_id: borrow Slice<u8>, randomness_declared: bool) -> bool
+```
+
+### `std.tracing.inbound-context-adoption-admitted`
+
+Two separate questions that a naive implementation collapses into one.
+Whether an inbound `traceparent` is well-formed is a parsing question,
+answered above. Whether this process should *continue* that trace is a
+trust question: a well-formed header from an unauthenticated peer is a
+caller-chosen trace-id, which lets anyone on the internet stitch their
+traffic into an internal trace, replay a trace-id to correlate internal
+work, or inflate a backend's per-trace storage at will. A well-formed
+context is adopted only from a trusted peer.
+
+```semaprax
+fn inbound_context_adoption_admitted(inbound_shape_admitted: bool, peer_is_trusted: bool) -> bool
+```
+
+### `std.tracing.fresh-root-required`
+
+The complement, and the reason the two questions are separate: whenever a
+context is not adopted -- malformed, or well-formed but untrusted -- this
+process starts a fresh root rather than repairing, partially reusing, or
+silently dropping the inbound one. A repaired hostile context is still a
+hostile context.
+
+```semaprax
+fn fresh_root_required(inbound_shape_admitted: bool, peer_is_trusted: bool) -> bool
+```
+
+### `std.tracing.span-admitted`
+
+The composed span judgement. Every clause is one of the named predicates
+above, so a refusal is attributable to a stated rule.
+
+```semaprax
+fn span_admitted(name: borrow Slice<u8>, kind: i64, status: i64, start_nanos: i64, end_nanos: i64, attribute_count: usize) -> bool
+```
+
+### `std.tracing.span-admitted-guarded`
+
+The same judgement with the shared redaction policy's six caller-declared
+flags applied: a span the caller has classified as carrying a secret in
+its name or attributes is refused before it is recorded, independent of
+every shape rule above.
+
+```semaprax
+fn span_admitted_guarded(name: borrow Slice<u8>, kind: i64, status: i64, start_nanos: i64, end_nanos: i64, attribute_count: usize, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+```
+
 ## `std.url`
 
 Package `std/url`, tier `portable`, status partial. Required project profile: `scalar`. Dependency: `std.url = "^0.1.0"`. Targets: `interpreter`, `native-c11`, `core-wasm`.
@@ -5939,4 +7250,155 @@ attempt is ever made, independent of signature, size, or timestamp.
 
 ```semaprax
 fn delivery_admitted_guarded(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+```
+
+### `std.webhook.payload-field-projection-admitted`
+
+policy owns protected names, classified values, marker and commitment shape;
+this package retains its existing byte/size grammar. This does not send,
+authenticate a commitment, discover secrets in arbitrary content, or make
+legacy unguarded shape helpers secret-safe.
+
+```semaprax
+fn payload_field_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
+```
+
+### `std.webhook.key-byte-admitted`
+
+---------------------------------------------------------------------
+Delivery identity, idempotency, and uncertain delivery (issue #193)
+---------------------------------------------------------------------
+The section above judges one delivery in isolation: is this signature
+well-shaped, is this body inside budget, is this timestamp fresh. None of
+it can tell a first delivery from the same delivery arriving twice, and
+`attempt_admitted`/`backoff_seconds` bound how often a sender retries
+without ever saying whether retrying *this* delivery is safe at all.
+
+That is the gap this slice closes. A webhook is an external effect: a
+retry after a response that never arrived either recovers a lost delivery
+or performs the effect a second time, and the sender cannot tell which.
+The only honest answer is a first-class `uncertain` outcome plus a rule
+that refuses to retry it unless the receiver was given an idempotency key
+it can deduplicate against.
+
+As everywhere else in this package, nothing here delivers, signs,
+deduplicates, or stores anything. These are decisions about
+already-assembled identifiers and an already-observed outcome.
+
+```semaprax
+fn key_byte_admitted(candidate: u8) -> bool
+```
+
+### `std.webhook.idempotency-key-len-admitted`
+
+Long enough not to collide by accident, short enough to bound what a
+receiver must store and index. A key outside this range is refused rather
+than truncated: truncating two distinct keys to the same prefix is how a
+deduplication table starts suppressing deliveries it should have made.
+
+```semaprax
+fn idempotency_key_len_admitted(length: usize) -> bool
+```
+
+### `std.webhook.idempotency-key-admitted`
+
+A key is opaque: it carries no structure a receiver is expected to parse,
+and deliberately admits no byte that could terminate a header line, open
+a quoted string, or survive into a log field as punctuation.
+
+```semaprax
+fn idempotency_key_admitted(key: borrow Slice<u8>) -> bool
+```
+
+### `std.webhook.delivery-id-len`
+
+A delivery identifier names one delivery across all of its attempts, so a
+receiver's log and a sender's log can be joined without either side
+guessing. Exactly 32 lowercase hex digits: the same shape discipline the
+signature envelope already uses, one length down.
+
+```semaprax
+fn delivery_id_len() -> usize
+```
+
+### `std.webhook.delivery-id-admitted`
+
+```semaprax
+fn delivery_id_admitted(delivery_id: borrow Slice<u8>) -> bool
+```
+
+### `std.webhook.outcome-admitted`
+
+---------------------------------------------------------------------
+Delivery outcomes
+---------------------------------------------------------------------
+One closed vocabulary for what happened to an attempt:
+
+ 0 delivered              3 uncertain
+ 1 refused-permanently    4 signature-invalid
+ 2 transient-failure      5 duplicate-suppressed
+
+```semaprax
+fn outcome_admitted(outcome: i64) -> bool
+```
+
+### `std.webhook.outcome-is-uncertain`
+
+`uncertain` is the outcome a sender records when the request left but no
+response arrived. It is not a failure and must not be reported as one:
+collapsing it into "failed" is what makes a retry look free.
+
+```semaprax
+fn outcome_is_uncertain(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+```
+
+### `std.webhook.outcome-is-terminal`
+
+```semaprax
+fn outcome_is_terminal(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+```
+
+### `std.webhook.outcome-is-retryable`
+
+```semaprax
+fn outcome_is_retryable(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+```
+
+### `std.webhook.retry-admitted`
+
+The rule. A transient failure never reached a handler, so retrying it
+duplicates nothing. An uncertain outcome may already have been handled,
+so it is retried only when the receiver was given an idempotency key it
+can deduplicate against; without one, the sender must stop and surface the
+uncertainty rather than guess.
+
+```semaprax
+fn retry_admitted(outcome: i64, attempt: i64, has_idempotency_key: bool) -> bool
+    requires outcome_admitted(outcome)
+```
+
+### `std.webhook.duplicate-suppression-admitted`
+
+A receiver that has already handled this key answers `duplicate-suppressed`
+rather than performing the effect again. Suppression requires a key: a
+receiver with no key has nothing to deduplicate on and must treat the
+delivery as new.
+
+```semaprax
+fn duplicate_suppression_admitted(has_idempotency_key: bool, key_already_seen: bool) -> bool
+```
+
+### `std.webhook.delivery-plan-admitted`
+
+The composed sender-side judgement before an attempt leaves: the existing
+envelope policy, a well-formed delivery identity, and -- for a delivery
+the sender intends to be able to retry at all -- an idempotency key. A
+sender that declares `retryable` without a key is refused here rather than
+discovering the problem after the first uncertain response.
+
+```semaprax
+fn delivery_plan_admitted(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64, delivery_id: borrow Slice<u8>, idempotency_key: borrow Slice<u8>, intends_retry: bool) -> bool
 ```

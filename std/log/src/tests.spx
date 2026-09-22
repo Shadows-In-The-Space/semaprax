@@ -20,6 +20,17 @@ use function @id("std.log.write-level") from std.log as write_level;
 use function @id("std.io.writer.cursor") from std.io as writer_position;
 use function @id("std.io.writer.finish") from std.io as writer_finish;
 use function @id("std.io.writer.from-bytes") from std.io as writer_from_bytes;
+use function @id("std.log.event-name-byte-admitted") from std.log as event_name_byte_admitted;
+use function @id("std.log.event-name-admitted") from std.log as event_name_admitted;
+use function @id("std.log.level-admitted") from std.log as level_admitted;
+use function @id("std.log.field-count-admitted") from std.log as field_count_admitted;
+use function @id("std.log.field-bytes-limit") from std.log as field_bytes_limit;
+use function @id("std.log.field-bytes-admitted") from std.log as field_bytes_admitted;
+use function @id("std.log.message-len-limit") from std.log as message_len_limit;
+use function @id("std.log.message-len-admitted") from std.log as message_len_admitted;
+use function @id("std.log.structured-event-admitted") from std.log as structured_event_admitted;
+use function @id("std.log.structured-event-admitted-guarded") from std.log as structured_event_admitted_guarded;
+use function @id("std.log.observed-status") from std.log as observed_status;
 
 @id("std.log.tests.equal")
 fn equal(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool
@@ -118,7 +129,7 @@ fn main() -> i64
     failed = failed + if test_line() == 0 { 0 } else { 1 };
     failed = failed + if guarded_writes_through_when_safe() { 0 } else { 2 };
     failed = failed + if guarded_discards_when_unsafe() { 0 } else { 4 };
-    failed + projection_policy_failures()
+    failed + projection_policy_failures() + structured_event_failures()
 }
 
 @id("std.log.tests.projection-policy-cases")
@@ -157,4 +168,144 @@ fn projection_value_limit() -> bool
 fn projection_policy_failures() -> i64
 {
     if projection_policy_cases() && projection_value_limit() { 0 } else { 1073741824 }
+}
+
+// ---------------------------------------------------------------------
+// Issue #193: stable event identities and field budgets
+// ---------------------------------------------------------------------
+@id("std.log.tests.event_name_alphabet")
+fn event_name_alphabet() -> bool
+{
+    event_name_byte_admitted(97u8) && event_name_byte_admitted(122u8) && event_name_byte_admitted(48u8) && event_name_byte_admitted(57u8) && event_name_byte_admitted(46u8) && event_name_byte_admitted(95u8)
+}
+
+@id("std.log.tests.event_name_alphabet_refusals")
+fn event_name_alphabet_refusals() -> bool
+{
+    !event_name_byte_admitted(65u8) && !event_name_byte_admitted(90u8) && !event_name_byte_admitted(32u8) && !event_name_byte_admitted(45u8) && !event_name_byte_admitted(10u8) && !event_name_byte_admitted(34u8)
+}
+
+// An identity is a dotted lowercase identifier, not a sentence: a message
+// interpolated into the name field is refused rather than folded, because an
+// identity two call sites spell differently is two identities.
+@id("std.log.tests.event_name_is_an_identity_not_a_sentence")
+fn event_name_is_an_identity_not_a_sentence() -> bool
+{
+    let identity = [104u8, 116u8, 116u8, 112u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 46u8, 114u8, 101u8, 106u8, 101u8, 99u8, 116u8, 101u8, 100u8];
+    let sentence = [82u8, 101u8, 106u8, 101u8, 99u8, 116u8, 101u8, 100u8, 32u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 32u8, 102u8, 114u8, 111u8, 109u8, 32u8, 50u8, 48u8, 51u8, 46u8, 48u8, 46u8, 49u8, 49u8, 51u8, 46u8, 57u8];
+    let shouting = [72u8, 84u8, 84u8, 80u8, 46u8, 82u8, 69u8, 81u8, 85u8, 69u8, 83u8, 84u8];
+    let empty = [0u8; 0];
+    event_name_admitted(array_as_slice(identity)) && !event_name_admitted(array_as_slice(sentence)) && !event_name_admitted(array_as_slice(shouting)) && !event_name_admitted(array_as_slice(empty))
+}
+
+@id("std.log.tests.event_name_length_window")
+fn event_name_length_window() -> bool
+{
+    let at_limit = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    let over_limit = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    event_name_admitted(array_as_slice(at_limit)) && !event_name_admitted(array_as_slice(over_limit))
+}
+
+@id("std.log.tests.level_vocabulary_is_closed")
+fn level_vocabulary_is_closed() -> bool
+{
+    level_admitted(0u8) && level_admitted(5u8) && !level_admitted(6u8) && !level_admitted(255u8)
+}
+
+// Arity and payload are separate budgets: thirty-two fields are inside the
+// count ceiling and can still be far past the byte ceiling.
+@id("std.log.tests.field_budgets_are_separate")
+fn field_budgets_are_separate() -> bool
+{
+    let bytes_limit = field_bytes_limit();
+    let counts = field_count_admitted(0usize) && field_count_admitted(32usize) && !field_count_admitted(33usize);
+    let payload = field_bytes_admitted(0usize) && field_bytes_admitted(bytes_limit) && !field_bytes_admitted(bytes_limit + 1usize);
+    counts && payload
+}
+
+@id("std.log.tests.message_budget_boundary")
+fn message_budget_boundary() -> bool
+{
+    let limit = message_len_limit();
+    message_len_admitted(0usize) && message_len_admitted(limit) && !message_len_admitted(limit + 1usize)
+}
+
+// Every clause of the composed judgement refuses on its own while the other
+// four hold, so a refusal is attributable to a named rule.
+@id("std.log.tests.structured_event_admission_is_attributable")
+fn structured_event_admission_is_attributable() -> bool
+{
+    let identity = [104u8, 116u8, 116u8, 112u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 46u8, 114u8, 101u8, 106u8, 101u8, 99u8, 116u8, 101u8, 100u8];
+    let sentence = [82u8, 101u8, 106u8, 101u8, 99u8, 116u8, 101u8, 100u8, 32u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8];
+    let name = array_as_slice(identity);
+    let all_hold = structured_event_admitted(name, 3u8, 256usize, 8usize, 1024usize);
+    let name_only = !structured_event_admitted(array_as_slice(sentence), 3u8, 256usize, 8usize, 1024usize);
+    let level_only = !structured_event_admitted(name, 6u8, 256usize, 8usize, 1024usize);
+    let message_only = !structured_event_admitted(name, 3u8, message_len_limit() + 1usize, 8usize, 1024usize);
+    let count_only = !structured_event_admitted(name, 3u8, 256usize, 33usize, 1024usize);
+    let bytes_only = !structured_event_admitted(name, 3u8, 256usize, 8usize, field_bytes_limit() + 1usize);
+    all_hold && name_only && level_only && message_only && count_only && bytes_only
+}
+
+// None of the shape rules has any notion of classified content: an event
+// whose fields carry a session token passes every one of them.
+@id("std.log.tests.structured_guard_refuses_each_secret_flag")
+fn structured_guard_refuses_each_secret_flag() -> bool
+{
+    let identity = [104u8, 116u8, 116u8, 112u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 46u8, 114u8, 101u8, 106u8, 101u8, 99u8, 116u8, 101u8, 100u8];
+    let name = array_as_slice(identity);
+    let safe = structured_event_admitted_guarded(name, 3u8, 256usize, 8usize, 1024usize, false, false, false, false, false, false);
+    let password = !structured_event_admitted_guarded(name, 3u8, 256usize, 8usize, 1024usize, true, false, false, false, false, false);
+    let api_key = !structured_event_admitted_guarded(name, 3u8, 256usize, 8usize, 1024usize, false, true, false, false, false, false);
+    let bearer = !structured_event_admitted_guarded(name, 3u8, 256usize, 8usize, 1024usize, false, false, true, false, false, false);
+    safe && password && api_key && bearer
+}
+
+@id("std.log.tests.structured_guard_refuses_the_remaining_flags")
+fn structured_guard_refuses_the_remaining_flags() -> bool
+{
+    let identity = [104u8, 116u8, 116u8, 112u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 46u8, 114u8, 101u8, 106u8, 101u8, 99u8, 116u8, 101u8, 100u8];
+    let name = array_as_slice(identity);
+    let session = !structured_event_admitted_guarded(name, 3u8, 256usize, 8usize, 1024usize, false, false, false, true, false, false);
+    let signing = !structured_event_admitted_guarded(name, 3u8, 256usize, 8usize, 1024usize, false, false, false, false, true, false);
+    let smtp = !structured_event_admitted_guarded(name, 3u8, 256usize, 8usize, 1024usize, false, false, false, false, false, true);
+    session && signing && smtp
+}
+
+// A telemetry sink's failure never replaces the application's own status,
+// and a deployment gets fail-closed export only by asking for it.
+@id("std.log.tests.export_failure_never_masks_the_primary_status")
+fn export_failure_never_masks_the_primary_status() -> bool
+{
+    let ignored = observed_status(0, 9, false) == 0;
+    let primary_survives = observed_status(4, 9, false) == 4;
+    let primary_survives_fail_closed = observed_status(4, 9, true) == 4;
+    let fail_closed_reports = observed_status(0, 9, true) == 9;
+    let both_succeed = observed_status(0, 0, true) == 0;
+    ignored && primary_survives && primary_survives_fail_closed && fail_closed_reports && both_succeed
+}
+
+@id("std.log.tests.structured-event-failures")
+fn structured_event_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if event_name_alphabet() { 0 } else { 1048576 };
+    failed = failed + if event_name_alphabet_refusals() { 0 } else { 2097152 };
+    failed = failed + if event_name_is_an_identity_not_a_sentence() { 0 } else { 4194304 };
+    failed = failed + if event_name_length_window() { 0 } else { 8388608 };
+    failed = failed + if level_vocabulary_is_closed() { 0 } else { 16777216 };
+    failed = failed + if field_budgets_are_separate() { 0 } else { 33554432 };
+    failed + structured_guard_failures()
+}
+
+@id("std.log.tests.structured-guard-failures")
+fn structured_guard_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if message_budget_boundary() { 0 } else { 67108864 };
+    failed = failed + if structured_event_admission_is_attributable() { 0 } else { 134217728 };
+    failed = failed + if structured_guard_refuses_each_secret_flag() { 0 } else { 268435456 };
+    failed = failed + if structured_guard_refuses_the_remaining_flags() { 0 } else { 536870912 };
+    failed = failed + if export_failure_never_masks_the_primary_status() { 0 } else { 1073741824 };
+    failed
 }

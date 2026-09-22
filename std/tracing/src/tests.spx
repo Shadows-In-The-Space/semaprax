@@ -27,6 +27,20 @@ use function @id("std.tracing.tracestate_key_shape_admitted") from std.tracing a
 use function @id("std.tracing.tracestate_value_shape_admitted") from std.tracing as tracestate_value_shape_admitted;
 use function @id("std.tracing.tracestate_member_admitted") from std.tracing as tracestate_member_admitted;
 use function @id("std.tracing.tracestate_mutation_admitted") from std.tracing as tracestate_mutation_admitted;
+use function @id("std.tracing.span-name-byte-admitted") from std.tracing as span_name_byte_admitted;
+use function @id("std.tracing.span-name-admitted") from std.tracing as span_name_admitted;
+use function @id("std.tracing.span-kind-admitted") from std.tracing as span_kind_admitted;
+use function @id("std.tracing.span-status-admitted") from std.tracing as span_status_admitted;
+use function @id("std.tracing.span-duration-limit-nanos") from std.tracing as span_duration_limit_nanos;
+use function @id("std.tracing.span-duration-admitted") from std.tracing as span_duration_admitted;
+use function @id("std.tracing.span-attribute-count-admitted") from std.tracing as span_attribute_count_admitted;
+use function @id("std.tracing.span-attribute-admitted") from std.tracing as span_attribute_admitted;
+use function @id("std.tracing.fresh-span-id-admitted") from std.tracing as fresh_span_id_admitted;
+use function @id("std.tracing.fresh-trace-id-admitted") from std.tracing as fresh_trace_id_admitted;
+use function @id("std.tracing.inbound-context-adoption-admitted") from std.tracing as inbound_context_adoption_admitted;
+use function @id("std.tracing.fresh-root-required") from std.tracing as fresh_root_required;
+use function @id("std.tracing.span-admitted") from std.tracing as span_admitted;
+use function @id("std.tracing.span-admitted-guarded") from std.tracing as span_admitted_guarded;
 
 // The trace context's shape and the caller's six secret-bearing
 // classifications are independent gates. Every flag is exercised alone so a
@@ -526,7 +540,7 @@ fn redaction_guard_failures() -> i64
 @id("std.tracing.tests.main")
 fn main() -> i64
 {
-    inbound_conformance_failures() + outbound_conformance_failures() * 8192 + redaction_guard_failures() * 16384 + projection_policy_failures()
+    inbound_conformance_failures() + outbound_conformance_failures() * 8192 + redaction_guard_failures() * 16384 + projection_policy_failures() + span_policy_failures()
 }
 
 @id("std.tracing.tests.projection-policy-cases")
@@ -574,4 +588,214 @@ fn projection_value_limit() -> bool
 fn projection_policy_failures() -> i64
 {
     if projection_policy_cases() && projection_value_limit() { 0 } else { 1073741824 }
+}
+
+// ---------------------------------------------------------------------
+// Issue #193: span schema and hostile inbound propagation
+// ---------------------------------------------------------------------
+@id("std.tracing.tests.span_name_alphabet")
+fn span_name_alphabet() -> bool
+{
+    span_name_byte_admitted(97u8) && span_name_byte_admitted(122u8) && span_name_byte_admitted(48u8) && span_name_byte_admitted(45u8) && span_name_byte_admitted(46u8) && span_name_byte_admitted(47u8) && span_name_byte_admitted(95u8)
+}
+
+@id("std.tracing.tests.span_name_alphabet_refusals")
+fn span_name_alphabet_refusals() -> bool
+{
+    !span_name_byte_admitted(65u8) && !span_name_byte_admitted(90u8) && !span_name_byte_admitted(32u8) && !span_name_byte_admitted(63u8) && !span_name_byte_admitted(10u8) && !span_name_byte_admitted(58u8)
+}
+
+// A name carrying a request identifier makes every request its own series
+// downstream, which is metric-label cardinality wearing a different hat.
+// `GET /users/4711` is refused for its uppercase and its space; the stable
+// operation name it should have been is admitted.
+@id("std.tracing.tests.span_name_refuses_high_cardinality_shapes")
+fn span_name_refuses_high_cardinality_shapes() -> bool
+{
+    let stable = [104u8, 116u8, 116u8, 112u8, 46u8, 115u8, 101u8, 114u8, 118u8, 101u8, 114u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8];
+    let pathy = [117u8, 115u8, 101u8, 114u8, 115u8, 47u8, 98u8, 121u8, 45u8, 105u8, 100u8];
+    let request = [71u8, 69u8, 84u8, 32u8, 47u8, 117u8, 115u8, 101u8, 114u8, 115u8, 47u8, 52u8, 55u8, 49u8, 49u8];
+    let empty = [0u8; 0];
+    span_name_admitted(array_as_slice(stable)) && span_name_admitted(array_as_slice(pathy)) && !span_name_admitted(array_as_slice(request)) && !span_name_admitted(array_as_slice(empty))
+}
+
+@id("std.tracing.tests.span_name_length_window")
+fn span_name_length_window() -> bool
+{
+    let at_limit = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    let over_limit = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    span_name_admitted(array_as_slice(at_limit)) && !span_name_admitted(array_as_slice(over_limit))
+}
+
+@id("std.tracing.tests.span_kind_and_status_vocabularies")
+fn span_kind_and_status_vocabularies() -> bool
+{
+    span_kind_admitted(0) && span_kind_admitted(4) && !span_kind_admitted(-1) && !span_kind_admitted(5) && span_status_admitted(0) && span_status_admitted(2) && !span_status_admitted(-1) && !span_status_admitted(3)
+}
+
+// An end before its start is refused rather than clamped, so a negative
+// duration never becomes a zero-duration span nobody notices.
+@id("std.tracing.tests.span_duration_boundaries")
+fn span_duration_boundaries() -> bool
+{
+    let limit = span_duration_limit_nanos();
+    let instant = span_duration_admitted(1000, 1000);
+    let at_limit = span_duration_admitted(0, limit);
+    let over_limit = !span_duration_admitted(0, limit + 1);
+    let reversed = !span_duration_admitted(2000, 1999);
+    let negative_start = !span_duration_admitted(-1, 1000);
+    instant && at_limit && over_limit && reversed && negative_start
+}
+
+// The attribute ceiling is the shared redaction budget, not a second one.
+@id("std.tracing.tests.span_attribute_count_boundary")
+fn span_attribute_count_boundary() -> bool
+{
+    span_attribute_count_admitted(0usize) && span_attribute_count_admitted(32usize) && !span_attribute_count_admitted(33usize)
+}
+
+// A span attribute is judged by the shared projection policy plus this
+// package's name grammar: a protected name needs the exact marker, and a
+// name outside the span alphabet is refused even with a public value.
+@id("std.tracing.tests.span_attribute_projection")
+fn span_attribute_projection() -> bool
+{
+    let protected = [112u8, 97u8, 115u8, 115u8, 119u8, 111u8, 114u8, 100u8];
+    let public = [104u8, 116u8, 116u8, 112u8, 46u8, 115u8, 116u8, 97u8, 116u8, 117u8, 115u8];
+    let raw = [115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
+    let marker = [91u8, 82u8, 69u8, 68u8, 65u8, 67u8, 84u8, 69u8, 68u8, 93u8];
+    let shouting = [72u8, 84u8, 84u8, 80u8, 46u8, 83u8, 84u8, 65u8, 84u8, 85u8, 83u8];
+    let raw_view = array_as_slice(raw);
+    let absent = byte_range(raw_view, 0usize, 0usize);
+    let refuses_named = !span_attribute_admitted(array_as_slice(protected), false, array_as_slice(raw), absent);
+    let admits_marker = span_attribute_admitted(array_as_slice(protected), false, array_as_slice(marker), absent);
+    let admits_public = span_attribute_admitted(array_as_slice(public), false, array_as_slice(raw), absent);
+    let refuses_grammar = !span_attribute_admitted(array_as_slice(shouting), false, array_as_slice(raw), absent);
+    refuses_named && admits_marker && admits_public && refuses_grammar
+}
+
+// "Generate a fresh id" cannot be satisfied by echoing the inbound one, and
+// cannot be satisfied at all without a declared randomness capability.
+@id("std.tracing.tests.fresh_span_id_is_not_an_echo")
+fn fresh_span_id_is_not_an_echo() -> bool
+{
+    let inbound = [48u8, 48u8, 102u8, 48u8, 54u8, 55u8, 97u8, 97u8, 48u8, 98u8, 97u8, 57u8, 48u8, 50u8, 98u8, 55u8];
+    let minted = [98u8, 55u8, 57u8, 48u8, 50u8, 98u8, 97u8, 48u8, 97u8, 97u8, 54u8, 55u8, 102u8, 48u8, 48u8, 48u8];
+    let zeroes = [48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8, 48u8];
+    let previous = array_as_slice(inbound);
+    let fresh = fresh_span_id_admitted(array_as_slice(minted), previous, true);
+    let echoed = !fresh_span_id_admitted(previous, previous, true);
+    let undeclared = !fresh_span_id_admitted(array_as_slice(minted), previous, false);
+    let all_zero = !fresh_span_id_admitted(array_as_slice(zeroes), previous, true);
+    fresh && echoed && undeclared && all_zero
+}
+
+@id("std.tracing.tests.fresh_trace_id_is_not_an_echo")
+fn fresh_trace_id_is_not_an_echo() -> bool
+{
+    let inbound = [52u8, 98u8, 102u8, 57u8, 50u8, 102u8, 51u8, 53u8, 55u8, 55u8, 98u8, 51u8, 52u8, 100u8, 97u8, 54u8, 97u8, 51u8, 99u8, 101u8, 57u8, 50u8, 57u8, 100u8, 48u8, 101u8, 48u8, 101u8, 52u8, 55u8, 51u8, 54u8];
+    let minted = [54u8, 51u8, 55u8, 52u8, 101u8, 48u8, 101u8, 48u8, 100u8, 57u8, 50u8, 57u8, 101u8, 99u8, 97u8, 54u8, 97u8, 100u8, 52u8, 51u8, 98u8, 55u8, 55u8, 55u8, 51u8, 53u8, 102u8, 50u8, 57u8, 102u8, 98u8, 52u8];
+    let short = [52u8, 98u8, 102u8, 57u8, 50u8, 102u8, 51u8, 53u8, 55u8, 55u8, 98u8, 51u8, 52u8, 100u8, 97u8, 54u8, 97u8, 51u8, 99u8, 101u8, 57u8, 50u8, 57u8, 100u8, 48u8, 101u8, 48u8, 101u8, 52u8, 55u8, 51u8];
+    let previous = array_as_slice(inbound);
+    let fresh = fresh_trace_id_admitted(array_as_slice(minted), previous, true);
+    let echoed = !fresh_trace_id_admitted(previous, previous, true);
+    let undeclared = !fresh_trace_id_admitted(array_as_slice(minted), previous, false);
+    let malformed = !fresh_trace_id_admitted(array_as_slice(short), previous, true);
+    fresh && echoed && undeclared && malformed
+}
+
+// The two questions are separate: a well-formed header from an
+// unauthenticated peer is a caller-chosen trace-id, so it is not adopted,
+// and a fresh root is required in exactly the three non-adopting cases.
+@id("std.tracing.tests.well_formed_is_not_trusted")
+fn well_formed_is_not_trusted() -> bool
+{
+    let adopted = inbound_context_adoption_admitted(true, true);
+    let untrusted = !inbound_context_adoption_admitted(true, false);
+    let malformed = !inbound_context_adoption_admitted(false, true);
+    let neither = !inbound_context_adoption_admitted(false, false);
+    adopted && untrusted && malformed && neither
+}
+
+@id("std.tracing.tests.fresh_root_is_required_whenever_not_adopted")
+fn fresh_root_is_required_whenever_not_adopted() -> bool
+{
+    !fresh_root_required(true, true) && fresh_root_required(true, false) && fresh_root_required(false, true) && fresh_root_required(false, false)
+}
+
+// Every clause of the composed span judgement refuses on its own.
+@id("std.tracing.tests.span_admission_is_attributable")
+fn span_admission_is_attributable() -> bool
+{
+    let name = [104u8, 116u8, 116u8, 112u8, 46u8, 115u8, 101u8, 114u8, 118u8, 101u8, 114u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8];
+    let shouting = [72u8, 84u8, 84u8, 80u8, 46u8, 83u8, 69u8, 82u8, 86u8, 69u8, 82u8, 46u8, 82u8, 69u8, 81u8, 85u8, 69u8, 83u8, 84u8];
+    let operation = array_as_slice(name);
+    let all_hold = span_admitted(operation, 1, 1, 1000, 2000, 8usize);
+    let name_only = !span_admitted(array_as_slice(shouting), 1, 1, 1000, 2000, 8usize);
+    let kind_only = !span_admitted(operation, 5, 1, 1000, 2000, 8usize);
+    let status_only = !span_admitted(operation, 1, 3, 1000, 2000, 8usize);
+    let duration_only = !span_admitted(operation, 1, 1, 2000, 1000, 8usize);
+    let attributes_only = !span_admitted(operation, 1, 1, 1000, 2000, 33usize);
+    all_hold && name_only && kind_only && status_only && duration_only && attributes_only
+}
+
+// None of the shape rules has any notion of classified content: a fully
+// admitted span whose attributes carry a bearer token passes all of them.
+@id("std.tracing.tests.span_guard_refuses_each_secret_flag")
+fn span_guard_refuses_each_secret_flag() -> bool
+{
+    let name = [104u8, 116u8, 116u8, 112u8, 46u8, 115u8, 101u8, 114u8, 118u8, 101u8, 114u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8];
+    let operation = array_as_slice(name);
+    let safe = span_admitted_guarded(operation, 1, 1, 1000, 2000, 8usize, false, false, false, false, false, false);
+    let password = !span_admitted_guarded(operation, 1, 1, 1000, 2000, 8usize, true, false, false, false, false, false);
+    let api_key = !span_admitted_guarded(operation, 1, 1, 1000, 2000, 8usize, false, true, false, false, false, false);
+    let bearer = !span_admitted_guarded(operation, 1, 1, 1000, 2000, 8usize, false, false, true, false, false, false);
+    safe && password && api_key && bearer
+}
+
+@id("std.tracing.tests.span_guard_refuses_the_remaining_flags")
+fn span_guard_refuses_the_remaining_flags() -> bool
+{
+    let name = [104u8, 116u8, 116u8, 112u8, 46u8, 115u8, 101u8, 114u8, 118u8, 101u8, 114u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8];
+    let operation = array_as_slice(name);
+    let session = !span_admitted_guarded(operation, 1, 1, 1000, 2000, 8usize, false, false, false, true, false, false);
+    let signing = !span_admitted_guarded(operation, 1, 1, 1000, 2000, 8usize, false, false, false, false, true, false);
+    let smtp = !span_admitted_guarded(operation, 1, 1, 1000, 2000, 8usize, false, false, false, false, false, true);
+    session && signing && smtp
+}
+
+@id("std.tracing.tests.span-policy-failures")
+fn span_policy_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if span_name_alphabet() { 0 } else { 1048576 };
+    failed = failed + if span_name_alphabet_refusals() { 0 } else { 2097152 };
+    failed = failed + if span_name_refuses_high_cardinality_shapes() { 0 } else { 4194304 };
+    failed = failed + if span_name_length_window() { 0 } else { 8388608 };
+    failed = failed + if span_kind_and_status_vocabularies() { 0 } else { 16777216 };
+    failed = failed + if span_duration_boundaries() { 0 } else { 33554432 };
+    failed + span_identity_failures()
+}
+
+@id("std.tracing.tests.span-identity-failures")
+fn span_identity_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if span_attribute_count_boundary() { 0 } else { 67108864 };
+    failed = failed + if span_attribute_projection() { 0 } else { 134217728 };
+    failed = failed + if fresh_span_id_is_not_an_echo() { 0 } else { 268435456 };
+    failed = failed + if fresh_trace_id_is_not_an_echo() { 0 } else { 536870912 };
+    failed = failed + if well_formed_is_not_trusted() { 0 } else { 1073741824 };
+    failed = failed + if fresh_root_is_required_whenever_not_adopted() { 0 } else { 2147483648 };
+    failed + span_guard_failures()
+}
+
+@id("std.tracing.tests.span-guard-failures")
+fn span_guard_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if span_admission_is_attributable() { 0 } else { 4294967296 };
+    failed = failed + if span_guard_refuses_each_secret_flag() { 0 } else { 8589934592 };
+    failed = failed + if span_guard_refuses_the_remaining_flags() { 0 } else { 17179869184 };
+    failed
 }

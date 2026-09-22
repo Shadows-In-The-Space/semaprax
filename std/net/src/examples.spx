@@ -3,11 +3,30 @@ use function @id("std.net.host_is_valid") from std.net as host_is_valid;
 use function @id("std.net.is_ipv4") from std.net as is_ipv4;
 use function @id("std.net.port_is_valid") from std.net as port_is_valid;
 use function @id("std.net.wait_is_readable") from std.net as wait_is_readable;
+use function @id("std.net.endpoint-admitted") from std.net as endpoint_admitted;
+use function @id("std.net.host-is-public-target") from std.net as host_is_public_target;
 
 @id("std.net.examples.main")
 fn main() -> i64
 {
     let host = [101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 111u8, 114u8, 103u8];
     let loopback = [49u8, 50u8, 55u8, 46u8, 48u8, 46u8, 48u8, 46u8, 49u8];
-    if host_is_valid(array_as_slice(host)) && !is_ipv4(array_as_slice(host)) && is_ipv4(array_as_slice(loopback)) && port_is_valid(80usize) && wait_is_readable(1usize) { 0 } else { 1 }
+    if host_is_valid(array_as_slice(host)) && !is_ipv4(array_as_slice(host)) && is_ipv4(array_as_slice(loopback)) && port_is_valid(80usize) && wait_is_readable(1usize) && outbound_endpoint_walk() { 0 } else { 1 }
+}
+
+// The endpoint decisions an outbound adapter makes before it resolves a
+// name: the allowlisted target is admitted, the cloud instance-metadata
+// address is refused as an internal literal, and a sibling domain that
+// merely looks like the entry never matches it. Nothing here connects.
+@id("std.net.examples.outbound-endpoint-walk")
+fn outbound_endpoint_walk() -> bool
+{
+    let entry = [97u8, 112u8, 105u8, 46u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let metadata = [49u8, 54u8, 57u8, 46u8, 50u8, 53u8, 52u8, 46u8, 49u8, 54u8, 57u8, 46u8, 50u8, 53u8, 52u8];
+    let sibling = [97u8, 112u8, 105u8, 46u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8, 46u8, 97u8, 116u8, 116u8, 97u8, 99u8, 107u8, 101u8, 114u8, 46u8, 116u8, 101u8, 115u8, 116u8];
+    let allowlisted = array_as_slice(entry);
+    let admitted = endpoint_admitted(allowlisted, 443usize, allowlisted, 443usize, false);
+    let internal_refused = !endpoint_admitted(array_as_slice(metadata), 443usize, array_as_slice(metadata), 443usize, false);
+    let sibling_refused = !endpoint_admitted(array_as_slice(sibling), 443usize, allowlisted, 443usize, false);
+    admitted && internal_refused && sibling_refused && host_is_public_target(allowlisted)
 }

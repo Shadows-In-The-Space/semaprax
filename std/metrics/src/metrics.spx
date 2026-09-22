@@ -261,3 +261,238 @@ fn try_admit_projected_series(existing_count: i64, name: borrow Slice<u8>, class
 {
     if label_projection_admitted(name, classified_secret, projection, commitment) { try_admit_series(existing_count) } else { -1 }
 }
+
+// ---------------------------------------------------------------------
+// Metric identity, counter monotonicity, and histogram buckets (issue #193)
+// ---------------------------------------------------------------------
+// Everything above judges a label and a series budget. A metric is more
+// than its labels: it has a name that has to stay the same across releases
+// for a dashboard to keep working, a unit that has to be stated for a value
+// to mean anything, a kind that decides how a consumer may aggregate it, and
+// -- for a histogram -- a bucket layout that has to be monotonic for a
+// quantile computed from it to be anything but noise.
+//
+// A metric name is the highest-leverage cardinality decision in the whole
+// package: a name assembled from a request path creates a new metric per
+// request, which no per-metric series budget can contain because each one is
+// its own metric. The grammar below refuses that shape by construction.
+//
+// Nothing here records, aggregates, or exports a measurement.
+@id("std.metrics.byte-is-metric-name-start")
+fn byte_is_metric_name_start(byte: u8) -> bool
+{
+    byte >= 97u8 && byte <= 122u8 || byte == 95u8
+}
+
+@id("std.metrics.byte-is-metric-name-char")
+fn byte_is_metric_name_char(byte: u8) -> bool
+{
+    byte_is_metric_name_start(byte) || byte >= 48u8 && byte <= 57u8 || byte == 46u8
+}
+
+@id("std.metrics.metric-name-max-len")
+fn metric_name_max_len() -> usize
+{
+    128usize
+}
+
+// Lowercase only, and never starting with a digit. Uppercase is refused
+// rather than folded for the same reason a span name refuses it: folding
+// hides a caller's mistake, and two names that differ only in case would
+// otherwise become two metrics that look like one on a dashboard.
+@id("std.metrics.metric-name-admitted")
+fn metric_name_admitted(name: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut admitted = length >= 1usize && length <= metric_name_max_len();
+    while index < length && admitted {
+        admitted = match byte_get(name, index) { Option::Some { value } => if index == 0usize { byte_is_metric_name_start(value) } else { byte_is_metric_name_char(value) }, Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// A unit is optional but never arbitrary: `ms`, `by`, `1`, `req/s`. An empty
+// unit is admitted and means "dimensionless", stated rather than left to a
+// consumer to guess.
+@id("std.metrics.byte-is-unit-char")
+fn byte_is_unit_char(byte: u8) -> bool
+{
+    byte >= 97u8 && byte <= 122u8 || byte >= 48u8 && byte <= 57u8 || byte == 47u8 || byte == 95u8
+}
+
+@id("std.metrics.metric-unit-admitted")
+fn metric_unit_admitted(unit: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(unit);
+    let mut index = 0usize;
+    let mut admitted = length <= 32usize;
+    while index < length && admitted {
+        admitted = match byte_get(unit, index) { Option::Some { value } => byte_is_unit_char(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// 0 counter, 1 gauge, 2 histogram, 3 up-down counter. The kind is what tells
+// a consumer whether summing two values is meaningful, so it is a closed
+// vocabulary rather than a free-form string.
+@id("std.metrics.metric-kind-admitted")
+fn metric_kind_admitted(kind: i64) -> bool
+{
+    kind >= 0 && kind <= 3
+}
+
+// ---------------------------------------------------------------------
+// Counter monotonicity
+// ---------------------------------------------------------------------
+// A counter only ever goes up. A negative delta is refused rather than
+// applied, because a consumer computing a rate from a decreasing counter
+// reads it as a process restart and silently discards the interval.
+@id("std.metrics.counter-delta-admitted")
+fn counter_delta_admitted(delta: i64) -> bool
+{
+    delta >= 0
+}
+
+// The reset a consumer must actually handle: a value lower than the last one
+// it saw. Reporting this as data, rather than papering over it, is what lets
+// a rate calculation restart deliberately instead of producing a negative
+// rate or an enormous one.
+@id("std.metrics.counter-reset-detected")
+fn counter_reset_detected(previous: i64, current: i64) -> bool
+    requires previous >= 0
+    requires current >= 0
+{
+    current < previous
+}
+
+// An up-down counter is the one kind for which a negative delta is
+// legitimate, which is precisely why it is a different kind rather than a
+// counter with a relaxed rule.
+@id("std.metrics.delta-admitted-for-kind")
+fn delta_admitted_for_kind(kind: i64, delta: i64) -> bool
+    requires metric_kind_admitted(kind)
+{
+    if kind == 0 { counter_delta_admitted(delta) } else { true }
+}
+
+// ---------------------------------------------------------------------
+// Histogram buckets
+// ---------------------------------------------------------------------
+// Bucket bounds are checked pairwise, in the order a caller supplies them,
+// rather than as a whole array: this package has no array-of-i64 parameter
+// shape, and a pairwise rule is the same property stated one step at a time.
+// A caller walks its own bounds and asks once per adjacent pair.
+@id("std.metrics.bucket-count-max")
+fn bucket_count_max() -> usize
+{
+    32usize
+}
+
+// At least one finite bound, and a stated ceiling: an unbounded bucket
+// layout is per-metric cardinality by another name, since every bucket is a
+// series in most exposition formats.
+@id("std.metrics.bucket-count-admitted")
+fn bucket_count_admitted(count: usize) -> bool
+{
+    count >= 1usize && count <= bucket_count_max()
+}
+
+// Strictly increasing, not merely non-decreasing. Two equal adjacent bounds
+// create a bucket that can never be selected, and a quantile interpolated
+// across it divides by its zero width.
+@id("std.metrics.bucket-bound-follows")
+fn bucket_bound_follows(previous: i64, next: i64) -> bool
+{
+    next > previous
+}
+
+// Upper-inclusive, lower-exclusive, matching the cumulative convention every
+// mainstream exposition format uses. Stating it here keeps a caller from
+// choosing the other convention and shifting every quantile by one bucket.
+@id("std.metrics.bucket-selects")
+fn bucket_selects(value: i64, lower_bound: i64, upper_bound: i64) -> bool
+    requires bucket_bound_follows(lower_bound, upper_bound)
+{
+    value > lower_bound && value <= upper_bound
+}
+
+// Cumulative bucket counts are non-decreasing by construction: a later
+// bucket contains every observation an earlier one did. A pair that
+// decreases is a corrupt or reordered histogram, not a small one.
+@id("std.metrics.cumulative-count-follows")
+fn cumulative_count_follows(previous: i64, next: i64) -> bool
+{
+    previous >= 0 && next >= previous
+}
+
+// A histogram's own consistency: the count in its final cumulative bucket
+// can never exceed the observation count, and the observation count can
+// never be negative. A caller that reports more bucketed observations than
+// it made has a counting bug this refuses to export.
+@id("std.metrics.histogram-totals-admitted")
+fn histogram_totals_admitted(observation_count: i64, final_cumulative_count: i64) -> bool
+{
+    observation_count >= 0 && final_cumulative_count >= 0 && final_cumulative_count <= observation_count
+}
+
+// ---------------------------------------------------------------------
+// Deterministic overflow aggregation
+// ---------------------------------------------------------------------
+// `try_admit_series` above refuses past the per-metric limit. Refusal is one
+// deterministic answer; the other the issue names is aggregation, and this
+// is it: excess series fold into one reserved slot rather than vanishing, so
+// the total stays correct even though the attribution is lost. The slot is a
+// fixed index, so the same overflowing sequence produces the same layout on
+// every run and on every backend.
+@id("std.metrics.overflow-series-slot")
+fn overflow_series_slot() -> i64
+{
+    0
+}
+
+// The slot an incoming series is written to: its own next index while the
+// budget holds, and the reserved overflow slot afterwards. Deterministic in
+// both branches and total over every admitted count, so no caller has to
+// invent behaviour for the overflowing case.
+@id("std.metrics.series-slot")
+fn series_slot(existing_count: i64) -> i64
+    requires existing_count >= 0
+    ensures result >= 0 && result <= cardinality_limit()
+{
+    if existing_count < cardinality_limit() { existing_count + 1 } else { overflow_series_slot() }
+}
+
+@id("std.metrics.series-was-aggregated")
+fn series_was_aggregated(existing_count: i64) -> bool
+    requires existing_count >= 0
+{
+    series_slot(existing_count) == overflow_series_slot()
+}
+
+// A whole-deployment ceiling above the per-metric one. A process holding a
+// hundred metrics each inside `cardinality_limit()` is still well past what
+// a collector will accept, and no per-metric budget can see that.
+@id("std.metrics.deployment-series-limit")
+fn deployment_series_limit() -> i64
+{
+    4096
+}
+
+@id("std.metrics.deployment-series-admitted")
+fn deployment_series_admitted(total_series: i64) -> bool
+{
+    total_series >= 0 && total_series <= deployment_series_limit()
+}
+
+// The composed metric judgement. Every clause is one of the named
+// predicates above, so a refusal is attributable to a stated rule.
+@id("std.metrics.metric-admitted")
+fn metric_admitted(name: borrow Slice<u8>, unit: borrow Slice<u8>, kind: i64, label_count: i64) -> bool
+{
+    metric_name_admitted(name) && metric_unit_admitted(unit) && metric_kind_admitted(kind) && label_count_admitted(label_count)
+}

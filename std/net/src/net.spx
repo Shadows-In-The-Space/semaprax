@@ -80,3 +80,205 @@ fn is_ipv4(host: borrow Slice<u8>) -> bool
     }
     valid && groups == 4usize && digits >= 1usize
 }
+
+// ---------------------------------------------------------------------
+// Literal-address classification and endpoint allowlists (issue #193)
+// ---------------------------------------------------------------------
+// `host_is_valid` and `is_ipv4` above judge spelling. Spelling is not
+// reachability policy: `127.0.0.1`, `169.254.169.254`, `10.0.0.1`, and
+// `localhost` are all perfectly well-spelled and are exactly the targets a
+// server-side request forgery aims an outbound client at. This slice adds
+// the classification an outbound adapter consults BEFORE it resolves or
+// connects, plus the exact-match allowlist rule that decides whether a
+// caller-supplied endpoint was authorized at all.
+//
+// Nothing here resolves a name, opens a socket, or grants network
+// authority. Every function is scalar-in/scalar-out or
+// `borrow Slice<u8>`-in/scalar-out. A `true` answer is a decision about a
+// spelling, never a permission to connect: the capability model still owns
+// that, and this package declares no `permit`.
+//
+// What this deliberately does NOT do: it does not decide anything about a
+// name's *resolved* address. A hostname that passes `host_is_public_target`
+// can still resolve to a loopback address (DNS rebinding). Defending that
+// requires re-checking the resolved literal at connect time, which is the
+// host adapter's job; this package supplies the literal classifier that
+// check must use, and says so rather than implying the name check is enough.
+@id("std.net.ipv4-octet")
+fn ipv4_octet(host: borrow Slice<u8>, group: usize) -> usize
+    requires is_ipv4(host)
+    requires group < 4usize
+{
+    let length = byte_len(host);
+    let mut index = 0usize;
+    let mut current = 0usize;
+    let mut value = 0usize;
+    let mut scanning = index < length && current <= group;
+    while scanning {
+        let byte = match byte_get(host, index) { Option::Some { value: found } => found, Option::None {} => 46u8, };
+        let dot = byte == 46u8;
+        let digit = digit_or_ten(byte);
+        value = if !dot && current == group && digit < 10usize && value <= 25usize { value * 10usize + digit } else { value };
+        current = if dot { current + 1usize } else { current };
+        index = index + 1usize;
+        scanning = index < length && current <= group;
+        scanning
+    }
+    if value > 255usize { 255usize } else { value }
+}
+
+// 127.0.0.0/8. The whole /8 is loopback, not only 127.0.0.1: an adapter that
+// refuses the one canonical spelling and admits 127.0.0.2 has refused
+// nothing.
+@id("std.net.ipv4-is-loopback")
+fn ipv4_is_loopback(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+{
+    ipv4_octet(host, 0usize) == 127usize
+}
+
+// RFC 1918: 10/8, 172.16/12, 192.168/16. The 172 range is a /12, not a /8 or
+// a /16, so both ends of its second octet are checked rather than assumed.
+@id("std.net.ipv4-is-private")
+fn ipv4_is_private(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+{
+    let first = ipv4_octet(host, 0usize);
+    let second = ipv4_octet(host, 1usize);
+    first == 10usize || first == 172usize && second >= 16usize && second <= 31usize || first == 192usize && second == 168usize
+}
+
+// 169.254.0.0/16. This is the range that carries cloud instance-metadata
+// services, which is why an outbound client that forgets it leaks
+// credentials rather than merely reaching a private host.
+@id("std.net.ipv4-is-link-local")
+fn ipv4_is_link_local(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+{
+    ipv4_octet(host, 0usize) == 169usize && ipv4_octet(host, 1usize) == 254usize
+}
+
+// 0.0.0.0/8: "this network". On many stacks 0.0.0.0 connects to localhost.
+@id("std.net.ipv4-is-unspecified")
+fn ipv4_is_unspecified(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+{
+    ipv4_octet(host, 0usize) == 0usize
+}
+
+// 100.64.0.0/10, the carrier-grade NAT shared address space.
+@id("std.net.ipv4-is-shared")
+fn ipv4_is_shared(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+{
+    let second = ipv4_octet(host, 1usize);
+    ipv4_octet(host, 0usize) == 100usize && second >= 64usize && second <= 127usize
+}
+
+// 224.0.0.0/4 multicast and 240.0.0.0/4 reserved, including the
+// 255.255.255.255 limited broadcast address at the top of the reserved
+// range. Neither is a legitimate unicast target for an outbound client.
+@id("std.net.ipv4-is-multicast")
+fn ipv4_is_multicast(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+{
+    let first = ipv4_octet(host, 0usize);
+    first >= 224usize && first <= 239usize
+}
+
+@id("std.net.ipv4-is-reserved")
+fn ipv4_is_reserved(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+{
+    ipv4_octet(host, 0usize) >= 240usize
+}
+
+// The closed refusal an outbound adapter actually calls on a literal
+// address. Adding a newly-reserved range means adding it here; the check is
+// exhaustive over this stated list, not over whatever a caller remembers.
+@id("std.net.ipv4-is-internal")
+fn ipv4_is_internal(host: borrow Slice<u8>) -> bool
+    requires is_ipv4(host)
+{
+    ipv4_is_loopback(host) || ipv4_is_private(host) || ipv4_is_link_local(host) || ipv4_is_unspecified(host) || ipv4_is_shared(host) || ipv4_is_multicast(host) || ipv4_is_reserved(host)
+}
+
+@id("std.net.lowered-label-byte")
+fn lowered_label_byte(byte: u8) -> u8
+{
+    if byte >= 65u8 && byte <= 90u8 { byte + 32u8 } else { byte }
+}
+
+// Case-insensitive exact equality over host spellings. DNS names are
+// case-insensitive, so an allowlist that compares bytes literally admits
+// `example.com` and refuses `EXAMPLE.com`, or worse, is bypassed by a
+// deployment that wrote its entry in a different case.
+@id("std.net.host-equals-ignoring-case")
+fn host_equals_ignoring_case(left: borrow Slice<u8>, right: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(left);
+    let mut index = 0usize;
+    let mut same = length == byte_len(right);
+    while index < length && same {
+        let here = match byte_get(left, index) { Option::Some { value } => lowered_label_byte(value), Option::None {} => 0u8, };
+        let there = match byte_get(right, index) { Option::Some { value } => lowered_label_byte(value), Option::None {} => 1u8, };
+        same = here == there;
+        index = index + 1usize;
+        index < length && same
+    }
+    same
+}
+
+// The reserved loopback *name*. A host that never looks at literals still
+// reaches its own loopback interface through this spelling.
+@id("std.net.host-is-loopback-name")
+fn host_is_loopback_name(host: borrow Slice<u8>) -> bool
+{
+    let localhost = [108u8, 111u8, 99u8, 97u8, 108u8, 104u8, 111u8, 115u8, 116u8];
+    host_equals_ignoring_case(host, array_as_slice(localhost))
+}
+
+// A well-spelled host that is neither a reserved name nor an internal
+// literal. This is a spelling judgement about the target a caller asked for,
+// not about the address it will resolve to; see this section's opening note
+// on DNS rebinding.
+@id("std.net.host-is-public-target")
+fn host_is_public_target(host: borrow Slice<u8>) -> bool
+{
+    if host_is_valid(host) { if is_ipv4(host) { !ipv4_is_internal(host) } else { !host_is_loopback_name(host) } } else { false }
+}
+
+// ---------------------------------------------------------------------
+// Endpoint allowlist
+// ---------------------------------------------------------------------
+// An allowlist entry is a well-spelled host and a valid port, both stated.
+// A entry with an unstated port is not an entry: "example.com" with the port
+// left to the caller authorizes port 22 as readily as port 443.
+@id("std.net.allowlist-entry-admitted")
+fn allowlist_entry_admitted(entry_host: borrow Slice<u8>, entry_port: usize) -> bool
+{
+    host_is_valid(entry_host) && port_is_valid(entry_port)
+}
+
+// Exact host and exact port, deliberately with no suffix or wildcard rule.
+// A suffix match on `example.com` admits `evil-example.com` under a naive
+// implementation and `example.com.attacker.test` under a careless one; both
+// are the standard way endpoint allowlists are bypassed. A deployment that
+// needs several subdomains states several entries.
+@id("std.net.endpoint-matches-allowlist-entry")
+fn endpoint_matches_allowlist_entry(host: borrow Slice<u8>, port: usize, entry_host: borrow Slice<u8>, entry_port: usize) -> bool
+{
+    allowlist_entry_admitted(entry_host, entry_port) && port == entry_port && host_equals_ignoring_case(host, entry_host)
+}
+
+// The composed judgement. `allow_internal` is the deployment's explicit,
+// separate decision to authorize an internal target (a sidecar, a test
+// fixture); it defaults to nothing and must be passed as `true` on purpose,
+// so an internal endpoint is never reachable merely because someone wrote it
+// into an allowlist by accident.
+@id("std.net.endpoint-admitted")
+fn endpoint_admitted(host: borrow Slice<u8>, port: usize, entry_host: borrow Slice<u8>, entry_port: usize, allow_internal: bool) -> bool
+{
+    let matched = endpoint_matches_allowlist_entry(host, port, entry_host, entry_port);
+    if matched { allow_internal || host_is_public_target(host) } else { false }
+}

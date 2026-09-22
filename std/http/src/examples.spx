@@ -5,6 +5,9 @@ use function @id("std.http.content_length") from std.http as content_length;
 use function @id("std.http.is_success") from std.http as is_success;
 use function @id("std.http.method_is_valid") from std.http as method_is_valid;
 use function @id("std.http.status_code") from std.http as status_code;
+use function @id("std.http.outbound-request-admitted") from std.http as outbound_request_admitted;
+use function @id("std.http.retry-admitted") from std.http as retry_admitted;
+use function @id("std.http.redirect-admitted") from std.http as redirect_admitted;
 
 @id("std.http.examples.main")
 fn main() -> i64
@@ -12,7 +15,7 @@ fn main() -> i64
     let method = [71u8, 69u8, 84u8];
     let response = [72u8, 84u8, 84u8, 80u8, 47u8, 49u8, 46u8, 49u8, 32u8, 50u8, 48u8, 48u8, 32u8, 79u8, 75u8, 13u8, 10u8, 99u8, 111u8, 110u8, 116u8, 101u8, 110u8, 116u8, 45u8, 108u8, 101u8, 110u8, 103u8, 116u8, 104u8, 58u8, 32u8, 53u8, 13u8, 10u8, 13u8, 10u8, 104u8, 101u8, 108u8, 108u8, 111u8];
     let view = array_as_slice(response);
-    if method_is_valid(array_as_slice(method)) && is_success(status_code(view)) && content_length(view) == 5 && body_len(view) == 5usize && projected_secret() { 0 } else { 1 }
+    if method_is_valid(array_as_slice(method)) && is_success(status_code(view)) && content_length(view) == 5 && body_len(view) == 5usize && projected_secret() && outbound_call_walk() { 0 } else { 1 }
 }
 
 @id("std.http.examples.projected-secret")
@@ -23,4 +26,25 @@ fn projected_secret() -> bool
     let marker_view = array_as_slice(marker);
     let absent = byte_range(marker_view, 0usize, 0usize);
     header_projection_admitted(array_as_slice(name), false, array_as_slice(marker), absent)
+}
+
+// The decisions an outbound adapter makes around one call, in the order it
+// makes them: the request is admitted against transport, target, body and
+// deadline policy; a redirect to a host the allowlist never named is
+// refused; and a POST whose deadline expired is not retried without an
+// idempotency key. Nothing here connects to anything.
+@id("std.http.examples.outbound-call-walk")
+fn outbound_call_walk() -> bool
+{
+    let get = [71u8, 69u8, 84u8];
+    let post = [80u8, 79u8, 83u8, 84u8];
+    let https = [104u8, 116u8, 116u8, 112u8, 115u8];
+    let target = [47u8, 118u8, 49u8, 47u8, 112u8, 105u8, 110u8, 103u8];
+    let method = array_as_slice(get);
+    let scheme = array_as_slice(https);
+    let path = array_as_slice(target);
+    let admitted = outbound_request_admitted(method, scheme, path, true, 512usize, 5000);
+    let unlisted_redirect_refused = !redirect_admitted(307, 0, scheme, path, false);
+    let uncertain_post_not_retried = !retry_admitted(array_as_slice(post), 5, 1, false);
+    admitted && unlisted_redirect_refused && uncertain_post_not_retried
 }

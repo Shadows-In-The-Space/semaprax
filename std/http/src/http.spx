@@ -361,3 +361,293 @@ fn diagnostic_target_admitted(target: borrow Slice<u8>, classified_secret: bool)
     }
     admitted
 }
+
+// ---------------------------------------------------------------------
+// Outbound client policy (issue #193)
+// ---------------------------------------------------------------------
+// Everything above judges bytes a server or a client already has: a request
+// line, a header name, a status line, a body length read off a parsed
+// message. None of it decides whether an outbound request should be made at
+// all. This slice is that decision layer: transport, deadline, body budget,
+// redirect policy, a normalized outcome taxonomy, and the retry rule that
+// keeps an at-most-once effect from becoming an at-least-once one.
+//
+// It performs no I/O, declares no `permit`, calls no `uses`-gated operation,
+// and resolves no name. Endpoint *identity* -- whether a host and port were
+// allowlisted at all, and whether the target is an internal address -- is
+// `std.net`'s job and is passed in here as the caller's already-made
+// decision rather than re-derived, so there is exactly one allowlist rule in
+// the standard library instead of two that can disagree.
+@id("std.http.scheme-byte-matches")
+fn scheme_byte_matches(scheme: borrow Slice<u8>, index: usize, expected: u8) -> bool
+{
+    match byte_get(scheme, index) { Option::Some { value: byte } => lower(byte) == expected, Option::None {} => false, }
+}
+
+// Exactly `https`, case-folded. A scheme check that accepts a prefix admits
+// `https-evil`, and one that is case-sensitive is bypassed by `HTTPS`.
+@id("std.http.scheme-is-https")
+fn scheme_is_https(scheme: borrow Slice<u8>) -> bool
+{
+    byte_len(scheme) == 5usize && scheme_byte_matches(scheme, 0usize, 104u8) && scheme_byte_matches(scheme, 1usize, 116u8) && scheme_byte_matches(scheme, 2usize, 116u8) && scheme_byte_matches(scheme, 3usize, 112u8) && scheme_byte_matches(scheme, 4usize, 115u8)
+}
+
+@id("std.http.scheme-is-http")
+fn scheme_is_http(scheme: borrow Slice<u8>) -> bool
+{
+    byte_len(scheme) == 4usize && scheme_byte_matches(scheme, 0usize, 104u8) && scheme_byte_matches(scheme, 1usize, 116u8) && scheme_byte_matches(scheme, 2usize, 116u8) && scheme_byte_matches(scheme, 3usize, 112u8)
+}
+
+// Cleartext is refused rather than upgraded. Silently rewriting `http` to
+// `https` hides a deployment's mistake; refusing it surfaces one.
+@id("std.http.transport-admitted")
+fn transport_admitted(scheme: borrow Slice<u8>) -> bool
+{
+    scheme_is_https(scheme)
+}
+
+// ---------------------------------------------------------------------
+// Deadlines
+// ---------------------------------------------------------------------
+// An outbound call with no deadline is an unbounded hold on the caller's
+// own budget. The ceiling is stated so that a caller cannot pass a
+// "deadline" of a day and call the request bounded.
+@id("std.http.deadline-millis-max")
+fn deadline_millis_max() -> i64
+{
+    120000
+}
+
+@id("std.http.deadline-admitted")
+fn deadline_admitted(budget_millis: i64) -> bool
+{
+    budget_millis >= 1 && budget_millis <= deadline_millis_max()
+}
+
+// The budget left, never negative and never larger than the budget itself,
+// so a caller that passes a clock reading older than its own start cannot
+// manufacture extra time.
+@id("std.http.deadline-remaining")
+fn deadline_remaining(started_at: i64, now: i64, budget_millis: i64) -> i64
+    requires started_at >= 0
+    requires now >= started_at
+    requires deadline_admitted(budget_millis)
+{
+    let elapsed = now - started_at;
+    if elapsed >= budget_millis { 0 } else { budget_millis - elapsed }
+}
+
+@id("std.http.deadline-expired")
+fn deadline_expired(started_at: i64, now: i64, budget_millis: i64) -> bool
+    requires started_at >= 0
+    requires now >= started_at
+    requires deadline_admitted(budget_millis)
+{
+    deadline_remaining(started_at, now, budget_millis) == 0
+}
+
+// ---------------------------------------------------------------------
+// Body budgets
+// ---------------------------------------------------------------------
+// Two separate ceilings on purpose: what this process is willing to send is
+// a different decision from how much of a remote answer it is willing to
+// buffer, and a response budget derived from the request budget is how a
+// small request ends up authorizing a large allocation.
+@id("std.http.request-body-limit")
+fn request_body_limit() -> usize
+{
+    1048576usize
+}
+
+@id("std.http.response-body-limit")
+fn response_body_limit() -> usize
+{
+    8388608usize
+}
+
+@id("std.http.request-body-admitted")
+fn request_body_admitted(length: usize) -> bool
+{
+    length <= request_body_limit()
+}
+
+@id("std.http.response-body-admitted")
+fn response_body_admitted(length: usize) -> bool
+{
+    length <= response_body_limit()
+}
+
+// ---------------------------------------------------------------------
+// Redirects
+// ---------------------------------------------------------------------
+// A redirect is a second request to an address the caller never chose. Each
+// hop is re-judged against the same endpoint policy as the first, the chain
+// is bounded, and credentials do not travel across an origin boundary.
+@id("std.http.redirect-depth-max")
+fn redirect_depth_max() -> i64
+{
+    3
+}
+
+@id("std.http.redirect-depth-admitted")
+fn redirect_depth_admitted(depth: i64) -> bool
+{
+    depth >= 0 && depth < redirect_depth_max()
+}
+
+@id("std.http.status-is-redirect")
+fn status_is_redirect(code: i64) -> bool
+{
+    match code { 301 => true, 302 => true, 303 => true, 307 => true, 308 => true, _ => false, }
+}
+
+// 307 and 308 replay the original method and body; 301, 302 and 303 are the
+// codes clients historically rewrite to GET. Stating which is which keeps a
+// redirect from silently turning a POST into a GET, or a GET into a replayed
+// POST.
+@id("std.http.redirect-preserves-method")
+fn redirect_preserves_method(code: i64) -> bool
+    requires status_is_redirect(code)
+{
+    code == 307 || code == 308
+}
+
+// All three components must match. A redirect that keeps the host but drops
+// to cleartext, or keeps the name but changes the port, is a different
+// origin and must not carry the first request's Authorization header.
+@id("std.http.redirect-forwards-credentials")
+fn redirect_forwards_credentials(same_scheme: bool, same_host: bool, same_port: bool) -> bool
+{
+    same_scheme && same_host && same_port
+}
+
+// The whole hop. `target_endpoint_admitted` is `std.net.endpoint-admitted`'s
+// answer for the *new* location, not the original one: re-checking the
+// allowlist at every hop is the property that stops a redirect from being
+// the way out of it.
+@id("std.http.redirect-admitted")
+fn redirect_admitted(code: i64, depth: i64, target_scheme: borrow Slice<u8>, target: borrow Slice<u8>, target_endpoint_admitted: bool) -> bool
+{
+    status_is_redirect(code) && redirect_depth_admitted(depth) && transport_admitted(target_scheme) && target_endpoint_admitted && request_target_admits_no_userinfo(target)
+}
+
+// ---------------------------------------------------------------------
+// Normalized outcomes
+// ---------------------------------------------------------------------
+// One closed vocabulary instead of a transport's own error strings, so a
+// caller's retry logic is written against a stable code and a diagnostic
+// never carries a URL, a header, or a credential out of the adapter.
+//
+//  0 completed              9 protocol-error
+//  1 endpoint-refused      10 server-transient
+//  2 dns-failed            11 uncertain
+//  3 tls-failed
+//  4 connect-failed
+//  5 deadline-exceeded
+//  6 cancelled
+//  7 redirect-refused
+//  8 body-limit-exceeded
+@id("std.http.outcome-admitted")
+fn outcome_admitted(outcome: i64) -> bool
+{
+    outcome >= 0 && outcome <= 11
+}
+
+// Whether the request may already have been processed by the origin. This
+// is the distinction that decides whether retrying a non-idempotent request
+// risks a duplicate effect: a DNS failure never reached anything, a
+// deadline may have.
+@id("std.http.outcome-may-have-reached-origin")
+fn outcome_may_have_reached_origin(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+{
+    match outcome { 0 => true, 5 => true, 6 => true, 7 => true, 8 => true, 9 => true, 10 => true, 11 => true, _ => false, }
+}
+
+// An outcome whose delivery state is genuinely unknown. `uncertain` is a
+// first-class answer rather than a failure: an adapter that reports "failed"
+// for a request that may have succeeded invites exactly the duplicate the
+// retry rule below exists to prevent.
+@id("std.http.outcome-is-uncertain")
+fn outcome_is_uncertain(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+{
+    match outcome { 5 => true, 6 => true, 9 => true, 11 => true, _ => false, }
+}
+
+// A retry can only help when the condition is transient. An endpoint refused
+// by policy, a refused redirect, and an over-budget body are all decisions
+// that will be made again identically, so retrying them is pure amplification.
+@id("std.http.outcome-is-retryable")
+fn outcome_is_retryable(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+{
+    match outcome { 2 => true, 3 => true, 4 => true, 5 => true, 10 => true, 11 => true, _ => false, }
+}
+
+// ---------------------------------------------------------------------
+// Idempotence and retry
+// ---------------------------------------------------------------------
+@id("std.http.method-equals")
+fn method_equals(method: borrow Slice<u8>, expected: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(method);
+    let mut index = 0usize;
+    let mut same = length == byte_len(expected);
+    while index < length && same {
+        let here = match byte_get(method, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        let there = match byte_get(expected, index) { Option::Some { value } => value, Option::None {} => 1u8, };
+        same = here == there;
+        index = index + 1usize;
+        index < length && same
+    }
+    same
+}
+
+// The closed idempotent set. POST and PATCH are absent on purpose: repeating
+// either is a second external effect, which is exactly what this issue's
+// "no automatic retries of non-idempotent outbound requests" rule forbids.
+@id("std.http.method-is-idempotent")
+fn method_is_idempotent(method: borrow Slice<u8>) -> bool
+{
+    let get = [71u8, 69u8, 84u8];
+    let head = [72u8, 69u8, 65u8, 68u8];
+    let put = [80u8, 85u8, 84u8];
+    let delete = [68u8, 69u8, 76u8, 69u8, 84u8, 69u8];
+    let options = [79u8, 80u8, 84u8, 73u8, 79u8, 78u8, 83u8];
+    let trace = [84u8, 82u8, 65u8, 67u8, 69u8];
+    method_equals(method, array_as_slice(get)) || method_equals(method, array_as_slice(head)) || method_equals(method, array_as_slice(put)) || method_equals(method, array_as_slice(delete)) || method_equals(method, array_as_slice(options)) || method_equals(method, array_as_slice(trace))
+}
+
+@id("std.http.attempt-admitted")
+fn attempt_admitted(attempt: i64) -> bool
+{
+    attempt >= 1 && attempt <= 5
+}
+
+// The rule with teeth. A retry is admitted only when the outcome is
+// transient, the attempt budget is not spent, and one of three things is
+// true: the request never reached the origin, the method is idempotent by
+// definition, or the caller supplied an idempotency key the origin can
+// deduplicate against. A non-idempotent request with no key that may already
+// have been processed is refused, which is the uncertain-delivery case.
+@id("std.http.retry-admitted")
+fn retry_admitted(method: borrow Slice<u8>, outcome: i64, attempt: i64, has_idempotency_key: bool) -> bool
+    requires outcome_admitted(outcome)
+{
+    let transient = outcome_is_retryable(outcome) && attempt_admitted(attempt);
+    if transient { !outcome_may_have_reached_origin(outcome) || method_is_idempotent(method) || has_idempotency_key } else { false }
+}
+
+// ---------------------------------------------------------------------
+// The composed outbound request
+// ---------------------------------------------------------------------
+// Every clause is one of the named predicates above, so a refusal is always
+// attributable to a stated rule rather than to this function as a whole. A
+// `true` answer is a decision about a request's shape and policy, never a
+// capability to perform it.
+@id("std.http.outbound-request-admitted")
+fn outbound_request_admitted(method: borrow Slice<u8>, scheme: borrow Slice<u8>, target: borrow Slice<u8>, endpoint_allowlisted: bool, body_len: usize, budget_millis: i64) -> bool
+{
+    method_is_valid(method) && transport_admitted(scheme) && endpoint_allowlisted && request_target_is_safe(target) && request_target_admits_no_userinfo(target) && request_body_admitted(body_len) && deadline_admitted(budget_millis)
+}

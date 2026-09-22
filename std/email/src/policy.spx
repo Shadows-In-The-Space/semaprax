@@ -202,3 +202,207 @@ fn header_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, p
 {
     projected_field_admitted(name, classified_secret, projection, commitment) && value_is_header_safe(projection)
 }
+
+// ---------------------------------------------------------------------
+// Message budgets, header fields, and attachments (issue #193)
+// ---------------------------------------------------------------------
+// Everything above judges an address and a header value's injection safety.
+// A message is more than its envelope: a subject long enough to fold across
+// lines, a body big enough to exhaust a provider's quota, and an attachment
+// whose declared filename is the one byte sequence that reaches a recipient's
+// filesystem are all caller-controlled and all unbounded until stated here.
+//
+// This slice states them. It sends nothing, encodes nothing, and opens no
+// connection: every function is scalar-in/scalar-out or
+// `borrow Slice<u8>`-in/scalar-out, and a `true` answer is a decision about
+// an already-assembled value, never authority to transmit it.
+@id("std.email.subject-len-admitted")
+fn subject_len_admitted(length: usize) -> bool
+{
+    length >= 1usize && length <= 512usize
+}
+
+// RFC 5322's 998-octet line ceiling, stated rather than assumed. A header
+// value longer than this is refused instead of being folded by the adapter:
+// folding is a rewrite, and a rewrite of a caller's value is exactly where
+// an injected sequence gets reassembled into something else.
+@id("std.email.header-line-len-admitted")
+fn header_line_len_admitted(length: usize) -> bool
+{
+    length <= 998usize
+}
+
+@id("std.email.body-len-limit")
+fn body_len_limit() -> usize
+{
+    1048576usize
+}
+
+@id("std.email.body-len-admitted")
+fn body_len_admitted(length: usize) -> bool
+{
+    length <= body_len_limit()
+}
+
+// An adapter that accepts an unbounded attachment list turns one caller into
+// a provider-quota amplifier, exactly as an unbounded recipient list turns
+// it into a fan-out amplifier.
+@id("std.email.attachment-count-admitted")
+fn attachment_count_admitted(count: usize) -> bool
+{
+    count <= 16usize
+}
+
+@id("std.email.attachment-len-limit")
+fn attachment_len_limit() -> usize
+{
+    4194304usize
+}
+
+@id("std.email.attachment-len-admitted")
+fn attachment_len_admitted(length: usize) -> bool
+{
+    length >= 1usize && length <= attachment_len_limit()
+}
+
+@id("std.email.total-size-limit")
+fn total_size_limit() -> usize
+{
+    26214400usize
+}
+
+// The per-part ceilings do not compose into a whole-message ceiling on their
+// own: sixteen attachments each inside their own limit still exceed what a
+// provider will accept. The total is checked separately, with both operands
+// already bounded so the sum cannot wrap.
+@id("std.email.total-size-admitted")
+fn total_size_admitted(body_len: usize, attachment_bytes: usize) -> bool
+{
+    if body_len_admitted(body_len) && attachment_bytes <= total_size_limit() { body_len + attachment_bytes <= total_size_limit() } else { false }
+}
+
+// ---------------------------------------------------------------------
+// Header fields
+// ---------------------------------------------------------------------
+// A field name is an RFC 5322 printable-ASCII token with no colon: a name
+// that can carry a colon can carry a whole second header.
+@id("std.email.header-name-byte-admitted")
+fn header_name_byte_admitted(candidate: u8) -> bool
+{
+    candidate >= 33u8 && candidate <= 126u8 && candidate != 58u8
+}
+
+@id("std.email.header-name-admitted")
+fn header_name_admitted(name: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut admitted = length >= 1usize && length <= 64usize;
+    while index < length && admitted {
+        admitted = match byte_get(name, index) { Option::Some { value } => header_name_byte_admitted(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// A complete field: a token name, an injection-safe value, and a line that
+// fits. All three, because each alone lets a different malformed header out.
+@id("std.email.header-field-admitted")
+fn header_field_admitted(name: borrow Slice<u8>, value: borrow Slice<u8>) -> bool
+{
+    header_name_admitted(name) && value_is_header_safe(value) && header_line_len_admitted(byte_len(name) + 2usize + byte_len(value))
+}
+
+// ---------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------
+// A filename reaches a recipient's filesystem. Path separators, quotes,
+// backslashes, semicolons and control bytes are refused rather than escaped:
+// escaping is a rewrite, and a `Content-Disposition` parameter is exactly
+// where a rewrite gets un-escaped by someone else's parser.
+@id("std.email.filename-byte-admitted")
+fn filename_byte_admitted(candidate: u8) -> bool
+{
+    let alpha = candidate >= 65u8 && candidate <= 90u8 || candidate >= 97u8 && candidate <= 122u8;
+    let digit = candidate >= 48u8 && candidate <= 57u8;
+    let punctuation = match candidate { 45u8 => true, 46u8 => true, 95u8 => true, _ => false, };
+    alpha || digit || punctuation
+}
+
+@id("std.email.filename-admitted")
+fn filename_admitted(name: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut admitted = length >= 1usize && length <= 128usize;
+    let mut previous_dot = false;
+    while index < length && admitted {
+        let byte = match byte_get(name, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        let dot = byte == 46u8;
+        admitted = filename_byte_admitted(byte) && !(dot && previous_dot) && !(dot && index == 0usize);
+        previous_dot = dot;
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted && !previous_dot
+}
+
+// `type/subtype`, exactly one solidus, each half a non-empty token. A media
+// type carrying parameters is refused here: a parameter is another place a
+// caller-controlled value crosses into a header.
+@id("std.email.media-type-byte-admitted")
+fn media_type_byte_admitted(candidate: u8) -> bool
+{
+    let alpha = candidate >= 65u8 && candidate <= 90u8 || candidate >= 97u8 && candidate <= 122u8;
+    let digit = candidate >= 48u8 && candidate <= 57u8;
+    let punctuation = match candidate { 45u8 => true, 43u8 => true, 46u8 => true, 95u8 => true, _ => false, };
+    alpha || digit || punctuation
+}
+
+@id("std.email.media-type-admitted")
+fn media_type_admitted(value: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(value);
+    let mut index = 0usize;
+    let mut admitted = length >= 3usize && length <= 128usize;
+    let mut solidus = 0usize;
+    let mut segment = 0usize;
+    while index < length && admitted {
+        let byte = match byte_get(value, index) { Option::Some { value } => value, Option::None {} => 0u8, };
+        let slash = byte == 47u8;
+        admitted = if slash { segment >= 1usize && solidus == 0usize } else { media_type_byte_admitted(byte) };
+        solidus = if slash { solidus + 1usize } else { solidus };
+        segment = if slash { 0usize } else { segment + 1usize };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted && solidus == 1usize && segment >= 1usize
+}
+
+@id("std.email.attachment-admitted")
+fn attachment_admitted(filename: borrow Slice<u8>, media_type: borrow Slice<u8>, length: usize) -> bool
+{
+    filename_admitted(filename) && media_type_admitted(media_type) && attachment_len_admitted(length)
+}
+
+// The composed message judgement. Every clause is one of the predicates
+// above, so a refusal is attributable to a named rule rather than to this
+// function as a whole, and a caller learns which budget it exceeded.
+@id("std.email.message-admitted")
+fn message_admitted(subject: borrow Slice<u8>, recipient_count: usize, body_len: usize, attachment_count: usize, attachment_bytes: usize) -> bool
+{
+    let shaped = subject_len_admitted(byte_len(subject)) && value_is_header_safe(subject);
+    let bounded = recipient_count_admitted(recipient_count) && attachment_count_admitted(attachment_count);
+    shaped && bounded && total_size_admitted(body_len, attachment_bytes)
+}
+
+// The same judgement with the shared redaction policy's six caller-declared
+// flags applied, so a message the caller has classified as carrying a secret
+// in its subject or body is refused before it is assembled, independent of
+// every budget above.
+@id("std.email.message-admitted-guarded")
+fn message_admitted_guarded(subject: borrow Slice<u8>, recipient_count: usize, body_len: usize, attachment_count: usize, attachment_bytes: usize, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+{
+    message_admitted(subject, recipient_count, body_len, attachment_count, attachment_bytes) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
+}

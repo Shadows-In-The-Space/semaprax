@@ -10,6 +10,18 @@ use function @id("std.webhook.replay_window_seconds") from std.webhook as replay
 use function @id("std.webhook.attempt_admitted") from std.webhook as attempt_admitted;
 use function @id("std.webhook.backoff_seconds") from std.webhook as backoff_seconds;
 use function @id("std.webhook.delivery_admitted_guarded") from std.webhook as delivery_admitted_guarded;
+use function @id("std.webhook.key-byte-admitted") from std.webhook as key_byte_admitted;
+use function @id("std.webhook.idempotency-key-len-admitted") from std.webhook as idempotency_key_len_admitted;
+use function @id("std.webhook.idempotency-key-admitted") from std.webhook as idempotency_key_admitted;
+use function @id("std.webhook.delivery-id-len") from std.webhook as delivery_id_len;
+use function @id("std.webhook.delivery-id-admitted") from std.webhook as delivery_id_admitted;
+use function @id("std.webhook.outcome-admitted") from std.webhook as outcome_admitted;
+use function @id("std.webhook.outcome-is-uncertain") from std.webhook as outcome_is_uncertain;
+use function @id("std.webhook.outcome-is-terminal") from std.webhook as outcome_is_terminal;
+use function @id("std.webhook.outcome-is-retryable") from std.webhook as outcome_is_retryable;
+use function @id("std.webhook.retry-admitted") from std.webhook as retry_admitted;
+use function @id("std.webhook.duplicate-suppression-admitted") from std.webhook as duplicate_suppression_admitted;
+use function @id("std.webhook.delivery-plan-admitted") from std.webhook as delivery_plan_admitted;
 
 // A full-length signature of all `a` is admitted; one byte short, one byte
 // long, one uppercase digit and one non-hex byte are each refused
@@ -162,7 +174,7 @@ fn main() -> i64
     failed = failed + if backoff_doubles_then_saturates() { 0 } else { 32 };
     failed = failed + if composed_admission_is_attributable() { 0 } else { 64 };
     failed = failed + if delivery_admitted_guarded_refuses_each_secret_flag() { 0 } else { 256 };
-    failed + projection_policy_failures()
+    failed + projection_policy_failures() + idempotency_policy_failures()
 }
 
 @id("std.webhook.tests.projection-policy-cases")
@@ -210,4 +222,186 @@ fn projection_value_limit() -> bool
 fn projection_policy_failures() -> i64
 {
     if projection_policy_cases() && projection_value_limit() { 0 } else { 1073741824 }
+}
+
+// ---------------------------------------------------------------------
+// Issue #193: delivery identity, idempotency, uncertain delivery
+// ---------------------------------------------------------------------
+// The key alphabet at every boundary, including the four bytes just outside
+// each admitted run. A scanner that uses `<=` where it needs `<` fails one
+// of these rather than passing everything.
+@id("std.webhook.tests.key_alphabet_boundaries")
+fn key_alphabet_boundaries() -> bool
+{
+    key_byte_admitted(48u8) && key_byte_admitted(57u8) && key_byte_admitted(65u8) && key_byte_admitted(90u8) && key_byte_admitted(97u8) && key_byte_admitted(122u8) && key_byte_admitted(45u8) && key_byte_admitted(95u8)
+}
+
+@id("std.webhook.tests.key_alphabet_refusals")
+fn key_alphabet_refusals() -> bool
+{
+    !key_byte_admitted(47u8) && !key_byte_admitted(58u8) && !key_byte_admitted(64u8) && !key_byte_admitted(91u8) && !key_byte_admitted(96u8) && !key_byte_admitted(123u8) && !key_byte_admitted(46u8) && !key_byte_admitted(10u8)
+}
+
+// The length window is inclusive at both ends and refuses one either side.
+@id("std.webhook.tests.key_length_window")
+fn key_length_window() -> bool
+{
+    !idempotency_key_len_admitted(15usize) && idempotency_key_len_admitted(16usize) && idempotency_key_len_admitted(128usize) && !idempotency_key_len_admitted(129usize) && !idempotency_key_len_admitted(0usize)
+}
+
+// A key at the minimum is admitted; the same key one byte shorter, and the
+// same key with a dot or a newline substituted, are each refused on their
+// own.
+@id("std.webhook.tests.key_shape_cases")
+fn key_shape_cases() -> bool
+{
+    let ok = [107u8, 55u8, 81u8, 110u8, 45u8, 51u8, 120u8, 90u8, 95u8, 118u8, 57u8, 66u8, 112u8, 65u8, 50u8, 99u8];
+    let short = [107u8, 55u8, 81u8, 110u8, 45u8, 51u8, 120u8, 90u8, 95u8, 118u8, 57u8, 66u8, 112u8, 65u8, 50u8];
+    let dotted = [107u8, 55u8, 81u8, 110u8, 46u8, 51u8, 120u8, 90u8, 95u8, 118u8, 57u8, 66u8, 112u8, 65u8, 50u8, 99u8];
+    let injected = [107u8, 55u8, 81u8, 110u8, 10u8, 51u8, 120u8, 90u8, 95u8, 118u8, 57u8, 66u8, 112u8, 65u8, 50u8, 99u8];
+    idempotency_key_admitted(array_as_slice(ok)) && !idempotency_key_admitted(array_as_slice(short)) && !idempotency_key_admitted(array_as_slice(dotted)) && !idempotency_key_admitted(array_as_slice(injected))
+}
+
+// The maximum and the maximum plus one, as byte sequences rather than as
+// lengths, so a scanner that stops early is caught by the same case.
+@id("std.webhook.tests.key_maximum_and_one_more")
+fn key_maximum_and_one_more() -> bool
+{
+    let at_limit = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    let over_limit = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    idempotency_key_admitted(array_as_slice(at_limit)) && !idempotency_key_admitted(array_as_slice(over_limit))
+}
+
+// Exactly 32 lowercase hex digits: one short, one long and one uppercase are
+// each refused individually.
+@id("std.webhook.tests.delivery_id_shape_cases")
+fn delivery_id_shape_cases() -> bool
+{
+    let ok = [48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8, 48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8];
+    let short = [48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8, 48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8];
+    let long = [48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8, 48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8, 48u8];
+    let upper = [48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 65u8, 66u8, 67u8, 68u8, 69u8, 70u8, 48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8];
+    delivery_id_len() == 32usize && delivery_id_admitted(array_as_slice(ok)) && !delivery_id_admitted(array_as_slice(short)) && !delivery_id_admitted(array_as_slice(long)) && !delivery_id_admitted(array_as_slice(upper))
+}
+
+@id("std.webhook.tests.outcome_vocabulary_is_closed")
+fn outcome_vocabulary_is_closed() -> bool
+{
+    outcome_admitted(0) && outcome_admitted(5) && !outcome_admitted(-1) && !outcome_admitted(6)
+}
+
+// Uncertain is its own outcome, neither terminal nor an ordinary failure.
+@id("std.webhook.tests.uncertain_is_not_terminal")
+fn uncertain_is_not_terminal() -> bool
+{
+    outcome_is_uncertain(3) && !outcome_is_uncertain(2) && !outcome_is_terminal(3) && !outcome_is_terminal(2)
+}
+
+@id("std.webhook.tests.terminal_outcomes")
+fn terminal_outcomes() -> bool
+{
+    outcome_is_terminal(0) && outcome_is_terminal(1) && outcome_is_terminal(4) && outcome_is_terminal(5)
+}
+
+@id("std.webhook.tests.retryable_outcomes")
+fn retryable_outcomes() -> bool
+{
+    outcome_is_retryable(2) && outcome_is_retryable(3) && !outcome_is_retryable(0) && !outcome_is_retryable(1) && !outcome_is_retryable(4) && !outcome_is_retryable(5)
+}
+
+// The rule this issue names: an uncertain delivery is retried only when the
+// receiver was given an idempotency key. A transient failure never reached a
+// handler and needs no key.
+@id("std.webhook.tests.uncertain_delivery_needs_a_key_to_retry")
+fn uncertain_delivery_needs_a_key_to_retry() -> bool
+{
+    let transient = retry_admitted(2, 1, false);
+    let uncertain_without_key = !retry_admitted(3, 1, false);
+    let uncertain_with_key = retry_admitted(3, 1, true);
+    let delivered = !retry_admitted(0, 1, true);
+    let refused = !retry_admitted(1, 1, true);
+    transient && uncertain_without_key && uncertain_with_key && delivered && refused
+}
+
+@id("std.webhook.tests.retry_respects_the_attempt_budget")
+fn retry_respects_the_attempt_budget() -> bool
+{
+    retry_admitted(2, 8, false) && !retry_admitted(2, 9, false) && !retry_admitted(2, 0, false) && !retry_admitted(3, 9, true)
+}
+
+// Suppression needs both halves: a receiver with no key has nothing to
+// deduplicate on and must treat the delivery as new.
+@id("std.webhook.tests.suppression_needs_a_key_and_a_prior_sighting")
+fn suppression_needs_a_key_and_a_prior_sighting() -> bool
+{
+    duplicate_suppression_admitted(true, true) && !duplicate_suppression_admitted(true, false) && !duplicate_suppression_admitted(false, true) && !duplicate_suppression_admitted(false, false)
+}
+
+// A sender that declares it may retry is refused without a key, before the
+// first attempt rather than after the first uncertain response.
+@id("std.webhook.tests.retryable_plan_requires_a_key")
+fn retryable_plan_requires_a_key() -> bool
+{
+    let signature = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    let identity = [48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8, 48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8];
+    let key = [107u8, 55u8, 81u8, 110u8, 45u8, 51u8, 120u8, 90u8, 95u8, 118u8, 57u8, 66u8, 112u8, 65u8, 50u8, 99u8];
+    let absent = [0u8; 0];
+    let signed = array_as_slice(signature);
+    let delivery = array_as_slice(identity);
+    let keyed = delivery_plan_admitted(signed, 1024usize, 1000, 1100, delivery, array_as_slice(key), true);
+    let unkeyed = !delivery_plan_admitted(signed, 1024usize, 1000, 1100, delivery, array_as_slice(absent), true);
+    let one_shot = delivery_plan_admitted(signed, 1024usize, 1000, 1100, delivery, array_as_slice(absent), false);
+    keyed && unkeyed && one_shot
+}
+
+// The plan re-uses the envelope policy rather than restating it: a stale
+// timestamp and a malformed delivery identity each refuse the whole plan.
+@id("std.webhook.tests.plan_inherits_the_envelope_policy")
+fn plan_inherits_the_envelope_policy() -> bool
+{
+    let signature = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    let identity = [48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8, 48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8];
+    let broken = [48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8, 102u8, 48u8, 49u8, 50u8, 51u8, 52u8, 53u8, 54u8, 55u8, 56u8, 57u8, 97u8, 98u8, 99u8, 100u8, 101u8];
+    let key = [107u8, 55u8, 81u8, 110u8, 45u8, 51u8, 120u8, 90u8, 95u8, 118u8, 57u8, 66u8, 112u8, 65u8, 50u8, 99u8];
+    let signed = array_as_slice(signature);
+    let stale = !delivery_plan_admitted(signed, 1024usize, 1000, 4600, array_as_slice(identity), array_as_slice(key), true);
+    let malformed_id = !delivery_plan_admitted(signed, 1024usize, 1000, 1100, array_as_slice(broken), array_as_slice(key), true);
+    let oversized = !delivery_plan_admitted(signed, 65537usize, 1000, 1100, array_as_slice(identity), array_as_slice(key), true);
+    stale && malformed_id && oversized
+}
+
+@id("std.webhook.tests.idempotency-policy-failures")
+fn idempotency_policy_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if key_alphabet_boundaries() { 0 } else { 2147483648 };
+    failed = failed + if key_alphabet_refusals() { 0 } else { 4294967296 };
+    failed = failed + if key_length_window() { 0 } else { 8589934592 };
+    failed = failed + if key_shape_cases() { 0 } else { 17179869184 };
+    failed = failed + if key_maximum_and_one_more() { 0 } else { 34359738368 };
+    failed = failed + if delivery_id_shape_cases() { 0 } else { 68719476736 };
+    failed + outcome_policy_failures()
+}
+
+@id("std.webhook.tests.outcome-policy-failures")
+fn outcome_policy_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if outcome_vocabulary_is_closed() { 0 } else { 137438953472 };
+    failed = failed + if uncertain_is_not_terminal() { 0 } else { 274877906944 };
+    failed = failed + if terminal_outcomes() { 0 } else { 549755813888 };
+    failed = failed + if retryable_outcomes() { 0 } else { 1099511627776 };
+    failed = failed + if uncertain_delivery_needs_a_key_to_retry() { 0 } else { 2199023255552 };
+    failed = failed + if retry_respects_the_attempt_budget() { 0 } else { 4398046511104 };
+    failed + delivery_plan_failures()
+}
+
+@id("std.webhook.tests.delivery-plan-failures")
+fn delivery_plan_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if suppression_needs_a_key_and_a_prior_sighting() { 0 } else { 8796093022208 };
+    failed = failed + if retryable_plan_requires_a_key() { 0 } else { 17592186044416 };
+    failed = failed + if plan_inherits_the_envelope_policy() { 0 } else { 35184372088832 };
+    failed
 }

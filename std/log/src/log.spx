@@ -10,6 +10,7 @@ use function @id("std.data.json.write.usize_len") from std.data.json.write as us
 use function @id("std.io.reader.finish") from std.io as reader_finish;
 use function @id("std.io.reader.from-bytes") from std.io as reader_from_bytes;
 use function @id("std.log.redact.event_is_safe") from std.log.redact as event_is_safe;
+use function @id("std.log.redact.field_count_within_budget") from std.log.redact as field_count_within_budget;
 
 @id("std.log.event")
 record Event {
@@ -172,4 +173,128 @@ fn append_event_guarded(event: own Event, carries_password: bool, carries_api_ke
 fn field_projection_admitted(name: borrow Slice<u8>, classified_secret: bool, projection: borrow Slice<u8>, commitment: borrow Slice<u8>) -> bool
 {
     projected_field_admitted(name, classified_secret, projection, commitment) && is_utf8(projection)
+}
+
+// ---------------------------------------------------------------------
+// Stable event identities and structured fields (issue #193)
+// ---------------------------------------------------------------------
+// This package's `Event` carries a `name` and a `message`, and until here
+// neither had a grammar. That is the difference between a log a query can be
+// written against and a log a human greps: a stable event identity is the
+// one field an alert, a dashboard, and a regression test all bind to, so it
+// has to be a closed spelling rather than whatever string the call site
+// happened to interpolate. The `message` stays free text for a reader; the
+// identity does not.
+//
+// The field budget below is the structured-logging analogue of metric label
+// cardinality. An event whose field set is assembled from attacker-supplied
+// keys is an unbounded-arity observation, and the shared redaction policy
+// already owns the ceiling, so it is reused here rather than restated.
+//
+// Nothing here writes, ships, or stores anything. These are decisions about
+// values a caller has already assembled, made before `append_event` is
+// reached.
+@id("std.log.event-name-byte-admitted")
+fn event_name_byte_admitted(candidate: u8) -> bool
+{
+    let lower = candidate >= 97u8 && candidate <= 122u8;
+    let digit = candidate >= 48u8 && candidate <= 57u8;
+    let punctuation = match candidate { 46u8 => true, 95u8 => true, _ => false, };
+    lower || digit || punctuation
+}
+
+// A dotted lowercase identifier: `http.request.rejected`, not
+// `Rejected request from 203.0.113.9`. Uppercase, spaces and punctuation are
+// refused rather than folded or stripped, because an identity that two call
+// sites spell differently is two identities, and one an adapter rewrote is
+// an identity nobody can predict from the source.
+@id("std.log.event-name-admitted")
+fn event_name_admitted(name: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(name);
+    let mut index = 0usize;
+    let mut admitted = length >= 1usize && length <= 64usize;
+    while index < length && admitted {
+        admitted = match byte_get(name, index) { Option::Some { value } => event_name_byte_admitted(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+@id("std.log.level-admitted")
+fn level_admitted(level: u8) -> bool
+{
+    level <= 5u8
+}
+
+// The same per-observation arity budget the shared redaction policy owns,
+// reused rather than restated so a log event's field set and a span's
+// attribute set cannot drift to different ceilings.
+@id("std.log.field-count-admitted")
+fn field_count_admitted(count: usize) -> bool
+{
+    field_count_within_budget(count)
+}
+
+// Arity alone does not bound an event: thirty-two fields of a megabyte each
+// are inside every count budget and still exhaust a log pipeline. The total
+// serialized field payload is bounded separately.
+@id("std.log.field-bytes-limit")
+fn field_bytes_limit() -> usize
+{
+    16384usize
+}
+
+@id("std.log.field-bytes-admitted")
+fn field_bytes_admitted(total: usize) -> bool
+{
+    total <= field_bytes_limit()
+}
+
+// The message stays free text, but not unbounded free text: a message is
+// what a reader sees, and one large enough to dominate a log line is a
+// denial of service on the reader as much as on the pipeline.
+@id("std.log.message-len-limit")
+fn message_len_limit() -> usize
+{
+    4096usize
+}
+
+@id("std.log.message-len-admitted")
+fn message_len_admitted(length: usize) -> bool
+{
+    length <= message_len_limit()
+}
+
+// The composed judgement a structured-logging caller makes before it
+// assembles an Event at all. Every clause is one of the named predicates
+// above, so a refusal is attributable to a stated rule.
+@id("std.log.structured-event-admitted")
+fn structured_event_admitted(name: borrow Slice<u8>, level: u8, message_len: usize, field_count: usize, field_bytes: usize) -> bool
+{
+    let identified = event_name_admitted(name) && level_admitted(level);
+    identified && message_len_admitted(message_len) && field_count_admitted(field_count) && field_bytes_admitted(field_bytes)
+}
+
+// The same judgement with the shared redaction policy's six caller-declared
+// flags applied. None of the shape rules above has any notion of classified
+// content: an event whose fields carry a session token passes every one of
+// them, which is exactly the gap `append_event_guarded` closes at the writer
+// and this closes one step earlier, before the event is built.
+@id("std.log.structured-event-admitted-guarded")
+fn structured_event_admitted_guarded(name: borrow Slice<u8>, level: u8, message_len: usize, field_count: usize, field_bytes: usize, carries_password: bool, carries_api_key: bool, carries_bearer_token: bool, carries_session_token: bool, carries_webhook_signing_secret: bool, carries_smtp_credential: bool) -> bool
+{
+    structured_event_admitted(name, level, message_len, field_count, field_bytes) && event_is_safe(carries_password, carries_api_key, carries_bearer_token, carries_session_token, carries_webhook_signing_secret, carries_smtp_credential)
+}
+
+// A telemetry sink's failure is not the application's failure. The primary
+// status survives unless the deployment explicitly chose to fail closed on
+// export, in which case the export failure is reported as itself rather than
+// disguised as an application error. Stated here, at the observability root,
+// because every adapter in this family can reach it.
+@id("std.log.observed-status")
+fn observed_status(primary_status: i64, export_status: i64, fail_closed_on_export: bool) -> i64
+{
+    if primary_status != 0 { primary_status } else { if fail_closed_on_export { export_status } else { 0 } }
 }

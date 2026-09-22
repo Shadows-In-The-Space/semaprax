@@ -21,6 +21,28 @@ use function @id("std.metrics.label-admitted") from std.metrics as label_admitte
 use function @id("std.metrics.try-admit-labeled-series") from std.metrics as try_admit_labeled_series;
 use function @id("std.metrics.label-admitted-guarded") from std.metrics as label_admitted_guarded;
 use function @id("std.metrics.try-admit-labeled-series-guarded") from std.metrics as try_admit_labeled_series_guarded;
+use function @id("std.metrics.byte-is-metric-name-start") from std.metrics as byte_is_metric_name_start;
+use function @id("std.metrics.byte-is-metric-name-char") from std.metrics as byte_is_metric_name_char;
+use function @id("std.metrics.metric-name-max-len") from std.metrics as metric_name_max_len;
+use function @id("std.metrics.metric-name-admitted") from std.metrics as metric_name_admitted;
+use function @id("std.metrics.byte-is-unit-char") from std.metrics as byte_is_unit_char;
+use function @id("std.metrics.metric-unit-admitted") from std.metrics as metric_unit_admitted;
+use function @id("std.metrics.metric-kind-admitted") from std.metrics as metric_kind_admitted;
+use function @id("std.metrics.counter-delta-admitted") from std.metrics as counter_delta_admitted;
+use function @id("std.metrics.counter-reset-detected") from std.metrics as counter_reset_detected;
+use function @id("std.metrics.delta-admitted-for-kind") from std.metrics as delta_admitted_for_kind;
+use function @id("std.metrics.bucket-count-max") from std.metrics as bucket_count_max;
+use function @id("std.metrics.bucket-count-admitted") from std.metrics as bucket_count_admitted;
+use function @id("std.metrics.bucket-bound-follows") from std.metrics as bucket_bound_follows;
+use function @id("std.metrics.bucket-selects") from std.metrics as bucket_selects;
+use function @id("std.metrics.cumulative-count-follows") from std.metrics as cumulative_count_follows;
+use function @id("std.metrics.histogram-totals-admitted") from std.metrics as histogram_totals_admitted;
+use function @id("std.metrics.overflow-series-slot") from std.metrics as overflow_series_slot;
+use function @id("std.metrics.series-slot") from std.metrics as series_slot;
+use function @id("std.metrics.series-was-aggregated") from std.metrics as series_was_aggregated;
+use function @id("std.metrics.deployment-series-limit") from std.metrics as deployment_series_limit;
+use function @id("std.metrics.deployment-series-admitted") from std.metrics as deployment_series_admitted;
+use function @id("std.metrics.metric-admitted") from std.metrics as metric_admitted;
 
 @id("std.metrics.tests.counter_increment_accumulates")
 fn counter_increment_accumulates() -> bool
@@ -297,7 +319,7 @@ fn main_redaction_guard() -> i64
 @id("std.metrics.tests.main")
 fn main() -> i64
 {
-    main_scalars() + main_label_bytes() + main_label_admission() + main_redaction_guard() * 131072 + projection_policy_failures()
+    main_scalars() + main_label_bytes() + main_label_admission() + main_redaction_guard() * 131072 + projection_policy_failures() + metric_identity_failures()
 }
 
 @id("std.metrics.tests.projection-policy-cases")
@@ -359,4 +381,191 @@ fn projected_registry_enforces_policy() -> bool
     let at_limit = try_admit_projected_series(cardinality_limit() - 1, array_as_slice(name), false, array_as_slice(marker), absent) == cardinality_limit();
     let over_limit = try_admit_projected_series(cardinality_limit(), array_as_slice(name), false, array_as_slice(marker), absent) == -1;
     refused && at_limit && over_limit
+}
+
+// ---------------------------------------------------------------------
+// Issue #193: metric identity, counter monotonicity, histogram buckets
+// ---------------------------------------------------------------------
+@id("std.metrics.tests.metric_name_alphabet")
+fn metric_name_alphabet() -> bool
+{
+    byte_is_metric_name_start(97u8) && byte_is_metric_name_start(122u8) && byte_is_metric_name_start(95u8) && !byte_is_metric_name_start(65u8) && !byte_is_metric_name_start(48u8) && !byte_is_metric_name_start(46u8)
+}
+
+@id("std.metrics.tests.metric_name_continuation_alphabet")
+fn metric_name_continuation_alphabet() -> bool
+{
+    byte_is_metric_name_char(48u8) && byte_is_metric_name_char(57u8) && byte_is_metric_name_char(46u8) && byte_is_metric_name_char(97u8) && !byte_is_metric_name_char(65u8) && !byte_is_metric_name_char(45u8)
+}
+
+// A name assembled from a request path creates a new metric per request,
+// which no per-metric series budget can contain. That shape is refused by
+// construction, and so is a leading digit and an uppercase spelling.
+@id("std.metrics.tests.metric_name_refuses_per_request_shapes")
+fn metric_name_refuses_per_request_shapes() -> bool
+{
+    let stable = [104u8, 116u8, 116u8, 112u8, 46u8, 115u8, 101u8, 114u8, 118u8, 101u8, 114u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 46u8, 100u8, 117u8, 114u8, 97u8, 116u8, 105u8, 111u8, 110u8];
+    let per_request = [104u8, 116u8, 116u8, 112u8, 46u8, 115u8, 101u8, 114u8, 118u8, 101u8, 114u8, 46u8, 47u8, 117u8, 115u8, 101u8, 114u8, 115u8, 47u8, 52u8, 55u8, 49u8, 49u8];
+    let shouting = [72u8, 116u8, 116u8, 112u8, 46u8, 83u8, 101u8, 114u8, 118u8, 101u8, 114u8, 46u8, 82u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 115u8];
+    let leading_digit = [53u8, 120u8, 120u8, 46u8, 114u8, 101u8, 115u8, 112u8, 111u8, 110u8, 115u8, 101u8, 115u8];
+    let empty = [0u8; 0];
+    metric_name_admitted(array_as_slice(stable)) && !metric_name_admitted(array_as_slice(per_request)) && !metric_name_admitted(array_as_slice(shouting)) && !metric_name_admitted(array_as_slice(leading_digit)) && !metric_name_admitted(array_as_slice(empty))
+}
+
+@id("std.metrics.tests.metric_name_length_window")
+fn metric_name_length_window() -> bool
+{
+    let at_limit = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    let over_limit = [97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8, 97u8];
+    metric_name_max_len() == 128usize && metric_name_admitted(array_as_slice(at_limit)) && !metric_name_admitted(array_as_slice(over_limit))
+}
+
+// An empty unit is dimensionless and admitted; an arbitrary one is not.
+@id("std.metrics.tests.metric_unit_cases")
+fn metric_unit_cases() -> bool
+{
+    let millis = [109u8, 115u8];
+    let rate = [114u8, 101u8, 113u8, 47u8, 115u8];
+    let spaced = [112u8, 101u8, 114u8, 32u8, 115u8, 101u8, 99u8, 111u8, 110u8, 100u8];
+    let empty = [0u8; 0];
+    byte_is_unit_char(47u8) && metric_unit_admitted(array_as_slice(millis)) && metric_unit_admitted(array_as_slice(rate)) && metric_unit_admitted(array_as_slice(empty)) && !metric_unit_admitted(array_as_slice(spaced))
+}
+
+@id("std.metrics.tests.metric_kind_vocabulary")
+fn metric_kind_vocabulary() -> bool
+{
+    metric_kind_admitted(0) && metric_kind_admitted(3) && !metric_kind_admitted(-1) && !metric_kind_admitted(4)
+}
+
+// A counter only goes up, and an up-down counter is a different kind rather
+// than a counter with a relaxed rule.
+@id("std.metrics.tests.counter_never_decreases")
+fn counter_never_decreases() -> bool
+{
+    let deltas = counter_delta_admitted(0) && counter_delta_admitted(1) && !counter_delta_admitted(-1);
+    let counter = delta_admitted_for_kind(0, 1) && !delta_admitted_for_kind(0, -1);
+    let up_down = delta_admitted_for_kind(3, -1) && delta_admitted_for_kind(3, 1);
+    deltas && counter && up_down
+}
+
+@id("std.metrics.tests.counter_reset_is_reported_not_hidden")
+fn counter_reset_is_reported_not_hidden() -> bool
+{
+    counter_reset_detected(10, 0) && counter_reset_detected(10, 9) && !counter_reset_detected(10, 10) && !counter_reset_detected(0, 10)
+}
+
+@id("std.metrics.tests.bucket_count_boundary")
+fn bucket_count_boundary() -> bool
+{
+    let ceiling = bucket_count_max();
+    !bucket_count_admitted(0usize) && bucket_count_admitted(1usize) && bucket_count_admitted(ceiling) && !bucket_count_admitted(ceiling + 1usize)
+}
+
+// Strictly increasing, not merely non-decreasing: two equal adjacent bounds
+// create a bucket that can never be selected.
+@id("std.metrics.tests.bucket_bounds_are_strictly_increasing")
+fn bucket_bounds_are_strictly_increasing() -> bool
+{
+    bucket_bound_follows(1, 2) && bucket_bound_follows(-5, 0) && !bucket_bound_follows(2, 2) && !bucket_bound_follows(3, 2)
+}
+
+// Upper-inclusive, lower-exclusive: the value exactly on a bound belongs to
+// the bucket below it, and the other convention would shift every quantile.
+@id("std.metrics.tests.bucket_selection_is_upper_inclusive")
+fn bucket_selection_is_upper_inclusive() -> bool
+{
+    bucket_selects(10, 5, 10) && bucket_selects(6, 5, 10) && !bucket_selects(5, 5, 10) && !bucket_selects(11, 5, 10)
+}
+
+@id("std.metrics.tests.cumulative_counts_never_decrease")
+fn cumulative_counts_never_decrease() -> bool
+{
+    cumulative_count_follows(0, 0) && cumulative_count_follows(3, 7) && !cumulative_count_follows(7, 3) && !cumulative_count_follows(-1, 0)
+}
+
+// More bucketed observations than observations made is a counting bug, and
+// it is refused rather than exported.
+@id("std.metrics.tests.histogram_totals_are_consistent")
+fn histogram_totals_are_consistent() -> bool
+{
+    histogram_totals_admitted(10, 10) && histogram_totals_admitted(10, 4) && !histogram_totals_admitted(10, 11) && !histogram_totals_admitted(-1, 0)
+}
+
+// Overflow folds into one reserved slot rather than vanishing: the layout is
+// identical on every run, and the boundary is exactly the per-metric limit.
+@id("std.metrics.tests.overflow_aggregation_is_deterministic")
+fn overflow_aggregation_is_deterministic() -> bool
+{
+    let limit = cardinality_limit();
+    let first = series_slot(0) == 1;
+    let last = series_slot(limit - 1) == limit;
+    let overflowed = series_slot(limit) == overflow_series_slot();
+    let beyond = series_slot(limit + 1) == overflow_series_slot();
+    let flagged = !series_was_aggregated(limit - 1) && series_was_aggregated(limit);
+    first && last && overflowed && beyond && flagged
+}
+
+// A whole-deployment ceiling above the per-metric one: a process holding a
+// hundred within-budget metrics is still past what a collector accepts.
+@id("std.metrics.tests.deployment_budget_boundary")
+fn deployment_budget_boundary() -> bool
+{
+    let ceiling = deployment_series_limit();
+    let above_per_metric = ceiling > cardinality_limit();
+    deployment_series_admitted(0) && deployment_series_admitted(ceiling) && !deployment_series_admitted(ceiling + 1) && !deployment_series_admitted(-1) && above_per_metric
+}
+
+// Every clause of the composed metric judgement refuses on its own.
+@id("std.metrics.tests.metric_admission_is_attributable")
+fn metric_admission_is_attributable() -> bool
+{
+    let name = [104u8, 116u8, 116u8, 112u8, 46u8, 115u8, 101u8, 114u8, 118u8, 101u8, 114u8, 46u8, 114u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 46u8, 100u8, 117u8, 114u8, 97u8, 116u8, 105u8, 111u8, 110u8];
+    let shouting = [72u8, 116u8, 116u8, 112u8, 46u8, 83u8, 101u8, 114u8, 118u8, 101u8, 114u8];
+    let unit = [109u8, 115u8];
+    let spaced = [112u8, 101u8, 114u8, 32u8, 115u8, 101u8, 99u8, 111u8, 110u8, 100u8];
+    let metric = array_as_slice(name);
+    let unit_view = array_as_slice(unit);
+    let all_hold = metric_admitted(metric, unit_view, 2, 4);
+    let name_only = !metric_admitted(array_as_slice(shouting), unit_view, 2, 4);
+    let unit_only = !metric_admitted(metric, array_as_slice(spaced), 2, 4);
+    let kind_only = !metric_admitted(metric, unit_view, 4, 4);
+    let labels_only = !metric_admitted(metric, unit_view, 2, 33);
+    all_hold && name_only && unit_only && kind_only && labels_only
+}
+
+@id("std.metrics.tests.metric-identity-failures")
+fn metric_identity_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if metric_name_alphabet() { 0 } else { 1048576 };
+    failed = failed + if metric_name_continuation_alphabet() { 0 } else { 2097152 };
+    failed = failed + if metric_name_refuses_per_request_shapes() { 0 } else { 4194304 };
+    failed = failed + if metric_name_length_window() { 0 } else { 8388608 };
+    failed = failed + if metric_unit_cases() { 0 } else { 16777216 };
+    failed = failed + if metric_kind_vocabulary() { 0 } else { 33554432 };
+    failed + metric_counter_failures()
+}
+
+@id("std.metrics.tests.metric-counter-failures")
+fn metric_counter_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if counter_never_decreases() { 0 } else { 67108864 };
+    failed = failed + if counter_reset_is_reported_not_hidden() { 0 } else { 134217728 };
+    failed = failed + if bucket_count_boundary() { 0 } else { 268435456 };
+    failed = failed + if bucket_bounds_are_strictly_increasing() { 0 } else { 536870912 };
+    failed = failed + if bucket_selection_is_upper_inclusive() { 0 } else { 1073741824 };
+    failed = failed + if cumulative_counts_never_decrease() { 0 } else { 2147483648 };
+    failed + metric_budget_failures()
+}
+
+@id("std.metrics.tests.metric-budget-failures")
+fn metric_budget_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if histogram_totals_are_consistent() { 0 } else { 4294967296 };
+    failed = failed + if overflow_aggregation_is_deterministic() { 0 } else { 8589934592 };
+    failed = failed + if deployment_budget_boundary() { 0 } else { 17179869184 };
+    failed = failed + if metric_admission_is_attributable() { 0 } else { 34359738368 };
+    failed
 }

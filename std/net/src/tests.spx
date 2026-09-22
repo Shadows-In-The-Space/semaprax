@@ -7,6 +7,22 @@ use function @id("std.net.port_is_valid") from std.net as port_is_valid;
 use function @id("std.net.wait_is_closed") from std.net as wait_is_closed;
 use function @id("std.net.wait_is_readable") from std.net as wait_is_readable;
 use function @id("std.net.wait_is_timeout") from std.net as wait_is_timeout;
+use function @id("std.net.ipv4-octet") from std.net as ipv4_octet;
+use function @id("std.net.ipv4-is-loopback") from std.net as ipv4_is_loopback;
+use function @id("std.net.ipv4-is-private") from std.net as ipv4_is_private;
+use function @id("std.net.ipv4-is-link-local") from std.net as ipv4_is_link_local;
+use function @id("std.net.ipv4-is-unspecified") from std.net as ipv4_is_unspecified;
+use function @id("std.net.ipv4-is-shared") from std.net as ipv4_is_shared;
+use function @id("std.net.ipv4-is-multicast") from std.net as ipv4_is_multicast;
+use function @id("std.net.ipv4-is-reserved") from std.net as ipv4_is_reserved;
+use function @id("std.net.ipv4-is-internal") from std.net as ipv4_is_internal;
+use function @id("std.net.lowered-label-byte") from std.net as lowered_label_byte;
+use function @id("std.net.host-equals-ignoring-case") from std.net as host_equals_ignoring_case;
+use function @id("std.net.host-is-loopback-name") from std.net as host_is_loopback_name;
+use function @id("std.net.host-is-public-target") from std.net as host_is_public_target;
+use function @id("std.net.allowlist-entry-admitted") from std.net as allowlist_entry_admitted;
+use function @id("std.net.endpoint-matches-allowlist-entry") from std.net as endpoint_matches_allowlist_entry;
+use function @id("std.net.endpoint-admitted") from std.net as endpoint_admitted;
 
 @id("std.net.tests.ports")
 fn ports() -> bool
@@ -79,5 +95,210 @@ fn main() -> i64
     failed = failed + if bad_hosts() { 0 } else { 16 };
     failed = failed + if addresses() { 0 } else { 32 };
     failed = failed + if bad_addresses() { 0 } else { 64 };
+    failed + endpoint_policy_failures()
+}
+
+// ---------------------------------------------------------------------
+// Issue #193: outbound endpoint policy
+// ---------------------------------------------------------------------
+// Octets are extracted by position, not by "the first digit run", so a
+// classifier built on this cannot confuse 172.16.0.0 with 16.172.0.0.
+@id("std.net.tests.octets_are_positional")
+fn octets_are_positional() -> bool
+{
+    let address = [49u8, 57u8, 50u8, 46u8, 49u8, 54u8, 56u8, 46u8, 49u8, 46u8, 50u8, 48u8, 48u8];
+    let view = array_as_slice(address);
+    ipv4_octet(view, 0usize) == 192usize && ipv4_octet(view, 1usize) == 168usize && ipv4_octet(view, 2usize) == 1usize && ipv4_octet(view, 3usize) == 200usize
+}
+
+// The whole 127/8 is loopback, and 128.0.0.1 is not: a classifier that only
+// knows the canonical 127.0.0.1 spelling refuses nothing.
+@id("std.net.tests.loopback_is_the_whole_slash_eight")
+fn loopback_is_the_whole_slash_eight() -> bool
+{
+    let canonical = [49u8, 50u8, 55u8, 46u8, 48u8, 46u8, 48u8, 46u8, 49u8];
+    let high = [49u8, 50u8, 55u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 52u8];
+    let outside = [49u8, 50u8, 56u8, 46u8, 48u8, 46u8, 48u8, 46u8, 49u8];
+    ipv4_is_loopback(array_as_slice(canonical)) && ipv4_is_loopback(array_as_slice(high)) && !ipv4_is_loopback(array_as_slice(outside))
+}
+
+// The RFC 1918 172.16/12 boundary at both ends: 172.15.255.255 and
+// 172.32.0.0 are public, 172.16.0.0 and 172.31.255.255 are private. A /8 or
+// /16 misreading fails exactly one of these four.
+@id("std.net.tests.private_ranges_are_exact")
+fn private_ranges_are_exact() -> bool
+{
+    let below = [49u8, 55u8, 50u8, 46u8, 49u8, 53u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8];
+    let low = [49u8, 55u8, 50u8, 46u8, 49u8, 54u8, 46u8, 48u8, 46u8, 48u8];
+    let high = [49u8, 55u8, 50u8, 46u8, 51u8, 49u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8];
+    let above = [49u8, 55u8, 50u8, 46u8, 51u8, 50u8, 46u8, 48u8, 46u8, 48u8];
+    !ipv4_is_private(array_as_slice(below)) && ipv4_is_private(array_as_slice(low)) && ipv4_is_private(array_as_slice(high)) && !ipv4_is_private(array_as_slice(above))
+}
+
+@id("std.net.tests.private_ten_and_one_ninety_two")
+fn private_ten_and_one_ninety_two() -> bool
+{
+    let ten = [49u8, 48u8, 46u8, 48u8, 46u8, 48u8, 46u8, 49u8];
+    let sixteen = [49u8, 57u8, 50u8, 46u8, 49u8, 54u8, 56u8, 46u8, 49u8, 46u8, 49u8];
+    let neighbour = [49u8, 57u8, 50u8, 46u8, 49u8, 54u8, 55u8, 46u8, 48u8, 46u8, 49u8];
+    ipv4_is_private(array_as_slice(ten)) && ipv4_is_private(array_as_slice(sixteen)) && !ipv4_is_private(array_as_slice(neighbour))
+}
+
+// 169.254.169.254 is the cloud instance-metadata address. Forgetting the
+// link-local range is how an outbound client leaks deployment credentials.
+@id("std.net.tests.link_local_covers_instance_metadata")
+fn link_local_covers_instance_metadata() -> bool
+{
+    let metadata = [49u8, 54u8, 57u8, 46u8, 50u8, 53u8, 52u8, 46u8, 49u8, 54u8, 57u8, 46u8, 50u8, 53u8, 52u8];
+    let neighbour = [49u8, 54u8, 57u8, 46u8, 50u8, 53u8, 51u8, 46u8, 48u8, 46u8, 49u8];
+    ipv4_is_link_local(array_as_slice(metadata)) && !ipv4_is_link_local(array_as_slice(neighbour)) && ipv4_is_internal(array_as_slice(metadata))
+}
+
+@id("std.net.tests.unspecified_and_shared_boundaries")
+fn unspecified_and_shared_boundaries() -> bool
+{
+    let zero = [48u8, 46u8, 48u8, 46u8, 48u8, 46u8, 48u8];
+    let below = [49u8, 48u8, 48u8, 46u8, 54u8, 51u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8];
+    let low = [49u8, 48u8, 48u8, 46u8, 54u8, 52u8, 46u8, 48u8, 46u8, 48u8];
+    let high = [49u8, 48u8, 48u8, 46u8, 49u8, 50u8, 55u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8];
+    let above = [49u8, 48u8, 48u8, 46u8, 49u8, 50u8, 56u8, 46u8, 48u8, 46u8, 48u8];
+    ipv4_is_unspecified(array_as_slice(zero)) && !ipv4_is_shared(array_as_slice(below)) && ipv4_is_shared(array_as_slice(low)) && ipv4_is_shared(array_as_slice(high)) && !ipv4_is_shared(array_as_slice(above))
+}
+
+// 224/4 and 240/4, at both boundaries, plus the limited broadcast address.
+@id("std.net.tests.multicast_and_reserved_boundaries")
+fn multicast_and_reserved_boundaries() -> bool
+{
+    let below = [50u8, 50u8, 51u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8];
+    let low = [50u8, 50u8, 52u8, 46u8, 48u8, 46u8, 48u8, 46u8, 49u8];
+    let high = [50u8, 51u8, 57u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8];
+    let reserved = [50u8, 52u8, 48u8, 46u8, 48u8, 46u8, 48u8, 46u8, 49u8];
+    let broadcast = [50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8, 46u8, 50u8, 53u8, 53u8];
+    !ipv4_is_multicast(array_as_slice(below)) && ipv4_is_multicast(array_as_slice(low)) && ipv4_is_multicast(array_as_slice(high)) && !ipv4_is_multicast(array_as_slice(reserved)) && ipv4_is_reserved(array_as_slice(reserved)) && ipv4_is_reserved(array_as_slice(broadcast))
+}
+
+// A routable public literal is not internal, so the closed refusal is not
+// simply "refuse everything".
+@id("std.net.tests.public_literal_is_not_internal")
+fn public_literal_is_not_internal() -> bool
+{
+    let public = [56u8, 46u8, 56u8, 46u8, 56u8, 46u8, 56u8];
+    let one = [49u8, 46u8, 49u8, 46u8, 49u8, 46u8, 49u8];
+    !ipv4_is_internal(array_as_slice(public)) && !ipv4_is_internal(array_as_slice(one))
+}
+
+@id("std.net.tests.case_folding_is_ascii_only")
+fn case_folding_is_ascii_only() -> bool
+{
+    lowered_label_byte(65u8) == 97u8 && lowered_label_byte(90u8) == 122u8 && lowered_label_byte(97u8) == 97u8 && lowered_label_byte(64u8) == 64u8 && lowered_label_byte(91u8) == 91u8 && lowered_label_byte(48u8) == 48u8
+}
+
+// Case-insensitive, but still exact: a shorter prefix and a longer host that
+// merely ends with the entry are both refused.
+@id("std.net.tests.host_equality_is_exact_and_case_folded")
+fn host_equality_is_exact_and_case_folded() -> bool
+{
+    let entry = [101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let upper = [69u8, 88u8, 65u8, 77u8, 80u8, 76u8, 69u8, 46u8, 67u8, 79u8, 77u8];
+    let short = [101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8];
+    let evil = [101u8, 118u8, 105u8, 108u8, 45u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let view = array_as_slice(entry);
+    host_equals_ignoring_case(view, array_as_slice(upper)) && !host_equals_ignoring_case(view, array_as_slice(short)) && !host_equals_ignoring_case(view, array_as_slice(evil))
+}
+
+// The reserved name, folded, and not a host that merely starts with it.
+@id("std.net.tests.loopback_name_is_exact")
+fn loopback_name_is_exact() -> bool
+{
+    let name = [108u8, 111u8, 99u8, 97u8, 108u8, 104u8, 111u8, 115u8, 116u8];
+    let mixed = [76u8, 111u8, 99u8, 97u8, 108u8, 72u8, 111u8, 115u8, 116u8];
+    let subdomain = [108u8, 111u8, 99u8, 97u8, 108u8, 104u8, 111u8, 115u8, 116u8, 46u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    host_is_loopback_name(array_as_slice(name)) && host_is_loopback_name(array_as_slice(mixed)) && !host_is_loopback_name(array_as_slice(subdomain))
+}
+
+@id("std.net.tests.public_target_refuses_reserved_spellings")
+fn public_target_refuses_reserved_spellings() -> bool
+{
+    let example = [101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let name = [108u8, 111u8, 99u8, 97u8, 108u8, 104u8, 111u8, 115u8, 116u8];
+    let loopback = [49u8, 50u8, 55u8, 46u8, 48u8, 46u8, 48u8, 46u8, 49u8];
+    let malformed = [97u8, 46u8, 46u8, 98u8];
+    host_is_public_target(array_as_slice(example)) && !host_is_public_target(array_as_slice(name)) && !host_is_public_target(array_as_slice(loopback)) && !host_is_public_target(array_as_slice(malformed))
+}
+
+// A port is part of an entry, never left open: 0 and 65536 are refused at
+// the entry, not merely at the connect.
+@id("std.net.tests.allowlist_entry_states_its_port")
+fn allowlist_entry_states_its_port() -> bool
+{
+    let entry = [101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let malformed = [97u8, 46u8, 46u8, 98u8];
+    let view = array_as_slice(entry);
+    allowlist_entry_admitted(view, 443usize) && allowlist_entry_admitted(view, 65535usize) && !allowlist_entry_admitted(view, 0usize) && !allowlist_entry_admitted(view, 65536usize) && !allowlist_entry_admitted(array_as_slice(malformed), 443usize)
+}
+
+// The bypass this rule exists to stop: a suffix match on `example.com`
+// admits `evil-example.com` and `api.example.com`. Both are refused, and so
+// is the same host on a different port.
+@id("std.net.tests.allowlist_has_no_suffix_rule")
+fn allowlist_has_no_suffix_rule() -> bool
+{
+    let entry = [101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let upper = [69u8, 88u8, 65u8, 77u8, 80u8, 76u8, 69u8, 46u8, 67u8, 79u8, 77u8];
+    let evil = [101u8, 118u8, 105u8, 108u8, 45u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let sub = [97u8, 112u8, 105u8, 46u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let view = array_as_slice(entry);
+    let exact = endpoint_matches_allowlist_entry(view, 443usize, view, 443usize);
+    let folded = endpoint_matches_allowlist_entry(array_as_slice(upper), 443usize, view, 443usize);
+    let wrong_port = !endpoint_matches_allowlist_entry(view, 8443usize, view, 443usize);
+    let sibling = !endpoint_matches_allowlist_entry(array_as_slice(evil), 443usize, view, 443usize);
+    let subdomain = !endpoint_matches_allowlist_entry(array_as_slice(sub), 443usize, view, 443usize);
+    exact && folded && wrong_port && sibling && subdomain
+}
+
+// An internal target that someone wrote into an allowlist is still refused
+// unless the deployment passed `allow_internal` on purpose. Matching the
+// allowlist is necessary, never sufficient.
+@id("std.net.tests.internal_endpoint_needs_explicit_opt_in")
+fn internal_endpoint_needs_explicit_opt_in() -> bool
+{
+    let public = [101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let metadata = [49u8, 54u8, 57u8, 46u8, 50u8, 53u8, 52u8, 46u8, 49u8, 54u8, 57u8, 46u8, 50u8, 53u8, 52u8];
+    let evil = [101u8, 118u8, 105u8, 108u8, 45u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let entry = array_as_slice(public);
+    let inner = array_as_slice(metadata);
+    let admitted = endpoint_admitted(entry, 443usize, entry, 443usize, false);
+    let refused_internal = !endpoint_admitted(inner, 443usize, inner, 443usize, false);
+    let opted_in = endpoint_admitted(inner, 443usize, inner, 443usize, true);
+    let unmatched = !endpoint_admitted(array_as_slice(evil), 443usize, entry, 443usize, true);
+    admitted && refused_internal && opted_in && unmatched
+}
+
+@id("std.net.tests.endpoint_policy_failures")
+fn endpoint_policy_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if octets_are_positional() { 0 } else { 128 };
+    failed = failed + if loopback_is_the_whole_slash_eight() { 0 } else { 256 };
+    failed = failed + if private_ranges_are_exact() { 0 } else { 512 };
+    failed = failed + if private_ten_and_one_ninety_two() { 0 } else { 1024 };
+    failed = failed + if link_local_covers_instance_metadata() { 0 } else { 2048 };
+    failed = failed + if unspecified_and_shared_boundaries() { 0 } else { 4096 };
+    failed = failed + if multicast_and_reserved_boundaries() { 0 } else { 8192 };
+    failed = failed + if public_literal_is_not_internal() { 0 } else { 16384 };
+    failed + endpoint_allowlist_failures()
+}
+
+@id("std.net.tests.endpoint_allowlist_failures")
+fn endpoint_allowlist_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if case_folding_is_ascii_only() { 0 } else { 32768 };
+    failed = failed + if host_equality_is_exact_and_case_folded() { 0 } else { 65536 };
+    failed = failed + if loopback_name_is_exact() { 0 } else { 131072 };
+    failed = failed + if public_target_refuses_reserved_spellings() { 0 } else { 262144 };
+    failed = failed + if allowlist_entry_states_its_port() { 0 } else { 524288 };
+    failed = failed + if allowlist_has_no_suffix_rule() { 0 } else { 1048576 };
+    failed = failed + if internal_endpoint_needs_explicit_opt_in() { 0 } else { 2097152 };
     failed
 }

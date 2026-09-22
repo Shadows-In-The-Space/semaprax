@@ -159,3 +159,152 @@ fn payload_field_projection_admitted(name: borrow Slice<u8>, classified_secret: 
 {
     projected_field_admitted(name, classified_secret, projection, commitment)
 }
+
+// ---------------------------------------------------------------------
+// Delivery identity, idempotency, and uncertain delivery (issue #193)
+// ---------------------------------------------------------------------
+// The section above judges one delivery in isolation: is this signature
+// well-shaped, is this body inside budget, is this timestamp fresh. None of
+// it can tell a first delivery from the same delivery arriving twice, and
+// `attempt_admitted`/`backoff_seconds` bound how often a sender retries
+// without ever saying whether retrying *this* delivery is safe at all.
+//
+// That is the gap this slice closes. A webhook is an external effect: a
+// retry after a response that never arrived either recovers a lost delivery
+// or performs the effect a second time, and the sender cannot tell which.
+// The only honest answer is a first-class `uncertain` outcome plus a rule
+// that refuses to retry it unless the receiver was given an idempotency key
+// it can deduplicate against.
+//
+// As everywhere else in this package, nothing here delivers, signs,
+// deduplicates, or stores anything. These are decisions about
+// already-assembled identifiers and an already-observed outcome.
+@id("std.webhook.key-byte-admitted")
+fn key_byte_admitted(candidate: u8) -> bool
+{
+    candidate >= 48u8 && candidate <= 57u8 || candidate >= 65u8 && candidate <= 90u8 || candidate >= 97u8 && candidate <= 122u8 || candidate == 45u8 || candidate == 95u8
+}
+
+// Long enough not to collide by accident, short enough to bound what a
+// receiver must store and index. A key outside this range is refused rather
+// than truncated: truncating two distinct keys to the same prefix is how a
+// deduplication table starts suppressing deliveries it should have made.
+@id("std.webhook.idempotency-key-len-admitted")
+fn idempotency_key_len_admitted(length: usize) -> bool
+{
+    length >= 16usize && length <= 128usize
+}
+
+// A key is opaque: it carries no structure a receiver is expected to parse,
+// and deliberately admits no byte that could terminate a header line, open
+// a quoted string, or survive into a log field as punctuation.
+@id("std.webhook.idempotency-key-admitted")
+fn idempotency_key_admitted(key: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(key);
+    let mut index = 0usize;
+    let mut admitted = idempotency_key_len_admitted(length);
+    while index < length && admitted {
+        admitted = match byte_get(key, index) { Option::Some { value } => key_byte_admitted(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// A delivery identifier names one delivery across all of its attempts, so a
+// receiver's log and a sender's log can be joined without either side
+// guessing. Exactly 32 lowercase hex digits: the same shape discipline the
+// signature envelope already uses, one length down.
+@id("std.webhook.delivery-id-len")
+fn delivery_id_len() -> usize
+{
+    32usize
+}
+
+@id("std.webhook.delivery-id-admitted")
+fn delivery_id_admitted(delivery_id: borrow Slice<u8>) -> bool
+{
+    let length = byte_len(delivery_id);
+    let mut index = 0usize;
+    let mut admitted = length == delivery_id_len();
+    while index < length && admitted {
+        admitted = match byte_get(delivery_id, index) { Option::Some { value } => byte_is_lower_hex(value), Option::None {} => false, };
+        index = index + 1usize;
+        index < length && admitted
+    }
+    admitted
+}
+
+// ---------------------------------------------------------------------
+// Delivery outcomes
+// ---------------------------------------------------------------------
+// One closed vocabulary for what happened to an attempt:
+//
+//  0 delivered              3 uncertain
+//  1 refused-permanently    4 signature-invalid
+//  2 transient-failure      5 duplicate-suppressed
+@id("std.webhook.outcome-admitted")
+fn outcome_admitted(outcome: i64) -> bool
+{
+    outcome >= 0 && outcome <= 5
+}
+
+// `uncertain` is the outcome a sender records when the request left but no
+// response arrived. It is not a failure and must not be reported as one:
+// collapsing it into "failed" is what makes a retry look free.
+@id("std.webhook.outcome-is-uncertain")
+fn outcome_is_uncertain(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+{
+    outcome == 3
+}
+
+@id("std.webhook.outcome-is-terminal")
+fn outcome_is_terminal(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+{
+    match outcome { 0 => true, 1 => true, 4 => true, 5 => true, _ => false, }
+}
+
+@id("std.webhook.outcome-is-retryable")
+fn outcome_is_retryable(outcome: i64) -> bool
+    requires outcome_admitted(outcome)
+{
+    outcome == 2 || outcome == 3
+}
+
+// The rule. A transient failure never reached a handler, so retrying it
+// duplicates nothing. An uncertain outcome may already have been handled,
+// so it is retried only when the receiver was given an idempotency key it
+// can deduplicate against; without one, the sender must stop and surface the
+// uncertainty rather than guess.
+@id("std.webhook.retry-admitted")
+fn retry_admitted(outcome: i64, attempt: i64, has_idempotency_key: bool) -> bool
+    requires outcome_admitted(outcome)
+{
+    let budgeted = outcome_is_retryable(outcome) && attempt_admitted(attempt);
+    if budgeted { !outcome_is_uncertain(outcome) || has_idempotency_key } else { false }
+}
+
+// A receiver that has already handled this key answers `duplicate-suppressed`
+// rather than performing the effect again. Suppression requires a key: a
+// receiver with no key has nothing to deduplicate on and must treat the
+// delivery as new.
+@id("std.webhook.duplicate-suppression-admitted")
+fn duplicate_suppression_admitted(has_idempotency_key: bool, key_already_seen: bool) -> bool
+{
+    has_idempotency_key && key_already_seen
+}
+
+// The composed sender-side judgement before an attempt leaves: the existing
+// envelope policy, a well-formed delivery identity, and -- for a delivery
+// the sender intends to be able to retry at all -- an idempotency key. A
+// sender that declares `retryable` without a key is refused here rather than
+// discovering the problem after the first uncertain response.
+@id("std.webhook.delivery-plan-admitted")
+fn delivery_plan_admitted(signature: borrow Slice<u8>, payload_len: usize, signed_at: i64, now: i64, delivery_id: borrow Slice<u8>, idempotency_key: borrow Slice<u8>, intends_retry: bool) -> bool
+{
+    let enveloped = delivery_admitted(signature, payload_len, signed_at, now) && delivery_id_admitted(delivery_id);
+    if enveloped { if intends_retry { idempotency_key_admitted(idempotency_key) } else { byte_len(idempotency_key) == 0usize || idempotency_key_admitted(idempotency_key) } } else { false }
+}

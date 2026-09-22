@@ -29,6 +29,33 @@ use function @id("std.http.name_at") from std.http as name_at;
 use function @id("std.http.skip_blanks") from std.http as skip_blanks;
 use function @id("std.http.status_code") from std.http as status_code;
 use function @id("std.http.terminator") from std.http as terminator;
+use function @id("std.http.scheme-byte-matches") from std.http as scheme_byte_matches;
+use function @id("std.http.scheme-is-https") from std.http as scheme_is_https;
+use function @id("std.http.scheme-is-http") from std.http as scheme_is_http;
+use function @id("std.http.transport-admitted") from std.http as transport_admitted;
+use function @id("std.http.deadline-millis-max") from std.http as deadline_millis_max;
+use function @id("std.http.deadline-admitted") from std.http as deadline_admitted;
+use function @id("std.http.deadline-remaining") from std.http as deadline_remaining;
+use function @id("std.http.deadline-expired") from std.http as deadline_expired;
+use function @id("std.http.request-body-limit") from std.http as request_body_limit;
+use function @id("std.http.response-body-limit") from std.http as response_body_limit;
+use function @id("std.http.request-body-admitted") from std.http as request_body_admitted;
+use function @id("std.http.response-body-admitted") from std.http as response_body_admitted;
+use function @id("std.http.redirect-depth-max") from std.http as redirect_depth_max;
+use function @id("std.http.redirect-depth-admitted") from std.http as redirect_depth_admitted;
+use function @id("std.http.status-is-redirect") from std.http as status_is_redirect;
+use function @id("std.http.redirect-preserves-method") from std.http as redirect_preserves_method;
+use function @id("std.http.redirect-forwards-credentials") from std.http as redirect_forwards_credentials;
+use function @id("std.http.redirect-admitted") from std.http as redirect_admitted;
+use function @id("std.http.outcome-admitted") from std.http as outcome_admitted;
+use function @id("std.http.outcome-may-have-reached-origin") from std.http as outcome_may_have_reached_origin;
+use function @id("std.http.outcome-is-uncertain") from std.http as outcome_is_uncertain;
+use function @id("std.http.outcome-is-retryable") from std.http as outcome_is_retryable;
+use function @id("std.http.method-equals") from std.http as method_equals;
+use function @id("std.http.method-is-idempotent") from std.http as method_is_idempotent;
+use function @id("std.http.attempt-admitted") from std.http as attempt_admitted;
+use function @id("std.http.retry-admitted") from std.http as retry_admitted;
+use function @id("std.http.outbound-request-admitted") from std.http as outbound_request_admitted;
 
 @id("std.http.tests.digits")
 fn digits() -> bool
@@ -238,7 +265,7 @@ fn main() -> i64
     failed = failed + if header_name_admits_only_tchar() { 0 } else { 128 };
     failed = failed + if request_target_refuses_space_and_separators() { 0 } else { 256 };
     failed = failed + if request_line_needs_both_halves() { 0 } else { 512 };
-    failed + main_userinfo_and_guard() + projection_policy_failures()
+    failed + main_userinfo_and_guard() + projection_policy_failures() + outbound_policy_failures()
 }
 
 @id("std.http.tests.projection-policy-cases")
@@ -313,4 +340,294 @@ fn diagnostic_target_limit() -> bool
     path = bytes_set(path, 0usize, 47u8);
     let view = bytes_as_slice(path);
     diagnostic_target_admitted(byte_range(view, 0usize, 2048usize), false) && !diagnostic_target_admitted(view, false)
+}
+
+// ---------------------------------------------------------------------
+// Issue #193: outbound client policy
+// ---------------------------------------------------------------------
+// Exactly five case-folded bytes. A prefix check admits `https-evil`, a
+// case-sensitive one is bypassed by `HTTPS`, and a length-only check admits
+// any five bytes.
+@id("std.http.tests.scheme_match_is_exact_and_folded")
+fn scheme_match_is_exact_and_folded() -> bool
+{
+    let https = [104u8, 116u8, 116u8, 112u8, 115u8];
+    let upper = [72u8, 84u8, 84u8, 80u8, 83u8];
+    let http = [104u8, 116u8, 116u8, 112u8];
+    let prefixed = [104u8, 116u8, 116u8, 112u8, 115u8, 45u8, 120u8];
+    let other = [104u8, 116u8, 116u8, 112u8, 122u8];
+    scheme_is_https(array_as_slice(https)) && scheme_is_https(array_as_slice(upper)) && !scheme_is_https(array_as_slice(http)) && !scheme_is_https(array_as_slice(prefixed)) && !scheme_is_https(array_as_slice(other)) && scheme_is_http(array_as_slice(http)) && !scheme_is_http(array_as_slice(https))
+}
+
+// Cleartext is refused, not upgraded: `transport_admitted` says no to the
+// scheme `http` rather than quietly rewriting it.
+@id("std.http.tests.cleartext_is_refused_not_upgraded")
+fn cleartext_is_refused_not_upgraded() -> bool
+{
+    let https = [104u8, 116u8, 116u8, 112u8, 115u8];
+    let http = [104u8, 116u8, 116u8, 112u8];
+    let empty = [0u8; 0];
+    transport_admitted(array_as_slice(https)) && !transport_admitted(array_as_slice(http)) && !transport_admitted(array_as_slice(empty)) && scheme_byte_matches(array_as_slice(https), 0usize, 104u8) && !scheme_byte_matches(array_as_slice(https), 9usize, 104u8)
+}
+
+// The budget is inclusive at 1 and at its ceiling, and refuses 0 and one
+// millisecond past the ceiling.
+@id("std.http.tests.deadline_budget_boundary")
+fn deadline_budget_boundary() -> bool
+{
+    let ceiling = deadline_millis_max();
+    !deadline_admitted(0) && deadline_admitted(1) && deadline_admitted(ceiling) && !deadline_admitted(ceiling + 1) && !deadline_admitted(-1)
+}
+
+// Remaining time is clamped at zero and never exceeds the budget, so a
+// caller cannot manufacture time by moving its own clock.
+@id("std.http.tests.deadline_remaining_is_clamped")
+fn deadline_remaining_is_clamped() -> bool
+{
+    let full = deadline_remaining(1000, 1000, 5000) == 5000;
+    let partial = deadline_remaining(1000, 3000, 5000) == 3000;
+    let edge = deadline_remaining(1000, 6000, 5000) == 0;
+    let past = deadline_remaining(1000, 9000, 5000) == 0;
+    let expired = !deadline_expired(1000, 5999, 5000) && deadline_expired(1000, 6000, 5000);
+    full && partial && edge && past && expired
+}
+
+// Request and response ceilings are separate values, each inclusive at its
+// limit and refusing one byte more.
+@id("std.http.tests.body_budgets_are_separate_and_bounded")
+fn body_budgets_are_separate_and_bounded() -> bool
+{
+    let request = request_body_limit();
+    let response = response_body_limit();
+    let distinct = request < response;
+    let request_edge = request_body_admitted(request) && !request_body_admitted(request + 1usize);
+    let response_edge = response_body_admitted(response) && !response_body_admitted(response + 1usize);
+    let request_refuses_response_size = !request_body_admitted(response);
+    distinct && request_edge && response_edge && request_refuses_response_size
+}
+
+// Depth is counted from 0 and stops strictly below the ceiling, so the
+// maximum number of hops actually taken is `redirect_depth_max`.
+@id("std.http.tests.redirect_depth_boundary")
+fn redirect_depth_boundary() -> bool
+{
+    let ceiling = redirect_depth_max();
+    redirect_depth_admitted(0) && redirect_depth_admitted(ceiling - 1) && !redirect_depth_admitted(ceiling) && !redirect_depth_admitted(-1)
+}
+
+// The closed redirect status set, and the 307/308 method-preserving split.
+@id("std.http.tests.redirect_status_vocabulary")
+fn redirect_status_vocabulary() -> bool
+{
+    let recognized = status_is_redirect(301) && status_is_redirect(302) && status_is_redirect(303) && status_is_redirect(307) && status_is_redirect(308);
+    let rejected = !status_is_redirect(200) && !status_is_redirect(304) && !status_is_redirect(300) && !status_is_redirect(309);
+    let preserved = redirect_preserves_method(307) && redirect_preserves_method(308);
+    let rewritten = !redirect_preserves_method(301) && !redirect_preserves_method(302) && !redirect_preserves_method(303);
+    recognized && rejected && preserved && rewritten
+}
+
+// Credentials cross none of the three origin components. Each of scheme,
+// host and port is asserted alone, so dropping any one clause fails here.
+@id("std.http.tests.credentials_do_not_cross_an_origin_boundary")
+fn credentials_do_not_cross_an_origin_boundary() -> bool
+{
+    redirect_forwards_credentials(true, true, true) && !redirect_forwards_credentials(false, true, true) && !redirect_forwards_credentials(true, false, true) && !redirect_forwards_credentials(true, true, false)
+}
+
+// Every hop is re-judged: a redirect to a host the allowlist never named is
+// refused even when the status, depth and scheme are all fine, and a
+// downgrade to cleartext is refused even when the target was allowlisted.
+@id("std.http.tests.each_redirect_hop_is_rejudged")
+fn each_redirect_hop_is_rejudged() -> bool
+{
+    let https = [104u8, 116u8, 116u8, 112u8, 115u8];
+    let http = [104u8, 116u8, 116u8, 112u8];
+    let target = [47u8, 110u8, 101u8, 120u8, 116u8];
+    let secure = array_as_slice(https);
+    let path = array_as_slice(target);
+    let admitted = redirect_admitted(307, 0, secure, path, true);
+    let unlisted = !redirect_admitted(307, 0, secure, path, false);
+    let downgraded = !redirect_admitted(307, 0, array_as_slice(http), path, true);
+    let too_deep = !redirect_admitted(307, redirect_depth_max(), secure, path, true);
+    let not_a_redirect = !redirect_admitted(200, 0, secure, path, true);
+    admitted && unlisted && downgraded && too_deep && not_a_redirect
+}
+
+// A redirect target carrying userinfo is refused rather than stripped: the
+// credential in it was never meant for the new origin.
+@id("std.http.tests.redirect_refuses_userinfo_target")
+fn redirect_refuses_userinfo_target() -> bool
+{
+    let https = [104u8, 116u8, 116u8, 112u8, 115u8];
+    let userinfo = [104u8, 116u8, 116u8, 112u8, 115u8, 58u8, 47u8, 47u8, 117u8, 58u8, 112u8, 64u8, 104u8, 47u8, 120u8];
+    !redirect_admitted(307, 0, array_as_slice(https), array_as_slice(userinfo), true)
+}
+
+// The outcome vocabulary is closed at both ends.
+@id("std.http.tests.outcome_vocabulary_is_closed")
+fn outcome_vocabulary_is_closed() -> bool
+{
+    outcome_admitted(0) && outcome_admitted(11) && !outcome_admitted(-1) && !outcome_admitted(12)
+}
+
+// Pre-origin failures are distinguished from post-origin ones. This is the
+// distinction the retry rule is built on, so it is asserted directly rather
+// than only through the composed rule. The four halves are separate
+// functions because the cleanup-plan replay budget counts combined branch
+// outcomes, not assertions.
+@id("std.http.tests.outcomes_that_never_reached_the_origin")
+fn outcomes_that_never_reached_the_origin() -> bool
+{
+    !outcome_may_have_reached_origin(1) && !outcome_may_have_reached_origin(2) && !outcome_may_have_reached_origin(3) && !outcome_may_have_reached_origin(4)
+}
+
+@id("std.http.tests.outcomes_that_may_have_reached_the_origin")
+fn outcomes_that_may_have_reached_the_origin() -> bool
+{
+    outcome_may_have_reached_origin(0) && outcome_may_have_reached_origin(5) && outcome_may_have_reached_origin(7) && outcome_may_have_reached_origin(11)
+}
+
+@id("std.http.tests.uncertain_outcomes")
+fn uncertain_outcomes() -> bool
+{
+    outcome_is_uncertain(5) && outcome_is_uncertain(6) && outcome_is_uncertain(9) && outcome_is_uncertain(11)
+}
+
+@id("std.http.tests.certain_outcomes")
+fn certain_outcomes() -> bool
+{
+    !outcome_is_uncertain(0) && !outcome_is_uncertain(1) && !outcome_is_uncertain(2) && !outcome_is_uncertain(10)
+}
+
+// A policy refusal is never retried: it will be decided identically the
+// second time, so retrying it is pure amplification.
+@id("std.http.tests.transient_outcomes_are_retryable")
+fn transient_outcomes_are_retryable() -> bool
+{
+    outcome_is_retryable(2) && outcome_is_retryable(3) && outcome_is_retryable(4) && outcome_is_retryable(5)
+}
+
+@id("std.http.tests.terminal_outcomes_are_not_retryable")
+fn terminal_outcomes_are_not_retryable() -> bool
+{
+    !outcome_is_retryable(0) && !outcome_is_retryable(1) && !outcome_is_retryable(7) && !outcome_is_retryable(8)
+}
+
+@id("std.http.tests.server_transient_and_uncertain_are_retryable")
+fn server_transient_and_uncertain_are_retryable() -> bool
+{
+    outcome_is_retryable(10) && outcome_is_retryable(11) && !outcome_is_retryable(6) && !outcome_is_retryable(9)
+}
+
+@id("std.http.tests.method_equality_and_idempotence")
+fn method_equality_and_idempotence() -> bool
+{
+    let get = [71u8, 69u8, 84u8];
+    let post = [80u8, 79u8, 83u8, 84u8];
+    let patch = [80u8, 65u8, 84u8, 67u8, 72u8];
+    let delete = [68u8, 69u8, 76u8, 69u8, 84u8, 69u8];
+    let lower_get = [103u8, 101u8, 116u8];
+    let equal = method_equals(array_as_slice(get), array_as_slice(get)) && !method_equals(array_as_slice(get), array_as_slice(post)) && !method_equals(array_as_slice(get), array_as_slice(lower_get));
+    let idempotent = method_is_idempotent(array_as_slice(get)) && method_is_idempotent(array_as_slice(delete));
+    let effectful = !method_is_idempotent(array_as_slice(post)) && !method_is_idempotent(array_as_slice(patch));
+    equal && idempotent && effectful
+}
+
+@id("std.http.tests.attempt_budget_boundary")
+fn attempt_budget_boundary() -> bool
+{
+    !attempt_admitted(0) && attempt_admitted(1) && attempt_admitted(5) && !attempt_admitted(6)
+}
+
+// The rule this issue names explicitly. A POST whose deadline expired may
+// already have been processed, so it is not retried; the same POST with an
+// idempotency key is, and so is a GET with neither.
+@id("std.http.tests.non_idempotent_uncertain_request_is_not_retried")
+fn non_idempotent_uncertain_request_is_not_retried() -> bool
+{
+    let post = [80u8, 79u8, 83u8, 84u8];
+    let get = [71u8, 69u8, 84u8];
+    let effectful = array_as_slice(post);
+    let safe = array_as_slice(get);
+    let refused = !retry_admitted(effectful, 5, 1, false);
+    let keyed = retry_admitted(effectful, 5, 1, true);
+    let idempotent = retry_admitted(safe, 5, 1, false);
+    let pre_origin = retry_admitted(effectful, 2, 1, false);
+    let spent = !retry_admitted(safe, 5, 6, true);
+    let terminal = !retry_admitted(safe, 1, 1, true);
+    refused && keyed && idempotent && pre_origin && spent && terminal
+}
+
+// Every clause of the composed admission refuses on its own while the other
+// five hold, so a refusal is attributable to a named rule.
+@id("std.http.tests.outbound_admission_is_attributable")
+fn outbound_admission_is_attributable() -> bool
+{
+    let get = [71u8, 69u8, 84u8];
+    let bad_method = [103u8, 101u8, 116u8];
+    let https = [104u8, 116u8, 116u8, 112u8, 115u8];
+    let http = [104u8, 116u8, 116u8, 112u8];
+    let target = [47u8, 118u8, 49u8, 47u8, 112u8, 105u8, 110u8, 103u8];
+    let spaced = [47u8, 118u8, 49u8, 32u8, 120u8];
+    let method = array_as_slice(get);
+    let scheme = array_as_slice(https);
+    let path = array_as_slice(target);
+    let all_hold = outbound_request_admitted(method, scheme, path, true, 1024usize, 5000);
+    let method_only = !outbound_request_admitted(array_as_slice(bad_method), scheme, path, true, 1024usize, 5000);
+    let scheme_only = !outbound_request_admitted(method, array_as_slice(http), path, true, 1024usize, 5000);
+    let allowlist_only = !outbound_request_admitted(method, scheme, path, false, 1024usize, 5000);
+    let target_only = !outbound_request_admitted(method, scheme, array_as_slice(spaced), true, 1024usize, 5000);
+    let body_only = !outbound_request_admitted(method, scheme, path, true, request_body_limit() + 1usize, 5000);
+    let deadline_only = !outbound_request_admitted(method, scheme, path, true, 1024usize, 0);
+    all_hold && method_only && scheme_only && allowlist_only && target_only && body_only && deadline_only
+}
+
+@id("std.http.tests.outbound-policy-failures")
+fn outbound_policy_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if scheme_match_is_exact_and_folded() { 0 } else { 4096 };
+    failed = failed + if cleartext_is_refused_not_upgraded() { 0 } else { 8192 };
+    failed = failed + if deadline_budget_boundary() { 0 } else { 16384 };
+    failed = failed + if deadline_remaining_is_clamped() { 0 } else { 32768 };
+    failed = failed + if body_budgets_are_separate_and_bounded() { 0 } else { 65536 };
+    failed = failed + if redirect_depth_boundary() { 0 } else { 131072 };
+    failed + outbound_redirect_failures()
+}
+
+@id("std.http.tests.outbound-redirect-failures")
+fn outbound_redirect_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if redirect_status_vocabulary() { 0 } else { 262144 };
+    failed = failed + if credentials_do_not_cross_an_origin_boundary() { 0 } else { 524288 };
+    failed = failed + if each_redirect_hop_is_rejudged() { 0 } else { 1048576 };
+    failed = failed + if redirect_refuses_userinfo_target() { 0 } else { 2097152 };
+    failed = failed + if outcome_vocabulary_is_closed() { 0 } else { 4194304 };
+    failed = failed + if outcomes_that_never_reached_the_origin() { 0 } else { 8388608 };
+    failed + outbound_outcome_failures()
+}
+
+@id("std.http.tests.outbound-outcome-failures")
+fn outbound_outcome_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if outcomes_that_may_have_reached_the_origin() { 0 } else { 16777216 };
+    failed = failed + if uncertain_outcomes() { 0 } else { 33554432 };
+    failed = failed + if certain_outcomes() { 0 } else { 67108864 };
+    failed = failed + if transient_outcomes_are_retryable() { 0 } else { 134217728 };
+    failed = failed + if terminal_outcomes_are_not_retryable() { 0 } else { 268435456 };
+    failed = failed + if server_transient_and_uncertain_are_retryable() { 0 } else { 536870912 };
+    failed + outbound_retry_failures()
+}
+
+@id("std.http.tests.outbound-retry-failures")
+fn outbound_retry_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if method_equality_and_idempotence() { 0 } else { 1073741824 };
+    failed = failed + if attempt_budget_boundary() { 0 } else { 2147483648 };
+    failed = failed + if non_idempotent_uncertain_request_is_not_retried() { 0 } else { 4294967296 };
+    failed = failed + if outbound_admission_is_attributable() { 0 } else { 8589934592 };
+    failed
 }

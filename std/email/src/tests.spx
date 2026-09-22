@@ -12,6 +12,25 @@ use function @id("std.email.byte_is_header_separator") from std.email as byte_is
 use function @id("std.email.at_sign_index") from std.email as at_sign_index;
 use function @id("std.email.domain_shape_admitted") from std.email as domain_shape_admitted;
 use function @id("std.email.value_is_header_safe_guarded") from std.email as value_is_header_safe_guarded;
+use function @id("std.email.subject-len-admitted") from std.email as subject_len_admitted;
+use function @id("std.email.header-line-len-admitted") from std.email as header_line_len_admitted;
+use function @id("std.email.body-len-limit") from std.email as body_len_limit;
+use function @id("std.email.body-len-admitted") from std.email as body_len_admitted;
+use function @id("std.email.attachment-count-admitted") from std.email as attachment_count_admitted;
+use function @id("std.email.attachment-len-limit") from std.email as attachment_len_limit;
+use function @id("std.email.attachment-len-admitted") from std.email as attachment_len_admitted;
+use function @id("std.email.total-size-limit") from std.email as total_size_limit;
+use function @id("std.email.total-size-admitted") from std.email as total_size_admitted;
+use function @id("std.email.header-name-byte-admitted") from std.email as header_name_byte_admitted;
+use function @id("std.email.header-name-admitted") from std.email as header_name_admitted;
+use function @id("std.email.header-field-admitted") from std.email as header_field_admitted;
+use function @id("std.email.filename-byte-admitted") from std.email as filename_byte_admitted;
+use function @id("std.email.filename-admitted") from std.email as filename_admitted;
+use function @id("std.email.media-type-byte-admitted") from std.email as media_type_byte_admitted;
+use function @id("std.email.media-type-admitted") from std.email as media_type_admitted;
+use function @id("std.email.attachment-admitted") from std.email as attachment_admitted;
+use function @id("std.email.message-admitted") from std.email as message_admitted;
+use function @id("std.email.message-admitted-guarded") from std.email as message_admitted_guarded;
 
 // Each header-separator byte is asserted individually, never combined, so a
 // regression that stops checking any one of the three fails here rather than
@@ -240,7 +259,7 @@ fn main() -> i64
     failed = failed + if separator_predicate() { 0 } else { 256 };
     failed = failed + if at_sign_index_positions() { 0 } else { 512 };
     failed = failed + if domain_shape_cases() { 0 } else { 1024 };
-    failed + main_redaction_guard() + projection_policy_failures()
+    failed + main_redaction_guard() + projection_policy_failures() + message_budget_failures()
 }
 
 // Split from `main` so the aggregator never combines more than a handful of
@@ -300,4 +319,244 @@ fn projection_value_limit() -> bool
 fn projection_policy_failures() -> i64
 {
     if projection_policy_cases() && projection_value_limit() { 0 } else { 1073741824 }
+}
+
+// ---------------------------------------------------------------------
+// Issue #193: message budgets, header fields, attachments
+// ---------------------------------------------------------------------
+// A subject is required and bounded: an empty one and a 513-byte one are
+// both refused, at the predicate rather than only through the composed rule.
+@id("std.email.tests.subject_length_window")
+fn subject_length_window() -> bool
+{
+    !subject_len_admitted(0usize) && subject_len_admitted(1usize) && subject_len_admitted(512usize) && !subject_len_admitted(513usize)
+}
+
+// RFC 5322's 998-octet line ceiling, inclusive, refusing one octet more.
+@id("std.email.tests.header_line_ceiling")
+fn header_line_ceiling() -> bool
+{
+    header_line_len_admitted(0usize) && header_line_len_admitted(998usize) && !header_line_len_admitted(999usize)
+}
+
+@id("std.email.tests.body_budget_boundary")
+fn body_budget_boundary() -> bool
+{
+    let limit = body_len_limit();
+    body_len_admitted(0usize) && body_len_admitted(limit) && !body_len_admitted(limit + 1usize)
+}
+
+// An empty attachment is refused; the per-attachment ceiling is inclusive
+// and refuses one byte more; the count ceiling behaves the same way.
+@id("std.email.tests.attachment_budget_boundaries")
+fn attachment_budget_boundaries() -> bool
+{
+    let limit = attachment_len_limit();
+    !attachment_len_admitted(0usize) && attachment_len_admitted(1usize) && attachment_len_admitted(limit) && !attachment_len_admitted(limit + 1usize) && attachment_count_admitted(0usize) && attachment_count_admitted(16usize) && !attachment_count_admitted(17usize)
+}
+
+// The per-part ceilings do not compose on their own: a body and attachments
+// each inside their own limit can still exceed the whole-message ceiling.
+@id("std.email.tests.total_size_is_checked_separately")
+fn total_size_is_checked_separately() -> bool
+{
+    let total = total_size_limit();
+    let body = body_len_limit();
+    let exact = total_size_admitted(body, total - body);
+    let one_more = !total_size_admitted(body, total - body + 1usize);
+    let body_alone = !total_size_admitted(body + 1usize, 0usize);
+    let attachments_alone = !total_size_admitted(0usize, total + 1usize);
+    let empty = total_size_admitted(0usize, 0usize);
+    exact && one_more && body_alone && attachments_alone && empty
+}
+
+// A field name that can carry a colon can carry a whole second header, so
+// the colon is refused inside the name rather than only at assembly.
+@id("std.email.tests.header_name_refuses_colon_and_controls")
+fn header_name_refuses_colon_and_controls() -> bool
+{
+    header_name_byte_admitted(33u8) && header_name_byte_admitted(126u8) && !header_name_byte_admitted(58u8) && !header_name_byte_admitted(32u8) && !header_name_byte_admitted(127u8) && !header_name_byte_admitted(13u8)
+}
+
+@id("std.email.tests.header_name_shape_cases")
+fn header_name_shape_cases() -> bool
+{
+    let ok = [88u8, 45u8, 82u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 45u8, 73u8, 100u8];
+    let colon = [88u8, 45u8, 82u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 58u8, 73u8, 100u8];
+    let spaced = [88u8, 32u8, 82u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8];
+    let empty = [0u8; 0];
+    header_name_admitted(array_as_slice(ok)) && !header_name_admitted(array_as_slice(colon)) && !header_name_admitted(array_as_slice(spaced)) && !header_name_admitted(array_as_slice(empty))
+}
+
+// A complete field needs all three clauses: each refuses on its own.
+@id("std.email.tests.header_field_is_attributable")
+fn header_field_is_attributable() -> bool
+{
+    let name = [88u8, 45u8, 82u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 45u8, 73u8, 100u8];
+    let value = [97u8, 98u8, 99u8, 49u8, 50u8, 51u8];
+    let injected = [97u8, 98u8, 99u8, 13u8, 10u8, 66u8, 99u8, 99u8, 58u8, 32u8, 118u8, 105u8, 99u8, 116u8, 105u8, 109u8, 64u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let bad_name = [88u8, 45u8, 82u8, 101u8, 113u8, 117u8, 101u8, 115u8, 116u8, 58u8, 73u8, 100u8];
+    let token = array_as_slice(name);
+    let admitted = header_field_admitted(token, array_as_slice(value));
+    let injection_refused = !header_field_admitted(token, array_as_slice(injected));
+    let name_refused = !header_field_admitted(array_as_slice(bad_name), array_as_slice(value));
+    admitted && injection_refused && name_refused
+}
+
+// A filename reaches a recipient's filesystem. Separators, quotes,
+// backslashes, semicolons and spaces are refused rather than escaped.
+@id("std.email.tests.filename_alphabet_is_closed")
+fn filename_alphabet_is_closed() -> bool
+{
+    filename_byte_admitted(97u8) && filename_byte_admitted(90u8) && filename_byte_admitted(48u8) && filename_byte_admitted(45u8) && filename_byte_admitted(46u8) && filename_byte_admitted(95u8)
+}
+
+@id("std.email.tests.filename_alphabet_refusals")
+fn filename_alphabet_refusals() -> bool
+{
+    !filename_byte_admitted(47u8) && !filename_byte_admitted(92u8) && !filename_byte_admitted(34u8) && !filename_byte_admitted(59u8) && !filename_byte_admitted(32u8) && !filename_byte_admitted(13u8)
+}
+
+// Path traversal is refused by shape: a leading dot, a trailing dot and any
+// `..` run are each rejected, so the adapter never has to normalize one.
+@id("std.email.tests.filename_refuses_traversal_shapes")
+fn filename_refuses_traversal_shapes() -> bool
+{
+    let ok = [114u8, 101u8, 112u8, 111u8, 114u8, 116u8, 45u8, 50u8, 48u8, 50u8, 54u8, 46u8, 112u8, 100u8, 102u8];
+    let traversal = [46u8, 46u8, 101u8, 116u8, 99u8];
+    let leading = [46u8, 104u8, 105u8, 100u8, 100u8, 101u8, 110u8];
+    let trailing = [114u8, 101u8, 112u8, 111u8, 114u8, 116u8, 46u8];
+    let separator = [97u8, 47u8, 98u8, 46u8, 112u8, 100u8, 102u8];
+    filename_admitted(array_as_slice(ok)) && !filename_admitted(array_as_slice(traversal)) && !filename_admitted(array_as_slice(leading)) && !filename_admitted(array_as_slice(trailing)) && !filename_admitted(array_as_slice(separator))
+}
+
+@id("std.email.tests.media_type_alphabet")
+fn media_type_alphabet() -> bool
+{
+    media_type_byte_admitted(97u8) && media_type_byte_admitted(57u8) && media_type_byte_admitted(43u8) && media_type_byte_admitted(45u8) && !media_type_byte_admitted(47u8) && !media_type_byte_admitted(59u8)
+}
+
+// Exactly one solidus with non-empty halves, and no parameter tail: a media
+// type carrying `; name=...` is another caller-controlled value crossing
+// into a header.
+@id("std.email.tests.media_type_shape_cases")
+fn media_type_shape_cases() -> bool
+{
+    let ok = [97u8, 112u8, 112u8, 108u8, 105u8, 99u8, 97u8, 116u8, 105u8, 111u8, 110u8, 47u8, 112u8, 100u8, 102u8];
+    let structured = [97u8, 112u8, 112u8, 108u8, 105u8, 99u8, 97u8, 116u8, 105u8, 111u8, 110u8, 47u8, 118u8, 110u8, 100u8, 46u8, 97u8, 112u8, 105u8, 43u8, 106u8, 115u8, 111u8, 110u8];
+    let parameterized = [116u8, 101u8, 120u8, 116u8, 47u8, 112u8, 108u8, 97u8, 105u8, 110u8, 59u8, 32u8, 99u8, 104u8, 97u8, 114u8, 115u8, 101u8, 116u8, 61u8, 117u8, 116u8, 102u8, 45u8, 56u8];
+    let double = [97u8, 47u8, 98u8, 47u8, 99u8];
+    let bare = [112u8, 100u8, 102u8];
+    media_type_admitted(array_as_slice(ok)) && media_type_admitted(array_as_slice(structured)) && !media_type_admitted(array_as_slice(parameterized)) && !media_type_admitted(array_as_slice(double)) && !media_type_admitted(array_as_slice(bare))
+}
+
+@id("std.email.tests.media_type_edge_shapes")
+fn media_type_edge_shapes() -> bool
+{
+    let leading = [47u8, 112u8, 100u8, 102u8];
+    let trailing = [97u8, 112u8, 112u8, 108u8, 105u8, 99u8, 97u8, 116u8, 105u8, 111u8, 110u8, 47u8];
+    leading_and_trailing_solidus_refused(array_as_slice(leading), array_as_slice(trailing))
+}
+
+@id("std.email.tests.leading_and_trailing_solidus_refused")
+fn leading_and_trailing_solidus_refused(leading: borrow Slice<u8>, trailing: borrow Slice<u8>) -> bool
+{
+    !media_type_admitted(leading) && !media_type_admitted(trailing)
+}
+
+// Every clause of an attachment refuses on its own.
+@id("std.email.tests.attachment_is_attributable")
+fn attachment_is_attributable() -> bool
+{
+    let name = [114u8, 101u8, 112u8, 111u8, 114u8, 116u8, 45u8, 50u8, 48u8, 50u8, 54u8, 46u8, 112u8, 100u8, 102u8];
+    let bad_name = [46u8, 46u8, 47u8, 101u8, 116u8, 99u8, 47u8, 112u8, 97u8, 115u8, 115u8, 119u8, 100u8];
+    let media = [97u8, 112u8, 112u8, 108u8, 105u8, 99u8, 97u8, 116u8, 105u8, 111u8, 110u8, 47u8, 112u8, 100u8, 102u8];
+    let bad_media = [97u8, 112u8, 112u8, 108u8, 105u8, 99u8, 97u8, 116u8, 105u8, 111u8, 110u8];
+    let filename = array_as_slice(name);
+    let media_type = array_as_slice(media);
+    let admitted = attachment_admitted(filename, media_type, 1024usize);
+    let name_refused = !attachment_admitted(array_as_slice(bad_name), media_type, 1024usize);
+    let media_refused = !attachment_admitted(filename, array_as_slice(bad_media), 1024usize);
+    let size_refused = !attachment_admitted(filename, media_type, attachment_len_limit() + 1usize);
+    admitted && name_refused && media_refused && size_refused
+}
+
+// The composed message: each budget refuses on its own while the others hold.
+@id("std.email.tests.message_admission_is_attributable")
+fn message_admission_is_attributable() -> bool
+{
+    let subject = [77u8, 111u8, 110u8, 116u8, 104u8, 108u8, 121u8, 32u8, 114u8, 101u8, 112u8, 111u8, 114u8, 116u8];
+    let injected = [77u8, 111u8, 110u8, 116u8, 104u8, 108u8, 121u8, 13u8, 10u8, 66u8, 99u8, 99u8, 58u8, 32u8, 118u8, 105u8, 99u8, 116u8, 105u8, 109u8, 64u8, 101u8, 120u8, 97u8, 109u8, 112u8, 108u8, 101u8, 46u8, 99u8, 111u8, 109u8];
+    let topic = array_as_slice(subject);
+    let all_hold = message_admitted(topic, 3usize, 4096usize, 2usize, 8192usize);
+    let subject_refused = !message_admitted(array_as_slice(injected), 3usize, 4096usize, 2usize, 8192usize);
+    let recipients_refused = !message_admitted(topic, 65usize, 4096usize, 2usize, 8192usize);
+    let attachments_refused = !message_admitted(topic, 3usize, 4096usize, 17usize, 8192usize);
+    let size_refused = !message_admitted(topic, 3usize, body_len_limit() + 1usize, 2usize, 8192usize);
+    all_hold && subject_refused && recipients_refused && attachments_refused && size_refused
+}
+
+// None of the budgets above has any notion of a message's classified
+// content: a fully budgeted message whose body carries an SMTP credential
+// passes every one of them. Each flag is asserted individually.
+@id("std.email.tests.message_guard_refuses_each_secret_flag")
+fn message_guard_refuses_each_secret_flag() -> bool
+{
+    let subject = [77u8, 111u8, 110u8, 116u8, 104u8, 108u8, 121u8, 32u8, 114u8, 101u8, 112u8, 111u8, 114u8, 116u8];
+    let topic = array_as_slice(subject);
+    let safe = message_admitted_guarded(topic, 3usize, 4096usize, 2usize, 8192usize, false, false, false, false, false, false);
+    let password = !message_admitted_guarded(topic, 3usize, 4096usize, 2usize, 8192usize, true, false, false, false, false, false);
+    let api_key = !message_admitted_guarded(topic, 3usize, 4096usize, 2usize, 8192usize, false, true, false, false, false, false);
+    let bearer = !message_admitted_guarded(topic, 3usize, 4096usize, 2usize, 8192usize, false, false, true, false, false, false);
+    safe && password && api_key && bearer
+}
+
+@id("std.email.tests.message_guard_refuses_the_remaining_flags")
+fn message_guard_refuses_the_remaining_flags() -> bool
+{
+    let subject = [77u8, 111u8, 110u8, 116u8, 104u8, 108u8, 121u8, 32u8, 114u8, 101u8, 112u8, 111u8, 114u8, 116u8];
+    let topic = array_as_slice(subject);
+    let session = !message_admitted_guarded(topic, 3usize, 4096usize, 2usize, 8192usize, false, false, false, true, false, false);
+    let signing = !message_admitted_guarded(topic, 3usize, 4096usize, 2usize, 8192usize, false, false, false, false, true, false);
+    let smtp = !message_admitted_guarded(topic, 3usize, 4096usize, 2usize, 8192usize, false, false, false, false, false, true);
+    session && signing && smtp
+}
+
+@id("std.email.tests.message-budget-failures")
+fn message_budget_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if subject_length_window() { 0 } else { 32768 };
+    failed = failed + if header_line_ceiling() { 0 } else { 65536 };
+    failed = failed + if body_budget_boundary() { 0 } else { 131072 };
+    failed = failed + if attachment_budget_boundaries() { 0 } else { 262144 };
+    failed = failed + if total_size_is_checked_separately() { 0 } else { 524288 };
+    failed = failed + if header_name_refuses_colon_and_controls() { 0 } else { 1048576 };
+    failed + header_and_attachment_failures()
+}
+
+@id("std.email.tests.header-and-attachment-failures")
+fn header_and_attachment_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if header_name_shape_cases() { 0 } else { 2097152 };
+    failed = failed + if header_field_is_attributable() { 0 } else { 4194304 };
+    failed = failed + if filename_alphabet_is_closed() { 0 } else { 8388608 };
+    failed = failed + if filename_alphabet_refusals() { 0 } else { 16777216 };
+    failed = failed + if filename_refuses_traversal_shapes() { 0 } else { 33554432 };
+    failed = failed + if media_type_alphabet() { 0 } else { 67108864 };
+    failed + media_and_message_failures()
+}
+
+@id("std.email.tests.media-and-message-failures")
+fn media_and_message_failures() -> i64
+{
+    let mut failed = 0;
+    failed = failed + if media_type_shape_cases() { 0 } else { 134217728 };
+    failed = failed + if media_type_edge_shapes() { 0 } else { 268435456 };
+    failed = failed + if attachment_is_attributable() { 0 } else { 536870912 };
+    failed = failed + if message_admission_is_attributable() { 0 } else { 1073741824 };
+    failed = failed + if message_guard_refuses_each_secret_flag() { 0 } else { 2147483648 };
+    failed = failed + if message_guard_refuses_the_remaining_flags() { 0 } else { 4294967296 };
+    failed
 }

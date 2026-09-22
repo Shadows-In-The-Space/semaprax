@@ -25,7 +25,7 @@
 //!   baseline reads the candidate's fields at the wrong positions. Breaking,
 //!   in both directions, and never "additive" the way a new declaration is.
 //! - A **field ownership change** — a by-value leaf becoming an
-//!   `own<`[`OWNED_BYTES_RESOURCE`](super::OWNED_BYTES_RESOURCE)`>` handle, or
+//!   `own<`[`OWNED_BYTES_RESOURCE`]`>` handle, or
 //!   the reverse — moves *who runs cleanup* across the boundary. It is
 //!   reported as its own delta kind, distinct from an ordinary type change,
 //!   because a reviewer scanning for cleanup-responsibility movement must not
@@ -41,7 +41,7 @@
 //! ## Fail-closed
 //!
 //! [`compare`] refuses two projections that do not share one
-//! [`WIT_TYPE_PROJECTION_SCHEMA`](super::WIT_TYPE_PROJECTION_SCHEMA)
+//! [`WIT_TYPE_PROJECTION_SCHEMA`]
 //! (`SPX-PGWIT121`): a delta across two mapping-table versions would compare
 //! renderings whose terms mean different things. It refuses rather than
 //! truncates when the delta count exceeds [`MAX_REPORTED_DELTAS`]

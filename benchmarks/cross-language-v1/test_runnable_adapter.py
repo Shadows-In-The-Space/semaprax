@@ -6,8 +6,14 @@ import hashlib
 import importlib.util
 import json
 import pathlib
+import plistlib
+import os
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 
 SUITE = pathlib.Path(__file__).resolve().parent
@@ -26,6 +32,23 @@ def digest(value: bytes) -> str:
 
 
 class RunnableAdapterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tool = pathlib.Path("/opt/homebrew/bin/rustc").resolve()
+        assert cls.tool.is_file(), f"local Rust fixture compiler is unavailable: {cls.tool}"
+        cls.tool_root = cls.tool.parent.parent
+        cls.tool_root_sha256 = RUNNABLE._toolchain_digest(cls.tool_root)
+        cls.linker = pathlib.Path("/usr/bin/cc").resolve()
+        assert cls.linker.is_file(), f"local Rust fixture linker is unavailable: {cls.linker}"
+        cls.link_editor = pathlib.Path("/Library/Developer/CommandLineTools/usr/bin/ld")
+        assert cls.link_editor.is_file(), f"local Rust fixture link editor is unavailable: {cls.link_editor}"
+        cls.sdk_root = pathlib.Path("/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk")
+        assert cls.sdk_root.is_dir() and not cls.sdk_root.is_symlink(), "canonical macOS SDK root is unavailable"
+        cls.sdk_settings = (cls.sdk_root / "SDKSettings.json").read_bytes()
+        cls.sdk_system_version = (cls.sdk_root / "System/Library/CoreServices/SystemVersion.plist").read_bytes()
+        cls.sdk_version = json.loads(cls.sdk_settings)["Version"]
+        cls.sdk_build = plistlib.loads(cls.sdk_system_version)["ProductBuildVersion"]
+
     def setUp(self) -> None:
         self.tasks = (SUITE / "tasks.json").read_bytes()
         self.adapters = (SUITE / "adapters.json").read_bytes()
@@ -72,6 +95,19 @@ class RunnableAdapterTests(unittest.TestCase):
                 "receipt": receipt,
                 "receipt_sha256": digest(receipt.encode()),
                 "timeout_seconds": 120,
+                "tool_path": str(self.tool),
+                "tool_sha256": digest(self.tool.read_bytes()),
+                "tool_root": str(self.tool_root),
+                "tool_root_sha256": self.tool_root_sha256,
+                "linker_path": str(self.linker),
+                "linker_sha256": digest(self.linker.read_bytes()),
+                "link_editor_path": str(self.link_editor),
+                "link_editor_sha256": digest(self.link_editor.read_bytes()),
+                "sdk_root": str(self.sdk_root),
+                "sdk_version": self.sdk_version,
+                "sdk_build": self.sdk_build,
+                "sdk_settings_sha256": digest(self.sdk_settings),
+                "sdk_system_version_sha256": digest(self.sdk_system_version),
             },
         })
 
@@ -114,8 +150,112 @@ class RunnableAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="spx-runnable-root-") as temporary:
             self.assertEqual(
                 RUNNABLE.execute_local_fixture(self.descriptor(), self.tasks, self.adapters, pathlib.Path(temporary))["reason"],
-                "execution_inputs_drifted",
+                "posix_snapshot_execution_unavailable",
             )
+
+    def test_malformed_bounds_and_containers_refuse_without_crashing(self) -> None:
+        descriptor = json.loads(self.descriptor())
+        descriptor["execution"]["timeout_seconds"] = True
+        self.assertEqual(
+            RUNNABLE.admit_runnable_descriptor(canonical(descriptor), self.tasks, self.adapters)["reason"],
+            "invalid_execution_bounds",
+        )
+        descriptor = json.loads(self.descriptor())
+        descriptor["execution"] = []
+        self.assertEqual(
+            RUNNABLE.admit_runnable_descriptor(canonical(descriptor), self.tasks, self.adapters)["reason"],
+            "invalid_execution_provenance",
+        )
+        descriptor = json.loads(self.descriptor())
+        descriptor["execution"] = None
+        self.assertEqual(
+            RUNNABLE.admit_runnable_descriptor(canonical(descriptor), self.tasks, self.adapters)["reason"],
+            "invalid_execution_provenance",
+        )
+
+    def test_closed_environment_excludes_path_and_startup_variables(self) -> None:
+        observed: dict[str, str] = {}
+
+        def capture(_command: list[str], _cwd: pathlib.Path, _deadline: float,
+                    environment: dict[str, str]) -> tuple[int | None, bytes, bytes, str | None]:
+            observed.update(environment)
+            return None, b"", b"", "environment_captured"
+
+        with mock.patch.dict(os.environ, {
+            "PATH": "/attacker/bin", "RUSTUP_HOME": "/attacker/rustup",
+            "CARGO_HOME": "/attacker/cargo", "DYLD_INSERT_LIBRARIES": "/attacker/inject.dylib",
+        }, clear=False), mock.patch.object(RUNNABLE, "_run_bounded_group", side_effect=capture):
+            result = RUNNABLE.execute_local_fixture(self.descriptor(), self.tasks, self.adapters, RUNNABLE.ROOT)
+        self.assertEqual(result["reason"], "environment_captured")
+        self.assertEqual(set(observed), {"LANG", "LC_ALL", "TZ", "SDKROOT", "DEVELOPER_DIR"})
+        self.assertNotIn("/attacker", " ".join(observed.values()))
+
+    def test_snapshot_remains_bound_when_original_is_replaced_before_launch(self) -> None:
+        source = RUNNABLE.ROOT / "benchmarks/cross-language-v1/tasks/sequence-digest-v1/public/rust/main.rs"
+        original = source.read_bytes()
+
+        def replace_after_snapshot(_snapshot_root: pathlib.Path) -> None:
+            source.write_bytes(b"this replacement must never reach the scorer\n")
+
+        try:
+            with mock.patch.object(RUNNABLE, "_after_snapshot_before_launch", side_effect=replace_after_snapshot):
+                result = RUNNABLE.execute_local_fixture(self.descriptor(), self.tasks, self.adapters, RUNNABLE.ROOT)
+        finally:
+            source.write_bytes(original)
+        self.assertEqual(result["status"], "fixture_ok", result)
+        self.assertTrue(result["result"]["public"]["passed"])
+
+    def test_timeout_kills_an_orphaned_process_group_child(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="spx-runnable-child-") as temporary:
+            marker = pathlib.Path(temporary) / "child.pid"
+            script = (
+                "import pathlib, subprocess, sys, time; "
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                f"pathlib.Path({str(marker)!r}).write_text(str(child.pid)); time.sleep(30)"
+            )
+            _, _, _, reason = RUNNABLE._run_bounded_group(
+                [sys.executable, "-c", script], pathlib.Path(temporary), time.monotonic() + 0.25,
+                dict(RUNNABLE.CLOSED_ENVIRONMENT),
+            )
+            self.assertEqual(reason, "execution_timed_out")
+            child_pid = int(marker.read_text())
+            until = time.monotonic() + 3
+            while True:
+                try:
+                    os.kill(child_pid, 0)
+                except ProcessLookupError:
+                    break
+                if time.monotonic() >= until:
+                    self.fail("process-group child survived timeout containment")
+                time.sleep(0.05)
+
+    def test_oversized_and_fifo_inputs_and_outputs_refuse_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="spx-runnable-bounds-") as temporary:
+            root = pathlib.Path(temporary)
+            oversized = root / "oversized.json"
+            oversized.write_bytes(b"x" * (RUNNABLE.MAX_DESCRIPTOR_BYTES + 1))
+            with self.assertRaisesRegex(RUNNABLE.SnapshotError, "regular_file_type_or_size_refused"):
+                RUNNABLE._read_regular(oversized.resolve(), RUNNABLE.MAX_DESCRIPTOR_BYTES)
+            fifo = root / "input.fifo"
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(RUNNABLE.SnapshotError, "regular_file_type_or_size_refused"):
+                RUNNABLE._read_regular(fifo.resolve(), RUNNABLE.MAX_DESCRIPTOR_BYTES)
+            with self.assertRaisesRegex(RUNNABLE.SnapshotError, "result_exceeds_byte_bound"):
+                RUNNABLE._write_new_regular(root / "oversized-result.json", b"x" * (RUNNABLE.MAX_RESULT_BYTES + 1))
+            _, _, _, overflow = RUNNABLE._run_bounded_group(
+                [sys.executable, "-c", "import sys; sys.stdout.write('x' * 70000)"], root,
+                time.monotonic() + 5, dict(RUNNABLE.CLOSED_ENVIRONMENT),
+            )
+            self.assertEqual(overflow, "execution_output_exceeded")
+            descriptor = root / "descriptor.json"
+            descriptor.write_bytes(b"{}")
+            output_fifo = root / "output.fifo"
+            os.mkfifo(output_fifo)
+            completed = subprocess.run([
+                sys.executable, str(RUNNABLE.SUITE / "runnable_adapter.py"), "--descriptor", str(descriptor),
+                "--output", str(output_fifo),
+            ], capture_output=True, timeout=5, check=False)
+            self.assertEqual(completed.returncode, 2)
 
     def test_scoring_inventory_retains_every_blocked_adapter(self) -> None:
         with tempfile.TemporaryDirectory(prefix="spx-runnable-plan-") as temporary:

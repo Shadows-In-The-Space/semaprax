@@ -44,10 +44,15 @@ import json
 import os
 import pathlib
 import platform
+import selectors
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from dataclasses import dataclass
+from typing import Optional
 from datetime import datetime, timezone
 
 SUITE = pathlib.Path(__file__).resolve().parent
@@ -66,6 +71,20 @@ OK = "ok"
 FAILED = "failed"
 BLOCKED = "blocked"
 DRIFTED = "drifted"
+
+
+@dataclass(frozen=True)
+class HardenedExecution:
+    """Optional POSIX-only process policy for an already-snapshotted subject.
+
+    The ordinary benchmark path intentionally keeps its established behavior.
+    Runnable-adapter v1 opts into this profile only after creating private
+    regular-file inputs and a closed environment.
+    """
+
+    environment: dict[str, str]
+    deadline: float
+    output_limit: int
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -89,12 +108,10 @@ def digest_tree(directory: pathlib.Path) -> str:
     return sha256_bytes("\n".join(rows).encode())
 
 
-def tool_version(command: list) -> str:
+def tool_version(command: list, execution: Optional[HardenedExecution] = None) -> str:
     try:
-        completed = subprocess.run(
-            command, capture_output=True, text=True, timeout=TIMEOUT_SECONDS
-        )
-        text = (completed.stdout or completed.stderr or "").strip()
+        code, stdout, stderr = run_command(command, pathlib.Path.cwd(), execution)
+        text = (stdout or stderr or "").strip()
         return text.splitlines()[0] if text else "unknown"
     except Exception:
         return "unknown"
@@ -152,9 +169,92 @@ def command_for(adapter: dict, key: str, semaprax_binary: str) -> list:
     return line
 
 
-def run_command(command: list, cwd: pathlib.Path) -> tuple:
+def _kill_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        # A prior kill can race process-group teardown on Darwin.
+        pass
+
+
+def _run_hardened(command: list, cwd: pathlib.Path, execution: HardenedExecution) -> tuple:
+    """Run one bounded child process without retaining unbounded output.
+
+    This profile is intentionally POSIX-scoped.  A Windows job-object
+    implementation would be a separate reviewed contract; falling back to a
+    parent-only kill would weaken the containment claim.
+    """
+    if os.name != "posix":
+        return None, "", "hardened execution is unavailable on this host"
+    if time.monotonic() >= execution.deadline:
+        return None, "", "shared execution deadline expired"
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+        env=execution.environment,
+        start_new_session=True,
+    )
+    selector = selectors.DefaultSelector()
+    streams = {process.stdout, process.stderr}
+    for stream in streams:
+        assert stream is not None
+        os.set_blocking(stream.fileno(), False)
+        selector.register(stream, selectors.EVENT_READ)
+    output = {process.stdout: bytearray(), process.stderr: bytearray()}
+    overflow = False
+    timed_out = False
+    while selector.get_map():
+        remaining = execution.deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            _kill_group(process)
+            break
+        events = selector.select(min(remaining, 0.1))
+        for key, _ in events:
+            chunk = os.read(key.fileobj.fileno(), min(8192, execution.output_limit + 1))
+            if not chunk:
+                selector.unregister(key.fileobj)
+                continue
+            output[key.fileobj].extend(chunk)
+            if len(output[key.fileobj]) > execution.output_limit:
+                overflow = True
+                _kill_group(process)
+                break
+        if overflow:
+            break
+    selector.close()
+    if overflow or timed_out:
+        _kill_group(process)
+    try:
+        process.wait(timeout=max(0.0, execution.deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        _kill_group(process)
+        process.wait()
+        timed_out = True
+    stdout = bytes(output[process.stdout]).decode("utf-8", "replace")
+    stderr = bytes(output[process.stderr]).decode("utf-8", "replace")
+    assert process.stdout is not None and process.stderr is not None
+    process.stdout.close()
+    process.stderr.close()
+    if overflow:
+        return None, stdout, "adapter output exceeded byte bound"
+    if timed_out:
+        return None, stdout, "shared execution deadline expired"
+    return process.returncode, stdout, stderr
+
+
+def run_command(command: list, cwd: pathlib.Path, execution: Optional[HardenedExecution] = None) -> tuple:
     """Execute one adapter step. Returns (returncode, stdout, stderr) or a
     timeout sentinel (`None`, "", "timeout after N seconds")."""
+    if execution is not None:
+        try:
+            return _run_hardened(command, cwd, execution)
+        except FileNotFoundError as error:
+            return None, "", f"tool not found: {error}"
     try:
         completed = subprocess.run(
             command,
@@ -189,7 +289,8 @@ def evaluate_success(adapter: dict, returncode, stdout: str) -> tuple:
     raise ValueError(f"unknown success predicate kind: {kind}")
 
 
-def stage(scratch: pathlib.Path, adapter: dict, semaprax_binary: str) -> dict:
+def stage(scratch: pathlib.Path, adapter: dict, semaprax_binary: str,
+          execution: Optional[HardenedExecution] = None) -> dict:
     """Build (if declared) then run one adapter phase inside `scratch`.
 
     Returns a dict with `passed`, `phase` ("build" or the run phase), the
@@ -198,7 +299,7 @@ def stage(scratch: pathlib.Path, adapter: dict, semaprax_binary: str) -> dict:
     """
     build_command = command_for(adapter, "build_command", semaprax_binary)
     if build_command:
-        code, _, err = run_command(build_command, scratch)
+        code, _, err = run_command(build_command, scratch, execution)
         if code != 0:
             return {
                 "passed": False,
@@ -206,7 +307,7 @@ def stage(scratch: pathlib.Path, adapter: dict, semaprax_binary: str) -> dict:
                 "detail": (err or "").strip().splitlines()[-5:] or [f"exit {code}"],
             }
     run_line = command_for(adapter, "run_command", semaprax_binary)
-    code, out, err = run_command(run_line, scratch)
+    code, out, err = run_command(run_line, scratch, execution)
     passed, why = evaluate_success(adapter, code, out)
     result = {"passed": passed, "phase": "run", "detail": [why]}
     if not passed and err:
@@ -239,7 +340,7 @@ def scratch_dir(label: str) -> pathlib.Path:
 
 
 def evaluate_pair(root: pathlib.Path, task: dict, language: str, adapter: dict,
-                   semaprax_binary: str) -> dict:
+                   semaprax_binary: str, execution: Optional[HardenedExecution] = None) -> dict:
     record = {
         "id": f"{task['id']}::{language}",
         "task": task["id"],
@@ -266,7 +367,7 @@ def evaluate_pair(root: pathlib.Path, task: dict, language: str, adapter: dict,
     hidden_digest = digest_tree(hidden_dir)
     combined = sha256_bytes(f"{public_digest}\n{hidden_digest}".encode())
     record["provenance"] = {
-        "adapter_version": tool_version(command_for(adapter, "version_command", semaprax_binary)),
+        "adapter_version": tool_version(command_for(adapter, "version_command", semaprax_binary), execution),
         "public_digest": public_digest,
         "hidden_digest": hidden_digest,
         "digest": combined,
@@ -283,7 +384,7 @@ def evaluate_pair(root: pathlib.Path, task: dict, language: str, adapter: dict,
     hidden_scratch = scratch_dir(f"hidden-{language}")
     try:
         copy_tree(public_dir, public_scratch)
-        public_outcome = stage(public_scratch, adapter, semaprax_binary)
+        public_outcome = stage(public_scratch, adapter, semaprax_binary, execution)
 
         # Leak check: the public scratch tree must never contain a
         # hidden-only path, regardless of whether the public phase passed.
@@ -306,7 +407,7 @@ def evaluate_pair(root: pathlib.Path, task: dict, language: str, adapter: dict,
 
         copy_tree(public_dir, hidden_scratch)
         copy_tree(hidden_dir, hidden_scratch)  # overlay: same-path files replace
-        hidden_outcome = stage(hidden_scratch, adapter, semaprax_binary)
+        hidden_outcome = stage(hidden_scratch, adapter, semaprax_binary, execution)
         record["hidden"] = {"passed": hidden_outcome["passed"], "detail": hidden_outcome["detail"]}
         if not hidden_outcome["passed"]:
             record.update(status=FAILED, reason=f"hidden {hidden_outcome['phase']}: "
@@ -417,11 +518,31 @@ def main():
     parser.add_argument("--adapters", help=f"adapter inventory to read (default: {ADAPTERS})")
     parser.add_argument("--root", help=f"repository root task paths resolve against (default: {ROOT})")
     parser.add_argument("--semaprax", help="path to the semaprax binary the `semaprax` adapter invokes")
+    parser.add_argument("--hardened-posix", action="store_true",
+                        help="use the optional bounded POSIX execution profile")
+    parser.add_argument("--execution-deadline-monotonic", type=float,
+                        help="shared monotonic deadline required with --hardened-posix")
+    parser.add_argument("--execution-output-bytes", type=int,
+                        help="per-stream cap required with --hardened-posix")
     args = parser.parse_args()
 
     root = pathlib.Path(args.root).resolve() if args.root else ROOT
     tasks_path = pathlib.Path(args.tasks).resolve() if args.tasks else TASKS
     adapters_path = pathlib.Path(args.adapters).resolve() if args.adapters else ADAPTERS
+
+    execution = None
+    if args.hardened_posix:
+        if os.name != "posix":
+            return fail("hardened execution is unavailable on this host")
+        if (args.execution_deadline_monotonic is None
+                or type(args.execution_output_bytes) is not int
+                or not 1 <= args.execution_output_bytes <= 1024 * 1024):
+            return fail("hardened execution requires bounded deadline and output")
+        execution = HardenedExecution(
+            environment=dict(os.environ),
+            deadline=args.execution_deadline_monotonic,
+            output_limit=args.execution_output_bytes,
+        )
 
     try:
         tasks_document = load_json(tasks_path, TASKS_SCHEMA, "task inventory")
@@ -463,7 +584,7 @@ def main():
             }
         else:
             print(f"[{task['id']}::{language}] ...", flush=True)
-            record = evaluate_pair(root, task, language, adapter, semaprax_binary)
+            record = evaluate_pair(root, task, language, adapter, semaprax_binary, execution)
         print(f"  -> status={record['status']} {record.get('reason', '')}".rstrip(), flush=True)
         results.append(record)
 

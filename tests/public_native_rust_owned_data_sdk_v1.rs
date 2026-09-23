@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[path = "support/native_rust_cargo.rs"]
@@ -130,6 +131,226 @@ fn preview_tamper_is_refused(prepared: &Path, payload: &str) {
         "tampered preview must be refused before package use: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+// Test-only archive admission, not a registry installer or a concurrent-writer
+// sandbox. Python/tool absence fails this provisioned gate. Reuse the preview
+// reader for the held, bounded snapshot; never reread generator output as truth.
+const CRATE_GUARD: &str = r#"
+import gzip, importlib.util, io, json, os, stat, sys, tarfile, tomllib
+from pathlib import Path
+
+MODE, INPUT, OUTPUT, PREFIX, RELEASE = sys.argv[1:]
+INPUT, OUTPUT = Path(INPUT), Path(OUTPUT)
+FILE_LIMIT = 16 * 1024 * 1024
+TOTAL_LIMIT = 32 * 1024 * 1024
+ARCHIVE_LIMIT = TOTAL_LIMIT + 1024 * 1024
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+def regular_bytes(path, limit):
+    before = path.lstat()
+    require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_size <= limit, 'regular file bound')
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    with os.fdopen(fd, 'rb') as stream:
+        opened = os.fstat(stream.fileno())
+        require((before.st_dev, before.st_ino) == (opened.st_dev, opened.st_ino), 'file replaced')
+        data = stream.read(limit + 1)
+        after = os.fstat(stream.fileno())
+    require(len(data) <= limit and len(data) == opened.st_size, 'file byte bound')
+    require((opened.st_size, opened.st_mtime_ns) == (after.st_size, after.st_mtime_ns), 'file changed')
+    require((before.st_dev, before.st_ino) == (path.lstat().st_dev, path.lstat().st_ino), 'path replaced')
+    return data
+
+def manifest_rule(actual, original):
+    source = tomllib.loads(original.decode('utf-8'))
+    require(set(source) == {'package', 'lib', 'workspace'} and source['workspace'] == {}, 'source manifest shape')
+    require(source['lib'] == {'path': 'lib.rs'}, 'source lib shape')
+    require(source['package'] == {
+        'name': 'semaprax-generated-native-rust-owned-data-sdk', 'version': '0.1.0',
+        'edition': '2021', 'rust-version': '1.85', 'publish': False, 'build': 'build.rs',
+    }, 'source package shape')
+    value = tomllib.loads(actual.decode('utf-8'))
+    # Closed Cargo normalization: remove empty [workspace], optionally add only
+    # these false auto-discovery/readme defaults and the derived lib name.
+    # Original package/lib values stay exact; no dependencies, target tables,
+    # new build path, features, patches, includes, links, or executable targets.
+    require(set(value) == {'package', 'lib'}, 'normalized manifest tables')
+    package = value['package']
+    for key in ('autolib', 'autobins', 'autoexamples', 'autotests', 'autobenches', 'readme'):
+        if key in package:
+            require(package.pop(key) is False, 'normalized manifest default')
+    library = value['lib']
+    if 'name' in library:
+        require(library.pop('name') == source['package']['name'].replace('-', '_'), 'normalized lib name')
+    require(package == source['package'] and library == source['lib'], 'normalized manifest changed')
+
+def payload_rule(files, expected):
+    required = set(expected) | {'Cargo.toml.orig'}
+    require(set(files) in (required, required | {'Cargo.lock'}), 'archive inventory')
+    for name, data in expected.items():
+        if name != 'Cargo.toml':
+            require(files[name] == data, 'payload mismatch: ' + name)
+    require(files['Cargo.toml.orig'] == expected['Cargo.toml'], 'original Cargo manifest mismatch')
+    manifest_rule(files['Cargo.toml'], expected['Cargo.toml'])
+    if 'Cargo.lock' in files:
+        lock = tomllib.loads(files['Cargo.lock'].decode('utf-8'))
+        require(set(lock) == {'version', 'package'} and type(lock['version']) is int and lock['version'] in (3, 4), 'lock shape')
+        require(lock['package'] == [{'name': 'semaprax-generated-native-rust-owned-data-sdk', 'version': '0.1.0'}], 'lock dependency substitution')
+
+def archive_payload(packed, expected):
+    require(len(packed) <= ARCHIVE_LIMIT, 'compressed bound')
+    with gzip.GzipFile(fileobj=io.BytesIO(packed)) as stream:
+        raw = stream.read(ARCHIVE_LIMIT + 1)
+    require(len(raw) <= ARCHIVE_LIMIT, 'expanded bound')
+    files, offset, total = {}, 0, 0
+    allowed = set(expected) | {'Cargo.toml.orig', 'Cargo.lock'}
+    while offset + 512 <= len(raw):
+        header = raw[offset:offset + 512]
+        if header == bytes(512):
+            require(len(raw) - offset >= 1024 and not any(raw[offset:]), 'archive trailer')
+            payload_rule(files, expected)
+            return files
+        require(len(files) < len(allowed), 'member count')
+        # Parse fixed tar headers ourselves: no transparent PAX/GNU extension
+        # allocation, links, directories, devices, sparse members or repair.
+        require(header[156:157] in (b'0', b'\0'), 'regular archive members only')
+        require(header[257:265] in (b'ustar\00000', b'ustar  \0'), 'tar header format')
+        if header[257:265] == b'ustar\00000':
+            require(not any(header[345:500]), 'tar prefix forbidden')
+        def octal(field):
+            text = field.rstrip(b'\0 ').lstrip(b' ')
+            require(text and all(byte in b'01234567' for byte in text), 'tar octal')
+            return int(text, 8)
+        require(octal(header[148:156]) == sum(header[:148]) + 8 * 32 + sum(header[156:]), 'tar checksum')
+        name_field = header[:100].split(b'\0', 1)
+        require(len(name_field) == 2 and not any(name_field[1]), 'tar name termination')
+        name = name_field[0].decode('utf-8')
+        require(name.startswith(PREFIX + '/'), 'archive root')
+        leaf = name[len(PREFIX) + 1:]
+        require(leaf in allowed and '/' not in leaf and '\\' not in leaf, 'archive member path')
+        require(leaf not in files, 'duplicate archive member')
+        size = octal(header[124:136])
+        require(size <= FILE_LIMIT, 'member size')
+        total += size
+        require(total <= TOTAL_LIMIT, 'payload total')
+        start, end = offset + 512, offset + 512 + size
+        padded = (end + 511) // 512 * 512
+        require(padded <= len(raw) and not any(raw[end:padded]), 'member extent')
+        files[leaf] = raw[start:end]
+        offset = padded
+    raise ValueError('missing archive trailer')
+
+def verify_directory(root, files):
+    require(stat.S_ISDIR(root.lstat().st_mode), 'physical extracted directory')
+    with os.scandir(root) as entries:
+        names = []
+        for entry in entries:
+            require(len(names) < len(files), 'extracted member count')
+            names.append(entry.name)
+    require(set(names) == set(files), 'extracted inventory')
+    for name, expected in files.items():
+        require(regular_bytes(root / name, FILE_LIMIT) == expected, 'extracted payload mismatch: ' + name)
+
+def pack(files, mutation=None):
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode='w', format=tarfile.USTAR_FORMAT) as tar:
+        for name, data in files.items():
+            info = tarfile.TarInfo(PREFIX + '/' + name)
+            info.size = len(data)
+            if name == 'build.rs' and mutation == 'path':
+                info.name = PREFIX + '/../build.rs'
+            if name == 'build.rs' and mutation == 'symlink':
+                info.type, info.linkname, info.size = tarfile.SYMTYPE, 'lib.rs', 0
+            tar.addfile(info, io.BytesIO(data))
+            if name == 'build.rs' and mutation == 'duplicate':
+                tar.addfile(info, io.BytesIO(data))
+    return gzip.compress(output.getvalue(), mtime=0)
+
+try:
+    if MODE == 'snapshot':
+        spec = importlib.util.spec_from_file_location('release', RELEASE)
+        release = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(release)
+        release.assert_no_credential_env(os.environ)
+        manifest, recomputed, payload = release._read_prepared(INPUT, 'rust')
+        release._validate_prepared_manifest('rust', manifest, recomputed, payload, INPUT)
+        print(json.dumps({name: data.hex() for name, data in payload.items()}, sort_keys=True))
+    else:
+        encoded = sys.stdin.buffer.read(2 * TOTAL_LIMIT + 4097)
+        require(len(encoded) <= 2 * TOTAL_LIMIT + 4096, 'snapshot bound')
+        expected = {name: bytes.fromhex(data) for name, data in json.loads(encoded).items()}
+        packed = regular_bytes(INPUT, ARCHIVE_LIMIT)
+        files = archive_payload(packed, expected)
+        if MODE == 'mutate':
+            marker = str(OUTPUT) + '.build-entered'
+            files['build.rs'] = ('fn main(){std::fs::write(' + json.dumps(marker) + ',b"entered").unwrap();}\n').encode()
+            with OUTPUT.open('xb') as stream:
+                stream.write(pack(files))
+        elif MODE == 'extract':
+            for mutation in ('path', 'symlink', 'duplicate'):
+                try:
+                    archive_payload(pack(files, mutation), expected)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError('archive negative accepted: ' + mutation)
+            for suffix in ('\n[dependencies]\nsubstituted = "1"\n', '\n[[bin]]\nname = "substituted"\npath = "build.rs"\n'):
+                forged = dict(files)
+                forged['Cargo.toml'] += suffix.encode()
+                try:
+                    payload_rule(forged, expected)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError('executable manifest mutation accepted')
+            # No extraction effects occur until the entire archive is admitted.
+            OUTPUT.mkdir()
+            for name, data in files.items():
+                with (OUTPUT / name).open('xb') as stream:
+                    stream.write(data)
+            verify_directory(OUTPUT, files)
+            print('archive admitted; traversal/symlink/duplicate/dependency/target controls refused')
+        elif MODE == 'verify':
+            verify_directory(OUTPUT, files)
+        else:
+            raise ValueError('unknown guard mode')
+except Exception as error:
+    print('crate admission refused: ' + str(error), file=sys.stderr)
+    sys.exit(2)
+"#;
+
+fn crate_guard(mode: &str, input: &Path, output: &Path, snapshot: &[u8]) -> Output {
+    let mut child = Command::new("python3")
+        .args(["-c", CRATE_GUARD, mode])
+        .arg(input)
+        .arg(output)
+        .arg(PACKAGE_CRATE_DIRECTORY)
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/generated-package-release.py"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("provisioned Python with tomllib is required");
+    child.stdin.take().unwrap().write_all(snapshot).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+fn checked_consumer_run(
+    archive: &Path,
+    extracted: &Path,
+    snapshot: &[u8],
+    command: &mut Command,
+    entries: &mut usize,
+) -> Result<Output, Output> {
+    let admission = crate_guard("verify", archive, extracted, snapshot);
+    if !admission.status.success() {
+        return Err(admission);
+    }
+    *entries += 1;
+    Ok(run(command, "run byte-verified safe consumer"))
 }
 
 fn locked_version<'a>(lock: &'a str, package: &str) -> &'a str {
@@ -445,6 +666,22 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
     // only this checked payload snapshot, never the generator output tree.
     let preview = fixture.0.join("preview");
     run(
+        Command::new("git")
+            .args(["diff", "HEAD", "--exit-code", "--quiet"])
+            .current_dir(env!("CARGO_MANIFEST_DIR")),
+        "exact local revision requires clean tracked sources",
+    );
+    let revision = run(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(env!("CARGO_MANIFEST_DIR")),
+        "read local tested revision",
+    );
+    let revision = String::from_utf8(revision.stdout).unwrap();
+    let revision = revision.trim();
+    assert_eq!(revision.len(), 40);
+    assert!(revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    run(
         release_preview_command()
             .args(["prepare", "--kind", "rust", "--package-dir"])
             .arg(&generated)
@@ -453,11 +690,18 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
                 "owned-data-rust",
                 "--project-version",
                 "0.1.0",
+                "--commit",
+                revision,
                 "--output",
             ])
             .arg(&preview),
         "prepare genuine owned-data SDK preview",
     );
+    let preview_manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(preview.join("package-preview-manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(preview_manifest["commit"], revision);
+    eprintln!("local generated-crate test revision: {revision} (not release provenance)");
     preview_tamper_is_refused(&preview, "descriptor.json");
     run(
         release_preview_command()
@@ -465,6 +709,13 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
             .arg(&preview),
         "verify genuine owned-data SDK preview",
     );
+    let snapshot = crate_guard("snapshot", &preview, &preview, &[]);
+    assert!(
+        snapshot.status.success(),
+        "checked payload snapshot: {}",
+        String::from_utf8_lossy(&snapshot.stderr)
+    );
+    let snapshot = snapshot.stdout;
     let preview_payload = preview.join("payload");
 
     // Issue #145 requires an external consumer of the archive a registry
@@ -482,27 +733,32 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
         .path()
         .join("package")
         .join(PACKAGE_CRATE_FILE);
-    let tarball_bytes = fs::read(&packaged_tarball).unwrap_or_else(|error| {
-        panic!(
-            "read owned-data SDK package tarball {}: {error}",
-            packaged_tarball.display()
-        )
-    });
-    assert_eq!(
-        tarball_bytes.len(),
-        fs::metadata(&packaged_tarball).unwrap().len() as usize
-    );
     let extracted_root = fixture.0.join("packaged-sdk");
     fs::create_dir(&extracted_root).unwrap();
-    run(
-        Command::new("tar")
-            .arg("xzf")
-            .arg(&packaged_tarball)
-            .arg("-C")
-            .arg(&extracted_root),
-        "extract owned-data SDK tarball",
-    );
     let extracted = extracted_root.join(PACKAGE_CRATE_DIRECTORY);
+    let malicious_archive = fixture.0.join("substituted.crate");
+    let mutated = crate_guard("mutate", &packaged_tarball, &malicious_archive, &snapshot);
+    assert!(
+        mutated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&mutated.stderr)
+    );
+    let refused_root = fixture.0.join("refused-extract");
+    let refused = crate_guard("extract", &malicious_archive, &refused_root, &snapshot);
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("payload mismatch: build.rs"));
+    assert!(
+        !refused_root.exists(),
+        "refusal precedes extraction/build entry"
+    );
+    assert!(!fixture.0.join("substituted.crate.build-entered").exists());
+    let admitted = crate_guard("extract", &packaged_tarball, &extracted, &snapshot);
+    assert!(
+        admitted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&admitted.stderr)
+    );
+    eprintln!("{}", String::from_utf8_lossy(&admitted.stdout).trim());
     let packaged_manifest = fs::read_to_string(extracted.join("Cargo.toml")).unwrap();
     assert!(!packaged_manifest.contains(env!("CARGO_MANIFEST_DIR")));
     for forbidden in [
@@ -520,24 +776,19 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
             "packaged owned-data SDK manifest leaks `{forbidden}`"
         );
     }
-    assert_eq!(
-        fs::read(extracted.join("descriptor.json")).unwrap(),
-        fs::read(generated.join("descriptor.json")).unwrap(),
-        "the installed archive must retain the source-derived descriptor bytes"
-    );
-    assert_eq!(
-        fs::read(extracted.join("semaprax.native-rust-owned-data-sdk.json")).unwrap(),
-        fs::read(generated.join("semaprax.native-rust-owned-data-sdk.json")).unwrap(),
-        "the installed archive must retain the source-derived package manifest"
-    );
-
     let consumer = fixture.0.join("packaged-consumer");
     fs::create_dir_all(consumer.join("src")).unwrap();
     let consumer_source =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/owned-data-rust/consumer");
-    fs::copy(
-        consumer_source.join("src/main.rs"),
+    let consumer_marker = fixture.0.join("consumer-entered");
+    let source = fs::read_to_string(consumer_source.join("src/main.rs")).unwrap();
+    assert_eq!(source.matches("fn main() {").count(), 1);
+    fs::write(
         consumer.join("src/main.rs"),
+        source.replace(
+            "fn main() {",
+            &format!("fn main() {{ std::fs::write({consumer_marker:?}, b\"entered\").unwrap();"),
+        ),
     )
     .unwrap();
     fs::write(
@@ -547,6 +798,60 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
         ),
     )
     .unwrap();
+    let mut cargo_entries = 0;
+    let refused = checked_consumer_run(
+        &malicious_archive,
+        &extracted,
+        &snapshot,
+        native_rust_cargo::cargo_command()
+            .args(["run", "--offline", "--quiet"])
+            .current_dir(&consumer)
+            .env("CARGO_TARGET_DIR", consumer_target.path()),
+        &mut cargo_entries,
+    )
+    .expect_err("substituted archive build script must fail before Cargo entry");
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("payload mismatch: build.rs"));
+    assert_eq!(cargo_entries, 0);
+    assert!(!fixture.0.join("substituted.crate.build-entered").exists());
+    assert!(!consumer_marker.exists());
+    let build_script = extracted.join("build.rs");
+    let original_build = fs::read(&build_script).unwrap();
+    let build_marker = fixture.0.join("extracted-build-entered");
+    fs::write(
+        &build_script,
+        format!("fn main() {{ std::fs::write({build_marker:?}, b\"entered\").unwrap(); }}\n"),
+    )
+    .unwrap();
+    let refused = checked_consumer_run(
+        &packaged_tarball,
+        &extracted,
+        &snapshot,
+        native_rust_cargo::cargo_command()
+            .args(["run", "--offline", "--quiet"])
+            .current_dir(&consumer)
+            .env("CARGO_TARGET_DIR", consumer_target.path()),
+        &mut cargo_entries,
+    )
+    .expect_err("substituted extracted build script must fail before Cargo entry");
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("extracted payload mismatch: build.rs")
+    );
+    assert_eq!(cargo_entries, 0);
+    assert!(!build_marker.exists());
+    assert!(!consumer_marker.exists());
+    assert!(!consumer.join("Cargo.lock").exists());
+    fs::write(&build_script, original_build).unwrap();
+    eprintln!(
+        "archive/extracted executable substitutions refused: zero Cargo/build/consumer entry"
+    );
+    let verified = crate_guard("verify", &packaged_tarball, &extracted, &snapshot);
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
     run(
         native_rust_cargo::cargo_command()
             .args(["generate-lockfile", "--offline"])
@@ -555,13 +860,19 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
         "lock safe consumer",
     );
     let lock_before_run = fs::read(consumer.join("Cargo.lock")).unwrap();
-    let consumer_output = run(
+    let consumer_output = checked_consumer_run(
+        &packaged_tarball,
+        &extracted,
+        &snapshot,
         native_rust_cargo::cargo_command()
             .args(["run", "--locked", "--offline", "--quiet"])
             .current_dir(&consumer)
             .env("CARGO_TARGET_DIR", consumer_target.path()),
-        "run safe consumer",
-    );
+        &mut cargo_entries,
+    )
+    .expect("exact extracted payload must admit the consumer");
+    assert_eq!(cargo_entries, 1);
+    assert_eq!(fs::read(consumer_marker).unwrap(), b"entered");
     assert_eq!(consumer_output.stdout, b"42\n");
     assert_eq!(
         fs::read(consumer.join("Cargo.lock")).unwrap(),

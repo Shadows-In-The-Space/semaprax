@@ -85,6 +85,7 @@ class HardenedExecution:
     environment: dict[str, str]
     deadline: float
     output_limit: int
+    group_id: int
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -169,9 +170,9 @@ def command_for(adapter: dict, key: str, semaprax_binary: str) -> list:
     return line
 
 
-def _kill_group(process: subprocess.Popen) -> None:
+def _kill_group(group_id: int) -> None:
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        os.killpg(group_id, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         # A prior kill can race process-group teardown on Darwin.
         pass
@@ -186,6 +187,8 @@ def _run_hardened(command: list, cwd: pathlib.Path, execution: HardenedExecution
     """
     if os.name != "posix":
         return None, "", "hardened execution is unavailable on this host"
+    if os.getpid() != execution.group_id or os.getpgrp() != execution.group_id:
+        return None, "", "hardened execution lost its containment group"
     if time.monotonic() >= execution.deadline:
         return None, "", "shared execution deadline expired"
     process = subprocess.Popen(
@@ -196,7 +199,9 @@ def _run_hardened(command: list, cwd: pathlib.Path, execution: HardenedExecution
         stderr=subprocess.PIPE,
         text=False,
         env=execution.environment,
-        start_new_session=True,
+        # The admitted runner is the sole group leader.  Adapter children join
+        # it so the outer snapshot executor can terminate every descendant.
+        start_new_session=False,
     )
     selector = selectors.DefaultSelector()
     streams = {process.stdout, process.stderr}
@@ -211,7 +216,7 @@ def _run_hardened(command: list, cwd: pathlib.Path, execution: HardenedExecution
         remaining = execution.deadline - time.monotonic()
         if remaining <= 0:
             timed_out = True
-            _kill_group(process)
+            _kill_group(execution.group_id)
             break
         events = selector.select(min(remaining, 0.1))
         for key, _ in events:
@@ -222,17 +227,17 @@ def _run_hardened(command: list, cwd: pathlib.Path, execution: HardenedExecution
             output[key.fileobj].extend(chunk)
             if len(output[key.fileobj]) > execution.output_limit:
                 overflow = True
-                _kill_group(process)
+                _kill_group(execution.group_id)
                 break
         if overflow:
             break
     selector.close()
     if overflow or timed_out:
-        _kill_group(process)
+        _kill_group(execution.group_id)
     try:
         process.wait(timeout=max(0.0, execution.deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
-        _kill_group(process)
+        _kill_group(execution.group_id)
         process.wait()
         timed_out = True
     stdout = bytes(output[process.stdout]).decode("utf-8", "replace")
@@ -534,6 +539,8 @@ def main():
     if args.hardened_posix:
         if os.name != "posix":
             return fail("hardened execution is unavailable on this host")
+        if os.getpgrp() != os.getpid():
+            return fail("hardened execution requires an admitted group leader")
         if (args.execution_deadline_monotonic is None
                 or type(args.execution_output_bytes) is not int
                 or not 1 <= args.execution_output_bytes <= 1024 * 1024):
@@ -542,6 +549,7 @@ def main():
             environment=dict(os.environ),
             deadline=args.execution_deadline_monotonic,
             output_limit=args.execution_output_bytes,
+            group_id=os.getpgrp(),
         )
 
     try:

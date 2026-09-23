@@ -133,8 +133,12 @@ def _adapter_inventory(adapter_inventory_bytes: bytes) -> dict[str, dict[str, An
     rows = adapters.get("adapters")
     if adapters.get("schema") != "benchmark.cross_language.adapters.v1" or not isinstance(rows, list):
         return None
-    by_id = {row.get("id"): row for row in rows if isinstance(row, dict)}
-    return by_id if len(by_id) == len(rows) and all(isinstance(key, str) for key in by_id) else None
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str) or row["id"] in by_id:
+            return None
+        by_id[row["id"]] = row
+    return by_id
 
 
 def admit_runnable_descriptor(descriptor_bytes: bytes, owner_task_inventory_bytes: bytes,
@@ -186,8 +190,10 @@ def admit_runnable_descriptor(descriptor_bytes: bytes, owner_task_inventory_byte
         return _unavailable("invalid_tool_identity")
     if not all(isinstance(execution[field], str) for field in ("sdk_root", "sdk_version", "sdk_build", "sdk_settings_sha256", "sdk_system_version_sha256")):
         return _unavailable("invalid_sdk_identity")
+    if not isinstance(execution["adapter_id"], str) or not isinstance(execution["task_id"], str):
+        return _unavailable("invalid_execution_provenance")
     adapter = by_id.get(execution["adapter_id"])
-    if not isinstance(execution["task_id"], str) or not isinstance(adapter, dict):
+    if not isinstance(adapter, dict):
         return _unavailable("undeclared_task_or_adapter")
     if adapter.get("implemented") is not True:
         return _unavailable("adapter_remains_unavailable")
@@ -307,7 +313,9 @@ def _toolchain_digest(root: pathlib.Path, copy_to: pathlib.Path | None = None) -
                     digest.update(b"L\0" + str(item_relative).encode() + b"\0" + target.encode())
                     if destination is not None:
                         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                        os.symlink(target, destination)
+                        copied_target = copy_to / resolved.relative_to(root)
+                        rewritten = os.path.relpath(copied_target, start=destination.parent)
+                        os.symlink(rewritten, destination)
                 elif resolved.is_file():
                     data, source_stat = _read_regular(resolved, MAX_TOOL_BYTES)
                     budget[0] += len(data)

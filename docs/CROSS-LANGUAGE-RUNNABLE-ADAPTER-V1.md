@@ -61,8 +61,10 @@ complete version-root digest. The executor copies that bounded (512 MiB)
 regular-file/symlink tree into a private directory using new files, then runs
 only the copied `rustc`; a hard link is never treated as a snapshot. It rejects
 any escaping or changed link, file type, byte bound, compiler digest, or root
-digest. This is intentionally an admitted local fixture, not authentication of
-an external-language toolchain.
+digest. A link whose original absolute target is within the admitted root is
+rewritten relative to the private root, so replacing the original target after
+copy cannot alter the executed toolchain. This is intentionally an admitted
+local fixture, not authentication of an external-language toolchain.
 
 If the shared baseline gate refuses, this extension preserves its named
 unavailable reason (for example `invalid_required_task_inventory`) rather
@@ -97,10 +99,13 @@ The snapshot runs exactly one existing `run.py` pair using this argv shape:
   --output <exclusive-temporary-result.json>
 ```
 
-The POSIX-only profile creates a new process group, enforces the one shared
-monotonic deadline, caps each captured output stream at 65,536 bytes, and kills
-the entire group on deadline or output overflow. Non-POSIX hosts refuse this
-execution path rather than silently applying parent-only timeout semantics.
+The POSIX-only profile creates one process group with the snapshot scorer as
+leader. Hardened adapter children join that same group; neither layer creates a
+second session. It enforces one shared monotonic deadline, caps each captured
+output stream at 65,536 bytes, and kills that complete group on deadline or
+output overflow. Non-POSIX hosts, or a scorer that is not its admitted group
+leader, refuse execution rather than silently applying parent-only timeout
+semantics.
 The subprocess receives only deterministic `LANG`, `LC_ALL`, and `TZ`, plus
 the explicitly admitted macOS SDK variables below: it never restores `PATH`,
 `xcrun`, `rustup`, Cargo homes, dynamic-loader startup variables, or network

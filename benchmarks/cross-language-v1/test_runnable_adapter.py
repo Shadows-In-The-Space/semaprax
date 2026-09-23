@@ -167,6 +167,36 @@ class RunnableAdapterTests(unittest.TestCase):
             "invalid_execution_provenance",
         )
         descriptor = json.loads(self.descriptor())
+        descriptor["execution"]["adapter_id"] = []
+        self.assertEqual(
+            RUNNABLE.admit_runnable_descriptor(canonical(descriptor), self.tasks, self.adapters)["reason"],
+            "invalid_execution_provenance",
+        )
+        malformed_adapters = json.loads(self.adapters)
+        malformed_adapters["adapters"][0]["id"] = []
+        malformed_adapter_bytes = canonical(malformed_adapters)
+        descriptor = json.loads(self.descriptor())
+        descriptor["execution"]["adapter_inventory_sha256"] = digest(malformed_adapter_bytes)
+        self.assertEqual(
+            RUNNABLE.admit_runnable_descriptor(canonical(descriptor), self.tasks, malformed_adapter_bytes)["reason"],
+            "invalid_adapter_inventory",
+        )
+
+    def test_internal_absolute_toolchain_link_is_private_after_original_replacement(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="spx-runnable-toolchain-") as temporary:
+            root = pathlib.Path(temporary).resolve() / "toolchain"
+            root.mkdir()
+            target = root / "real-tool"
+            target.write_bytes(b"original tool bytes")
+            absolute_link = root / "tool-link"
+            absolute_link.symlink_to(target)
+            snapshot = pathlib.Path(temporary).resolve() / "snapshot"
+            RUNNABLE._toolchain_digest(root, snapshot)
+            self.assertTrue((snapshot / "tool-link").is_symlink())
+            self.assertFalse(os.path.isabs(os.readlink(snapshot / "tool-link")))
+            target.write_bytes(b"replacement tool bytes")
+            self.assertEqual((snapshot / "tool-link").read_bytes(), b"original tool bytes")
+        descriptor = json.loads(self.descriptor())
         descriptor["execution"] = None
         self.assertEqual(
             RUNNABLE.admit_runnable_descriptor(canonical(descriptor), self.tasks, self.adapters)["reason"],
@@ -227,6 +257,38 @@ class RunnableAdapterTests(unittest.TestCase):
                     break
                 if time.monotonic() >= until:
                     self.fail("process-group child survived timeout containment")
+                time.sleep(0.05)
+
+    def test_scorer_timeout_kills_adapter_descendants_in_the_outer_group(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="spx-runnable-nested-") as temporary:
+            root = pathlib.Path(temporary)
+            marker = root / "adapter-child.pid"
+            adapter = (
+                "import pathlib, subprocess, sys, time; "
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                f"pathlib.Path({str(marker)!r}).write_text(str(child.pid)); time.sleep(30)"
+            )
+            scorer = (
+                "import importlib.util, os, pathlib, sys, time; "
+                f"spec = importlib.util.spec_from_file_location('scorer', {str(RUNNABLE.RUNNER)!r}); "
+                "scorer = importlib.util.module_from_spec(spec); spec.loader.exec_module(scorer); "
+                "execution = scorer.HardenedExecution(environment={'LANG': 'C', 'LC_ALL': 'C', 'TZ': 'UTC'}, "
+                "deadline=time.monotonic() + 0.3, output_limit=65536, group_id=os.getpgrp()); "
+                f"scorer._run_hardened([sys.executable, '-c', {adapter!r}], pathlib.Path({str(root)!r}), execution)"
+            )
+            RUNNABLE._run_bounded_group(
+                [sys.executable, "-c", scorer], root, time.monotonic() + 5,
+                dict(RUNNABLE.CLOSED_ENVIRONMENT),
+            )
+            child_pid = int(marker.read_text())
+            until = time.monotonic() + 3
+            while True:
+                try:
+                    os.kill(child_pid, 0)
+                except ProcessLookupError:
+                    break
+                if time.monotonic() >= until:
+                    self.fail("adapter descendant survived scorer timeout containment")
                 time.sleep(0.05)
 
     def test_oversized_and_fifo_inputs_and_outputs_refuse_without_blocking(self) -> None:

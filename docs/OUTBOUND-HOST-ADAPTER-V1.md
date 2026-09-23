@@ -145,6 +145,28 @@ This closes a local crash window only. It does not prove a remote receipt,
 receiver idempotency, durable-store freshness, or distributed exactly-once
 delivery.
 
+The native host crate now supplies `OutboundDeliveryStore`, an additive local
+implementation of the typed HTTP, webhook, and email checkpoint-store
+interfaces. Construction requires a caller-held `HeldDirectory`; it does not
+read configuration, resolve a storage path, create a directory, or grant
+authority. Each checkpoint is written once under a deterministic
+kind-plus-SHA-256 filename with create-new semantics and a 192 KiB per-file
+limit. Repeated writes are acknowledged only when existing bytes match
+exactly; changed, unreadable, or uncertain files fail closed. Recovery loads
+only the exact digest retained by the host, then still requires the existing
+authenticated restore API and its independently supplied digest/capacity
+capability. The store does not enumerate or select a latest checkpoint. Hosts
+remain responsible for directory provisioning, retention/quota, and the
+trusted reference that identifies a checkpoint; this slice does not establish
+multi-process coordination or power-loss guarantees beyond the platform
+create-new/sync contract. Its reopen/tamper and no-redispatch tests use local
+temporary directories and recording adapters only.
+
+This is local adapter implementation evidence, not real-provider acceptance,
+provider authentication/interoperability, hosted execution, or authorization to
+use credentials or public endpoints. Those require separately authorized
+operator evidence and are not part of this implementation.
+
 ### Read-only disposition checkpoints
 
 `HostDeliveryLedger::checkpoint` and the corresponding method on the HTTP,

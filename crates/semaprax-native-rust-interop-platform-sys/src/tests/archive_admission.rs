@@ -389,6 +389,57 @@ fn sparse_oversize_archive_is_rejected_before_digest_io() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn windows_fresh_file_authentication_is_bounded_before_digest() {
+    let windows = super::WINDOWS_SOURCE;
+    for (signature, next_signature) in [
+        (
+            "pub fn write_file_new(\n",
+            "pub fn write_file_new_prepared<",
+        ),
+        (
+            "pub fn write_file_new_prepared<",
+            "pub(super) fn hold_regular_file_name_external_read_prepared",
+        ),
+    ] {
+        let start = windows
+            .find(signature)
+            .unwrap_or_else(|| panic!("missing Windows function: {signature}"));
+        let end = windows[start + signature.len()..]
+            .find(next_signature)
+            .map(|offset| start + signature.len() + offset)
+            .unwrap_or_else(|| panic!("missing end of Windows function: {signature}"));
+        let function = &windows[start..end];
+        assert!(
+            function.contains("let expected_length = u64::try_from(bytes.len())"),
+            "fresh Windows file authentication must bind its byte bound to the expected input"
+        );
+        assert!(
+            function.contains("authenticate_regular_file_bounded(file, expected_length)"),
+            "fresh Windows file authentication must check the bound before hashing"
+        );
+        assert!(
+            !function.contains("authenticate_regular_file(file)"),
+            "fresh Windows file authentication must not use the unbounded helper"
+        );
+    }
+
+    let authenticate_start = windows
+        .find("fn authenticate_regular_file_bounded(")
+        .expect("Windows bounded authentication helper");
+    let authenticate = &windows[authenticate_start..];
+    let bound_check = authenticate
+        .find("if identity.length > maximum")
+        .expect("metadata length check");
+    let digest = authenticate
+        .find("digest(&file, identity.length)?")
+        .expect("bounded digest");
+    assert!(
+        bound_check < digest,
+        "Windows metadata size must be rejected before digest I/O"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn bounded_fifo_open_child() {

@@ -119,18 +119,8 @@ pub fn write_file_new(
     )?;
     file.write_all(bytes).map_err(|_| Error::Changed)?;
     file.sync_all().map_err(|_| Error::Changed)?;
-    let identity = information(&file)?;
-    if identity.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
-        || !file.metadata().map_err(|_| Error::Changed)?.is_file()
-    {
-        return Err(Error::Changed);
-    }
-    let digest = digest(&file, identity.length)?;
-    Ok(RegularFile {
-        file,
-        identity,
-        digest,
-    })
+    let expected_length = u64::try_from(bytes.len()).map_err(|_| Error::OutputLimit)?;
+    authenticate_regular_file_bounded(file, expected_length)
 }
 
 pub fn write_file_new_prepared<const N: usize>(
@@ -151,7 +141,8 @@ pub fn write_file_new_prepared<const N: usize>(
     )?;
     file.write_all(bytes).map_err(|_| Error::Changed)?;
     file.sync_all().map_err(|_| Error::Changed)?;
-    authenticate_regular_file(file)
+    let expected_length = u64::try_from(bytes.len()).map_err(|_| Error::OutputLimit)?;
+    authenticate_regular_file_bounded(file, expected_length)
 }
 
 pub(super) fn hold_regular_file_name_external_read_prepared(

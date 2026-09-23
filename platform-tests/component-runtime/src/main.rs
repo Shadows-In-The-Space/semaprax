@@ -78,6 +78,15 @@ mod v10_bindings {
     });
 }
 
+mod public_generic_component_v1_bindings {
+    wasmtime::component::bindgen!({
+        path: "wit/semaprax-public-generic-component-v1.wit",
+        world: "public-generic-component-v1",
+        ownership: Owning,
+        additional_derives: [Eq, PartialEq],
+    });
+}
+
 use exports::semaprax::private::evaluation::Status;
 
 type HostResult<T> = Result<T, Box<dyn Error>>;
@@ -2562,9 +2571,304 @@ fn main() -> HostResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    static NEXT_PUBLIC_GENERIC: AtomicU64 = AtomicU64::new(0);
+
+    const PUBLIC_GENERIC_MANIFEST: &str = "schema = \"semaprax.manifest.v1\"\n\n[package]\nname = \"public-generic-component-runtime\"\nversion = \"1.0.0\"\nprofile = \"public-generic-wasm-provider.v1\"\n\n[modules]\nentry = \"provider.app\"\nsources = [\"src/app.spx\", \"src/tests.spx\"]\ntests = [\"provider.tests\"]\n\n[exports]\nweb = [\"provider.transform\"]\n";
+    const PUBLIC_GENERIC_APP: &str = r#"module provider.app;
+
+@id("provider.leaf-pair")
+record LeafPair {
+    @id("provider.leaf-pair.left")
+    left: Bytes,
+    @id("provider.leaf-pair.right")
+    right: Bytes,
+}
+
+@id("provider.envelope")
+record Envelope<T> {
+    @id("provider.envelope.payload")
+    payload: T,
+}
+
+@id("provider.transform")
+fn transform(value: own Envelope<LeafPair>) -> Envelope<LeafPair> { value }
+
+@id("provider.main")
+fn main() -> i64 { 0 }
+"#;
+
+    struct PublicGenericFixture(PathBuf);
+
+    impl PublicGenericFixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "semaprax-public-generic-component-runtime-{}-{}",
+                std::process::id(),
+                NEXT_PUBLIC_GENERIC.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(root.join("src")).unwrap();
+            fs::write(root.join("semaprax.toml"), PUBLIC_GENERIC_MANIFEST).unwrap();
+            write_canonical(&root.join("src/app.spx"), PUBLIC_GENERIC_APP);
+            write_canonical(
+                &root.join("src/tests.spx"),
+                "module provider.tests;\n\n@id(\"provider.tests.main\")\nfn main() -> i64 { 0 }\n",
+            );
+            Self(root.canonicalize().unwrap())
+        }
+
+        fn manifest(&self) -> PathBuf {
+            self.0.join("semaprax.toml")
+        }
+    }
+
+    impl Drop for PublicGenericFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn write_canonical(path: &std::path::Path, source: &str) {
+        let parsed = semaprax::parse(source, path).unwrap();
+        fs::write(path, semaprax::format::canonical(&parsed)).unwrap();
+    }
+
+    fn run_public_generic_component_v1() -> HostResult<()> {
+        use semaprax::project::with_authenticated_project;
+
+        let fixture = PublicGenericFixture::new();
+        let (artifact_bytes, artifact_digest, descriptor_digest, provider_digest, input_leaves) =
+            with_authenticated_project(&fixture.manifest(), |snapshot| {
+                snapshot.check()?;
+                let revision = snapshot.retain_revision();
+                let endpoint = revision.public_generic_wasm_provider_endpoint_v1()?;
+                if endpoint.subject().input().owned_leaves.len() != 2 {
+                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                        "SPX-W121",
+                        "runtime fixture did not retain exactly two owned Bytes leaves",
+                    )]);
+                }
+                let input_leaves = endpoint.subject().input().owned_leaves.clone();
+                let leaf_paths = input_leaves
+                    .iter()
+                    .map(|path| path.split_once('/'))
+                    .collect::<Option<Vec<_>>>();
+                let has_left_then_right = leaf_paths.as_ref().is_some_and(|paths| {
+                    paths.len() == 2
+                        && paths[0].0 == paths[1].0
+                        && paths[0].0.ends_with("provider.envelope.payload")
+                        && paths[0].1.ends_with("provider.leaf-pair.left")
+                        && paths[1].1.ends_with("provider.leaf-pair.right")
+                        && !paths[0].1.contains('/')
+                        && !paths[1].1.contains('/')
+                });
+                if !has_left_then_right {
+                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                        "SPX-W121",
+                        "retained input Bytes leaves must bind payload.left then payload.right",
+                    )]);
+                }
+                let artifact = revision.public_generic_wasm_component_artifact_v1()?;
+                if artifact.descriptor_digest() != endpoint.descriptor().descriptor_digest() {
+                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                        "SPX-W121",
+                        "Component descriptor identity differs from retained endpoint",
+                    )]);
+                }
+                let mut tampered = artifact.bytes().to_vec();
+                let final_byte = tampered.last_mut().ok_or_else(|| {
+                    vec![semaprax::diagnostic::Diagnostic::io(
+                        "SPX-W121",
+                        "retained Component artifact is empty",
+                    )]
+                })?;
+                *final_byte ^= 1;
+                if revision
+                    .replay_public_generic_wasm_component_v1(
+                        &tampered,
+                        artifact.digest(),
+                        artifact.descriptor_digest(),
+                        artifact.provider_digest(),
+                    )
+                    .is_ok()
+                {
+                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                        "SPX-W121",
+                        "tampered Component unexpectedly replayed",
+                    )]);
+                }
+                let replayed = revision.replay_public_generic_wasm_component_v1(
+                    artifact.bytes(),
+                    artifact.digest(),
+                    artifact.descriptor_digest(),
+                    artifact.provider_digest(),
+                )?;
+                if replayed != artifact {
+                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                        "SPX-W121",
+                        "authentic retained Component failed replay after tamper refusal",
+                    )]);
+                }
+                Ok((
+                    replayed.bytes().to_vec(),
+                    replayed.digest().to_owned(),
+                    replayed.descriptor_digest().to_owned(),
+                    replayed.provider_digest().to_owned(),
+                    input_leaves,
+                ))
+            })
+            .map_err(|errors| failure(format!("retained project admission failed: {errors:?}")))?;
+
+        let before = <[u8; 32]>::from(Sha256::digest(&artifact_bytes));
+        if artifact_digest.is_empty()
+            || descriptor_digest.is_empty()
+            || provider_digest.is_empty()
+            || input_leaves.len() != 2
+        {
+            return Err(failure("retained Component identity facts are invalid"));
+        }
+        let mut config = Config::new();
+        config.wasm_component_model(true);
+        config.consume_fuel(true);
+        let engine = Engine::new(&config)?;
+        let component = Component::new(&engine, &artifact_bytes)?;
+        if component.component_type().imports(&engine).len() != 0 {
+            return Err(failure(
+                "public-generic Component requested ambient imports",
+            ));
+        }
+        let linker = Linker::<()>::new(&engine);
+        let mut store = Store::new(&engine, ());
+        store.set_fuel(1_000_000_000)?;
+        let bindings = public_generic_component_v1_bindings::PublicGenericComponentV1::instantiate(
+            &mut store, &component, &linker,
+        )?;
+        let adapter = bindings.semaprax_public_generic_component_adapter();
+        let bytes = adapter.owned_bytes();
+        const MAX_LIST_BYTES: usize = 65_536;
+        const REUSE_CYCLES: usize = 200;
+        const PREVIOUS_STAGING_CAPACITY_BYTES: usize = 12_355_336;
+        const _: () = assert!(REUSE_CYCLES * MAX_LIST_BYTES > PREVIOUS_STAGING_CAPACITY_BYTES);
+        let sentinel_input = vec![0xa5; 257];
+        let sentinel = bytes
+            .call_constructor(&mut store, &sentinel_input)
+            .map_err(|error| failure(format!("sentinel constructor trapped: {error}")))?;
+        let left_input = (0..MAX_LIST_BYTES)
+            .map(|index| ((index * 17 + 3) & 0xff) as u8)
+            .collect::<Vec<_>>();
+        let right_input = (0..MAX_LIST_BYTES)
+            .map(|index| ((index * 29 + 11) & 0xff) as u8)
+            .collect::<Vec<_>>();
+        let left = bytes
+            .call_constructor(&mut store, &left_input)
+            .map_err(|error| failure(format!("left max-leaf constructor trapped: {error}")))?;
+        let right = bytes
+            .call_constructor(&mut store, &right_input)
+            .map_err(|error| failure(format!("right max-leaf constructor trapped: {error}")))?;
+        let (left_output, right_output) = adapter
+            .call_invoke(&mut store, left, right)
+            .map_err(|error| failure(format!("max-leaf invoke trapped: {error}")))?
+            .map_err(|status| failure(format!("component refused valid transform: {status:?}")))?;
+        let left_observed = bytes
+            .call_read(&mut store, left_output)
+            .map_err(|error| failure(format!("left max-leaf output read trapped: {error}")))?;
+        let right_observed = bytes
+            .call_read(&mut store, right_output)
+            .map_err(|error| failure(format!("right max-leaf output read trapped: {error}")))?;
+        if left_observed != left_input || right_observed != right_input {
+            return Err(failure(
+                "descriptor-bound owned Bytes leaves differ from identity oracle",
+            ));
+        }
+        let sentinel_observed = bytes
+            .call_read(&mut store, sentinel)
+            .map_err(|error| failure(format!("sentinel read trapped after invoke: {error}")))?;
+        if sentinel_observed != sentinel_input {
+            return Err(failure(
+                "invocation changed an unrelated retained Component resource",
+            ));
+        }
+        left_output
+            .resource_drop(&mut store)
+            .map_err(|error| failure(format!("left output drop trapped: {error}")))?;
+        right_output
+            .resource_drop(&mut store)
+            .map_err(|error| failure(format!("right output drop trapped: {error}")))?;
+        sentinel
+            .resource_drop(&mut store)
+            .map_err(|error| failure(format!("sentinel drop trapped: {error}")))?;
+
+        // These maximum-size cycles exceed the former staging tail; each must
+        // reclaim its constructor allocation while resource storage stays live
+        // only for the duration of the individual resource.
+        let cycle_payload = vec![0x6d; MAX_LIST_BYTES];
+        for cycle in 0..REUSE_CYCLES {
+            let resource = bytes
+                .call_constructor(&mut store, &cycle_payload)
+                .map_err(|error| {
+                    failure(format!("reuse cycle {cycle} constructor trapped: {error}"))
+                })?;
+            let observed = bytes
+                .call_read(&mut store, resource)
+                .map_err(|error| failure(format!("reuse cycle {cycle} read trapped: {error}")))?;
+            if observed != cycle_payload {
+                return Err(failure(format!(
+                    "Component resource changed during reuse cycle {cycle}"
+                )));
+            }
+            resource
+                .resource_drop(&mut store)
+                .map_err(|error| failure(format!("reuse cycle {cycle} drop trapped: {error}")))?;
+        }
+
+        // A second full transfer proves recovery after the tampered candidate
+        // was refused and that the output resources were explicitly closed.
+        let left = bytes
+            .call_constructor(&mut store, &[1, 2, 3])
+            .map_err(|error| failure(format!("recovery left constructor trapped: {error}")))?;
+        let right = bytes
+            .call_constructor(&mut store, &[4, 5])
+            .map_err(|error| failure(format!("recovery right constructor trapped: {error}")))?;
+        let (left_output, right_output) = adapter
+            .call_invoke(&mut store, left, right)
+            .map_err(|error| failure(format!("recovery invoke trapped: {error}")))?
+            .map_err(|status| failure(format!("component recovery call refused: {status:?}")))?;
+        let left_observed = bytes
+            .call_read(&mut store, left_output)
+            .map_err(|error| failure(format!("recovery left output read trapped: {error}")))?;
+        let right_observed = bytes
+            .call_read(&mut store, right_output)
+            .map_err(|error| failure(format!("recovery right output read trapped: {error}")))?;
+        if left_observed != [1, 2, 3] || right_observed != [4, 5] {
+            return Err(failure("component recovery call changed owned Bytes"));
+        }
+        left_output
+            .resource_drop(&mut store)
+            .map_err(|error| failure(format!("recovery left output drop trapped: {error}")))?;
+        right_output
+            .resource_drop(&mut store)
+            .map_err(|error| failure(format!("recovery right output drop trapped: {error}")))?;
+        if <[u8; 32]>::from(Sha256::digest(&artifact_bytes)) != before {
+            return Err(failure(
+                "authenticated retained Component bytes changed during execution",
+            ));
+        }
+        Ok(())
+    }
 
     #[test]
     fn typed_engine_runtime_covers_success_and_every_frozen_status() -> HostResult<()> {
         run()
+    }
+
+    #[test]
+    fn retained_public_generic_component_transfers_owned_bytes_and_recovers_after_tamper()
+    -> HostResult<()> {
+        run_public_generic_component_v1()
     }
 }

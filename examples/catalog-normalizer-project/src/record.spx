@@ -282,10 +282,8 @@ fn label_value(line: borrow Slice<u8>) -> usize
 // 0 reject, 1 continue, 2 equal and closed.  The caller has no independent
 // branches, keeping the bounded comparison cheap in the quadratic batch scan.
 @id("catalog_normalizer.record.id-pair-emitted")
-fn id_pair_emitted(input: borrow Slice<u8>, opening: bool, left_index: usize, right_index: usize, left_part: usize, right_part: usize, count: usize) -> bool
+fn id_pair_emitted(input: borrow Slice<u8>, opening: bool, left_index: usize, right_index: usize, left_width: usize, right_width: usize, left_part: usize, right_part: usize, count: usize) -> bool
 {
-    let left_width = emit_len(input, left_index);
-    let right_width = emit_len(input, right_index);
     let first = emit_at(input, left_index, left_part);
     let second = emit_at(input, right_index, right_part);
     opening && !at_in(input, left_index, 34u8, 34u8) && !at_in(input, right_index, 34u8, 34u8) && count < max_id_bytes() && left_width > 0usize && right_width > 0usize && first >= 0 && first == second
@@ -304,7 +302,7 @@ fn id_pair_step(input: borrow Slice<u8>, left: usize, right: usize, left_cursor:
     let closed = left_closed && right_closed;
     let left_width = emit_len(input, left_index);
     let right_width = emit_len(input, right_index);
-    let emitted = id_pair_emitted(input, opening, left_index, right_index, left_part, right_part, count);
+    let emitted = id_pair_emitted(input, opening, left_index, right_index, left_width, right_width, left_part, right_part, count);
     let next_left = if left_part + 1usize >= left_width { token_end(input, left_index) * 4usize } else { left_cursor + 1usize };
     let next_right = if right_part + 1usize >= right_width { token_end(input, right_index) * 4usize } else { right_cursor + 1usize };
     let next_valid = !is_failure(input, next_left / 4usize) && !is_failure(input, next_right / 4usize);

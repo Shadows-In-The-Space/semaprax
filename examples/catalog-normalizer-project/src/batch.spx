@@ -181,21 +181,7 @@ fn first_duplicate_record(body: borrow Slice<u8>) -> usize
     let mut scanning = record < count;
     while scanning {
         let end = line_end(body, start);
-        let line = byte_range(body, start, end);
-        let id = record_id_value(line);
-        let mut prior = 0usize;
-        let mut prior_start = 0usize;
-        let mut same = false;
-        let mut comparing = prior < record;
-        while comparing {
-            let prior_end = line_end(body, prior_start);
-            let prior_line = byte_range(body, prior_start, prior_end);
-            same = same_decoded_id(body, prior_start + record_id_value(prior_line), start + id);
-            prior = prior + 1usize;
-            prior_start = prior_end + 1usize;
-            comparing = !same && prior < record;
-            comparing
-        }
+        let same = record_is_duplicate(body, record, start, end);
         duplicate = if same { record } else { duplicate };
         record = if same { count } else { record + 1usize };
         start = end + 1usize;

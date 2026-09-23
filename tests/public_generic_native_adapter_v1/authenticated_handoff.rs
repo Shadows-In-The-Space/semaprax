@@ -15,6 +15,11 @@ use sha2::{Digest as _, Sha256};
 use std::{fs, path::Path, process::Command};
 
 const REVISION: &str = "r07-native-identity-v1";
+const SETTLED_STDOUT: &[u8] = if cfg!(windows) {
+    b"authenticated-native-handoff-settled\r\n"
+} else {
+    b"authenticated-native-handoff-settled\n"
+};
 const SOURCE: &str = r#"
 module authenticated.native;
 @id("auth.pair")
@@ -248,7 +253,7 @@ fn compile_run(provider: &str, driver: &str, expected_success: bool, label: &str
                 String::from_utf8_lossy(&run.stderr)
             );
             if expected_success {
-                assert_eq!(run.stdout, b"authenticated-native-handoff-settled\n");
+                assert_eq!(run.stdout, SETTLED_STDOUT);
             }
         }
         let executable = root.join(format!("probe{opt}-rust"));
@@ -273,7 +278,7 @@ fn compile_run(provider: &str, driver: &str, expected_success: bool, label: &str
             String::from_utf8_lossy(&run.stderr)
         );
         if expected_success {
-            assert_eq!(run.stdout, b"authenticated-native-handoff-settled\n");
+            assert_eq!(run.stdout, SETTLED_STDOUT);
         }
     }
 }

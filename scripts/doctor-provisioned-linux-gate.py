@@ -1490,39 +1490,51 @@ def self_test(root=None):
     with tempfile.TemporaryDirectory(prefix="semaprax-doctor-evidence-") as directory:
         evidence = {"schema": "test", "value": 7}
         fresh = os.path.join(directory, "fresh.json")
-        write_evidence(fresh, evidence)
-        with open(fresh, encoding="utf-8") as handle:
-            fresh_evidence = json.load(handle)
-        check(
-            "fresh evidence publication is canonical and owner-only",
-            fresh_evidence == evidence
-            and stat.S_IMODE(os.stat(fresh).st_mode) == 0o600,
-        )
-        with open(fresh, "rb") as handle:
-            before_bytes = handle.read()
-        try:
-            write_evidence(fresh, {"replacement": True})
-            replacement_refused = False
-        except EvidenceWriteError:
-            replacement_refused = True
-        check(
-            "existing evidence is never overwritten",
-            replacement_refused and Path(fresh).read_bytes() == before_bytes,
-        )
-        target = os.path.join(directory, "target.json")
-        with open(target, "wb") as handle:
-            handle.write(b"preserve this target")
-        link = os.path.join(directory, "evidence-link.json")
-        os.symlink(target, link)
-        try:
-            write_evidence(link, evidence)
-            link_refused = False
-        except EvidenceWriteError:
-            link_refused = True
-        check(
-            "symlink evidence targets are refused without touching their target",
-            link_refused and Path(target).read_bytes() == b"preserve this target",
-        )
+        if not hasattr(os, "O_NOFOLLOW"):
+            # Windows can test the fail-closed route, not POSIX publication.
+            try:
+                write_evidence(fresh, evidence)
+                unavailable_refused = False
+            except EvidenceWriteError:
+                unavailable_refused = True
+            check(
+                "unsupported host refuses evidence publication",
+                unavailable_refused and not os.path.exists(fresh),
+            )
+        else:
+            write_evidence(fresh, evidence)
+            with open(fresh, encoding="utf-8") as handle:
+                fresh_evidence = json.load(handle)
+            check(
+                "fresh evidence publication is canonical and owner-only",
+                fresh_evidence == evidence
+                and stat.S_IMODE(os.stat(fresh).st_mode) == 0o600,
+            )
+            with open(fresh, "rb") as handle:
+                before_bytes = handle.read()
+            try:
+                write_evidence(fresh, {"replacement": True})
+                replacement_refused = False
+            except EvidenceWriteError:
+                replacement_refused = True
+            check(
+                "existing evidence is never overwritten",
+                replacement_refused and Path(fresh).read_bytes() == before_bytes,
+            )
+            target = os.path.join(directory, "target.json")
+            with open(target, "wb") as handle:
+                handle.write(b"preserve this target")
+            link = os.path.join(directory, "evidence-link.json")
+            os.symlink(target, link)
+            try:
+                write_evidence(link, evidence)
+                link_refused = False
+            except EvidenceWriteError:
+                link_refused = True
+            check(
+                "symlink evidence targets are refused without touching their target",
+                link_refused and Path(target).read_bytes() == b"preserve this target",
+            )
 
     sticky = Settlement()
     sticky.record("execute", ["worker never settled"])

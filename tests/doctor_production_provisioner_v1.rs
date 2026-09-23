@@ -691,7 +691,7 @@ fn aarch64_local_driver_boundary(local_driver: &str) -> Result<(), String> {
         // Only the cargo test invocation itself must be unmasked; the
         // subsequent shell probes for the real-distribution fixtures
         // legitimately use `|| fail` after the lifecycle suite.
-        let cargo_invocation = command.split("\n\t\techo").next().unwrap_or(command);
+        let cargo_invocation = command.split("\n\techo").next().unwrap_or(command);
         if cargo_invocation.contains("||") {
             return Err(format!(
                 "selected AArch64 lifecycle command {index} is masked instead of fail-fast"
@@ -991,6 +991,27 @@ fn aarch64_linux_tracking_contract_is_separate_fail_closed_and_non_promotional()
             "an unexpectedly passing excluded fixture must fail the tracking route"
         );
     }
+    let masked_lifecycle = local_driver.replacen(
+        "\t\t\"${PLATFORM_LIFECYCLE_TESTS[@]}\"",
+        "\t\t\"${PLATFORM_LIFECYCLE_TESTS[@]}\" || true",
+        1,
+    );
+    assert_ne!(
+        masked_lifecycle, local_driver,
+        "missing lifecycle mutation anchor"
+    );
+    assert!(
+        aarch64_tracking_contract_tripwires(
+            &tracking,
+            &workflow,
+            &masked_lifecycle,
+            &guard_policy,
+            &guard_tests,
+            &provisioner_admission,
+        )
+        .is_err(),
+        "a masked selected lifecycle command must fail the tracking route"
+    );
 
     for (name, hostile_tracking, hostile_workflow) in [
         (

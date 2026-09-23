@@ -13,6 +13,31 @@ fn fixture_executable() -> PathBuf {
         })
         .clone()
 }
+
+#[test]
+fn interrupted_staged_executable_cleanup_requires_matching_held_bytes() {
+    let root = std::env::temp_dir().join(format!(
+        "semaprax-opencode-cleanup-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let staged = root.join(super::STAGED_EXECUTABLE);
+    std::fs::write(&staged, b"foreign").unwrap();
+    assert!(!super::cleanup_interrupted_staged_executable(
+        &root, b"owned"
+    ));
+    assert_eq!(std::fs::read(&staged).unwrap(), b"foreign");
+    std::fs::write(&staged, b"owned").unwrap();
+    assert!(super::cleanup_interrupted_staged_executable(
+        &root, b"owned"
+    ));
+    assert!(!staged.exists());
+    std::fs::remove_dir(&root).unwrap();
+}
 use std::path::PathBuf;
 use std::time::Duration;
 

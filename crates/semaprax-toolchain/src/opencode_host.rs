@@ -590,20 +590,37 @@ fn cleanup_interrupted_staged_executable(sandbox: &std::path::Path, expected: &[
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
         Err(_) => return false,
     };
-    let Ok(before) = file.metadata() else {
-        return false;
-    };
     let Ok(after) = path.symlink_metadata() else {
         return false;
     };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        if after.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return false;
+        }
+    }
     if !after.file_type().is_file()
-        || before.dev() != after.dev()
-        || before.ino() != after.ino()
+        || !held_path_is_same_file(&file, &path)
         || !held_file_matches(&mut file, expected)
     {
         return false;
     }
     std::fs::remove_file(path).is_ok()
+}
+
+fn held_path_is_same_file(file: &std::fs::File, path: &std::path::Path) -> bool {
+    let Ok(clone) = file.try_clone() else {
+        return false;
+    };
+    let Ok(held) = same_file::Handle::from_file(clone) else {
+        return false;
+    };
+    let Ok(rebound) = same_file::Handle::from_path(path) else {
+        return false;
+    };
+    held == rebound
 }
 
 fn held_file_matches(file: &mut std::fs::File, expected: &[u8]) -> bool {

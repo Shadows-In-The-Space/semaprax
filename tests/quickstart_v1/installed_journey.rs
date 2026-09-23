@@ -365,19 +365,29 @@ fn clean_installed_toolchain_walks_the_documented_journey() {
         .map(|source| source["path"].as_str().unwrap())
         .collect::<Vec<_>>();
     // The manifest covers the whole checked closure, not just the project's
-    // own files: the three bundled dependency sources the `service` template
-    // composes are in it too, and `std.bytes` is there transitively. That is
-    // the right scope for an assurance manifest -- obligations arise from
-    // every checked declaration, including the ones a dependency contributes
-    // -- so this asserts the exact six rather than the three a reader might
-    // expect. A dependency silently dropping out of the closure is precisely
-    // what this would catch.
+    // own files: the service template's bundled dependency closure is in it
+    // too, including transitive standard-library sources. Obligations arise
+    // from every checked declaration, so assert the exact closure. A silently
+    // dropped dependency must fail this assertion.
     assert_eq!(
         sources,
         vec![
             "dependencies/std.auth/0.1.0/auth.spx",
             "dependencies/std.bytes/0.1.0/bytes.spx",
+            "dependencies/std.data.json.utf8/0.1.0/utf8.spx",
+            "dependencies/std.data.json.write/0.1.0/write.spx",
+            "dependencies/std.db/0.1.0/db.spx",
+            "dependencies/std.encoding/0.1.0/encoding.spx",
+            "dependencies/std.export.policy/0.1.0/policy.spx",
+            "dependencies/std.http/0.1.0/http.spx",
+            "dependencies/std.io/0.1.0/io.spx",
             "dependencies/std.jobs/0.1.0/jobs.spx",
+            "dependencies/std.log.redact/0.1.0/redact.spx",
+            "dependencies/std.log/0.1.0/log.spx",
+            "dependencies/std.metrics/0.1.0/metrics.spx",
+            "dependencies/std.num.overflow/0.1.0/overflow.spx",
+            "dependencies/std.tracing/0.1.0/policy.spx",
+            "dependencies/std.webhook/0.1.0/policy.spx",
             "src/app.spx",
             "src/core.spx",
             "src/tests.spx",

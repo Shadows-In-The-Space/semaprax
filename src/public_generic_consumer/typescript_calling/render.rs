@@ -278,14 +278,15 @@ fn input_with_first_field_fn(input: &RecordShape) -> String {
     out
 }
 
-fn assert_reversed_fn(output: &RecordShape) -> String {
+fn assert_reversed_fn(input: &RecordShape, output: &RecordShape) -> String {
     let mut out = String::new();
     out.push_str("function assertReversed(output, original) {\n");
-    for field in &output.fields {
-        let name = field_name(field);
+    for (input_field, output_field) in input.fields.iter().zip(&output.fields) {
+        let input_name = field_name(input_field);
+        let output_name = field_name(output_field);
         let _ = writeln!(
             out,
-            "  assert.deepEqual(output.{name}, reversed(original.{name}));"
+            "  assert.deepEqual(output.{output_name}, reversed(original.{input_name}));"
         );
     }
     out.push_str("}\n");
@@ -307,7 +308,7 @@ pub(super) fn round_trip_mjs(input: &RecordShape, output: &RecordShape) -> Strin
     out.push('\n');
     out.push_str(&input_with_first_field_fn(input));
     out.push('\n');
-    out.push_str(&assert_reversed_fn(output));
+    out.push_str(&assert_reversed_fn(input, output));
     out.push_str(&template(ROUND_TRIP_BODY));
     out
 }
@@ -315,6 +316,23 @@ pub(super) fn round_trip_mjs(input: &RecordShape, output: &RecordShape) -> Strin
 #[cfg(test)]
 mod template_tests {
     use super::*;
+    use crate::public_generic_consumer::rust_calling::OwnedByteField;
+
+    #[test]
+    fn round_trip_assertions_pair_differently_named_leaves_by_position() {
+        let input = RecordShape::new(vec![
+            OwnedByteField::new("input-a"),
+            OwnedByteField::new("input-b"),
+        ]);
+        let output = RecordShape::new(vec![
+            OwnedByteField::new("output-x"),
+            OwnedByteField::new("output-y"),
+        ]);
+        let rendered = assert_reversed_fn(&input, &output);
+        assert!(rendered.contains("output.field_output_x, reversed(original.field_input_a)"));
+        assert!(rendered.contains("output.field_output_y, reversed(original.field_input_b)"));
+        assert!(!rendered.contains("original.field_output_x"));
+    }
 
     #[test]
     fn every_fixed_asset_has_lf_crlf_equivalent_rendering() {

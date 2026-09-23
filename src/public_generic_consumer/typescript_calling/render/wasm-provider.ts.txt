@@ -77,6 +77,19 @@ function normalized(error: unknown): SemapraxPublicGenericException {
   return error instanceof SemapraxPublicGenericException ? error
     : new SemapraxPublicGenericException({ kind: "execution-failed", status: 11 });
 }
+function normalizedExport(error: unknown): SemapraxPublicGenericException {
+  const selected = normalized(error);
+  // The codec reports malformed returned bytes as result-rejected. The
+  // reference provider's settled export contract reports bound violations as
+  // capacity-exceeded, while leaving framing/count/trailing refusals intact.
+  if (selected.detail.kind === "result-rejected") {
+    const reason = selected.detail.reason;
+    if (reason === "leaf-bytes" || reason === "total-payload" || reason === "carrier-bytes") {
+      return capacity(reason);
+    }
+  }
+  return selected;
+}
 interface Span { readonly offset: number; readonly length: number; released: boolean; }
 
 /** The existing exact-LIFO contract, now explicitly one outstanding frame.
@@ -352,7 +365,7 @@ export class Provider {
       const output = decodeOutput(exported);
       this.#event("export-copied"); this.#legacyAt(FAILURE_ORDINALS.AFTER_RESULT_COPIED_OUT);
       return output;
-    } catch (error) { throw normalized(error); }
+    } catch (error) { throw normalizedExport(error); }
     finally { this.#busy = false; }
   }
   #releaseHandle(handle: unknown, role: "input" | "result"): void {

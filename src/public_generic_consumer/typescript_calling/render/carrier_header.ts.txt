@@ -110,7 +110,7 @@ export function locateLeaves(bytes: Uint8Array, expectedCount: number): LeafSpan
   validCount(expectedCount);
   let checked: Uint8Array;
   try { checked = byteView(bytes); } catch { throw resultRejected("carrier-framing"); }
-  if (checked.length > MAX_CARRIER_BYTES) throw capacityExceeded("carrier-bytes");
+  if (checked.length > MAX_CARRIER_BYTES) throw resultRejected("carrier-bytes");
   if (checked.length < 8) throw resultRejected("carrier-framing");
   const wire = new DataView(checked.buffer, checked.byteOffset, checked.byteLength);
   if (wire.getBigUint64(0, true) !== BigInt(expectedCount)) throw resultRejected("carrier-count");
@@ -121,9 +121,9 @@ export function locateLeaves(bytes: Uint8Array, expectedCount: number): LeafSpan
     if (checked.length - offset < 8) throw resultRejected("carrier-framing");
     const length = wire.getBigUint64(offset, true);
     offset += 8;
-    if (length > BigInt(MAX_BYTES_PER_LEAF)) throw capacityExceeded("leaf-bytes");
+    if (length > BigInt(MAX_BYTES_PER_LEAF)) throw resultRejected("leaf-bytes");
     const exact = Number(length);
-    if (exact > MAX_TOTAL_PAYLOAD_BYTES - payload) throw capacityExceeded("total-payload");
+    if (exact > MAX_TOTAL_PAYLOAD_BYTES - payload) throw resultRejected("total-payload");
     if (exact > checked.length - offset) throw resultRejected("carrier-framing");
     payload += exact;
     spans.push({ offset, length: exact });

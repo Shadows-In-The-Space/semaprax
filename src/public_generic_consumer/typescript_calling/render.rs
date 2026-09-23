@@ -308,7 +308,6 @@ pub(super) fn round_trip_mjs(input: &RecordShape, output: &RecordShape) -> Strin
     out.push_str(&input_with_first_field_fn(input));
     out.push('\n');
     out.push_str(&assert_reversed_fn(output));
-    out.push('\n');
     out.push_str(&template(ROUND_TRIP_BODY));
     out
 }

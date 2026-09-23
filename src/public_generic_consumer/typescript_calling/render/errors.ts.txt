@@ -10,7 +10,8 @@ export type ProviderReason = "binding-replay" | "binding-bound" | "module-bytes-
 export type CarrierReason = "input-shape" | "input-field" | "input-bytes"
   | "provider-closed" | "provider-busy" | "handle-invalid" | "handle-provider"
   | "handle-kind" | "lifo-release" | "state-invalid" | "failure-injection"
-  | "carrier-framing" | "carrier-count" | "carrier-trailing";
+  | "carrier-framing" | "carrier-count" | "carrier-trailing"
+  | "carrier-bytes" | "leaf-bytes" | "total-payload";
 export type CapacityReason = "leaf-count" | "leaf-bytes" | "total-payload"
   | "carrier-bytes" | "trace-events" | "memory-growth" | "generation" | "host-allocation";
 

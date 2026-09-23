@@ -180,7 +180,9 @@ mod settlement_host_v3;
 mod settlement_host_v3_integration;
 mod settlement_ledger;
 
-#[cfg(not(target_os = "ios"))]
+// The held-directory checkpoint store is a desktop/server host adapter, not
+// part of the Android or iOS callable runtime.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 pub mod outbound_delivery_store;
 
 #[cfg(feature = "unstable-desktop-app-harness")]

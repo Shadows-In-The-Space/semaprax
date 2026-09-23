@@ -329,9 +329,14 @@ mod template_tests {
             OwnedByteField::new("output-y"),
         ]);
         let rendered = assert_reversed_fn(&input, &output);
-        assert!(rendered.contains("output.field_output_x, reversed(original.field_input_a)"));
-        assert!(rendered.contains("output.field_output_y, reversed(original.field_input_b)"));
-        assert!(!rendered.contains("original.field_output_x"));
+        for (input_field, output_field) in input.fields.iter().zip(&output.fields) {
+            assert!(rendered.contains(&format!(
+                "output.{}, reversed(original.{})",
+                field_name(output_field),
+                field_name(input_field)
+            )));
+            assert!(!rendered.contains(&format!("original.{}", field_name(output_field))));
+        }
     }
 
     #[test]

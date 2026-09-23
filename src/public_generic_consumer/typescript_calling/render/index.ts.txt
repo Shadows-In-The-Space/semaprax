@@ -18,3 +18,4 @@ export type {
   ProviderReason,
   SemapraxPublicGenericError,
 } from "./errors.js";
+export type { SettlementReport, SettlementSnapshot, SettlementEvent, FailurePoint } from "./wasm-provider.js";

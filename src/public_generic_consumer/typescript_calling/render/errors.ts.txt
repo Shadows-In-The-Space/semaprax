@@ -1,21 +1,18 @@
 /** Generated, closed caller error vocabulary. Messages never determine status.
- * Provider execution and cleanup statuses originate in the compiled module.
+ * This is the host-owned reference caller, not a compiled provider ABI.
+ * Cleanup failures are retained on the exception and in Provider.settlement().
  */
 export type DescriptorReason = "descriptor-bound" | "descriptor-framing" | "descriptor-replay";
 export type ProviderReason = "binding-replay" | "binding-bound" | "module-bytes-required"
   | "module-buffer" | "module-bound" | "module-digest" | "module-compile"
-  | "module-imports" | "module-exports" | "module-memory" | "module-abi"
+  | "module-imports" | "module-exports" | "module-memory" | "module-endpoint"
   | "module-instance";
 export type CarrierReason = "input-shape" | "input-field" | "input-bytes"
-  | "provider-closed" | "handle-invalid" | "handle-provider"
-  | "handle-kind" | "state-invalid"
+  | "provider-closed" | "provider-busy" | "handle-invalid" | "handle-provider"
+  | "handle-kind" | "lifo-release" | "state-invalid" | "failure-injection"
   | "carrier-framing" | "carrier-count" | "carrier-trailing";
 export type CapacityReason = "leaf-count" | "leaf-bytes" | "total-payload"
   | "carrier-bytes" | "trace-events" | "memory-growth" | "generation" | "host-allocation";
-/** Incoming result frames use their own closed refusal class. A hostile
- * provider claim of an over-bound carrier is not a caller-requested capacity
- * failure, even though the bound vocabulary is shared with input admission. */
-export type ResultReason = CarrierReason | "leaf-bytes" | "total-payload" | "carrier-bytes";
 
 export type SemapraxPublicGenericError =
   | { readonly kind: "descriptor-rejected"; readonly reason: DescriptorReason }
@@ -23,7 +20,7 @@ export type SemapraxPublicGenericError =
   | { readonly kind: "carrier-rejected"; readonly reason: CarrierReason }
   | { readonly kind: "capacity-exceeded"; readonly reason: CapacityReason }
   | { readonly kind: "execution-failed"; readonly status: number }
-  | { readonly kind: "result-rejected"; readonly reason: ResultReason }
+  | { readonly kind: "result-rejected"; readonly reason: CarrierReason }
   | { readonly kind: "release-failed"; readonly status: number };
 
 export class SemapraxPublicGenericException extends Error {

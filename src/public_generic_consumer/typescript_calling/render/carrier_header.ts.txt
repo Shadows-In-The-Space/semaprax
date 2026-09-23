@@ -3,7 +3,7 @@
  * allocation. Input records use own data fields, never getters or iteration.
  */
 import { SemapraxPublicGenericException } from "./errors.js";
-import type { CapacityReason, CarrierReason, ResultReason } from "./errors.js";
+import type { CapacityReason, CarrierReason } from "./errors.js";
 import type { Input, Output } from "./types.js";
 
 export const MAX_OWNED_LEAVES = 256;
@@ -21,7 +21,7 @@ const arrayBufferResizable = Object.getOwnPropertyDescriptor(ArrayBuffer.prototy
 function capacityExceeded(reason: CapacityReason): SemapraxPublicGenericException {
   return new SemapraxPublicGenericException({ kind: "capacity-exceeded", reason });
 }
-function resultRejected(reason: ResultReason): SemapraxPublicGenericException {
+function resultRejected(reason: CarrierReason): SemapraxPublicGenericException {
   return new SemapraxPublicGenericException({ kind: "result-rejected", reason });
 }
 function inputRejected(reason: CarrierReason): SemapraxPublicGenericException {
@@ -110,10 +110,7 @@ export function locateLeaves(bytes: Uint8Array, expectedCount: number): LeafSpan
   validCount(expectedCount);
   let checked: Uint8Array;
   try { checked = byteView(bytes); } catch { throw resultRejected("carrier-framing"); }
-  // This is a provider-produced result frame. Its claimed carrier/leaf
-  // sizes are malformed-result facts, not caller-requested capacity: match
-  // the Rust and C11 generated decoders' closed ResultRejected domain.
-  if (checked.length > MAX_CARRIER_BYTES) throw resultRejected("carrier-bytes");
+  if (checked.length > MAX_CARRIER_BYTES) throw capacityExceeded("carrier-bytes");
   if (checked.length < 8) throw resultRejected("carrier-framing");
   const wire = new DataView(checked.buffer, checked.byteOffset, checked.byteLength);
   if (wire.getBigUint64(0, true) !== BigInt(expectedCount)) throw resultRejected("carrier-count");
@@ -124,9 +121,9 @@ export function locateLeaves(bytes: Uint8Array, expectedCount: number): LeafSpan
     if (checked.length - offset < 8) throw resultRejected("carrier-framing");
     const length = wire.getBigUint64(offset, true);
     offset += 8;
-    if (length > BigInt(MAX_BYTES_PER_LEAF)) throw resultRejected("leaf-bytes");
+    if (length > BigInt(MAX_BYTES_PER_LEAF)) throw capacityExceeded("leaf-bytes");
     const exact = Number(length);
-    if (exact > MAX_TOTAL_PAYLOAD_BYTES - payload) throw resultRejected("total-payload");
+    if (exact > MAX_TOTAL_PAYLOAD_BYTES - payload) throw capacityExceeded("total-payload");
     if (exact > checked.length - offset) throw resultRejected("carrier-framing");
     payload += exact;
     spans.push({ offset, length: exact });

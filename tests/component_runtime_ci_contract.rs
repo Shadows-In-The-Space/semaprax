@@ -1,4 +1,6 @@
-use std::{fs, path::Path};
+use std::{fmt::Write as _, fs, path::Path};
+
+use sha2::{Digest, Sha256};
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -30,7 +32,10 @@ fn standalone_runner_is_pinned_private_and_outside_the_root_workspace() {
         "wasmtime = { version = \"=47.0.4\", default-features = false, features = [\"component-model\", \"cranelift\", \"runtime\", \"std\"] }",
         "unsafe_code = \"forbid\"",
     ] {
-        assert!(manifest.contains(required), "missing runner lock: {required}");
+        assert!(
+            manifest.contains(required),
+            "missing runner lock: {required}"
+        );
     }
     for forbidden in ["wasmtime-wasi", "wasi-common", "version = \"*\""] {
         assert!(
@@ -399,6 +404,14 @@ fn capability_and_dependency_policy_are_fail_closed() {
 
     let runner = read("platform-tests/component-runtime/src/main.rs");
     for required in [
+        "/fixtures/public-generic-v1/semaprax.toml",
+        "with_authenticated_project(manifest, |snapshot|",
+        "EXPECTED_PUBLIC_GENERIC_COMPONENT_DIGEST",
+        "EXPECTED_PUBLIC_GENERIC_DESCRIPTOR_DIGEST",
+        "EXPECTED_PUBLIC_GENERIC_PROVIDER_DIGEST",
+        "EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256",
+        "raw_digest != EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256",
+        "retained_public_generic_component_transfers_owned_bytes_and_recovers_after_tamper",
         "wasm_component_model(true)",
         "Component::new",
         "component.component_type().imports(&engine)",
@@ -571,6 +584,9 @@ fn capability_and_dependency_policy_are_fail_closed() {
         "std::net",
         "std::env",
         "std::process",
+        "temp_dir(",
+        "create_dir_all(",
+        "remove_dir_all(",
         "func_wrap",
         "add_to_linker",
         "get_func",
@@ -582,6 +598,55 @@ fn capability_and_dependency_policy_are_fail_closed() {
             "runner contains ambient or untyped surface: {forbidden}"
         );
     }
+    for relative in [
+        "platform-tests/component-runtime/fixtures/public-generic-v1/src/app.spx",
+        "platform-tests/component-runtime/fixtures/public-generic-v1/src/tests.spx",
+    ] {
+        let source = read(relative);
+        let parsed = semaprax::parse(&source, root().join(relative))
+            .expect("checked-in private Component fixture must parse");
+        assert_eq!(
+            source,
+            semaprax::format::canonical(&parsed),
+            "private Component fixture must already be canonical: {relative}"
+        );
+    }
+    // Bind the independent runner known answers to this exact canonical project,
+    // rather than weakening its source audit or trusting runtime emitter claims.
+    let artifact = semaprax::project::with_authenticated_project(
+        &root().join("platform-tests/component-runtime/fixtures/public-generic-v1/semaprax.toml"),
+        |snapshot| {
+            snapshot.check()?;
+            snapshot
+                .retain_revision()
+                .public_generic_wasm_component_artifact_v1()
+        },
+    )
+    .expect("private Component fixture must admit and emit");
+    let mut raw_digest = String::with_capacity(64);
+    for byte in Sha256::digest(artifact.bytes()) {
+        write!(raw_digest, "{byte:02x}").unwrap();
+    }
+    let mut mismatches = Vec::new();
+    for (name, expected) in [
+        ("COMPONENT_DIGEST", artifact.digest()),
+        ("DESCRIPTOR_DIGEST", artifact.descriptor_digest()),
+        ("PROVIDER_DIGEST", artifact.provider_digest()),
+        ("COMPONENT_SHA256", raw_digest.as_str()),
+    ] {
+        let declaration = format!("const EXPECTED_PUBLIC_GENERIC_{name}: &str =");
+        let value = runner
+            .split_once(&declaration)
+            .and_then(|(_, rest)| rest.split_once(';'))
+            .map(|(value, _)| value.trim());
+        if value != Some(format!("\"{expected}\"").as_str()) {
+            mismatches.push(format!("{name}: {expected}"));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "private Component known answers differ: {mismatches:?}"
+    );
     assert_eq!(
         runner
             .matches("get_typed_func::<(i64, i32, i64, i64), i32>")

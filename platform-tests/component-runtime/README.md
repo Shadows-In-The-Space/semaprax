@@ -39,3 +39,16 @@ complete script is an exact x86_64 Ubuntu toolchain gate; non-Linux contributors
 can run its Cargo commands individually with the pinned Rust release. This
 remains private copy-algebra evidence: it adds no resources, imports,
 futures/streams, public backend, or `SPX-B104` admission.
+
+The separate private public-generic Component test explicitly acquires the
+checked-in `fixtures/public-generic-v1/semaprax.toml` project through the ordinary
+authenticated project route. It does not create a temporary project or discover
+a runtime path from the environment. Retained-revision replay uses independently
+pinned component, descriptor, and provider identities, followed by a pinned raw
+Component SHA-256 check before Wasmtime compilation. The test retains tamper
+refusal followed by authentic replay, typed owned-Bytes transfer/read/drop,
+maximum-payload copies, and sustained resource reuse. Its Component still has
+zero imports and an empty host linker; explicit host-side fixture acquisition
+does not grant filesystem authority to guest code. This is narrow private
+resource evidence, not public generic Component support or full settlement,
+finalizer, status, or fuel parity.

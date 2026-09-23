@@ -2571,166 +2571,114 @@ fn main() -> HostResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        fs,
-        path::PathBuf,
-        sync::atomic::{AtomicU64, Ordering},
-    };
+    use std::fmt::Write as _;
 
-    static NEXT_PUBLIC_GENERIC: AtomicU64 = AtomicU64::new(0);
-
-    const PUBLIC_GENERIC_MANIFEST: &str = "schema = \"semaprax.manifest.v1\"\n\n[package]\nname = \"public-generic-component-runtime\"\nversion = \"1.0.0\"\nprofile = \"public-generic-wasm-provider.v1\"\n\n[modules]\nentry = \"provider.app\"\nsources = [\"src/app.spx\", \"src/tests.spx\"]\ntests = [\"provider.tests\"]\n\n[exports]\nweb = [\"provider.transform\"]\n";
-    const PUBLIC_GENERIC_APP: &str = r#"module provider.app;
-
-@id("provider.leaf-pair")
-record LeafPair {
-    @id("provider.leaf-pair.left")
-    left: Bytes,
-    @id("provider.leaf-pair.right")
-    right: Bytes,
-}
-
-@id("provider.envelope")
-record Envelope<T> {
-    @id("provider.envelope.payload")
-    payload: T,
-}
-
-@id("provider.transform")
-fn transform(value: own Envelope<LeafPair>) -> Envelope<LeafPair> { value }
-
-@id("provider.main")
-fn main() -> i64 { 0 }
-"#;
-
-    struct PublicGenericFixture(PathBuf);
-
-    impl PublicGenericFixture {
-        fn new() -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "semaprax-public-generic-component-runtime-{}-{}",
-                std::process::id(),
-                NEXT_PUBLIC_GENERIC.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir_all(root.join("src")).unwrap();
-            fs::write(root.join("semaprax.toml"), PUBLIC_GENERIC_MANIFEST).unwrap();
-            write_canonical(&root.join("src/app.spx"), PUBLIC_GENERIC_APP);
-            write_canonical(
-                &root.join("src/tests.spx"),
-                "module provider.tests;\n\n@id(\"provider.tests.main\")\nfn main() -> i64 { 0 }\n",
-            );
-            Self(root.canonicalize().unwrap())
-        }
-
-        fn manifest(&self) -> PathBuf {
-            self.0.join("semaprax.toml")
-        }
-    }
-
-    impl Drop for PublicGenericFixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn write_canonical(path: &std::path::Path, source: &str) {
-        let parsed = semaprax::parse(source, path).unwrap();
-        fs::write(path, semaprax::format::canonical(&parsed)).unwrap();
-    }
+    // Independent known answers for the checked-in, explicitly acquired project.
+    // Replay must not accept identity claims supplied by the emitter under test.
+    const EXPECTED_PUBLIC_GENERIC_COMPONENT_DIGEST: &str =
+        "sha256:18a1e58a15962d9f902174f0523bd2c2a6d1a018f19c991cdede6c6d0f2002f7";
+    const EXPECTED_PUBLIC_GENERIC_DESCRIPTOR_DIGEST: &str =
+        "sha256:52473587274784c87a62e109cd8640bf337306117f8fa943a6b930aeb6a75b1a";
+    const EXPECTED_PUBLIC_GENERIC_PROVIDER_DIGEST: &str =
+        "sha256:0c85f2bd25e1275f8b58dc221b59cc4b23d8ab71018c279f60eaef3049548a84";
+    const EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256: &str =
+        "cdfe4b99cae0f8be9f5ec2edba799d803b07d26a7110f332b754f1d59a6ba2ed";
 
     fn run_public_generic_component_v1() -> HostResult<()> {
         use semaprax::project::with_authenticated_project;
 
-        let fixture = PublicGenericFixture::new();
-        let (artifact_bytes, artifact_digest, descriptor_digest, provider_digest, input_leaves) =
-            with_authenticated_project(&fixture.manifest(), |snapshot| {
-                snapshot.check()?;
-                let revision = snapshot.retain_revision();
-                let endpoint = revision.public_generic_wasm_provider_endpoint_v1()?;
-                if endpoint.subject().input().owned_leaves.len() != 2 {
-                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
-                        "SPX-W121",
-                        "runtime fixture did not retain exactly two owned Bytes leaves",
-                    )]);
-                }
-                let input_leaves = endpoint.subject().input().owned_leaves.clone();
-                let leaf_paths = input_leaves
-                    .iter()
-                    .map(|path| path.split_once('/'))
-                    .collect::<Option<Vec<_>>>();
-                let has_left_then_right = leaf_paths.as_ref().is_some_and(|paths| {
-                    paths.len() == 2
-                        && paths[0].0 == paths[1].0
-                        && paths[0].0.ends_with("provider.envelope.payload")
-                        && paths[0].1.ends_with("provider.leaf-pair.left")
-                        && paths[1].1.ends_with("provider.leaf-pair.right")
-                        && !paths[0].1.contains('/')
-                        && !paths[1].1.contains('/')
-                });
-                if !has_left_then_right {
-                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
-                        "SPX-W121",
-                        "retained input Bytes leaves must bind payload.left then payload.right",
-                    )]);
-                }
-                let artifact = revision.public_generic_wasm_component_artifact_v1()?;
-                if artifact.descriptor_digest() != endpoint.descriptor().descriptor_digest() {
-                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
-                        "SPX-W121",
-                        "Component descriptor identity differs from retained endpoint",
-                    )]);
-                }
-                let mut tampered = artifact.bytes().to_vec();
-                let final_byte = tampered.last_mut().ok_or_else(|| {
-                    vec![semaprax::diagnostic::Diagnostic::io(
-                        "SPX-W121",
-                        "retained Component artifact is empty",
-                    )]
-                })?;
-                *final_byte ^= 1;
-                if revision
-                    .replay_public_generic_wasm_component_v1(
-                        &tampered,
-                        artifact.digest(),
-                        artifact.descriptor_digest(),
-                        artifact.provider_digest(),
-                    )
-                    .is_ok()
-                {
-                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
-                        "SPX-W121",
-                        "tampered Component unexpectedly replayed",
-                    )]);
-                }
-                let replayed = revision.replay_public_generic_wasm_component_v1(
-                    artifact.bytes(),
-                    artifact.digest(),
-                    artifact.descriptor_digest(),
-                    artifact.provider_digest(),
-                )?;
-                if replayed != artifact {
-                    return Err(vec![semaprax::diagnostic::Diagnostic::io(
-                        "SPX-W121",
-                        "authentic retained Component failed replay after tamper refusal",
-                    )]);
-                }
-                Ok((
-                    replayed.bytes().to_vec(),
-                    replayed.digest().to_owned(),
-                    replayed.descriptor_digest().to_owned(),
-                    replayed.provider_digest().to_owned(),
-                    input_leaves,
-                ))
-            })
-            .map_err(|errors| failure(format!("retained project admission failed: {errors:?}")))?;
+        let manifest = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fixtures/public-generic-v1/semaprax.toml"
+        ));
+        let artifact_bytes = with_authenticated_project(manifest, |snapshot| {
+            snapshot.check()?;
+            let revision = snapshot.retain_revision();
+            let endpoint = revision.public_generic_wasm_provider_endpoint_v1()?;
+            if endpoint.subject().input().owned_leaves.len() != 2 {
+                return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                    "SPX-W121",
+                    "runtime fixture did not retain exactly two owned Bytes leaves",
+                )]);
+            }
+            let input_leaves = endpoint.subject().input().owned_leaves.clone();
+            let leaf_paths = input_leaves
+                .iter()
+                .map(|path| path.split_once('/'))
+                .collect::<Option<Vec<_>>>();
+            let has_left_then_right = leaf_paths.as_ref().is_some_and(|paths| {
+                paths.len() == 2
+                    && paths[0].0 == paths[1].0
+                    && paths[0].0.ends_with("provider.envelope.payload")
+                    && paths[0].1.ends_with("provider.leaf-pair.left")
+                    && paths[1].1.ends_with("provider.leaf-pair.right")
+                    && !paths[0].1.contains('/')
+                    && !paths[1].1.contains('/')
+            });
+            if !has_left_then_right {
+                return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                    "SPX-W121",
+                    "retained input Bytes leaves must bind payload.left then payload.right",
+                )]);
+            }
+            let artifact = revision.public_generic_wasm_component_artifact_v1()?;
+            if artifact.descriptor_digest() != EXPECTED_PUBLIC_GENERIC_DESCRIPTOR_DIGEST
+                || endpoint.descriptor().descriptor_digest()
+                    != EXPECTED_PUBLIC_GENERIC_DESCRIPTOR_DIGEST
+                || artifact.provider_digest() != EXPECTED_PUBLIC_GENERIC_PROVIDER_DIGEST
+            {
+                return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                    "SPX-W121",
+                    "Component descriptor/provider identity differs from pinned fixture",
+                )]);
+            }
+            let mut tampered = artifact.bytes().to_vec();
+            let final_byte = tampered.last_mut().ok_or_else(|| {
+                vec![semaprax::diagnostic::Diagnostic::io(
+                    "SPX-W121",
+                    "retained Component artifact is empty",
+                )]
+            })?;
+            *final_byte ^= 1;
+            if revision
+                .replay_public_generic_wasm_component_v1(
+                    &tampered,
+                    EXPECTED_PUBLIC_GENERIC_COMPONENT_DIGEST,
+                    EXPECTED_PUBLIC_GENERIC_DESCRIPTOR_DIGEST,
+                    EXPECTED_PUBLIC_GENERIC_PROVIDER_DIGEST,
+                )
+                .is_ok()
+            {
+                return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                    "SPX-W121",
+                    "tampered Component unexpectedly replayed",
+                )]);
+            }
+            let replayed = revision.replay_public_generic_wasm_component_v1(
+                artifact.bytes(),
+                EXPECTED_PUBLIC_GENERIC_COMPONENT_DIGEST,
+                EXPECTED_PUBLIC_GENERIC_DESCRIPTOR_DIGEST,
+                EXPECTED_PUBLIC_GENERIC_PROVIDER_DIGEST,
+            )?;
+            if replayed != artifact {
+                return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                    "SPX-W121",
+                    "authentic retained Component failed replay after tamper refusal",
+                )]);
+            }
+            Ok(replayed.bytes().to_vec())
+        })
+        .map_err(|errors| failure(format!("retained project admission failed: {errors:?}")))?;
 
-        let before = <[u8; 32]>::from(Sha256::digest(&artifact_bytes));
-        if artifact_digest.is_empty()
-            || descriptor_digest.is_empty()
-            || provider_digest.is_empty()
-            || input_leaves.len() != 2
-        {
-            return Err(failure("retained Component identity facts are invalid"));
+        let before = Sha256::digest(&artifact_bytes);
+        let mut raw_digest = String::with_capacity(64);
+        for byte in before {
+            write!(raw_digest, "{byte:02x}")?;
+        }
+        if raw_digest != EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256 {
+            return Err(failure(
+                "retained Component bytes differ from pinned fixture",
+            ));
         }
         let mut config = Config::new();
         config.wasm_component_model(true);
@@ -2853,7 +2801,7 @@ fn main() -> i64 { 0 }
         right_output
             .resource_drop(&mut store)
             .map_err(|error| failure(format!("recovery right output drop trapped: {error}")))?;
-        if <[u8; 32]>::from(Sha256::digest(&artifact_bytes)) != before {
+        if Sha256::digest(&artifact_bytes) != before {
             return Err(failure(
                 "authenticated retained Component bytes changed during execution",
             ));

@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Keep the private public-generic Component runtime inside its ambient-authority
+  source contract: acquire a checked-in canonical project explicitly, replay
+  against pinned identities, and authenticate exact Component bytes before
+  typed execution. This does not widen public Component support.
+
 - Generate canonical descriptor-bound TypeScript/Wasm carrier frames and run
   the generated package against the compiler-owned provider lifecycle. Add the
   private `semaprax.authenticated-native-identity.v1` C profile, which rejects

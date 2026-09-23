@@ -1,4 +1,5 @@
 mod owned_moves;
+pub(crate) mod public_generic_bridge;
 use super::{
     backend_error, c_i32, c_i64, native_box, native_byte_data, native_bytes, native_command,
     native_command_io, native_host_output, native_iter, native_resource, native_runtime,

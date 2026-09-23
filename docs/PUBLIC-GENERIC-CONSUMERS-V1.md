@@ -24,6 +24,15 @@ that did not exist when the metadata half closed; both gates stay open for
 hosted evidence of all four languages. Public generic ownership remains
 unsupported and unpublished.
 
+The generated TypeScript calling package now emits canonical descriptor-bound
+Logical Carrier v1 frames and drives the compiler-owned zero-import Wasm
+provider through open/prepare/call/export/release/close. The earlier stand-in
+and flat-frame passages below describe the still-active, explicitly selected
+reference shared-corpus lane; they must not be read as the current compiled-
+package limitation or as a fallback from the compiled binding. Full shared-
+corpus migration, broader endpoint shapes, browser/hosted evidence, and
+publication remain open.
+
 The four calling-consumer generators retain their byte-oriented configuration
 API: generation embeds the supplied trusted descriptor bytes without granting
 them authority. At **open**, Rust, C11, and TypeScript/Wasm independently check
@@ -1056,11 +1065,12 @@ It has no generation, ownership flag, field path, variant tag or cleanup-plan
 field to substitute. Generation belongs to the provider handle registry;
 ownership and cleanup ordering belong to the call state machine and
 settlement plan; leaf paths and the closed leaf-kind tag belong to
-`LogicalCarrierFrame`. Their existing reference-codec, provider lifecycle
-and settlement tests remain separate evidence. The 27-case consumer corpus
-does not claim four-language equivalence for those categories or connect
-the logical frame to physical provider authority. That integration and the
-#229 compiled-provider lane require their own implementation and evidence.
+`LogicalCarrierFrame`. Their existing reference-codec, provider lifecycle and
+settlement tests remain separate evidence. The 27-case consumer corpus does
+not claim four-language equivalence for those categories. Separate focused
+gates now connect canonical frames to the compiler-owned Wasm provider and to
+the additive authenticated native identity profile; those gates do not
+retroactively widen this shared corpus or establish hosted/public support.
 
 **Two reference-codec gaps #173's audit found and closed directly.**
 Auditing every hostile case already listed above against the five wire

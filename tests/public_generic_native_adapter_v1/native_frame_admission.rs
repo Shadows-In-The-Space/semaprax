@@ -48,7 +48,7 @@ fn main() -> i64 { 0 }
 
 const REVISION: &str = "issue173-native-admission-v1";
 
-fn program_root(program: &semaprax::hir::ResolvedProgram) -> String {
+pub(crate) fn program_root(program: &semaprax::hir::ResolvedProgram) -> String {
     let mut ids = Vec::new();
     ids.extend(program.types.iter().map(|item| item.id.as_str()));
     ids.extend(

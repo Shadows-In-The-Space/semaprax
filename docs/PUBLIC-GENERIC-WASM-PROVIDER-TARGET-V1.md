@@ -81,15 +81,19 @@ The module owns scratch growth, opaque non-recycled handles, carrier SHA-256
 replay, checked source invocation, result staging/export, and explicit
 release/close transitions. Its binding covers normalized exact artifact bytes,
 endpoint export, compiler backend, descriptor, runtime identity, and Core Wasm
-target. The generated TypeScript runtime now calls these exports and no longer
-contains an allocator or handle registry.
+target. When its binding selects the compiled provider, the generated
+TypeScript runtime calls these exports and does not use its host allocator or
+handle registry. The same generated file retains an explicitly selected
+reference-provider route for the predecessor fixture and settlement corpora;
+there is no fallback between the bindings.
 
-The remaining #229 integration gap is canonical carrier generation in the
-TypeScript package: its older flat leaf codec is deliberately rejected by the
-new module. The retired hand-assembled reference module is now a negative
-compatibility fixture only. The compiler artifact's full successful lifecycle
-is executed directly under Node, but #229 is not closed until the generated
-TypeScript carrier codec emits the canonical descriptor-bound frames too.
+The generated TypeScript package now emits canonical descriptor-bound carrier
+frames and executes the complete lifecycle against this compiler artifact.
+The hand-assembled reference module remains an explicit legacy test lane and
+cannot satisfy compiled-provider acceptance. This closes the former codec
+mismatch, but not #229's broader acceptance: hosted evidence, the full
+hostile/settlement matrix, and endpoint shapes beyond the admitted flat
+owned-`Bytes` profile remain separate.
 
 ## Nonclaims
 
@@ -97,16 +101,17 @@ The implemented Phase A product is not:
 
 - a public or supported generic ABI;
 - a replacement for the C11 reference provider or in-process Wasm model;
-- proof that any physical adapter invokes the selected Semaprax function;
+- proof that every physical adapter or broader body shape invokes a selected
+  Semaprax function;
 - permission to publish npm, native, Web, component, or transport artifacts;
   or
 - completion of PG-7, PG-8, PG-9, issue #162, or issue #229.
 
-The native settlement harness now derives and independently verifies one real
-generic source subject before generating its C, C++, and Rust callers. The
-physical provider still invokes the explicitly labelled reversal fixture;
-that narrower improvement must not be described as compiler-derived endpoint
-execution.
+The predecessor native settlement harness still invokes its explicitly
+labelled reversal fixture. Separately, the additive
+`semaprax.authenticated-native-identity.v1` profile executes one compiler-
+checked identity body after authenticating its canonical frame in the physical
+C entry point. That narrow local profile is not a general native public ABI.
 
 ## Focused gates
 
@@ -119,13 +124,16 @@ cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1 -- \
   compiler_provider_artifact --test-threads=1
 cargo test --locked -p semaprax --test public_generic_native_adapter_v1 -- \
   consumer_settlement:: --test-threads=1
+cargo test --locked -p semaprax --test public_generic_native_adapter_v1 -- \
+  authenticated_handoff:: --test-threads=1
 ```
 
 The first gate covers manifest selection, checked admission, deterministic
 artifact derivation, Project Lock binding, source-drift identity, shape/count
 refusals, and fail-closed legacy output routes. The second validates the exact
 zero-import export inventory and executes open/prepare/checked-call/export/
-release/close under Node. The third proves that executed native generated
-callers and their provider use the same compiler-derived descriptor, binding,
-instance, leaf, and settlement identities while retaining the fixture endpoint
-nonclaim.
+release/close under Node. The third proves the predecessor generated-caller
+fixture lane. The fourth proves the additive authenticated identity lane,
+which rejects malformed metadata, binding drift, stale generation, wrong
+ownership, and settlement-plan drift before allocation or dispatch across C,
+C++, and Rust at `-O0` and `-O2`.

@@ -5,10 +5,12 @@
 //! compatibility checks for field/case addition, reordering, ownership
 //! change, and identifier-preserving display rename"). Like the projection it
 //! compares, it is **not** a support or publication decision: public generic
-//! ownership remains unsupported and unpublished pending PG-9 of the
+//! ownership remains unsupported and unpublished under PG-9 of the
 //! [Public Generic Ownership milestone](../../../docs/PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md),
-//! and no compiled `.wasm` implements the provider ABI (issue #229). Nothing
-//! here emits, instantiates, links, or runs a component; it reads two
+//! whose standing decision is still `unsupported`/`unpublished`. A private
+//! compiled Core-Wasm provider now exists, but it is not a Component Model
+//! publication or support decision. Nothing here emits, instantiates, links,
+//! or runs a component; it reads two
 //! already-produced projections and reports how they differ.
 //!
 //! ## Why a delta report rather than a digest comparison

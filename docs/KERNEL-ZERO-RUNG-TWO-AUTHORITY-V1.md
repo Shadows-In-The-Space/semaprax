@@ -2,7 +2,10 @@
 
 Status: implemented local compiler boundary for issue #188. This is neither a
 self-hosting-rung promotion nor a public ABI, hosted result, target-runtime
-claim, authority transfer, or owned Kernel-0 buffer.
+claim, authority transfer, or owned Kernel-0 buffer. The private
+[Owned Handoff v1](KERNEL-ZERO-RUNG-TWO-OWNED-HANDOFF-V1.md) adds an ordinary
+checked owned-Bytes transfer around the assembled scalar candidate without
+changing the scalar proof boundary.
 
 ## Closed subject
 
@@ -24,8 +27,10 @@ new versioned contract; it may not silently enlarge the array.
 
 For each ordinary formatter token, the adapter evaluates the candidate first.
 That evaluation replays the component's embedded source through its retained
-binding before it can return text. The adapter copies the candidate into its
-fixed private token only if it fits, then byte-compares the entire token with
+binding before it can return text. The candidate then traverses the private
+exact-bound synchronous owned handoff; actual last-owner release and successful
+result settlement must be observed before comparison. The adapter copies it into
+its fixed private token only if it fits, then byte-compares the entire token with
 the caller-provided Rust reference bytes. Only exact equality selects the
 candidate token for copying to the caller's output.
 
@@ -36,8 +41,8 @@ single bounded copy; candidate storage is never returned. Rust therefore
 remains the sole authority for formatter bytes even on a candidate match.
 
 Exact-source replay may canonicalize internal compiler data. A thread-local,
-panic-safe scoped guard surrounds only candidate evaluation. Any formatter
-entry nested under that scope bypasses candidates and copies its authoritative
+panic-safe scoped guard surrounds candidate evaluation and owned handoff. Any
+formatter entry nested under that scope bypasses candidates and copies its authoritative
 Rust bytes directly; the outer call resumes normal byte comparison after the
 scope drops. This prevents recursive candidate derivation without disabling
 ordinary top-level lane traversal or leaking state across calls/threads.
@@ -65,7 +70,8 @@ canonical formatting operation: the formatter's measured pass and emitted
 pass each traverse the authored `[1, 2, 3, 4, 1]` token inventory. This
 pins both phases of one canonical operation. A nested-canonicalization test
 proves the guard bypasses the inner candidate and restores the outer thread
-state; package-report generation
+state; unwind panic or refused handoff keeps Rust bytes and restores re-entry.
+Package-report generation
 from `examples/meaning.spx` pins the former recursive path. A bounded-output
 test pins evidence bypass, zero candidate count inside the scope, and normal
 candidate use after scope restoration. Existing broad

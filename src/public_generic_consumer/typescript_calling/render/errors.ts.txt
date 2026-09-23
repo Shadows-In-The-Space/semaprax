@@ -6,7 +6,7 @@ export type DescriptorReason = "descriptor-bound" | "descriptor-framing" | "desc
 export type ProviderReason = "binding-replay" | "binding-bound" | "module-bytes-required"
   | "module-buffer" | "module-bound" | "module-digest" | "module-compile"
   | "module-imports" | "module-exports" | "module-memory" | "module-endpoint"
-  | "module-instance";
+  | "module-instance" | "module-abi";
 export type CarrierReason = "input-shape" | "input-field" | "input-bytes"
   | "provider-closed" | "provider-busy" | "handle-invalid" | "handle-provider"
   | "handle-kind" | "lifo-release" | "state-invalid" | "failure-injection"

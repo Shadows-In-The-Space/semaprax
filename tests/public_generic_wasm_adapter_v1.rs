@@ -37,3 +37,8 @@ mod compiled_provider;
 /// structural-validated and loaded by Node without fixture C or host imports.
 #[path = "public_generic_wasm_adapter_v1/compiler_provider_artifact.rs"]
 mod compiler_provider_artifact;
+/// R14: deterministic retained-revision Component derivation and fail-closed
+/// byte/provider-metadata replay. This is artifact evidence, not Wasmtime
+/// runtime conformance.
+#[path = "public_generic_wasm_adapter_v1/component_artifact.rs"]
+mod component_artifact;

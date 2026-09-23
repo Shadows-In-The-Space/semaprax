@@ -139,3 +139,63 @@ export function decodeLeaves(bytes: Uint8Array, expectedCount: number): Uint8Arr
   try { return spans.map(span => checked.slice(span.offset, span.offset + span.length)); }
   catch { throw capacityExceeded("host-allocation"); }
 }
+
+// Canonical LogicalCarrierFrame v1. The legacy helpers above remain solely
+// for the explicitly selected reference provider; compiled providers use the
+// descriptor-bound framing below. This implementation deliberately keeps the
+// SHA-256 primitive synchronous: transform() is a synchronous owned call and
+// Web Crypto's Promise API would otherwise create a second lifecycle shape.
+const CARRIER_SCHEMA = "semaprax.public-generic-carrier.v1";
+const FRAME_DOMAIN = new TextEncoder().encode("semaprax.public-generic-carrier.v1.frame\0");
+const ENDPOINT_DOMAIN = new TextEncoder().encode("semaprax.public-generic-carrier.v1.endpoint-identity\0");
+const INVENTORY_DOMAIN = new TextEncoder().encode("semaprax.public-generic-carrier.v1.leaf-inventory\0");
+const MAX_FRAME_FIELD_BYTES = 65536;
+
+function sha256(input: Uint8Array): Uint8Array {
+  const k = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const h = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const blocks = Math.ceil((input.length + 9) / 64);
+  const padded = new Uint8Array(blocks * 64); padded.set(input); padded[input.length] = 0x80;
+  const bitLength = BigInt(input.length) * 8n;
+  new DataView(padded.buffer).setBigUint64(padded.length - 8, bitLength, false);
+  const words = new Uint32Array(64);
+  for (let base = 0; base < padded.length; base += 64) {
+    const view = new DataView(padded.buffer, base, 64);
+    for (let i = 0; i < 16; i += 1) words[i] = view.getUint32(i * 4, false);
+    for (let i = 16; i < 64; i += 1) { const x = words[i - 15]!; const y = words[i - 2]!; words[i] = (((x >>> 7 | x << 25) ^ (x >>> 18 | x << 14) ^ (x >>> 3)) + words[i - 16]! + ((y >>> 17 | y << 15) ^ (y >>> 19 | y << 13) ^ (y >>> 10)) + words[i - 7]!) >>> 0; }
+    let a = h[0]!, b = h[1]!, c = h[2]!, d = h[3]!, e = h[4]!, f = h[5]!, g = h[6]!, hh = h[7]!;
+    for (let i = 0; i < 64; i += 1) { const s1 = (e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7); const ch = (e & f) ^ (~e & g); const t1 = (hh + s1 + ch + k[i]! + words[i]!) >>> 0; const s0 = (a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10); const maj = (a & b) ^ (a & c) ^ (b & c); const t2 = (s0 + maj) >>> 0; hh = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0; }
+    h[0] = (h[0]! + a) >>> 0; h[1] = (h[1]! + b) >>> 0; h[2] = (h[2]! + c) >>> 0; h[3] = (h[3]! + d) >>> 0; h[4] = (h[4]! + e) >>> 0; h[5] = (h[5]! + f) >>> 0; h[6] = (h[6]! + g) >>> 0; h[7] = (h[7]! + hh) >>> 0;
+  }
+  const out = new Uint8Array(32); const view = new DataView(out.buffer); h.forEach((word, index) => view.setUint32(index * 4, word, false)); return out;
+}
+function digest(domain: Uint8Array, body: Uint8Array): string { const preimage = new Uint8Array(domain.length + 8 + body.length); preimage.set(domain); new DataView(preimage.buffer).setBigUint64(domain.length, BigInt(body.length), true); preimage.set(body, domain.length + 8); return `sha256:${Array.from(sha256(preimage), byte => byte.toString(16).padStart(2, "0")).join("")}`; }
+function framed(bytes: Uint8Array): Uint8Array { const out = new Uint8Array(8 + bytes.length); new DataView(out.buffer).setBigUint64(0, BigInt(bytes.length), true); out.set(bytes, 8); return out; }
+function join(parts: readonly Uint8Array[]): Uint8Array { const length = parts.reduce((total, part) => total + part.length, 0); const out = new Uint8Array(length); let offset = 0; for (const part of parts) { out.set(part, offset); offset += part.length; } return out; }
+function text(value: string): Uint8Array { return new TextEncoder().encode(value); }
+function inventoryDigest(paths: readonly string[]): string { return digest(INVENTORY_DOMAIN, join([u64(paths.length), ...paths.map(path => framed(text(path)))])); }
+function endpointDigest(exportId: string): string { return digest(ENDPOINT_DOMAIN, text(exportId)); }
+function u64(value: number): Uint8Array { const out = new Uint8Array(8); new DataView(out.buffer).setBigUint64(0, BigInt(value), true); return out; }
+
+export function encodeCanonicalFrame(direction: "input" | "result", descriptorDigest: string, exportId: string, instanceDigest: string, paths: readonly string[], leaves: readonly Uint8Array[]): Uint8Array {
+  validCount(paths.length); if (leaves.length !== paths.length) throw inputRejected("carrier-count");
+  let total = 0; const payloads: Uint8Array[] = [];
+  for (const leaf of leaves) { const view = byteView(leaf); if (view.length > MAX_BYTES_PER_LEAF) throw capacityExceeded("leaf-bytes"); if (view.length > MAX_TOTAL_PAYLOAD_BYTES - total) throw capacityExceeded("total-payload"); total += view.length; payloads.push(view); }
+  const prefix: Uint8Array[] = [framed(text(CARRIER_SCHEMA)), framed(text(direction)), framed(text(descriptorDigest)), framed(text(endpointDigest(exportId))), framed(text(instanceDigest)), framed(text(inventoryDigest(paths))), u64(paths.length), u64(total)];
+  for (let index = 0; index < paths.length; index += 1) prefix.push(framed(text(paths[index]!)), Uint8Array.of(0), framed(payloads[index]!));
+  const body = join(prefix); return join([body, framed(text(digest(FRAME_DOMAIN, body)))]);
+}
+function readFrame(bytes: Uint8Array, offset: number): readonly [Uint8Array, number] | null { if (bytes.length - offset < 8) return null; const width = new DataView(bytes.buffer, bytes.byteOffset + offset, 8).getBigUint64(0, true); if (width > BigInt(MAX_FRAME_FIELD_BYTES)) return null; const length = Number(width); const start = offset + 8; return length <= bytes.length - start ? [bytes.subarray(start, start + length), start + length] : null; }
+function readText(bytes: Uint8Array, offset: number): readonly [string, number] | null { const found = readFrame(bytes, offset); if (!found) return null; try { return [new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(found[0]), found[1]]; } catch { return null; } }
+export function decodeCanonicalFrame(direction: "input" | "result", descriptorDigest: string, exportId: string, instanceDigest: string, paths: readonly string[], bytes: Uint8Array): Uint8Array[] {
+  let checked: Uint8Array; try { checked = byteView(bytes); } catch { throw resultRejected("carrier-framing"); }
+  if (checked.length > MAX_CARRIER_BYTES + 4 * 1024 * 1024) throw resultRejected("carrier-bytes");
+  let offset = 0; const bodyStart = offset; const expected = [CARRIER_SCHEMA, direction, descriptorDigest, endpointDigest(exportId), instanceDigest, inventoryDigest(paths)];
+  for (const value of expected) { const field = readText(checked, offset); if (!field || field[0] !== value) throw resultRejected("carrier-framing"); offset = field[1]; }
+  if (checked.length - offset < 16) throw resultRejected("carrier-framing"); const view = new DataView(checked.buffer, checked.byteOffset, checked.byteLength); const count = view.getBigUint64(offset, true); offset += 8; const declaredTotal = view.getBigUint64(offset, true); offset += 8;
+  if (count !== BigInt(paths.length)) throw resultRejected("carrier-count"); if (declaredTotal > BigInt(MAX_TOTAL_PAYLOAD_BYTES)) throw resultRejected("total-payload");
+  let total = 0; const payloads: Uint8Array[] = [];
+  for (let index = 0; index < paths.length; index += 1) { const path = readText(checked, offset); if (!path || path[0] !== paths[index]) throw resultRejected("carrier-framing"); offset = path[1]; if (offset >= checked.length || checked[offset] !== 0) throw resultRejected("carrier-framing"); offset += 1; const payload = readFrame(checked, offset); if (!payload || payload[0].length > MAX_BYTES_PER_LEAF) throw resultRejected("leaf-bytes"); offset = payload[1]; if (payload[0].length > MAX_TOTAL_PAYLOAD_BYTES - total) throw resultRejected("total-payload"); total += payload[0].length; payloads.push(payload[0]); }
+  if (BigInt(total) !== declaredTotal) throw resultRejected("carrier-framing"); const body = checked.subarray(bodyStart, offset); const facts = readText(checked, offset); if (!facts || facts[1] !== checked.length || facts[0] !== digest(FRAME_DOMAIN, body)) throw resultRejected("carrier-framing");
+  try { return payloads.map(payload => payload.slice()); } catch { throw capacityExceeded("host-allocation"); }
+}

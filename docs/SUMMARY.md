@@ -496,6 +496,7 @@ Audience: all documentation readers.
 - [Project Assurance Manifest v1](PROJECT-ASSURANCE-MANIFEST-V1.md)
 - [Source Live I/O v5](SOURCE-LIVE-IO-V5.md)
 - [Cross-language Agent benchmark laboratory v1](CROSS-LANGUAGE-BENCHMARK-V1.md)
+- [Cross-language runnable adapter v1](CROSS-LANGUAGE-RUNNABLE-ADAPTER-V1.md)
 - [Catalog normalizer oracle v1](CATALOG-NORMALIZER-ORACLE-V1.md)
 - [Economic Agent](ECONOMIC-AGENT-V1.md)
 - [Deterministic ARC zone model](ARC-ZONES-V1.md)

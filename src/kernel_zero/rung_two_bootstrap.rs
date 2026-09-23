@@ -11,9 +11,32 @@
 mod artifact;
 mod decode;
 
+pub(crate) fn canonical_term_bytes(program: &super::term::KernelProgram) -> Result<Vec<u8>, ()> {
+    artifact::encode_program(program).map_err(|_| ())
+}
+
+pub(crate) fn renderer_core_definitions() -> [(&'static str, &'static str); 5] {
+    artifact::component_defs().map(|component| (component.source, component.entry))
+}
+
 #[cfg(test)]
 mod recovery;
 #[cfg(test)]
 mod target_execution;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(super) fn with_target_scratch(work: impl FnOnce(&std::path::Path)) {
+    let scratch = target_execution::Scratch::create().expect("bounded target scratch");
+    work(scratch.path());
+}
+
+#[cfg(test)]
+pub(super) fn run_target(
+    command: &mut std::process::Command,
+) -> Result<(bool, Vec<u8>, Vec<u8>), ()> {
+    target_execution::run_bounded(command)
+        .map(|output| (output.status.success(), output.stdout, output.stderr))
+        .map_err(|_| ())
+}

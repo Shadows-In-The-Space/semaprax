@@ -25,14 +25,14 @@
 use crate::public_generic_abi::boundary_profile::{
     MAX_BYTES_PER_LEAF, MAX_OWNED_LEAVES_PER_INSTANCE, MAX_TOTAL_PAYLOAD_BYTES,
 };
+use crate::public_generic_abi::carrier::CARRIER_SCHEMA;
 use crate::public_generic_abi::carrier::frame::CarrierFrameBinding;
 use crate::public_generic_abi::carrier::trace::Direction;
-use crate::public_generic_abi::carrier::CARRIER_SCHEMA;
 use crate::public_generic_abi::descriptor::verify::VerifiedPublicGenericDescriptor;
 
 const FRAME_DOMAIN: &[u8] = b"semaprax.public-generic-carrier.v1.frame\0";
 const MAX_FRAME_FIELD_BYTES: u32 = 64 * 1024;
-const MAX_FRAME_WIRE_BYTES: u32 = MAX_TOTAL_PAYLOAD_BYTES as u32 + 4 * 1024 * 1024;
+pub(crate) const MAX_FRAME_WIRE_BYTES: u32 = MAX_TOTAL_PAYLOAD_BYTES as u32 + 4 * 1024 * 1024;
 const DIGEST_TEXT_BYTES: u32 = 71; // `sha256:` plus 32 lowercase hexadecimal bytes.
 const SHA256_WORKSPACE_BYTES: u32 = 288; // 64 words plus the final 32-byte digest.
 

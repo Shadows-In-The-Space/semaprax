@@ -265,7 +265,8 @@ fn reference_shape_has_exact_zero_max_and_first_over_leaf_bounds() {
             .collect(),
     );
     assert!(
-        generate_typescript_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape).is_ok()
+        generate_typescript_calling_consumer(&descriptor_bytes(), &binding(), &shape, &shape)
+            .is_ok()
     );
 }
 
@@ -312,7 +313,9 @@ fn authentication_and_cleanup_guards_are_emitted_from_fixed_assets() {
         provider
             .find("const bytes = snapshotModuleBytes(moduleOrBytes);")
             .unwrap()
-            < provider.find("await verifyModuleArtifactDigest(bytes)").unwrap()
+            < provider
+                .find("await verifyModuleArtifactDigest(bytes)")
+                .unwrap()
     );
     assert!(source("src/descriptor.ts")
         .contains("EXPECTED_DESCRIPTOR_BYTES = TRUSTED_DESCRIPTOR_BYTES.slice()"));

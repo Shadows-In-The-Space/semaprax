@@ -86,7 +86,13 @@ pub use owned_data_public::{
     emit_resolved_module_with_nested_owned_record_exports,
     emit_resolved_module_with_owned_data_exports,
 };
-pub use public_generic_provider::{BindingDigestSlotV1, PublicGenericWasmProviderArtifactV1};
+pub(crate) use public_generic_provider::{
+    emit_component as emit_public_generic_wasm_component_v1,
+    replay_component as replay_public_generic_wasm_component_v1,
+};
+pub use public_generic_provider::{
+    BindingDigestSlotV1, PublicGenericWasmComponentArtifactV1, PublicGenericWasmProviderArtifactV1,
+};
 #[cfg(any(test, feature = "unstable-wit-component-harness"))]
 pub(crate) use record_pattern_component_v8::{
     emit_private_record_pattern_core_v8,

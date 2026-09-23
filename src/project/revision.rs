@@ -19,7 +19,7 @@ use super::{ProjectSource, ProjectWebBuild, ScalarWitInterfaceArtifactV1};
 use crate::public_generic_abi::compiler_endpoint::{
     replay_admitted_public_generic_endpoint_v1, AdmittedPublicGenericEndpointV1,
 };
-use crate::wasm::PublicGenericWasmProviderArtifactV1;
+use crate::wasm::{PublicGenericWasmComponentArtifactV1, PublicGenericWasmProviderArtifactV1};
 
 /// One immutable, fully admitted Project revision without ambient authority.
 pub struct ProjectRevision {
@@ -161,6 +161,37 @@ impl ProjectRevision {
         let endpoint = self.public_generic_wasm_provider_endpoint_v1()?;
         crate::wasm::emit_public_generic_wasm_provider_v1(&self.public_api_program, &endpoint)
             .map_err(|error| vec![error])
+    }
+
+    /// Deterministically emit the private callable Component Model profile
+    /// from this retained, independently replayed public-generic endpoint.
+    pub fn public_generic_wasm_component_artifact_v1(
+        &self,
+    ) -> Result<PublicGenericWasmComponentArtifactV1, Vec<Diagnostic>> {
+        let endpoint = self.public_generic_wasm_provider_endpoint_v1()?;
+        crate::wasm::emit_public_generic_wasm_component_v1(&self.public_api_program, &endpoint)
+            .map_err(|error| vec![error])
+    }
+
+    /// Replay a candidate Component and its component/provider identity
+    /// metadata against the exact endpoint retained by this revision.
+    pub fn replay_public_generic_wasm_component_v1(
+        &self,
+        candidate_bytes: &[u8],
+        candidate_digest: &str,
+        candidate_descriptor_digest: &str,
+        candidate_provider_digest: &str,
+    ) -> Result<PublicGenericWasmComponentArtifactV1, Vec<Diagnostic>> {
+        let endpoint = self.public_generic_wasm_provider_endpoint_v1()?;
+        crate::wasm::replay_public_generic_wasm_component_v1(
+            &self.public_api_program,
+            &endpoint,
+            candidate_bytes,
+            candidate_digest,
+            candidate_descriptor_digest,
+            candidate_provider_digest,
+        )
+        .map_err(|error| vec![error])
     }
 
     pub fn test_program(&self) -> &crate::hir::ResolvedProgram {

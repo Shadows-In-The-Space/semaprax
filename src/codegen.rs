@@ -70,6 +70,7 @@ macro_rules! format {
 }
 
 mod native_emit;
+pub(crate) use native_emit::public_generic_bridge::emit_public_generic_identity_bridge;
 
 #[cfg(test)]
 use native_emit::{

@@ -69,14 +69,18 @@ This authored local gate compares proposal admission, fresh authorization
 bindings and consumed requests, an injected read operation, continued State,
 terminal Result, stage order, turn/effect counters, cancellation and
 iteration/stage ceilings. It requires `clang` and `node`; a tool-absent skip
-is not execution evidence. Native and Wasm report no interpreter instruction
-or cleanup-event counts. The public target-stage route instead records one
+is not execution evidence. Native now additionally settles borrowed stage
+arguments and returned `Bytes` at the real boundary, with local allocation,
+free, call, cancellation, receipt, and omission/duplication controls. The
+reported native cleanup count remains limited to result-copy-out settlement;
+it is not full instruction/finalizer parity, and Wasm still reports no such
+cleanup-event count. The public target-stage route instead records one
 backend-neutral reservation per settled stage: the checked per-stage cap times
 the recorded stage count, bounded by the run-stage cap. Pre-dispatch
 cancellation settles before this accounting; otherwise the sealed dispatch
 rejects an invalid retained-call stage cap before native/Node admission on
 every selector. This is comparable finite admission fuel, not instruction,
-cleanup-event, timing, or byte-identical cross-engine evidence. This private
+full cleanup-event, timing, or byte-identical cross-engine evidence. This private
 selector does not extend the released production or hosted support claim.
 
 The canonical v2 document explicitly records initialize-once, the iteration

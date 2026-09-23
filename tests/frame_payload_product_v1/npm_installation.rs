@@ -43,6 +43,32 @@ fn success(command: &mut Command) -> Output {
     output
 }
 
+fn release_preview_command() -> Command {
+    let mut command = Command::new("python3");
+    command.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/generated-package-release.py"));
+    command
+}
+
+fn preview_tamper_is_refused(prepared: &Path, payload: &str) {
+    let path = prepared.join("payload").join(payload);
+    let original = fs::read(&path).unwrap();
+    let mut altered = original.clone();
+    altered[0] ^= 1;
+    fs::write(&path, altered).unwrap();
+    let output = release_preview_command()
+        .args(["check", "--kind", "npm", "--prepared-dir"])
+        .arg(prepared)
+        .output()
+        .unwrap();
+    fs::write(&path, original).unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("on-disk file digests disagree"),
+        "tampered preview must be refused before package use: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn inventory(path: &Path) -> Vec<String> {
     let mut files = fs::read_dir(path)
         .unwrap()
@@ -127,10 +153,39 @@ fn installed_owned_npm_package_resolves_and_runs_without_compiler() {
             assert_eq!(fs::read(package.join(name)).unwrap(), *bytes);
         }
 
+        // Reuse the hardened preview boundary with the actual compiler
+        // output. Both the script's packed-tarball consumer and the richer
+        // corpus/type consumer below use only its exact byte snapshot.
+        let preview = case.join("preview");
+        success(
+            release_preview_command()
+                .args(["prepare", "--kind", "npm", "--package-dir"])
+                .arg(&package)
+                .args([
+                    "--project-name",
+                    "frame-payload",
+                    "--project-version",
+                    "0.1.0",
+                    "--output",
+                ])
+                .arg(&preview),
+        );
+        preview_tamper_is_refused(&preview, "semaprax.bindings.js");
+        success(
+            release_preview_command()
+                .args(["check", "--kind", "npm", "--prepared-dir"])
+                .arg(&preview)
+                .args(["--npm-bin"])
+                .arg(&npm)
+                .args(["--npm-tarball-consumer", "--node-bin"])
+                .arg(&executable),
+        );
+        let preview_payload = preview.join("payload");
+
         let packed = case.join("packed");
         fs::create_dir(&packed).unwrap();
         let report = success(
-            npm_command(&package)
+            npm_command(&preview_payload)
                 .args(["pack", "--json", "--pack-destination"])
                 .arg(&packed),
         );

@@ -11,6 +11,9 @@ use crate::public_generic_abi::digest;
 use crate::public_generic_abi::wasm::binding::WasmProviderBindingV1;
 
 mod carrier_codec;
+mod component;
+pub use component::PublicGenericWasmComponentArtifactV1;
+pub(crate) use component::{emit as emit_component, replay as replay_component};
 
 const ARTIFACT_DOMAIN: &[u8] = b"semaprax.public-generic-wasm-provider.v1.artifact\0";
 const RUNTIME_DOMAIN: &[u8] = b"semaprax.public-generic-wasm-provider.v1.runtime\0";
@@ -22,13 +25,92 @@ const BINDING_OFFSET: u32 = 131_072;
 const SCRATCH_BASE: u32 = 393_216;
 const MAX_SCRATCH_BYTES: u32 = 16 * 1024 * 1024 + 2_056;
 const PRIVATE_BASE: u32 = SCRATCH_BASE + MAX_SCRATCH_BYTES;
+const PROVIDER_MEMORY_LIMIT: u32 = (SCRATCH_BASE + MAX_SCRATCH_BYTES * 2).div_ceil(65_536) * 65_536;
 const INPUT_LEAF_TABLE: u32 = PRIVATE_BASE + 1_024;
 const RESULT_LEAF_TABLE: u32 = PRIVATE_BASE + 1_536;
 const INPUT_PAYLOADS: u32 = PRIVATE_BASE + 2_048;
 const INPUT_AGGREGATE: u32 = PRIVATE_BASE + 4_096;
 const RESULT_AGGREGATE: u32 = PRIVATE_BASE + 8_192;
 const RESULT_CARRIER: u32 = PRIVATE_BASE + 16_384;
+const MAX_COMPONENT_INPUT_PAYLOAD_BYTES: u32 = 2 * 65_536;
+
+#[derive(Clone, Copy)]
+pub(super) struct ProviderLayout {
+    pub(super) input_sha256_workspace: u32,
+    pub(super) result_sha256_workspace: u32,
+    pub(super) input_leaf_table: u32,
+    pub(super) result_leaf_table: u32,
+    pub(super) input_payloads: u32,
+    pub(super) input_aggregate: u32,
+    pub(super) result_aggregate: u32,
+    pub(super) result_carrier: u32,
+    pub(super) result_carrier_capacity: u32,
+    pub(super) workspace_end: u32,
+}
+
+const fn align_up(value: u32, alignment: u32) -> u32 {
+    value.div_ceil(alignment) * alignment
+}
+
+const STANDALONE_PROVIDER_LAYOUT: ProviderLayout = ProviderLayout {
+    input_sha256_workspace: PRIVATE_BASE,
+    result_sha256_workspace: PRIVATE_BASE + 512,
+    input_leaf_table: INPUT_LEAF_TABLE,
+    result_leaf_table: RESULT_LEAF_TABLE,
+    input_payloads: INPUT_PAYLOADS,
+    input_aggregate: INPUT_AGGREGATE,
+    result_aggregate: RESULT_AGGREGATE,
+    result_carrier: RESULT_CARRIER,
+    result_carrier_capacity: MAX_SCRATCH_BYTES,
+    workspace_end: PROVIDER_MEMORY_LIMIT,
+};
+
+const COMPONENT_INPUT_SHA256_WORKSPACE: u32 = PRIVATE_BASE;
+const COMPONENT_RESULT_SHA256_WORKSPACE: u32 = PRIVATE_BASE + 512;
+const COMPONENT_INPUT_LEAF_TABLE: u32 = PRIVATE_BASE + 1_024;
+const COMPONENT_RESULT_LEAF_TABLE: u32 = PRIVATE_BASE + 1_536;
+const COMPONENT_INPUT_PAYLOADS: u32 = PRIVATE_BASE + 2_048;
+const COMPONENT_INPUT_AGGREGATE: u32 = align_up(
+    COMPONENT_INPUT_PAYLOADS + MAX_COMPONENT_INPUT_PAYLOAD_BYTES,
+    16,
+);
+const COMPONENT_RESULT_AGGREGATE: u32 = COMPONENT_INPUT_AGGREGATE + 16;
+const COMPONENT_RESULT_CARRIER: u32 = align_up(COMPONENT_RESULT_AGGREGATE + 16, 8);
+const COMPONENT_PROVIDER_WORKSPACE_END: u32 = align_up(
+    COMPONENT_RESULT_CARRIER + carrier_codec::MAX_FRAME_WIRE_BYTES,
+    65_536,
+);
+pub(super) const COMPONENT_PROVIDER_LAYOUT: ProviderLayout = ProviderLayout {
+    input_sha256_workspace: COMPONENT_INPUT_SHA256_WORKSPACE,
+    result_sha256_workspace: COMPONENT_RESULT_SHA256_WORKSPACE,
+    input_leaf_table: COMPONENT_INPUT_LEAF_TABLE,
+    result_leaf_table: COMPONENT_RESULT_LEAF_TABLE,
+    input_payloads: COMPONENT_INPUT_PAYLOADS,
+    input_aggregate: COMPONENT_INPUT_AGGREGATE,
+    result_aggregate: COMPONENT_RESULT_AGGREGATE,
+    result_carrier: COMPONENT_RESULT_CARRIER,
+    result_carrier_capacity: carrier_codec::MAX_FRAME_WIRE_BYTES,
+    workspace_end: COMPONENT_PROVIDER_WORKSPACE_END,
+};
+
+const _: () = assert!(COMPONENT_INPUT_SHA256_WORKSPACE + 288 <= COMPONENT_RESULT_SHA256_WORKSPACE);
+const _: () = assert!(COMPONENT_RESULT_SHA256_WORKSPACE + 288 <= COMPONENT_INPUT_LEAF_TABLE);
+const _: () = assert!(COMPONENT_INPUT_LEAF_TABLE + 16 <= COMPONENT_RESULT_LEAF_TABLE);
+const _: () = assert!(COMPONENT_RESULT_LEAF_TABLE + 16 <= COMPONENT_INPUT_PAYLOADS);
+const _: () = assert!(COMPONENT_INPUT_PAYLOADS >= PRIVATE_BASE);
+const _: () = assert!(
+    COMPONENT_INPUT_PAYLOADS + MAX_COMPONENT_INPUT_PAYLOAD_BYTES <= COMPONENT_INPUT_AGGREGATE
+);
+const _: () = assert!(COMPONENT_INPUT_AGGREGATE + 16 <= COMPONENT_RESULT_AGGREGATE);
+const _: () = assert!(COMPONENT_RESULT_AGGREGATE + 16 <= COMPONENT_RESULT_CARRIER);
+const _: () = assert!(
+    COMPONENT_RESULT_CARRIER + COMPONENT_PROVIDER_LAYOUT.result_carrier_capacity
+        <= COMPONENT_PROVIDER_WORKSPACE_END
+);
+const _: () = assert!(COMPONENT_PROVIDER_WORKSPACE_END >= PROVIDER_MEMORY_LIMIT);
 const BINDING_SLOT_CUSTOM_SECTION: &str = "semaprax.public-generic-provider-binding-slot.v1";
+const COMPONENT_INPUT_ENCODE_EXPORT_V1: &str = "spx_pg_component_input_encode_v1";
+const COMPONENT_RESULT_COPY_EXPORT_V1: &str = "spx_pg_component_result_copy_v1";
 
 const GLOBAL_SCRATCH_RESERVED: u32 = 1;
 const GLOBAL_PROVIDER: u32 = 2;
@@ -135,6 +217,41 @@ pub fn emit(
     program: &ResolvedProgram,
     endpoint: &AdmittedPublicGenericEndpointV1,
 ) -> Result<PublicGenericWasmProviderArtifactV1, Diagnostic> {
+    let core = emit_bound_core(program, endpoint, false)?;
+    let binding_slot = locate_binding_slot(&core.wasm, &core.binding.encode())?;
+    let artifact = PublicGenericWasmProviderArtifactV1 {
+        wasm: core.wasm,
+        descriptor: core.descriptor,
+        binding: core.binding,
+        binding_slot,
+    };
+    artifact.verify()?;
+    Ok(artifact)
+}
+
+pub(crate) struct ComponentProviderCoreV1 {
+    pub(crate) wasm: Vec<u8>,
+    pub(crate) descriptor: Vec<u8>,
+    pub(crate) binding: WasmProviderBindingV1,
+}
+
+pub(crate) fn emit_component_core(
+    program: &ResolvedProgram,
+    endpoint: &AdmittedPublicGenericEndpointV1,
+) -> Result<ComponentProviderCoreV1, Diagnostic> {
+    emit_bound_core(program, endpoint, true)
+}
+
+fn emit_bound_core(
+    program: &ResolvedProgram,
+    endpoint: &AdmittedPublicGenericEndpointV1,
+    component_helpers: bool,
+) -> Result<ComponentProviderCoreV1, Diagnostic> {
+    let layout = if component_helpers {
+        COMPONENT_PROVIDER_LAYOUT
+    } else {
+        STANDALONE_PROVIDER_LAYOUT
+    };
     let runtime_identity = digest(RUNTIME_DOMAIN, b"closed-core-wasm-runtime-v1");
     let carrier = CarrierBindingV1::new(
         endpoint.descriptor().descriptor_digest(),
@@ -155,7 +272,7 @@ pub fn emit(
         .map_err(error)?,
         carrier_codec::CarrierCodecLayout {
             trusted_data_offset: 196_608,
-            sha256_workspace_offset: PRIVATE_BASE,
+            sha256_workspace_offset: layout.input_sha256_workspace,
         },
     )
     .map_err(error)?;
@@ -167,7 +284,7 @@ pub fn emit(
         .map_err(error)?,
         carrier_codec::CarrierCodecLayout {
             trusted_data_offset: 262_144,
-            sha256_workspace_offset: PRIVATE_BASE + 512,
+            sha256_workspace_offset: layout.result_sha256_workspace,
         },
     )
     .map_err(error)?;
@@ -188,6 +305,8 @@ pub fn emit(
         &lowering,
         &input_codec,
         &result_codec,
+        component_helpers,
+        layout,
     )?;
     let provisional_slot = locate_binding_slot(&provisional_wasm, &provisional_bytes)?;
     let artifact_digest = artifact_digest(&provisional_wasm, provisional_slot);
@@ -203,16 +322,14 @@ pub fn emit(
         &lowering,
         &input_codec,
         &result_codec,
+        component_helpers,
+        layout,
     )?;
-    let binding_slot = locate_binding_slot(&wasm, &binding.encode())?;
-    let artifact = PublicGenericWasmProviderArtifactV1 {
+    Ok(ComponentProviderCoreV1 {
         wasm,
         descriptor: endpoint.descriptor_bytes().to_vec(),
         binding,
-        binding_slot,
-    };
-    artifact.verify()?;
-    Ok(artifact)
+    })
 }
 
 fn error(message: impl Into<String>) -> Diagnostic {
@@ -288,6 +405,8 @@ fn assemble(
     lowering: &crate::wasm::aggregate::SelectedAggregateLowering,
     input_codec: &carrier_codec::CarrierCodecEmission,
     result_codec: &carrier_codec::CarrierCodecEmission,
+    component_helpers: bool,
+    layout: ProviderLayout,
 ) -> Result<Vec<u8>, Diagnostic> {
     if descriptor.len() > 64 * 1024 || binding.len() > 256 * 1024 {
         return Err(error(
@@ -375,10 +494,12 @@ fn assemble(
     let min_pages = static_end.div_ceil(65_536).max(1);
     let mut memory = vec![1, 1];
     u32_leb(&mut memory, min_pages);
-    u32_leb(
-        &mut memory,
-        ((SCRATCH_BASE + MAX_SCRATCH_BYTES * 2).div_ceil(65_536)).max(1),
-    );
+    let max_pages = if component_helpers {
+        component::COMPONENT_MEMORY_PAGES
+    } else {
+        (layout.workspace_end / 65_536).max(1)
+    };
+    u32_leb(&mut memory, max_pages);
     section(&mut module, 5, &memory);
 
     // Global 0 is aggregate lowering's private shadow-stack pointer. Every
@@ -396,18 +517,33 @@ fn assemble(
     global_i32(&mut globals, 0); // input carrier length
     global_i32(&mut globals, 0); // result carrier pointer
     global_i32(&mut globals, 0); // result carrier length
-    global_i32(&mut globals, INPUT_AGGREGATE as i32); // aggregate input pointer
-    global_i32(&mut globals, RESULT_AGGREGATE as i32); // aggregate output pointer
+    global_i32(&mut globals, layout.input_aggregate as i32); // aggregate input pointer
+    global_i32(&mut globals, layout.result_aggregate as i32); // aggregate output pointer
     section(&mut module, 6, &globals);
 
     let mut exports = Vec::new();
-    u32_leb(&mut exports, EXPORTS.len() as u32);
+    u32_leb(
+        &mut exports,
+        (EXPORTS.len() + if component_helpers { 2 } else { 0 }) as u32,
+    );
     name(&mut exports, EXPORTS[0]);
     exports.extend([0x02, 0x00]);
     for (index, export) in EXPORTS[1..].iter().enumerate() {
         name(&mut exports, export);
         exports.push(0x00);
         u32_leb(&mut exports, 13 + index as u32);
+    }
+    if component_helpers {
+        let codec_function_base = 23 + lowering.function_type_indexes.len() as u32;
+        name(&mut exports, COMPONENT_INPUT_ENCODE_EXPORT_V1);
+        exports.push(0x00);
+        u32_leb(&mut exports, codec_function_base + 3);
+        name(&mut exports, COMPONENT_RESULT_COPY_EXPORT_V1);
+        exports.push(0x00);
+        u32_leb(
+            &mut exports,
+            codec_function_base + input_codec.function_count() + 2,
+        );
     }
     section(&mut module, 7, &exports);
 
@@ -432,15 +568,20 @@ fn assemble(
     body_i64_set_identity(&mut code);
     // Slots 13..=22: scratch ptr, reserve, capacity and public lifecycle.
     body_i32_const(&mut code, SCRATCH_BASE as i32);
-    body_scratch_reserve(&mut code);
+    body_scratch_reserve(&mut code, component_helpers);
     body_i32_const(&mut code, MAX_SCRATCH_BYTES as i32);
     body_open(&mut code, descriptor.len() as u32, binding.len() as u32);
     let codec_function_base = 23 + lowering.function_type_indexes.len() as u32;
     let input_indexes = input_codec.function_indexes(codec_function_base);
     let result_indexes =
         result_codec.function_indexes(codec_function_base + input_codec.function_count());
-    body_input_prepare(&mut code, input_indexes.copy);
-    body_call(&mut code, lowering.selected_index, result_indexes.encode);
+    body_input_prepare(&mut code, input_indexes.copy, component_helpers, layout);
+    body_call(
+        &mut code,
+        lowering.selected_index,
+        result_indexes.encode,
+        layout,
+    );
     body_result_export(&mut code);
     body_value_release(&mut code);
     body_result_release(&mut code);
@@ -563,7 +704,7 @@ fn body_i64_lane(code: &mut Vec<u8>, status: u32, value: u32) {
     code.extend(body);
 }
 
-fn body_scratch_reserve(code: &mut Vec<u8>) {
+fn body_scratch_reserve(code: &mut Vec<u8>, component_helpers: bool) {
     // Reserve is idempotent and only exposes the fixed public scratch
     // range. It never accepts a caller-selected pointer or allocates from a
     // host-owned arena.
@@ -577,16 +718,35 @@ fn body_scratch_reserve(code: &mut Vec<u8>) {
     body.push(0x0b);
     body.extend(global_get(GLOBAL_SCRATCH_RESERVED));
     body.extend([0x45, 0x04, 0x40]); // if not reserved
-    body.extend([0x41]); // required - current pages
-    i32_leb(&mut body, required_pages as i32);
-    body.extend([0x3f, 0x00]);
-    body.push(0x6b);
-    body.extend([0x40, 0x00, 0x41]); // grow; failure is -1
-    i32_leb(&mut body, -1);
-    body.extend([0x46, 0x04, 0x40]);
-    lane(&mut body, 10, 0);
-    body.push(0x0f);
-    body.push(0x0b);
+    if component_helpers {
+        body.extend([0x3f, 0x00]); // current memory pages
+        body.extend(i32_const(required_pages as i32));
+        body.extend([0x4f, 0x04, 0x40]); // if already large enough, skip growth
+        body.push(0x05);
+        body.extend([0x41]); // required - current pages
+        i32_leb(&mut body, required_pages as i32);
+        body.extend([0x3f, 0x00]);
+        body.push(0x6b);
+        body.extend([0x40, 0x00, 0x41]); // grow; failure is -1
+        i32_leb(&mut body, -1);
+        body.extend([0x46, 0x04, 0x40]);
+        lane(&mut body, 10, 0);
+        body.push(0x0f);
+        body.push(0x0b);
+        body.push(0x0b); // close the insufficient-pages branch
+    } else {
+        // Preserve the standalone provider v1 instruction stream exactly.
+        body.extend([0x41]);
+        i32_leb(&mut body, required_pages as i32);
+        body.extend([0x3f, 0x00]);
+        body.push(0x6b);
+        body.extend([0x40, 0x00, 0x41]); // grow; failure is -1
+        i32_leb(&mut body, -1);
+        body.extend([0x46, 0x04, 0x40]);
+        lane(&mut body, 10, 0);
+        body.push(0x0f);
+        body.push(0x0b);
+    }
     body.extend(i32_const(1));
     body.extend(global_set(GLOBAL_SCRATCH_RESERVED));
     body.push(0x0b);
@@ -643,7 +803,12 @@ fn body_open(code: &mut Vec<u8>, descriptor_len: u32, binding_len: u32) {
     code.extend(body);
 }
 
-fn body_input_prepare(code: &mut Vec<u8>, copy_index: u32) {
+fn body_input_prepare(
+    code: &mut Vec<u8>,
+    copy_index: u32,
+    component_helpers: bool,
+    layout: ProviderLayout,
+) {
     // The carrier codec hooks into this fixed state transition. Until its
     // exact self-digest check has succeeded, no input id is stored or
     // exposed; this preserves a clean failure boundary for malformed bytes.
@@ -688,14 +853,14 @@ fn body_input_prepare(code: &mut Vec<u8>, copy_index: u32) {
     lane(&mut body, 6, 0);
     body.push(0x0f);
     body.push(0x0b);
-    emit_private_reserve(&mut body);
+    emit_private_reserve(&mut body, component_helpers);
     // Copy validates every carrier field plus its self-digest before it
     // writes private payloads and descriptor-ordered slice rows.
     body.extend(local_get(1));
     body.extend(local_get(2));
-    body.extend(i32_const(INPUT_PAYLOADS as i32));
+    body.extend(i32_const(layout.input_payloads as i32));
     body.extend(i32_const(MAX_SCRATCH_BYTES as i32));
-    body.extend(i32_const(INPUT_LEAF_TABLE as i32));
+    body.extend(i32_const(layout.input_leaf_table as i32));
     body.push(0x10);
     u32_leb(&mut body, copy_index);
     body.extend(local_set(4));
@@ -714,7 +879,7 @@ fn body_input_prepare(code: &mut Vec<u8>, copy_index: u32) {
     body.push(0x0b);
     body.push(0x0f);
     body.push(0x0b);
-    emit_slice_table_to_aggregate(&mut body, INPUT_LEAF_TABLE, INPUT_AGGREGATE);
+    emit_slice_table_to_aggregate(&mut body, layout.input_leaf_table, layout.input_aggregate);
     body.extend(local_get(1));
     body.extend(global_set(GLOBAL_INPUT_PTR));
     body.extend(local_get(2));
@@ -736,7 +901,7 @@ fn body_input_prepare(code: &mut Vec<u8>, copy_index: u32) {
     code.extend(body);
 }
 
-fn body_call(code: &mut Vec<u8>, selected_index: u32, encode_index: u32) {
+fn body_call(code: &mut Vec<u8>, selected_index: u32, encode_index: u32, layout: ProviderLayout) {
     let mut body = locals_i32_i64(1, 1);
     body.extend(local_get(0));
     body.extend(global_get(GLOBAL_PROVIDER));
@@ -764,11 +929,11 @@ fn body_call(code: &mut Vec<u8>, selected_index: u32, encode_index: u32) {
     lane(&mut body, 11, 0);
     body.push(0x0f);
     body.push(0x0b);
-    emit_aggregate_to_slice_table(&mut body, RESULT_AGGREGATE, RESULT_LEAF_TABLE);
-    body.extend(i32_const(RESULT_LEAF_TABLE as i32));
+    emit_aggregate_to_slice_table(&mut body, layout.result_aggregate, layout.result_leaf_table);
+    body.extend(i32_const(layout.result_leaf_table as i32));
     body.extend(i32_const(2));
-    body.extend(i32_const(RESULT_CARRIER as i32));
-    body.extend(i32_const(MAX_SCRATCH_BYTES as i32));
+    body.extend(i32_const(layout.result_carrier as i32));
+    body.extend(i32_const(layout.result_carrier_capacity as i32));
     body.push(0x10);
     u32_leb(&mut body, encode_index);
     body.extend(local_set(3));
@@ -787,7 +952,7 @@ fn body_call(code: &mut Vec<u8>, selected_index: u32, encode_index: u32) {
     body.push(0x0b);
     body.push(0x0f);
     body.push(0x0b);
-    body.extend(i32_const(RESULT_CARRIER as i32));
+    body.extend(i32_const(layout.result_carrier as i32));
     body.extend(global_set(GLOBAL_RESULT_PTR));
     body.extend(local_get(3));
     body.extend(i64_const_imm(32));
@@ -805,9 +970,9 @@ fn body_call(code: &mut Vec<u8>, selected_index: u32, encode_index: u32) {
     body.extend(global_get(GLOBAL_RESULT));
     body.push(0xad);
     body.extend(i64_const_imm(32));
-    body.push(0x86);
+    body.push(0x86); // i64.shl: success result handle occupies the high value lane.
     body.extend(i64_lane(0, 0));
-    body.push(0x84);
+    body.push(0x84); // i64.or: the low status lane is success (zero).
     body.push(0x0b);
     u32_leb(code, body.len() as u32);
     code.extend(body);
@@ -962,8 +1127,16 @@ fn emit_scratch_bound(body: &mut Vec<u8>, pointer: u32, len: u32, status: u32) {
     body.push(0x0b);
 }
 
-fn emit_private_reserve(body: &mut Vec<u8>) {
+fn emit_private_reserve(body: &mut Vec<u8>, component_helpers: bool) {
     let pages = (PRIVATE_BASE + MAX_SCRATCH_BYTES).div_ceil(65_536);
+    if component_helpers {
+        // Component constructors can grow memory beyond the provider's own
+        // private floor. Skip the subtraction/grow path when that floor is
+        // already met; unsigned subtraction would otherwise wrap.
+        body.extend([0x3f, 0x00]);
+        body.extend(i32_const(pages as i32));
+        body.extend([0x4b, 0x04, 0x40, 0x05]);
+    }
     body.extend(i32_const(pages as i32));
     body.extend([0x3f, 0x00, 0x6b, 0x40, 0x00]);
     body.extend(i32_const(-1));
@@ -971,6 +1144,9 @@ fn emit_private_reserve(body: &mut Vec<u8>) {
     lane(body, 10, 0);
     body.push(0x0f);
     body.push(0x0b);
+    if component_helpers {
+        body.push(0x0b);
+    }
 }
 
 fn emit_slice_table_to_aggregate(body: &mut Vec<u8>, table: u32, aggregate: u32) {

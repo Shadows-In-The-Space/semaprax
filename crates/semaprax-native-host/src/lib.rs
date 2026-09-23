@@ -180,6 +180,9 @@ mod settlement_host_v3;
 mod settlement_host_v3_integration;
 mod settlement_ledger;
 
+#[cfg(not(target_os = "ios"))]
+pub mod outbound_delivery_store;
+
 #[cfg(feature = "unstable-desktop-app-harness")]
 #[doc(hidden)]
 pub use desktop_app_harness::private_desktop_v3_app_main;

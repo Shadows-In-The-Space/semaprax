@@ -22,10 +22,12 @@ transfer, or release against, in this LOGICAL section.
 and [Core Wasm physical adapter (issue #155)](#core-wasm-physical-adapter-issue-155)
 below are the first two PHYSICAL adapters built on top of it, each with real
 allocation, release, and normalized-trace emission — locally evidenced only,
-against a fixture endpoint, per each section's own scope note. The remaining
-per-target adapters and generated consumers (issues #156-#159, #162) are
-still outstanding. Public generic ownership remains unsupported and
-unpublished.
+with their own scope notes. The generated calling consumers and the compiled
+Wasm provider now exercise canonical descriptor-bound frames locally; the
+additive authenticated native identity profile does likewise at its physical
+C entry point. Broader endpoint shapes, full shared hostile/settlement
+participation, hosted promotion, and publication remain outstanding. Public
+generic ownership remains unsupported and unpublished.
 
 Audience: ownership, cleanup, backend, ABI, and generated-consumer
 maintainers.
@@ -211,10 +213,14 @@ descriptor, then `admit_then` invokes an installer-provided callback only
 after generation, caller ownership, settlement digest, bounded-frame, and
 semantic-binding checks pass. Its hostile regression proves all six admitted
 ticket substitutions leave that callback at zero calls, while the canonical
-ticket calls it exactly once with the descriptor-bound leaves. This is not a
-claim that the C11 provider's physical allocation, transfer, or endpoint
-dispatch is protected: no production provider installs the seam, and that
-handoff remains separate follow-on work.
+ticket calls it exactly once with the descriptor-bound leaves. The callback
+helper itself still performs no physical work. The separate additive
+`semaprax.authenticated-native-identity.v1` renderer embeds the same
+descriptor-derived checks in a physical C entry point, then allocates,
+transfers, invokes one compiler-checked flat owned-`Bytes` identity body, and
+settles the result. Its predecessor flattened prepare entry remains a stable
+refusal. This is local evidence for that narrow private profile, not a public
+C ABI or general-body support.
 
 ## The logical value state machine
 

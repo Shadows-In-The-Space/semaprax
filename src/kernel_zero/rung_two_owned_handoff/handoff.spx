@@ -1,0 +1,20 @@
+module kernel_zero.owned_handoff;
+
+@id("kernel-zero.owned-handoff.move")
+fn handoff(input: own Bytes) -> Bytes
+{
+    let next = input;
+    next
+}
+
+@id("kernel-zero.owned-handoff.export")
+fn export_handoff(input: borrow Slice<u8>) -> Bytes
+{
+    handoff(bytes_copy(input))
+}
+
+@id("kernel-zero.owned-handoff.main")
+fn main() -> i64
+{
+    0
+}

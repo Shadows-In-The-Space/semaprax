@@ -381,16 +381,136 @@ fn sparse_oversize_archive_is_rejected_before_digest_io() {
     let directory = super::platform::hold_directory(&root).unwrap();
     let start = std::time::Instant::now();
     assert!(matches!(
-        super::platform::test_hold_regular_file_name_bounded(
-            &directory,
-            name,
-            super::SDK_ARCHIVE_MAX_BYTES,
-        ),
+        super::platform::hold_regular_file_bounded(&directory, name, super::SDK_ARCHIVE_MAX_BYTES,),
         Err(Error::OutputLimit),
     ));
     assert!(start.elapsed() < std::time::Duration::from_secs(1));
     drop(directory);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn windows_fresh_file_authentication_is_bounded_before_digest() {
+    let windows = super::WINDOWS_SOURCE;
+    for (signature, next_signature) in [
+        (
+            "pub fn write_file_new(\n",
+            "pub fn write_file_new_prepared<",
+        ),
+        (
+            "pub fn write_file_new_prepared<",
+            "pub(super) fn hold_regular_file_name_external_read_prepared",
+        ),
+    ] {
+        let start = windows
+            .find(signature)
+            .unwrap_or_else(|| panic!("missing Windows function: {signature}"));
+        let end = windows[start + signature.len()..]
+            .find(next_signature)
+            .map(|offset| start + signature.len() + offset)
+            .unwrap_or_else(|| panic!("missing end of Windows function: {signature}"));
+        let function = &windows[start..end];
+        assert!(
+            function.contains("let expected_length = u64::try_from(bytes.len())"),
+            "fresh Windows file authentication must bind its byte bound to the expected input"
+        );
+        assert!(
+            function.contains("authenticate_regular_file_bounded(file, expected_length)"),
+            "fresh Windows file authentication must check the bound before hashing"
+        );
+        assert!(
+            !function.contains("authenticate_regular_file(file)"),
+            "fresh Windows file authentication must not use the unbounded helper"
+        );
+    }
+
+    let authenticate_start = windows
+        .find("fn authenticate_regular_file_bounded(")
+        .expect("Windows bounded authentication helper");
+    let authenticate = &windows[authenticate_start..];
+    let bound_check = authenticate
+        .find("if identity.length > maximum")
+        .expect("metadata length check");
+    let digest = authenticate
+        .find("digest(&file, identity.length)?")
+        .expect("bounded digest");
+    assert!(
+        bound_check < digest,
+        "Windows metadata size must be rejected before digest I/O"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn bounded_fifo_open_child() {
+    let Some(root) = std::env::var_os("SEMAPRAX_PLATFORM_BOUNDED_FIFO_ROOT") else {
+        return;
+    };
+    let directory = super::platform::hold_directory(std::path::Path::new(&root)).unwrap();
+    assert!(matches!(
+        super::platform::hold_regular_file_bounded(
+            &directory,
+            std::ffi::OsStr::new("hostile.fifo"),
+            192 * 1024,
+        ),
+        Err(Error::Changed)
+    ));
+    assert!(matches!(
+        super::platform::hold_regular_file_bounded_for_sync(
+            &directory,
+            std::ffi::OsStr::new("hostile.fifo"),
+            192 * 1024,
+        ),
+        Err(Error::Changed)
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn bounded_fifo_open_never_waits_for_a_writer() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    let root = std::env::temp_dir().join(format!(
+        "semaprax-bounded-fifo-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let root = std::fs::canonicalize(root).unwrap();
+    let fifo = root.join("hostile.fifo");
+    let encoded = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(encoded.as_ptr(), 0o600) }, 0);
+
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::archive_admission::bounded_fifo_open_child",
+            "--nocapture",
+        ])
+        .env("SEMAPRAX_PLATFORM_BOUNDED_FIFO_ROOT", &root)
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            let _ = std::fs::remove_dir_all(&root);
+            assert!(status.success(), "bounded FIFO child failed: {status}");
+            return;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&root);
+            panic!("opening a FIFO through the bounded API waited for a writer");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]

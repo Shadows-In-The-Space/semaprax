@@ -78,16 +78,35 @@ export async function computeModuleArtifactDigest(
 ): Promise<string> {
   wasmBytes = byteView(wasmBytes);
   if (wasmBytes.length > MAX_MODULE_BYTES) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "module-bound" });
+  let body = wasmBytes;
+  let domain = MODULE_ARTIFACT_DIGEST_DOMAIN;
+  if (TRUSTED_COMPILED_PROVIDER) {
+    // The compiler artifact's binding carries its own digest. Its producer
+    // defines identity by zeroing exactly that fixed-width fourth binding
+    // field before hashing, not by hashing a self-referential raw module.
+    const bindingOffset = findBytes(wasmBytes, EXPECTED_BINDING_BYTES);
+    let offset = 0;
+    for (let field = 0; field < 3; field += 1) {
+      const next = framedEnd(EXPECTED_BINDING_BYTES, offset);
+      if (next === null) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "binding-replay" });
+      offset = next;
+    }
+    if (bindingOffset < 0 || offset + 8 > EXPECTED_BINDING_BYTES.length) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "binding-replay" });
+    const width = new DataView(EXPECTED_BINDING_BYTES.buffer, EXPECTED_BINDING_BYTES.byteOffset + offset, 8).getBigUint64(0, true);
+    if (width !== 71n || Number(width) > EXPECTED_BINDING_BYTES.length - offset - 8) throw new SemapraxPublicGenericException({ kind: "provider-mismatch", reason: "binding-replay" });
+    body = wasmBytes.slice(); body.fill(0, bindingOffset + offset + 8, bindingOffset + offset + 8 + Number(width));
+    domain = new TextEncoder().encode("semaprax.public-generic-wasm-provider.v1.artifact\0");
+  }
   const preimage = new Uint8Array(
-    MODULE_ARTIFACT_DIGEST_DOMAIN.length + 8 + wasmBytes.length,
+    domain.length + 8 + body.length,
   );
-  preimage.set(MODULE_ARTIFACT_DIGEST_DOMAIN, 0);
+  preimage.set(domain, 0);
   new DataView(preimage.buffer).setBigUint64(
-    MODULE_ARTIFACT_DIGEST_DOMAIN.length,
-    BigInt(wasmBytes.length),
+    domain.length,
+    BigInt(body.length),
     true,
   );
-  preimage.set(wasmBytes, MODULE_ARTIFACT_DIGEST_DOMAIN.length + 8);
+  preimage.set(body, domain.length + 8);
   const digestBytes = new Uint8Array(
     await crypto.subtle.digest("SHA-256", preimage),
   );
@@ -96,6 +115,23 @@ export async function computeModuleArtifactDigest(
     hex += byte.toString(16).padStart(2, "0");
   }
   return `sha256:${hex}`;
+}
+
+function framedEnd(bytes: Uint8Array, offset: number): number | null {
+  if (bytes.length - offset < 8) return null;
+  const width = new DataView(bytes.buffer, bytes.byteOffset + offset, 8).getBigUint64(0, true);
+  if (width > BigInt(bytes.length - offset - 8)) return null;
+  return offset + 8 + Number(width);
+}
+
+function findBytes(haystack: Uint8Array, needle: Uint8Array): number {
+  if (needle.length === 0 || needle.length > haystack.length) return -1;
+  for (let start = 0; start <= haystack.length - needle.length; start += 1) {
+    let same = 1;
+    for (let index = 0; index < needle.length; index += 1) same &= Number(haystack[start + index] === needle[index]);
+    if (same === 1) return start;
+  }
+  return -1;
 }
 
 export async function verifyModuleArtifactDigest(

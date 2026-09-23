@@ -1,0 +1,20 @@
+package semaprax:public-generic-component@0.1.0;
+
+interface adapter {
+  resource owned-bytes {
+    constructor(payload: list<u8>);
+    read: func() -> list<u8>;
+  }
+
+  enum failure {
+    contract-violation,
+    resource-or-provider-refusal,
+  }
+
+  invoke: func(left: own<owned-bytes>, right: own<owned-bytes>)
+    -> result<tuple<own<owned-bytes>, own<owned-bytes>>, failure>;
+}
+
+world public-generic-component-v1 {
+  export adapter;
+}

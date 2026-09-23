@@ -148,7 +148,7 @@ async function run() {
       () => locateLeaves(forged, 1),
       (error) => {
         assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "capacity-exceeded");
+        assert.equal(error.detail.kind, "result-rejected");
         return true;
       },
     );
@@ -164,7 +164,7 @@ async function run() {
       () => locateLeaves(overBound, 1),
       (error) => {
         assert.ok(error instanceof SemapraxPublicGenericException);
-        assert.equal(error.detail.kind, "capacity-exceeded");
+        assert.equal(error.detail.kind, "result-rejected");
         return true;
       },
     );

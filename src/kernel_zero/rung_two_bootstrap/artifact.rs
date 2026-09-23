@@ -245,7 +245,7 @@ fn push_blob(bytes: &mut Vec<u8>, value: &[u8]) -> Result<(), BootstrapRefusal> 
     Ok(())
 }
 
-fn encode_program(program: &KernelProgram) -> Result<Vec<u8>, BootstrapRefusal> {
+pub(super) fn encode_program(program: &KernelProgram) -> Result<Vec<u8>, BootstrapRefusal> {
     if program.functions.is_empty() || program.functions.len() > 64 {
         return Err(BootstrapRefusal::Profile);
     }

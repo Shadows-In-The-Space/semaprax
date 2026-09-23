@@ -705,6 +705,7 @@ fn main() -> i64
 "#;
     let parsed = crate::parse(source, "kernel-zero-production-lanes.spx").unwrap();
     let expected = crate::format::canonical(&parsed);
+    let handoffs_before = super::rung_two_owned_handoff::handoffs();
     let (actual, counts) =
         super::rung_two_authority::with_counts(|| crate::format::canonical(&parsed));
     assert_eq!(
@@ -715,5 +716,10 @@ fn main() -> i64
         counts,
         [2, 4, 6, 8, 2],
         "the formatter's measured and emitted passes must each visit char, bool, int, operator, and string-scalar lanes in authored traversal order"
+    );
+    assert_eq!(
+        super::rung_two_owned_handoff::handoffs() - handoffs_before,
+        counts.iter().sum::<usize>(),
+        "every production lane must actually pass through the settled owned handoff"
     );
 }

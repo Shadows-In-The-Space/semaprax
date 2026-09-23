@@ -43,6 +43,11 @@ impl Drop for CandidateScope {
     }
 }
 
+pub(super) fn in_candidate_scope<T>(work: impl FnOnce() -> T) -> T {
+    let _scope = CandidateScope::enter();
+    work()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Lane {
     Char,
@@ -149,11 +154,64 @@ fn copy_into(
     if CandidateScope::active() || crate::bounded_output::active_limit().is_some() {
         return Selected::Rust(rust.as_bytes()).copy_to(output);
     }
-    let scope = CandidateScope::enter();
-    let candidate = candidate();
-    drop(scope);
+    let candidate = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        in_candidate_scope(|| candidate().and_then(super::rung_two_owned_handoff::handoff))
+    }))
+    .unwrap_or(Err(()));
     let selected = select(lane, rust, candidate);
     selected.copy_to(output)
+}
+
+#[cfg(test)]
+#[test]
+fn owned_handoff_panic_restores_fallback_and_reentry() {
+    let mut output = [0; MAX_TOKEN_BYTES];
+    // Initialize before arming the after-staging hook.
+    assert_eq!(
+        copy_into(Lane::Int, "abc", || Ok("abc".into()), &mut output),
+        3
+    );
+    let before = super::rung_two_owned_handoff::handoffs();
+    crate::interpreter::retained_call::owned_handoff::panic_on_next_staging();
+    assert_eq!(
+        copy_into(Lane::Int, "rust", || Ok("candidate".into()), &mut output),
+        4
+    );
+    assert_eq!(&output[..4], b"rust");
+    assert!(!CandidateScope::active());
+    assert_eq!(super::rung_two_owned_handoff::handoffs(), before);
+    assert_eq!(
+        copy_into(Lane::Int, "abc", || Ok("abc".into()), &mut output),
+        3
+    );
+    assert_eq!(super::rung_two_owned_handoff::handoffs(), before + 1);
+}
+
+#[cfg(test)]
+#[test]
+fn owned_handoff_refusal_and_candidate_panic_keep_rust_bytes() {
+    let mut output = [0; MAX_TOKEN_BYTES];
+    let before = crate::interpreter::retained_call::owned_handoff::staged_count();
+    assert_eq!(
+        copy_into(Lane::Int, "rust", || Ok("x".repeat(21)), &mut output),
+        4
+    );
+    assert_eq!(&output[..4], b"rust");
+    assert_eq!(
+        crate::interpreter::retained_call::owned_handoff::staged_count(),
+        before
+    );
+    assert_eq!(
+        copy_into(
+            Lane::Int,
+            "rust",
+            || panic!("candidate failure"),
+            &mut output
+        ),
+        4
+    );
+    assert_eq!(&output[..4], b"rust");
+    assert!(!CandidateScope::active());
 }
 
 pub(crate) fn char_into(value: u32, rust: &str, output: &mut [u8; MAX_TOKEN_BYTES]) -> usize {
@@ -336,15 +394,25 @@ mod tests {
     #[test]
     fn candidate_scope_restores_after_panic() {
         let panic = std::panic::catch_unwind(|| {
+            in_candidate_scope(|| panic!("injected scope panic"));
+        });
+        assert!(panic.is_err());
+        assert!(!CANDIDATE_ACTIVE.with(|active| active.get()));
+
+        let before = super::super::rung_two_owned_handoff::handoffs();
+        let fallback = std::panic::catch_unwind(|| {
             let mut output = [0; MAX_TOKEN_BYTES];
-            let _ = copy_into(
+            let len = copy_into(
                 Lane::Char,
                 "x",
                 || -> Result<String, ()> { panic!("injected candidate panic") },
                 &mut output,
             );
+            assert_eq!(&output[..len], b"x");
         });
-        assert!(panic.is_err());
+        assert!(fallback.is_ok(), "candidate panic escaped Rust fallback");
+        assert!(!CANDIDATE_ACTIVE.with(|active| active.get()));
+        assert_eq!(super::super::rung_two_owned_handoff::handoffs(), before);
 
         let mut output = [0; MAX_TOKEN_BYTES];
         let mut candidate_ran = false;
@@ -359,6 +427,7 @@ mod tests {
         );
         assert!(candidate_ran, "panic left the candidate scope active");
         assert_eq!(&output[..len], b"x");
+        assert_eq!(super::super::rung_two_owned_handoff::handoffs(), before + 1);
     }
 
     #[test]

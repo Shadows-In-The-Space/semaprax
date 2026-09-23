@@ -738,6 +738,16 @@ cooperative cancellation seam, prepared evaluation entry, and expression-trace
 traversal hook. The root interpreter retains the shared evaluator and only the
 minimal crate-private reexports needed by the Project lane.
 
+`src/interpreter/retained_call/execution.rs` shares retained-call staging,
+evaluation and harvesting between the existing worker API and the sealed
+`retained_call/owned_handoff.rs` synchronous move-only profile.
+`src/kernel_zero/rung_two_owned_handoff.rs` owns its exact-source/core-term/target
+binding and the production formatter handoff; `rung_two_authority.rs` retains
+Rust byte authority, bounded-output bypass and panic-safe re-entry. This is an
+ordinary checked ownership boundary around unchanged scalar rendering, not an
+extension of the Kernel-0 theorem. [Owned Handoff v1](KERNEL-ZERO-RUNG-TWO-OWNED-HANDOFF-V1.md)
+owns the private contract and its separate target-evidence nonclaims.
+
 `src/project/prepared_interpreter/` adds an authority-neutral retained Project
 lane over the same evaluator. It caches the exact admitted entry/test closure
 indexes once, owns one sequential fixed-stack worker, observes monotonic

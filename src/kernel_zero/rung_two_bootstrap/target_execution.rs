@@ -37,16 +37,16 @@ struct Row {
     rust: Vec<u8>,
 }
 
-struct Captured {
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+pub(super) struct Captured {
+    pub(super) status: ExitStatus,
+    pub(super) stdout: Vec<u8>,
+    pub(super) stderr: Vec<u8>,
 }
 
-struct Scratch(PathBuf);
+pub(super) struct Scratch(PathBuf);
 
 impl Scratch {
-    fn create() -> Result<Self, TargetFailure> {
+    pub(super) fn create() -> Result<Self, TargetFailure> {
         for _ in 0..8 {
             let mut entropy = [0_u8; 16];
             getrandom::fill(&mut entropy).map_err(|_| TargetFailure::Io)?;
@@ -64,7 +64,7 @@ impl Scratch {
         Err(TargetFailure::Io)
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -139,7 +139,7 @@ fn terminate_child_group(child: &mut Child) {
 /// the direct child is waited before reader collection, including after a
 /// direct child exits, so descendants cannot retain an inherited pipe past the
 /// same deadline.
-fn run_bounded(command: &mut Command) -> Result<Captured, TargetFailure> {
+pub(super) fn run_bounded(command: &mut Command) -> Result<Captured, TargetFailure> {
     #[cfg(unix)]
     command.process_group(0);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());

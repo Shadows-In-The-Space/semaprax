@@ -10,6 +10,17 @@ charter, not evidence.
 
 Audience: language, ABI, package, evidence, and promotion reviewers.
 
+**Local implementation update, 2026-09-23:** the compiler-owned zero-import
+Wasm provider now runs through its generated TypeScript package using canonical
+descriptor-bound carrier frames. A separate private
+`semaprax.authenticated-native-identity.v1` profile authenticates that frame at
+the physical C entry point and invokes one compiler-checked flat owned-`Bytes`
+identity body. These local additions supersede older blanket statements below
+that no compiled Wasm provider or compiler-derived physical endpoint exists;
+they do not change the `unsupported`/`unpublished` decision. Broader endpoint
+shapes, shared hostile/settlement coverage, hosted evidence, and the formal
+freeze remain open.
+
 **Correction, 2026-09-19 (issue #164 audit):** six of the eight hosted-green
 gates above (PG-1 through PG-4, PG-8) were already hosted green for
 implementation commit `2ef043ba…`; PG-5, PG-6, and PG-7 became additionally
@@ -489,13 +500,13 @@ record below.
 
 The shape of what is left is no longer "there is no versioned public generic
 descriptor and carrier" — one now exists, with local evidence for all three
-of PG-5, PG-6, and PG-7. What is left is: no code path anywhere compiles a
-real function body from an admitted public-generic export (every physical
-adapter still calls a fixture endpoint), no compiled Wasm artifact implements
-the admitted public-generic provider ABI, and hosted closure remains unrecorded.
-The private compiled C11 reference route below now exercises an in-module
-multi-call fixture; it does not change either compiler admission or public ABI
-status.
+of PG-5, PG-6, and PG-7. Nor is there still a blanket absence of compiled
+providers: the generated TypeScript package drives the compiler-owned Wasm
+artifact, and the private authenticated native identity profile invokes one
+checked body. What remains is broader-body and shared-corpus coverage, hosted
+closure, formal freeze, and an explicit supported-publication decision. The
+private compiled C11 reference route below remains an in-module multi-call
+fixture and does not change public ABI status.
 
 ### TypeScript host-owned settlement continuation
 

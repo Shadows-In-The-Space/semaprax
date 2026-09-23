@@ -31,13 +31,11 @@
 //! The generated `wasm-provider.ts` now authenticates and instantiates the
 //! compiler-owned zero-import provider artifact and delegates scratch,
 //! open/prepare/call/export, handles, and release/close transitions to that
-//! module. It contains no host allocator or provider state machine. One
-//! integration limitation remains explicit: `carrier.ts` still emits the
-//! predecessor flat leaf frame, while the compiler module accepts only the
-//! canonical descriptor-bound Logical Carrier v1 frame. The two therefore
-//! fail closed until #229's final TypeScript carrier-codec migration lands;
-//! the hand-assembled reference module is retained only as a negative legacy
-//! fixture, never as the provider implementation.
+//! module. It contains no host allocator or provider state machine.
+//! `carrier.ts` emits the canonical descriptor-bound Logical Carrier v1 frame,
+//! so the generated package executes the complete lifecycle against the
+//! compiled provider artifact. The hand-assembled reference module is retained
+//! only as a negative legacy fixture, never as the provider implementation.
 //!
 //! Determinism and authority: like [`super::rust_calling::generate_rust_calling_consumer`],
 //! this is a pure function from already-trusted bytes to source text. It

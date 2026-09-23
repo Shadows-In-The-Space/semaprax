@@ -9,9 +9,9 @@
 //! same verified-descriptor-derived frame plan in its physical C entry point;
 //! this Rust callback helper remains independently useful admission plumbing.
 //!
-//! This is deliberately native-only plumbing, not a new public C ABI.  The
-//! Core-Wasm provider still lacks the compiled provider ABI required to make
-//! the same boundary physical there (#229).
+//! This is deliberately native-only plumbing, not a new public C ABI. The
+//! compiled Core-Wasm provider has its own canonical-frame boundary; this
+//! callback helper does not grant access to it or widen either target profile.
 
 use crate::diagnostic::Diagnostic;
 use crate::public_generic_abi::carrier::frame::{

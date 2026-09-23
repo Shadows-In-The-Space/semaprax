@@ -8,14 +8,29 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Generate canonical descriptor-bound TypeScript/Wasm carrier frames and run
+  the generated package against the compiler-owned provider lifecycle. Add the
+  private `semaprax.authenticated-native-identity.v1` C profile, which rejects
+  malformed or drifted frame metadata before physical work and invokes one
+  compiler-checked flat owned-`Bytes` identity endpoint across C, C++, and Rust.
+  These are local, unpublished profiles; broader shapes, shared-corpus and
+  hosted acceptance remain open.
+
+- Settle borrowed arguments and returned `Bytes` at the native Agent stage
+  boundary, retaining sticky failure and strict post-drop receipts. Local
+  controls cover success, contract failure, cancellation, omitted drops,
+  malformed receipts, and duplicate calls; native instruction fuel, complete
+  finalizer accounting, compound cleanup failures, and Wasm parity remain open.
+
 - Emit the internal `public-generic-wasm-provider.v1` endpoint as a
   deterministic zero-import Core Wasm module with exact descriptor/binding
   replay, normalized artifact binding, canonical carrier SHA-256 validation,
   module-owned scratch and opaque lifecycle handles, checked HIR invocation,
   two-pass result export, and explicit release/close operations. The generated
-  TypeScript runtime now delegates provider lifecycle to those exports. Its
-  older flat carrier generator remains intentionally incompatible with the
-  descriptor-bound module, so #229 and the broader #162 matrix remain open.
+  TypeScript runtime now delegates provider lifecycle to those exports. The
+  subsequent canonical carrier migration makes that package interoperable;
+  #229 and the broader #162 matrix remain open for their larger acceptance
+  scope.
 
 - Add the internal `public-generic-wasm-provider.v1` Project profile as the
   first compiler-owned target foundation for #229. Package Manifest v1 now

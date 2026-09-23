@@ -94,8 +94,11 @@ private frozen-run selector, traverse the shared proposal, fresh-grant, injected
 read, cancellation, lifecycle-budget and evidence-settlement kernel
 (`agent_lifecycle::tests::lifecycle_parity`). This is local,
 `clang`/`node`-gated evidence only. Production, live-provider, checkpoint and
-migration routes remain interpreter-selected; native/Wasm interpreter-fuel and
-cleanup-event parity are not claimed (#142/#143/#182).
+migration routes remain interpreter-selected. Native locally proves real
+boundary settlement for borrowed arguments and returned `Bytes`, including
+result-copy-out cleanup receipts and negative omission/duplication controls;
+instruction fuel, all-finalizer accounting, compound cleanup failures, and
+Wasm cleanup-event parity are not claimed (#142/#143/#182).
 
 The generic implementation includes [argument inference v3](GENERIC-ARGUMENT-INFERENCE-V3.md),
 [authored variants](GENERIC-AUTHORED-VARIANTS-V1.md),
@@ -128,8 +131,10 @@ The internal
 profile now admits and independently replays one checked generic endpoint and
 emits a deterministic zero-import Core Wasm provider implementing the complete
 lifecycle ABI. Legacy artifact routes remain closed. The generated TypeScript
-runtime delegates lifecycle to the module, but its canonical carrier generator
-is still pending, so #229 remains open.
+runtime delegates lifecycle to the module and now emits canonical descriptor-
+bound carrier frames, so the focused package executes the compiled provider's
+complete lifecycle. #229 remains open for the broader hostile/settlement
+matrix, endpoint shapes, and hosted acceptance.
 The [runtime settlement corpus](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md)
 records the implemented native fixture subset, including bounded non-recycled
 identity/recreation, sibling settlement, explicit release-status propagation and

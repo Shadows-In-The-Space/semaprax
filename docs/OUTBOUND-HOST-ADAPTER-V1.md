@@ -151,16 +151,26 @@ interfaces. Construction requires a caller-held `HeldDirectory`; it does not
 read configuration, resolve a storage path, create a directory, or grant
 authority. Each checkpoint is written once under a deterministic
 kind-plus-SHA-256 filename with create-new semantics and a 192 KiB per-file
-limit. Repeated writes are acknowledged only when existing bytes match
-exactly; changed, unreadable, or uncertain files fail closed. Recovery loads
-only the exact digest retained by the host, then still requires the existing
+limit. Before `Committed`, both a new write and an idempotent existing write
+reopen the current namespace entry through a bounded, sync-capable regular-file
+admission, compare its exact bytes, successfully sync that held file, and
+recheck that the name still resolves to the same authenticated object/content.
+That successful named recheck is the lock-free ACK linearization point; a later
+external replacement is outside the guarantee. This commit path requires write
+access to the checkpoint file; inability to acquire or sync that authority
+stays `Uncertain`, never a read-only ACK. Recovery `load` uses a separate
+bounded read-only admission. A sparse oversized file is refused before
+digesting; Unix opens are nonblocking so a FIFO cannot stall admission.
+Changed, unreadable, or uncertain files fail closed. Recovery loads only the
+exact digest retained by the host, then still requires the existing
 authenticated restore API and its independently supplied digest/capacity
 capability. The store does not enumerate or select a latest checkpoint. Hosts
 remain responsible for directory provisioning, retention/quota, and the
-trusted reference that identifies a checkpoint; this slice does not establish
-multi-process coordination or power-loss guarantees beyond the platform
-create-new/sync contract. Its reopen/tamper and no-redispatch tests use local
-temporary directories and recording adapters only.
+trusted reference that identifies a checkpoint. File-content sync does not
+flush the containing directory, so this slice does not claim power-loss
+durability of the namespace entry or multi-process coordination. Its
+reopen/tamper and no-redispatch tests use local temporary directories and
+recording adapters only.
 
 This is local adapter implementation evidence, not real-provider acceptance,
 provider authentication/interoperability, hosted execution, or authorization to

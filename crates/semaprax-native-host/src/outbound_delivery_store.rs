@@ -68,12 +68,17 @@ impl<'directory> OutboundDeliveryStore<'directory> {
             .ok_or(OutboundCheckpointReadRefusal::InvalidDigest)?;
         platform::recheck_directory(self.directory)
             .map_err(|_| OutboundCheckpointReadRefusal::StorageUnavailable)?;
-        let file = platform::hold_regular_file(self.directory, OsStr::new(&name))
+        let file = platform::hold_regular_file_bounded(
+            self.directory,
+            OsStr::new(&name),
+            MAX_CHECKPOINT_BYTES,
+        )
+        .map_err(|_| OutboundCheckpointReadRefusal::StorageUnavailable)?;
+        let bytes = platform::read_exact(&file, MAX_CHECKPOINT_BYTES)
             .map_err(|_| OutboundCheckpointReadRefusal::StorageUnavailable)?;
         platform::recheck_regular_file(&file)
             .map_err(|_| OutboundCheckpointReadRefusal::StorageUnavailable)?;
-        platform::read_exact(&file, MAX_CHECKPOINT_BYTES)
-            .map_err(|_| OutboundCheckpointReadRefusal::StorageUnavailable)
+        Ok(bytes)
     }
 
     fn commit_rendered(
@@ -82,6 +87,32 @@ impl<'directory> OutboundDeliveryStore<'directory> {
         digest: &str,
         rendered: &str,
     ) -> CheckpointCommit {
+        self.commit_rendered_with(
+            kind,
+            digest,
+            rendered,
+            platform::write_file_new,
+            platform::sync_regular_file,
+        )
+    }
+
+    fn commit_rendered_with<W, S>(
+        &mut self,
+        kind: OutboundCheckpointKind,
+        digest: &str,
+        rendered: &str,
+        write_new: W,
+        sync_file: S,
+    ) -> CheckpointCommit
+    where
+        W: FnOnce(
+            &HeldDirectory,
+            &OsStr,
+            &[u8],
+            u32,
+        ) -> Result<platform::HeldRegularFile, platform::Error>,
+        S: Fn(&platform::HeldRegularFile) -> Result<(), platform::Error>,
+    {
         let Some(name) = checkpoint_filename(kind, digest) else {
             return CheckpointCommit::NotCommitted;
         };
@@ -92,28 +123,34 @@ impl<'directory> OutboundDeliveryStore<'directory> {
         if platform::recheck_directory(self.directory).is_err() {
             return CheckpointCommit::Uncertain;
         }
-        match platform::write_file_new(self.directory, OsStr::new(&name), bytes, 0o600) {
-            Ok(file) => match platform::recheck_regular_file(&file) {
-                Ok(()) => CheckpointCommit::Committed,
-                Err(_) => CheckpointCommit::Uncertain,
-            },
-            Err(platform::Error::Exists) => {
-                // A repeated commit is idempotent only when the immutable
-                // content is byte-for-byte the exact same checkpoint.
-                if platform::recheck_directory(self.directory).is_err() {
-                    return CheckpointCommit::Uncertain;
-                }
-                let existing = platform::hold_regular_file(self.directory, OsStr::new(&name));
+        match write_new(self.directory, OsStr::new(&name), bytes, 0o600) {
+            // Bind ACK to the current namespace entry rather than trusting the
+            // writer's descriptor, which may not be the file now at `name`.
+            Ok(_) | Err(platform::Error::Exists) => {
+                let existing = platform::hold_regular_file_bounded_for_sync(
+                    self.directory,
+                    OsStr::new(&name),
+                    MAX_CHECKPOINT_BYTES,
+                );
                 let Ok(existing) = existing else {
                     return CheckpointCommit::Uncertain;
                 };
-                if platform::recheck_regular_file(&existing).is_err() {
+                match platform::read_exact(&existing, MAX_CHECKPOINT_BYTES) {
+                    Ok(existing_bytes) if existing_bytes == bytes => {}
+                    Ok(_) | Err(_) => return CheckpointCommit::Uncertain,
+                }
+                if sync_file(&existing).is_err()
+                    || platform::recheck_regular_file_named_bounded(
+                        self.directory,
+                        OsStr::new(&name),
+                        &existing,
+                        MAX_CHECKPOINT_BYTES,
+                    )
+                    .is_err()
+                {
                     return CheckpointCommit::Uncertain;
                 }
-                match platform::read_exact(&existing, MAX_CHECKPOINT_BYTES) {
-                    Ok(existing) if existing == bytes => CheckpointCommit::Committed,
-                    Ok(_) | Err(_) => CheckpointCommit::Uncertain,
-                }
+                CheckpointCommit::Committed
             }
             // A failed create may have become visible before the OS reported
             // its failure, so no I/O failure is treated as definite absence.
@@ -258,6 +295,13 @@ mod tests {
         }
     }
 
+    fn empty_checkpoint() -> HttpDeliverySessionCheckpoint {
+        HttpDeliverySession::new(1)
+            .expect("bounded session")
+            .session_checkpoint()
+            .expect("empty session checkpoint")
+    }
+
     #[test]
     fn http_checkpoint_reopens_and_exact_replay_does_not_redispatch() {
         let temp = TempDirectory::new();
@@ -350,6 +394,114 @@ mod tests {
             ))
         ));
         assert_eq!(adapter.0.len(), 1, "refused recovery does not redispatch");
+    }
+
+    #[test]
+    fn sparse_oversized_checkpoint_is_refused_by_load_and_existing_commit() {
+        let temp = TempDirectory::new();
+        let directory = platform::hold_directory(temp.path()).expect("hold caller directory");
+        let mut store = OutboundDeliveryStore::new(&directory);
+        let checkpoint = empty_checkpoint();
+        let digest = checkpoint.digest();
+        let name = checkpoint_filename(OutboundCheckpointKind::HttpSession, &digest).unwrap();
+        let file = fs::File::create(temp.path().join(name)).expect("create sparse hostile file");
+        file.set_len((MAX_CHECKPOINT_BYTES + 1) as u64)
+            .expect("extend sparse hostile file");
+        drop(file);
+
+        assert_eq!(
+            store.load(OutboundCheckpointKind::HttpSession, &digest),
+            Err(OutboundCheckpointReadRefusal::StorageUnavailable)
+        );
+        assert_eq!(
+            HttpDeliverySessionCheckpointStore::commit(&mut store, &checkpoint),
+            CheckpointCommit::Uncertain
+        );
+    }
+
+    #[test]
+    fn exact_existing_checkpoint_requires_each_sync_to_succeed() {
+        let temp = TempDirectory::new();
+        let directory = platform::hold_directory(temp.path()).expect("hold caller directory");
+        let mut store = OutboundDeliveryStore::new(&directory);
+        let checkpoint = empty_checkpoint();
+        let digest = checkpoint.digest();
+        let name = checkpoint_filename(OutboundCheckpointKind::HttpSession, &digest).unwrap();
+        fs::write(temp.path().join(name), checkpoint.render().as_bytes())
+            .expect("create exact preexisting bytes");
+        let sync_calls = std::cell::Cell::new(0);
+        let commit = store.commit_rendered_with(
+            OutboundCheckpointKind::HttpSession,
+            &digest,
+            &checkpoint.render(),
+            |_, _, _, _| Err(platform::Error::Exists),
+            |_| {
+                sync_calls.set(sync_calls.get() + 1);
+                Err(platform::Error::Changed)
+            },
+        );
+        assert_eq!(sync_calls.get(), 1);
+        assert_eq!(commit, CheckpointCommit::Uncertain);
+
+        assert_eq!(
+            HttpDeliverySessionCheckpointStore::commit(&mut store, &checkpoint),
+            CheckpointCommit::Committed,
+            "an exact preexisting file is acknowledged only after the real sync succeeds"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_after_new_write_is_not_acknowledged() {
+        let temp = TempDirectory::new();
+        let directory = platform::hold_directory(temp.path()).expect("hold caller directory");
+        let mut store = OutboundDeliveryStore::new(&directory);
+        let checkpoint = empty_checkpoint();
+        let digest = checkpoint.digest();
+        let rendered = checkpoint.render();
+        let commit = store.commit_rendered_with(
+            OutboundCheckpointKind::HttpSession,
+            &digest,
+            &rendered,
+            |directory, name, bytes, mode| {
+                let created = platform::write_file_new(directory, name, bytes, mode)?;
+                let replacement = temp.path().join("replacement-checkpoint");
+                fs::write(&replacement, b"replacement bytes")
+                    .map_err(|_| platform::Error::Changed)?;
+                fs::rename(&replacement, temp.path().join(name))
+                    .map_err(|_| platform::Error::Changed)?;
+                Ok(created)
+            },
+            platform::sync_regular_file,
+        );
+        assert_eq!(commit, CheckpointCommit::Uncertain);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_during_sync_is_not_acknowledged() {
+        let temp = TempDirectory::new();
+        let directory = platform::hold_directory(temp.path()).expect("hold caller directory");
+        let mut store = OutboundDeliveryStore::new(&directory);
+        let checkpoint = empty_checkpoint();
+        let digest = checkpoint.digest();
+        let rendered = checkpoint.render();
+        let name = checkpoint_filename(OutboundCheckpointKind::HttpSession, &digest).unwrap();
+        let commit = store.commit_rendered_with(
+            OutboundCheckpointKind::HttpSession,
+            &digest,
+            &rendered,
+            platform::write_file_new,
+            |file| {
+                platform::sync_regular_file(file)?;
+                let replacement = temp.path().join("replacement-checkpoint");
+                fs::write(&replacement, b"replacement bytes")
+                    .map_err(|_| platform::Error::Changed)?;
+                fs::rename(&replacement, temp.path().join(&name))
+                    .map_err(|_| platform::Error::Changed)
+            },
+        );
+        assert_eq!(commit, CheckpointCommit::Uncertain);
     }
 
     #[test]

@@ -690,12 +690,70 @@ pub fn write_file_new(
         .map(HeldRegularFile)
 }
 
+/// Open one held regular file only when its metadata size is at most `maximum`.
+/// Unix uses a nonblocking open so a hostile FIFO cannot delay classification.
+pub fn hold_regular_file_bounded(
+    directory: &HeldDirectory,
+    name: &OsStr,
+    maximum: usize,
+) -> Result<HeldRegularFile, Error> {
+    let maximum = u64::try_from(maximum).map_err(|_| Error::OutputLimit)?;
+    semaprax_native_rust_interop_platform_sys::hold_regular_file_bounded(
+        &directory.0,
+        name,
+        maximum,
+    )
+    .map(HeldRegularFile)
+}
+
+/// Open a bounded regular file with the additional write authority required
+/// for its held handle to be synchronized. Callers still authenticate bytes
+/// and recheck identity around any durability acknowledgement.
+pub fn hold_regular_file_bounded_for_sync(
+    directory: &HeldDirectory,
+    name: &OsStr,
+    maximum: usize,
+) -> Result<HeldRegularFile, Error> {
+    let maximum = u64::try_from(maximum).map_err(|_| Error::OutputLimit)?;
+    semaprax_native_rust_interop_platform_sys::hold_regular_file_bounded_for_sync(
+        &directory.0,
+        name,
+        maximum,
+    )
+    .map(HeldRegularFile)
+}
+
 pub fn hold_regular_file(
     directory: &HeldDirectory,
     name: &OsStr,
 ) -> Result<HeldRegularFile, Error> {
     semaprax_native_rust_interop_platform_sys::hold_regular_file(&directory.0, name)
         .map(HeldRegularFile)
+}
+
+/// Request an OS-level content/metadata sync for this exact held regular file.
+/// The containing directory entry is not synchronized by this operation.
+pub fn sync_regular_file(file: &HeldRegularFile) -> Result<(), Error> {
+    semaprax_native_rust_interop_platform_sys::sync_regular_file(&file.0)
+}
+
+/// Reopen `name` through a bounded held-directory capability and verify it
+/// still resolves to the exact authenticated regular file supplied by the
+/// caller. This check is a lock-free linearization point; later replacement
+/// requires a separate directory-coordination guarantee.
+pub fn recheck_regular_file_named_bounded(
+    directory: &HeldDirectory,
+    name: &OsStr,
+    file: &HeldRegularFile,
+    maximum: usize,
+) -> Result<(), Error> {
+    let maximum = u64::try_from(maximum).map_err(|_| Error::OutputLimit)?;
+    semaprax_native_rust_interop_platform_sys::recheck_regular_file_named_bounded(
+        &directory.0,
+        name,
+        &file.0,
+        maximum,
+    )
 }
 
 pub fn recheck_regular_file(file: &HeldRegularFile) -> Result<(), Error> {

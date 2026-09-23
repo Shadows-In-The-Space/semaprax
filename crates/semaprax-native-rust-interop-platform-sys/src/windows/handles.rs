@@ -199,6 +199,53 @@ pub fn hold_regular_file(directory: &Directory, name: &OsStr) -> Result<RegularF
     hold_regular_file_name_prepared(directory, &name)
 }
 
+pub fn hold_regular_file_bounded(
+    directory: &Directory,
+    name: &OsStr,
+    maximum: u64,
+) -> Result<RegularFile, Error> {
+    recheck_directory(directory)?;
+    let name = prepare_relative_name(name)?;
+    hold_regular_file_name_external_read_bounded_prepared(directory, &name, maximum)
+}
+
+pub fn hold_regular_file_bounded_for_sync(
+    directory: &Directory,
+    name: &OsStr,
+    maximum: u64,
+) -> Result<RegularFile, Error> {
+    recheck_directory(directory)?;
+    let name = prepare_relative_name(name)?;
+    let file = relative_file_prepared(
+        &directory.file,
+        &name,
+        REGULAR_OWNED_ACCESS,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE,
+    )?;
+    authenticate_regular_file_bounded(file, maximum)
+}
+
+pub fn sync_regular_file(file: &RegularFile) -> Result<(), Error> {
+    file.file.sync_all().map_err(|_| Error::Changed)
+}
+
+pub fn recheck_regular_file_named_bounded(
+    directory: &Directory,
+    name: &OsStr,
+    file: &RegularFile,
+    maximum: u64,
+) -> Result<(), Error> {
+    recheck_directory(directory)?;
+    recheck_held_regular(file)?;
+    let name = prepare_relative_name(name)?;
+    let rebound = hold_regular_file_name_external_read_bounded_prepared(directory, &name, maximum)?;
+    if rebound.identity != file.identity || rebound.digest != file.digest {
+        return Err(Error::Changed);
+    }
+    recheck_held_regular(file)
+}
+
 fn authenticate_regular_file(file: File) -> Result<RegularFile, Error> {
     authenticate_regular_file_bounded(file, u64::MAX)
 }

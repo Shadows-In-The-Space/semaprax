@@ -146,6 +146,7 @@ pub fn write_file_new(
     mode: u32,
 ) -> Result<RegularFile, Error> {
     recheck_directory(directory)?;
+    let prepared_name = prepare_relative_name(name)?;
     let name = c_name(name)?;
     let fd = unsafe {
         libc::openat(
@@ -160,11 +161,15 @@ pub fn write_file_new(
     }
     let mut file = unsafe { File::from_raw_fd(fd) };
     file.write_all(bytes).map_err(|_| Error::Changed)?;
-    file.sync_data().map_err(|_| Error::Changed)?;
+    file.sync_all().map_err(|_| Error::Changed)?;
     drop(file);
-    hold_regular_file(
+    // Reopen under the expected size bound and nonblocking regular-file path.
+    // The caller that needs to ACK these exact bytes still compares readback
+    // against its expected payload before committing.
+    hold_regular_file_name_bounded_prepared(
         directory,
-        OsStr::new(name.to_str().map_err(|_| Error::Invalid)?),
+        &prepared_name,
+        u64::try_from(bytes.len()).map_err(|_| Error::OutputLimit)?,
     )
 }
 
@@ -198,6 +203,71 @@ pub fn hold_regular_file(directory: &Directory, name: &OsStr) -> Result<RegularF
     recheck_directory(directory)?;
     let name = prepare_relative_name(name)?;
     hold_regular_file_name_prepared(directory, &name)
+}
+
+pub fn hold_regular_file_bounded(
+    directory: &Directory,
+    name: &OsStr,
+    maximum: u64,
+) -> Result<RegularFile, Error> {
+    recheck_directory(directory)?;
+    let name = prepare_relative_name(name)?;
+    hold_regular_file_name_bounded_prepared(directory, &name, maximum)
+}
+
+pub fn hold_regular_file_bounded_for_sync(
+    directory: &Directory,
+    name: &OsStr,
+    maximum: u64,
+) -> Result<RegularFile, Error> {
+    recheck_directory(directory)?;
+    let name = prepare_relative_name(name)?;
+    let fd = unsafe {
+        libc::openat(
+            directory.file.as_raw_fd(),
+            name.0.as_ptr(),
+            libc::O_RDWR | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+        )
+    };
+    if fd < 0 {
+        return Err(Error::Changed);
+    }
+    authenticate_regular_file_bounded(unsafe { File::from_raw_fd(fd) }, maximum)
+}
+
+pub fn sync_regular_file(file: &RegularFile) -> Result<(), Error> {
+    file.file.sync_all().map_err(|_| Error::Changed)
+}
+
+pub fn recheck_regular_file_named_bounded(
+    directory: &Directory,
+    name: &OsStr,
+    file: &RegularFile,
+    maximum: u64,
+) -> Result<(), Error> {
+    recheck_directory(directory)?;
+    recheck_regular(file)?;
+    let name = prepare_relative_name(name)?;
+    let rebound = hold_regular_file_name_bounded_prepared(directory, &name, maximum)?;
+    if rebound.dev != file.dev
+        || rebound.ino != file.ino
+        || rebound.mode != file.mode
+        || rebound.len != file.len
+        || rebound.digest != file.digest
+        || cfg!(target_os = "macos") && {
+            #[cfg(target_os = "macos")]
+            {
+                rebound.generation != file.generation
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                false
+            }
+        }
+    {
+        return Err(Error::Changed);
+    }
+    recheck_regular(file)
 }
 
 pub(crate) fn authenticate_regular_file(file: File) -> Result<RegularFile, Error> {
@@ -252,7 +322,7 @@ pub(super) fn hold_regular_file_name_bounded_prepared(
         libc::openat(
             directory.file.as_raw_fd(),
             name.0.as_ptr(),
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
         )
     };
     if fd < 0 {

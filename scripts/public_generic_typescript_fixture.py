@@ -82,8 +82,9 @@ def render(count: int, module: bytes) -> dict[str, str]:
         '  "semaprax.public-generic-typescript-wasm-consumer.v1.module-artifact\\0",\n);\n\n')
     desc += 'export const TRUSTED_DESCRIPTOR_BYTES: Uint8Array = ' + literal(descriptor) + ';\n\n'
     desc += 'export const TRUSTED_BINDING_BYTES: Uint8Array = ' + literal(binding) + ';\n\n'
-    desc += 'export const TRUSTED_ENDPOINT_EXPORT_NAME: string = ' + json.dumps(ENDPOINT) + ';\n\n'
     desc += 'export const TRUSTED_PROVIDER_ARTIFACT_DIGEST: string = ' + json.dumps(digest(DOMAIN, module)) + ';\n'
+    desc += 'export const TRUSTED_ENDPOINT_EXPORT_NAME: string = ' + json.dumps(ENDPOINT) + ';\n'
+    desc += 'export const TRUSTED_COMPILED_PROVIDER: boolean = false;\n'
     desc += asset('descriptor_verify.ts.txt')
     def interface(name: str) -> str:
         return f'export interface {name} {{\n' + ''.join(
@@ -98,6 +99,20 @@ def render(count: int, module: bytes) -> dict[str, str]:
     carrier += ''.join(f'    {field}: leaves[{i}] as Uint8Array,\n' for i, field in enumerate(fields)) + '  };\n}\n\n'
     carrier += ('export function encodeInput(value: Input): Uint8Array {\n  return encodeLeaves(inputLeaves(value));\n}\n\n'
         'export function decodeOutput(bytes: Uint8Array): Output {\n  return outputFromLeaves(decodeLeaves(bytes, FIELD_COUNT));\n}\n')
+    descriptor_identity = digest('semaprax.public-generic-descriptor.v1.identity',
+        descriptor[:-len(frame(b'transform'))])
+    carrier += '\nexport const CARRIER_DESCRIPTOR_DIGEST = ' + json.dumps(descriptor_identity)
+    carrier += ';\nexport const CARRIER_EXPORT_ID = "sample.transform";\n'
+    carrier += 'export const INPUT_INSTANCE_DIGEST = "sha256:' + '4' * 64 + '";\n'
+    carrier += 'export const OUTPUT_INSTANCE_DIGEST = "sha256:' + '5' * 64 + '";\n'
+    carrier += 'export const INPUT_LEAF_PATHS = Object.freeze([\n'
+    carrier += ''.join('  ' + json.dumps(identity) + ',\n' for identity in ids)
+    carrier += ']);\nexport const OUTPUT_LEAF_PATHS = Object.freeze([\n'
+    carrier += ''.join('  ' + json.dumps(identity) + ',\n' for identity in ids)
+    carrier += (']);\n\nexport function encodeCanonicalInput(value: Input): Uint8Array {\n'
+        '  return encodeCanonicalFrame("input", CARRIER_DESCRIPTOR_DIGEST, CARRIER_EXPORT_ID, INPUT_INSTANCE_DIGEST, INPUT_LEAF_PATHS, inputLeaves(value));\n}\n\n'
+        'export function decodeCanonicalOutput(bytes: Uint8Array): Output {\n'
+        '  return outputFromLeaves(decodeCanonicalFrame("result", CARRIER_DESCRIPTOR_DIGEST, CARRIER_EXPORT_ID, OUTPUT_INSTANCE_DIGEST, OUTPUT_LEAF_PATHS, bytes));\n}\n')
     round_trip = asset('round_trip_header.mjs.txt') + '\n' + 'function sampleInput() {\n  return {\n'
     round_trip += ''.join(f'    {field}: new TextEncoder().encode("sample-{i}"),\n' for i, field in enumerate(fields)) + '  };\n}\n\n'
     round_trip += 'function inputWithFirstField(bytes) {\n  return {\n'

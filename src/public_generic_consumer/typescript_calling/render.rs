@@ -264,28 +264,36 @@ fn sample_input_fn(input: &RecordShape) -> String {
     out
 }
 
-fn assert_output_shape_fn(output: &RecordShape) -> String {
-    let mut out = String::new();
-    out.push_str("function assertOutputShape(output) {\n");
-    out.push_str("  assert.deepEqual(Object.keys(output), [\n");
-    for field in &output.fields {
-        let _ = writeln!(out, "    {:?},", field_name(field));
+fn input_with_first_field_fn(input: &RecordShape) -> String {
+    let mut out = String::from("function inputWithFirstField(bytes) {\n  return {\n");
+    for (index, field) in input.fields.iter().enumerate() {
+        let value = if index == 0 {
+            "bytes"
+        } else {
+            "new Uint8Array(0)"
+        };
+        let _ = writeln!(out, "    {}: {value},", field_name(field));
     }
-    out.push_str("  ]);\n");
+    out.push_str("  };\n}\n");
+    out
+}
+
+fn assert_reversed_fn(output: &RecordShape) -> String {
+    let mut out = String::new();
+    out.push_str("function assertReversed(output, original) {\n");
     for field in &output.fields {
         let name = field_name(field);
-        let _ = writeln!(out, "  assert.ok(output.{name} instanceof Uint8Array);");
         let _ = writeln!(
             out,
-            "  assert.strictEqual(Object.getPrototypeOf(output.{name}), Uint8Array.prototype);"
-        );
-        let _ = writeln!(out, "  assert.strictEqual(Object.getPrototypeOf(output.{name}.buffer), ArrayBuffer.prototype);");
-        let _ = writeln!(
-            out,
-            "  assert.strictEqual(output.{name}.buffer.resizable, false);"
+            "  assert.deepEqual(output.{name}, reversed(original.{name}));"
         );
     }
     out.push_str("}\n");
+    let _ = writeln!(
+        out,
+        "\nfunction FIRST_OUTPUT_FIELD(output) {{\n  return output.{};\n}}",
+        field_name(&output.fields[0])
+    );
     out
 }
 
@@ -297,7 +305,9 @@ pub(super) fn round_trip_mjs(input: &RecordShape, output: &RecordShape) -> Strin
     out.push('\n');
     out.push_str(&sample_input_fn(input));
     out.push('\n');
-    out.push_str(&assert_output_shape_fn(output));
+    out.push_str(&input_with_first_field_fn(input));
+    out.push('\n');
+    out.push_str(&assert_reversed_fn(output));
     out.push('\n');
     out.push_str(&template(ROUND_TRIP_BODY));
     out

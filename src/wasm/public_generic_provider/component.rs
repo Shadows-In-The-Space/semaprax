@@ -5,9 +5,9 @@
 //! Component; no host adapter is imported.
 
 use super::{
-    BINDING_OFFSET, COMPONENT_INPUT_ENCODE_EXPORT_V1, COMPONENT_PROVIDER_LAYOUT,
-    COMPONENT_RESULT_COPY_EXPORT_V1, ComponentProviderCoreV1, DESCRIPTOR_OFFSET, EXPORTS,
-    MAX_SCRATCH_BYTES, SCRATCH_BASE, emit_component_core,
+    emit_component_core, ComponentProviderCoreV1, BINDING_OFFSET, COMPONENT_INPUT_ENCODE_EXPORT_V1,
+    COMPONENT_PROVIDER_LAYOUT, COMPONENT_RESULT_COPY_EXPORT_V1, DESCRIPTOR_OFFSET, EXPORTS,
+    MAX_SCRATCH_BYTES, SCRATCH_BASE,
 };
 use crate::{
     diagnostic::Diagnostic, hir::ResolvedProgram,

@@ -25,9 +25,9 @@
 use crate::public_generic_abi::boundary_profile::{
     MAX_BYTES_PER_LEAF, MAX_OWNED_LEAVES_PER_INSTANCE, MAX_TOTAL_PAYLOAD_BYTES,
 };
-use crate::public_generic_abi::carrier::CARRIER_SCHEMA;
 use crate::public_generic_abi::carrier::frame::CarrierFrameBinding;
 use crate::public_generic_abi::carrier::trace::Direction;
+use crate::public_generic_abi::carrier::CARRIER_SCHEMA;
 use crate::public_generic_abi::descriptor::verify::VerifiedPublicGenericDescriptor;
 
 const FRAME_DOMAIN: &[u8] = b"semaprax.public-generic-carrier.v1.frame\0";

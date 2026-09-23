@@ -670,6 +670,7 @@ fn doctor_release_real_cli_refuses_unsigned_swapped_stale_tampered_untrusted_mat
         ("tampered", "SPX-Z704"),
         ("untrusted-identity", "SPX-Z703"),
         ("untrusted-root", "SPX-Z707"),
+        ("wrong-commitment", "SPX-Z707"),
     ] {
         let directory = if case == "unsigned" {
             release_directory("doctor-unsigned")
@@ -709,11 +710,13 @@ fn doctor_release_real_cli_refuses_unsigned_swapped_stale_tampered_untrusted_mat
                 .unwrap();
             }
             "untrusted-root" => {
-                fs::write(
-                    directory.join("trusted_root.jsonl"),
-                    b"{\"trustedRoot\":\"untrusted\"}\n",
-                )
+                let root: serde_json::Value = serde_json::from_str(include_str!(
+                    "../fixtures/release_sigstore/public-good.json"
+                ))
                 .unwrap();
+                let root = format!("{}\n", serde_json::to_string(&root).unwrap());
+                sigstore_verify::trust_root::TrustedRoot::from_json(&root).unwrap();
+                fs::write(directory.join("trusted_root.jsonl"), root).unwrap();
             }
             _ => {}
         }
@@ -727,9 +730,22 @@ fn doctor_release_real_cli_refuses_unsigned_swapped_stale_tampered_untrusted_mat
         let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
             .args(["doctor", "verify-release"])
             .arg(&directory)
+            .arg("--trusted-root-sha256")
+            .arg(if case == "wrong-commitment" {
+                "0".repeat(64)
+            } else {
+                // Independent test expectation: do not discover trust from
+                // the release directory's mutable trusted_root.jsonl.
+                sha256(FIXTURE_TRUSTED_ROOT.as_bytes())
+                    .trim_start_matches("sha256:")
+                    .to_owned()
+            })
             .output()
             .unwrap();
         assert_rejected(&output, code);
+        if matches!(case, "untrusted-root" | "wrong-commitment") {
+            assert!(stderr(&output).contains("independently supplied SHA-256 commitment"));
+        }
         let after: Vec<_> = listing(&directory)
             .into_iter()
             .map(|name| {
@@ -744,12 +760,29 @@ fn doctor_release_real_cli_refuses_unsigned_swapped_stale_tampered_untrusted_mat
 
 #[test]
 fn doctor_release_real_cli_has_closed_grammar_and_scoped_help() {
+    let uppercase = "A".repeat(64);
     for arguments in [
         vec!["doctor", "verify-release"],
+        vec!["doctor", "verify-release", "dist"],
         vec!["doctor", "verify-release", ""],
         vec!["doctor", "verify-release", "--json"],
         vec!["doctor", "verify-release", "dist", "extra"],
         vec!["doctor", "verify-release", "dist", "--profile", "fixture"],
+        vec!["doctor", "verify-release", "dist", "--trusted-root-sha256"],
+        vec![
+            "doctor",
+            "verify-release",
+            "dist",
+            "--trusted-root-sha256",
+            "0",
+        ],
+        vec![
+            "doctor",
+            "verify-release",
+            "dist",
+            "--trusted-root-sha256",
+            &uppercase,
+        ],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
             .args(&arguments)
@@ -757,7 +790,7 @@ fn doctor_release_real_cli_has_closed_grammar_and_scoped_help() {
             .unwrap();
         assert_eq!(output.status.code(), Some(2), "{arguments:?}");
         assert!(output.stdout.is_empty());
-        assert!(stderr(&output).contains("doctor accepts exactly `verify-release <release-dir>`"));
+        assert!(stderr(&output).contains("doctor accepts exactly `verify-release <release-dir> --trusted-root-sha256 <64-lowercase-hex>`"));
     }
     let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
         .args(["doctor", "--help"])
@@ -765,7 +798,7 @@ fn doctor_release_real_cli_has_closed_grammar_and_scoped_help() {
         .unwrap();
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    assert_eq!(output.stdout, b"Usage:\n  semaprax doctor [--profile <id>] [--target native|web|all] [--json]\n  semaprax doctor verify-release <release-dir>\n");
+    assert_eq!(output.stdout, b"Usage:\n  semaprax doctor [--profile <id>] [--target native|web|all] [--json]\n  semaprax doctor verify-release <release-dir> --trusted-root-sha256 <64-lowercase-hex>\n");
 }
 
 /// The verb's grammar is closed: only `verify <dir>`, and a malformed

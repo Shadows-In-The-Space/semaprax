@@ -39,19 +39,34 @@ runner is unchanged.
 
 ### Separate release verification proposal
 
-R10 adds the bounded local CLI route `semaprax doctor verify-release <release-dir>`.
+R10 adds this bounded local CLI route:
+
+```text
+semaprax doctor verify-release <release-dir> --trusted-root-sha256 <64-lowercase-hex>
+```
+
+The commitment is a separate invocation input, not a file discovered in the
+release directory. Its independently trusted provenance is an operator
+precondition: copying a digest from that same untrusted directory does not
+authenticate the trust root. This route cannot infer that provenance from
+matching hexadecimal bytes. The held root bytes must match the commitment
+before any other release document, bundle, or archive is read or verified;
+missing/malformed commitments are syntax errors (exit 2), and a mismatch fails
+as `SPX-Z707` before cryptographic work. Both built-in and injected-verifier
+paths require this binding; the release directory alone is insufficient.
+
 This implementation proposal does not admit a tool profile or change the
 ordinary doctor route described below. It delegates to the existing held,
 bounded, no-follow release loader and aggregate offline Sigstore verifier under
 the unchanged [release signing policy](RELEASE-SIGNING-POLICY-V1.md).
 It requires the complete signed-material inventory; missing material fails
 rather than falling back to digest-only or unsigned success. It accepts no
-profile, target, JSON, signing, publication, or trust-policy options.
+profile, target, JSON, signing, publication, or trust-policy-change options.
 
 The standalone route uses the built-in verifier. An embedding host's explicit
 verifier override retains the distinct caller-supplied-capability report and
 makes no independent cryptographic claim. Verification concerns exact held
-bytes under an explicitly supplied historical root snapshot, not current
+bytes under an independently committed historical root snapshot, not current
 revocation/freshness, a signed hosted release, installation, or profile
 admission. No files are written, artifacts executed, processes spawned, or
 network requests made. This proposal is not accepted hosted/release support.

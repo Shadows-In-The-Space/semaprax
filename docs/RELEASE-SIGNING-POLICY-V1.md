@@ -413,15 +413,26 @@ only the first.
 ### What verification does and does not prove
 
 The additive R10 implementation proposal `semaprax doctor verify-release
-<release-dir>` reuses this same held loader, aggregate verifier, diagnostic
+<release-dir> --trusted-root-sha256 <64-lowercase-hex>` reuses this same held loader, aggregate verifier, diagnostic
 codes, and fixed identity policy. Unlike `release verify`, it requires complete
-signed material and has no unsigned fallback. This is separate from ordinary
+signed material and has no unsigned fallback. The separate mandatory invocation
+commitment binds the held root bytes before any other document, bundle, archive,
+or verifier work. Missing/malformed commitments fail as CLI errors; mismatched
+root bytes fail as `SPX-Z707`. The operator must obtain the commitment through
+an independently trusted channel: a digest copied from the release directory
+is not authentication, and matching hex does not prove independent provenance.
+The receipt records that caller precondition, not a newly inferred trust policy.
+The release directory alone can never authorize built-in doctor verification.
+The existing `release verify` route remains unchanged. This is separate from ordinary
 doctor tool-profile admission and from the Ed25519 doctor-install policy.
 Its local positive transport test uses an explicitly injected recording
 capability, labels that result as non-cryptographic, and requires the identical
 fabricated signing material to fail under the built-in verifier (`SPX-Z707`).
 Swapped archive attestations, stale claims, tampered archives, untrusted
-identities/roots, and missing material must refuse without success output.
+identities/roots, and missing material must refuse without success output. A
+working real Sigstore root fixture (calibrated with its genuine external-signer
+bundle) is also refused when substituted without the independent commitment;
+malformed JSON alone is not the root-substitution control.
 No valid signed SEMAPRAX release is supplied by these tests; the existing
 external-signer Sigstore fixture is not a substitute for the pinned release
 identity. Hosted acceptance, signing identity ownership and rotation/revocation

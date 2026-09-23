@@ -259,7 +259,7 @@ fn standalone_scoped_help_is_exhaustive_exact_capability_aware_and_inert() {
     assert!(hidden.stderr.is_empty());
     assert_eq!(
         hidden.stdout,
-        format!("Usage:\n  {DOCTOR_LINE}  semaprax doctor verify-release <release-dir>\n")
+        format!("Usage:\n  {DOCTOR_LINE}  semaprax doctor verify-release <release-dir> --trusted-root-sha256 <64-lowercase-hex>\n")
             .as_bytes()
     );
     std::fs::remove_dir(hidden_dir).unwrap();

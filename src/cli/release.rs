@@ -95,18 +95,28 @@ pub(crate) fn parse(args: &[String]) -> Result<PathBuf, u8> {
 
 /// The explicit doctor release check is separate from offline tool profiles.
 /// Complete syntax admission precedes all release-directory reads.
-pub(crate) fn parse_doctor_release(args: &[String]) -> Result<PathBuf, u8> {
+fn parse_doctor_release(args: &[String]) -> Result<(PathBuf, [u8; 32]), u8> {
     match args {
-        [command, directory]
+        [command, directory, option, digest]
             if command == "verify-release"
                 && !directory.is_empty()
-                && !directory.starts_with('-') =>
+                && !directory.starts_with('-')
+                && option == "--trusted-root-sha256"
+                && digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
         {
-            Ok(PathBuf::from(directory))
+            let mut commitment = [0; 32];
+            for (index, byte) in commitment.iter_mut().enumerate() {
+                *byte = u8::from_str_radix(&digest[index * 2..index * 2 + 2], 16)
+                    .expect("validated lowercase hexadecimal commitment");
+            }
+            Ok((PathBuf::from(directory), commitment))
         }
         _ => {
             eprintln!(
-                "doctor accepts exactly `verify-release <release-dir>` for release verification"
+                "doctor accepts exactly `verify-release <release-dir> --trusted-root-sha256 <64-lowercase-hex>` for release verification"
             );
             Err(2)
         }
@@ -118,9 +128,9 @@ pub(crate) fn doctor_release_command(
     capability: Option<&(dyn OfflineBundleVerificationCapability + Sync)>,
     report: impl FnOnce(&[Diagnostic], bool) -> u8,
 ) -> Result<(), u8> {
-    let directory = parse_doctor_release(args)?;
-    let receipt =
-        run_doctor_release(&directory, capability).map_err(|error| report(&[error], false))?;
+    let (directory, commitment) = parse_doctor_release(args)?;
+    let receipt = run_doctor_release(&directory, &commitment, capability)
+        .map_err(|error| report(&[error], false))?;
     print!("{receipt}");
     Ok(())
 }
@@ -494,12 +504,29 @@ struct OfflineRelease {
 /// Load the complete closed release inventory for the aggregate verifier.
 /// The non-archive binding/root checks run before any archive is allocated,
 /// and archive bytes have an explicit combined memory bound.
-fn load_offline_release(directory: &Path) -> Result<OfflineRelease, Diagnostic> {
+fn load_offline_release(
+    directory: &Path,
+    root_commitment: Option<&[u8; 32]>,
+) -> Result<OfflineRelease, Diagnostic> {
+    // Doctor authenticates root bytes before any other release member is read.
+    // None preserves the existing release route's read/diagnostic ordering.
+    let committed_root = root_commitment.map(|expected| {
+        let root = read_document(directory, TRUSTED_ROOT_FILE)?;
+        let actual: [u8; 32] = Sha256::digest(&root).into();
+        if &actual != expected {
+            return Err(Diagnostic::io("SPX-Z707",
+                "held trusted-root bytes disagree with the independently supplied SHA-256 commitment"));
+        }
+        Ok(root)
+    }).transpose()?;
     let manifest = read_document(directory, MANIFEST_FILE)?;
     let provenance = read_document(directory, PROVENANCE_FILE)?;
     let claim = read_document(directory, SIGNATURE_CLAIM_FILE)?;
     let message_bundle = read_document(directory, MESSAGE_BUNDLE_FILE)?;
-    let trusted_root = read_document(directory, TRUSTED_ROOT_FILE)?;
+    let trusted_root = match committed_root {
+        Some(root) => root,
+        None => read_document(directory, TRUSTED_ROOT_FILE)?,
+    };
 
     // These cheap checks are deliberately repeated by the aggregate API. They
     // prevent an invalid document/root/bundle from causing archive allocation
@@ -560,8 +587,9 @@ fn run_with_offline_capability_kind(
     directory: &Path,
     capability: &dyn OfflineBundleVerificationCapability,
     kind: OfflineVerifierKind,
+    root_commitment: Option<&[u8; 32]>,
 ) -> Result<String, Diagnostic> {
-    let release = load_offline_release(directory)?;
+    let release = load_offline_release(directory, root_commitment)?;
     let OfflineRelease {
         manifest,
         provenance,
@@ -622,7 +650,12 @@ pub(crate) fn run_with_offline_capability(
     directory: &Path,
     capability: &dyn OfflineBundleVerificationCapability,
 ) -> Result<String, Diagnostic> {
-    run_with_offline_capability_kind(directory, capability, OfflineVerifierKind::CallerSupplied)
+    run_with_offline_capability_kind(
+        directory,
+        capability,
+        OfflineVerifierKind::CallerSupplied,
+        None,
+    )
 }
 
 fn run_with_builtin_offline_verifier(directory: &Path) -> Result<String, Diagnostic> {
@@ -630,6 +663,7 @@ fn run_with_builtin_offline_verifier(directory: &Path) -> Result<String, Diagnos
         directory,
         &SigstoreOfflineVerifier,
         OfflineVerifierKind::BuiltInSigstore,
+        None,
     )
 }
 
@@ -638,14 +672,29 @@ fn run_with_builtin_offline_verifier(directory: &Path) -> Result<String, Diagnos
 /// aggregate verifier runs. Ordinary doctor tool-profile admission is untouched.
 pub(crate) fn run_doctor_release(
     directory: &Path,
+    root_commitment: &[u8; 32],
     capability: Option<&(dyn OfflineBundleVerificationCapability + Sync)>,
 ) -> Result<String, Diagnostic> {
     let receipt = match capability {
-        Some(capability) => run_with_offline_capability(directory, capability),
-        None => run_with_builtin_offline_verifier(directory),
+        Some(capability) => run_with_offline_capability_kind(
+            directory,
+            capability,
+            OfflineVerifierKind::CallerSupplied,
+            Some(root_commitment),
+        ),
+        None => run_with_offline_capability_kind(
+            directory,
+            &SigstoreOfflineVerifier,
+            OfflineVerifierKind::BuiltInSigstore,
+            Some(root_commitment),
+        ),
     }?;
     Ok(format!(
-        "doctor verify-release: offline release check\n{receipt}"
+        "doctor verify-release: offline release check\n\
+         trusted-root commitment: sha256:{:x}\n\
+         Trust boundary: the operator must authenticate this commitment independently;\n\
+         a digest copied from the release directory does not establish trust.\n{receipt}",
+        semaprax::digest_hex::LowerHex(root_commitment)
     ))
 }
 
@@ -957,6 +1006,11 @@ mod tests {
     #[derive(Default)]
     struct DoctorRecordingCapability(std::sync::Mutex<Vec<Vec<u8>>>);
 
+    fn doctor_fixture_commitment() -> [u8; 32] {
+        // Independent test expectation, never discovered from the directory.
+        Sha256::digest(b"{\"trustedRoot\":\"fixture\"}\n").into()
+    }
+
     impl OfflineBundleVerificationCapability for DoctorRecordingCapability {
         fn verify_offline_bundle(
             &self,
@@ -979,12 +1033,14 @@ mod tests {
     #[test]
     fn doctor_release_valid_transport_and_builtin_crypto_are_distinct() {
         let directory = signed_directory("doctor-valid");
-        let held = load_offline_release(&directory).unwrap();
+        let held = load_offline_release(&directory, None).unwrap();
         let expected: Vec<_> = std::iter::once(held.provenance)
             .chain(held.archives.into_iter().map(|archive| archive.bytes))
             .collect();
         let capability = DoctorRecordingCapability::default();
-        let report = run_doctor_release(&directory, Some(&capability)).unwrap();
+        let report =
+            run_doctor_release(&directory, &doctor_fixture_commitment(), Some(&capability))
+                .unwrap();
         assert_eq!(*capability.0.lock().unwrap(), expected);
         assert!(report.starts_with("doctor verify-release: offline release check\n"));
         assert!(report.contains("CALLER-SUPPLIED VERIFICATION CAPABILITY"));
@@ -994,7 +1050,9 @@ mod tests {
         // Identical valid framing must reach the real engine, which refuses
         // fabricated certificate/signature material instead of digest fallback.
         assert_eq!(
-            run_doctor_release(&directory, None).unwrap_err().code,
+            run_doctor_release(&directory, &doctor_fixture_commitment(), None)
+                .unwrap_err()
+                .code,
             "SPX-Z707"
         );
         std::fs::remove_dir_all(directory).unwrap();
@@ -1053,7 +1111,9 @@ mod tests {
                 _ => unreachable!(),
             }
             let capability = DoctorRecordingCapability::default();
-            let error = run_doctor_release(&directory, Some(&capability)).unwrap_err();
+            let error =
+                run_doctor_release(&directory, &doctor_fixture_commitment(), Some(&capability))
+                    .unwrap_err();
             assert_eq!(error.code, code, "{case}: {}", error.message);
             assert!(capability.0.lock().unwrap().is_empty(), "{case}");
             std::fs::remove_dir_all(directory).unwrap();
@@ -1067,7 +1127,7 @@ mod tests {
             std::fs::remove_file(directory.join(name)).unwrap();
             let capability = DoctorRecordingCapability::default();
             assert_eq!(
-                run_doctor_release(&directory, Some(&capability))
+                run_doctor_release(&directory, &doctor_fixture_commitment(), Some(&capability))
                     .unwrap_err()
                     .code,
                 "SPX-Z705"
@@ -1086,6 +1146,56 @@ mod tests {
             .expect_err("unframed trusted root must fail before authority use");
         assert_eq!(error.code, "SPX-Z701");
         assert_eq!(capability.0.get(), 0);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn doctor_release_valid_uncommitted_root_refuses_before_other_reads() {
+        // Calibrate the substituted root with a genuine external-signer bundle:
+        // it is functional trust material, not merely syntactically valid JSON.
+        // This signer is NOT the pinned SEMAPRAX release identity.
+        let root = include_str!("../../tests/fixtures/release_sigstore/public-good.json");
+        let root = format!(
+            "{}\n",
+            serde_json::to_string(&serde_json::from_str::<serde_json::Value>(root).unwrap())
+                .unwrap()
+        );
+        let trusted = sigstore_verify::trust_root::TrustedRoot::from_json(&root).unwrap();
+        let bundle = sigstore_verify::types::Bundle::from_json(include_str!(
+            "../../tests/fixtures/release_sigstore/cosign-v3-blob.sigstore.json"
+        ))
+        .unwrap();
+        sigstore_verify::Verifier::new(&trusted)
+            .verify(
+                include_bytes!("../../tests/fixtures/release_sigstore/cosign-v3-blob.txt"),
+                &bundle,
+                &sigstore_verify::VerificationPolicy::default()
+                    .require_identity("w.vollprecht@gmail.com")
+                    .require_issuer("https://github.com/login/oauth"),
+            )
+            .expect("substituted root must be a working cryptographic trust root");
+        let directory = signed_directory("doctor-valid-root-substitution");
+        std::fs::write(directory.join(TRUSTED_ROOT_FILE), &root).unwrap();
+        // Root mismatch must win before attempting any other release read.
+        std::fs::remove_file(directory.join(MANIFEST_FILE)).unwrap();
+        let capability = DoctorRecordingCapability::default();
+        for verifier in [
+            Some(&capability as &(dyn OfflineBundleVerificationCapability + Sync)),
+            None,
+        ] {
+            let error =
+                run_doctor_release(&directory, &doctor_fixture_commitment(), verifier).unwrap_err();
+            assert_eq!(error.code, "SPX-Z707");
+            assert!(error
+                .message
+                .contains("independently supplied SHA-256 commitment"));
+        }
+        assert!(capability.0.lock().unwrap().is_empty());
+        // Matching the bytes passes only this binding step, not verification.
+        let matching: [u8; 32] = Sha256::digest(root.as_bytes()).into();
+        let error = run_doctor_release(&directory, &matching, None).unwrap_err();
+        assert_eq!(error.code, "SPX-Z705");
+        assert!(error.message.contains(MANIFEST_FILE));
         std::fs::remove_dir_all(directory).unwrap();
     }
 

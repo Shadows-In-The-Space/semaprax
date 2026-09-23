@@ -204,7 +204,15 @@ impl NativeStageHost {
         )?;
         match output.termination {
             ProcessTermination::Exited(0) => Ok(()),
-            _ => Err(invariant("native_executor.compile")),
+            _ => {
+                #[cfg(test)]
+                eprintln!(
+                    "native stage compiler termination={:?} stderr={}",
+                    output.termination,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                Err(invariant("native_executor.compile"))
+            }
         }
     }
 

@@ -15,7 +15,9 @@ use sha2::{Digest as _, Sha256};
 use std::{fs, path::Path, process::Command};
 
 const REVISION: &str = "r07-native-identity-v1";
-const SETTLED_STDOUT: &[u8] = if cfg!(windows) {
+// The C runtime translates puts("...\n") to CRLF on Windows; Rust's
+// println! emits LF. Keep each physical caller's bytes exact.
+const C_SETTLED_STDOUT: &[u8] = if cfg!(windows) {
     b"authenticated-native-handoff-settled\r\n"
 } else {
     b"authenticated-native-handoff-settled\n"
@@ -253,7 +255,7 @@ fn compile_run(provider: &str, driver: &str, expected_success: bool, label: &str
                 String::from_utf8_lossy(&run.stderr)
             );
             if expected_success {
-                assert_eq!(run.stdout, SETTLED_STDOUT);
+                assert_eq!(run.stdout, C_SETTLED_STDOUT);
             }
         }
         let executable = root.join(format!("probe{opt}-rust"));
@@ -278,7 +280,7 @@ fn compile_run(provider: &str, driver: &str, expected_success: bool, label: &str
             String::from_utf8_lossy(&run.stderr)
         );
         if expected_success {
-            assert_eq!(run.stdout, SETTLED_STDOUT);
+            assert_eq!(run.stdout, b"authenticated-native-handoff-settled\n");
         }
     }
 }

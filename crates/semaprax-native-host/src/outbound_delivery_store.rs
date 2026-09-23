@@ -322,7 +322,6 @@ mod tests {
         let checkpoint = session.session_checkpoint().expect("terminal checkpoint");
         let digest = checkpoint.digest();
         let capacity = checkpoint.capacity();
-        drop(store);
         drop(directory);
 
         // Recovery deliberately reacquires the directory capability rather

@@ -279,7 +279,9 @@ fn exercise_max_total_payload_consumer(one_byte_short: bool) {
         return;
     };
 
-    let wasm_bytes = reference_wasm_module::build();
+    // The 16 MiB payload plus its canonical 2,056-byte carrier frame needs
+    // 257 pages. Keep the default 256-page legacy fixture unchanged.
+    let wasm_bytes = reference_wasm_module::build_with_max_pages(257);
     let (input, output) = max_total_payload_shapes();
     let binding = fixture_binding(&wasm_bytes);
     let consumer = generate_typescript_calling_consumer(
@@ -364,12 +366,11 @@ fn generated_typescript_consumer_rejects_the_retired_host_owned_reference_module
     };
 
     let wasm_bytes = reference_wasm_module::build();
-
+    let compiled = super::compiler_provider_artifact::artifact();
     let (input, output) = shapes();
-    let binding = fixture_binding(&wasm_bytes);
     let consumer = generate_typescript_calling_consumer(
-        &fixture_descriptor_bytes(),
-        &binding,
+        compiled.descriptor_bytes(),
+        compiled.binding(),
         &input,
         &output,
     )
@@ -426,7 +427,7 @@ const bytes = await readFile(process.argv[2]);
 await assert.rejects(
   () => Provider.open(bytes),
   error => error?.detail?.kind === "provider-mismatch"
-    && error.detail.reason === "module-digest",
+    && error.detail.reason === "binding-replay",
 );
 "#,
     )

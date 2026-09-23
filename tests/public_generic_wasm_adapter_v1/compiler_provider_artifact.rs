@@ -86,13 +86,12 @@ fn endpoint_for(
     let parsed = semaprax::parse(source, Path::new("compiler-provider-artifact.spx")).unwrap();
     let source_revision = semaprax::format::canonical(&parsed);
     let program = resolved_program(source);
-    let endpoint = semaprax::public_generic_abi::compiler_endpoint::derive_admitted_public_generic_endpoint_v1(
+    semaprax::public_generic_abi::compiler_endpoint::derive_admitted_public_generic_endpoint_v1(
         &program,
         &source_revision,
         "provider.transform",
     )
-    .unwrap();
-    endpoint
+    .unwrap()
 }
 
 fn endpoint() -> semaprax::public_generic_abi::compiler_endpoint::AdmittedPublicGenericEndpointV1 {

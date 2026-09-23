@@ -554,6 +554,7 @@ fn run(command: &mut Command, label: &str) -> Output {
 /// while ALSO printing one `SHARED_CORPUS <case_id> <STATUS>` line this
 /// harness parses back out.
 const TS_APPENDIX: &str = r#"
+  const { decodeOutput } = await import("../dist/carrier.js");
   await test("shared corpus: success_baseline", async () => {
     const provider = await Provider.open(wasmBytes);
     const input = sampleInput();
@@ -737,7 +738,7 @@ fn ts_malformed_result_carrier_cases() -> String {
     const candidate = new Uint8Array({});
     let status = "OTHER";
     try {{
-      Provider.diagnostics.validateResultCarrier(candidate);
+      decodeOutput(candidate);
       status = "ACCEPTED";
     }} catch (error) {{
       if (error instanceof SemapraxPublicGenericException &&
@@ -818,7 +819,7 @@ fn shared_hostile_corpus_agrees_with_the_native_manifest() {
 
     let round_trip_path = package_root.join("test/round-trip.mjs");
     let mut contents = fs::read_to_string(&round_trip_path).unwrap();
-    let anchor = "if (failed !== 0 || passed !== 14) {";
+    let anchor = "  if (failed > 0) {";
     let position = contents.find(anchor).unwrap_or_else(|| {
         panic!("splice anchor {anchor:?} not found in generated round-trip.mjs")
     });

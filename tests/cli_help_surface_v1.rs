@@ -257,7 +257,11 @@ fn standalone_scoped_help_is_exhaustive_exact_capability_aware_and_inert() {
     let (hidden, hidden_dir) = invoke(&["help", "doctor"]);
     assert!(hidden.status.success());
     assert!(hidden.stderr.is_empty());
-    assert_eq!(hidden.stdout, format!("Usage:\n  {DOCTOR_LINE}").as_bytes());
+    assert_eq!(
+        hidden.stdout,
+        format!("Usage:\n  {DOCTOR_LINE}  semaprax doctor verify-release <release-dir>\n")
+            .as_bytes()
+    );
     std::fs::remove_dir(hidden_dir).unwrap();
     let (language, language_dir) = invoke(&["help", "language"]);
     assert!(language.status.success());

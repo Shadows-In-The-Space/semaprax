@@ -37,6 +37,27 @@ runner is unchanged.
 
 ## Offline profile selection
 
+### Separate release verification proposal
+
+R10 adds the bounded local CLI route `semaprax doctor verify-release <release-dir>`.
+This implementation proposal does not admit a tool profile or change the
+ordinary doctor route described below. It delegates to the existing held,
+bounded, no-follow release loader and aggregate offline Sigstore verifier under
+the unchanged [release signing policy](RELEASE-SIGNING-POLICY-V1.md).
+It requires the complete signed-material inventory; missing material fails
+rather than falling back to digest-only or unsigned success. It accepts no
+profile, target, JSON, signing, publication, or trust-policy options.
+
+The standalone route uses the built-in verifier. An embedding host's explicit
+verifier override retains the distinct caller-supplied-capability report and
+makes no independent cryptographic claim. Verification concerns exact held
+bytes under an explicitly supplied historical root snapshot, not current
+revocation/freshness, a signed hosted release, installation, or profile
+admission. No files are written, artifacts executed, processes spawned, or
+network requests made. This proposal is not accepted hosted/release support.
+
+### Tool profiles (unchanged)
+
 ```text
 semaprax doctor [--profile <id>] [--target native|web|all] [--json]
 ```

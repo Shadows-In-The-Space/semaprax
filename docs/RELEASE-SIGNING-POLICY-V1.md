@@ -412,6 +412,21 @@ only the first.
 
 ### What verification does and does not prove
 
+The additive R10 implementation proposal `semaprax doctor verify-release
+<release-dir>` reuses this same held loader, aggregate verifier, diagnostic
+codes, and fixed identity policy. Unlike `release verify`, it requires complete
+signed material and has no unsigned fallback. This is separate from ordinary
+doctor tool-profile admission and from the Ed25519 doctor-install policy.
+Its local positive transport test uses an explicitly injected recording
+capability, labels that result as non-cryptographic, and requires the identical
+fabricated signing material to fail under the built-in verifier (`SPX-Z707`).
+Swapped archive attestations, stale claims, tampered archives, untrusted
+identities/roots, and missing material must refuse without success output.
+No valid signed SEMAPRAX release is supplied by these tests; the existing
+external-signer Sigstore fixture is not a substitute for the pinned release
+identity. Hosted acceptance, signing identity ownership and rotation/revocation
+decisions remain outstanding and unchanged.
+
 **Does prove:** that a manifest, a provenance document, and a signature claim
 name exactly the same commit, tag, version, and artifact digests; that their
 exact held subjects satisfy the admitted Sigstore v0.3 signatures,

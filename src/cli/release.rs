@@ -93,6 +93,38 @@ pub(crate) fn parse(args: &[String]) -> Result<PathBuf, u8> {
     Err(2)
 }
 
+/// The explicit doctor release check is separate from offline tool profiles.
+/// Complete syntax admission precedes all release-directory reads.
+pub(crate) fn parse_doctor_release(args: &[String]) -> Result<PathBuf, u8> {
+    match args {
+        [command, directory]
+            if command == "verify-release"
+                && !directory.is_empty()
+                && !directory.starts_with('-') =>
+        {
+            Ok(PathBuf::from(directory))
+        }
+        _ => {
+            eprintln!(
+                "doctor accepts exactly `verify-release <release-dir>` for release verification"
+            );
+            Err(2)
+        }
+    }
+}
+
+pub(crate) fn doctor_release_command(
+    args: &[String],
+    capability: Option<&(dyn OfflineBundleVerificationCapability + Sync)>,
+    report: impl FnOnce(&[Diagnostic], bool) -> u8,
+) -> Result<(), u8> {
+    let directory = parse_doctor_release(args)?;
+    let receipt =
+        run_doctor_release(&directory, capability).map_err(|error| report(&[error], false))?;
+    print!("{receipt}");
+    Ok(())
+}
+
 #[cfg(unix)]
 fn open_regular_no_follow(path: &Path) -> Result<std::fs::File, ()> {
     use rustix::fs::{open, Mode, OFlags};
@@ -601,6 +633,22 @@ fn run_with_builtin_offline_verifier(directory: &Path) -> Result<String, Diagnos
     )
 }
 
+/// Unlike `release verify`, doctor never falls back to digest-only success.
+/// The existing held loader requires every signed-material file before the
+/// aggregate verifier runs. Ordinary doctor tool-profile admission is untouched.
+pub(crate) fn run_doctor_release(
+    directory: &Path,
+    capability: Option<&(dyn OfflineBundleVerificationCapability + Sync)>,
+) -> Result<String, Diagnostic> {
+    let receipt = match capability {
+        Some(capability) => run_with_offline_capability(directory, capability),
+        None => run_with_builtin_offline_verifier(directory),
+    }?;
+    Ok(format!(
+        "doctor verify-release: offline release check\n{receipt}"
+    ))
+}
+
 /// What the directory says about signing. A missing claim document is the
 /// ordinary case today and is *not* an error; any other read failure is.
 fn signature_lines(directory: &Path, provenance_bytes: &[u8]) -> Result<String, Diagnostic> {
@@ -903,6 +951,130 @@ mod tests {
         assert!(report.contains("CALLER-SUPPLIED VERIFICATION CAPABILITY"));
         assert!(report.contains("no independent cryptographic claim"));
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    // This capability observes transport only: it cannot establish signing.
+    #[derive(Default)]
+    struct DoctorRecordingCapability(std::sync::Mutex<Vec<Vec<u8>>>);
+
+    impl OfflineBundleVerificationCapability for DoctorRecordingCapability {
+        fn verify_offline_bundle(
+            &self,
+            identity: &semaprax::release_provenance::ExpectedReleaseIdentity,
+            subject: &[u8],
+            _bundle: &[u8],
+            root: &[u8],
+        ) -> Result<(), Diagnostic> {
+            assert_eq!(identity.tag, TAG);
+            assert_eq!(
+                identity.issuer,
+                "https://token.actions.githubusercontent.com"
+            );
+            assert_eq!(root, b"{\"trustedRoot\":\"fixture\"}\n");
+            self.0.lock().unwrap().push(subject.to_vec());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn doctor_release_valid_transport_and_builtin_crypto_are_distinct() {
+        let directory = signed_directory("doctor-valid");
+        let held = load_offline_release(&directory).unwrap();
+        let expected: Vec<_> = std::iter::once(held.provenance)
+            .chain(held.archives.into_iter().map(|archive| archive.bytes))
+            .collect();
+        let capability = DoctorRecordingCapability::default();
+        let report = run_doctor_release(&directory, Some(&capability)).unwrap();
+        assert_eq!(*capability.0.lock().unwrap(), expected);
+        assert!(report.starts_with("doctor verify-release: offline release check\n"));
+        assert!(report.contains("CALLER-SUPPLIED VERIFICATION CAPABILITY"));
+        assert!(report.contains("no independent cryptographic claim"));
+        assert!(!report.contains("CRYPTOGRAPHICALLY VERIFIED OFFLINE"));
+        assert!(!report.contains("VERIFIED UNSIGNED RELEASE"));
+        // Identical valid framing must reach the real engine, which refuses
+        // fabricated certificate/signature material instead of digest fallback.
+        assert_eq!(
+            run_doctor_release(&directory, None).unwrap_err().code,
+            "SPX-Z707"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn doctor_release_swapped_stale_tampered_untrusted_refuse_before_capability() {
+        for (case, code) in [
+            ("swapped", "SPX-Z702"),
+            ("stale", "SPX-Z702"),
+            ("tampered", "SPX-Z704"),
+            ("untrusted", "SPX-Z703"),
+        ] {
+            let directory = signed_directory(&format!("doctor-{case}"));
+            match case {
+                "swapped" => {
+                    let platforms = semaprax::release_provenance::ARCHIVE_PLATFORMS;
+                    let first = directory.join(attestation_name(platforms[0]));
+                    let second = directory.join(attestation_name(platforms[1]));
+                    let first_bytes = std::fs::read(&first).unwrap();
+                    let second_bytes = std::fs::read(&second).unwrap();
+                    std::fs::write(first, second_bytes).unwrap();
+                    std::fs::write(second, first_bytes).unwrap();
+                }
+                "stale" => {
+                    let path = directory.join(SIGNATURE_CLAIM_FILE);
+                    let claim = std::fs::read_to_string(&path).unwrap();
+                    let provenance = std::fs::read(directory.join(PROVENANCE_FILE)).unwrap();
+                    std::fs::write(
+                        path,
+                        claim.replace(&sha256(&provenance), &sha256(b"older release")),
+                    )
+                    .unwrap();
+                }
+                "tampered" => {
+                    let manifest =
+                        parse_manifest(&std::fs::read(directory.join(MANIFEST_FILE)).unwrap())
+                            .unwrap();
+                    let path = directory.join(&manifest.artifacts[0].name);
+                    let mut bytes = std::fs::read(&path).unwrap();
+                    bytes[0] ^= 1;
+                    std::fs::write(path, bytes).unwrap();
+                }
+                "untrusted" => {
+                    let path = directory.join(SIGNATURE_CLAIM_FILE);
+                    let claim = std::fs::read_to_string(&path).unwrap();
+                    std::fs::write(
+                        path,
+                        claim.replace(
+                            "https://token.actions.githubusercontent.com",
+                            "https://untrusted.example",
+                        ),
+                    )
+                    .unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let capability = DoctorRecordingCapability::default();
+            let error = run_doctor_release(&directory, Some(&capability)).unwrap_err();
+            assert_eq!(error.code, code, "{case}: {}", error.message);
+            assert!(capability.0.lock().unwrap().is_empty(), "{case}");
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn doctor_release_never_downgrades_missing_signed_material() {
+        for name in [SIGNATURE_CLAIM_FILE, MESSAGE_BUNDLE_FILE, TRUSTED_ROOT_FILE] {
+            let directory = signed_directory(&format!("doctor-missing-{name}"));
+            std::fs::remove_file(directory.join(name)).unwrap();
+            let capability = DoctorRecordingCapability::default();
+            assert_eq!(
+                run_doctor_release(&directory, Some(&capability))
+                    .unwrap_err()
+                    .code,
+                "SPX-Z705"
+            );
+            assert!(capability.0.lock().unwrap().is_empty());
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     #[test]

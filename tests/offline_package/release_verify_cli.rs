@@ -615,7 +615,20 @@ fn release_verify_refuses_incomplete_offline_bundle_material() {
 /// structural/binding code -- both of which this test rejects.
 #[test]
 fn release_verify_reaches_the_built_in_cryptographic_verifier_and_reports_spx_z707() {
-    let directory = release_directory("crypto-engine-wiring");
+    let directory = complete_offline_directory("crypto-engine-wiring");
+    let output = verify(&directory);
+    assert_rejected(&output, "SPX-Z707");
+    let message = stderr(&output);
+    assert!(
+        !message.contains("CRYPTOGRAPHICALLY VERIFIED OFFLINE"),
+        "{message}"
+    );
+    fs::remove_dir_all(&directory).ok();
+}
+
+// Complete structural material, deliberately not a signed SEMAPRAX release.
+fn complete_offline_directory(label: &str) -> PathBuf {
+    let directory = release_directory(label);
     let provenance = fs::read(directory.join("release-provenance.json")).unwrap();
     let subject_digest = sha256(&provenance);
 
@@ -644,14 +657,115 @@ fn release_verify_reaches_the_built_in_cryptographic_verifier_and_reports_spx_z7
         .unwrap();
     }
 
-    let output = verify(&directory);
-    assert_rejected(&output, "SPX-Z707");
-    let message = stderr(&output);
-    assert!(
-        !message.contains("CRYPTOGRAPHICALLY VERIFIED OFFLINE"),
-        "{message}"
-    );
-    fs::remove_dir_all(&directory).ok();
+    directory
+}
+
+#[test]
+fn doctor_release_real_cli_refuses_unsigned_swapped_stale_tampered_untrusted_material() {
+    for (case, code) in [
+        ("unsigned", "SPX-Z705"),
+        ("fabricated-crypto", "SPX-Z707"),
+        ("swapped", "SPX-Z702"),
+        ("stale", "SPX-Z702"),
+        ("tampered", "SPX-Z704"),
+        ("untrusted-identity", "SPX-Z703"),
+        ("untrusted-root", "SPX-Z707"),
+    ] {
+        let directory = if case == "unsigned" {
+            release_directory("doctor-unsigned")
+        } else {
+            complete_offline_directory(&format!("doctor-{case}"))
+        };
+        match case {
+            "swapped" => {
+                let first =
+                    directory.join(format!("release-attestation-{}.json", ARCHIVE_PLATFORMS[0]));
+                let second =
+                    directory.join(format!("release-attestation-{}.json", ARCHIVE_PLATFORMS[1]));
+                let bytes = fs::read(&first).unwrap();
+                fs::write(first, fs::read(&second).unwrap()).unwrap();
+                fs::write(second, bytes).unwrap();
+            }
+            "stale" => {
+                fs::write(
+                    directory.join("release-signature-claim.json"),
+                    signed_claim_json(FAKE_DIGEST),
+                )
+                .unwrap();
+            }
+            "tampered" => {
+                let path = directory.join(archive_name(ARCHIVE_PLATFORMS[0]));
+                let mut bytes = fs::read(&path).unwrap();
+                bytes[0] ^= 1;
+                fs::write(path, bytes).unwrap();
+            }
+            "untrusted-identity" => {
+                let path = directory.join("release-signature-claim.json");
+                let claim = fs::read_to_string(&path).unwrap();
+                fs::write(
+                    path,
+                    claim.replace(TRUSTED_ISSUER, "https://untrusted.example"),
+                )
+                .unwrap();
+            }
+            "untrusted-root" => {
+                fs::write(
+                    directory.join("trusted_root.jsonl"),
+                    b"{\"trustedRoot\":\"untrusted\"}\n",
+                )
+                .unwrap();
+            }
+            _ => {}
+        }
+        let before: Vec<_> = listing(&directory)
+            .into_iter()
+            .map(|name| {
+                let bytes = fs::read(directory.join(&name)).unwrap();
+                (name, bytes)
+            })
+            .collect();
+        let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
+            .args(["doctor", "verify-release"])
+            .arg(&directory)
+            .output()
+            .unwrap();
+        assert_rejected(&output, code);
+        let after: Vec<_> = listing(&directory)
+            .into_iter()
+            .map(|name| {
+                let bytes = fs::read(directory.join(&name)).unwrap();
+                (name, bytes)
+            })
+            .collect();
+        assert_eq!(before, after, "doctor must not mutate {case} material");
+        fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[test]
+fn doctor_release_real_cli_has_closed_grammar_and_scoped_help() {
+    for arguments in [
+        vec!["doctor", "verify-release"],
+        vec!["doctor", "verify-release", ""],
+        vec!["doctor", "verify-release", "--json"],
+        vec!["doctor", "verify-release", "dist", "extra"],
+        vec!["doctor", "verify-release", "dist", "--profile", "fixture"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
+            .args(&arguments)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(output.stdout.is_empty());
+        assert!(stderr(&output).contains("doctor accepts exactly `verify-release <release-dir>`"));
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_semaprax"))
+        .args(["doctor", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, b"Usage:\n  semaprax doctor [--profile <id>] [--target native|web|all] [--json]\n  semaprax doctor verify-release <release-dir>\n");
 }
 
 /// The verb's grammar is closed: only `verify <dir>`, and a malformed

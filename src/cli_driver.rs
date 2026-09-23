@@ -584,6 +584,10 @@ fn run(args: Vec<String>, host: Option<&PrivateHost>) -> Result<(), u8> {
             Ok(())
         }
         CommandId::Doctor => {
+            if args.get(1).map(String::as_str) == Some("verify-release") {
+                let verifier = host.and_then(|host| host.offline_release_verifier);
+                return cli::release::doctor_release_command(&args[1..], verifier, report);
+            }
             let outcome = semaprax::doctor::run(&args[1..]).map_err(|error| {
                 eprintln!("doctor: {error}");
                 2

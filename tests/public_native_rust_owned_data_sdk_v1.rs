@@ -106,6 +106,32 @@ fn run(command: &mut Command, label: &str) -> Output {
     output
 }
 
+fn release_preview_command() -> Command {
+    let mut command = Command::new("python3");
+    command.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/generated-package-release.py"));
+    command
+}
+
+fn preview_tamper_is_refused(prepared: &Path, payload: &str) {
+    let path = prepared.join("payload").join(payload);
+    let original = fs::read(&path).unwrap();
+    let mut altered = original.clone();
+    altered[0] ^= 1;
+    fs::write(&path, altered).unwrap();
+    let output = release_preview_command()
+        .args(["check", "--kind", "rust", "--prepared-dir"])
+        .arg(prepared)
+        .output()
+        .unwrap();
+    fs::write(&path, original).unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("on-disk file digests disagree"),
+        "tampered preview must be refused before package use: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn locked_version<'a>(lock: &'a str, package: &str) -> &'a str {
     let marker = format!("[[package]]\nname = \"{package}\"\nversion = \"");
     lock.split_once(&marker)
@@ -414,6 +440,33 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
     assert!(!ffi.contains("spx_owned_data_test_fault_v1"));
     assert!(!public.contains("Handle"));
 
+    // The compiler-generated directory first crosses the existing preview
+    // security boundary. The later Cargo archive and independent consumer use
+    // only this checked payload snapshot, never the generator output tree.
+    let preview = fixture.0.join("preview");
+    run(
+        release_preview_command()
+            .args(["prepare", "--kind", "rust", "--package-dir"])
+            .arg(&generated)
+            .args([
+                "--project-name",
+                "owned-data-rust",
+                "--project-version",
+                "0.1.0",
+                "--output",
+            ])
+            .arg(&preview),
+        "prepare genuine owned-data SDK preview",
+    );
+    preview_tamper_is_refused(&preview, "descriptor.json");
+    run(
+        release_preview_command()
+            .args(["check", "--kind", "rust", "--prepared-dir"])
+            .arg(&preview),
+        "verify genuine owned-data SDK preview",
+    );
+    let preview_payload = preview.join("payload");
+
     // Issue #145 requires an external consumer of the archive a registry
     // would contain, rather than a path dependency into the generated output.
     // `cargo package` is offline and does not publish; the extract below is
@@ -421,7 +474,7 @@ fn packaged_safe_package_builds_offline_and_fail_stops_on_unsettled_handles() {
     run(
         native_rust_cargo::cargo_command()
             .args(["package", "--offline", "--no-verify", "--manifest-path"])
-            .arg(generated.join("Cargo.toml"))
+            .arg(preview_payload.join("Cargo.toml"))
             .env("CARGO_TARGET_DIR", package_target.path()),
         "package owned-data SDK tarball",
     );

@@ -3,7 +3,8 @@
 //! The explicit test selector changes all four deterministic stage dispatches,
 //! including authorization. Proposal admission, fresh grant binding/consumption,
 //! injected reads, transitions and settlement use the existing driver unchanged.
-//! Native/Wasm do not meter interpreter fuel or expose its cleanup-event trace;
+//! Native/Wasm do not meter interpreter fuel. Native result copy-out settlement
+//! is observed separately; full body-finalizer/Wasm cleanup parity remains open;
 //! neither metric nor byte-identical cross-engine evidence is claimed here.
 //! This adds no public backend selector, live provider or checkpoint support.
 
@@ -511,4 +512,87 @@ fn interpreter_fuel_exhaustion_stays_explicitly_outside_cross_backend_parity() {
         (0, 0, 1)
     );
     assert_eq!(run.0.stages()[0].outcome(), "fuel_exhausted");
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn native_boundary_result_settlement_matches_retained_copy_out() {
+    let host = native_stage_host().expect("native settlement evidence requires held clang");
+    let compiled = lifecycle();
+    let task = payload(&compiled.binding.task, vec![1, 7, 13], 10);
+    for backend in [native_backend(&host), native_o2_backend(&host)] {
+        let initialized = authorization::dispatch_on(
+            backend,
+            &compiled.program,
+            compiled.binding.initialize.prepared(),
+            std::slice::from_ref(&task),
+            DEFAULT_STAGE_STEPS,
+        )
+        .unwrap();
+        assert_eq!(
+            initialized.cleanup_events,
+            [crate::interpreter::OwnedDataCleanupEvent::CopyOutAndSettleBytes]
+        );
+        let RetainedCallOutcome::Returned(state) = initialized.outcome else {
+            panic!("state")
+        };
+        for budget in [1, 11] {
+            let args = [
+                state.clone(),
+                RetainedValue::I64(budget),
+                RetainedValue::Bool(false),
+                RetainedValue::Usize(1),
+            ];
+            let expected = authorization::dispatch_on(
+                StageBackend::Interpreter,
+                &compiled.program,
+                compiled.binding.authorize.stage().prepared(),
+                &args,
+                DEFAULT_STAGE_STEPS,
+            )
+            .unwrap();
+            let actual = authorization::dispatch_on(
+                backend,
+                &compiled.program,
+                compiled.binding.authorize.stage().prepared(),
+                &args,
+                DEFAULT_STAGE_STEPS,
+            )
+            .unwrap();
+            assert_eq!(actual.outcome, expected.outcome);
+            assert_eq!(actual.cleanup_events, expected.cleanup_events);
+            assert_eq!(actual.cleanup_events.len(), usize::from(budget == 1));
+            assert_eq!(actual.steps_used, 0, "instruction fuel remains unmeasured");
+        }
+    }
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn native_settlement_negative_controls_detect_missing_drops_receipts_and_duplicate_calls() {
+    native_stage_host()
+        .expect("native settlement evidence requires held clang")
+        .assert_boundary_settlement_controls();
+}
+
+#[test]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn native_settlement_cancellation_does_not_repeat_or_start_host_work() {
+    let host = native_stage_host().expect("native settlement evidence requires held clang");
+    let compiled = compile(&source());
+    for backend in [native_backend(&host), native_o2_backend(&host)] {
+        for (cancelled, cancel_on_read, calls) in [(true, false, 0), (false, true, 1)] {
+            let result = run(
+                &compiled,
+                &proposals(&compiled),
+                IterativeBudget::default(),
+                backend,
+                cancelled,
+                cancel_on_read,
+            );
+            assert_eq!(result.0.status(), IterativeStatus::Cancelled);
+            assert_eq!(result.1.reads.len(), calls);
+            assert!(result.1.transitions.is_empty());
+        }
+    }
 }

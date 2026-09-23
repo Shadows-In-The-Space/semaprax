@@ -41,6 +41,11 @@
 //! declared effect, and the fixture this module's own tests share with
 //! `stage_backend_parity.rs` carries no `requires`/`ensures` -- so this gap
 //! is a scoped, honestly-reported one, not a silently-passing one.
+//!
+//! The wrapper settles its borrowed argument copies and returned Bytes before
+//! accepting an exact post-finalizer receipt. `cleanup_events` describes only
+//! successful result copy-out (as on the interpreter), not body finalizers,
+//! instruction fuel, or cleanup after process termination/cancellation.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -60,6 +65,7 @@ use crate::interpreter::retained_call::{
     PreparedRetainedCall, RetainedCallEvaluation, RetainedCallOutcome, RetainedField,
     RetainedRecord, RetainedValue, RetainedVariant,
 };
+use crate::interpreter::OwnedDataCleanupEvent;
 use crate::variant_layout::{VariantLayout, VariantTarget};
 
 use crate::agent_lifecycle::stages::invariant;
@@ -526,6 +532,7 @@ struct Emitter {
     body: String,
     byte_ordinal: usize,
     arg_ordinal: usize,
+    borrowed_owners: Vec<String>,
 }
 
 impl Emitter {
@@ -534,6 +541,7 @@ impl Emitter {
             body: String::new(),
             byte_ordinal: 0,
             arg_ordinal: 0,
+            borrowed_owners: Vec::new(),
         }
     }
 
@@ -655,6 +663,9 @@ fn prepare_argument(
                 for field in &layout.fields {
                     if field.ty == ResolvedType::Bytes {
                         extra.push(format!("&{var}.{}", field_symbol(&field.field)));
+                        emitter
+                            .borrowed_owners
+                            .push(format!("{var}.{}", field_symbol(&field.field)));
                     }
                 }
             }
@@ -719,6 +730,18 @@ fn emit_record_print(
         }
     }
     body.push_str("    printf(\"\\n\");\n");
+    for field in layout
+        .fields
+        .iter()
+        .rev()
+        .filter(|field| field.ty == ResolvedType::Bytes)
+    {
+        emit_settle(
+            body,
+            &format!("({expr}).{}", field_symbol(&field.field)),
+            "spx_result_settled",
+        );
+    }
     Ok(())
 }
 
@@ -765,10 +788,36 @@ fn emit_variant_print(
                 _ => return Err(invariant("native_executor.result.leaf")),
             }
         }
-        body.push_str("        printf(\"\\n\");\n        break;\n    }\n");
+        body.push_str("        printf(\"\\n\");\n");
+        for field in case
+            .fields
+            .iter()
+            .rev()
+            .filter(|field| field.ty == ResolvedType::Bytes)
+        {
+            emit_settle(
+                body,
+                &format!(
+                    "({expr}).spx_payload.{}.{}",
+                    case_symbol(&case.case),
+                    field_symbol(&field.field)
+                ),
+                "spx_result_settled",
+            );
+        }
+        body.push_str("        break;\n    }\n");
     }
     body.push_str("    default: printf(\"INVALID_TAG\\n\"); break;\n    }\n");
     Ok(())
+}
+
+// A receipt counts completed physical finalizers, not a cleanup-plan prediction.
+// Clearing the carrier is part of the runtime finalizer's postcondition. Result
+// publication remains in Rust, after the complete transcript is authenticated.
+fn emit_settle(body: &mut String, owner: &str, counter: &str) {
+    body.push_str(&format!(
+        "    spx_bytes_drop(&({owner}));\n    if (({owner}).ptr != NULL || ({owner}).len != 0) return 91;\n    ++{counter};\n"
+    ));
 }
 
 fn c_value_type_name(
@@ -963,7 +1012,28 @@ fn run(
     if entry.params.len() != arguments.len() || arguments.len() != prepared.parameter_count() {
         return Err(invariant("native_executor.argument.arity"));
     }
+    let (body, borrowed_count) = render_driver(program, entry, arguments)?;
+    let generated =
+        crate::codegen::emit_hir_c(program).map_err(|_| invariant("native_executor.codegen"))?;
+    let root = ProbeDirectory::create()?;
+    let outcome = compile_and_run(&generated, &body, &root, host, optimization, cancellation);
+    root.cleanup();
+    let stdout = outcome?;
+    let result_declaration = nominal_declaration(&entry.return_type)?.clone();
+    decode(
+        entry.id.clone(),
+        &result_declaration,
+        &stdout,
+        max_steps,
+        borrowed_count,
+    )
+}
 
+fn render_driver(
+    program: &hir::ResolvedProgram,
+    entry: &hir::ResolvedFunction,
+    arguments: &[RetainedValue],
+) -> Result<(String, usize), Diagnostic> {
     let mut emitter = Emitter::new();
     let mut call_args = Vec::new();
     for (parameter, argument) in entry.params.iter().zip(arguments) {
@@ -988,6 +1058,7 @@ fn run(
     let mut body = String::new();
     body.push_str("    struct spx_status_entry spx_status_entries[UINT32_C(32)];\n");
     body.push_str("    struct spx_context spx_ctx = {0};\n");
+    body.push_str("    unsigned spx_borrowed_settled = 0, spx_result_settled = 0;\n");
     body.push_str("    if (!spx_context_init(&spx_ctx, UINT64_C(1), spx_status_entries, UINT32_C(32), NULL, NULL, NULL)) { return 90; }\n");
     body.push_str(&emitter.body);
     body.push_str(&format!(
@@ -997,9 +1068,12 @@ fn run(
         body.push_str(&format!(", {argument}"));
     }
     body.push_str(", &spx_native_exec_result);\n");
-    body.push_str(
-        "    if (spx_native_exec_token != SPX_STATUS_SUCCESS) { printf(\"STATUS_FAILURE\\n\"); return 0; }\n",
-    );
+    // Borrowed argument copies stay caller-owned on both success and failure.
+    // Own parameters were transferred to the selected callee: never drop them here.
+    for owner in emitter.borrowed_owners.iter().rev() {
+        emit_settle(&mut body, owner, "spx_borrowed_settled");
+    }
+    body.push_str("    if (spx_native_exec_token != SPX_STATUS_SUCCESS) { printf(\"STATUS_FAILURE\\n\"); } else {\n");
 
     if let Ok(layout) =
         AggregateLayout::for_type(program, AggregateTarget::Native64, &entry.return_type)
@@ -1012,18 +1086,12 @@ fn run(
     } else {
         return Err(invariant("native_executor.result.shape"));
     }
-    body.push_str("    return 0;\n");
-
-    let generated =
-        crate::codegen::emit_hir_c(program).map_err(|_| invariant("native_executor.codegen"))?;
-
-    let root = ProbeDirectory::create()?;
-    let outcome = compile_and_run(&generated, &body, &root, host, optimization, cancellation);
-    root.cleanup();
-    let stdout = outcome?;
-    let result_declaration = nominal_declaration(&entry.return_type)?.clone();
-
-    decode(entry.id.clone(), &result_declaration, &stdout, max_steps)
+    body.push_str("    }\n");
+    body.push_str(&format!(
+        "    printf(\"SETTLED native-boundary-v1 {} %u %u\\n\", spx_borrowed_settled, spx_result_settled);\n    return 0;\n",
+        hex_payload(&entry.id)
+    ));
+    Ok((body, emitter.borrowed_owners.len()))
 }
 
 fn compile_and_run(
@@ -1055,12 +1123,20 @@ fn decode(
     result_declaration: &DeclarationId,
     stdout: &str,
     max_steps: usize,
+    borrowed_count: usize,
 ) -> Result<RetainedCallEvaluation, Diagnostic> {
-    let line = stdout
-        .lines()
+    let mut lines = stdout.split_terminator('\n');
+    let line = lines
         .next()
         .ok_or_else(|| invariant("native_executor.decode.empty"))?;
+    let receipt = lines
+        .next()
+        .ok_or_else(|| invariant("native_executor.decode.settlement"))?;
+    if lines.next().is_some() || !stdout.ends_with('\n') {
+        return Err(invariant("native_executor.decode.settlement"));
+    }
     if line == "STATUS_FAILURE" {
+        check_receipt(receipt, &function_id, borrowed_count, 0)?;
         // A native contract/status failure is detected, not silently
         // ignored, but this executor does not yet reconstruct the exact
         // interpreter-shaped `NormalizedStatus` from the native status
@@ -1081,14 +1157,208 @@ fn decode(
     } else {
         return Err(invariant("native_executor.decode.shape"));
     };
+    let RetainedCallOutcome::Returned(value) = &outcome else {
+        unreachable!()
+    };
+    let fields = match value {
+        RetainedValue::Record(record) => &record.fields,
+        RetainedValue::Variant(variant) => &variant.fields,
+        _ => unreachable!(),
+    };
+    let result_count = fields
+        .iter()
+        .filter(|field| matches!(field.value, RetainedValue::Bytes(_)))
+        .count();
+    check_receipt(receipt, &function_id, borrowed_count, result_count)?;
     Ok(RetainedCallEvaluation {
         function_id,
         outcome,
-        cleanup_events: Vec::new(),
+        cleanup_events: vec![OwnedDataCleanupEvent::CopyOutAndSettleBytes; result_count],
         steps_used: 0,
         max_steps,
         failure: None,
     })
+}
+
+fn check_receipt(
+    receipt: &str,
+    function: &DeclarationId,
+    borrowed: usize,
+    results: usize,
+) -> Result<(), Diagnostic> {
+    if receipt
+        != format!(
+            "SETTLED native-boundary-v1 {} {borrowed} {results}",
+            hex_payload(function)
+        )
+    {
+        return Err(invariant("native_executor.decode.settlement"));
+    }
+    Ok(())
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+impl NativeStageHost {
+    /// Physical negative controls, reached from the owning lifecycle harness.
+    pub(in crate::agent_lifecycle) fn assert_boundary_settlement_controls(&self) {
+        let parsed = crate::check(
+            crate::agent_lifecycle::tests::MODULE,
+            Path::new("settlement.spx"),
+        )
+        .unwrap();
+        let program = hir::resolve(&parsed).unwrap();
+        let entry = program
+            .functions
+            .iter()
+            .find(|f| f.id.as_str() == "fixture.agent.fn.observe")
+            .unwrap();
+        let state = RetainedValue::Record(RetainedRecord {
+            record: DeclarationId::new("fixture.agent.type.state"),
+            fields: [
+                ("objective", RetainedValue::Bytes(vec![1, 7, 13])),
+                ("budget", RetainedValue::I64(10)),
+                ("epoch", RetainedValue::I64(1)),
+            ]
+            .into_iter()
+            .map(|(name, value)| RetainedField {
+                field: DeclarationId::new(format!("fixture.agent.type.state.{name}")),
+                value,
+            })
+            .collect(),
+        });
+        let (body, borrowed) = render_driver(&program, entry, &[state]).unwrap();
+        assert_eq!(borrowed, 1);
+        let generated_body = crate::codegen::emit_hir_c(&program).unwrap();
+        // Test-only physical allocation inventory. Neither emitted receipts nor
+        // result-shape counts can hide an omitted or duplicated physical free.
+        let generated = format!(
+            r#"#include <stdlib.h>
+static void *test_live[32];
+static unsigned test_allocs, test_frees;
+static void *test_malloc(size_t n) {{
+    void *p = malloc(n); if (!p || test_allocs == 32) abort();
+    test_live[test_allocs++] = p; return p;
+}}
+static void test_free(void *p) {{
+    if (!p) return;
+    for (unsigned i=0; i<test_allocs; ++i) if (test_live[i] == p) {{
+        test_live[i] = NULL; ++test_frees; free(p); return;
+    }}
+    abort();
+}}
+#define malloc test_malloc
+#define free test_free
+{generated_body}"#
+        );
+        let failure_source = crate::agent_lifecycle::tests::MODULE.replace(
+            "fn observe(state: borrow State) -> Observation\n{",
+            "fn observe(state: borrow State) -> Observation\n    requires false\n{",
+        );
+        let failure_program =
+            hir::resolve(&crate::check(&failure_source, Path::new("failure.spx")).unwrap())
+                .unwrap();
+        let failure_generated = generated.replace(
+            &generated_body,
+            &crate::codegen::emit_hir_c(&failure_program).unwrap(),
+        );
+        let symbol = function_symbol(&entry.id);
+        let body = format!("unsigned test_calls = 0;\n#define {symbol}(...) (++test_calls, {symbol}(__VA_ARGS__))\n{body}")
+            .replace("    return 0;", "    if (test_calls != 1 || test_allocs != 2 || test_frees != 2) return 92;\n    return 0;");
+        for optimization in ["-O0", "-O2"] {
+            for mutation in [
+                "none",
+                "omit-borrow",
+                "omit-result",
+                "drop-failure",
+                "duplicate-call",
+                "primary-failure",
+            ] {
+                let mut driver = body.clone();
+                if mutation.starts_with("omit-") {
+                    let owner = if mutation == "omit-borrow" {
+                        format!(
+                            "spx_native_exec_arg_1.{}",
+                            field_symbol(&DeclarationId::new("fixture.agent.type.state.objective"))
+                        )
+                    } else {
+                        format!(
+                            "(spx_native_exec_result).{}",
+                            field_symbol(&DeclarationId::new("fixture.agent.type.observation.tag"))
+                        )
+                    };
+                    let drop = format!("spx_bytes_drop(&({owner}));");
+                    assert_eq!(driver.matches(&drop).count(), 1);
+                    driver =
+                        driver.replace(&drop, &format!("({owner}).ptr = NULL; ({owner}).len = 0;"));
+                } else if mutation == "drop-failure" {
+                    driver.insert_str(0, "#define spx_bytes_drop(...) abort()\n");
+                } else if mutation == "duplicate-call" {
+                    driver = driver.replace(
+                        &format!("(++test_calls, {symbol}(__VA_ARGS__))"),
+                        &format!("(++test_calls, {symbol}(__VA_ARGS__), ++test_calls, {symbol}(__VA_ARGS__))"),
+                    );
+                } else if mutation == "primary-failure" {
+                    driver = driver.replace(
+                        "test_allocs != 2 || test_frees != 2",
+                        "test_allocs != 1 || test_frees != 1",
+                    );
+                }
+                let root = ProbeDirectory::create().unwrap();
+                let selected = if mutation == "primary-failure" {
+                    &failure_generated
+                } else {
+                    &generated
+                };
+                let result = compile_and_run(selected, &driver, &root, self, optimization, None);
+                root.cleanup();
+                if mutation == "none" {
+                    let stdout = result.unwrap();
+                    let declaration = nominal_declaration(&entry.return_type).unwrap();
+                    let evaluation =
+                        decode(entry.id.clone(), declaration, &stdout, 1000, borrowed).unwrap();
+                    assert_eq!(
+                        evaluation.cleanup_events,
+                        [OwnedDataCleanupEvent::CopyOutAndSettleBytes]
+                    );
+                    for forged in [
+                        stdout.lines().next().unwrap().to_owned(),
+                        format!("{stdout}{stdout}"),
+                        stdout.replace(" 1 1\n", " 0 1\n"),
+                        stdout.replace(" 1 1\n", " 1 0\n"),
+                    ] {
+                        assert!(
+                            decode(entry.id.clone(), declaration, &forged, 1000, borrowed).is_err()
+                        );
+                    }
+                } else if mutation == "primary-failure" {
+                    let stdout =
+                        result.expect("checked failure physically settles borrowed owners");
+                    assert_eq!(
+                        stdout,
+                        format!(
+                            "STATUS_FAILURE\nSETTLED native-boundary-v1 {} 1 0\n",
+                            hex_payload(&entry.id)
+                        )
+                    );
+                    let error = decode(
+                        entry.id.clone(),
+                        nominal_declaration(&entry.return_type).unwrap(),
+                        &stdout,
+                        1000,
+                        borrowed,
+                    )
+                    .unwrap_err();
+                    assert!(error
+                        .message
+                        .contains("native_executor.decode.status_failure"));
+                } else {
+                    let error = result.expect_err("physical negative control must fail");
+                    assert!(error.message.contains("native_executor.run"),
+                        "{mutation} at {optimization} must execute, not fail compilation: {error:?}");
+                }
+            }
+        }
+    }
 }
 
 fn decode_field(token: &str) -> Result<RetainedField, Diagnostic> {

@@ -331,7 +331,7 @@ pub(super) fn hold_regular_file_name_bounded_prepared(
     authenticate_regular_file_bounded(unsafe { File::from_raw_fd(fd) }, maximum)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub(crate) fn test_hold_regular_file_name_bounded(
     directory: &Directory,
     name: &OsStr,

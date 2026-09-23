@@ -174,16 +174,6 @@ pub(super) fn hold_regular_file_name_external_read_bounded_prepared(
     authenticate_regular_file_bounded(file, maximum)
 }
 
-#[cfg(test)]
-pub(crate) fn test_hold_regular_file_name_bounded(
-    directory: &Directory,
-    name: &OsStr,
-    maximum: u64,
-) -> Result<RegularFile, Error> {
-    let name = prepare_relative_name(name)?;
-    hold_regular_file_name_external_read_bounded_prepared(directory, &name, maximum)
-}
-
 pub fn hold_regular_file(directory: &Directory, name: &OsStr) -> Result<RegularFile, Error> {
     recheck_directory(directory)?;
     let name = prepare_relative_name(name)?;

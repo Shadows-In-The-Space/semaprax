@@ -103,6 +103,20 @@ fn fixture(guard: bool) -> (String, String) {
     remint(&mut unknown_direction);
     let mut oversized_metadata = frame.clone();
     oversized_metadata[8 + schema_len..8 + schema_len + 8].copy_from_slice(&65537u64.to_le_bytes());
+    let mut count_offset = 0;
+    for _ in 0..6 {
+        let field_len =
+            u64::from_le_bytes(frame[count_offset..count_offset + 8].try_into().unwrap()) as usize;
+        count_offset += 8 + field_len;
+    }
+    let mut oversized_count_truncated = frame[..count_offset + 8].to_vec();
+    oversized_count_truncated[count_offset..].copy_from_slice(&257u64.to_le_bytes());
+    assert_eq!(
+        semaprax::public_generic_abi::carrier::frame::parse_bounded(&oversized_count_truncated)
+            .unwrap_err()
+            .code,
+        "SPX-PG802"
+    );
     let mut substituted = leaves.clone();
     substituted[0] = CarrierLeaf::new("forged.path", LeafKind::Bytes, vec![1, 7, 13]);
     let wrong_path = plan.frame_with_leaves(substituted).encode();
@@ -145,6 +159,7 @@ fn fixture(guard: bool) -> (String, String) {
         ("duplicate_path", &duplicate_path),
         ("invalid_utf8", &invalid_utf8),
         ("oversized_metadata", &oversized_metadata),
+        ("oversized_count_truncated", &oversized_count_truncated),
         ("wrong_tag", &wrong_tag),
         ("corrupt", &corrupt),
         ("oversized", &oversized),

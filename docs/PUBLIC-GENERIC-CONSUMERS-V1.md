@@ -27,10 +27,11 @@ unsupported and unpublished.
 The generated TypeScript calling package now emits canonical descriptor-bound
 Logical Carrier v1 frames and drives the compiler-owned zero-import Wasm
 provider through open/prepare/call/export/release/close. The earlier stand-in
-and flat-frame passages below describe the predecessor shared-corpus lane; they
-remain relevant only to that historical lane and must not be read as the
-current compiled-package limitation. Full shared-corpus migration, broader
-endpoint shapes, browser/hosted evidence, and publication remain open.
+and flat-frame passages below describe the still-active, explicitly selected
+reference shared-corpus lane; they must not be read as the current compiled-
+package limitation or as a fallback from the compiled binding. Full shared-
+corpus migration, broader endpoint shapes, browser/hosted evidence, and
+publication remain open.
 
 The four calling-consumer generators retain their byte-oriented configuration
 API: generation embeds the supplied trusted descriptor bytes without granting

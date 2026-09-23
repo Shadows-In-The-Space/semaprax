@@ -81,15 +81,19 @@ The module owns scratch growth, opaque non-recycled handles, carrier SHA-256
 replay, checked source invocation, result staging/export, and explicit
 release/close transitions. Its binding covers normalized exact artifact bytes,
 endpoint export, compiler backend, descriptor, runtime identity, and Core Wasm
-target. The generated TypeScript runtime now calls these exports and no longer
-contains an allocator or handle registry.
+target. When its binding selects the compiled provider, the generated
+TypeScript runtime calls these exports and does not use its host allocator or
+handle registry. The same generated file retains an explicitly selected
+reference-provider route for the predecessor fixture and settlement corpora;
+there is no fallback between the bindings.
 
 The generated TypeScript package now emits canonical descriptor-bound carrier
 frames and executes the complete lifecycle against this compiler artifact.
-The retired hand-assembled reference module is a negative compatibility
-fixture only. This closes the former codec mismatch, but not #229's broader
-acceptance: hosted evidence, the full hostile/settlement matrix, and endpoint
-shapes beyond the admitted flat owned-`Bytes` profile remain separate.
+The hand-assembled reference module remains an explicit legacy test lane and
+cannot satisfy compiled-provider acceptance. This closes the former codec
+mismatch, but not #229's broader acceptance: hosted evidence, the full
+hostile/settlement matrix, and endpoint shapes beyond the admitted flat
+owned-`Bytes` profile remain separate.
 
 ## Nonclaims
 
@@ -120,14 +124,16 @@ cargo test --locked -p semaprax --test public_generic_wasm_adapter_v1 -- \
   compiler_provider_artifact --test-threads=1
 cargo test --locked -p semaprax --test public_generic_native_adapter_v1 -- \
   consumer_settlement:: --test-threads=1
+cargo test --locked -p semaprax --test public_generic_native_adapter_v1 -- \
+  authenticated_handoff:: --test-threads=1
 ```
 
 The first gate covers manifest selection, checked admission, deterministic
 artifact derivation, Project Lock binding, source-drift identity, shape/count
 refusals, and fail-closed legacy output routes. The second validates the exact
 zero-import export inventory and executes open/prepare/checked-call/export/
-release/close under Node. The third proves both the predecessor generated-
-caller fixture lane and the additive authenticated identity lane. The latter
-rejects malformed metadata, binding drift, stale generation, wrong ownership,
-and settlement-plan drift before allocation or dispatch across C, C++, and
-Rust at `-O0` and `-O2`.
+release/close under Node. The third proves the predecessor generated-caller
+fixture lane. The fourth proves the additive authenticated identity lane,
+which rejects malformed metadata, binding drift, stale generation, wrong
+ownership, and settlement-plan drift before allocation or dispatch across C,
+C++, and Rust at `-O0` and `-O2`.

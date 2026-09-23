@@ -29,6 +29,7 @@ int main(void) {
     refused(provider,generation,0,cleanup,sizeof(cleanup),duplicate_path,sizeof(duplicate_path),5);
     refused(provider,generation,0,cleanup,sizeof(cleanup),invalid_utf8,sizeof(invalid_utf8),5);
     refused(provider,generation,0,cleanup,sizeof(cleanup),oversized_metadata,sizeof(oversized_metadata),5);
+    refused(provider,generation,0,cleanup,sizeof(cleanup),oversized_count_truncated,sizeof(oversized_count_truncated),6);
     refused(provider,generation,0,cleanup,sizeof(cleanup),wrong_tag,sizeof(wrong_tag),5);
     refused(provider,generation,0,cleanup,sizeof(cleanup),corrupt,sizeof(corrupt),14);
     refused(provider,generation,0,cleanup,sizeof(cleanup),oversized,sizeof(oversized),6);

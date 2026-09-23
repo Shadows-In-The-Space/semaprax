@@ -29,13 +29,15 @@
 //! prerequisite, not a limitation invented here.
 //!
 //! The generated `wasm-provider.ts` now authenticates and instantiates the
-//! compiler-owned zero-import provider artifact and delegates scratch,
-//! open/prepare/call/export, handles, and release/close transitions to that
-//! module. It contains no host allocator or provider state machine.
+//! compiler-owned zero-import provider artifact. For the compiled binding it
+//! delegates scratch, open/prepare/call/export, handles, and release/close
+//! transitions to that module; that selected route uses no host allocator or
+//! provider state machine. The generated file deliberately retains the
+//! explicit reference-provider route for its older fixture and settlement
+//! corpora, with no fallback between the two bindings.
 //! `carrier.ts` emits the canonical descriptor-bound Logical Carrier v1 frame,
 //! so the generated package executes the complete lifecycle against the
-//! compiled provider artifact. The hand-assembled reference module is retained
-//! only as a negative legacy fixture, never as the provider implementation.
+//! compiled provider artifact.
 //!
 //! Determinism and authority: like [`super::rust_calling::generate_rust_calling_consumer`],
 //! this is a pure function from already-trusted bytes to source text. It

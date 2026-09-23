@@ -61,9 +61,12 @@ static spx_pg_status_v1 spx_pg_auth_frame(const uint8_t *p, size_t n,
             binding_mismatch=1;
         }
     }
-    if (n-at < 16) return SPX_PG_STATUS_MALFORMED_CARRIER;
-    uint64_t count=spx_pg_read_u64le(p+at), total=spx_pg_read_u64le(p+at+8); at+=16; trusted+=16;
-    if (count>256 || total>SPX_PG_MAX_TOTAL_PAYLOAD_BYTES) return SPX_PG_STATUS_CARRIER_CAPACITY;
+    if (n-at < 8) return SPX_PG_STATUS_MALFORMED_CARRIER;
+    uint64_t count=spx_pg_read_u64le(p+at); at+=8;
+    if (count>256) return SPX_PG_STATUS_CARRIER_CAPACITY;
+    if (n-at < 8) return SPX_PG_STATUS_MALFORMED_CARRIER;
+    uint64_t total=spx_pg_read_u64le(p+at); at+=8; trusted+=16;
+    if (total>SPX_PG_MAX_TOTAL_PAYLOAD_BYTES) return SPX_PG_STATUS_CARRIER_CAPACITY;
     if (count!=SPX_PG_AUTH_LEAF_COUNT) binding_mismatch=1;
     const uint8_t *paths[256]; size_t path_lengths[256];
     size_t sum=0;

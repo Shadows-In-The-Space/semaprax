@@ -8,10 +8,10 @@ separately gated.
 
 Audience: agent builders, compiler contributors, and reviewers.
 
-This additive [Project Candidate](PROJECT-CANDIDATES-V1.md) operation replaces
-one authored body expression selected by its actual retained HIR identity.
-Canonical source remains authoritative. A caller supplies neither source text,
-byte offsets, AST paths, nor trusted graph/HIR objects.
+This [Project Candidate](PROJECT-CANDIDATES-V1.md) operation replaces one
+authored body expression, selected by its actual retained HIR identity.
+Canonical source remains authoritative. Callers supply no source text, byte
+offsets, AST paths, or trusted graph/HIR objects.
 
 ## Discovery and selection
 
@@ -34,9 +34,9 @@ entries contain:
 
 The function's declared effect budget is reported separately. This is an
 authority ceiling, not a claim that expression effects were inferred precisely.
-Lexical visibility is also distinct from liveness: an owned binding may be
-lexically visible after it was consumed. The actual replacement must pass the
-ordinary ownership and effect verifier.
+Being in scope does not mean a value is still live: an owned binding may remain
+visible after consumption. The replacement must still pass the ordinary
+ownership and effect verifier.
 
 The scope includes parameters, preceding `let` bindings in the same enclosing
 blocks, and the current match arm's typed binders. A `let` initializer cannot

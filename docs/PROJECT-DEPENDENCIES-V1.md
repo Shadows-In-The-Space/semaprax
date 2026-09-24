@@ -7,11 +7,11 @@ The public-support decision remains separate.
 Audience: application authors, package authors, Rust host-adapter authors, and
 compiler contributors.
 
-Project Dependencies v1 gives scalar `semaprax.manifest.v1` projects two
-deliberately separate dependency boundaries. SEMAPRAX packages are replayed,
-resolved, and linked into the checked semantic workspace. Rust crates are
-exact inputs to the generated Native Rust SDK package and are available only
-to Rust host code. Neither route grants the compiler ambient network access.
+Scalar `semaprax.manifest.v1` projects have two separate dependency routes.
+SEMAPRAX packages are replayed, resolved and linked into the checked semantic
+workspace. Rust crates are exact inputs to the generated Native Rust SDK
+package, available only to Rust host code. Neither route gives the compiler
+ambient network access.
 
 ## SEMAPRAX package closure
 
@@ -28,8 +28,8 @@ acme.math = "vendor/acme-math.subject.json"
 ```
 
 The table has at most four rows, is strictly byte-sorted by package identity,
-and uses canonical relative `.json` paths. It contains the entire finite
-closure, including transitive packages, not merely the roots. Each held file
+and uses canonical relative `.json` paths. It lists the entire finite dependency closure, including transitive packages,
+not just the roots. Each held file
 must independently replay as a Semantic Package Subject v3 and its embedded
 Semantic Package Report v2. The table key must equal the subject coordinate's
 package name.

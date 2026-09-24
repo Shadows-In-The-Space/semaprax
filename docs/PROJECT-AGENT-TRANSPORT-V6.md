@@ -12,8 +12,8 @@ broader product completion remain separately gated.
 
 `semapraxd --stdio --allow-project-public-api` selects the read-only
 `semaprax.agent-transport.v6` profile over one host-selected Project v8, v9,
-v10, or v11 public owned-data subject. The authenticated manifest selects the
-exact profile. Requests cannot select or widen it. V6 adds the same two
+v10, or v11 public owned-data subject. The authenticated manifest fixes the
+profile; requests cannot select a different one or widen it. V6 adds the same two
 semantic method names as v5 to the unchanged read-only inspection surface:
 
 - `project/api-describe`
@@ -29,9 +29,9 @@ unchanged.
 ## Bound subject and response
 
 Both methods require the exact Project and Workspace revisions returned by
-`workspace/open`. The common held-input pre- and post-authentication surrounds
-the complete read. Drift is absorbing and prevents payload publication.
-Notifications do not execute either semantic method.
+`workspace/open`. Held inputs are authenticated before and after the complete read. Once drift
+is observed, the session cannot recover and no payload is published.
+Notifications execute neither semantic method.
 
 Both results identify their closed profile with:
 

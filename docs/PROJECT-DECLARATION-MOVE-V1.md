@@ -8,12 +8,11 @@ authoring-time, ignored, or separately provisioned observations below retain
 their narrower scope; public promotion and broader product completion remain
 separately gated.
 
-The additive `move_declaration` intention relocates one existing top-level
-function between already authenticated Project modules. It preserves the
-function's explicit stable ID and display name, reconstructs imports and calls
-by stable identity, and passes through full candidate source and Project
-admission. Human `.spx` files remain canonical; this operation constructs an
-immutable private candidate and has no filesystem publication authority.
+Use `move_declaration` to move one existing top-level function between
+authenticated Project modules. It keeps the explicit stable ID and display
+name, rebuilds imports and calls by stable identity, and runs full candidate
+source and Project admission. Human `.spx` files remain canonical. The result
+is an immutable private candidate, not permission to publish files.
 
 ```json
 {
@@ -26,8 +25,8 @@ immutable private candidate and has no filesystem publication authority.
 These are the exact required keys. Both selectors are existing function stable
 IDs of at most 4,096 UTF-8 bytes, without NUL. The destination selects a module
 through an explicit monomorphic top-level anchor, including an existing `main`.
-It supplies neither a source path nor an insertion position. The function is
-appended after the destination module's existing functions.
+The selector supplies neither a source path nor an insertion position. The
+function is appended after existing functions in the destination module.
 
 ## Admitted boundary
 

@@ -15,12 +15,11 @@ persistent identity and an existing lexical root:
 {"kind":"field_place","target":"packets.packet.payload","root":"packet"}
 ```
 
-The request has exactly these three keys. `root` is a bounded local identifier,
-not source text, a dotted path, a recursive base expression, or an arbitrary
-value ID. `target` identifies an explicit field of an authenticated source
-record. The compiler derives its field spelling and owner from checked source
-declarations. A same-spelling field on a different record cannot satisfy the
-selected identity.
+Only these three keys are accepted. `root` is a bounded local identifier, not
+source text, a dotted path, a recursive base expression, or an arbitrary value
+ID. `target` selects an explicit field of an authenticated source record. The
+compiler derives the field name and owner from checked declarations. A field
+with the same name on another record does not match the selected identity.
 
 ## Exact owner and direct source lowering
 
@@ -29,8 +28,8 @@ bindings. Existing expression selections supply their checked HIR scope;
 function parameters supply their authenticated declared types. Constructor
 bindings propagate exact nominal identities from their initializers. A field
 selection must agree with that root's record identity and ordered type
-arguments. A type cannot be inferred from the requested field merely to make
-the selection succeed. Missing or ambiguous facts reject with `SPX-G225`.
+arguments. The compiler cannot infer a type from the requested field just to make the
+selection succeed. Missing or ambiguous facts reject with `SPX-G225`.
 
 Propagation follows the actual constructed AST: aliases retain their known
 type; record/variant constructors retain the exact nominal instance; a call

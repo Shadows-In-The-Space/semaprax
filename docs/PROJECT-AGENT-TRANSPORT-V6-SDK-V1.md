@@ -16,17 +16,16 @@ descriptor, and carrier schema triples for Project v8 through v11. It records
 the transport byte ceilings and explicitly identifies TypeScript, Python, and
 Rust codecs.
 
-Generated codecs only construct LF-delimited JSON-RPC request bytes and decode
-caller-supplied response bytes. They never locate or launch `semapraxd`, read a
-manifest, select a path or tool, inspect an environment, open a socket, or
-perform filesystem, source, workspace, package, or publication effects. The
-caller owns process and byte transport plumbing.
+Generated codecs construct LF-delimited JSON-RPC requests and decode response
+bytes supplied by the caller. The caller must manage processes and transport.
+Codecs never locate or launch `semapraxd`, read manifests, select paths or tools,
+inspect environments, open sockets, or perform filesystem, source, workspace,
+package, or publication effects.
 
 The decoders reject surplus wrapper/result fields, mismatched request IDs,
 unknown profile triples, invalid descriptor digests, descriptor/profile
-disagreement, and carrier/profile disagreement. Nested descriptor semantic
-replay and carrier authentication remain server responsibilities; the SDK does
-not relabel structural outer validation as authentication.
+disagreement, and carrier/profile disagreement. The server still owns nested descriptor semantic replay and carrier
+authentication. Checking the outer response structure does not authenticate it.
 
 This artifact adds no protocol method and does not alter v2-v6 wire bytes. Its
 owning gate is the `agent_transport_v6_sdk` module in the Project integration

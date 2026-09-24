@@ -8,11 +8,12 @@ signatures and target execution are not supplied by this lock.
 Audience: people and agents building with `semaprax.toml`, package-tooling
 authors, and compiler contributors.
 
-Project Lock v1 is `semaprax.lock` beside `semaprax.toml`. Lock v3 proves a
-supplied dependency graph; this lock binds the exact package in one working
-tree. Rendering derives only from the authenticated snapshot, and verification
-re-renders exact bytes, so source, manifest, or compiler drift fails closed.
-Commands are always explicit, never an effect of `check`.
+Project Lock v1 is `semaprax.lock` beside `semaprax.toml`. Unlike
+[Offline Semantic Lock v3](OFFLINE-SEMANTIC-PACKAGE-LOCK-V3.md), which proves a
+supplied dependency graph, it binds the exact package in one working tree.
+Rendering uses only the authenticated snapshot. Verification re-renders and
+compares exact bytes, so source, manifest, or compiler drift fails closed.
+Commands are explicit; `check` never writes or verifies the lock implicitly.
 
 ## Commands
 
@@ -40,9 +41,9 @@ acts:
   a fresh rendering, printing `verified semaprax.lock for <name> (<digest>)`
   on success.
 
-`--compare <baseline.lock>` renders the project's current lock and classifies
-it against the baseline (see below). `--write`, `--verify`, and `--compare` are
-mutually exclusive. `check`, `run`, `test`, and `build` never read or write the
+`--compare <baseline.lock>` renders the current project lock and classifies it
+against the baseline (see below). Select only one of `--write`, `--verify`, or
+`--compare`. `check`, `run`, `test`, and `build` never read or write the
 lock.
 
 ## Compatibility comparison

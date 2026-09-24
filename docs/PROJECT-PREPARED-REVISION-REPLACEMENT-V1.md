@@ -10,11 +10,10 @@ Audience: compiler contributors, editor and agent integrators, and reviewers.
 
 ## Purpose and boundary
 
-This additive library operation replaces the immutable Project subject used
-by one existing [prepared interpreter](PROJECT-PREPARED-INTERPRETER-V1.md).
-It reuses the worker thread, fixed stack, process-wide worker permit, and
-original trace ceilings. It does not create a new worker or mutate either
-Project revision.
+This library operation replaces the immutable Project subject of an existing
+[prepared interpreter](PROJECT-PREPARED-INTERPRETER-V1.md). It reuses the worker
+thread, fixed stack, process-wide worker permit and original trace ceilings.
+Neither Project revision is mutated, and no new worker is created.
 
 ```rust,ignore
 prepared.replace_revision(expected_project_revision, candidate_revision)?;
@@ -27,10 +26,10 @@ does not discover, read, parse, or publish source files. Constructing a new
 revision and authenticating live source inputs remain the caller's existing
 Project responsibilities.
 
-This is same-worker replacement, not incremental parsing, linking, or
-per-function compilation. Candidate interpreter closure and origin indexes
-are prepared again. No performance or latency improvement is claimed without
-measurement; the structural guarantee is that replacement creates no worker.
+Replacement reuses the worker, not parsing, linking or per-function compilation.
+It prepares candidate interpreter closures and origin indexes again. The
+guarantee is that no worker is created; performance or latency improvements
+require measurement.
 
 ## Transaction and stale-base rule
 

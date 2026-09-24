@@ -52,11 +52,10 @@ mutation, escaping borrow, or implicit ambient capability is introduced.
 ## Identity and independent replay
 
 HIR retains `Closure { parameters, captures, body }`. Each capture binds one
-private body parameter to one outer scalar snapshot. Capture order is the
-strict order of outer `ValueId` identities, with no duplicates or unused slots.
-The private callable identity is derived from the enclosing closure expression
-identity under `semaprax.closure.v1`; any collision with an indexed declaration
-is rejected. It is not an authored persistent declaration or backend address.
+private body parameter to an outer scalar snapshot. Captures follow outer
+`ValueId` order with no duplicates/unused slots. The callable ID derives from
+the creation expression under `semaprax.closure.v1`; collisions fail. It is not
+an authored persistent declaration or backend address.
 
 Capture values have expression identities `.capture.N` under the creation site.
 The body uses its own derived function execution identity and the ordinary
@@ -68,11 +67,10 @@ The combined callable target universe is bounded at 256 entries.
 
 ## Creation and invocation
 
-Closure creation reads the scalar snapshots and produces a Copy carrier. It
-does not execute the body, run body contracts, allocate an owning environment,
-or evaluate a body call. Creation therefore has the ordinary atomic Copy cleanup
-behavior. General ownership and runtime child traversals visit capture values
-only. Semantic queries separately retain the body and its callable dependencies.
+Creation reads scalar snapshots into a Copy carrier. It does not run the body,
+its contracts, allocate an owning environment, or evaluate a body call; it has
+ordinary atomic Copy cleanup. Ownership/runtime traversals visit captures only,
+while semantic queries retain the body and dependencies separately.
 
 Invocation evaluates the callable and then each argument once in left-to-right
 order. The compiler derives a separate private function product for the body,

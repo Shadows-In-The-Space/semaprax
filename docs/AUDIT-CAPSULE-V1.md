@@ -112,10 +112,9 @@ the referenced object's exact bytes -- the same digest an independent
   guarantee than it actually establishes. Profile composition (below)
   remains unimplemented, so there is nothing for a composed-capsule CLI verb
   to do yet.
-- **`diff_capsules` compares two already-parsed capsules, not two capsule
-  files.** [`diff_capsules`] itself never reads a file and never
-  re-verifies either side; `semaprax audit diff` is the thin wrapper that
-  does both independently before calling it.
+- **`diff_capsules` compares parsed capsules, not files.** It never reads or
+  re-verifies either side; `semaprax audit diff` performs those steps before
+  calling it.
 
 ## Schema: `semaprax.audit-capsule.v1`
 

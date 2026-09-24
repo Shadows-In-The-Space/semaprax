@@ -37,10 +37,10 @@ pub struct DeclaredTestFact { /* opaque */ }
 pub struct ContractsAndTestsFacts { /* opaque */ }
 ```
 
-`derive` accepts an `Arc<ProjectRevision>` and its exact expected Project
-revision. It reads only retained admitted compiler facts. `replay` additionally
-accepts the expected fact digest and submitted canonical bytes; it returns a
-fresh derivation only after exact Project, digest, shape, and byte agreement.
+`derive` accepts an `Arc<ProjectRevision>` and its exact revision, reading only
+retained admitted facts. `replay` also takes the expected digest and canonical
+bytes, returning a fresh derivation only after exact Project, digest, shape, and
+byte agreement.
 
 ## Contract association inventory
 
@@ -51,12 +51,10 @@ sorted by stable-identity bytes. Each entry binds:
 - `declaration_kind`, exactly `function` or `function_template`;
 - ordered `requires` and `ensures` arrays.
 
-Each clause fact binds its phase, zero-based position within that phase,
-revision-scoped expression identity, checked type identity, and the compiler's
-canonical structured expression fact. Clause order is declaration order and is
-never sorted or repaired. Empty arrays mean that the admitted declaration has
-no clause in that phase; they are not proof that an external contract is
-absent.
+Each clause binds phase, zero-based position, revision-scoped expression ID,
+checked type ID, and canonical structured expression fact. Order is declaration
+order and is never sorted or repaired. An empty array means no admitted clause
+in that phase, not that an external contract is absent.
 
 The structured expression fact is a compiler projection of checked HIR, not
 the original source substring and not executable authority. Display-only
@@ -72,8 +70,8 @@ identified, zero-parameter function returning `i64` whose display name begins
 with `test_`. Helpers or skipped `test_` candidates of another shape are not
 silently promoted into test cases.
 
-This is a declaration inventory. It does not say that a test was run, passed,
-failed, reached a declaration, covered a clause, or proves a behavior.
+This is a declaration inventory, not evidence that a test ran, passed, reached
+a declaration, covered a clause, or proved behavior.
 
 ## Canonical document and identity
 

@@ -123,20 +123,16 @@ form one change and one seed.
 
 ## Finite reverse-call closure
 
-Behavioral seeds traverse only the validated HIR's persistent authored
-function/function-template call graph. Calls in `requires`, the body, and
-`ensures` are indexed. The reverse closure is finite because it contains only
-those callable declarations in the current single program; there is no lazy
-repository discovery or unbounded external expansion.
+Behavioral seeds traverse only validated HIR's persistent authored callable
+graph, indexing calls in `requires`, body, and `ensures`. The closure is finite:
+it contains only current-program callables, with no repository discovery or
+external expansion.
 
-The implementation computes that complete finite reverse closure before
-applying `depth`, `max_nodes`, or `max_bytes`. These are output-selection and
-truncation limits, not traversal-work limits. `operations`, `changes`, and
-every change's complete `source_consumers` are mandatory and never truncated;
-their bytes are part of the mandatory envelope. Only the known
-`affected_functions` closure is prefix-selected. If the fixed envelope plus
-the required first omitted-depth frontier cannot fit, the report fails as
-`SPX-G109` instead of dropping provenance or consumer facts.
+The implementation computes the full reverse closure before `depth`,
+`max_nodes`, or `max_bytes`; those select output, not traversal work.
+`operations`, `changes`, and complete `source_consumers` never truncate. Only
+`affected_functions` is prefix-selected. If the required envelope/frontier does
+not fit, it fails `SPX-G109` rather than dropping provenance.
 
 Traversal is breadth-first, globally ordered by stable ID at each depth. A
 callable appears once at its minimum depth. Operation provenance is the sorted

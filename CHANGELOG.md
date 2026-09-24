@@ -8,6 +8,10 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Allow the unchanged GEN-05B hosted generic-instance corpus enough job time;
+  the v0.6.0 release gate reached its former 90-minute ceiling before the
+  authored-variant and owned-result checks could finish.
+
 - Persist and restore semantic caches for admitted Projects whose bundled
   standard-library closure exceeds the authored-source manifest limit. The
   private snapshot now validates the complete bounded source inventory before

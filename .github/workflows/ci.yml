@@ -83,7 +83,9 @@ jobs:
   gen05b-generic-instance-closure:
     name: GEN-05B generic instance semantic closure
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # The exact inference and owned-result backend corpus exceeded 90 minutes
+    # on the v0.6.0 hosted runner; keep every check and allow its full run.
+    timeout-minutes: 240
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"

@@ -2519,6 +2519,12 @@ a predecessor-decoding callback; ordinary v1 bytes/routes remain unchanged.
 Receipts grant no fetch/read/execution capability. See
 [Registry Host v2](PACKAGE-REGISTRY-HOST-V2.md).
 
+Its `read` child owns explicit offline artifact consumption through the live
+held store: exact generation/Lock-v3 pin, independently sealed Registry-v3,
+current signed-metadata freshness and manifest-bound bytes, with a final ACTIVE
+recheck before returning immutable payload/evidence. No receipt becomes a
+serializable bearer token or arbitrary filesystem/execution authority.
+
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary
 semantic-workspace graph derives function imports over synthetic logical paths,

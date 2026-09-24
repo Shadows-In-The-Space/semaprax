@@ -41,6 +41,52 @@ extra unlocked coordinates, malformed locks, yanks and tamper fail before any
 staging. This is the closed scalar profile, not arbitrary cache completeness.
 No reusable fetch/read/execute token is returned, even after durable commit.
 
+## Explicit offline artifact consumption
+
+`HeldTrustStore::read_artifact(ArtifactRead)` is a live read under the existing
+non-cloneable held directory/lock authority. The request explicitly supplies
+the exact expected generation digest, exact Lock-v3 bytes, an independently
+producer-admitted sealed Registry-v3, package/version/logical artifact path,
+and trusted fixed Unix-seconds read time. None of these strings grants ambient
+filesystem path access. No decoded snapshot can replace sealed admission.
+
+Before returning bytes, the method rechecks ACTIVE and the complete held chain,
+compares the requested generation/lock to exact stored bytes, and compares the
+caller-sealed registry envelope to the stored envelope. It reconstructs signed
+metadata inputs solely from held generation bytes, then re-verifies thresholds,
+root/namespace binding, version/equivocation and expiry at the supplied read
+time using the stored checkpoint. Read time cannot precede committed observed
+time. It replays the complete stored subject selection and Lock-v3 compiled
+closure, requires the requested coordinate in that lock and exact path in the
+selected cache, decodes bounded lowercase hex, and checks bytes against the
+signed admitted manifest. A second exact ACTIVE/chain check under the same lock
+must succeed before any result is returned. Bootstrap, pending, orphan,
+tampered, symlink-substituted or mismatched state grants no read result.
+
+`VerifiedArtifact` owns immutable bytes and exposes generation/lock/artifact
+digests, coordinate/path and verification time as evidence. `bytes()` borrows
+the payload; `into_bytes()` consumes the result. There is no serialization or
+deserialization token API, path-open method, signing/network capability, or
+execution permission. A result cannot restore store authority or authorize a
+later read. Callers consuming bytes later must not treat old verification time
+as perpetual freshness; this route does not execute install scripts or modules.
+
+Reads perform no writes and do not advance the durable checkpoint clock.
+Truthful/nondecreasing clock provenance remains the embedding host's obligation.
+Installed root rotation and current generation checks reject stale generation
+pins; yanked coordinates cannot pass the selected signed lock/artifact checks.
+A different externally supplied yanked snapshot is refused rather than replacing
+the held state. The offline route cannot discover not-yet-installed publisher
+revocations or remote yanks; it never bypasses expiry when newer metadata is
+unavailable. The existing flat `fetch --lock` cache is not connected to this API.
+
+The focused `package_registry::trust::host::registry_v3::tests::read_tests`
+selector covers exact root/leaf bytes and bound evidence without effects,
+wrong generation/lock/coordinate/path/registry, expiry/time rollback, byte tamper
+and ACTIVE symlink, post-verification ACTIVE/generation mutation before return,
+installed root rotation/stale pins, bootstrap and interrupted-update refusal.
+These are local invocation-bound read checks, not hosted availability claims.
+
 ## Generation-v2 and exact CAS
 
 The canonical sorted compact JSON schema is

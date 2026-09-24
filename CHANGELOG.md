@@ -13,6 +13,11 @@ format: `Unreleased` then release buckets, grouped by impact.
   descriptor/binding and once-only result-release controls. This is local
   compiled-provider evidence, not the full hostile or hosted R06 matrix.
 
+- Add explicit offline artifact reads from a held signed Registry-v3 generation,
+  bound to exact Lock-v3 and independently admitted manifests. Reads replay
+  trusted-time freshness and recheck ACTIVE before returning immutable bytes;
+  no reusable bearer token, ambient path read or execution authority is added.
+
 - Add an explicit local Registry-v3 generation store coordinating signed trust,
   full root/leaf Lock-v3 selection and exact core artifacts, with one-way v1
   migration and exact interrupted-commit recovery. Receipts remain evidence;

@@ -15,6 +15,8 @@ pub struct Update<'registry, 'input> {
 }
 
 mod generation;
+mod read;
+pub use read::{ArtifactRead, VerifiedArtifact};
 
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 mod store;

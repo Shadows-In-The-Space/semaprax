@@ -11,6 +11,16 @@ pub struct HeldTrustStore {
     generation: Generation,
 }
 impl HeldTrustStore {
+    /// One live explicit read, not a persistent bearer capability. All output
+    /// bytes remain private until exact ACTIVE recheck under this held lock.
+    pub fn read_artifact(&self, request: &ArtifactRead<'_, '_>) -> Result<VerifiedArtifact> {
+        self.recheck()?;
+        let artifact = super::read::verify(&self.generation, request)?;
+        #[cfg(test)]
+        super::read::before_release();
+        self.recheck()?;
+        Ok(artifact)
+    }
     pub fn install(
         path: &Path,
         root: &str,

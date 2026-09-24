@@ -184,7 +184,8 @@ fn i64_byte(value: i64, index: usize) -> u8
 @id("catalog_normalizer.app.literal-byte")
 fn literal_byte(kind: usize, index: usize) -> u8
 {
-    match kind { 1usize => { let value = "{\"status\":\"error\",\"category\":\""; text_byte(string_as_str(value), index) }, 2usize => { let value = "\",\"record_index\":"; text_byte(string_as_str(value), index) }, 3usize => { let value = ",\"byte_offset\":"; text_byte(string_as_str(value), index) }, 4usize => { let value = "}\n"; text_byte(string_as_str(value), index) }, 5usize => { let value = "{\"status\":\"ok\",\"count\":"; text_byte(string_as_str(value), index) }, 6usize => { let value = ",\"total_quantity\":"; text_byte(string_as_str(value), index) }, 7usize => { let value = ",\"records\":["; text_byte(string_as_str(value), index) }, 8usize => { let value = "]}\n"; text_byte(string_as_str(value), index) }, 9usize => { let value = "{\"id\":\""; text_byte(string_as_str(value), index) }, 10usize => { let value = "\",\"label\":\""; text_byte(string_as_str(value), index) }, 11usize => { let value = "\",\"quantity\":"; text_byte(string_as_str(value), index) }, 12usize => { let value = ",\"category\":"; text_byte(string_as_str(value), index) }, _ => { let value = "null"; text_byte(string_as_str(value), index) }, }
+    let value = match kind { 1usize => "{\"status\":\"error\",\"category\":\"", 2usize => "\",\"record_index\":", 3usize => ",\"byte_offset\":", 4usize => "}\n", 5usize => "{\"status\":\"ok\",\"count\":", 6usize => ",\"total_quantity\":", 7usize => ",\"records\":[", 8usize => "]}\n", 9usize => "{\"id\":\"", 10usize => "\",\"label\":\"", 11usize => "\",\"quantity\":", 12usize => ",\"category\":", _ => "null", };
+    text_byte(string_as_str(value), index)
 }
 
 @id("catalog_normalizer.app.category-len")
@@ -196,7 +197,8 @@ fn category_len(category: usize) -> usize
 @id("catalog_normalizer.app.category-byte")
 fn category_byte(category: usize, index: usize) -> u8
 {
-    match category { 1usize => { let value = "oversized_input"; text_byte(string_as_str(value), index) }, 2usize => { let value = "invalid_utf8"; text_byte(string_as_str(value), index) }, 3usize => { let value = "malformed_json"; text_byte(string_as_str(value), index) }, 4usize => { let value = "schema"; text_byte(string_as_str(value), index) }, 5usize => { let value = "duplicate_id"; text_byte(string_as_str(value), index) }, 6usize => { let value = "overflow"; text_byte(string_as_str(value), index) }, 7usize => { let value = "provider_denied"; text_byte(string_as_str(value), index) }, 8usize => { let value = "provider_timeout"; text_byte(string_as_str(value), index) }, _ => { let value = "provider_malformed"; text_byte(string_as_str(value), index) }, }
+    let value = match category { 1usize => "oversized_input", 2usize => "invalid_utf8", 3usize => "malformed_json", 4usize => "schema", 5usize => "duplicate_id", 6usize => "overflow", 7usize => "provider_denied", 8usize => "provider_timeout", _ => "provider_malformed", };
+    text_byte(string_as_str(value), index)
 }
 
 @id("catalog_normalizer.app.error-len")
@@ -366,21 +368,20 @@ fn escape_cursor_start(line: borrow Slice<u8>, token: usize, skip: usize) -> usi
 @id("catalog_normalizer.app.escape-cursor-byte")
 fn escape_cursor_byte(line: borrow Slice<u8>, cursor: usize) -> u8
 {
-    let source = cursor / 32usize;
-    let part = cursor % 32usize / 8usize;
-    let escaped = cursor % 8usize;
+    // The mode bit marks the remainder of a canonical six-byte control atom.
+    // Ordinary packed cursors stay below it for the bounded 65,536-byte body.
     // Only an unnamed control renders six bytes. Output parts two and three
     // are always ASCII '0', regardless of the accepted source escape.
-    if escaped >= 2usize && escaped <= 3usize { 48u8 } else { let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, }; let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw }; escape_byte(decoded, escaped) }
+    if cursor >= 4194304usize { let source = (cursor - 4194304usize) / 32usize; let offset = (cursor - 4194304usize) % 32usize; match byte_get(line, source + offset) { Option::Some { value } => value, Option::None {} => 0u8, } } else { let source = cursor / 32usize; let part = cursor % 32usize / 8usize; let escaped = cursor % 8usize; if escaped >= 2usize && escaped <= 3usize { 48u8 } else { let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, }; let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw }; escape_byte(decoded, escaped) } }
 }
 
 @id("catalog_normalizer.app.escape-cursor-next")
 fn escape_cursor_next(line: borrow Slice<u8>, cursor: usize) -> usize
 {
-    let source = cursor / 32usize;
-    let part = cursor % 32usize / 8usize;
-    let escaped = cursor % 8usize;
-    if escaped >= 2usize && escaped <= 4usize { cursor + 1usize } else { let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, }; let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw }; let more_escape = escaped + 1usize < escape_len(decoded); let last = part + 1usize >= emit_len(line, source); let next_source = if more_escape { source } else { if last { token_end(line, source) } else { source } }; let next_part = if more_escape { part } else { if last { 0usize } else { part + 1usize } }; let next_escape = if more_escape { escaped + 1usize } else { 0usize }; next_source * 32usize + next_part * 8usize + next_escape }
+    // Validation precedes this writer. Only lowercase canonical \u00hh
+    // unnamed controls may enter raw-copy mode; every other escape retains
+    // the decoded cursor path, including uppercase, named, and surrogate forms.
+    if cursor >= 4194304usize { let source = (cursor - 4194304usize) / 32usize; let offset = (cursor - 4194304usize) % 32usize; if offset < 5usize { cursor + 1usize } else { (source + 6usize) * 32usize } } else { let source = cursor / 32usize; let part = cursor % 32usize / 8usize; let escaped = cursor % 8usize; if escaped >= 2usize && escaped <= 4usize { cursor + 1usize } else { let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, }; let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw }; let canonical_control = if part == 0usize && escaped == 0usize && raw == 92u8 && escape_len(decoded) == 6usize { let low = match byte_get(line, source + 5usize) { Option::Some { value } => value, Option::None {} => 65u8, }; low < 65u8 || low > 70u8 } else { false }; if canonical_control { 4194304usize + source * 32usize + 1usize } else { let more_escape = escaped + 1usize < escape_len(decoded); let last = part + 1usize >= emit_len(line, source); let next_source = if more_escape { source } else { if last { token_end(line, source) } else { source } }; let next_part = if more_escape { part } else { if last { 0usize } else { part + 1usize } }; let next_escape = if more_escape { escaped + 1usize } else { 0usize }; next_source * 32usize + next_part * 8usize + next_escape } } }
 }
 
 @id("catalog_normalizer.app.record-output-len")

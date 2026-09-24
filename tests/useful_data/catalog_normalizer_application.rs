@@ -477,6 +477,36 @@ fn focused_r05_controls_agree_across_interpreter_native_and_core_wasm() {
             "{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"widget-1\",\"label\":\"l\",\"quantity\":1,\"category\":7}]}\n",
             true,
         ),
+        (
+            "empty-plain-phases",
+            "",
+            "{\"status\":\"ok\",\"count\":0,\"total_quantity\":0,\"records\":[]}\n",
+            false,
+        ),
+        (
+            "empty-enriched-phases",
+            "",
+            "{\"status\":\"ok\",\"count\":0,\"total_quantity\":0,\"records\":[]}\n",
+            true,
+        ),
+        (
+            "two-record-phase-transition",
+            "{\"id\":\"a\",\"label\":\"x\",\"quantity\":1}\n{\"id\":\"b\",\"label\":\"y\",\"quantity\":2}\n",
+            "{\"status\":\"ok\",\"count\":2,\"total_quantity\":3,\"records\":[{\"id\":\"a\",\"label\":\"x\",\"quantity\":1},{\"id\":\"b\",\"label\":\"y\",\"quantity\":2}]}\n",
+            false,
+        ),
+        (
+            "mixed-canonical-escapes",
+            concat!(r#"{"id":"one","label":"\u0001\n\\x","quantity":1}"#, "\n"),
+            concat!(r#"{"status":"ok","count":1,"total_quantity":1,"records":[{"id":"one","label":"\u0001\n\\x","quantity":1}]}"#, "\n"),
+            false,
+        ),
+        (
+            "mixed-shrinking-escape-before-escaped-quote",
+            concat!(r#"{"id":"one","label":"\u0001\/\"","quantity":1}"#, "\n"),
+            concat!(r#"{"status":"ok","count":1,"total_quantity":1,"records":[{"id":"one","label":"\u0001/\"","quantity":1}]}"#, "\n"),
+            false,
+        ),
     ];
     let root = fixture();
     let scratch = ScratchRoot::new();

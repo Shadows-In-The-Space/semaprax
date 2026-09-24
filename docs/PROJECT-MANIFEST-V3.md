@@ -6,9 +6,10 @@ Status: implemented bounded profile; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). Safe Windows v2 package
 publication, npm registry publication and broader public support remain separate.
 
-Project Manifest v3 is the additive public Project boundary for the bounded
-[`useful-data.v1`](PORTABLE-INDEXED-BYTE-DATA-V1.md) profile. It does not
-reinterpret or re-render Project Manifest v1 or v2.
+Use Project Manifest v3 to expose the bounded
+[`useful-data.v1`](PORTABLE-INDEXED-BYTE-DATA-V1.md) profile through a public
+Project package. It adds a new profile without changing how Project Manifest
+v1 or v2 is interpreted or rendered.
 
 ## Canonical manifest
 
@@ -32,8 +33,9 @@ route. V1 and v2 canonical bytes and diagnostics remain independently frozen.
 ## Linking and semantic authority
 
 One held Project snapshot authenticates the manifest and complete source set.
-The profile links the exact entry closure, sole test closure, and every selected
-stable-ID Web export root. The linker rebuilds and validates compiler-owned
+The profile links the entry, the sole test, and every selected stable-ID Web
+export with their required functions. The linker rebuilds and validates
+compiler-owned
 byte-operation call-index facts, slice provenance/value facts, capacity facts,
 and cleanup instead of trusting or flattening source-shaped data. The linked
 test closure uses the same useful-data profile as the entry; it is not replaced
@@ -70,12 +72,12 @@ The npm route emits exactly:
 5. `semaprax.data-exports.json`
 6. `package.json`
 
-The context-bound `semaprax.project-npm-build.v2` carrier binds the retained
+The `semaprax.project-npm-build.v2` carrier records the retained
 Project facts, canonical data-export plan, ordered artifacts, bytes, digests,
-and payload digest. Independent inspection proves compiler consistency and
-rejects tampering, but does not authenticate self-claimed Project authority or
-mint a publishable build. Only an opaque build prepared from the retained
-Project snapshot may authorize publication.
+and payload digest. Independent inspection checks compiler consistency and
+rejects tampering. It does not authenticate the record's claimed Project
+authority or create a publishable build. Only an opaque build prepared from the
+retained Project snapshot may authorize publication.
 
 Unix publication resolves and authenticates the parent once and performs
 handle-relative create-new effects without following substituted paths or

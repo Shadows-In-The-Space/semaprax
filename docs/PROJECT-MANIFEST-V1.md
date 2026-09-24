@@ -8,17 +8,17 @@ broader product completion remain separately gated.
 
 Audience: language users, tool authors, and compiler contributors.
 
-Project Manifest v1 is a bounded, invocation-local way to check, execute, test,
-or build one explicit
-multi-file pure-scalar program. It reuses the existing Semantic Workspace
-Phase-A resolver in memory, then links the selected entry and test provider
-closures into validated HIR. It creates no `.semaprax-workspace`, generation,
+Use Project Manifest v1 to check, run, test, or build one explicitly listed
+multi-file pure-scalar program. Each invocation resolves the program in memory
+with Semantic Workspace Phase-A, then links the entry and test functions with
+the functions they call. The result is validated HIR, the compiler's resolved
+program representation. It creates no `.semaprax-workspace`, generation,
 `ACTIVE` pivot, cache, lock, source rewrite, dependency resolution, or third
 workspace.
 
-This is a build-input protocol, not the managed Semantic Workspace or
-Workspace Transaction authority. It publishes neither source state nor a
-reusable authorization token.
+The manifest describes build inputs. It does not grant managed Semantic
+Workspace or Workspace Transaction authority, publish source state, or create
+a reusable authorization token.
 
 ## Manifest
 
@@ -86,15 +86,16 @@ generic/owned boundary signature remains rejected. Project Manifest v1, package
 Report-v2, public scalar descriptor and Wasm package schema spellings remain
 unchanged, as do prior-program projections.
 
-The entry and test closures include only their transitive explicit function
-providers. Explicit stable-ID `use function` provider edges are the sole
-cross-file composition mechanism. Reverse consumers are excluded. Retained
-functions keep their real resolved bodies, stable identities, display names,
-and source identity origins; there are no imported default-body stubs or
-synthetic `main` declarations. Display-name duplicates across modules are valid
-because linkage and calls use stable IDs. The linker reconstructs cleanup
-inventory and cleanup plans over each linked closure and finally validates HIR
-before any backend is invoked.
+Each entry or test closure contains that function and its transitive explicit
+function providers: the functions it needs, directly or through other calls.
+Explicit stable-ID `use function` provider edges are the sole cross-file
+composition mechanism. Reverse consumers are excluded.
+
+Retained functions keep their real resolved bodies, stable identities, display
+names, and source identity origins. There are no imported default-body stubs or
+synthetic `main` declarations. Two modules may use the same display name because
+linkage and calls use stable IDs. Before invoking a backend, the linker rebuilds
+the cleanup inventory and plans for each closure and validates the HIR.
 
 A Project v1 entry closure that declares a Native Rust callback is admitted
 through a separate route that derives no target at all. WebAssembly rejects
@@ -108,13 +109,13 @@ that every effect it declares is granted by a declared callback. A Project that
 declares no callback keeps the previous route unchanged: the scalar Web module
 is still emitted and admitted, byte for byte.
 
-Because no Web artifact exists for this shape, that admission derives no scalar
-WIT descriptor, and the public scalar WIT accessor fails closed with
+This callback route produces no Web artifact or scalar WIT descriptor. The
+public scalar WIT accessor therefore fails closed with
 `SPX-J105`. The manifest field is still spelled `web_exports`. For a callback
 Project it names the exported functions selected for the generated Rust SDK
-even though the Project has no Web target; the field name is frozen v1 grammar
-while its meaning now depends on the admitted route, which is a wart rather
-than a claim of Web support. The only consumer of such a Project is the
+even though the Project has no Web target. The frozen v1 field name does not
+imply Web support: its meaning depends on the admitted route. The only consumer is
+the
 generated C and safe Rust bridge that the Native Rust SDK builder renders from
 the linked HIR.
 

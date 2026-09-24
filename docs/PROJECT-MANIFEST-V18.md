@@ -6,11 +6,13 @@ Broader physical-provider platform support remains separately scoped.
 
 Audience: compiler, project-tooling, and standard-library contributors.
 
-Project v18 selects the private `process-io.v1` profile. It gives one authored
-command entry a checked, bounded process provider while preserving the frozen
-older Project manifest schemas and their authority. This document specifies
-the manifest admission boundary; the process operation and provider contract
-remain owned by [Bounded Process I/O v1](BOUNDED-PROCESS-IO-V1.md).
+Project v18 selects the private `process-io.v1` profile. One authored command
+uses a checked, bounded process provider. Older Project manifest schemas and
+their authority remain unchanged.
+
+This document defines which manifests the profile accepts. See
+[Bounded Process I/O v1](BOUNDED-PROCESS-IO-V1.md) for process operations and
+the provider contract.
 
 ## Manifest
 
@@ -51,10 +53,10 @@ authority.
 
 ## Admission and non-claims
 
-The manifest is authenticated as one Project snapshot. Linking and command
-preparation retain ordinary source, dependency, effect, ownership, cleanup,
-and provider checks. The empty export list keeps this route private; it is not
-a public process API and does not establish production support.
+The compiler authenticates the manifest as one Project snapshot. Linking and
+command preparation still check sources, dependencies, effects, ownership,
+cleanup, and providers. The empty export list keeps this route private: it
+does not create a public process API or establish production support.
 
 The package gate covers example, conformance, and bundled-consumer commands
 on the interpreter, native C11 `-O0`/`-O2`, and Core Wasm. The historical local

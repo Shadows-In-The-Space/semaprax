@@ -8,13 +8,10 @@ no fetch, network, signing, publication, or durable authority itself.
 
 ## Authority and ownership
 
-`package_registry::trust::registry_v3` verifies signed metadata-v2 against a
-borrowed, sealed [Registry-v3](PACKAGE-REGISTRY-SNAPSHOT-V3.md). The caller must
-independently admit every linked root and dependency-free leaf through their
-build producers. Decoded snapshot/manifest inspection cannot construct that
-type. A publisher signature authenticates an exact manifest claim; it does not
-replace independent source/build/API/dependency replay. Existing publication
-identity strings remain data, not cryptographic publisher authority.
+`package_registry::trust::registry_v3` verifies metadata-v2 against a borrowed,
+sealed [Registry-v3](PACKAGE-REGISTRY-SNAPSHOT-V3.md). Producers, not decoded
+inspection, admit roots and leaves. A publisher signature authenticates one
+manifest claim; it never replaces source/build/API/dependency replay.
 
 Root installation provenance, disjoint Ed25519 roles and thresholds, namespace
 delegation, exact one-version dual-threshold root rotation, revocation, canonical

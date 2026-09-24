@@ -14,8 +14,8 @@ front has its own focused tests. None is hosted or a publication/support
 decision.
 
 `crate::package_registry` is an authority-free, content-addressed model of a
-published-package registry: a deterministic, immutable snapshot of package
-coordinates that composes with the existing
+published-package registry: one deterministic immutable coordinate snapshot
+that composes with the existing
 [Offline Deterministic Package Resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md)
 rather than reimplementing dependency solving.
 

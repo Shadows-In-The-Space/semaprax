@@ -3,13 +3,11 @@
 Audience: package-registry implementers and compiler contributors.
 
 Status: additive pure local distribution evidence; not a trusted fetch or
-hosted registry. Audience: package, resolver and registry contributors.
+hosted registry.
 
 Registry-v3 combines independently admitted linked roots and dependency-free
-leaves into a finite reproducible catalog. Existing Registry-v1/v2 and Artifact
-Manifest-v1 schemas, bytes, decoders and closed profiles remain unchanged.
-No change to Source Capsule v1's 2..4 reachable packages or Linked Build-v2
-verification is permitted by this specification.
+leaves into a finite reproducible catalog. Registry-v1/v2, Artifact Manifest
+v1, Source Capsule v1's 2..4 package limit, and Linked Build-v2 stay unchanged.
 
 ## Producer and inspection types
 

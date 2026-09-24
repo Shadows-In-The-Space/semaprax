@@ -9,9 +9,8 @@ credential, proxy, or execution route.
 ## Authority and request boundary
 
 `package_registry::mirror_transport` accepts one host-constructed
-`MirrorNetworkAuthority`. It contains one exact HTTPS origin and a timeout in
-the closed interval `(0, 60 seconds]`. The origin has a host, no user-info,
-path other than `/`, query, or fragment. A caller supplies one through 64 exact
+`MirrorNetworkAuthority`: one exact HTTPS origin and a timeout in `(0, 60 seconds]`.
+The origin has a host but no user-info, non-root path, query, or fragment. A caller supplies 1..64 exact
 origin-relative object paths, each with a lower-case `sha256:<hex>` binding and
 its own byte bound. Paths are canonical ASCII segments (`A-Z`, `a-z`, `0-9`,
 `-`, `_`, `.`) separated by a single `/`; empty, dot, query, fragment,

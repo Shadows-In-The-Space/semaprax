@@ -10,8 +10,8 @@ Audience: package-tooling contributors, embedding hosts, and agent authors.
 
 This derived graph makes authenticated package consumers queryable. It starts
 from the [multi-package source capsule](OFFLINE-MULTI-PACKAGE-SOURCE-CAPSULE-V1.md),
-not from a directory scan, an installed-package guess, or equal symbol IDs in
-unrelated Projects. Canonical `.spx` remains the source of program meaning.
+not a directory scan, installed-package guess, or unrelated equal symbol IDs.
+Canonical `.spx` remains the source of meaning.
 
 ## Authentication and identity
 

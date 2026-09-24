@@ -9,13 +9,10 @@ registry, and this format does not create one.
 
 Audience: package-tool authors and compiler contributors working on issue #195.
 
-`crate::package_registry::federation` is the multi-registry layer above
-[Package registry snapshot v1](PACKAGE-REGISTRY-SNAPSHOT-V1.md). It exists for
-one reason: the snapshot layer models exactly one registry, so its
-ownership-continuity check protects a package name only *within* one snapshot.
-Two registries could each serve `examples.meaning@1.0.0`, under different
-publishers and different content, and nothing in the snapshot layer would
-notice. That is dependency confusion, which issue #195 names as a required
+`crate::package_registry::federation` extends [Registry Snapshot v1](PACKAGE-REGISTRY-SNAPSHOT-V1.md)
+across registries. A single snapshot protects a name only within itself; two
+registries can otherwise serve the same coordinate with different publishers or
+content. This closes that dependency-confusion gap required by issue #195.
 case. This layer refuses it.
 
 ## What this is not

@@ -7,11 +7,10 @@ registry, authority-bearing fetch route, or physical power-loss certification.
 
 ## Authority and API
 
-`package_registry::trust::host::registry_v3` owns a separate generation-v2
-protocol over the existing held Unix store primitive. Linux/Android/Apple
-support it; unsupported hosts refuse `open` without effects. Its owner-private
-directory, retained nofollow ancestor chain, single-link regular files,
-exclusive cooperative lock, bounds and filesystem assumptions follow
+`package_registry::trust::host::registry_v3` owns a generation-v2 protocol over
+the held Unix store. Linux/Android/Apple support it; other hosts refuse `open`
+without effects. Its private directory, nofollow chain, regular files,
+cooperative lock, bounds, and filesystem assumptions follow
 [Trust v1 host](PACKAGE-REGISTRY-TRUST-V1.md#explicit-local-durable-host).
 There is no ambient time, network, key generation, publication or executable
 artifact invocation. The caller must authenticate the independent bootstrap

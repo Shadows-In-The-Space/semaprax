@@ -6,12 +6,11 @@ Audience: package-registry, security, and host-integration contributors.
 
 ## Scope and authority
 
-`package_registry::trust` composes existing Ed25519 verification with exact
+`package_registry::trust` combines Ed25519 verification with exact
 [Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md) and
-[Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md) replay. Its separation
-of root, publisher/targets, snapshot, and timestamp roles follows the security
-model of [TUF specification 1.0.26](https://theupdateframework.github.io/specification/v1.0.26/).
-The closed SEMAPRAX wire below is deliberately not TUF wire compatibility.
+[Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md) replay. Its root,
+publisher/targets, snapshot, and timestamp roles follow [TUF 1.0.26](https://theupdateframework.github.io/specification/v1.0.26/),
+but SEMAPRAX wire is not TUF-compatible.
 
 The embedding host supplies an independently installed root, trusted prior
 checkpoint data, and one fixed Unix-seconds update-start time. There is no

@@ -5,12 +5,9 @@ Audience: package-registry and resolver contributors.
 
 ## Additive relationship to v1
 
-Registry Snapshot v2 is additive. [Registry Snapshot
-v1](PACKAGE-REGISTRY-SNAPSHOT-V1.md), its document schema, canonical bytes,
-decoder, digest domain, APIs, diagnostics, and behavior remain unchanged. V2
-adds exactly one association: every admitted publication entry carries the
-canonical bytes and domain-separated digest of one [Package Artifact Manifest
-v1](PACKAGE-ARTIFACT-MANIFEST-V1.md).
+Registry Snapshot v2 leaves Registry Snapshot v1 unchanged. It adds one fact:
+each admitted publication carries the canonical bytes and domain-separated
+digest of one [Package Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md).
 
 The document schema is `semaprax.package-registry-document.v2`. Its exact
 top-level fields are `schema` and `entries`. Entries retain the v1 publication

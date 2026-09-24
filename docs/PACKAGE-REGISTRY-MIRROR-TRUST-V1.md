@@ -11,10 +11,9 @@ by the separate explicit HTTPS authority, an independently installed root,
 trusted bridge-local `MirrorCheckpoint` (containing RegistryCheckpoint-v2 plus
 the last-new-timestamp observation), fixed caller time, independently producer-sealed
 Registry-v3, and one exact timestamp/snapshot/publisher metadata path set.
-All returned rows must be metadata, have exactly the named paths, and have no
-duplicates or extras. Bytes must be UTF-8 canonical trust documents. The bridge
-then invokes the ordinary Trust v2 verifier; it does not parse a decoded
-registry, select a root, or substitute mirror digests for signatures.
+Rows must be metadata at exactly the named paths, with no duplicates or extras,
+and bytes must be canonical UTF-8 trust documents. The bridge calls Trust v2;
+it never substitutes mirror digests for signatures or selects a root.
 
 Thus timestamp pins snapshot; snapshot pins the exact sealed Registry-v3
 envelope and every publisher envelope; publisher roles authenticate exact

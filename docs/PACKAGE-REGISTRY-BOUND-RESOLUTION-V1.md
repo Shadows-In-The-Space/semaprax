@@ -10,12 +10,9 @@ registry, and this format does not create one.
 
 Audience: package-tool authors and compiler contributors working on issue #195.
 
-`crate::package_registry::binding` sits above
-[Package registry snapshot v1](PACKAGE-REGISTRY-SNAPSHOT-V1.md) and
-[Offline deterministic package resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md). It
-exists to close one specific gap: resolver-v2 evidence — the lockfile — embeds
-only a digest of the raw `subjects: Vec<String>` catalog it was handed. It
-carries no reference to *which registry snapshot, at which digest, under which
+`crate::package_registry::binding` sits above [Registry Snapshot v1](PACKAGE-REGISTRY-SNAPSHOT-V1.md)
+and [Resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md). Resolver evidence commits
+only to the supplied `subjects: Vec<String>` catalog, not to which snapshot or
 yank policy* produced those subjects. Two different snapshots can project the
 identical subject list for the packages one resolution actually selects — for
 example, a snapshot with an extra `Yanked` entry that `YankPolicy::ExcludeYanked`

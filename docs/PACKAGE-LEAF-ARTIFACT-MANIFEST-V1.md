@@ -3,16 +3,12 @@
 Audience: package-registry implementers and package producers.
 
 Status: additive local producer-admission contract; no hosted or distribution
-authority claim. Audience: package and registry contributors.
+authority claim.
 
-This version fills the dependency-free producer gap without widening the
-two-through-four reachable-package Source Capsule v1 or Linked Build v2.
-`package_registry::leaf_manifest_v1::create_from_leaf_build` invokes the existing
-[Build-v1 verifier](OFFLINE-PURE-WASM-PACKAGE-BUILD-V1.md) on all three artifacts
-and exact original resolver evidence, catalog, options and build options. That
-verifier independently regenerates the single selected dependency-free source,
-HIR, scalar Core-Wasm, manifest and evidence. It gains no filesystem, execution,
-network, signing or publication authority.
+This fills the dependency-free producer gap without widening Source Capsule v1
+or Linked Build v2. `create_from_leaf_build` replays Build-v1 over the three
+artifacts and exact resolver inputs; it regenerates the selected source, HIR,
+Core-Wasm, manifest, and evidence without acquiring authority.
 
 The publication's independently replayed Subject-v3 must have the same package
 and version, no dependencies and no capabilities. Reconstructing Subject-v2

@@ -8,6 +8,9 @@ The exact `1b3731a` full hosted matrix is green in [run 31408654657 attempt
 including [Ubuntu job
 93530141404](https://github.com/wavect/semaprax/actions/runs/31408654657/job/93530141404).
 
+Use Impact to preview which checked callables a single-file patch may affect.
+It does not apply the patch or claim that omitted runtime behavior is safe.
+
 ## Command and limits
 
 The CLI accepts an existing Semantic Patch v1 or v2 file without applying it:

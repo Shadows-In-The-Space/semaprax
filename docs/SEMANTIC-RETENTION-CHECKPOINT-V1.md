@@ -10,11 +10,10 @@ contributors.
 
 ## Scope and authority boundary
 
-`semantic_retention` provides one deterministic lifecycle policy for disposable
-Semantic Workspace Image, complete-candidate archive and incomplete-draft
-archive identities. It records no source, HIR, graph, archive, approval or store
-root. It cannot read a clock, inspect a filesystem, validate a candidate, make a
-historical subject current or publish source.
+`semantic_retention` plans metadata retention for image, complete-candidate,
+and incomplete-draft identities. It records no source, HIR, graph, archive,
+approval, or store root. It cannot read a clock or filesystem, validate a
+candidate, make a historical subject current, or publish source.
 
 Each subject is a closed typed identity:
 

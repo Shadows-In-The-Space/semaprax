@@ -10,11 +10,10 @@ authority-neutral image, candidate and draft retention metadata.
 
 ## Explicit storage boundary
 
-`semantic_retention_registry` composes the existing receipt planner and immutable
-retention metadata store. The caller selects one existing absolute registry root
-owned by the current effective user with exact mode `0700`. That root must
-already contain one current-user-owned `0700` directory named `metadata`. The
-registry neither creates nor discovers either directory.
+`semantic_retention_registry` joins the receipt planner to the immutable
+metadata store. The caller selects an existing absolute root owned by the
+effective user with exact mode `0700`; it must already contain a current-user
+`0700` directory named `metadata`. The registry creates or discovers neither.
 
 The root inventory is closed to `metadata`, an optional `CURRENT` file and at
 most one interrupted `.CURRENT-stage`. `metadata` remains the unmodified

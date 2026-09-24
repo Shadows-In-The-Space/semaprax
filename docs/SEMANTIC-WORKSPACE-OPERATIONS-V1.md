@@ -4,12 +4,11 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: workspace tool authors and compiler contributors.
 
-Semantic Workspace Operations v1 is a bounded stable-identity compiler from
-one authenticated managed workspace pre-state to one canonical existing
-Semantic Workspace Change v1 replacements proposal. Read-only derivation,
-Evidence generation, and verification add no publication authority. The
-separate apply route may publish only after fresh exact Operations-intent and
-unchanged Change-v1 Evidence replay under one exclusive workspace lock.
+Workspace Operations v1 turns stable-identity edits against one authenticated
+managed pre-state into a canonical Workspace Change v1 replacements proposal.
+Derivation, Evidence generation, and verification are read-only. Only the
+separate apply route may publish, after fresh exact Operations-intent and
+unchanged Change-v1 Evidence replay under an exclusive workspace lock.
 
 The source-only [Project Nominal Rename](PROJECT-NOMINAL-RENAME-V1.md) adapter
 reuses this implementation's occurrence collector and exact replay through a

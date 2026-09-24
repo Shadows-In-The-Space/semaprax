@@ -8,6 +8,10 @@ exact `2634011f3d205077d4533701e412bec8fdcff7c8` full matrix is hosted green in
 1](https://github.com/wavect/semaprax/actions/runs/31423743369/attempts/1); all
 12 jobs passed.
 
+Use Review to inspect one proposed patch and its supporting checked facts
+before deciding whether to apply it. Review never edits source or grants
+approval authority.
+
 ## Command and public surface
 
 The CLI accepts one existing Semantic Patch v1, v2, or the sole canonical v3

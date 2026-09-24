@@ -10,26 +10,21 @@ which claim in that issue is already true, partially true, or not yet true.
 
 ## Why this document exists
 
-Issue #200 asks to "consolidate CLI, LSP, MCP, and generated SDKs on one
-versioned semantic service API." Its audit baseline
-(`ae25c6a49dc09ec4613c7a6f52a27daa69dcd3f3`) asserts that "a persistent
-incremental semantic service, stdio transport, MCP facade, universal
-query/transaction operations, and multiple generated clients exist" and that
-"several older Project Agent Transport and Image/Workspace protocols remain
-for compatibility." Before any further consolidation work is spent, this audit
-separates three different situations issue #200 could actually be in, because
-the correct next step differs for each:
+Issue #200 proposes one versioned semantic service API for CLI, LSP, MCP, and
+generated SDKs. Its baseline (`ae25c6a49dc09ec4613c7a6f52a27daa69dcd3f3`)
+claims an incremental service, stdio transport, MCP facade, universal
+query/transaction operations, generated clients, and older compatibility
+protocols. This audit checks which of three situations actually applies:
 
 1. a shared service API already exists and the named surfaces already sit on
    it;
 2. a shared core exists but a surface duplicates logic or schema on top of it;
 3. no shared service API exists and each surface is independent.
 
-**Finding: this repository is simultaneously in state 1 for one protocol
-family and state 3 across protocol families, and the "LSP" surface named by
-the issue does not exist at all.** The sections below give exact evidence for
-each claim, one operation proven byte-equivalent across two real surfaces, and
-a precise list of what remains.
+**Finding:** one protocol family shares an API (state 1), different protocol
+families do not (state 3), and the named LSP surface does not exist. The
+sections below show the evidence, one operation byte-equivalent across two
+real surfaces, and the remaining work.
 
 ## Fact: there is no LSP module in this repository
 

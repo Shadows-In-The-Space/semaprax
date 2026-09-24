@@ -8,11 +8,10 @@ Audience: agent builders, compiler contributors, and reviewers.
 
 ## Source authority and image lifetime
 
-Canonical human-readable `.spx` source remains the Git and review authority.
-The compiler derives an operational semantic image from an already admitted
-`Arc<ProjectRevision>`. The image retains the same validated entry/test HIR,
-complete declared-project graph, and typed analysis indexes in memory. It does
-not make graph JSON the canonical source of program meaning.
+Canonical `.spx` is the Git and review authority. From an admitted
+`Arc<ProjectRevision>`, the compiler derives an in-memory image containing
+validated entry/test HIR, the complete declared-project graph, and typed
+analysis indexes. Graph JSON does not replace source as authority.
 
 An image is immutable, deterministic, revision-bound descriptive data. Its
 optional persisted bytes are a rebuildable projection: consumers must supply

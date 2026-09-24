@@ -4,9 +4,10 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: agent and tool authors, plus compiler contributors.
 
-Semantic Patch v2 is an additive, single-file transaction format for exact
-identity-scoped source changes. Schema-less patches retain the v1 behavior and
-the legacy `rename` domain: explicitly identified functions and resources only.
+Use Semantic Patch v2 to describe exact identity-scoped changes to one source
+file. It adds operations without changing schema-less v1 patches: the old
+`rename` operation still covers only explicitly identified functions and
+resources.
 
 ## Frozen grammar
 

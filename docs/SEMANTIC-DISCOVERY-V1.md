@@ -14,19 +14,14 @@ on: see [Composing this module](#composing-this-module).
 
 ## Why this module instead of another static graph
 
-The repository already has bounded, source-bound facts: `semaprax context`
-(`semaprax.agent-context.v1`/`.v2`), `semaprax query --capabilities`
-(`semaprax.installed-query-capabilities.v1`), the installed diagnostic
-catalog, `capability-manifest`, `region-report`, `assurance_manifest` and
-`agent_interaction_schema`. An agent orienting itself in this repository does
-not need a *second* description of what any one of those does — it needs one
-small index that says these exist, at which schema, through which surface,
-and one way to ask "what changed" without re-fetching everything.
-`semantic_discovery` is exactly that index plus that one delta operation. It
-never re-derives another owner's facts; where it needs to be concrete (the
-installed diagnostic catalog's code count, the installed query-capabilities
-digest) it calls that owner's existing function and reports its live output,
-so this catalog cannot drift out of sync with what it describes.
+The compiler already owns bounded facts in `semaprax context` v1/v2,
+`semaprax query --capabilities`, the installed diagnostic catalog,
+`capability-manifest`, `region-report`, `assurance_manifest`, and
+`agent_interaction_schema`. Agents need a small index of their schemas and
+surfaces, plus a way to ask what changed. `semantic_discovery` supplies that
+index and one delta operation. It calls each owner for live facts such as the
+diagnostic code count and query-capabilities digest; it does not rederive or
+copy their contracts.
 
 ## Compact capability discovery
 

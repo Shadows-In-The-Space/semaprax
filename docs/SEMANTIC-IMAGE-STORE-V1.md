@@ -6,13 +6,12 @@ Status: bounded implementation; **HOSTED GREEN** for v0.4.0.
 See the [release baseline](RELEASE-0.4.0-STATUS.md) for evidence scope.
 No broader durability, performance or full-programme completion is implied.
 
-This additive lifecycle persists an image's exact canonical Project inputs
-through the existing [Project Revision Store v1](PROJECT-REVISION-STORE-V1.md).
-Loading authenticates those immutable inputs, performs the ordinary complete
-Project source rebuild, and derives the image again. No serialized HIR, typed
-index, graph, or image JSON is trusted as compiler input. Persistent storage
-therefore retains the source subject, not a warm cross-process compiler cache.
-Existing Semantic Image v1 bytes and nonclaims remain unchanged.
+Persist an image's exact canonical Project inputs through
+[Project Revision Store v1](PROJECT-REVISION-STORE-V1.md). Loading authenticates
+those inputs, rebuilds the complete Project from source, and derives a new
+image. Stored HIR, indexes, graph, and image JSON never become trusted compiler
+input. This retains the source subject, not a warm cross-process cache;
+Semantic Image v1 bytes and nonclaims remain unchanged.
 
 ## Host-selected persistence
 

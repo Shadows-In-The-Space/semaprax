@@ -10,12 +10,10 @@ Core-Wasm host-arena execution are part of the released implementation.
 A public FFI/Project buffer layout, general browser support and a `std.*`
 interface are not supplied by this profile.
 
-Owned Bounded Byte Buffer v1 is the first owned bounded collection in the
-language. It adds two compiler-owned operations to
-[Portable Indexed Byte Data v1](PORTABLE-INDEXED-BYTE-DATA-V1.md) so a program
-can build an owned `Bytes` buffer from computed element values instead of only
-copying one that already exists. It introduces no new type, no new cleanup leaf
-kind, no graph schema version, and no new mutation syntax.
+This first owned bounded collection lets a program fill `Bytes` with computed
+values rather than only copy existing bytes. It adds two compiler-owned
+operations to [Portable Indexed Byte Data v1](PORTABLE-INDEXED-BYTE-DATA-V1.md).
+It adds no type, cleanup leaf, graph schema version, or mutation syntax.
 
 ## What this deliberately is not
 

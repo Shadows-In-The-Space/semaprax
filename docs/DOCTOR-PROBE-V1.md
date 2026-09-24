@@ -10,15 +10,13 @@ Audience: CLI/platform contributors and reviewers.
 
 ## Scope
 
-`semaprax doctor`, admitted by the standalone and the full-toolchain binary
-alike since the policy module moved into the root crate (`src/doctor.rs`),
-requires an explicitly selected offline tool profile instead of ambient
-PATH/home discovery. Selection is not
-authority: a platform backend must admit the complete offline execution/input
-closure before any tool lookup or version probe. The separate signed
-[Linux production provisioner](DOCTOR-PRODUCTION-PROVISIONER-V1.md) now authors
-that dedicated-process boundary, but it is not packaged, physically executed,
-or connected to ordinary CLI acquisition. Consequently, the real CLI still
+Both standalone and full-toolchain `semaprax doctor` use the policy in
+`src/doctor.rs`. They require an explicit offline tool profile, not PATH/home
+discovery. Selecting a profile grants no authority: the platform backend must
+admit the complete offline execution/input closure before any lookup or probe.
+The separate signed [Linux production provisioner](DOCTOR-PRODUCTION-PROVISIONER-V1.md)
+defines that dedicated-process boundary, but it is not packaged, physically
+executed, or connected to ordinary CLI acquisition. Consequently, the real CLI still
 reports unavailable required checks (exit 1), even for a syntactically valid
 selector. It never falls back to the retained installed-tool probe.
 

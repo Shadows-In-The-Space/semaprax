@@ -10,12 +10,12 @@ Audience: trusted provisioners, toolchain contributors and security reviewers.
 
 ## Authority and entry
 
-The private `semaprax-doctor-launcher` starts the existing
-[worker](DOCTOR-OFFLINE-WORKER-V1.md) and becomes its
+The private `semaprax-doctor-launcher` starts the
+[worker](DOCTOR-OFFLINE-WORKER-V1.md), then becomes its
 [collector](DOCTOR-OFFLINE-COLLECTOR-V1.md). Its process-consuming unsafe entry
-lives in the existing sys quarantine, with no safe embedding facade and no
-ordinary `doctor` discovery or activation. It installs no service, configures no
-host policy, and performs no namespace bootstrap or image-path lookup.
+stays in the sys quarantine. There is no safe embedding facade, ordinary
+`doctor` activation, service installation, host-policy configuration,
+namespace bootstrap, or image-path lookup.
 
 The separate [Linux production provisioner](DOCTOR-PRODUCTION-PROVISIONER-V1.md)
 implements the signed outer fixed-descriptor, namespace, cgroup and settlement

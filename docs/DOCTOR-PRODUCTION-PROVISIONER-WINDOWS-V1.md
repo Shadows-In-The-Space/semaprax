@@ -16,9 +16,8 @@ and settlement logic remains separately testable on non-Windows hosts. See
 [Hosted Windows runtime evidence](#hosted-windows-runtime-evidence), and
 [Windows runtime gate](#windows-runtime-gate) for the exact evidence ceiling.
 
-The macOS half of this split is
-[DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1](DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1.md),
-which does carry real local execution evidence.
+The separate [macOS contract](DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1.md)
+has real local execution evidence; it is not Windows evidence.
 
 ## Hosted Windows compilation evidence (type-check only)
 

@@ -7,10 +7,10 @@ Audience: release engineers, embedding hosts, and security reviewers.
 
 ## Boundary
 
-This contract turns one independently authenticated, unpacked Linux doctor
-release into one immutable local generation. The caller supplies the release
-version, commit, target triple, architecture, target, selector and Ed25519
-public key independently. Distribution metadata never supplies its own trust.
+This contract installs one independently authenticated, unpacked Linux doctor
+release as an immutable local generation. The caller independently supplies
+version, commit, target triple, architecture, target, selector, and Ed25519
+public key. Distribution metadata cannot establish its own trust.
 
 The store is an existing absolute normalized current-euid-owned mode-0700
 directory on a trusted local filesystem. Its complete ancestor chain and the

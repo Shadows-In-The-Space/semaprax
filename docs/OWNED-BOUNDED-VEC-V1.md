@@ -4,17 +4,14 @@ Audience: language users, standard-library authors, and compiler contributors.
 
 Status: implemented bounded profile; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
-This document owns one internal, explicitly instantiated `Vec<T>` profile for
-Copy scalar elements. It defines no public aggregate ABI and does not implement
-Iterator. The additive [owned Bytes profile](OWNED-BOUNDED-VEC-V2.md) has a
-separate contract and the same release evidence baseline.
+This contract admits an internal `Vec<T>` with explicit Copy-scalar elements.
+It defines no public aggregate ABI or Iterator. The separate
+[owned Bytes profile](OWNED-BOUNDED-VEC-V2.md) shares the release evidence baseline.
 
-The separately versioned
-[Owned Bounded Vec For Traversal v1](OWNED-BOUNDED-VEC-FOR-TRAVERSAL-V1.md)
-adds one source `for item in values { body }` form over a simple immutable
-binding of this exact vector profile. Its resolver lowering reuses the existing
-len/get/while HIR and adds no operation, prelude version, backend primitive,
-standard-library declaration, or ABI.
+The separate [for-traversal contract](OWNED-BOUNDED-VEC-FOR-TRAVERSAL-V1.md)
+adds `for item in values { body }` for a simple immutable binding of this
+profile. Its resolver lowers to existing len/get/while HIR; it adds no operation,
+prelude version, backend primitive, standard-library declaration, or ABI.
 
 ## Exact profile
 

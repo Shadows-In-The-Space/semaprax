@@ -10,21 +10,20 @@ Audience: compiler/runtime contributors, SDK integrators and reviewers.
 
 ## Existing contract, corrected implementation
 
-This is a shared private implementation contract for the existing Project
-v8/v9/v10 generated JavaScript runtimes, not a new Project, descriptor, carrier,
-Wasm ABI or public API profile. It implements the publication and fail-stop
+This private contract corrects generated JavaScript runtimes for Project
+v8/v9/v10. It adds no Project, descriptor, carrier, Wasm ABI, or public API
+profile. It implements publication and fail-stop
 requirements in [Public Owned Data API v1](PUBLIC-OWNED-DATA-API-V1.md),
 [Public Flat Owned Record API v1](PUBLIC-FLAT-OWNED-RECORD-API-V1.md), and
 [Public Owned UTF-8 API v1](PUBLIC-OWNED-UTF8-API-V1.md).
 
-The previous facades incorrectly treated every `TypeError` or `RangeError`
-after execution began as recoverable and trusted an exception's public
-`semapraxSemantic` property. A fatal UTF-8 conversion after owner consumption
-could therefore leave an empty arena and permit reuse despite runtime
-uncertainty. A caught reentry error did not latch poison. View creation outside
-the guarded body and unguarded v9 scratch cleanup also left gaps in failure
-selection and busy-state release. Truthiness-based error publication could
-swallow a thrown `null`, `undefined`, `false`, zero or empty string.
+Earlier facades treated every post-entry `TypeError` or `RangeError` as
+recoverable and trusted the public `semapraxSemantic` property. A fatal UTF-8
+conversion after consuming an owner could then leave an empty arena reusable
+despite uncertainty. Caught reentry did not poison the instance. Unguarded
+view creation and v9 scratch cleanup could miss failure selection or busy-state
+release. Truthiness checks could swallow thrown `null`, `undefined`, `false`,
+zero, or an empty string.
 
 ## State and admission
 

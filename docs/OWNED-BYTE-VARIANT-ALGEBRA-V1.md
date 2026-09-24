@@ -13,8 +13,8 @@ continues to define its earlier admitted shapes and bytes.
 
 ## Purpose
 
-Owned Byte Variant Algebra v1 admits the first non-Copy sum execution path.
-It admits flat monomorphic authored variants with at least one direct `Bytes`
+This is the first non-Copy sum execution path. It admits flat monomorphic
+authored variants with at least one direct `Bytes`
 field, a bounded concrete authored-generic extension with one owned case, an
 additive exact two-owned-case authored shape, and the compiler-owned `Option<Bytes>`,
 `Result<Bytes, i64|bool>`, `Result<i64|bool, Bytes>`, and exact

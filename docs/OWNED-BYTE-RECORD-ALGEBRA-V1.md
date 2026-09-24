@@ -8,12 +8,11 @@ broader ownership support remain separate.
 
 ## Purpose
 
-Owned Byte Record Algebra v1 admits the first non-Copy record execution path
-whose ownership is derived from ordinary record structure. It is deliberately
-limited to flat monomorphic records with one or more direct `Bytes` fields and
-zero or more direct Copy-scalar fields. It does not create a public aggregate
-ABI or widen variants, generics, components, Project exports, callable
-interfaces, or native Rust interoperability.
+This is the first non-Copy record execution path whose ownership follows the
+record's structure. It admits only flat monomorphic records with at least one
+direct `Bytes` field and any number of direct Copy-scalar fields. It adds no
+public aggregate ABI and does not widen variants, generics, components, Project
+exports, callable interfaces, or native Rust interoperability.
 
 The additive [Acyclic Nested Owned-Byte Records
 v1](NESTED-OWNED-BYTE-RECORDS-V1.md) owns the separate bounded successor

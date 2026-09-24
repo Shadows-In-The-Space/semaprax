@@ -4,9 +4,10 @@ Audience: language users and compiler contributors.
 
 Status: implemented additive owned-payload profile; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
-This extends [scalar Vec v1](OWNED-BOUNDED-VEC-V1.md) with owned Bytes payloads.
-It does not redefine that frozen scalar contract. Consuming payload traversal
-is implemented separately in [Owning Iterator Payloads v2](OWNING-ITERATOR-PAYLOADS-V2.md).
+V2 adds owned `Bytes` payloads to [scalar Vec v1](OWNED-BOUNDED-VEC-V1.md)
+without changing its frozen contract. The separate
+[Owning Iterator Payloads v2](OWNING-ITERATOR-PAYLOADS-V2.md) owns consuming
+traversal.
 
 ## Owned operations
 

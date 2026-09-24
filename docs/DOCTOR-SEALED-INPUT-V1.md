@@ -19,9 +19,9 @@ admission: each provisioner must require its exact native code before platform
 effects. Linux accepts only `1` or `2`; Windows accepts only `3` or `4` for
 the current native architecture. See [production provisioner v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md#signed-release-capsule).
 
-The future offline doctor backend needs to obtain bytes without discovering or
-reading an arbitrary host filesystem first. The unpublished safe platform facade
-exposes `DoctorOfflineInput::acquire(&File, max_bytes)`. Its caller provisions
+The offline doctor backend must obtain bytes without first discovering or
+reading arbitrary host files. The unpublished safe platform facade exposes
+`DoctorOfflineInput::acquire(&File, max_bytes)`. Its caller provisions
 and retains the input file; the acquisition never interprets a pathname, reads
 an environment variable, or takes ownership of that file.
 

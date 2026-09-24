@@ -4,9 +4,9 @@ Audience: language users, standard-library authors, and compiler contributors.
 
 Status: implemented bounded traversal; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
-This document owns one source-level traversal form over the internal
-[Owned Bounded Vec v1](OWNED-BOUNDED-VEC-V1.md) profile. It is not a general
-Iterator design and adds no standard-library declaration or public aggregate ABI.
+This contract adds one source-level traversal form for the internal
+[Owned Bounded Vec v1](OWNED-BOUNDED-VEC-V1.md). It is not a general Iterator
+design and adds no standard-library declaration or public aggregate ABI.
 
 ## Exact source profile
 

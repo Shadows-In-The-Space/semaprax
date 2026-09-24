@@ -6,8 +6,8 @@ Status: implemented additive `Box<Bytes>` profile; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 Public aggregate ABI and general allocator support remain separate.
 
-This document defines the v2 extension to the compiler-owned bounded Box
-profile. The scalar v1 contract remains frozen in
+V2 adds owned `Bytes` to the compiler-owned bounded Box profile. The scalar
+contract remains frozen in
 [Owned Bounded Box v1](OWNED-BOUNDED-BOX-V1.md).
 
 ## Exact extension

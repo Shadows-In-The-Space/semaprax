@@ -10,12 +10,11 @@ Audience: CLI/platform contributors and reviewers.
 
 ## Ownership and entry boundary
 
-The sys quarantine now owns the single [offline bundle parser](DOCTOR-OFFLINE-BUNDLE-V1.md).
-Its unsafe-free parser module retains the sealed input and validated indexes;
-the safe platform crate delegates through an opaque wrapper. File-view accessors
-return slices with the retained bundle's lifetime, not the temporary view's
-lifetime. No caller can construct a bundle from arbitrary file vectors or obtain
-mutable input, a descriptor, or a publication operation through that facade.
+The sys quarantine owns the single [offline bundle parser](DOCTOR-OFFLINE-BUNDLE-V1.md).
+Its unsafe-free module retains sealed input and validated indexes; the safe
+platform crate uses an opaque wrapper. File-view slices live only as long as
+the bundle, not a temporary view. The facade cannot construct a bundle from
+arbitrary file vectors or expose mutable input, descriptors, or publication.
 
 The separate private `doctor/offline_root` component prepares and materializes
 that inventory. It is compiled only for native64 little-endian Linux x86-64 and

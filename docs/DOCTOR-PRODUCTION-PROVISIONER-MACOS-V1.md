@@ -10,16 +10,13 @@ Audience: release engineers, platform maintainers, and security reviewers.
 
 ## Purpose and boundary
 
-[DOCTOR-PRODUCTION-PROVISIONER-V1](DOCTOR-PRODUCTION-PROVISIONER-V1.md) states
-that macOS and Windows "need separate native confinement and settlement
-contracts" and that "Linux evidence never promotes those hosts." This contract
-is that separate definition for macOS. It does not extend, weaken, or reuse
-the Linux contract's namespace/cgroup design: macOS has no unprivileged
-namespace or cgroup-v2 equivalent, and this document does not pretend
-otherwise. It also does not activate an ordinary `semaprax doctor --profile`
-selector, does not become the production provisioner entry point
-(`provisioned_doctor_provisioner_entry` remains Linux-only), and does not by
-itself satisfy WP-05 for macOS.
+The [Linux provisioner contract](DOCTOR-PRODUCTION-PROVISIONER-V1.md) requires
+separate macOS and Windows confinement and settlement contracts. This is the
+macOS contract; Linux evidence cannot promote it. macOS has no unprivileged
+namespace or cgroup-v2 equivalent, so this contract does not reuse the Linux
+design. It does not activate `semaprax doctor --profile`, make
+`provisioned_doctor_provisioner_entry` available beyond Linux, or complete
+WP-05 for macOS.
 
 What it does define, and what
 `crates/semaprax-native-rust-interop-platform-sys/src/doctor/darwin_confinement.rs`

@@ -13,11 +13,9 @@ successfully, while Node terminates with `SIGSEGV` (signal 11) and rustc exits
 with status 127. This is a hosted failure, not promotion evidence. See
 [Executions](#executions).
 
-Owning contract: [Linux production offline doctor provisioner
-v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md). This document adds the executable
-gate that contract's distribution and evidence section requires; it changes no
-admission rule, activates no ordinary CLI route, and promotes no completion
-row.
+The [Linux production provisioner contract](DOCTOR-PRODUCTION-PROVISIONER-V1.md)
+requires this distribution and evidence gate. The gate changes no admission
+rule, activates no ordinary CLI route, and promotes no completion row.
 
 ## Executions
 

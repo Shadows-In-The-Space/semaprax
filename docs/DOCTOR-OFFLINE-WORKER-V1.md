@@ -9,14 +9,13 @@ Audience: toolchain maintainers, worker provisioners and security reviewers.
 
 ## Deployment and authority
 
-The separately invoked `semaprax-doctor-worker` executable is not an ordinary
-CLI subprocess. A trusted provisioner must establish its clean launch context
-before entry. No service installation, privileged host configuration, ambient
-worker discovery or ordinary `doctor` activation is part of this change.
-The binary and its unsafe process-consuming entry live in the existing sys
-quarantine crate. No safe platform facade exposes this entry with hidden
-single-thread/descriptor-lifetime prerequisites; the root compiler and ordinary
-toolchain remain unsafe-free.
+`semaprax-doctor-worker` is a separately launched private executable, not an
+ordinary CLI subprocess. A trusted provisioner must prepare its clean launch
+context. This change installs no service, configures no privileged host policy,
+and enables no ambient discovery or ordinary `doctor` activation. Its unsafe,
+process-consuming entry stays in the sys quarantine. The safe platform facade
+does not hide its single-thread and descriptor-lifetime prerequisites; the root
+compiler and ordinary toolchain remain unsafe-free.
 
 For the initial native64 Linux x86-64/AArch64 implementation the provisioner
 must supply a single-threaded worker, exclusive descriptor ownership, no foreign

@@ -26,7 +26,8 @@ format: `Unreleased` then release buckets, grouped by impact.
   support remain unverified. A tenth selected Windows case now exercises a
   real inheritable broad ACE on a private parent and requires the created
   scratch DACL to stay protected with only its intended explicit ACE; the
-  expanded selector awaits hosted execution.
+  expanded selector passed at `f4d3291f` in hosted Windows Server 2025 run
+  `35993882814` (10 passed, 0 failed, 0 ignored).
 
 - Harden additive lock-bound offline fetch with held-directory authority,
   bounded retained inputs, private staging and no-replace cache publication.

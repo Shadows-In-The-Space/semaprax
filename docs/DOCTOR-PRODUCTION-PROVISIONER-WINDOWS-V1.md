@@ -8,7 +8,7 @@ historical five-test runtime witness on exact checkout `3d4220b6`, extending the
 two-test witness at `c6bf9902`. The historical signed-capsule nine-case exact selector
 (six runtime cases plus three admission refusals) passed on exact checkout
 `c608b8d8`. The current ten-case selector adds a hostile inheritable-parent-ACE
-DACL case and is not yet hosted. The authoring host remains macOS arm64
+DACL case and passed on exact checkout `f4d3291f`. The authoring host remains macOS arm64
 without a Windows toolchain, and no cross-compilation or emulated substitute
 is treated as Windows evidence. Host-independent capsule, admission-ordering,
 and settlement logic remains separately testable on non-Windows hosts. See
@@ -69,6 +69,13 @@ token/job/filesystem effects. The preceding run `35992165688` at `3b790471`
 failed at compilation in a Windows-only test fixture; it executed no runtime
 case. Neither result establishes release trust, artifact binding, or general
 Windows support.
+Hosted [run 35993882814](https://github.com/wavect/semaprax/actions/runs/35993882814),
+Windows Server 2025 job `107614131433`, executed the exact ten-case selector
+on `f4d3291f1f8a261d5c86f0d6c6aaa70ca8779ad2`: **10 passed, 0 failed,
+0 ignored, 114 filtered**. The new case put a verified broad inheritable ACE
+on a private parent and observed a protected child scratch DACL with only its
+one intended explicit ACE. This is that fixture's observation, not a general
+filesystem-isolation or production-support claim.
 
 ## Why the first revision had no accompanying code, and why this one does
 
@@ -370,7 +377,7 @@ signed-capsule admission. The historical nine-case selector passed at exact
 checkout `c608b8d8`: six live runtime cases (including deterministic test-only
 signed-key launch/settlement) and three signed-admission refusal cases. The
 current ten-case source adds the hostile inheritable-parent-ACE scratch-DACL
-case and awaits a new hosted run. The test key is not release trust. Signature
+case and passed at `f4d3291f`. The test key is not release trust. Signature
 verification authenticates only capsule bytes; artifact/executable
 reacquisition and binding remain open.
 
@@ -382,8 +389,8 @@ reacquisition and binding remain open.
 | Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted type-check at exact checkout `7cab8aa8` and historical five selected runtime tests passed at exact checkout `3d4220b6`; see [Nonclaims](#nonclaims) |
 | Sealed-capsule consumption | production path calls shared `parse_signed` with the compile-time release-key input and requires native Windows code 3/4; nine test-key/admission cases passed at `c608b8d8`; artifact-byte reacquisition/binding remains open |
 | Hostile-input tests for the host-independent parts | 29 tests across `capsule`, `refusal`, and `settlement` pass on this authoring host (macOS arm64); `cargo test -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement` |
-| Runtime tests for the Win32 primitive itself | historical six runtime cases and three admission refusals passed in [run 35992373373](https://github.com/wavect/semaprax/actions/runs/35992373373) on `c608b8d8`; current hostile-parent-ACE case awaits hosted execution |
-| Fail-closed gate authored and run | script self-test passed locally; historical exact nine-test selector passed at `c608b8d8`; current ten-test selector awaits hosted execution |
+| Runtime tests for the Win32 primitive itself | ten selected cases, including the hostile-parent-ACE case, passed in [run 35993882814](https://github.com/wavect/semaprax/actions/runs/35993882814) on `f4d3291f` |
+| Fail-closed gate authored and run | script self-test passed locally; exact ten-test selector passed at `f4d3291f` |
 | Linux, macOS, or existing job-object evidence never cited as Windows proof | met |
 | `docs/COMPLETION-MATRIX.md` WP-05 promoted for Windows | not done; not claimed |
 

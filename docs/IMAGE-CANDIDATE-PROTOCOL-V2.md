@@ -6,11 +6,11 @@ completion remain separate from this release evidence.
 
 Audience: agent builders, compiler contributors, and reviewers.
 
-The host explicitly starts `semaprax serve-candidates <manifest>` or opens an
-`ImageSession` with `ImageHostCapability::CandidateOnly`. This selects
-`semaprax.image-agent-protocol.v2`; the existing `serve-image` command and
-read-only v1 method/catalog/result bytes are unchanged. No request can switch
-profiles or acquire source-write, runtime test, process, or build authority.
+The host selects v2 by starting `semaprax serve-candidates <manifest>` or
+opening an `ImageSession` with `ImageHostCapability::CandidateOnly`. The
+`serve-image` command and read-only v1 methods, catalogue, and result bytes
+stay unchanged. Requests cannot switch profiles or gain source-write, runtime
+test, process, or build authority.
 
 ## Capabilities and lifecycle
 

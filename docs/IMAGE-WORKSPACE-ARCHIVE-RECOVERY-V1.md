@@ -6,11 +6,11 @@ The full workspace-recovery programme remains Partial.
 
 Audience: workspace hosts, agent session integrators, and compiler contributors.
 
-The v5 host can retain a historical candidate from a self-contained Project
-Candidate Archive before accepting its first frame. Recovery restores checked
-in-memory candidate state. It does not restore source publication authority,
-Git approvals or receipts, drafts, attempts, filesystem roots, or session policy.
-Existing frame-based recovery capsules and v1–v4 transports remain unchanged.
+Before its first frame, a v5 host can restore a historical candidate from a
+self-contained Project Candidate Archive. This restores checked in-memory
+candidate state only—not publication authority, Git approvals or receipts,
+drafts, attempts, filesystem roots, or session policy. Frame-based recovery
+capsules and v1–v4 transports stay unchanged.
 
 ## Host API
 
@@ -47,12 +47,11 @@ source file; the host explicitly owns persistence.
 
 ## Historical sources and authority
 
-The archived base source revision may differ from current live source. A restart
-in an identical-manifest sibling checkout can therefore recover work after manual
-edits without guessing or adopting the old source as current. The live image and
-its digest remain unchanged. Historical candidates remain queryable and can be
-explicitly rebased onto a newly opened current candidate. No automatic rebase,
-merge, approval restoration, or source replacement occurs.
+The archive's base revision may differ from live source. An identical-manifest
+sibling checkout can recover work after manual edits without treating old source
+as current. The live image and digest do not change. Historical candidates stay
+queryable and may be explicitly rebased onto a new current candidate. Recovery
+does not automatically rebase, merge, restore approval, or replace source.
 
 Existing source commit checks still require a candidate based on the current
 held source revision and a separate startup-selected Git host and approval.

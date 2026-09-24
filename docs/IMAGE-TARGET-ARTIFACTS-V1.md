@@ -5,14 +5,13 @@ Status: implemented bounded projection profile; **HOSTED GREEN** under the
 actual target execution remain separate from these compiler projections.
 Audience: semantic agent clients, compiler contributors, and embedding hosts.
 
-`ProjectSemanticImage::target_admission` derives actual compiler-emission facts
-for the selected image's complete linked entry and test programs. It reuses the
-candidate target producer, including native C11 emission and wasmparser
-structural validation of Core Wasm. The selected authored function's membership
-is checked against each retained role program. A whole-closure failure does not
-establish that this function caused the failure. The report labels this scope
-and carries the owning compiler diagnostic without claiming runtime execution,
-native machine-code compilation, standalone function support or failure blame.
+`ProjectSemanticImage::target_admission` reports compiler-emission facts for
+the selected image's complete linked entry and test programs. It reuses the
+candidate target producer, including native C11 emission and wasmparser's Core
+Wasm structural validation. It checks whether the selected authored function
+belongs to each retained role program. A whole-closure failure does not blame
+that function. The report carries the compiler diagnostic but proves no runtime
+execution, native machine-code compilation, or standalone function support.
 
 `artifact_projection(expected_image, ImageArtifactKind::{Web,Npm,OpenApi,C}, max_bytes)`
 invokes the pathless Project carrier builder for the selected kind.

@@ -8,11 +8,10 @@ separately gated.
 
 Audience: embedding hosts, compiler contributors, and protocol reviewers.
 
-This contract adds two opt-in v5 operations for persisting an already retained
-complete candidate archive or incomplete draft archive. They compose the
-existing source-backed archives, shared immutable candidate/draft archive store,
-and authority-neutral retention lifecycle without transferring roots or
-policies into request data.
+Two opt-in v5 operations persist a retained complete candidate archive or
+incomplete draft archive. They use the existing source-backed archives,
+immutable shared store, and authority-neutral retention lifecycle. Requests
+cannot supply the store root or policy.
 
 ## Startup selection
 

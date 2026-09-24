@@ -6,14 +6,12 @@ Status: bounded implementation; **HOSTED GREEN** for v0.4.0.
 See the [release baseline](RELEASE-0.4.0-STATUS.md) for evidence scope.
 Broader completion and measured performance remain separate.
 
-`VNextSession::open_with_frontend_cache(&absolute_manifest, policy)` enables
-invocation-owned parsed/canonical AST reuse for v5 live refresh. The existing
-`open` constructor remains cold. The additive
-`VNextSession::open_with_semantic_cache(&absolute_manifest, policy)` additionally
-retains compiler-created checked modules; `open_with_frontend_cache` keeps its
-existing AST-only behavior. `VNextPolicy`, protocol method authority,
-capability reports, image bytes, and image identity do not change. Requests
-cannot enable, disable, seed, or deserialize a cache.
+`VNextSession::open_with_frontend_cache(&absolute_manifest, policy)` reuses
+parsed, canonical ASTs during v5 live refresh. `open` remains cold.
+`VNextSession::open_with_semantic_cache(&absolute_manifest, policy)` also retains
+compiler-checked modules; the frontend-cache constructor remains AST-only.
+Neither changes `VNextPolicy`, method authority, capability reports, image
+bytes, or image identity. Requests cannot control or seed either cache.
 
 The initial cached load reads each declared source through the existing Project
 filesystem authority and builds the initial cache during its single frontend

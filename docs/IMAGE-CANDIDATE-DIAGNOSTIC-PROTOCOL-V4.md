@@ -7,9 +7,9 @@ See the [release baseline](RELEASE-0.4.0-STATUS.md) for evidence scope.
 This remains a bounded diagnostic/repair profile, not general repair or
 full-programme completion.
 
-V4 adds a host-selected diagnostic lifecycle over validated candidates. It does
-not require runtime-test authority and does not widen the existing read-only v1,
-candidate-only v2, or test-enabled v3 method sets, descriptors, or result bytes.
+V4 lets the host enable diagnostics for validated candidates without enabling
+runtime tests. V1 read-only, v2 candidate-only, and v3 test-enabled methods,
+descriptors, and result bytes do not change.
 
 ## Host selection and authority
 
@@ -58,15 +58,15 @@ rejected by the closed request validator.
 | `protocol/conformance` | Optional `candidate_revision`, `offset`, `chunk_bytes` | Source-backed static protocol conformance chunks for the base image or a retained candidate |
 | `candidate/interface-catalog` | `candidate_revision`, `target`; optional `offset`, `chunk_bytes` | Required local protocol members and eligible implementation functions |
 
-The two conformance queries use existing `semantic_read` authority. They expose
-source-derived declaration tables over admitted images without adding dynamic
-dispatch or protocol nodes to the runtime Graph. See
+The two conformance queries need only `semantic_read`. They report declaration
+tables from admitted source; they add no dynamic dispatch or protocol nodes to
+the runtime Graph. See
 [Image Protocol Conformance v1](IMAGE-PROTOCOL-CONFORMANCE-V1.md).
 
-Expression holes use the existing fill/complete/discard lifecycle. V4 `hole/query`
-discovery admits either the body-hole or expression-hole context schema; the
-returned schema identifies which was selected. Opening an expression hole uses
-the already granted `candidate_prepare` authority, not test or source authority.
+Expression holes use the existing fill/complete/discard lifecycle. V4
+`hole/query` accepts a body-hole or expression-hole context schema and returns
+the selected schema. Opening an expression hole needs `candidate_prepare`, not
+test or source authority.
 See [Expression Holes v1](PROJECT-CANDIDATE-EXPRESSION-HOLES-V1.md).
 
 `candidate/apply-intent` keeps its existing fail-fast behavior, even in v4.

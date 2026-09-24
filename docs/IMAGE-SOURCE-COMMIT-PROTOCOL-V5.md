@@ -5,12 +5,12 @@ Status: implemented optional v5 publication extension; **HOSTED GREEN** under th
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 Startup-only host authorization and the separately owned Git boundary are unchanged.
 
-This extension connects retained complete candidates to the existing real local
-[Git publication authority](PROJECT-CANDIDATE-GIT-PUBLICATION-V1.md). Startup
-selection and exact independent host approval are required. Read-only and earlier
-candidate protocol versions gain no source authority. The extension creates
-canonical Git blobs/trees/commit and pivots one fixed bare-repository branch;
-original working-tree paths, indexes and managed `ACTIVE` remain unchanged.
+This extension lets an independently approving host publish a retained complete
+candidate through the existing [Git publication authority](PROJECT-CANDIDATE-GIT-PUBLICATION-V1.md).
+The host must select it at startup and approve the exact candidate. Read-only
+and earlier candidate protocols gain no source authority. Publication creates
+canonical Git blobs, trees, and a commit, then pivots one fixed bare-repository
+branch. Working-tree paths, indexes, and managed `ACTIVE` do not change.
 
 ## Startup selection and approval
 

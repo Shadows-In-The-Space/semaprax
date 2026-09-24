@@ -6,12 +6,11 @@ Status: implemented bounded interpreted-test protocol; **HOSTED GREEN** under
 [the v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). Native/Wasm execution
 and complete-programme support are not implied.
 
-V3 adds explicit interpreted-test authority to the retained candidate session.
-The host selects `ImageHostCapability::TestEnabled` before requests arrive, or
-calls `ImageSession::open_test_enabled(manifest, policy)` with a bounded
-`CandidateTestPolicy`. Read-only v1 and candidate-only v2 retain their existing
-method sets, envelopes and authority. An agent cannot select the profile or
-alter the policy through a request.
+V3 lets the host run interpreted tests on retained candidates. Before requests
+arrive, it selects `ImageHostCapability::TestEnabled` or calls
+`ImageSession::open_test_enabled(manifest, policy)` with a bounded
+`CandidateTestPolicy`. V1 and v2 keep their methods, envelopes, and authority.
+An agent cannot choose the profile or change the policy in a request.
 
 ```text
 semaprax serve-test-candidates <manifest>

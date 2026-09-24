@@ -6,19 +6,19 @@ Status: implemented bounded read-only protocol; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). Broader platform and public
 support remain governed by their owning contracts.
 
-`semaprax serve-image <manifest>` serves one host-selected authenticated Project
-through `semaprax.image-agent-protocol.v1`. This is separate from every existing
-Graph/Project transport version; none of their method sets change. The public
-`image_transport::serve` and `ImageSession::open` APIs require the host's
-explicit `ImageHostCapability::ReadOnly` selection. No request can elevate it.
+`semaprax serve-image <manifest>` serves one host-selected, authenticated Project
+through `semaprax.image-agent-protocol.v1`. Existing Graph/Project transports
+keep their method sets. The public `image_transport::serve` and
+`ImageSession::open` APIs require the host to select
+`ImageHostCapability::ReadOnly`; a request cannot elevate it.
 
 ## Session and authority
 
-Startup authenticates the exact manifest and declared source set once, retains
-the checked Project revision, and derives one immutable Semantic Workspace
-Image. `workspace/open` selects no path: it returns compact image, Project,
-and workspace revision handles for this already bound input. It does not emit
-the image or source bodies. Repeated opens return the same handle.
+Startup authenticates the manifest and declared sources, checks the Project
+revision, and derives one immutable Semantic Workspace Image.
+`workspace/open` takes no path and returns compact image, Project, and workspace
+revision handles. It returns no image or source bodies; repeated opens return
+the same handle.
 
 Every admitted call reauthenticates held Project inputs before executing and
 after rendering its complete result. Output is released only after that final

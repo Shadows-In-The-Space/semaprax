@@ -43,6 +43,10 @@ canonical Visual Studio 18 product line plus exact MSVC/linker/SDK versions,
 canonical versioned roots with every path component proven non-reparse, exact
 archive names, and COFF archive signatures; ambient `LIB` is replaced and the
 provider links only explicit absolute archives under `/nodefaultlib`.
+The hosted Windows image has presented two linker file revisions under the
+same pinned MSVC tools version. The lock admits only those two exact revisions;
+each package run still asserts its observed linker file and banner identities
+and checks reproducibility within that one observed toolchain.
 The macOS Rust link disables path-dependent linker signing, canonicalizes the
 single `LC_UUID`, assembles two complete application bundles, then applies a
 timestamp-free ad-hoc signature with the fixed identifier

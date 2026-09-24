@@ -111,7 +111,8 @@ if ($vcToolsVersion -ne (Lock 'windows.msvc.tools.version')) { throw "MSVC tools
 $vcToolsRoot = Resolve-CanonicalNonReparsePath (Join-Path $visualStudioRoot "VC/Tools/MSVC/$vcToolsVersion") 'MSVC tools root'
 $linkExe = Resolve-CanonicalNonReparsePath (Join-Path $vcToolsRoot 'bin/Hostx64/x64/link.exe') 'link.exe'
 $linkVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($linkExe).FileVersion
-if ($linkVersion -ne (Lock 'windows.link.version')) { throw "link.exe identity mismatch: $linkVersion" }
+$linkVersions = @((Lock 'windows.link.version'), (Lock 'windows.link.alternate-version'))
+if ($linkVersion -notin $linkVersions) { throw "link.exe identity mismatch: $linkVersion" }
 $linkLines = @(& $linkExe '/?' 2>&1)
 $linkExit = $LASTEXITCODE
 $linkOutput = ($linkLines -join "`n").Trim()

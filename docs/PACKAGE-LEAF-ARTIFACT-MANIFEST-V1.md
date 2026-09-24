@@ -19,7 +19,10 @@ the uniquely selected original Subject-v2 bytes. Thus a report with the same
 interface but different implementation cannot be substituted. Build-v1's exact
 single selected coordinate and root must equal the publication. The ordinary
 registry-v1 publication/namespace/content checks are retained. API identity is
-derived from verified export facts, never supplied as trusted input.
+derived from verified export facts, never supplied as trusted input. An empty
+publication `api_digest` is explicitly a builder-template placeholder. A
+nonempty value must equal the derived digest or admission fails with
+`SPX-PKR631`; a mismatched caller claim is never silently repaired.
 
 The producer returns `AdmittedLeafManifest`; byte-only `inspect` and
 `inspect_with_digest` return the distinct `InspectedLeafManifest`. There is no

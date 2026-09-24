@@ -71,7 +71,8 @@ order is independently canonicalized and exact-compared.
 producer-backed snapshot, not inspection output. It independently replays
 Lock-v3 with the exact supplied Subject-v3 inventory. Each selected subject
 must be byte-identical to an active admitted entry; yanked, absent, duplicate
-or extra selections refuse. Multiple independent roots may be selected if
+or extra selections refuse. The verified lock coordinate set must exactly equal
+the selected coordinate keys, independently of ordering. Multiple independent roots may be selected if
 their complete valid closure satisfies the same rules.
 
 For every selected entry, the actual resolved dependency coordinates must

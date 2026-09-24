@@ -472,7 +472,16 @@ pub fn verify_lock_selection(
             return Err(association("duplicate selection"));
         }
     }
-    if verified.packages.len() != selected.len() {
+    let locked_coordinates = verified
+        .packages
+        .iter()
+        .map(|coordinate| (coordinate.package.clone(), coordinate.version.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let selected_coordinates = selected
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    if verified.packages.len() != selected.len() || locked_coordinates != selected_coordinates {
         return Err(association("lock selection inventory disagrees"));
     }
     for (entry, subject) in selected.values() {

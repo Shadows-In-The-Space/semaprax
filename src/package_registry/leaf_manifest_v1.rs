@@ -167,6 +167,11 @@ pub fn create_from_leaf_build(
         "semaprax.package-artifact-api-abi.v1",
         encode(exports).as_bytes(),
     );
+    if !publication.api_digest.is_empty() && publication.api_digest != api {
+        return Err(association(
+            "supplied leaf API digest differs from verified exports",
+        ));
+    }
     let mut publication = publication.clone();
     publication.api_digest = api.clone();
     super::build_snapshot(std::slice::from_ref(&publication))?;

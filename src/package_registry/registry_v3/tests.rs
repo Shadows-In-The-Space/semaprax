@@ -285,8 +285,15 @@ fn leaf_exact_build_evidence_source_report_and_coordinate_tampering_refuses() {
 
 #[test]
 fn leaf_inspection_rejects_api_digest_rebinding_profile_and_inventory_splices() {
-    let fixture = Fixture::new();
+    let mut fixture = Fixture::new();
     let entry = fixture.leaf().unwrap();
+    fixture.leaf.api_digest = entry.publication.api_digest.clone();
+    assert_eq!(
+        fixture.leaf().unwrap().publication.api_digest,
+        entry.publication.api_digest
+    );
+    fixture.leaf.api_digest = leaf::raw(b"wrong caller API");
+    assert_eq!(fixture.leaf().unwrap_err().code, "SPX-PKR631");
     rejected(leaf::inspect(&entry.manifest.bytes.replace(
         leaf::PROFILE,
         "linked-effect-free-core-wasm-scalar.v2",

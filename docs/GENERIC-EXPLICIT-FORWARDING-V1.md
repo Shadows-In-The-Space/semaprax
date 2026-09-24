@@ -9,12 +9,11 @@ Audience: compiler contributors and language reviewers.
 
 ## Semantic scope
 
-An explicit call from an admitted generic function may map each callee type
-parameter to a caller parameter or an already admitted concrete type. The
-ordered argument list may permute, repeat, omit caller parameters, or combine
-caller parameters with concrete arguments. Callee arity must match exactly;
-caller and callee arities need not match. Existing declaration parameter-count
-limits remain unchanged.
+An admitted generic function may explicitly pass each callee type parameter
+as a caller parameter or an admitted concrete type. The ordered vector may
+permute, repeat, or omit caller parameters and mix them with concrete types.
+It must match the callee's arity, but caller and callee arities may differ.
+Existing declaration parameter-count limits still apply.
 
 For a caller with parameters `A, B`, mappings such as `<B, A>`, `<A, A>`,
 `<A, i64>`, and `<Bytes, B>` are structurally meaningful. They are executable

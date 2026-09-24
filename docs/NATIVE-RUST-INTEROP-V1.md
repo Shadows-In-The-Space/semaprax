@@ -8,13 +8,12 @@ authoring-time, ignored, device/simulator, or separately provisioned evidence
 below retains its narrower scope; public promotion, registry publication and
 broader product completion remain separately gated.
 
-Native Rust Interoperability v1 is an additive, current-host, scalar bridge. It
-does not change callable v2/v3, the native loader or host, Wasm, `SPX-B104`, or
-any existing wire/KAT; the additive `semaprax.graph.v25` projection that a
-declared import selects leaves every earlier Graph schema's selection and bytes
-unchanged. Its admitted round trip is safe generated Rust caller → selected
-SEMAPRAX export → selected Rust-import callback → scalar result. It never
-detours through Wasm or a dynamic library.
+This current-host scalar bridge runs a safe generated Rust caller → selected
+SEMAPRAX export → selected Rust-import callback → scalar result. It uses neither
+Wasm nor a dynamic library. Callable v2/v3, the native loader and host,
+`SPX-B104`, and existing wires/KATs do not change. A declared import selects
+the additive `semaprax.graph.v25` projection; earlier Graph schema selections
+and bytes remain unchanged.
 
 ## Source and semantic admission
 

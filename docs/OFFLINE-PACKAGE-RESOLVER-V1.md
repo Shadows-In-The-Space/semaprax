@@ -7,9 +7,9 @@ Status: implemented bounded authority-free resolver; **HOSTED GREEN** under the
 Acquisition, registry publication and general package support remain separate.
 
 Resolver v1 selects one integrity-bound version per package from a finite,
-caller-owned, source-replayed catalog. It is an authority-free planning layer
-above Report v2 and Lock v2; it never discovers, fetches, builds, executes,
-caches, or publishes packages.
+caller-owned catalog of source-replayed subjects. It plans over Semantic
+Package Report v2 and Offline Semantic Package Lock v2. It cannot discover,
+fetch, build, execute, cache, or publish packages.
 
 ## Public schemas and API
 

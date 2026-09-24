@@ -7,13 +7,11 @@ their narrower scope; public promotion and broader product completion remain
 separately gated.
 Audience: compiler, package-tooling, and platform-authority contributors.
 
-Offline Effect-Free Scalar Core-Wasm Package Build v1 consumes one exact Offline
-Deterministic Package Resolver v1 evidence envelope and its original caller-owned
-input. It independently replays resolution and Lock v2, recovers only the exact
-selected subject from that authenticated catalog, replays its embedded
-canonical source through the ordinary parser, verifier, and HIR resolver, and
-emits one deterministic Core-Wasm module through the existing Public Scalar
-Export Profile v1.
+Build v1 takes exact Resolver-v1 evidence and its original caller-owned input.
+It independently replays resolution and Lock v2, recovers only the exact selected
+subject from the authenticated catalog, and checks its canonical source through
+the ordinary parser, verifier, and HIR resolver. It then emits one deterministic
+Core-Wasm module through Public Scalar Export Profile v1.
 
 The effect-free builder is authority-free. A separate safe publisher independently
 replays the complete build before it acquires destination authority, creates one

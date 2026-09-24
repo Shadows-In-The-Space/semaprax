@@ -12,10 +12,10 @@ owned runtime corpora passed. Interpreter, native O0/O2 and Core Wasm agreed on
 success, failure cleanup and evaluation-once probes. These counts describe that
 local execution, not a new test run or the current evidence ceiling.
 
-This extends [v2](GENERIC-ARGUMENT-INFERENCE-V2.md) with nested omitted-call
-result evidence and inference inside admitted generic functions. It preserves
-the existing explicit substitution domains, value and ownership admission,
-concrete instance closure, and [forwarding contract](GENERIC-EXPLICIT-FORWARDING-V1.md).
+V3 adds nested omitted-call result evidence and inference inside admitted
+generic functions. It keeps [v2](GENERIC-ARGUMENT-INFERENCE-V2.md)'s
+substitution domains, value and ownership rules, concrete instance closure,
+and [forwarding contract](GENERIC-EXPLICIT-FORWARDING-V1.md).
 
 ## Nested calls
 

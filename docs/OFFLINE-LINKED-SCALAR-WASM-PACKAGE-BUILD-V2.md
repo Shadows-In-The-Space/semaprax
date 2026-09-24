@@ -9,14 +9,13 @@ Audience: compiler, package-tooling, and platform-authority contributors.
 
 ## Purpose and authority boundary
 
-Build v2 deterministically projects one caller-owned, independently replayed
-Package Source Capsule v1 into one effect-free scalar Core-Wasm module. The
-compiler receives no filesystem, process, registry, network, cache, clock, or
-publication authority. It consumes only
-`package_source_capsule::verify_for_linked_build`; the returned retained linked
-HIR is already authenticated and is never reconstructed from submitted build
-artifacts. The capsule, build evidence, and verification receipts carry facts,
-not authority.
+Build v2 deterministically turns one caller-owned, independently replayed
+Package Source Capsule v1 into an effect-free scalar Core-Wasm module. The
+compiler gets no filesystem, process, registry, network, cache, clock, or
+publication authority. It consumes
+only `package_source_capsule::verify_for_linked_build` and its authenticated,
+retained linked HIR, never submitted build artifacts. Capsules, evidence, and
+receipts record facts, not authority.
 
 The separate safe publisher may create one new directory, but `publish_linked`
 uses the exact v1 held-authority state machine, fixed three-file inventory,

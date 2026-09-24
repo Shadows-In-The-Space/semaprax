@@ -13,10 +13,9 @@ The codec defines authenticated bearer bytes for two staged capability kinds:
 - `2`: a provisional owned result bound to the exact function-template
   fingerprint that produced it.
 
-An owner remains eligible for different compatible functions because its token
-does not contain function scope. Converting a provisional result into a general
-owner will require a future synchronized registry transition and generation
-rotation; the codec does not implement that state machine.
+An owner token has no function scope, so compatible functions may use it.
+Promoting a provisional result to a general owner would require a synchronized
+registry transition and generation rotation; this codec does neither.
 
 ## Canonical 64-byte envelope
 

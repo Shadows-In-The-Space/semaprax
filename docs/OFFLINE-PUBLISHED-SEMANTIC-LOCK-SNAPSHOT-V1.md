@@ -11,9 +11,10 @@ Audience: package-tooling, compiler, and platform-authority contributors.
 ## Purpose and authority boundary
 
 This snapshot turns one exact caller-owned [Resolver v1](OFFLINE-PACKAGE-RESOLVER-V1.md)
-input/evidence pair into three replayable byte strings. The compiler layer is
-authority-free; a separate lower crate may publish them only to one fresh
-directory through the held no-replace state machine.
+input/evidence pair into three independently replayable byte strings. The
+compiler has no publication authority. A separate safe lower crate may publish
+them only to one fresh directory through the held, no-replace publication
+state machine.
 
 The snapshot is not an updateable lockfile, registry, cache, `ACTIVE` pivot,
 signature, provenance record, build, sandbox, or target-execution result.

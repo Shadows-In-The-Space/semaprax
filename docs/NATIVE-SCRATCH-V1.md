@@ -10,10 +10,9 @@ Audience: compiler contributors, CLI maintainers, and security reviewers.
 
 ## Scope
 
-The ordinary native compilation helper writes an emitted C translation unit
-for Clang. The legacy single-source `run` command additionally needs a temporary
-executable. Neither operation may adopt, truncate, or delete a pre-existing
-temporary file merely because its name contains this process's ID.
+Native compilation writes C for Clang; the legacy single-source `run` command
+also needs a temporary executable. Neither may adopt, truncate, or delete an
+existing temporary file just because its name contains this process's ID.
 
 This correction changes temporary filesystem handling, not language semantics,
 emitted C, command grammar, compiler flags, requested build-output behavior,

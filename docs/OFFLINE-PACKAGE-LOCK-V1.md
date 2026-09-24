@@ -5,9 +5,10 @@
   Registry, public support and runtime enforcement are not supplied by this lock.
 - Audience: package tooling authors and compiler contributors
 
-Offline Package Lock v1 deterministically records an exact graph from a finite,
-caller-supplied Report-v1 set. It is read-only: it never resolves, discovers,
-fetches, builds, executes, contacts a registry, mutates, or publishes.
+Offline Package Lock v1 records an exact, independently replayable graph from a
+finite caller-supplied set of Interface Package Report v1 envelopes. It is
+read-only: it does not resolve versions, discover or fetch files, build, run
+scripts or targets, contact a registry, change source, or publish a lockfile.
 
 ## Commands and library
 

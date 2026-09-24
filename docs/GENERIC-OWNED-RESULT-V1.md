@@ -14,8 +14,8 @@ not a new test run or the current evidence ceiling.
 
 ## Semantic scope
 
-This GEN-06 tranche admits explicit generic functions whose owning parameter
-and result are the same authenticated compiler-owned `Result<Bytes, E>`.
+GEN-06 admits explicit generic functions whose owning parameter and result
+share the authenticated compiler-owned `Result<Bytes, E>` type.
 `E` is one declaration-owned type parameter, explicitly instantiated as any
 of the eight Copy scalars (`i64`, `i32`, `u8`, `usize`, `char`, `f32`, `f64`,
 `bool`) or `Bytes`. This is a real substitution in the residual carrier, not

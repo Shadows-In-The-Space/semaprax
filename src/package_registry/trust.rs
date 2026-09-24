@@ -18,7 +18,7 @@ const MAX_ROLES: usize = 19;
 const MAX_KEYS: usize = 64;
 type Result<T> = std::result::Result<T, Diagnostic>;
 
-fn error(code: &str, message: &str) -> Diagnostic {
+fn error(code: &'static str, message: &str) -> Diagnostic {
     Diagnostic::io(code, message)
 }
 fn shape() -> Diagnostic {

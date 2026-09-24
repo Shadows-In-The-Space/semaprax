@@ -729,10 +729,11 @@ jobs:
     # skipped kernel reported as a pass is exactly the false green that kept
     # this evidence local until now, and it is the reason the flag exists.
     runs-on: ubuntu-24.04
-    # The complete differential corpus outlasted the former 60-minute cap on
-    # ubuntu-24.04 even though its two cross-backend legs passed. Keep every
-    # corpus selector intact and allow the remaining interpreter legs to end.
-    timeout-minutes: 120
+    # The exact v0.6.0 tag run reached the 120-minute cap after its two
+    # cross-backend legs passed, while the interpreter corpus was still
+    # running. Keep every selector and sample intact; give the full lane a
+    # bounded window to finish on the hosted runner.
+    timeout-minutes: 240
     env:
       # Pinned by tag *and* by content digest. The tag alone is mutable.
       ELAN_RELEASE: v4.2.4

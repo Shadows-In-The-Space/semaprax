@@ -52,8 +52,9 @@ hosted-registry end-to-end result.
 
 ## Focused evidence
 
-`package_registry::mirror_transport::tests` owns four local cases: ordered
+`package_registry::mirror_transport::tests` owns five local cases: ordered
 metadata/artifact exact URL acquisition; invalid origin/path/duplicate/timeout
 or aggregate bound pre-dispatch refusal; redirect, status, URL, size and digest
-hostile responses; and construction of the concrete native transport. The latter inspects no
+hostile responses; refusal to reuse a native client under a different authority;
+and construction of the concrete native transport. The latter inspects no
 network and makes no availability claim.

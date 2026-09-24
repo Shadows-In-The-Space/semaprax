@@ -9,28 +9,25 @@
 //! `provisioned_doctor_*`.
 //!
 //! This module is split so that the parts with no Win32 dependency --
-//! sealed-capsule structural validation ([`capsule`]), fail-closed admission
+//! signed-capsule verification plus a non-authoritative structural corpus ([`capsule`]), fail-closed admission
 //! ordering ([`refusal`]), and the sticky settlement state machine
 //! ([`settlement`]) -- compile and run their tests on every host this crate
 //! builds on, this one included. Only [`primitive`], the actual restricted
 //! token / tightened job object / ACL'd scratch root / sealed-capsule
-//! consumption wiring, is `#[cfg(windows)]`: it has never been compiled or
-//! executed on this authoring host (macOS arm64, no Windows toolchain, no
-//! `*-pc-windows-*` target). See [`primitive`]'s module documentation for
-//! exactly what was and was not verified about it, and for the specific
-//! simplifications it makes relative to the full contract in the owning
-//! specification.
+//! consumption wiring, is `#[cfg(windows)]`: it is not compiled or executed on
+//! this authoring host (macOS arm64, no Windows toolchain, no
+//! `*-pc-windows-*` target). Hosted run
+//! [35988348061](https://github.com/wavect/semaprax/actions/runs/35988348061)
+//! executed five selected Windows runtime tests on exact checkout `3d4220b6`,
+//! before the signed-capsule admission change in this checkout. See
+//! [`primitive`]'s module documentation for the current evidence ceiling and
+//! the remaining spec nonclaims.
 //!
 //! [doc]: https://github.com/wavect/semaprax/blob/main/docs/DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1.md
 //!
-//! `dead_code` is allowed for this module tree because `src/lib.rs` --
-//! outside this session's file lease (`crates/semaprax-native-rust-interop-platform-sys/src/doctor/**`,
-//! `crates/semaprax-doctor-collector/**`, `docs/DOCTOR-*.md`) -- does not yet
-//! re-export it the way it re-exports `doctor::darwin_confinement`, so these
-//! otherwise-`pub` items are unreachable from the crate's own public surface
-//! on a plain (non-test) build. A session with `src/lib.rs` in its lease
-//! should add `pub use doctor::windows_confinement;` there (mirroring the
-//! existing `darwin_confinement` re-export) and delete this allow.
+//! `dead_code` is allowed because the crate root deliberately does not
+//! re-export this internal Windows primitive as a public API or ordinary CLI
+//! route. Its contract and tests remain available inside the owning crate.
 #![allow(dead_code)]
 pub mod capsule;
 #[cfg(windows)]

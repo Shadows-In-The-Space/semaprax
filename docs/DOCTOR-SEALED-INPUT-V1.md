@@ -9,6 +9,16 @@ Audience: CLI/platform contributors and reviewers.
 
 ## Purpose and authority
 
+### Capsule wire architecture
+
+Doctor capsule-v1 encodes native OS and architecture in one byte: `1` is Linux
+x86-64, `2` Linux AArch64, `3` Windows x86-64, and `4` Windows AArch64.
+These values are reserved to those exact platform/architecture pairs; other
+values are invalid. Shared wire recognition does not grant cross-platform
+admission: each provisioner must require its exact native code before platform
+effects. Linux accepts only `1` or `2`; Windows accepts only `3` or `4` for
+the current native architecture. See [production provisioner v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md#signed-release-capsule).
+
 The future offline doctor backend needs to obtain bytes without discovering or
 reading an arbitrary host filesystem first. The unpublished safe platform facade
 exposes `DoctorOfflineInput::acquire(&File, max_bytes)`. Its caller provisions

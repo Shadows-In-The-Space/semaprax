@@ -4,8 +4,9 @@ Audience: release engineers, platform maintainers, and security reviewers
 with access to a real Windows host or a Windows CI runner.
 
 Status: the `#[cfg(windows)]` primitive has hosted type-check evidence and a
-five-test runtime witness on exact checkout `3d4220b6`, extending the earlier
-two-test witness at `c6bf9902`. The authoring host remains macOS arm64
+historical five-test runtime witness on exact checkout `3d4220b6`, extending the earlier
+two-test witness at `c6bf9902`. The current source adds signed-capsule parsing
+and a nine-case exact selector (six runtime cases plus three admission refusals), not yet executed on Windows. The authoring host remains macOS arm64
 without a Windows toolchain, and no cross-compilation or emulated substitute
 is treated as Windows evidence. Host-independent capsule, admission-ordering,
 and settlement logic remains separately testable on non-Windows hosts. See
@@ -117,8 +118,9 @@ now exists, reusing that same job-object *shape* without importing
 `windows.rs`'s private types (exactly as `doctor::darwin_confinement` does not
 import `doctor::unix::launch::darwin`'s private types):
 
-- `capsule.rs` -- host-independent structural sealed-capsule body parser (no
-  Win32 call; compiles and its hostile-input tests run on every host).
+- `capsule.rs` -- host-independent structural hostile-input corpus plus
+  Windows runtime delegation to the shared signed-capsule parser and release
+  trust anchor. Structural parsing is not runtime admission evidence.
 - `refusal.rs` -- host-independent, order-enforcing admission classifier (no
   Win32 call; compiles and its ordering tests run on every host).
 - `settlement.rs` -- host-independent sticky settlement state machine (no
@@ -229,26 +231,19 @@ after initial population), and this revision does not implement it -- that
 half of the sealed-input contract (the immutable carrier itself) is still
 open, exactly as the first revision left it.
 
-What this revision does implement, in
-`crates/semaprax-native-rust-interop-platform-sys/src/doctor/windows_confinement/capsule.rs`,
-is the **structural decode of a capsule's body fields once bytes are in
-hand** -- magic, version, architecture, target, role mask, selector, and the
-five fixed-size artifact records -- byte-for-byte identical in constants,
-field order, and validation rules to `semaprax-doctor-capsule` 0.1.0's private
-body-decoding stage (`crates/semaprax-doctor-capsule/src/lib.rs`,
-`parse_signed`). It deliberately does **not** verify the release Ed25519
-signature that crate's `parse_signed` requires before a capsule may be
-trusted: `semaprax-doctor-capsule` is a `cfg(target_os = "linux")`-only
-dependency in this crate's `Cargo.toml` today, a file outside every session's
-lease so far, so a Windows build cannot yet call it. A `CapsuleBody` result
-from this module is explicitly **not** a trust decision (see the module's own
-documentation and its `unverified_signature` field, which is copied out but
-never checked). This exists so the admission ordering in `refusal.rs` and
-this crate's own hostile-input tests have real capsule structure to refuse
-against, on any host, today; a Windows-capable session with `Cargo.toml` in
-its lease should add `semaprax-doctor-capsule` as a `cfg(windows)` dependency
-too and delete this module's body decoder in favor of calling that crate's
-`parse_signed` directly, rather than let the two decoders drift.
+Production Windows admission uses shared `semaprax-doctor-capsule::parse_signed`
+with the compile-time `SEMAPRAX_DOCTOR_RELEASE_PUBLIC_KEY_HEX` anchor, then
+requires native Windows architecture code 3 (x86-64) or 4 (AArch64) before
+token, job, or filesystem effects. Missing or invalid trust material and
+signature failure refuse closed. The shared v1 architecture mapping is
+specified in [Linux production provisioner v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md#signed-release-capsule)
+and [sealed input v1](DOCTOR-SEALED-INPUT-V1.md#capsule-wire-architecture).
+The structural decoder remains only as a non-authoritative malformed-wire test
+utility; production does not fall back to it. The deterministic test key is
+not a release anchor. Signature verification authenticates capsule bytes only:
+request, bundle, and executable carriers are not yet reacquired and bound to
+the signed lengths, digests, selector, or roles, so this is not complete
+signed-carrier admission or production support.
 
 ## Settlement contract
 
@@ -308,18 +303,22 @@ The dispatch-only
 uses an ephemeral `windows-2025` runner and creates a fresh, explicit scratch
 parent under `RUNNER_TEMP`. The gate fails when the host is not 64-bit Windows,
 the parent is missing, nonempty, or a reparse point, Cargo fails, any named
-test is filtered or ignored, or the test summary does not report all five
+  test is filtered or ignored, or the test summary does not report all nine
 runtime cases as passed. It never treats an absent prerequisite or a zero-test
 run as a skip/pass.
 
 `scripts/doctor-provisioned-windows-gate.py --self-test` checks the gate's
 refusal and libtest-result parsing on any host; it provides no Windows runtime
-evidence. `--plan` prints the exact five-test selector. The live selection runs
+evidence. `--plan` prints the exact nine-test selector. The live selection runs
 `windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it`
 and `windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation`,
 plus `windows_runtime_timeout_terminates_an_actual_job_descendant`,
 `windows_runtime_nonzero_exit_settles_failed_and_cleans_resources` and
-`windows_runtime_scratch_refusal_closes_setup_handles`.
+`windows_runtime_scratch_refusal_closes_setup_handles`,
+`windows_runtime_signed_test_key_capsule_refusals_and_launch_settle`,
+`windows_runtime_missing_release_anchor_refuses_before_token_job_or_filesystem`,
+`windows_runtime_bad_signature_refuses_before_token_job_or_filesystem`, and
+`windows_runtime_signed_linux_architecture_capsule_refuses_before_token_job_or_filesystem`.
 The four child-launch tests use `confined_spawn`. The success case inspects
 the child's disabled privilege set and job membership/limits, reads back the
 scratch DACL and SID, exercises the one-process job limit, and observes
@@ -349,29 +348,30 @@ itself a gate failure. Descendants reparented before the post-kill process-list
 check are not independently enumerated, so this is not a general descendant
 quiescence proof.
 
-The test capsule is deliberately structural fixture data with a placeholder
-signature. The Windows primitive currently does not verify capsule signatures,
-so these tests do not establish signed-capsule admission or production
-provisioner support. The original two-test dispatch selector passed at
-`c6bf9902`; the expanded five-test selector passed on exact checkout
-`3d4220b6`. The added cases prove only their asserted hosted behavior.
+The original two-test dispatch selector passed at `c6bf9902`; the historical
+five-test selector passed at exact checkout `3d4220b6`. Those runs predate
+signed-capsule admission. Current source selects nine cases: six live runtime
+cases (including deterministic test-only signed-key launch/settlement) and
+three signed-admission refusal cases. This selector has not yet run on Windows.
+The test key is not release trust. Signature verification authenticates only
+capsule bytes; artifact/executable reacquisition and binding remain open.
 
 ## Acceptance criteria status
 
 | Criterion | State |
 |---|---|
 | Versioned Windows contract, cross-referenced from V1 | met |
-| Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted type-check at exact checkout `7cab8aa8` and five selected runtime tests passed at exact checkout `3d4220b6`; see [Nonclaims](#nonclaims) |
-| Sealed-capsule consumption | structural body decode only (`doctor::windows_confinement::capsule`, host-independent, tested on every host); signature verification still needs `semaprax-doctor-capsule` as a `cfg(windows)` `Cargo.toml` dependency, outside every session's lease so far |
+| Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted type-check at exact checkout `7cab8aa8` and historical five selected runtime tests passed at exact checkout `3d4220b6`; see [Nonclaims](#nonclaims) |
+| Sealed-capsule consumption | production path calls shared `parse_signed` with the compile-time release-key input and requires native Windows code 3/4; current nine-case selector awaits hosted execution; artifact-byte reacquisition/binding remains open |
 | Hostile-input tests for the host-independent parts | 29 tests across `capsule`, `refusal`, and `settlement` pass on this authoring host (macOS arm64); `cargo test -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement` |
-| Runtime tests for the Win32 primitive itself | exact five-test selector passed in [run 35988348061](https://github.com/wavect/semaprax/actions/runs/35988348061) on `3d4220b6`, including actual-descendant timeout, nonzero exit and repeated scratch-refusal/handle-count cases |
-| Fail-closed gate authored and run | script self-test passed locally; five-test live selector passed at `3d4220b6` with no filtered or ignored selected case |
+| Runtime tests for the Win32 primitive itself | historical exact five-test selector passed in [run 35988348061](https://github.com/wavect/semaprax/actions/runs/35988348061) on `3d4220b6`; current six runtime cases and three admission refusals await hosted execution |
+| Fail-closed gate authored and run | script self-test passed locally; historical five-test selector passed at `3d4220b6`; current nine-test selector awaits hosted execution |
 | Linux, macOS, or existing job-object evidence never cited as Windows proof | met |
 | `docs/COMPLETION-MATRIX.md` WP-05 promoted for Windows | not done; not claimed |
 
 ## Nonclaims
 
-This contract does not claim that the five-test Windows runtime gate is a
+This contract does not claim that the nine-test Windows selector is a
 complete hostile corpus or production-support gate. The two-test run at
 `c6bf9902` and five-test run at `3d4220b6` each bind only their exact checkout
 and selected tests.
@@ -379,9 +379,10 @@ The hosted Windows compilation recorded above type-checks only exact checkout
 `7cab8aa8`; by itself it establishes no execution behavior. The five runtime
 tests give narrow observations only for their exact checkout and assertions.
 Earlier hand-checking against vendored `windows-sys` was diligence, not
-substitute execution evidence. The tests use an unverified-signature capsule
-fixture, and do not close signed-input, independent hostile-corpus, general
-descendant-tree, or production-support requirements. Do not claim the existing ordinary-probe
+substitute execution evidence. Current source uses a deterministic test-only
+signing key, is not yet run on Windows, and does not establish release trust or
+bind artifact bytes to the verified capsule. Independent hostile-corpus,
+general descendant-tree, and production-support requirements remain open. Do not claim the existing ordinary-probe
 job-object confinement in `windows.rs` as evidence of production-grade
 sandboxing (it confines process *lifetime*, not filesystem or network access,
 and was not designed as a security boundary); claim Linux or macOS evidence
@@ -393,9 +394,11 @@ touches a job object, a token, or the filesystem; run on a cross-compiled or
 emulated target as a substitute for real Windows execution; wire any new path
 into the CLI; or promote `docs/COMPLETION-MATRIX.md` WP-05 for Windows.
 
-The five live tests ran on Windows at `3d4220b6`, providing bounded
+The five historical live tests ran on Windows at `3d4220b6`, providing bounded
 observations of the restricted token, protected DACL, production job limits,
 descendant launch refusal, test-owned descendant timeout, normal/nonzero
 settlement, cancellation, and repeated filesystem-stage refusal/handle cleanup.
-The remaining work includes restricted-token refinement, signed-capsule
-verification, and a broader hostile corpus across supported Windows runners.
+The remaining work includes restricted-token refinement,
+artifact/executable reacquisition and binding, hosted execution of the current
+nine-case selector, and a broader hostile corpus across supported Windows
+runners.

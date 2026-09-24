@@ -13,13 +13,16 @@ format: `Unreleased` then release buckets, grouped by impact.
   DACL, descendant refusal and test-owned descendant timeout, normal/nonzero
   settlement, timeout cancellation, and filesystem-stage refusal with
   handle-count cleanup. The gate uses
-  structural capsule fixture bytes with an unverified
-  signature, requires successful `taskkill /T` and direct Cargo PID absence on
+  test-key-signed capsule fixture bytes (not a release trust anchor), requires
+  successful `taskkill /T` and direct Cargo PID absence on
   timeout, and checks exact marker/scratch cleanup. Descendant quiescence is
   not independently enumerated. The original two-test slice passed on exact
-  checkout `c6bf9902`; the expanded five-test selector passed in hosted
-  Windows run `35988348061` at `3d4220b6`. Signed-capsule admission and
-  production support remain unverified.
+  checkout `c6bf9902`; the historical five-test selector passed in hosted
+  Windows run `35988348061` at `3d4220b6`. Current source uses the shared
+  signed-capsule verifier and capsule-v1 architecture codes 3/4 for Windows,
+  with a nine-test selector (six runtime cases plus three admission refusals).
+  That selector has not run on Windows. Artifact-byte binding and production
+  support remain unverified.
 
 - Harden additive lock-bound offline fetch with held-directory authority,
   bounded retained inputs, private staging and no-replace cache publication.

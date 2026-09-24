@@ -71,6 +71,32 @@ fn every_target_derives_exact_roles_and_unknown_target_rejects() {
 }
 
 #[test]
+fn capsule_v1_architecture_bytes_are_closed_and_distinct_by_native_os() {
+    let signing = SigningKey::from_bytes(&[21; 32]);
+    for architecture in [
+        ARCHITECTURE_LINUX_X86_64,
+        ARCHITECTURE_LINUX_AARCH64,
+        ARCHITECTURE_WINDOWS_X86_64,
+        ARCHITECTURE_WINDOWS_AARCH64,
+    ] {
+        let mut value = spec();
+        value.architecture = architecture;
+        let bytes = signed(encode_body(&value).unwrap(), &signing);
+        assert_eq!(
+            parse_signed(&bytes, &signing.verifying_key())
+                .unwrap()
+                .architecture,
+            architecture
+        );
+    }
+    for architecture in [0, 5, 255] {
+        let mut value = spec();
+        value.architecture = architecture;
+        assert_eq!(encode_body(&value), Err(Error::Invalid));
+    }
+}
+
+#[test]
 fn every_body_mutation_and_wrong_key_rejects() {
     let signing = SigningKey::from_bytes(&[23; 32]);
     let bytes = fixture(&signing);

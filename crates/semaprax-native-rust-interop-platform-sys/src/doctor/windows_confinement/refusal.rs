@@ -26,7 +26,7 @@ pub enum Refusal {
     /// contents": this is checked, and can refuse, before the capsule stage
     /// ever runs.
     UnsupportedHost,
-    /// The sealed capsule failed structural validation; see
+    /// The sealed capsule failed trust-anchor or signed-wire validation; see
     /// [`super::capsule::CapsuleError`] for which check.
     Capsule(CapsuleError),
     /// Building or applying the restricted token failed.

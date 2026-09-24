@@ -147,3 +147,107 @@ fn filesystem_confinement_failure_is_the_last_stage_to_be_reachable() {
     );
     assert_eq!(result, Err(Refusal::FilesystemConfinement));
 }
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires the explicitly provisioned Windows runtime gate"]
+fn windows_runtime_missing_release_anchor_refuses_before_token_job_or_filesystem() {
+    let architecture = super::super::capsule::windows_architecture_code().unwrap();
+    let (bytes, _) = super::super::capsule::signed_test_fixture(architecture);
+    let token_called = Cell::new(false);
+    let job_called = Cell::new(false);
+    let filesystem_called = Cell::new(false);
+    let result = admit(
+        || Ok::<_, ()>(()),
+        || super::super::capsule::parse_with_anchor(&bytes, None),
+        || {
+            token_called.set(true);
+            Ok::<_, ()>(())
+        },
+        || {
+            job_called.set(true);
+            Ok::<_, ()>(())
+        },
+        || {
+            filesystem_called.set(true);
+            Ok::<_, ()>(())
+        },
+    );
+    assert_eq!(
+        result,
+        Err(Refusal::Capsule(CapsuleError::MissingTrustAnchor))
+    );
+    assert!(!token_called.get());
+    assert!(!job_called.get());
+    assert!(!filesystem_called.get());
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires the explicitly provisioned Windows runtime gate"]
+fn windows_runtime_bad_signature_refuses_before_token_job_or_filesystem() {
+    let architecture = super::super::capsule::windows_architecture_code().unwrap();
+    let (mut bytes, public_key_hex) = super::super::capsule::signed_test_fixture(architecture);
+    *bytes
+        .last_mut()
+        .expect("signed fixture has signature bytes") ^= 1;
+    let token_called = Cell::new(false);
+    let job_called = Cell::new(false);
+    let filesystem_called = Cell::new(false);
+    let result = admit(
+        || Ok::<_, ()>(()),
+        || super::super::capsule::parse_windows_signed_with_key(&bytes, &public_key_hex),
+        || {
+            token_called.set(true);
+            Ok::<_, ()>(())
+        },
+        || {
+            job_called.set(true);
+            Ok::<_, ()>(())
+        },
+        || {
+            filesystem_called.set(true);
+            Ok::<_, ()>(())
+        },
+    );
+    assert_eq!(result, Err(Refusal::Capsule(CapsuleError::Signature)));
+    assert!(!token_called.get());
+    assert!(!job_called.get());
+    assert!(!filesystem_called.get());
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires the explicitly provisioned Windows runtime gate"]
+fn windows_runtime_signed_linux_architecture_capsule_refuses_before_token_job_or_filesystem() {
+    for architecture in [1, 2] {
+        let (bytes, public_key_hex) = super::super::capsule::signed_test_fixture(architecture);
+        let token_called = Cell::new(false);
+        let job_called = Cell::new(false);
+        let filesystem_called = Cell::new(false);
+        let result = admit(
+            || Ok::<_, ()>(()),
+            || super::super::capsule::parse_windows_signed_with_key(&bytes, &public_key_hex),
+            || {
+                token_called.set(true);
+                Ok::<_, ()>(())
+            },
+            || {
+                job_called.set(true);
+                Ok::<_, ()>(())
+            },
+            || {
+                filesystem_called.set(true);
+                Ok::<_, ()>(())
+            },
+        );
+        assert_eq!(
+            result,
+            Err(Refusal::Capsule(CapsuleError::ArchitectureMismatch)),
+            "signed Linux architecture code {architecture}"
+        );
+        assert!(!token_called.get());
+        assert!(!job_called.get());
+        assert!(!filesystem_called.get());
+    }
+}

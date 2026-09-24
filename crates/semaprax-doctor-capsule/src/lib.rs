@@ -5,6 +5,14 @@ use ed25519_dalek::{Signature, VerifyingKey};
 
 pub const ARTIFACT_COUNT: usize = 5;
 pub const MAX_CAPSULE_BYTES: usize = 341;
+/// Capsule-v1 native-OS architecture byte: Linux x86-64.
+pub const ARCHITECTURE_LINUX_X86_64: u8 = 1;
+/// Capsule-v1 native-OS architecture byte: Linux AArch64.
+pub const ARCHITECTURE_LINUX_AARCH64: u8 = 2;
+/// Capsule-v1 native-OS architecture byte: Windows x86-64.
+pub const ARCHITECTURE_WINDOWS_X86_64: u8 = 3;
+/// Capsule-v1 native-OS architecture byte: Windows AArch64.
+pub const ARCHITECTURE_WINDOWS_AARCH64: u8 = 4;
 // Held equal to `DOCTOR_OFFLINE_INPUT_MAX_BYTES`: the request and bundle
 // artifacts this bounds are the same sealed carriers the sealed-input ceiling
 // bounds, and the smaller of the two is always the effective limit for the
@@ -186,7 +194,13 @@ pub fn roles_for_target(target: u8) -> Option<u8> {
 }
 
 fn validate_architecture(architecture: u8) -> Result<(), Error> {
-    if matches!(architecture, 1 | 2) {
+    if matches!(
+        architecture,
+        ARCHITECTURE_LINUX_X86_64
+            | ARCHITECTURE_LINUX_AARCH64
+            | ARCHITECTURE_WINDOWS_X86_64
+            | ARCHITECTURE_WINDOWS_AARCH64
+    ) {
         Ok(())
     } else {
         Err(Error::Invalid)

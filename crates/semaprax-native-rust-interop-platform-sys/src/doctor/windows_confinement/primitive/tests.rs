@@ -1,9 +1,10 @@
-//! These tests exercise the pure helpers and the live Win32 spawn/settle seam.
+//! These tests exercise the pure helpers and live Win32 spawn/settle seam.
 //! The live cases require the gate's explicit
 //! `SEMAPRAX_WINDOWS_CONFINEMENT_TEST_PARENT`; absent or unusable provisioning
-//! is a test failure. Their capsule bytes are structurally valid test input
-//! with an unverified signature because this primitive currently performs
-//! body decoding only. They exercise no signed-capsule trust decision.
+//! is a test failure. Their capsule is signed with a deterministic
+//! test-only key and parsed by the shared Ed25519 verifier. That key is not a
+//! release trust anchor and proves no production/release trust.
+use super::super::capsule::CapsuleError;
 use super::*;
 use std::ffi::OsString;
 
@@ -42,20 +43,19 @@ fn assert_parent_empty(parent: &Path) {
     );
 }
 
-fn test_capsule_body() -> Vec<u8> {
-    // This only satisfies parse_capsule_body's structural contract. The
-    // runtime primitive does not verify these placeholder signature bytes.
-    let selector = b"runtime-test";
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"SPXDPC1\0");
-    bytes.extend_from_slice(&[1, 1, 0, 4, selector.len() as u8]);
-    bytes.extend_from_slice(selector);
-    for _ in 0..super::super::capsule::ARTIFACT_COUNT {
-        bytes.extend_from_slice(&1u64.to_le_bytes());
-        bytes.extend_from_slice(&[0x42; 32]);
+struct TestCapsule {
+    bytes: Vec<u8>,
+    public_key_hex: String,
+}
+
+fn test_capsule_body() -> TestCapsule {
+    let architecture = super::super::capsule::windows_architecture_code()
+        .expect("the selected runtime gate only admits Windows x86-64 or AArch64");
+    let (bytes, public_key_hex) = super::super::capsule::signed_test_fixture(architecture);
+    TestCapsule {
+        bytes,
+        public_key_hex,
     }
-    bytes.extend_from_slice(&[0; 64]);
-    bytes
 }
 
 fn child_test_args(name: &str) -> Vec<OsString> {
@@ -313,8 +313,15 @@ fn windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it()
     let executable = std::env::current_exe().expect("current test executable exists");
     let args = child_test_args("runtime_child_checks_descendant_job_limit");
     let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
-    let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
-        .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
+    let capsule = test_capsule_body();
+    let child = confined_spawn_with_test_key(
+        &executable,
+        &borrowed_args,
+        &parent,
+        &capsule.bytes,
+        &capsule.public_key_hex,
+    )
+    .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
     let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
     let marker = child._scratch.dir.join(TEST_MARKER);
     let scratch_dir = child._scratch.dir.clone();
@@ -507,8 +514,15 @@ fn windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation(
     let executable = std::env::current_exe().expect("current test executable exists");
     let args = child_test_args("runtime_child_marks_start_then_waits_for_job_termination");
     let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
-    let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
-        .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
+    let capsule = test_capsule_body();
+    let child = confined_spawn_with_test_key(
+        &executable,
+        &borrowed_args,
+        &parent,
+        &capsule.bytes,
+        &capsule.public_key_hex,
+    )
+    .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
     let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
     let marker = child._scratch.dir.join(TEST_MARKER);
     let scratch_dir = child._scratch.dir.clone();
@@ -527,6 +541,67 @@ fn windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation(
 
 #[test]
 #[ignore = "requires the explicitly provisioned Windows runtime gate"]
+fn windows_runtime_signed_test_key_capsule_refusals_and_launch_settle() {
+    let parent = runtime_parent();
+    let executable = std::env::current_exe().expect("current test executable exists");
+    let args = child_test_args("runtime_child_marks_start_then_waits_for_job_termination");
+    let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+    let capsule = test_capsule_body();
+
+    let handles_before_refusals = current_process_handle_count();
+    let missing_anchor = confined_spawn_using(&executable, &borrowed_args, &parent, || {
+        super::super::capsule::parse_with_anchor(&capsule.bytes, None)
+    });
+    assert_eq!(
+        missing_anchor.err(),
+        Some(Refusal::Capsule(CapsuleError::MissingTrustAnchor))
+    );
+
+    let mut tampered = capsule.bytes.clone();
+    *tampered
+        .last_mut()
+        .expect("signed test capsule is nonempty") ^= 1;
+    assert_eq!(
+        confined_spawn_with_test_key(
+            &executable,
+            &borrowed_args,
+            &parent,
+            &tampered,
+            &capsule.public_key_hex,
+        )
+        .err(),
+        Some(Refusal::Capsule(CapsuleError::Signature))
+    );
+    assert_eq!(
+        current_process_handle_count(),
+        handles_before_refusals,
+        "missing-anchor and invalid-signature refusals precede Win32 setup"
+    );
+    assert_parent_empty(&parent);
+
+    let child = confined_spawn_with_test_key(
+        &executable,
+        &borrowed_args,
+        &parent,
+        &capsule.bytes,
+        &capsule.public_key_hex,
+    )
+    .expect("the test-only signed capsule verifies and reaches the Win32 seam");
+    let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
+    let marker = child._scratch.dir.join(TEST_MARKER);
+    let scratch_dir = child._scratch.dir.clone();
+    wait_for_marker(&marker);
+    assert_eq!(std::fs::read(&marker).unwrap(), b"started");
+    std::fs::remove_file(&marker).expect("remove exact child marker before scratch settlement");
+    cleanup_guard.disarm();
+    let settled = settle(child, Duration::from_millis(100));
+    assert_eq!(settled.status, Settlement::Cancelled);
+    assert!(!scratch_dir.exists());
+    assert_parent_empty(&parent);
+}
+
+#[test]
+#[ignore = "requires the explicitly provisioned Windows runtime gate"]
 fn windows_runtime_timeout_terminates_an_actual_job_descendant() {
     use windows_sys::Win32::System::JobObjects::{
         JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
@@ -537,8 +612,15 @@ fn windows_runtime_timeout_terminates_an_actual_job_descendant() {
     let executable = std::env::current_exe().expect("current test executable exists");
     let args = child_test_args("runtime_child_launches_descendant_after_parent_permit");
     let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
-    let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
-        .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
+    let capsule = test_capsule_body();
+    let child = confined_spawn_with_test_key(
+        &executable,
+        &borrowed_args,
+        &parent,
+        &capsule.bytes,
+        &capsule.public_key_hex,
+    )
+    .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
     let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
     let marker = child._scratch.dir.join(TEST_MARKER);
     let scratch_dir = child._scratch.dir.clone();
@@ -633,8 +715,15 @@ fn windows_runtime_nonzero_exit_settles_failed_and_cleans_resources() {
     let executable = std::env::current_exe().expect("current test executable exists");
     let args = child_test_args("runtime_child_exits_with_nonzero_status");
     let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
-    let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
-        .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
+    let capsule = test_capsule_body();
+    let child = confined_spawn_with_test_key(
+        &executable,
+        &borrowed_args,
+        &parent,
+        &capsule.bytes,
+        &capsule.public_key_hex,
+    )
+    .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
     let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
     let marker = child._scratch.dir.join(TEST_MARKER);
     let scratch_dir = child._scratch.dir.clone();
@@ -669,14 +758,28 @@ fn windows_runtime_scratch_refusal_closes_setup_handles() {
     // require repeated real token/job/ACL-stage refusal to settle all handles.
     for _ in 0..2 {
         assert_eq!(
-            confined_spawn(&executable, &borrowed_args, &missing_parent, &capsule).err(),
+            confined_spawn_with_test_key(
+                &executable,
+                &borrowed_args,
+                &missing_parent,
+                &capsule.bytes,
+                &capsule.public_key_hex,
+            )
+            .err(),
             Some(Refusal::FilesystemConfinement)
         );
     }
     let baseline = current_process_handle_count();
     for _ in 0..4 {
         assert_eq!(
-            confined_spawn(&executable, &borrowed_args, &missing_parent, &capsule).err(),
+            confined_spawn_with_test_key(
+                &executable,
+                &borrowed_args,
+                &missing_parent,
+                &capsule.bytes,
+                &capsule.public_key_hex,
+            )
+            .err(),
             Some(Refusal::FilesystemConfinement)
         );
         assert_eq!(

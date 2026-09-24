@@ -81,6 +81,12 @@ signature. Its bounded body binds:
 - exact lengths and SHA-256 digests for launcher, worker, and collector images;
 - the fixed capsule schema and no extensible or ignored trailing fields.
 
+Capsule-v1 architecture bytes are native-OS specific: `1` is Linux x86-64,
+`2` is Linux AArch64, `3` is Windows x86-64, and `4` is Windows AArch64.
+The Linux provisioner continues to require exact native code `1` or `2`
+before request parsing or namespace/cgroup mutation; recognizing the additive
+Windows codes in the shared wire codec does not admit them on Linux.
+
 Verification uses the exact Ed25519 public key compiled through the release
 builder's `SEMAPRAX_DOCTOR_RELEASE_PUBLIC_KEY_HEX` input. Missing, malformed, or
 noncanonical key material makes the production entry unavailable before clone

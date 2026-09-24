@@ -27,6 +27,7 @@ sha2 = "=0.11.0"
 semaprax-doctor-capsule = { version = "=0.1.0", path = "../semaprax-doctor-capsule" }
 
 [target.'cfg(windows)'.dependencies]
+semaprax-doctor-capsule = { version = "=0.1.0", path = "../semaprax-doctor-capsule" }
 sha2 = "=0.11.0"
 windows-sys = { version = "=0.61.2", features = [
     "Wdk_Foundation",
@@ -41,6 +42,9 @@ windows-sys = { version = "=0.61.2", features = [
     "Win32_Security",
     "Win32_Security_Authorization",
 ] }
+
+[dev-dependencies]
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std"] }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

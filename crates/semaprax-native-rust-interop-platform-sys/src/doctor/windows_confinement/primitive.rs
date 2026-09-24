@@ -5,10 +5,12 @@
 //!
 //! The authoring host for this module is macOS arm64 with no `rustup`, no
 //! installed `*-pc-windows-*` target, and no Windows toolchain of any kind,
-//! so `cfg(windows)` code is never even parsed here -- `cargo check` on this
-//! host does not select this module. The original restricted-token launch and
-//! timeout cases later passed in a hosted Windows run, but subsequent runtime
-//! additions still require the exact expanded gate. Every function signature, struct
+//! so `cfg(windows)` code is not compiled here. Hosted Windows run
+//! [35988348061](https://github.com/wavect/semaprax/actions/runs/35988348061)
+//! on exact checkout `3d4220b6` executed the prior five-case structural-
+//! capsule runtime selector. The signed-admission changes in this checkout
+//! require a new exact hosted run; the earlier run is not evidence for them.
+//! Every function signature, struct
 //! layout, and constant used below was cross-checked against the exact
 //! vendored `windows-sys = "=0.61.2"` source
 //! (`~/.cargo/registry/src/.../windows-sys-0.61.2`) already pinned by this
@@ -63,7 +65,6 @@
 //!    session's file lease).
 //!
 //! [doc]: https://github.com/wavect/semaprax/blob/main/docs/DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1.md
-use super::capsule::{parse_capsule_body, CapsuleBody};
 use super::refusal::{admit, Refusal};
 use super::settlement::{FailureReason, Settlement, StickySettlement, UncertainReason};
 use std::ffi::OsStr;
@@ -471,39 +472,68 @@ impl Drop for ConfinedProcess {
     }
 }
 
-/// Structurally validate a sealed capsule, then spawn `exe` suspended under
-/// a restricted token, inside a fresh ACL-confined scratch root, assigned to
-/// a tightened job object, before any target code runs. Mirrors
-/// `doctor::windows`'s "assign before resume" ordering.
+/// Verify the release-signed capsule using the compile-time release trust
+/// anchor, then spawn `exe` suspended under a restricted token, inside a
+/// fresh ACL-confined scratch root, assigned to a tightened job object,
+/// before any target code runs. Missing or malformed trust input refuses; it
+/// never falls back to structural-only parsing.
 pub fn confined_spawn(
     exe: &Path,
     args: &[&OsStr],
     scratch_root: &Path,
     capsule_bytes: &[u8],
 ) -> Result<ConfinedProcess, Refusal> {
-    let (_host, capsule, token, job, scratch): (_, CapsuleBody, _, _, _) = admit(
-        || {
-            if cfg!(all(
-                windows,
-                target_pointer_width = "64",
-                any(target_arch = "x86_64", target_arch = "aarch64")
-            )) {
-                Ok(())
-            } else {
-                Err(())
-            }
-        },
-        || parse_capsule_body(capsule_bytes),
-        restricted_token,
-        tightened_job,
-        || {
-            let token = restricted_token()?;
-            let mut sid_buffer = [0u8; 256];
-            read_token_user_sid(&token, &mut sid_buffer)?;
-            confined_scratch_root(scratch_root, &sid_buffer)
-        },
-    )?;
-    let _ = capsule; // Structural validation only; see `super::capsule` docs.
+    confined_spawn_using(exe, args, scratch_root, || {
+        super::capsule::parse_with_release_anchor(capsule_bytes)
+    })
+}
+
+/// Test-only seam for exercising the same signed parser and Win32 launch
+/// stages with a deterministic test key. It is not reachable in production
+/// builds and must not be treated as release-trust evidence.
+#[cfg(test)]
+fn confined_spawn_with_test_key(
+    exe: &Path,
+    args: &[&OsStr],
+    scratch_root: &Path,
+    capsule_bytes: &[u8],
+    public_key_hex: &str,
+) -> Result<ConfinedProcess, Refusal> {
+    confined_spawn_using(exe, args, scratch_root, || {
+        super::capsule::parse_windows_signed_with_key(capsule_bytes, public_key_hex)
+    })
+}
+
+fn confined_spawn_using(
+    exe: &Path,
+    args: &[&OsStr],
+    scratch_root: &Path,
+    parse_capsule: impl FnOnce()
+        -> Result<super::capsule::VerifiedCapsule, super::capsule::CapsuleError>,
+) -> Result<ConfinedProcess, Refusal> {
+    let (_host, _capsule, token, job, scratch): (_, super::capsule::VerifiedCapsule, _, _, _) =
+        admit(
+            || {
+                if cfg!(all(
+                    windows,
+                    target_pointer_width = "64",
+                    any(target_arch = "x86_64", target_arch = "aarch64")
+                )) {
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            },
+            parse_capsule,
+            restricted_token,
+            tightened_job,
+            || {
+                let token = restricted_token()?;
+                let mut sid_buffer = [0u8; 256];
+                read_token_user_sid(&token, &mut sid_buffer)?;
+                confined_scratch_root(scratch_root, &sid_buffer)
+            },
+        )?;
     let stdin = open_inheritable_null().map_err(|()| Refusal::FilesystemConfinement)?;
     let stdout =
         create_inheritable_log(&scratch.stdout_log).map_err(|()| Refusal::FilesystemConfinement)?;

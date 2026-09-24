@@ -37,7 +37,7 @@ pub(super) fn validate() -> Result<(), ()> {
     // touching namespace/cgroup state. Acquisition only snapshots sealed bytes.
     let capsule_input = acquire(CAPSULE_FD, capsule::MAX_CAPSULE_BYTES)?;
     let capsule = capsule::parse_with_release_anchor(capsule_input.bytes()).map_err(|_| ())?;
-    if capsule.architecture != native_architecture_byte() {
+    if !capsule_architecture_matches_native(capsule.architecture) {
         return Err(());
     }
 
@@ -135,6 +135,10 @@ fn native_architecture_byte() -> u8 {
     } else {
         2
     }
+}
+
+fn capsule_architecture_matches_native(capsule_architecture: u8) -> bool {
+    capsule_architecture == native_architecture_byte()
 }
 
 fn require_wait_policy() -> Result<(), ()> {
@@ -383,8 +387,8 @@ fn validate_cgroup_files() -> Result<(), ()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        anonymous_pipe_link, native_architecture, parse_decimal, scan_descriptors,
-        validate_static_elf,
+        anonymous_pipe_link, capsule_architecture_matches_native, native_architecture,
+        native_architecture_byte, parse_decimal, scan_descriptors, validate_static_elf,
     };
 
     fn elf(interpreter: bool) -> Vec<u8> {
@@ -418,6 +422,15 @@ mod tests {
         assert_eq!(parse_decimal(b"+1"), Err(()));
         assert_eq!(parse_decimal(b"01x"), Err(()));
         assert_eq!(parse_decimal(b"999999999999999999999"), Err(()));
+    }
+
+    #[test]
+    fn windows_capsule_architecture_bytes_are_rejected_by_the_linux_native_check() {
+        assert!(capsule_architecture_matches_native(
+            native_architecture_byte()
+        ));
+        assert!(!capsule_architecture_matches_native(3));
+        assert!(!capsule_architecture_matches_native(4));
     }
 
     #[test]

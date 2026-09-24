@@ -90,8 +90,23 @@ fn wrong_magic_or_version_is_rejected() {
 fn unknown_architecture_is_rejected() {
     let bytes = encode_test_body(0, 0, "x", healthy_artifacts());
     assert_eq!(parse_capsule_body(&bytes), Err(CapsuleError::Invalid));
-    let bytes = encode_test_body(3, 0, "x", healthy_artifacts());
+    let bytes = encode_test_body(5, 0, "x", healthy_artifacts());
     assert_eq!(parse_capsule_body(&bytes), Err(CapsuleError::Invalid));
+}
+
+#[test]
+fn capsule_v1_architecture_bytes_are_closed_and_distinct_by_native_os() {
+    for architecture in [1, 2, 3, 4] {
+        let bytes = encode_test_body(architecture, 0, "x", healthy_artifacts());
+        assert_eq!(
+            parse_capsule_body(&bytes).unwrap().architecture,
+            architecture
+        );
+    }
+    for architecture in [0, 5, 255] {
+        let bytes = encode_test_body(architecture, 0, "x", healthy_artifacts());
+        assert_eq!(parse_capsule_body(&bytes), Err(CapsuleError::Invalid));
+    }
 }
 
 #[test]

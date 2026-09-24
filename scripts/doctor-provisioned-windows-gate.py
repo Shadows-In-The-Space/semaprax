@@ -3,8 +3,8 @@
 
 This gate fails if its Windows host or scratch parent is absent, if Cargo or
 libtest fails, or if any named live test is filtered, ignored, or missing. The
-test capsule is structural fixture data: the current primitive does not
-verify capsule signatures, so this gate is not sealed-input evidence.
+runtime cases use a deterministic test-only signing key to exercise the shared
+capsule verifier; this is not release trust-anchor or artifact-binding evidence.
 """
 
 from __future__ import annotations
@@ -23,13 +23,17 @@ from pathlib import Path
 
 PACKAGE = "semaprax-native-rust-interop-platform-sys"
 PARENT_ENV = "SEMAPRAX_WINDOWS_CONFINEMENT_TEST_PARENT"
-FILTER = "doctor::windows_confinement::primitive::tests::windows_runtime_"
+FILTER = "windows_runtime_"
 EXPECTED_TESTS = (
     "doctor::windows_confinement::primitive::tests::windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it",
     "doctor::windows_confinement::primitive::tests::windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation",
     "doctor::windows_confinement::primitive::tests::windows_runtime_timeout_terminates_an_actual_job_descendant",
     "doctor::windows_confinement::primitive::tests::windows_runtime_nonzero_exit_settles_failed_and_cleans_resources",
     "doctor::windows_confinement::primitive::tests::windows_runtime_scratch_refusal_closes_setup_handles",
+    "doctor::windows_confinement::primitive::tests::windows_runtime_signed_test_key_capsule_refusals_and_launch_settle",
+    "doctor::windows_confinement::refusal::tests::windows_runtime_missing_release_anchor_refuses_before_token_job_or_filesystem",
+    "doctor::windows_confinement::refusal::tests::windows_runtime_bad_signature_refuses_before_token_job_or_filesystem",
+    "doctor::windows_confinement::refusal::tests::windows_runtime_signed_linux_architecture_capsule_refuses_before_token_job_or_filesystem",
 )
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TERMINATION_TIMEOUT_SECONDS = 30
@@ -294,7 +298,7 @@ def main():
         print(f"Cargo selector: -p {PACKAGE} --lib {FILTER} -- --ignored --nocapture --test-threads=1")
         for test in EXPECTED_TESTS:
             print(f"required executed test: {test}")
-        print("capsule bytes are structurally valid test data with an unverified signature")
+        print("selected tests use a deterministic test-only signing key; this is not release trust or artifact-binding evidence")
         return 0
     return run_gate()
 

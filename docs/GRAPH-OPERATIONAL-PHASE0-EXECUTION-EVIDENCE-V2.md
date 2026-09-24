@@ -6,8 +6,8 @@ Status: reviewed local aggregate passed at exact subject
 
 Audience: release engineers, compiler contributors, and programme reviewers.
 
-This contract reruns the selected Phase 0 evidence at one clean exact local
-HEAD. It does not inherit the [v1 aggregate](GRAPH-OPERATIONAL-PHASE0-EXECUTION-EVIDENCE-V1.md).
+V2 reruns the selected Phase 0 gates at one clean, exact local HEAD. It does
+not inherit the [v1 aggregate](GRAPH-OPERATIONAL-PHASE0-EXECUTION-EVIDENCE-V1.md).
 The command remains:
 
 ```sh

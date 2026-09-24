@@ -6,8 +6,8 @@ Status: reviewed local runner passed all 9 selected rows at exact subject
 
 Audience: release engineers, compiler contributors, and programme reviewers.
 
-This contract extends [v1](GRAPH-OPERATIONAL-EXECUTION-EVIDENCE-V1.md) without
-transferring its result to a later commit. The runner remains:
+V2 extends [v1](GRAPH-OPERATIONAL-EXECUTION-EVIDENCE-V1.md). Neither version's
+result transfers to a later commit. The runner remains:
 
 ```sh
 python3 scripts/graph-operational-evidence.py

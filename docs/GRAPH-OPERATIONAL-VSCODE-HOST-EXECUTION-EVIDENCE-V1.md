@@ -4,9 +4,9 @@ Status: executed locally for exact subject `2888f84f123b7caa44aa6807388d98f851d4
 
 Audience: editor integrators, compiler contributors, and programme reviewers.
 
-This contract defines a focused local evidence bundle for the saved-source VS
-Code adapter. It is independent of the canonical-Git and generated-client/MCP
-bundles. Passing it does not complete the graph-operational programme.
+This local bundle records the saved-source VS Code adapter gate. It is separate
+from canonical-Git and generated-client/MCP evidence. Passing this gate does
+not complete the graph-operational programme.
 
 ## Exact runner
 

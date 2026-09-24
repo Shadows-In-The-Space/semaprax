@@ -9,22 +9,20 @@ source materialization, and separate publication authority. Completing a
 bounded image, query protocol, or append-parameter operation does not complete
 that objective.
 
-The [completion matrix](COMPLETION-MATRIX.md) owns product status. This ledger
-preserves the full programme requirements, not a replacement product denominator.
-The implemented v0.4.0 slices and their admitted regression corpus are **HOSTED
-GREEN** under the [release baseline](RELEASE-0.4.0-STATUS.md). Earlier
-writing-session labels are superseded; completed release checks are maintenance
-obligations, not unexecuted backlog.
+The [completion matrix](COMPLETION-MATRIX.md) owns product status; this ledger
+keeps the full requirements visible. The implemented v0.4.0 slices and their
+admitted regressions are **HOSTED GREEN** under the
+[release baseline](RELEASE-0.4.0-STATUS.md). Earlier writing-session labels no
+longer apply. Completed release checks are maintenance work, not pending gates.
 
-**Partial** means an implemented bounded mechanism still leaves part of the
-stated mature-product requirement open. **Missing** means the requested
-integrated mechanism has not been implemented; a related utility is not a
-substitute. Neither a green release nor an authority-free report promotes an
-unpublished package, a private API or a broader target/provider claim.
-The exact-subject archived executions retain their original counts, platforms,
-measurements and limitations. They are historical witnesses, not the current
-release's evidence ceiling. No new comparative model trial, physical device
-run or general performance result is inferred.
+**Partial** means a bounded mechanism exists but the mature-product requirement
+is still open. **Missing** means the integrated mechanism does not exist; a
+related utility does not count. A green release or authority-free report does
+not promote an unpublished package, private API, or broader target/provider
+claim. Archived exact-subject runs keep their original counts, platforms,
+measurements, and limits. They are historical evidence, not the current
+release's ceiling; they imply no new model trial, physical-device run, or
+general performance result.
 
 ## Evidence owners
 
@@ -162,10 +160,10 @@ profiles, source imports or runtime authority.
 
 ## Phase 3: all eleven requested operations
 
-All eleven requested classes now have bounded **implemented** slices. This
-counts represented operation classes, not completed general operations, runtime
-interface support, passing tests or completion-matrix promotions. Each row keeps
-its broader requirement open.
+All eleven requested operation classes have bounded **implemented** slices.
+This counts represented classes, not general operation completion, runtime
+interface support, passing tests, or completion-matrix promotion. Each row
+still names the broader requirement.
 
 | Operation | Present scope and remaining requirement |
 | --- | --- |
@@ -331,12 +329,12 @@ rebase; host-selected least authority; evidence/review distinct from commit;
 and no ambient filesystem/network authority in semantic reasoning. Existing
 A0 and managed `ACTIVE` publication semantics remain distinct.
 
-Prohibited shortcuts remain explicit: canonical graph databases in Git;
-arbitrary agent writes to graph fields; unrepresentable graph-only states;
-hidden cache mutations; approval inferred from proof/review; authoritative
-ML relevance ranking; daemon-required compilation; and graph diffs replacing
-human-readable source review. Optional deterministic ranking must stay advisory
-and outside source/graph identity, proof and commit decisions.
+Prohibited shortcuts include graph databases in Git, arbitrary agent edits to
+graph fields, graph-only states with no source form, hidden cache mutations,
+approval inferred from review, authoritative ML ranking, daemon-required
+compilation, and graph diffs in place of source review. Optional deterministic
+ranking remains advisory; it cannot affect source or graph identity, proof, or
+commit decisions.
 
 Economics provides offline bytes/lexical-unit/relevance evidence only; its
 small corpus produced context larger than source. Still missing are measured

@@ -1,5 +1,7 @@
 # Package registry mirror trust v1
 
+Audience: package-registry implementers and trust-policy reviewers.
+
 Status: additive local byte-to-proof composition. It is not hosted registry,
 root discovery, durable storage, cache publication, execution or availability
 support.

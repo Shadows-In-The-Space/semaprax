@@ -1,5 +1,7 @@
 # Kernel-0 Rung-2 Target and Recovery Evidence v1
 
+Audience: compiler and self-hosting contributors.
+
 Status: local, private test gate for issue #188. It is unexecuted in this
 change, so it is not yet a passing local-evidence result. This document does
 not promote a self-hosting rung, transfer formatter authority, define a public

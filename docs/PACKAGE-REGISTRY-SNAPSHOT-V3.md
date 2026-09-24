@@ -1,5 +1,7 @@
 # Package Registry Snapshot v3
 
+Audience: package-registry implementers and compiler contributors.
+
 Status: additive pure local distribution evidence; not a trusted fetch or
 hosted registry. Audience: package, resolver and registry contributors.
 

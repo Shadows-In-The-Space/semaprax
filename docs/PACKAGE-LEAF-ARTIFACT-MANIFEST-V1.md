@@ -1,5 +1,7 @@
 # Package Leaf Artifact Manifest v1
 
+Audience: package-registry implementers and package producers.
+
 Status: additive local producer-admission contract; no hosted or distribution
 authority claim. Audience: package and registry contributors.
 

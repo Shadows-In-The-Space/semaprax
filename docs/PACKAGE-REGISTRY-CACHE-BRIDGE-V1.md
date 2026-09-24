@@ -1,5 +1,7 @@
 # Signed managed-store to resolver-cache bridge v1
 
+Audience: package-registry implementers and resolver contributors.
+
 Status: explicit offline host workflow. No online registry, mirror, transport,
 install-script, hosted availability or execution support is claimed.
 

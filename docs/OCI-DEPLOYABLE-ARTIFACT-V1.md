@@ -1,5 +1,9 @@
 # OCI Deployable Artifact v1
 
+Audience: people and coding agents packaging a SEMAPRAX project for a
+container registry or an OCI-artifact-aware deployment pipeline, and compiler
+contributors.
+
 Status: implemented for exactly the Project v1 scalar and Project v3 Useful
 Data v1 / Project v16 Useful Data v2 profiles; not wired to any other Project
 profile, not signed, and not published anywhere. Local evidence only -- see [Evidence and
@@ -9,10 +13,6 @@ GitHub issue [#194](https://github.com/wavect/semaprax/issues/194) asks for a
 deployable-artifact route out of a checked SEMAPRAX project. Before this
 capsule, no OCI, container, or image-manifest generation existed anywhere in
 this repository.
-
-Audience: people and coding agents packaging a SEMAPRAX project for a
-container registry or an OCI-artifact-aware deployment pipeline, and compiler
-contributors.
 
 ## What this is, and is not
 

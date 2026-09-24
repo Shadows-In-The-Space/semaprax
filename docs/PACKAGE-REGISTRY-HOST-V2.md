@@ -1,5 +1,7 @@
 # Registry-v3 durable local host v2
 
+Audience: package-registry implementers and storage reviewers.
+
 Status: additive explicit local host for signed Registry-v3; not a hosted
 registry, authority-bearing fetch route, or physical power-loss certification.
 

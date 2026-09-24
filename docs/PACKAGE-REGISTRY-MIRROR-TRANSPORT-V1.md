@@ -1,5 +1,7 @@
 # Package registry mirror transport v1
 
+Audience: package-registry implementers and transport reviewers.
+
 Status: additive bounded native HTTPS byte acquisition. This is neither a
 hosted registry nor a trust, store, resolver, cache, installation, publication,
 credential, proxy, or execution route.

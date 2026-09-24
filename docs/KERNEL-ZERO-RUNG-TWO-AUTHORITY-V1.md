@@ -1,5 +1,7 @@
 # Kernel-0 Rung-2 Formatter Authority v1
 
+Audience: compiler and self-hosting contributors.
+
 Status: implemented local compiler boundary for issue #188. This is neither a
 self-hosting-rung promotion nor a public ABI, hosted result, target-runtime
 claim, authority transfer, or owned Kernel-0 buffer. The private

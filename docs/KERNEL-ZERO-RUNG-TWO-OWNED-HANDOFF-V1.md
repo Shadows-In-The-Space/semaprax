@@ -1,5 +1,7 @@
 # Kernel-0 Rung-2 Owned Handoff v1
 
+Audience: compiler and self-hosting contributors.
+
 Status: private implementation for R16 / #294 with the bounded local evidence
 recorded below. This is not accepted-head, hosted, full-gate, or self-hosting-rung
 evidence. Remaining acceptance gates and the exact accepted revision must be

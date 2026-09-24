@@ -1,5 +1,7 @@
 # Public Generic Wasm Component v1
 
+Audience: compiler contributors and Wasm component integrators.
+
 Status: **private local execution profile; not public support**.
 
 This specification defines an additive callable Component Model artifact over

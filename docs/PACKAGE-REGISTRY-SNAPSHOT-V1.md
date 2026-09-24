@@ -1,5 +1,7 @@
 # Package Registry Snapshot v1
 
+Audience: package-tool authors and compiler contributors working on issue #195.
+
 The additive [Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md) binds a
 closed [Package Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md) to every
 publication while preserving this v1 schema, wire, decoder, digest domain, and
@@ -10,9 +12,6 @@ front. Its v1 snapshot, wire, catalog, federation, and binding layers retain
 their focused tests; additive v2 evidence has separate focused tests. The CLI
 front has its own focused tests. None is hosted or a publication/support
 decision.
-
-Audience: package-tool authors and compiler contributors working on
-issue #195.
 
 `crate::package_registry` is an authority-free, content-addressed model of a
 published-package registry: a deterministic, immutable snapshot of package

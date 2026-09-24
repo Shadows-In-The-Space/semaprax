@@ -1,5 +1,7 @@
 # Public Generic Wasm Provider Target v1
 
+Audience: compiler contributors and Wasm provider integrators.
+
 Status: **internal admission and compiler-owned Core Wasm artifact implemented**.
 
 This document owns the additive compiler target selected by the Package

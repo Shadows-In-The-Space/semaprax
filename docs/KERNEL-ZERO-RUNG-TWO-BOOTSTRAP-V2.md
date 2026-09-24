@@ -1,5 +1,7 @@
 # Kernel-0 Rung-2 Bootstrap Artifact v2
 
+Audience: compiler and self-hosting contributors.
+
 Status: local, private reproducibility evidence for issue #188. This is not a
 release artifact, a public ABI, a formatter authority grant, hosted evidence,
 or a self-hosting-rung promotion. Version 2 is a new closed wire: it does not

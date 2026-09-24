@@ -1,5 +1,7 @@
 # Package registry trust v2: Registry-v3 offline proof
 
+Audience: package-registry implementers and trust-policy reviewers.
+
 Status: additive pure TUF-style local policy, not TUF compliant. The separate
 [Host v2](PACKAGE-REGISTRY-HOST-V2.md) owns durable commits; this verifier grants
 no fetch, network, signing, publication, or durable authority itself.

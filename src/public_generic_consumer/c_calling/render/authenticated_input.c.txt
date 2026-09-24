@@ -1,0 +1,35 @@
+/* Only the already-bounded host leaves enter this conversion. The intermediate
+ * flat buffer is caller-owned scratch, never passed to the provider. All frame
+ * metadata is generated from the verified descriptor; only payloads vary. */
+static spx_pg_consumer_status spx_pg_ccc_encode_authenticated(
+    const spx_pg_owned_bytes *const *leaves, uint8_t **out_bytes, size_t *out_len) {
+    *out_bytes = NULL;
+    *out_len = 0;
+    uint8_t *flat = NULL;
+    size_t flat_len = 0;
+    const spx_pg_consumer_status status = spx_pg_ccc_encode_leaves(leaves, &flat, &flat_len);
+    if (status != SPX_PG_CONSUMER_OK) return status;
+    const size_t payload = flat_len - 8u - 8u * FIELD_COUNT;
+    const size_t total = sizeof(spx_pg_ccc_auth_empty) + payload;
+    uint8_t *frame = (uint8_t *)malloc(total);
+    if (frame == NULL) { free(flat); return SPX_PG_CONSUMER_ALLOCATION_FAILURE; }
+    memcpy(frame, spx_pg_ccc_auth_empty, SPX_PG_CCC_AUTH_PREFIX);
+    size_t at = SPX_PG_CCC_AUTH_PREFIX;
+    spx_pg_ccc_write_u64le(frame + at, payload); at += 8;
+    size_t from = 8;
+    for (size_t i = 0; i < FIELD_COUNT; ++i) {
+        memcpy(frame + at, spx_pg_ccc_auth_empty + spx_pg_ccc_auth_offsets[i], spx_pg_ccc_auth_lengths[i]);
+        at += spx_pg_ccc_auth_lengths[i];
+        const size_t length = (size_t)spx_pg_ccc_read_u64le(flat + from);
+        memcpy(frame + at, flat + from, 8u + length);
+        from += 8u + length; at += 8u + length;
+    }
+    uint8_t digest[71];
+    spx_pg_frame_digest(frame, at, digest);
+    spx_pg_ccc_write_u64le(frame + at, sizeof(digest)); at += 8;
+    memcpy(frame + at, digest, sizeof(digest));
+    free(flat);
+    *out_bytes = frame;
+    *out_len = total;
+    return SPX_PG_CONSUMER_OK;
+}

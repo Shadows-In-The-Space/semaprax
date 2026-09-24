@@ -61,6 +61,23 @@ pub(super) fn consumer_source(
     input: &RecordShape,
     output: &RecordShape,
 ) -> String {
+    consumer_source_with_profile(descriptor_bytes, binding_bytes, input, output, None)
+}
+
+pub(super) struct InputProfile {
+    pub header: &'static str,
+    pub support: String,
+    pub encoder: &'static str,
+    pub prepare: &'static str,
+}
+
+pub(super) fn consumer_source_with_profile(
+    descriptor_bytes: &[u8],
+    binding_bytes: &[u8],
+    input: &RecordShape,
+    output: &RecordShape,
+    profile: Option<&InputProfile>,
+) -> String {
     let field_count = input.fields.len();
     let mut out = String::new();
     out.push_str(SOURCE_PREAMBLE);
@@ -78,9 +95,27 @@ pub(super) fn consumer_source(
         binding_bytes,
     ));
     out.push('\n');
-    out.push_str(SOURCE_CODEC_AND_LIFECYCLE);
+    if let Some(profile) = profile {
+        // The private authenticated profile adds replay refusal to the existing
+        // carrier-rejected category; the legacy renderer is byte-unchanged.
+        const MALFORMED: &str = "case SPX_PG_STATUS_MALFORMED_CARRIER:";
+        out.push_str(profile.header);
+        assert_eq!(SOURCE_CODEC_AND_LIFECYCLE.matches(MALFORMED).count(), 1);
+        out.push_str(&SOURCE_CODEC_AND_LIFECYCLE.replace(
+            MALFORMED,
+            "case SPX_PG_AUTH_STATUS_REPLAY_MISMATCH:\n    case SPX_PG_STATUS_MALFORMED_CARRIER:",
+        ));
+    } else {
+        out.push_str(SOURCE_CODEC_AND_LIFECYCLE);
+    }
     out.push('\n');
-    out.push_str(&encode_input_fn(input));
+    if let Some(profile) = profile {
+        out.push_str(&profile.support);
+    }
+    out.push_str(&encode_input_fn(
+        input,
+        profile.map_or("spx_pg_ccc_encode_leaves", |p| p.encoder),
+    ));
     out.push('\n');
     out.push_str(&free_input_leaves_fn(input));
     out.push('\n');
@@ -88,7 +123,13 @@ pub(super) fn consumer_source(
     out.push('\n');
     out.push_str(&decode_output_fn(output));
     out.push('\n');
-    out.push_str(SOURCE_TRANSFORM_AND_DIAGNOSTICS);
+    if let Some(profile) = profile {
+        const PREPARE: &str = "status = spx_pg_input_prepare_v1(consumer->provider, carrier, carrier_len, &input_handle);";
+        assert_eq!(SOURCE_TRANSFORM_AND_DIAGNOSTICS.matches(PREPARE).count(), 1);
+        out.push_str(&SOURCE_TRANSFORM_AND_DIAGNOSTICS.replace(PREPARE, profile.prepare));
+    } else {
+        out.push_str(SOURCE_TRANSFORM_AND_DIAGNOSTICS);
+    }
     out.replace("\r\n", "\n")
 }
 
@@ -121,14 +162,17 @@ fn c_byte_array(bytes_name: &str, len_name: &str, bytes: &[u8]) -> String {
 
 const SOURCE_CODEC_AND_LIFECYCLE: &str = include_str!("render/codec.c.txt");
 
-fn encode_input_fn(input: &RecordShape) -> String {
+fn encode_input_fn(input: &RecordShape, encoder: &str) -> String {
     let mut out = String::from(
         "static spx_pg_consumer_status spx_pg_ccc_encode_input(const spx_pg_input *input,\n    uint8_t **out_bytes, size_t *out_len) {\n    const spx_pg_owned_bytes *leaves[FIELD_COUNT] = {\n",
     );
     for field in &input.fields {
         let _ = writeln!(out, "        &input->{},", field_name(field));
     }
-    out.push_str("    };\n    return spx_pg_ccc_encode_leaves(leaves, out_bytes, out_len);\n}\n");
+    let _ = write!(
+        out,
+        "    }};\n    return {encoder}(leaves, out_bytes, out_len);\n}}\n"
+    );
     out
 }
 

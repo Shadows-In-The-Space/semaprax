@@ -1,6 +1,8 @@
 //! One checked subject on two physical backends, not full settlement parity.
 //! In particular, native consumes failed inputs; Wasm retains them until release.
 //! Interpreter events describe result copy-out only, not physical handle cleanup.
+#[path = "same_subject_c.rs"]
+mod c;
 #[path = "same_subject_interpreter.rs"]
 mod interpreter;
 #[path = "same_subject_typescript.rs"]
@@ -141,6 +143,14 @@ fn prepare_subject(root: &Path, guard: bool) -> Subject {
         constants.push_str(&array(name, bytes));
     }
     let provider = format!("{}\nstatic size_t endpoint_calls;\n#define SPX_PG_OBSERVE_ENDPOINT() (++endpoint_calls)\n{}\n#undef malloc\n#undef free\nsize_t auth_live(void) {{ return fixture_live; }}\nsize_t auth_calls(void) {{ return endpoint_calls; }}\n", include_str!("../allocations.c"), native.source());
+    c::observe(
+        root,
+        endpoint.descriptor(),
+        &native,
+        &provider,
+        &frame,
+        guard,
+    );
     let expected = if guard { 0 } else { 11 };
     let driver = format!(
         "{}\n{}\n{}\n#define EXPECT_CALL_STATUS {expected}\n{}",

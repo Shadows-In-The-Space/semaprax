@@ -281,8 +281,7 @@ fn run_subject(root: &Path, source: &str, cases: &[Case]) {
             if case.live != 0 {
                 let line = provider
                     .lines()
-                    .filter(|line| line.starts_with("    spx_bytes_drop(&result."))
-                    .last()
+                    .rfind(|line| line.starts_with("    spx_bytes_drop(&result."))
                     .unwrap()
                     .to_owned();
                 provider = replace_once(

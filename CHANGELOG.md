@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Reject missing, empty, or byte-identical hidden overlays before scoring
+  cross-language benchmark tasks, including caller-supplied inventories.
+  Fixed scoring, agent scoring, and dry-run planning share the preflight;
+  invalid fixtures cannot invoke the solver transport or produce a false
+  hidden-test success. Same-path replacements remain supported. This is
+  structural fixture validation, not a test-coverage or model-quality claim.
+
 - Add a dispatch-only Windows confinement runtime gate that requires nonzero
   execution of restricted-token child launch, job limit/membership, scratch
   DACL, descendant refusal and test-owned descendant timeout, normal/nonzero

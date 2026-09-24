@@ -43,6 +43,8 @@ mod stable_dispatch_order;
 mod stale_edit_preservation;
 #[path = "cross_language_benchmark_suite/telemetry_overflow_diagnosis.rs"]
 mod telemetry_overflow_diagnosis;
+#[path = "cross_language_benchmark_suite/hidden_overlay_admission.rs"]
+mod hidden_overlay_admission;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
@@ -115,7 +117,7 @@ fn write_mock_language(task_dir: &Path, language: &MockLanguage) {
     std::fs::write(
         hidden.join("prog.py"),
         format!(
-            "import sys\nsys.exit({})\n",
+            "# hidden overlay keeps the same exit contract\nassert 1 == 1\nimport sys\nsys.exit({})\n",
             language.hidden_exit_code.unwrap_or(language.exit_code)
         ),
     )

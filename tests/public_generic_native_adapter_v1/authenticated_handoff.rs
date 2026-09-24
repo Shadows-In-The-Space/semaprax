@@ -14,6 +14,9 @@ use semaprax::public_generic_abi::{
 use sha2::{Digest as _, Sha256};
 use std::{fs, path::Path, process::Command};
 
+#[path = "authenticated_handoff/same_subject.rs"]
+mod same_subject;
+
 const REVISION: &str = "r07-native-identity-v1";
 // The C runtime translates puts("...\n") to CRLF on Windows; Rust's
 // println! emits LF. Keep each physical caller's bytes exact.

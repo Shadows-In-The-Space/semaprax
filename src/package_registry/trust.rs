@@ -371,13 +371,19 @@ impl Checkpoint {
                 return Err(shape());
             }
         }
-        Ok(Self {
+        let checkpoint = Self {
             registry,
             root_version: positive(&value["root_version"])?,
             root_digest: digest(&value["root_digest"])?,
             observed_time: number(&value["observed_time"])?,
             roles,
-        })
+        };
+        // A future store CAS binds the bytes actually read, not a repaired
+        // ordering of equivalent role stamps.
+        if checkpoint.canonical_bytes() != bytes {
+            return Err(shape());
+        }
+        Ok(checkpoint)
     }
     #[must_use]
     pub fn canonical_bytes(&self) -> String {

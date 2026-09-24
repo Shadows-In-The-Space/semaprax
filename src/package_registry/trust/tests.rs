@@ -185,15 +185,23 @@ fn real_admission_signed_chain_artifact_and_checkpoint_roundtrip() {
         ),
         "SPX-PKR624",
     );
-    let restored =
-        Checkpoint::from_trusted_store_bytes(&candidate.checkpoint().canonical_bytes()).unwrap();
+    let stored_bytes = candidate.checkpoint().canonical_bytes();
+    let restored = Checkpoint::from_trusted_store_bytes(&stored_bytes).unwrap();
+    let next = fixture.verify(&restored, 100).unwrap();
+    assert_eq!(
+        next.prior_checkpoint_digest(),
+        hash(stored_bytes.as_bytes())
+    );
+    let mut unsorted: Value = serde_json::from_str(&stored_bytes).unwrap();
+    unsorted["roles"].as_array_mut().unwrap().reverse();
+    assert_ne!(wire(&unsorted), stored_bytes);
+    refused(
+        Checkpoint::from_trusted_store_bytes(&wire(&unsorted)),
+        "SPX-PKR621",
+    );
     assert_eq!(
         candidate.checkpoint().canonical_bytes(),
-        fixture
-            .verify(&restored, 100)
-            .unwrap()
-            .checkpoint()
-            .canonical_bytes()
+        next.checkpoint().canonical_bytes()
     );
     assert_eq!(
         candidate.registry_snapshot_digest(),

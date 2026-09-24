@@ -437,6 +437,7 @@ Audience: all documentation readers.
 - [Package Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md)
 - [Package registry snapshot v1](PACKAGE-REGISTRY-SNAPSHOT-V1.md)
 - [Package Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md)
+- [Package registry trust v1](PACKAGE-REGISTRY-TRUST-V1.md)
 - [Package registry federation v1](PACKAGE-REGISTRY-FEDERATION-V1.md)
 - [Registry-bound resolution v1](PACKAGE-REGISTRY-BOUND-RESOLUTION-V1.md)
 - [Offline pure Wasm package build](OFFLINE-PURE-WASM-PACKAGE-BUILD-V1.md)

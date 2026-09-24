@@ -8,6 +8,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a TUF-style local registry verifier with independently installed roots,
+  namespace-delegated Ed25519 thresholds, dual-threshold root rotation, exact
+  registry/manifest bindings, freshness, rollback and yank checks. Results are
+  non-authoritative checkpoint candidates; durable trust storage and trusted
+  distribution remain separate host work.
+
 - Add a dispatch-only Windows confinement runtime gate that requires nonzero
   execution of restricted-token child launch, job limit/membership, scratch
   DACL, descendant refusal and test-owned descendant timeout, normal/nonzero

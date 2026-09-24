@@ -8,6 +8,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add independently verified dependency-free Build-v1 leaf manifests and an
+  additive producer-backed Registry-v3. A real linked root/leaf catalog now
+  reproduces Lock-v3 bytes and checks exact source/report/dependency closure;
+  focused tamper, yank, missing-leaf and API-claim controls pass locally.
+  Existing profiles remain unchanged; trusted v3 distribution is separate.
+
 - Add a separate private authenticated-native-moves.v1 handoff that executes
   checked flat-`Bytes` record movement bodies through generated C11/C++17
   callers. Focused physical controls cover both branches, malformed/legacy

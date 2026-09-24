@@ -2478,6 +2478,17 @@ publication surfaces and gain no registry, network, acquisition, cache, build,
 execution, or publication authority. See [Lock v3](OFFLINE-SEMANTIC-PACKAGE-LOCK-V3.md)
 and [Resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md).
 
+`package_registry::leaf_manifest_v1` owns dependency-free Build-v1 producer
+admission and exact Subject-v3/Subject-v2 source/report association, separately
+from byte-only inspection. `package_registry::registry_v3` composes admitted
+leaves with existing linked-build roots, retains independently verified
+source/dependency facts, and checks complete Lock-v3 selections against that
+exact compiled closure. Its sealed snapshots cannot be constructed from decoded
+inspection data. Both modules are pure and preserve registry-v1/v2 and the
+existing build/capsule profiles; trust and managed-host v3 integration remains
+separate. See [Leaf Manifest v1](PACKAGE-LEAF-ARTIFACT-MANIFEST-V1.md) and
+[Registry Snapshot v3](PACKAGE-REGISTRY-SNAPSHOT-V3.md).
+
 `package_registry::trust` adds a pure TUF-style local trust boundary above
 registry-v2 independently admitted entries. It verifies disjoint Ed25519
 root/timestamp/snapshot/publisher thresholds, namespace and exact manifest

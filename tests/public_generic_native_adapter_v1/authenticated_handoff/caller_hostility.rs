@@ -114,9 +114,11 @@ fn cases(descriptor: &VerifiedPublicGenericDescriptor, source: &str) -> Vec<Case
                     (14, "SPX-PG803")
                 };
                 super::super::remint(&mut changed);
-                let error = parse_bounded(&changed)
-                    .and_then(|frame| plan.validate_frame(&frame))
-                    .unwrap_err();
+                let result = match parse_bounded(&changed) {
+                    Ok(frame) => plan.validate_frame(&frame),
+                    Err(error) => Err(error),
+                };
+                let error = result.unwrap_err();
                 assert_eq!(error.code, code);
                 // The production encoder rebuilds the payload-bearing frame and
                 // remints its digest; the injected metadata is not a fake codec.

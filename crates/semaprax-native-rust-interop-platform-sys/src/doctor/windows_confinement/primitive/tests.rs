@@ -79,6 +79,26 @@ fn wait_for_marker(path: &Path) {
     );
 }
 
+fn publish_child_marker(contents: &[u8]) {
+    let directory = std::env::current_dir().expect("confined current directory");
+    let marker = directory.join(TEST_MARKER);
+    let temporary = directory.join(format!("{TEST_MARKER}.tmp"));
+    let publish = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        std::io::Write::write_all(&mut file, contents)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, &marker)
+    })();
+    if publish.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    publish.expect("child atomically publishes a complete start marker");
+}
+
 #[test]
 #[ignore = "spawned only by the live confinement runtime tests"]
 fn runtime_child_checks_descendant_job_limit() {
@@ -100,25 +120,13 @@ fn runtime_child_checks_descendant_job_limit() {
     } else {
         b"descendant-created-or-refused-for-another-reason"
     };
-    std::fs::write(
-        std::env::current_dir()
-            .expect("confined current directory")
-            .join(TEST_MARKER),
-        observation,
-    )
-    .expect("confined child writes its marker");
+    publish_child_marker(observation);
 }
 
 #[test]
 #[ignore = "spawned only by the live confinement runtime tests"]
 fn runtime_child_marks_start_then_waits_for_job_termination() {
-    std::fs::write(
-        std::env::current_dir()
-            .expect("confined current directory")
-            .join(TEST_MARKER),
-        b"started",
-    )
-    .expect("confined child writes its marker");
+    publish_child_marker(b"started");
     loop {
         std::thread::sleep(Duration::from_secs(30));
     }

@@ -446,10 +446,12 @@ pub struct ConfinedProcess {
     thread: Handle,
     job: Handle,
     _token: Handle,
-    _scratch: ScratchRoot,
+    // Rust drops fields in declaration order. Close the parent-held stdio
+    // handles before ScratchRoot removes their files and directory on Windows.
     _stdin: Handle,
     _stdout: Handle,
     _stderr: Handle,
+    _scratch: ScratchRoot,
     settled: bool,
 }
 

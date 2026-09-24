@@ -286,14 +286,15 @@ fn escape_len(value: u8) -> usize
 @id("catalog_normalizer.app.hex-byte")
 fn hex_byte(value: u8) -> u8
 {
-    match value { 0u8 => 48u8, 1u8 => 49u8, 2u8 => 50u8, 3u8 => 51u8, 4u8 => 52u8, 5u8 => 53u8, 6u8 => 54u8, 7u8 => 55u8, 8u8 => 56u8, 9u8 => 57u8, 10u8 => 97u8, 11u8 => 98u8, 12u8 => 99u8, 13u8 => 100u8, 14u8 => 101u8, 15u8 => 102u8, 16u8 => 48u8, 17u8 => 49u8, 18u8 => 50u8, 19u8 => 51u8, 20u8 => 52u8, 21u8 => 53u8, 22u8 => 54u8, 23u8 => 55u8, 24u8 => 56u8, 25u8 => 57u8, 26u8 => 97u8, 27u8 => 98u8, 28u8 => 99u8, 29u8 => 100u8, 30u8 => 101u8, _ => 102u8, }
+    let digit = if value < 16u8 { value } else { if value < 32u8 { value - 16u8 } else { 15u8 } };
+    if digit < 10u8 { digit + 48u8 } else { digit + 87u8 }
 }
 
 @id("catalog_normalizer.app.escape-byte")
 fn escape_byte(value: u8, part: usize) -> u8
 {
     let named = value == 34u8 || value == 92u8 || value == 8u8 || value == 9u8 || value == 10u8 || value == 12u8 || value == 13u8;
-    if named { if part == 0usize { 92u8 } else { if value == 34u8 { 34u8 } else { if value == 92u8 { 92u8 } else { if value == 8u8 { 98u8 } else { if value == 9u8 { 116u8 } else { if value == 10u8 { 110u8 } else { if value == 12u8 { 102u8 } else { 114u8 } } } } } } } } else { if value < 32u8 { if part == 0usize { 92u8 } else { if part == 1usize { 117u8 } else { if part < 5usize { 48u8 } else { hex_byte(value) } } } } else { value } }
+    if named { if part == 0usize { 92u8 } else { if value == 34u8 { 34u8 } else { if value == 92u8 { 92u8 } else { if value == 8u8 { 98u8 } else { if value == 9u8 { 116u8 } else { if value == 10u8 { 110u8 } else { if value == 12u8 { 102u8 } else { 114u8 } } } } } } } } else { if value < 32u8 { if part == 0usize { 92u8 } else { if part == 1usize { 117u8 } else { if part < 4usize { 48u8 } else { if part == 4usize { if value >= 16u8 { 49u8 } else { 48u8 } } else { hex_byte(value) } } } } } else { value } }
 }
 
 @id("catalog_normalizer.app.escaped-len")
@@ -368,9 +369,9 @@ fn escape_cursor_byte(line: borrow Slice<u8>, cursor: usize) -> u8
     let source = cursor / 32usize;
     let part = cursor % 32usize / 8usize;
     let escaped = cursor % 8usize;
-    let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, };
-    let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw };
-    escape_byte(decoded, escaped)
+    // Only an unnamed control renders six bytes. Output parts two and three
+    // are always ASCII '0', regardless of the accepted source escape.
+    if escaped >= 2usize && escaped <= 3usize { 48u8 } else { let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, }; let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw }; escape_byte(decoded, escaped) }
 }
 
 @id("catalog_normalizer.app.escape-cursor-next")
@@ -379,14 +380,7 @@ fn escape_cursor_next(line: borrow Slice<u8>, cursor: usize) -> usize
     let source = cursor / 32usize;
     let part = cursor % 32usize / 8usize;
     let escaped = cursor % 8usize;
-    let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, };
-    let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw };
-    let more_escape = escaped + 1usize < escape_len(decoded);
-    let last = part + 1usize >= emit_len(line, source);
-    let next_source = if more_escape { source } else { if last { token_end(line, source) } else { source } };
-    let next_part = if more_escape { part } else { if last { 0usize } else { part + 1usize } };
-    let next_escape = if more_escape { escaped + 1usize } else { 0usize };
-    next_source * 32usize + next_part * 8usize + next_escape
+    if escaped >= 2usize && escaped <= 4usize { cursor + 1usize } else { let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, }; let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw }; let more_escape = escaped + 1usize < escape_len(decoded); let last = part + 1usize >= emit_len(line, source); let next_source = if more_escape { source } else { if last { token_end(line, source) } else { source } }; let next_part = if more_escape { part } else { if last { 0usize } else { part + 1usize } }; let next_escape = if more_escape { escaped + 1usize } else { 0usize }; next_source * 32usize + next_part * 8usize + next_escape }
 }
 
 @id("catalog_normalizer.app.record-output-len")

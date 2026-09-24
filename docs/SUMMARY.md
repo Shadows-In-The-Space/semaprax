@@ -479,7 +479,7 @@ Audience: all documentation readers.
 
 ## Design decisions and drafts
 
-- [ADR 0001: Graph-first repository navigation](decisions/0001-graphify.md)
+- [ADR 0001: Why Graphify was deferred](decisions/0001-graphify.md)
 - [ADR 0002: Managed workspace generations](decisions/0002-managed-workspace-generations.md)
 - [ADR 0003: Maintained generated-package support for owned-data-api.v1 (Rust)](decisions/0003-maintained-generated-package-support.md)
 - [ADR 0004: Release signing and build provenance via Sigstore keyless identity](decisions/0004-release-signing-and-build-provenance.md)

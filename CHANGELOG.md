@@ -8,6 +8,17 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Restore source-locked test coverage after recent HIR, graph, scaffold, and
+  workspace-graph splits. The tests now bind the new submodule text or verify
+  its quality-route classification; the existing coverage threshold is not
+  raised.
+
+- Continue the concise documentation rewrite through the language tour,
+  development guide, agent protocols, project manifests, and design decisions.
+  Clarify that the workspace generation pivot is atomic visibility, not by
+  itself power-loss durability, and update the historical Graphify ADR to the
+  current Graft navigation workflow.
+
 - Compose the local, caller-authorized mirror-to-held flow with the existing
   signed resolver-cache bridge and deterministic Resolver-v2/Lock-v3 root/leaf
   replay. Cache reads are bounded, receipt-named and held nofollow reads; cache

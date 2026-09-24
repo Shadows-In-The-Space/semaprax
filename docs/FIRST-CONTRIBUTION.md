@@ -1,6 +1,7 @@
 # First contribution
 
-Status: living contributor guide. Audience: first-time contributors and agents.
+Status: living contributor guide.
+Audience: first-time contributors and agents.
 
 This page shows the order of work, not new project rules. Read
 [`AGENTS.md`](https://github.com/wavect/semaprax/blob/main/AGENTS.md) for invariants,

@@ -1,10 +1,25 @@
-# v0.6.0 partial hosted gate evidence
+# v0.6.0 hosted gate status
 
-Status: exact-job observations only; v0.6.0 is not published or signed.
+Status: exact-job observations only; the release gate is not green and v0.6.0
+is not published or signed.
 
 Audience: release reviewers, maintainers, and readers checking hosted claims.
 
-At 2026-09-24 19:12 UTC, the [tag-push CI run](https://github.com/wavect/semaprax/actions/runs/36028102754) for `v0.6.0` was still running against exact commit
+## Current tag run
+
+At 2026-09-24 20:53 UTC, the [new v0.6.0 tag run](https://github.com/wavect/semaprax/actions/runs/36047757697)
+for exact commit `ac2ce08666a66527b614fc7c10982cdab0026a38` had 26
+successful jobs, one failed job, and 36 jobs without a conclusion. The
+[Rust 1.88 integration-2 job](https://github.com/wavect/semaprax/actions/runs/36047757697/job/107796106524)
+failed because `tests/source_locked_contracts.rs` found four source-text
+readers that had lost coverage after module splits. A focused local repair in
+a newer checkout restores those readers; it is **not** part of this tag. The
+remaining jobs and the aggregate release gate still need their own outcomes.
+No partial job success makes the tag releasable.
+
+## Earlier tag run
+
+At 2026-09-24 19:12 UTC, the [earlier tag-push CI run](https://github.com/wavect/semaprax/actions/runs/36028102754) for `v0.6.0` was still running against exact commit
 [`32d45f30adeaa7709f93efdea60cea79a66491d6`](https://github.com/wavect/semaprax/commit/32d45f30adeaa7709f93efdea60cea79a66491d6).
 Thirty-five jobs had concluded successfully, four had failed, one had reached
 its 90-minute job timeout, and the remaining jobs had not concluded. These

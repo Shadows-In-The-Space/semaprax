@@ -4,28 +4,25 @@ Status: living internal contributor documentation.
 
 Audience: contributors, maintainers, and release reviewers.
 
-This document defines repository-wide verification policy and routes changes to
-their owning evidence. Exact protocol mutation matrices, known-answer digests,
-platform fixtures, and focused command lists belong in the relevant versioned
-specification and tests; they are not repeated here.
+Use this page to choose the repository-wide verification profile. Each
+versioned specification owns its focused tests, fixtures, and known answers.
 
-The implemented v0.4.0 regression corpus has the
-[HOSTED GREEN release baseline](RELEASE-0.4.0-STATUS.md). The tables below
-state checks to preserve or rerun for future changes; they are not a backlog
-of first executions for released implementations. Explicitly ignored, provisioned
-or broader-target gates retain their stated selection requirements.
+The v0.4.0 regression corpus has a
+[HOSTED GREEN baseline](RELEASE-0.4.0-STATUS.md). These checks preserve that
+evidence for later changes; ignored or provisioned tests run only when
+explicitly selected.
 
 ## The rule
 
-A change is ready only when:
+A change is ready when:
 
 1. its baseline quality profile passes;
 2. every affected versioned contract passes its focused evidence;
 3. preservation tests for older schemas and unaffected behavior pass;
 4. any public or hosted claim has evidence from the exact commit being claimed.
 
-A local green test can support a local claim. It cannot be promoted to hosted,
-public, cross-platform, or production evidence without the corresponding gate.
+A local pass proves only a local result. Hosted, public, cross-platform, and
+production claims need their own exact-commit evidence.
 
 Native public-generic single-owner/admission changes additionally run the
 [admission continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-single-owner-admission-continuation-issue-162):
@@ -65,35 +62,26 @@ has executed.
 
 ## Standard entry point
 
-Use the routed script on Unix:
+On Unix, the standard full profile is:
 
 ```sh
 scripts/quality.sh full
 ```
 
-It accepts `quick`, `changed`, or `full`. The script first emits and validates a
-deterministic `semaprax.quality-route.v2` plan, then dispatches only the exact
-listed gates. `changed` may widen to `full` when the path classification is not
-safe enough for a narrower run. Two path classes stay narrow and append their
-own gate after the fixed `changed` list: CLI surface paths (`src/cli/`,
-`src/cli_driver/`, `src/bin/`, `src/cli_driver.rs`, `src/main.rs`) add
-`test-cli`, which runs the CLI harnesses of both the standalone package and the
-full toolchain; editor
-paths (`editors/`) add `test-editor`, which runs the extension's `node --test`
-suite and the documentation harness. Any other unmapped path still widens the
-whole run to `full`, and `full`'s gate list does not vary.
+The script accepts `quick`, `changed`, or `full`. It validates a deterministic
+`semaprax.quality-route.v2` plan before running gates. `changed` widens to
+`full` when a path lacks a safe narrow mapping. CLI paths add `test-cli` for
+standalone and full-toolchain harnesses; editor paths add `test-editor` for
+extension and documentation tests. The `full` gate list is fixed.
 
-Preview the validated route without running any gates when choosing a local
-feedback loop or diagnosing why `changed` widened:
+Preview the route without running tests:
 
 ```sh
 scripts/quality.sh changed --plan
 ```
 
-Run `scripts/quality.sh --help` for the profile and option summary. During
-execution the script writes each gate name to standard error before starting
-it, so long-running checks remain attributable without changing the canonical
-plan on standard output.
+Use `scripts/quality.sh --help` for options. During a run, each gate name goes
+to stderr before it starts.
 
 | Profile | Intended use | Gates |
 | --- | --- | --- |
@@ -140,7 +128,7 @@ gate requires all three matrices.
 The Rust 1.88 minimum-version lane partitions the complete Cargo workspace
 target inventory into a lib/bin shard and three integration-target shards using
 `scripts/ci-msrv.py`. Every shard retains workspace-wide feature unification,
-locked dependencies, and the 20-minute job limit. The unit shard alone runs the
+locked dependencies, and the workflow's 240-minute job limit. The unit shard alone runs the
 whole-workspace all-targets/all-features check; repeating that identical check
 in the three integration shards adds no target coverage. Matrix fail-fast is
 disabled so every shard reports its result after a peer failure. Shared integration target names stay together;

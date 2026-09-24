@@ -1,7 +1,7 @@
 # Quickstart
 
-Audience: first-time SEMAPRAX users. This alpha example is a calculator, not a
-production-readiness claim.
+Status: public alpha example, not a production-readiness claim.
+Audience: first-time SEMAPRAX users.
 
 From the repository root, install the standalone CLI:
 

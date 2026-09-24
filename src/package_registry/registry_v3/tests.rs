@@ -8,6 +8,26 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static SERIAL: AtomicU64 = AtomicU64::new(0);
+
+pub(in crate::package_registry) fn trust_fixture(
+    yanked: bool,
+) -> (RegistrySnapshotV3, Vec<String>, String, Vec<u8>, Vec<u8>) {
+    let mut fixture = Fixture::new();
+    if yanked {
+        fixture.leaf.status = PublicationStatus::Yanked {
+            reason: "trust-v3 fixture".into(),
+        };
+    }
+    let subjects = fixture.subjects();
+    let lock = l3::generate(&subjects, &Default::default()).unwrap();
+    (
+        fixture.snapshot(),
+        subjects,
+        lock,
+        fixture.root_build.module_wasm,
+        fixture.leaf_build.module_wasm,
+    )
+}
 struct Fixture {
     leaf: PublishedEntry,
     root: PublishedEntry,

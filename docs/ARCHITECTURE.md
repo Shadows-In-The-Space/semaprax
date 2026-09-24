@@ -2485,8 +2485,8 @@ leaves with existing linked-build roots, retains independently verified
 source/dependency facts, and checks complete Lock-v3 selections against that
 exact compiled closure. Its sealed snapshots cannot be constructed from decoded
 inspection data. Both modules are pure and preserve registry-v1/v2 and the
-existing build/capsule profiles; trust and managed-host v3 integration remains
-separate. See [Leaf Manifest v1](PACKAGE-LEAF-ARTIFACT-MANIFEST-V1.md) and
+existing build/capsule profiles. Managed-host v3 integration remains separate.
+See [Leaf Manifest v1](PACKAGE-LEAF-ARTIFACT-MANIFEST-V1.md) and
 [Registry Snapshot v3](PACKAGE-REGISTRY-SNAPSHOT-V3.md).
 
 `package_registry::trust` adds a pure TUF-style local trust boundary above
@@ -2502,6 +2502,13 @@ fetch/read capability. This managed store is separate from the existing flat
 offline `fetch --lock` cache; neither route gains online registry authority,
 and no physical power-loss or hostile same-principal storage guarantee follows.
 [Registry Trust v1](PACKAGE-REGISTRY-TRUST-V1.md) owns these boundaries.
+
+`package_registry::trust::registry_v3` separately owns signed metadata-v2 proof
+over a borrowed producer-backed Registry-v3, exact leaf/linked manifest targets,
+Lock-v3 compiled-closure checks, and a one-way Checkpoint-v2 protocol floor.
+It shares root/threshold authentication but returns only a non-authoritative
+candidate; the v1 managed host and CLI do not consume it. See
+[Registry Trust v2](PACKAGE-REGISTRY-TRUST-V2.md).
 
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary

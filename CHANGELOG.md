@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add pure offline signed metadata-v2 verification for producer-backed
+  Registry-v3 linked roots and leaves, exact lock/artifact checks, and a one-way
+  Checkpoint-v2 protocol floor preserving prior version/digest high-water marks.
+  Candidates remain non-authoritative; managed-host/fetch integration is separate.
+
 - Add independently verified dependency-free Build-v1 leaf manifests and an
   additive producer-backed Registry-v3. A real linked root/leaf catalog now
   reproduces Lock-v3 bytes and checks exact source/report/dependency closure;

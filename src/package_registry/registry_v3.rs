@@ -515,4 +515,4 @@ pub fn verify_lock_selection(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

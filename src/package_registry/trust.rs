@@ -12,6 +12,7 @@ use crate::diagnostic::Diagnostic;
 
 /// Explicit durable local storage; separate from the offline flat fetch cache.
 pub mod host;
+pub mod registry_v3;
 
 const ROOT_SCHEMA: &str = "semaprax.registry-trust-root.v1";
 const METADATA_SCHEMA: &str = "semaprax.registry-trust-metadata.v1";
@@ -414,6 +415,26 @@ fn authenticate(
     bytes: &str,
     now: u64,
 ) -> Result<Metadata> {
+    authenticate_profile(
+        root,
+        checkpoint,
+        role,
+        bytes,
+        now,
+        METADATA_SCHEMA,
+        SIGN_DOMAIN,
+    )
+}
+
+fn authenticate_profile(
+    root: &InstalledRoot,
+    checkpoint: &Checkpoint,
+    role: &str,
+    bytes: &str,
+    now: u64,
+    schema: &str,
+    domain: &[u8],
+) -> Result<Metadata> {
     let value = parse(bytes)?;
     fields(&value, &["signed", "signatures"])?;
     let signed = &value["signed"];
@@ -429,7 +450,7 @@ fn authenticate(
             "payload",
         ],
     )?;
-    if signed["schema"] != METADATA_SCHEMA
+    if signed["schema"] != schema
         || signed["registry"] != root.registry
         || signed["root_digest"] != root.digest
         || signed["role"] != role
@@ -437,7 +458,7 @@ fn authenticate(
         return Err(signature());
     }
     let authority = root.roles.get(role).ok_or_else(signature)?;
-    let mut message = SIGN_DOMAIN.to_vec();
+    let mut message = domain.to_vec();
     message.extend_from_slice(wire(signed).as_bytes());
     let mut signed_keys = BTreeSet::new();
     for row in array(&value["signatures"], MAX_KEYS)? {

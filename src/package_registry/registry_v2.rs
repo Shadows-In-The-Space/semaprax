@@ -523,4 +523,4 @@ fn limit(message: impl Into<String>) -> Diagnostic {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

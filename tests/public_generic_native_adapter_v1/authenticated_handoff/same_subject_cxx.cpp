@@ -19,6 +19,7 @@ static_assert(std::is_nothrow_move_constructible_v<Output> && std::is_nothrow_mo
 int main() {
     constexpr int mode = @MODE@;
     constexpr bool guard = @GUARD@;
+    constexpr int refusal_status = @REFUSAL@;
     std::vector<std::uint8_t> descriptor(spx_pg_trusted_descriptor_bytes,
         spx_pg_trusted_descriptor_bytes + spx_pg_trusted_descriptor_len);
     descriptor[0] ^= 1;
@@ -54,8 +55,13 @@ int main() {
                     assert(result.error().native_status() == 11 && result.error().release_status() == 0);
                 }
             } else {
-                assert(!result && result.error().kind() == ErrorKind::CarrierRejected);
-                assert(result.error().native_status() == (mode == 2 ? 14 : 5));
+                const auto expected = mode == 2 && (refusal_status == 7 || refusal_status == 8)
+                    ? ErrorKind::ExecutionFailed : ErrorKind::CarrierRejected;
+                if (result || result.error().kind() != expected ||
+                    result.error().native_status() != (mode == 2 ? refusal_status : 5)) {
+                    assert(auth_calls() == 1 && auth_allocations() > before);
+                    return 77; // The omission control must cross the physical boundary.
+                }
                 assert(result.error().release_status() == 0);
                 assert(auth_calls() == 0 && auth_allocations() == before);
             }

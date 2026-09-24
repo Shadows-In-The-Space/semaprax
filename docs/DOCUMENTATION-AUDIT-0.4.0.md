@@ -8,7 +8,9 @@ Audit date: 2026-09-10.
 
 Read this as a dated audit of v0.4.0, not a review of today's documentation.
 It preserves the file inventory and evidence from that snapshot; newer pages
-and code need their own checks.
+and code need their own checks. The current [changelog archive page](CHANGELOG-ARCHIVE.md)
+is a short index; its original bytes remain at the immutable Git snapshot
+linked there. The dated audit's preservation claim refers to its own snapshot.
 
 ## Scope and authoritative subject
 

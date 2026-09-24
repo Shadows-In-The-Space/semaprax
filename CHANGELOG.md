@@ -132,6 +132,11 @@ format: `Unreleased` then release buckets, grouped by impact.
   registry/manifest bindings, freshness, rollback and yank checks. Results are
   non-authoritative checkpoint candidates; the managed durable host above is
   separate, and trusted distribution remains open.
+- Compact catalog-normalizer scalar projection helpers and avoid a repeated
+  label walk when summing accepted record quantities. The 18-case focused
+  interpreter/native C O0/O2/Core Wasm oracle selector passes, but the exact
+  65,536-byte/256-record plain response still exhausts 100M fuel; enriched
+  maximal output and the full owning gate remain unverified (#286 open).
 
 - Add a dispatch-only Windows confinement runtime gate that requires nonzero
   execution of restricted-token child launch, job limit/membership, scratch

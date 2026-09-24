@@ -268,7 +268,7 @@ fn record_is_duplicate(body: borrow Slice<u8>, record: usize, start: usize, end:
 fn record_failure(body: borrow Slice<u8>, record: usize, start: usize, end: usize, total: i64) -> usize
 {
     let basic = record_basic_failure(body, record, start, end);
-    if basic != 0usize { basic } else { let duplicate = record_is_duplicate(body, record, start, end); let line = byte_range(body, start, end); let id = record_id_value(line); if duplicate { pack_failure(5usize, record + 1usize, id) } else { let quantity = quantity_or(line, record_quantity_value(line), -1); if total_would_overflow(total, quantity) { pack_failure(6usize, record + 1usize, id) } else { 0usize } } }
+    if basic != 0usize { basic } else { let duplicate = record_is_duplicate(body, record, start, end); let line = byte_range(body, start, end); let id = record_id_value(line); indexed_record_failure(body, record, start, end, total, basic, id, duplicate) }
 }
 
 @id("catalog_normalizer.batch.indexed-record-failure")
@@ -281,7 +281,23 @@ fn indexed_record_failure(body: borrow Slice<u8>, record: usize, start: usize, e
 fn valid_record_quantity(body: borrow Slice<u8>, start: usize, end: usize) -> i64
 {
     let line = byte_range(body, start, end);
-    quantity_or(line, record_quantity_value(line), -1)
+    // This caller has a fully accepted record. Its final bare nonnegative
+    // integer is quantity; only the compact suffix avoids another label walk.
+    let length = byte_len(line);
+    let tail = if length > 0usize { length - 1usize } else { 0usize };
+    let closed = length > 0usize && byte_in(line, tail, 125u8, 125u8);
+    let mut position = tail;
+    let mut digits = 0usize;
+    let mut scanning = closed && position > 0usize && byte_in(line, position - 1usize, 48u8, 57u8);
+    while scanning {
+        position = position - 1usize;
+        digits = digits + 1usize;
+        scanning = position > 0usize && digits < 19usize && byte_in(line, position - 1usize, 48u8, 57u8);
+        scanning
+    }
+    let compact = digits > 0usize && position > 0usize && byte_in(line, position - 1usize, 58u8, 58u8);
+    let value = if compact { position } else { record_quantity_value(line) };
+    quantity_or(line, value, -1)
 }
 
 // Provider selection follows the regular structural, duplicate, and total

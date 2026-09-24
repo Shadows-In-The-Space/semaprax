@@ -217,7 +217,7 @@ fn error_byte_at(failure: usize, index: usize) -> u8
     let category_end = 30usize + category_len(category);
     let record_start = category_end + 17usize;
     let offset_start = record_start + record_len + 15usize;
-    if index < 30usize { literal_byte(1usize, index) } else { if index < category_end { category_byte(category, index - 30usize) } else { if index < record_start { literal_byte(2usize, index - category_end) } else { if index < record_start + record_len { if record == 0usize { if index == record_start { 45u8 } else { 49u8 } } else { usize_byte(record - 1usize, index - record_start) } } else { if index < offset_start { literal_byte(3usize, index - record_start - record_len) } else { if index < offset_start + usize_len(failure_offset(failure)) { usize_byte(failure_offset(failure), index - offset_start) } else { literal_byte(4usize, index - offset_start - usize_len(failure_offset(failure))) } } } } } }
+    if index < 30usize { literal_byte(1usize, index) } else { if index < category_end { category_byte(category, index - 30usize) } else { if index < record_start { literal_byte(2usize, index - category_end) } else { if index < record_start + record_len { if record == 0usize { if index == record_start { 45u8 } else { 49u8 } } else { usize_byte(record - 1usize, index - record_start) } } else { if index < offset_start { literal_byte(3usize, index - record_start - record_len) } else { let offset = failure_offset(failure); let offset_len = usize_len(offset); let offset_end = offset_start + offset_len; if index < offset_end { usize_byte(offset, index - offset_start) } else { literal_byte(4usize, index - offset_end) } } } } } }
 }
 
 @id("catalog_normalizer.app.decoded-byte-at")
@@ -401,13 +401,14 @@ fn record_output_byte(line: borrow Slice<u8>, index: usize) -> u8
 {
     let id = record_id_value(line);
     let label = record_label_value(line);
-    let id_len = escaped_len(line, id, 0usize, decoded_len(line, id));
+    let id_end = decoded_len(line, id);
+    let id_len = escaped_len(line, id, 0usize, id_end);
     let label_start = decoded_trim_start(line, label);
     let label_end_raw = decoded_trim_end(line, label);
     let label_end = if label_end_raw > label_start { label_end_raw } else { label_start };
     let label_len = escaped_len(line, label, label_start, label_end);
     let quantity = quantity_or(line, record_quantity_value(line), -1);
-    if index < 7usize { literal_byte(9usize, index) } else { if index < 7usize + id_len { escaped_byte_at(line, id, 0usize, decoded_len(line, id), index - 7usize) } else { if index < 18usize + id_len { literal_byte(10usize, index - 7usize - id_len) } else { if index < 18usize + id_len + label_len { escaped_byte_at(line, label, label_start, label_end, index - 18usize - id_len) } else { if index < 31usize + id_len + label_len { literal_byte(11usize, index - 18usize - id_len - label_len) } else { if index < 31usize + id_len + label_len + i64_len(quantity) { i64_byte(quantity, index - 31usize - id_len - label_len) } else { 125u8 } } } } } }
+    if index < 7usize { literal_byte(9usize, index) } else { let id_end_index = 7usize + id_len; if index < id_end_index { escaped_byte_at(line, id, 0usize, id_end, index - 7usize) } else { let label_start_index = id_end_index + 11usize; if index < label_start_index { literal_byte(10usize, index - id_end_index) } else { let label_end_index = label_start_index + label_len; if index < label_end_index { escaped_byte_at(line, label, label_start, label_end, index - label_start_index) } else { let quantity_start_index = label_end_index + 13usize; if index < quantity_start_index { literal_byte(11usize, index - label_end_index) } else { let quantity_end_index = quantity_start_index + i64_len(quantity); if index < quantity_end_index { i64_byte(quantity, index - quantity_start_index) } else { 125u8 } } } } } }
 }
 
 @id("catalog_normalizer.app.success-total")

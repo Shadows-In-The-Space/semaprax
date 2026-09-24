@@ -460,6 +460,24 @@ fn focused_r05_controls_agree_across_interpreter_native_and_core_wasm() {
             false,
         ),
         (
+            "reordered-quantity-with-string-lookalike",
+            concat!(r#"{"quantity":2,"id":"one","label":"look ,\"quantity\":123"}"#, "\n"),
+            concat!(r#"{"status":"ok","count":1,"total_quantity":2,"records":[{"id":"one","label":"look ,\"quantity\":123","quantity":2}]}"#, "\n"),
+            false,
+        ),
+        (
+            "validated-quantity-19-digit-boundary",
+            "{\"id\":\"maximum\",\"label\":\"l\",\"quantity\":9223372036854775807}\n",
+            "{\"status\":\"ok\",\"count\":1,\"total_quantity\":9223372036854775807,\"records\":[{\"id\":\"maximum\",\"label\":\"l\",\"quantity\":9223372036854775807}]}\n",
+            false,
+        ),
+        (
+            "validated-quantity-zero",
+            "{\"id\":\"zero\",\"label\":\"l\",\"quantity\":0}\n",
+            "{\"status\":\"ok\",\"count\":1,\"total_quantity\":0,\"records\":[{\"id\":\"zero\",\"label\":\"l\",\"quantity\":0}]}\n",
+            false,
+        ),
+        (
             "escaped-id-duplicate",
             "{\"id\":\"caf\\u00e9\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"café\",\"label\":\"l\",\"quantity\":1}\n",
             "{\"status\":\"error\",\"category\":\"duplicate_id\",\"record_index\":1,\"byte_offset\":6}\n",

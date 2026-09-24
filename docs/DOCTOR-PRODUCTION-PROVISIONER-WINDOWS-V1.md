@@ -5,8 +5,9 @@ with access to a real Windows host or a Windows CI runner.
 
 Status: the `#[cfg(windows)]` primitive has hosted type-check evidence and a
 historical five-test runtime witness on exact checkout `3d4220b6`, extending the earlier
-two-test witness at `c6bf9902`. The current source adds signed-capsule parsing
-and a nine-case exact selector (six runtime cases plus three admission refusals), not yet executed on Windows. The authoring host remains macOS arm64
+two-test witness at `c6bf9902`. The signed-capsule nine-case exact selector
+(six runtime cases plus three admission refusals) passed on exact checkout
+`c608b8d8`. The authoring host remains macOS arm64
 without a Windows toolchain, and no cross-compilation or emulated substitute
 is treated as Windows evidence. Host-independent capsule, admission-ordering,
 and settlement logic remains separately testable on non-Windows hosts. See
@@ -56,7 +57,17 @@ on `3d4220b633283e76c277f6042550275c8f1c3327`: **5 passed, 0 failed,
 0 ignored, 113 filtered**. Its three added cases exercised an actual
 test-admitted job descendant during timeout, nonzero-exit classification and
 cleanup, and repeated filesystem-stage refusal with stable handle count.
-Neither run establishes signed-capsule admission or general Windows support.
+Those earlier runs do not establish signed-capsule admission. Hosted
+[run 35992373373](https://github.com/wavect/semaprax/actions/runs/35992373373),
+Windows Server 2025 job `107609259218`, executed the signed-capsule selector
+on exact checkout `c608b8d8920816497c84be72ea9b0b5dc05dd253`:
+**9 passed, 0 failed, 0 ignored, 114 filtered**. Six runtime cases used a
+deterministic test-only signing key; three admission cases refused a missing
+anchor, a bad signature, and both signed Linux architecture codes before
+token/job/filesystem effects. The preceding run `35992165688` at `3b790471`
+failed at compilation in a Windows-only test fixture; it executed no runtime
+case. Neither result establishes release trust, artifact binding, or general
+Windows support.
 
 ## Why the first revision had no accompanying code, and why this one does
 
@@ -350,9 +361,9 @@ quiescence proof.
 
 The original two-test dispatch selector passed at `c6bf9902`; the historical
 five-test selector passed at exact checkout `3d4220b6`. Those runs predate
-signed-capsule admission. Current source selects nine cases: six live runtime
-cases (including deterministic test-only signed-key launch/settlement) and
-three signed-admission refusal cases. This selector has not yet run on Windows.
+signed-capsule admission. The current nine-case selector passed at exact
+checkout `c608b8d8`: six live runtime cases (including deterministic test-only
+signed-key launch/settlement) and three signed-admission refusal cases.
 The test key is not release trust. Signature verification authenticates only
 capsule bytes; artifact/executable reacquisition and binding remain open.
 
@@ -362,10 +373,10 @@ capsule bytes; artifact/executable reacquisition and binding remain open.
 |---|---|
 | Versioned Windows contract, cross-referenced from V1 | met |
 | Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted type-check at exact checkout `7cab8aa8` and historical five selected runtime tests passed at exact checkout `3d4220b6`; see [Nonclaims](#nonclaims) |
-| Sealed-capsule consumption | production path calls shared `parse_signed` with the compile-time release-key input and requires native Windows code 3/4; current nine-case selector awaits hosted execution; artifact-byte reacquisition/binding remains open |
+| Sealed-capsule consumption | production path calls shared `parse_signed` with the compile-time release-key input and requires native Windows code 3/4; nine test-key/admission cases passed at `c608b8d8`; artifact-byte reacquisition/binding remains open |
 | Hostile-input tests for the host-independent parts | 29 tests across `capsule`, `refusal`, and `settlement` pass on this authoring host (macOS arm64); `cargo test -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement` |
-| Runtime tests for the Win32 primitive itself | historical exact five-test selector passed in [run 35988348061](https://github.com/wavect/semaprax/actions/runs/35988348061) on `3d4220b6`; current six runtime cases and three admission refusals await hosted execution |
-| Fail-closed gate authored and run | script self-test passed locally; historical five-test selector passed at `3d4220b6`; current nine-test selector awaits hosted execution |
+| Runtime tests for the Win32 primitive itself | exact six runtime cases and three admission refusals passed in [run 35992373373](https://github.com/wavect/semaprax/actions/runs/35992373373) on `c608b8d8` |
+| Fail-closed gate authored and run | script self-test passed locally; exact nine-test selector passed at `c608b8d8` |
 | Linux, macOS, or existing job-object evidence never cited as Windows proof | met |
 | `docs/COMPLETION-MATRIX.md` WP-05 promoted for Windows | not done; not claimed |
 
@@ -379,8 +390,8 @@ The hosted Windows compilation recorded above type-checks only exact checkout
 `7cab8aa8`; by itself it establishes no execution behavior. The five runtime
 tests give narrow observations only for their exact checkout and assertions.
 Earlier hand-checking against vendored `windows-sys` was diligence, not
-substitute execution evidence. Current source uses a deterministic test-only
-signing key, is not yet run on Windows, and does not establish release trust or
+substitute execution evidence. The current nine-case selector uses a
+deterministic test-only signing key and does not establish release trust or
 bind artifact bytes to the verified capsule. Independent hostile-corpus,
 general descendant-tree, and production-support requirements remain open. Do not claim the existing ordinary-probe
 job-object confinement in `windows.rs` as evidence of production-grade
@@ -399,6 +410,5 @@ observations of the restricted token, protected DACL, production job limits,
 descendant launch refusal, test-owned descendant timeout, normal/nonzero
 settlement, cancellation, and repeated filesystem-stage refusal/handle cleanup.
 The remaining work includes restricted-token refinement,
-artifact/executable reacquisition and binding, hosted execution of the current
-nine-case selector, and a broader hostile corpus across supported Windows
+artifact/executable reacquisition and binding, and a broader hostile corpus across supported Windows
 runners.

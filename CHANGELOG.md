@@ -20,10 +20,13 @@ format: `Unreleased` then release buckets, grouped by impact.
   checkout `c6bf9902`; the historical five-test selector passed in hosted
   Windows run `35988348061` at `3d4220b6`. Current source uses the shared
   signed-capsule verifier and capsule-v1 architecture codes 3/4 for Windows,
-  with a nine-test selector (six runtime cases plus three admission refusals).
+  with a historical nine-test selector (six runtime cases plus three admission refusals).
   That selector passed on exact checkout `c608b8d8` in hosted Windows Server
   2025 run `35992373373` (9 passed, 0 failed, 0 ignored). Artifact-byte binding and production
-  support remain unverified.
+  support remain unverified. A tenth selected Windows case now exercises a
+  real inheritable broad ACE on a private parent and requires the created
+  scratch DACL to stay protected with only its intended explicit ACE; the
+  expanded selector awaits hosted execution.
 
 - Harden additive lock-bound offline fetch with held-directory authority,
   bounded retained inputs, private staging and no-replace cache publication.

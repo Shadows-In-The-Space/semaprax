@@ -796,6 +796,219 @@ fn windows_runtime_scratch_refusal_closes_setup_handles() {
 }
 
 #[test]
+#[ignore = "requires the explicitly provisioned Windows runtime gate"]
+fn windows_runtime_protected_scratch_dacl_blocks_inherited_parent_ace() {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{
+        GetNamedSecurityInfoW, SetNamedSecurityInfoW, SE_FILE_OBJECT,
+    };
+    use windows_sys::Win32::Security::{
+        AddAccessAllowedAceEx, EqualSid, GetAce, InitializeAcl, ACCESS_ALLOWED_ACE, ACE_HEADER,
+        ACL, ACL_REVISION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
+        PROTECTED_DACL_SECURITY_INFORMATION, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_ALL_ACCESS};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let provisioned_parent = runtime_parent();
+    let hostile_parent_path = provisioned_parent.join(format!(
+        "r24-inherited-ace-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time is after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir(&hostile_parent_path).expect("create exact private test parent");
+    let hostile_parent = InheritedAceParent(hostile_parent_path.clone());
+
+    let mut process_token_raw = std::ptr::null_mut();
+    assert_ne!(
+        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut process_token_raw,) },
+        0,
+        "open current process token for the controlled parent ACE"
+    );
+    let process_token = Handle::new(process_token_raw);
+    let mut user_storage = [0u8; 256];
+    read_token_user_sid(&process_token, &mut user_storage)
+        .expect("read current user's SID for the inherited ACE fixture");
+    let user_sid = unsafe { (*user_storage.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+
+    let mut acl_storage = [0u8; 512];
+    let acl = acl_storage.as_mut_ptr().cast::<ACL>();
+    assert_ne!(
+        unsafe { InitializeAcl(acl, acl_storage.len() as u32, ACL_REVISION) },
+        0,
+        "initialize exact fixture DACL"
+    );
+    let inherited_flags = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+    assert_ne!(
+        unsafe {
+            AddAccessAllowedAceEx(
+                acl,
+                ACL_REVISION,
+                inherited_flags,
+                FILE_ALL_ACCESS,
+                user_sid,
+            )
+        },
+        0,
+        "add a broad ACE inheritable by files and directories"
+    );
+    let hostile_parent_wide = wide(hostile_parent_path.as_os_str()).unwrap();
+    assert_eq!(
+        unsafe {
+            SetNamedSecurityInfoW(
+                hostile_parent_wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                acl,
+                std::ptr::null_mut(),
+            )
+        },
+        0,
+        "install the exact known inheritable parent DACL"
+    );
+
+    let mut parent_dacl = std::ptr::null_mut();
+    let mut parent_descriptor = std::ptr::null_mut();
+    assert_eq!(
+        unsafe {
+            GetNamedSecurityInfoW(
+                hostile_parent_wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut parent_dacl,
+                std::ptr::null_mut(),
+                &mut parent_descriptor,
+            )
+        },
+        0,
+        "read back the hostile parent DACL"
+    );
+    assert!(!parent_dacl.is_null());
+    let parent_acl = unsafe { &*parent_dacl };
+    assert_eq!(parent_acl.AceCount, 1, "fixture parent has exactly one ACE");
+    let mut parent_ace = std::ptr::null_mut();
+    assert_ne!(unsafe { GetAce(parent_dacl, 0, &mut parent_ace) }, 0);
+    let parent_header = unsafe { &*parent_ace.cast::<ACE_HEADER>() };
+    assert_eq!(
+        parent_header.AceFlags, inherited_flags as u8,
+        "fixture ACE is inheritable by both files and child directories"
+    );
+    let parent_allowed = unsafe { &*parent_ace.cast::<ACCESS_ALLOWED_ACE>() };
+    assert_eq!(parent_allowed.Mask, FILE_ALL_ACCESS);
+    let parent_ace_sid = (&parent_allowed.SidStart as *const u32).cast_mut().cast();
+    assert_ne!(unsafe { EqualSid(user_sid, parent_ace_sid) }, 0);
+    assert_eq!(
+        unsafe { LocalFree(parent_descriptor.cast()) },
+        std::ptr::null_mut()
+    );
+
+    let executable = std::env::current_exe().expect("current test executable exists");
+    let args = child_test_args("runtime_child_marks_start_then_waits_for_job_termination");
+    let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+    let capsule = test_capsule_body();
+    let child = confined_spawn_with_test_key(
+        &executable,
+        &borrowed_args,
+        &hostile_parent_path,
+        &capsule.bytes,
+        &capsule.public_key_hex,
+    )
+    .expect("protected scratch creation succeeds under an inheritable parent ACE");
+    let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
+    let marker = child._scratch.dir.join(TEST_MARKER);
+    let scratch_path = child._scratch.dir.clone();
+    wait_for_marker(&marker);
+
+    let mut scratch_dacl = std::ptr::null_mut();
+    let mut scratch_descriptor = std::ptr::null_mut();
+    let scratch_wide = wide(scratch_path.as_os_str()).unwrap();
+    assert_eq!(
+        unsafe {
+            GetNamedSecurityInfoW(
+                scratch_wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut scratch_dacl,
+                std::ptr::null_mut(),
+                &mut scratch_descriptor,
+            )
+        },
+        0,
+        "read back scratch DACL beneath the hostile parent"
+    );
+    assert!(!scratch_dacl.is_null());
+    let mut descriptor_control = 0u16;
+    let mut descriptor_revision = 0u32;
+    assert_ne!(
+        unsafe {
+            windows_sys::Win32::Security::GetSecurityDescriptorControl(
+                scratch_descriptor,
+                &mut descriptor_control,
+                &mut descriptor_revision,
+            )
+        },
+        0
+    );
+    assert_ne!(descriptor_control & SE_DACL_PROTECTED, 0);
+    let scratch_acl = unsafe { &*scratch_dacl };
+    assert_eq!(
+        scratch_acl.AceCount, 1,
+        "inheritable broad parent ACE did not enter protected scratch DACL"
+    );
+    let mut scratch_ace = std::ptr::null_mut();
+    assert_ne!(unsafe { GetAce(scratch_dacl, 0, &mut scratch_ace) }, 0);
+    let scratch_header = unsafe { &*scratch_ace.cast::<ACE_HEADER>() };
+    assert_eq!(
+        scratch_header.AceFlags, 0,
+        "scratch ACE is explicit, not inherited"
+    );
+    let scratch_allowed = unsafe { &*scratch_ace.cast::<ACCESS_ALLOWED_ACE>() };
+    assert_eq!(
+        scratch_allowed.Mask,
+        windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ
+            | windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_WRITE
+            | DELETE
+    );
+    let mut child_user_storage = [0u8; 256];
+    read_token_user_sid(&child._token, &mut child_user_storage).unwrap();
+    let child_user_sid = unsafe { (*child_user_storage.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    let scratch_ace_sid = (&scratch_allowed.SidStart as *const u32).cast_mut().cast();
+    assert_ne!(unsafe { EqualSid(child_user_sid, scratch_ace_sid) }, 0);
+    assert_eq!(
+        unsafe { LocalFree(scratch_descriptor.cast()) },
+        std::ptr::null_mut()
+    );
+
+    assert_eq!(std::fs::read(&marker).unwrap(), b"started");
+    std::fs::remove_file(&marker).expect("remove exact marker before scratch settlement");
+    cleanup_guard.disarm();
+    assert_eq!(
+        settle(child, Duration::from_millis(100)).status,
+        Settlement::Cancelled
+    );
+    assert!(!scratch_path.exists());
+    std::fs::remove_dir(&hostile_parent.0).expect("remove exact hostile parent after settlement");
+    assert_parent_empty(&provisioned_parent);
+}
+
+struct InheritedAceParent(PathBuf);
+
+impl Drop for InheritedAceParent {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
 fn wide_rejects_empty_oversized_and_interior_nul() {
     assert_eq!(wide(OsStr::new("")), Err(()));
     assert!(wide(OsStr::new("plain")).is_ok());

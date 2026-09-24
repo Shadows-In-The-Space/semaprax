@@ -34,6 +34,7 @@ EXPECTED_TESTS = (
     "doctor::windows_confinement::refusal::tests::windows_runtime_missing_release_anchor_refuses_before_token_job_or_filesystem",
     "doctor::windows_confinement::refusal::tests::windows_runtime_bad_signature_refuses_before_token_job_or_filesystem",
     "doctor::windows_confinement::refusal::tests::windows_runtime_signed_linux_architecture_capsule_refuses_before_token_job_or_filesystem",
+    "doctor::windows_confinement::primitive::tests::windows_runtime_protected_scratch_dacl_blocks_inherited_parent_ace",
 )
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TERMINATION_TIMEOUT_SECONDS = 30

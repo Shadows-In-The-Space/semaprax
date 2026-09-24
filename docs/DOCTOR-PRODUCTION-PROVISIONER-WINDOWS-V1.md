@@ -5,9 +5,10 @@ with access to a real Windows host or a Windows CI runner.
 
 Status: the `#[cfg(windows)]` primitive has hosted type-check evidence and a
 historical five-test runtime witness on exact checkout `3d4220b6`, extending the earlier
-two-test witness at `c6bf9902`. The signed-capsule nine-case exact selector
+two-test witness at `c6bf9902`. The historical signed-capsule nine-case exact selector
 (six runtime cases plus three admission refusals) passed on exact checkout
-`c608b8d8`. The authoring host remains macOS arm64
+`c608b8d8`. The current ten-case selector adds a hostile inheritable-parent-ACE
+DACL case and is not yet hosted. The authoring host remains macOS arm64
 without a Windows toolchain, and no cross-compilation or emulated substitute
 is treated as Windows evidence. Host-independent capsule, admission-ordering,
 and settlement logic remains separately testable on non-Windows hosts. See
@@ -221,13 +222,15 @@ its `TEMP`/`TMP` environment variables are confined to this directory
 (`primitive::forced_environment`). This needs no `windows-sys` feature beyond
 `Win32_Security`, already enabled.
 
-This session did **not** verify whether an inheritable ACE from
-`scratch_root`'s own parent directory can still additively grant access
-alongside this explicit DACL; `primitive.rs`'s doc comment on
-`confined_scratch_root` flags this and suggests `SE_DACL_PROTECTED` as the
-fix if a Windows-capable reviewer confirms it is needed. Output capture is
-also file-based (two fixed-name log files inside the same ACL'd directory)
-rather than the pipe-based, attribute-list-restricted handle inheritance
+The new `windows_runtime_protected_scratch_dacl_blocks_inherited_parent_ace`
+case creates a private parent with one `FILE_ALL_ACCESS` ACE marked
+inheritable to files and directories, verifies that fixture, then checks that
+the actual scratch child DACL is protected and contains only its one explicit
+restricted-token-user ACE with no inherited flags. This selected case tests
+that specific inheritance boundary; it does not prove general Windows
+filesystem isolation. Output capture remains file-based (two fixed-name log
+files inside the same ACL'd directory) rather than the pipe-based,
+attribute-list-restricted handle inheritance
 `windows/launch.rs` uses for the ordinary probe -- a deliberate simplification
 to keep the new unsafe surface reviewable without a toolchain, recorded in
 `primitive.rs`.
@@ -314,13 +317,13 @@ The dispatch-only
 uses an ephemeral `windows-2025` runner and creates a fresh, explicit scratch
 parent under `RUNNER_TEMP`. The gate fails when the host is not 64-bit Windows,
 the parent is missing, nonempty, or a reparse point, Cargo fails, any named
-  test is filtered or ignored, or the test summary does not report all nine
-runtime cases as passed. It never treats an absent prerequisite or a zero-test
+  test is filtered or ignored, or the test summary does not report all ten
+selected cases as passed. It never treats an absent prerequisite or a zero-test
 run as a skip/pass.
 
 `scripts/doctor-provisioned-windows-gate.py --self-test` checks the gate's
 refusal and libtest-result parsing on any host; it provides no Windows runtime
-evidence. `--plan` prints the exact nine-test selector. The live selection runs
+evidence. `--plan` prints the exact ten-test selector. The live selection runs
 `windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it`
 and `windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation`,
 plus `windows_runtime_timeout_terminates_an_actual_job_descendant`,
@@ -329,8 +332,10 @@ plus `windows_runtime_timeout_terminates_an_actual_job_descendant`,
 `windows_runtime_signed_test_key_capsule_refusals_and_launch_settle`,
 `windows_runtime_missing_release_anchor_refuses_before_token_job_or_filesystem`,
 `windows_runtime_bad_signature_refuses_before_token_job_or_filesystem`, and
-`windows_runtime_signed_linux_architecture_capsule_refuses_before_token_job_or_filesystem`.
-The four child-launch tests use `confined_spawn`. The success case inspects
+`windows_runtime_signed_linux_architecture_capsule_refuses_before_token_job_or_filesystem`,
+and `windows_runtime_protected_scratch_dacl_blocks_inherited_parent_ace`.
+The child-launch cases traverse `confined_spawn_using`; capsule verification
+uses the production release-key path or the explicit test-only key seam. The success case inspects
 the child's disabled privilege set and job membership/limits, reads back the
 scratch DACL and SID, exercises the one-process job limit, and observes
 successful settlement. The other launch cases observe timeout cancellation or
@@ -361,11 +366,13 @@ quiescence proof.
 
 The original two-test dispatch selector passed at `c6bf9902`; the historical
 five-test selector passed at exact checkout `3d4220b6`. Those runs predate
-signed-capsule admission. The current nine-case selector passed at exact
+signed-capsule admission. The historical nine-case selector passed at exact
 checkout `c608b8d8`: six live runtime cases (including deterministic test-only
-signed-key launch/settlement) and three signed-admission refusal cases.
-The test key is not release trust. Signature verification authenticates only
-capsule bytes; artifact/executable reacquisition and binding remain open.
+signed-key launch/settlement) and three signed-admission refusal cases. The
+current ten-case source adds the hostile inheritable-parent-ACE scratch-DACL
+case and awaits a new hosted run. The test key is not release trust. Signature
+verification authenticates only capsule bytes; artifact/executable
+reacquisition and binding remain open.
 
 ## Acceptance criteria status
 
@@ -375,14 +382,14 @@ capsule bytes; artifact/executable reacquisition and binding remain open.
 | Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted type-check at exact checkout `7cab8aa8` and historical five selected runtime tests passed at exact checkout `3d4220b6`; see [Nonclaims](#nonclaims) |
 | Sealed-capsule consumption | production path calls shared `parse_signed` with the compile-time release-key input and requires native Windows code 3/4; nine test-key/admission cases passed at `c608b8d8`; artifact-byte reacquisition/binding remains open |
 | Hostile-input tests for the host-independent parts | 29 tests across `capsule`, `refusal`, and `settlement` pass on this authoring host (macOS arm64); `cargo test -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement` |
-| Runtime tests for the Win32 primitive itself | exact six runtime cases and three admission refusals passed in [run 35992373373](https://github.com/wavect/semaprax/actions/runs/35992373373) on `c608b8d8` |
-| Fail-closed gate authored and run | script self-test passed locally; exact nine-test selector passed at `c608b8d8` |
+| Runtime tests for the Win32 primitive itself | historical six runtime cases and three admission refusals passed in [run 35992373373](https://github.com/wavect/semaprax/actions/runs/35992373373) on `c608b8d8`; current hostile-parent-ACE case awaits hosted execution |
+| Fail-closed gate authored and run | script self-test passed locally; historical exact nine-test selector passed at `c608b8d8`; current ten-test selector awaits hosted execution |
 | Linux, macOS, or existing job-object evidence never cited as Windows proof | met |
 | `docs/COMPLETION-MATRIX.md` WP-05 promoted for Windows | not done; not claimed |
 
 ## Nonclaims
 
-This contract does not claim that the nine-test Windows selector is a
+This contract does not claim that the ten-test Windows selector is a
 complete hostile corpus or production-support gate. The two-test run at
 `c6bf9902` and five-test run at `3d4220b6` each bind only their exact checkout
 and selected tests.
@@ -390,7 +397,7 @@ The hosted Windows compilation recorded above type-checks only exact checkout
 `7cab8aa8`; by itself it establishes no execution behavior. The five runtime
 tests give narrow observations only for their exact checkout and assertions.
 Earlier hand-checking against vendored `windows-sys` was diligence, not
-substitute execution evidence. The current nine-case selector uses a
+substitute execution evidence. The current ten-case selector uses a
 deterministic test-only signing key and does not establish release trust or
 bind artifact bytes to the verified capsule. Independent hostile-corpus,
 general descendant-tree, and production-support requirements remain open. Do not claim the existing ordinary-probe

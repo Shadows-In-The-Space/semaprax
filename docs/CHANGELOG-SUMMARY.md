@@ -97,10 +97,11 @@ For complete chronological detail, including historical context and archived art
 
 ## Latest published milestone
 
-- `v0.6.0` is the current prerelease tag used by installation and distribution
-  docs; hosted signed-release evidence is pending the authorized tag gate.
-- `v0.5.0` remains the immediately preceding published prerelease.
-- `v0.4.1` remains the immediately preceding prerelease.
+- `v0.5.0` remains the latest published prerelease used by installation and
+  distribution docs.
+- `v0.6.0` is the current prerelease tag, but its hosted gate failed before
+  publication; it has no release archives or signed-release evidence.
+- `v0.4.1` remains the prerelease before v0.5.0.
 - `v0.4.0` remains the prerelease before that, and its
   [release baseline](RELEASE-0.4.0-STATUS.md) remains the accepted hosted-green
   evidence record.

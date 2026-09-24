@@ -25,7 +25,7 @@ the documentation. They are not three products.
 | --- | --- | --- |
 | `semaprax` | `cargo install --locked --path .`, or the crates.io compiler package | The standalone compiler: create a project with `new`, format, check, run, test, inspect, patch and build admitted source/projects; `doctor` uses the shared fail-closed profile interface. |
 | `semaprax-full` | `cargo install --locked --path crates/semaprax-toolchain`, from a source checkout only | Everything the standalone compiler does, plus private Native Rust package publication, Windows revision-store host operations, Windows owned npm publication, and the held-parent staged publication route behind its `new`. The `doctor` command is shared by both binaries. |
-| `semaprax` inside a tag archive | The [v0.6.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.6.0) archives | The archive's `semaprax` *is* the `semaprax-full` binary, renamed during staging, so archive users write `semaprax doctor`, not `semaprax-full doctor`. |
+| `semaprax` inside a tag archive | The last published [v0.5.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.5.0) archives | The archive's `semaprax` *is* the `semaprax-full` binary, renamed during staging, so archive users write `semaprax doctor`, not `semaprax-full doctor`. |
 
 The `semaprax-toolchain` package is `publish = false`; it is never fetched
 from a registry. The naming split and what the standalone package excludes are
@@ -116,14 +116,15 @@ command -v semaprax
 
 ## Route 2: install from a release archive
 
-The [v0.6.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.6.0)
+The v0.6.0 tag failed its hosted release gate and has no downloadable archives.
+The last published [v0.5.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.5.0)
 publishes one archive per admitted host plus a `SHA256SUMS` file:
 
 | Host | Archive |
 | --- | --- |
-| Linux x86-64 | `semaprax-v0.6.0-x86_64-unknown-linux-gnu.tar.gz` |
-| Apple Silicon macOS | `semaprax-v0.6.0-aarch64-apple-darwin.tar.gz` |
-| Windows x86-64 | `semaprax-v0.6.0-x86_64-pc-windows-msvc.zip` |
+| Linux x86-64 | `semaprax-v0.5.0-x86_64-unknown-linux-gnu.tar.gz` |
+| Apple Silicon macOS | `semaprax-v0.5.0-aarch64-apple-darwin.tar.gz` |
+| Windows x86-64 | `semaprax-v0.5.0-x86_64-pc-windows-msvc.zip` |
 
 Each archive contains `semaprax`, the `semapraxd` daemon, `LICENSE`,
 `README.md`, a fixed smoke program, and a deterministic
@@ -132,7 +133,7 @@ Each archive contains `semaprax`, the `semapraxd` daemon, `LICENSE`,
 
 ```sh
 shasum -a 256 -c SHA256SUMS
-tar -xzf semaprax-v0.6.0-aarch64-apple-darwin.tar.gz
+tar -xzf semaprax-v0.5.0-aarch64-apple-darwin.tar.gz
 ```
 
 Use `unzip` for the Windows archive. Put the unpacked directory on your `PATH`

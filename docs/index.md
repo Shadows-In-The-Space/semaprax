@@ -16,10 +16,12 @@ evidence, private experiments, and repository internals live in the separate
 > The [v0.4.0 baseline](RELEASE-0.4.0-STATUS.md) records **HOSTED GREEN** for the
 > released implementation and supersedes its pre-release local-only status.
 
-The [v0.6.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.6.0)
-contains smoke-tested Linux x86-64, Apple Silicon macOS, and Windows x86-64
-archives. The implemented release code has **HOSTED GREEN** evidence; the
-release-note publication issue is not an outstanding code-evidence gate.
+The v0.6.0 tag failed its hosted release gate before publication; it has no
+downloadable archives. The last published
+[v0.5.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.5.0)
+contains Linux x86-64, Apple Silicon macOS, and Windows x86-64 archives.
+The v0.4.0 implementation baseline has **HOSTED GREEN** evidence, but that
+does not establish a successful v0.6.0 release.
 See the [release baseline](RELEASE-0.4.0-STATUS.md) and
 [release record and checksums](RELEASE-PROCESS.md#040-hosted-release-evidence).
 The release remains unsigned, not notarized, and alpha.

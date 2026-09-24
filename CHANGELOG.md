@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Re-pin exact Semantic Workspace Change and Operations artifact/evidence/receipt
+  KATs to the expanded Project graph and serialized limits while retaining
+  domain, reference, API/CLI parity, tamper, replay, budget, and stale/no-write
+  assertions.
+
 - Keep the standalone compiler archive independent of unpublished crates by
   moving the private OCI emitter and all hostile tests into one internal
   compiler module. Preserve the typed input boundary, exact artifact bytes,

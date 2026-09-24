@@ -224,7 +224,7 @@ fn public_api_cli_kat_parity_and_opaque_getters() {
         raw_sha(&evidence),
         // Parsed artifact fields and digest-reference parity below independently
         // bind this re-pinned whole-document digest.
-        "sha256:d0891a78596fb5dcca8133e5b4566f18fc8e50b4a8ae9ad21f97290fc001df9a"
+        "sha256:7ae7ea1ed4413f8368ebcb235aff9cf2bfb7ef861e73e15c8c1b9ad270f8aeea"
     );
     for value in [
         artifacts.proposal_digest(),

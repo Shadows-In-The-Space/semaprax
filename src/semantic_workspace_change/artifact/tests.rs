@@ -110,15 +110,14 @@ fn literal_kats_wire_order_domains_and_reference_parity() {
             raw_sha(artifacts.evidence()),
         ],
         [
-            // Reconstructed against 9e7e40ad: only the base/candidate
-            // `used_builder_bytes`, their graph digests, and dependent child
-            // digests moved; graph modules, declarations, edges, byte counts,
-            // and every other artifact field remained byte-identical.
-            "sha256:4740ff51d6732f82d85e0d854d8ea1710a7e3cf476cf2c311594d6cd88b5d35f",
-            "sha256:119d5a33c50ae8d0769e7fd6be32a49da86f62ae50bd4c38fef12a07b588ef17",
-            "sha256:4f1aeceb2c1bc9f931f2d1461d9a209a44b96154576e56855e75971f78387a88",
-            "sha256:1c8c94b308d5b552dc85bc4d7519566310c2cc9d64965c9c8a6621fdd49bb309",
-            "sha256:d0891a78596fb5dcca8133e5b4566f18fc8e50b4a8ae9ad21f97290fc001df9a"
+            // The expanded Project graph and limits change the bound documents;
+            // the domain, reference, wire-order, and tamper checks above and
+            // below still bind these literal whole-document digests.
+            "sha256:8f1b3eac4d3e9a8a0534ef3acb5a89f93737f75d2b3871e3cf0aa148871b7ed0",
+            "sha256:c5c921d4f9c52c6a740b3ddc87acd13c54743ade47696b3709d444e8dcc26387",
+            "sha256:dffc03acb665d869bcd222065aec0c26961244f93f45be53af870c0b85760739",
+            "sha256:2c7aaad6968b2b84ea35afab3f72be9cc3e79132cedd9c0a7850966f846084a8",
+            "sha256:7ae7ea1ed4413f8368ebcb235aff9cf2bfb7ef861e73e15c8c1b9ad270f8aeea"
         ]
     );
 

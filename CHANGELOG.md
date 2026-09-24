@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Project a frozen malformed-result carrier recipe through generated TypeScript
+  against the compiler-produced checked Wasm provider, alongside exact
+  descriptor/binding and once-only result-release controls. This is local
+  compiled-provider evidence, not the full hostile or hosted R06 matrix.
+
 - Add pure offline signed metadata-v2 verification for producer-backed
   Registry-v3 linked roots and leaves, exact lock/artifact checks, and a one-way
   Checkpoint-v2 protocol floor preserving prior version/digest high-water marks.

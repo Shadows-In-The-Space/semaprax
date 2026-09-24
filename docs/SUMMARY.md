@@ -61,7 +61,6 @@ Audience: all documentation readers.
 - [Unified CLI: review, verify, agent, query, package, add, fetch](UNIFIED-CLI-V1.md)
 - [Human diagnostic locations](HUMAN-DIAGNOSTICS-V1.md)
 - [Changelog](../CHANGELOG.md)
-- [Changelog archive](CHANGELOG-ARCHIVE.md)
 - [Changelog summary](CHANGELOG-SUMMARY.md)
 - [Examples index](../examples/README.md)
 - [Canonical comments](CANONICAL-COMMENTS-V1.md)
@@ -487,6 +486,7 @@ Audience: all documentation readers.
 - [v0.4.0 implementation and evidence baseline](RELEASE-0.4.0-STATUS.md)
 - [Roadmap](ROADMAP.md)
 - [Protocol migrations](MIGRATIONS.md)
+- [Historical changelog archive](CHANGELOG-ARCHIVE.md)
 
 ## Design decisions and drafts
 

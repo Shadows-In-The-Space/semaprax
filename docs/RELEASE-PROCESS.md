@@ -10,6 +10,18 @@ packaging, but cannot certify a release. This page combines the procedure with
 historical v0.4.x evidence; use [v0.6.0 status](RELEASE-0.6.0-STATUS.md) for
 the current tag.
 
+For a new release:
+
+1. Prepare the approved version across manifests, lockfiles, CLI, and docs;
+   review the generated diff and complete the human release notes.
+2. Verify the exact candidate commit with the required checks. Keep the
+   release commit on `main` and confirm the remote head still matches it.
+3. Create one annotated tag at that commit. Do not move a published tag.
+4. Let the hosted `release-gate` finish. Only a green exact-tag gate can
+   publish immutable archives and signing material.
+5. Verify the published asset set and record its exact hosted evidence. A
+   failed or incomplete tag run is not a release.
+
 ## Tag admission
 
 The release tag must be `v` followed by the root `Cargo.toml` package version.

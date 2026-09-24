@@ -21,11 +21,11 @@ compatibility evidence.
 - the exact provider package and version, candidate provider source path, and
   exported stable target identity.
 
-The method does not accept serialized graph facts as authority. It independently
-regenerates the complete candidate environment review, package semantic summary
-and selected consumer report through their existing public APIs. It parses each
-result as its exact canonical compiler schema and retains each complete report
-in the result, together with the SHA-256 of its exact bytes.
+The method regenerates the candidate environment review, package semantic
+summary and selected consumer report through their existing public APIs; it
+does not trust serialized graph facts. It parses each exact canonical compiler
+schema and includes the complete reports and SHA-256 hashes of their exact
+bytes.
 
 The join requires the candidate manifest name and version to equal the provider
 coordinate. The provider source path must select exactly one retained candidate
@@ -39,10 +39,10 @@ identities, and its retained source inventory must contain the same provider
 source revision and digest.
 
 The package graph's original `project_association: "none"` remains required.
-This composition adds only an exact candidate-era provider-source association
-inside this report. It does not mutate the graph, turn it into Project
-authority, retain it, or infer that its inventory represents installed,
-Workspace-wide, ambient or deployed consumers.
+This report adds only an exact association with the candidate-era provider
+source. It does not change or retain the graph, grant it Project authority, or
+claim its inventory covers installed, Workspace-wide, ambient or deployed
+consumers.
 
 ## Reports and coverage meaning
 

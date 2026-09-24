@@ -9,10 +9,9 @@ separately gated.
 Audience: reviewers, editor integrators and agent client authors.
 
 `ProjectCandidate::source_review(expected_candidate)` returns a closed source
-review without requiring a client to interpret the heterogeneous candidate
-report. It preserves the [candidate](PROJECT-CANDIDATES-V1.md) identity and
-publication boundaries. It does not produce an editor edit or grant permission
-to write any path.
+review so clients need not interpret the full candidate report's varied shapes.
+It preserves [candidate](PROJECT-CANDIDATES-V1.md) identity and publication
+boundaries. The report is not an editor edit or permission to write a path.
 
 ## Bound source pairs
 
@@ -39,8 +38,8 @@ report and its identity bytes are unchanged.
 The implementation requires unchanged complete manifest/source inventories,
 checks path order and source digests, and reconstructs the complete candidate
 history through ordinary independent replay before deriving the review. It
-never obtains base text by reading the current path from disk. A path in this
-report identifies a retained source member, not a filesystem capability.
+reads base text from retained data, never from the current disk path. Report
+paths identify retained source members; they are not filesystem capabilities.
 
 The lazy candidate-owned review cache contains only these derived bytes or a
 deterministic failure. Its first use performs replay; subsequent reads share

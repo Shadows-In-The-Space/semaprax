@@ -8,10 +8,10 @@ separately gated.
 
 Audience: agent builders, embedding hosts and compiler contributors.
 
-The read-only merge preview compares two complete candidates by attempting the
-existing semantic merge in both orders. It fills the gap between descriptive
-target overlap and explicit creation of a retained merged candidate. The
-original `compare` report and the mutation APIs remain unchanged.
+The read-only merge preview tries the existing semantic merge in both orders
+for two complete candidates. It goes beyond reporting target overlap, but does
+not retain a merged candidate. The original `compare` report and mutation APIs
+stay unchanged.
 
 ## Exact parents and source replay
 
@@ -29,9 +29,9 @@ independent Project verification and selected-target checks.
 
 The resulting candidates exist only while computing the report. No candidate
 object, retained registry entry, source write, filesystem authority, runtime
-execution, or publication is returned. A result candidate digest is descriptive
-identity, not a registered session handle. To obtain a usable merged candidate,
-the caller must separately request the ordinary merge with its chosen order.
+execution, or publication is returned. A result digest identifies a
+candidate; it is not a registered session handle. To retain a usable candidate,
+request the ordinary merge separately in the chosen order.
 
 ## Report and interpretation
 

@@ -8,12 +8,11 @@ separately gated.
 
 Audience: compiler contributors and agents reviewing immutable Project candidates.
 
-This additive report compares source-backed static protocol conformance across
-an entire candidate's original base and final admitted Project revision. It
-exposes changed required signatures, implementation bindings, and the functions
-behind those bindings without requiring an agent to guess which individual
-stable IDs to query. It leaves the selected Semantic Delta v1 and image/runtime
-graph schemas unchanged.
+This report compares source-backed static protocol conformance between a
+candidate's original base and final admitted Project revision. It shows changed
+required signatures, implementation bindings and their functions, without
+requiring callers to guess which stable IDs to query. Semantic Delta v1 and
+image/runtime graph schemas stay unchanged.
 
 ## API and exact binding
 
@@ -33,9 +32,8 @@ never substitute for persistent declaration identity or source provenance.
 
 Verification independently replays the complete candidate history and canonical
 candidate evidence, regenerates this report, and compares all submitted bytes.
-Recomputing public fact digests around a modified payload cannot authenticate
-that payload. Submitted JSON is never deserialized as trusted HIR or treated as
-permission to publish. A stale selector, different candidate, changed report,
+Editing a payload and recomputing its public digests cannot authenticate the
+edits. Submitted JSON is neither trusted HIR nor permission to publish. A stale selector, different candidate, changed report,
 or noncanonical encoding fails closed.
 
 ## Whole-candidate comparison

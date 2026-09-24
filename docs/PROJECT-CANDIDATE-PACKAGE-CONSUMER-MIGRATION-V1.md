@@ -29,16 +29,14 @@ built-in pair needed to authenticate this boundary: `own Bytes` and
 `borrow Slice<u8>`. Results remain by-value package scalars, which include the
 `usize` a byte-length provider returns; owning `string`, `borrow str`, authored
 nominal types, effects, capabilities, and type imports remain outside the
-package-source profile. Existing Copy-only reports retain their interface bytes
-and digests.
+package-source profile. Copy-only reports keep their existing interface bytes and digests.
 
-The compared base and candidate signatures are the exact retained checked HIR
-of each Project revision. A provider consumed only across packages is outside
-its own Project's entry and test closures, which retain linked call closures
-rather than every checked declaration, so the route then relinks that
-revision's exact retained canonical sources and reads the same validated HIR
-the revision was admitted from. It never reconstructs meaning from source text
-or from the submitted corpus.
+The comparison uses each Project revision's exact retained checked HIR.
+Entry and test closures keep linked callees, not every checked declaration.
+A provider used only by another package may therefore be outside those
+closures. In that case, the route relinks the revision's exact retained
+canonical sources and reads the same validated HIR used for admission. It
+never reconstructs meaning from source text or the submitted corpus.
 
 The append lane reports and authenticates the consumer call inventory. A
 provider-local call site is still rewritten, so the reconstructed provider

@@ -21,17 +21,17 @@ a retained revision is not current-path authentication.
 both candidates to share their original Project base revision. It finds their
 longest exact common intention-history prefix, replays the other candidate's
 complete history from that original base, and then replays this candidate's
-remaining suffix. The common prefix is not duplicated. The resulting source
-diff and complete intention evidence retain the original shared base, so
-changes from the other parent are not lost by treating its revision as a new
-empty base. Merge order is explicit: right suffix, then left suffix.
+remaining suffix. The common prefix runs only once. The resulting source diff and complete
+intention evidence keep the original shared base, preserving changes from both
+parents. The other parent's revision does not become a new empty base. Merge
+order is explicit: right suffix, then left suffix.
 
 Both return `ProjectCandidateRebase`, exposing `candidate()` by reference,
 `into_candidate()` by ownership, and `to_json()` for its separate ancestry and
 classification report. Existing Candidate and Image wire schemas are unchanged.
 The report binds both parent candidate digests for a merge; a rebase binds its
-source candidate and the exact admitted destination Project revision. Keep
-this report alongside the resulting candidate when retaining merge ancestry.
+source candidate and the exact admitted destination Project revision. To retain merge ancestry,
+keep this report with the resulting candidate.
 
 The additive [Typed-draft Rebase](PROJECT-CANDIDATE-DRAFT-REBASE-V1.md) first
 uses this checked-history rebase, then separately guards and remaps pending

@@ -8,11 +8,10 @@ broader product completion remain separately gated.
 
 Audience: compiler maintainers and hosts explicitly publishing approved Project candidates.
 
-This bridge publishes an independently replayed candidate through the existing
-managed Workspace `ACTIVE` authority. It does **not** commit canonical Git
-sources, rewrite original `.spx` files, publish a Project manifest, or make raw
-path readers observe a transaction. The broader canonical-source commit goal
-remains open.
+This bridge publishes an independently replayed candidate through managed
+Workspace `ACTIVE`. It does **not** commit canonical Git sources, rewrite
+original `.spx` files, publish a Project manifest, or give raw-path readers a
+transactional view. The broader canonical-source commit goal remains open.
 
 ## Separate host API
 
@@ -48,9 +47,9 @@ grants filesystem authority.
 The root must be the exact absolute UTF-8 path of the independently authenticated
 Project root, and the manifest argument must name its `semaprax.toml`. Existing
 Project and Workspace path/handle authentication rejects aliases and drift.
-The caller supplies both expected digests independently of the proof. Calling
-an argument “approved” is a host contract, not a signature, consent detector,
-or authorization service.
+The caller supplies both expected digests independently of the proof. The word “approved”
+is a host contract; it does not supply a signature, detect consent, or provide
+an authorization service.
 
 ## Binding and replay
 

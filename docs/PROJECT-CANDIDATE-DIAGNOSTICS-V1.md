@@ -8,10 +8,10 @@ authoring-time, ignored, or separately provisioned observations below retain
 their narrower scope; public promotion and broader product completion remain
 separately gated.
 
-A rejected semantic intention remains queryable through a diagnostic record,
-without treating invalid source as a Project revision, candidate, or checked
-image. The predecessor remains an immutable, fully admitted `ProjectCandidate`.
-The existing `apply` API and every source/invariant gate are unchanged.
+A diagnostic record lets callers inspect a rejected semantic intention.
+Invalid source does not become a Project revision, candidate, or checked image.
+The predecessor remains an immutable, fully admitted `ProjectCandidate`; the
+existing `apply` API and all source/invariant checks stay unchanged.
 
 ## Library API
 
@@ -26,9 +26,9 @@ returns one of:
   containing the exact canonical change, verified predecessor, and diagnostics
   emitted by that failed apply.
 
-Stale base bindings and oversized structural inputs are outer errors, not
-retained attempt objects. Resource failure while constructing a bounded report
-also remains an outer error; no partial diagnostic report is returned.
+A stale base binding or oversized structural input returns an error, not a
+retained attempt object. Running out of resources while constructing the report
+also returns an error, never a partial diagnostic report.
 
 An attempt exposes `attempt_digest()`, `to_json()`, digest-bound
 `summary(expected_attempt)` and `repair_catalog(expected_attempt)`, plus

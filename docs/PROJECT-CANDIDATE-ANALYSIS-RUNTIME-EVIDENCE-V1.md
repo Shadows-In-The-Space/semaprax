@@ -9,10 +9,9 @@ broader product completion remain separately gated.
 Audience: agent authors, embedding hosts, and compiler contributors reviewing
 an immutable Project candidate before publication.
 
-The compiler can identify a declaration and still lack the runtime contract
-that surrounds it. Candidate Analysis Coverage therefore keeps runtime as an
-explicit blind spot. This additive report composes that exact coverage
-inventory with one freshly produced `CandidateTestReport`. It changes
+Knowing a declaration does not establish its runtime behavior. Candidate
+Analysis Coverage therefore lists runtime as a blind spot. This report combines
+that exact coverage inventory with one new `CandidateTestReport`. It changes
 only the `runtime_environment` area from `not_inspected` to `partial`; every
 other area and every nested input remains byte-for-byte attributable to its
 existing evidence owner.
@@ -83,12 +82,11 @@ The derived `runtime_environment` row is:
 }
 ```
 
-No execution details are summarized into a second looser shape: the exact test
-report already owns outcome, origin, policy, source inventory, diffs, execution
-envelope, digests, fuel, and pass/fail semantics. `passed:false`, including a
-returned failure or fuel exhaustion, is retained unchanged. It still makes the
-runtime area partial because an attempt was observed; it never makes a gate
-pass.
+Execution details stay in the exact test report, which owns outcome, origin,
+policy, source inventory, diffs, execution envelope, digests, fuel, and pass/fail
+semantics. A returned failure or fuel exhaustion keeps `passed:false`. The
+runtime area is still partial because an attempt was observed, but that does
+not make a gate pass.
 
 All seven non-runtime `areas` rows and every other retained coverage field,
 apart from the explicitly appended nonclaims, must equal the separately

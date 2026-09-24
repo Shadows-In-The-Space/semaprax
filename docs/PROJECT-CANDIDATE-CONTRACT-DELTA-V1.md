@@ -8,12 +8,11 @@ separately gated.
 
 Audience: compiler contributors and agents reviewing candidate contract changes.
 
-This additive report compares contracts across an immutable candidate's original
-base and final admitted Project revision. It identifies changed predicate
-projections and changes to the callable dependencies used by those predicates.
-Agents need not query every function or generate target artifacts to discover
-these changes. Existing Semantic Delta v1 and Interface Delta v1 remain separate
-and keep their report schemas.
+This report compares contracts in an immutable candidate's original base and
+final admitted Project revision. It shows changes to predicates and to the
+functions they depend on, without requiring a query for every function or
+generated target artifacts. Semantic Delta v1 and Interface Delta v1 remain
+separate reports with unchanged schemas.
 
 ## API and source binding
 
@@ -37,10 +36,10 @@ persistent contract identity. Arrays preserve predicate order. No predicate is
 matched across revisions solely by an expression ID, and duplicate predicates
 must not be deduplicated.
 
-Verification independently replays the complete candidate history and existing
-canonical candidate evidence, recomputes the report, and compares all submitted
-bytes. Replacing digests in a modified report cannot authenticate its facts.
-Submitted JSON is never loaded as HIR, source, or approval authority.
+Verification replays the complete candidate history and canonical evidence,
+recomputes the report, and compares every submitted byte. Editing a report and
+replacing its digests cannot authenticate the changed facts. Submitted JSON is
+never loaded as HIR, source, or approval authority.
 
 ## Predicate and dependency comparisons
 

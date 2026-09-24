@@ -17,11 +17,11 @@ domain-separated length-delimited SHA-256 digest. Unknown or missing fields,
 stale candidate identities, noncanonical bytes, invalid digests, duplicate
 identities, and incomplete source/export joins fail closed.
 
-Each result starts from the ordinary exact candidate analysis-coverage report.
-It preserves all source, Project, Workspace, graph, manifest, authority, and
-other area rows. Only the area owned by the declaration changes to `partial`.
-The embedded declaration retains its canonical bytes and digest so another
-reader can replay the exact caller statement.
+Each result starts with the exact candidate analysis-coverage report. Only the
+declaration's area changes to `partial`; source, Project, Workspace, graph,
+manifest, authority, and other area rows stay unchanged. The result embeds the
+declaration's canonical bytes and digest so readers can replay the caller's
+exact statement.
 
 Project Agent Transport v5 exposes both individual attachments and
 `candidate/analysis-boundary-bundle` as `candidate_prepare` queries with exact
@@ -75,9 +75,9 @@ route, transport, or runtime value. The attachment changes only
 `external_api_behavior` and the matching combined external/deployed-runtime
 blind-spot row to `partial`; runtime observation remains absent.
 
-The digests are caller-declared comparison facts. They are not provider
-authentication, availability, compatibility, network behavior, remote side
-effects, version selection, or runtime conformance evidence. The method opens
+The digests record what the caller declared for comparison. They do not prove
+provider authentication, availability, compatibility, network behavior, remote
+side effects, version selection, or runtime conformance. The method opens
 no network or process and grants no ambient, filesystem, publication, or
 deployment authority.
 

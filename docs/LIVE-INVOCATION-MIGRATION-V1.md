@@ -276,7 +276,7 @@ proves the outbound-generation invariant without touching the store or dispatchi
   against fixtures.
 - **"Live" here names this kernel's causal-journal contract, not a running
   compiled conversation.** [Live Invocation Contract
-  v1](LIVE-INVOCATION-CONTRACT-V1.md#non-goals-and-known-limitations-this-round)
+  v1](LIVE-INVOCATION-CONTRACT-V1.md#boundaries-and-known-limitations)
   records that no parser or HIR syntax for `model.invoke` exists yet, and
   `kernel::run_live_invocation` is called for real only from this crate's
   own tests (`src/agent_interaction_schema/live_bridge/tests.rs`) — nothing

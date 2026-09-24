@@ -61,7 +61,7 @@ Out of scope for v1, matching the owning issue's own non-goals exactly:
   device effect names an explicit capability, see [Ownership and
   effects](#ownership-and-effects);
 - any claim of bit-exact floating-point equivalence where a real platform
-  does not provide one — see [Numeric policy](#numeric-policy): v1 admits no
+  does not provide one — see [Numeric policy](#numeric-policy-exact-integers-only-in-v1): v1 admits no
   floating-point kernel at all, precisely to avoid ever needing this claim
   before a dedicated tolerance profile exists;
 - accelerator syntax landing before host ownership, arrays/collections,

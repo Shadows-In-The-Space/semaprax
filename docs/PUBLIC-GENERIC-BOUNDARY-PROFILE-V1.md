@@ -190,10 +190,9 @@ leaf, leaf-count, or per-carrier payload admission bound above.
 
 Where several existing bounds could apply and differ, the smaller one was
 chosen; none of the numbers above widen any bound an existing hosted-green
-specification already enforces. Exact `limit` and `limit + 1` cases are
-required test fixtures for the future classifier (§ [Required test
-matrix](#required-test-matrix-for-the-classifier)); this document does not
-claim they exist yet, because the classifier does not exist yet.
+specification already enforces. Exact `limit` and `limit + 1` cases belong in
+the classifier test matrix; [Evidence](#evidence) records local coverage and
+does not claim a hosted run.
 
 ## IN / DEFERRED / EXCLUDED shape table
 

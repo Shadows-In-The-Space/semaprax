@@ -221,7 +221,7 @@ checked meaning rather than a documented intention:
 
 ## The #228 boundary, restated for this module
 
-[Durable Jobs v1](DURABLE-JOBS-V1.md#the-228-boundary-what-blocks-a-checked-semaprax-caller)
+[Durable Jobs v1](DURABLE-JOBS-V1.md#checked-publication-outcomes-and-recovery-uncertainty)
 records the same boundary this module runs into, for a different domain: a
 fallible host write that can fail *after* an irrevocable external action
 already happened has no in-language way for a checked SEMAPRAX-authored

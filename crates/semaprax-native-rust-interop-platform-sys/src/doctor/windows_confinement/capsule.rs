@@ -226,7 +226,7 @@ pub fn roles_for_target(target: u8) -> Option<u8> {
 }
 
 fn validate_architecture(architecture: u8) -> Result<(), CapsuleError> {
-    if matches!(architecture, 1 | 2 | 3 | 4) {
+    if matches!(architecture, 1..=4) {
         Ok(())
     } else {
         Err(CapsuleError::Invalid)

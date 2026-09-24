@@ -1,5 +1,6 @@
+use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -65,6 +66,58 @@ fn node_available() -> bool {
         .arg("--version")
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+fn exact_tsc_version(stdout: &[u8]) -> bool {
+    std::str::from_utf8(stdout).is_ok_and(|text| text.trim() == "Version 5.8.3")
+}
+
+fn checked_tsc(candidate: &Path) -> Result<PathBuf, String> {
+    // Resolve before the generated package changes the compiler's cwd.
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|error| format!("{}: {error}", candidate.display()))?;
+    let version = Command::new(&resolved)
+        .arg("--version")
+        .output()
+        .map_err(|error| format!("{}: {error}", resolved.display()))?;
+    if !version.status.success() || !exact_tsc_version(&version.stdout) {
+        return Err(format!(
+            "{} requires exactly TypeScript 5.8.3, got {:?}",
+            resolved.display(),
+            String::from_utf8_lossy(&version.stdout)
+        ));
+    }
+    Ok(resolved)
+}
+
+fn required_tsc() -> PathBuf {
+    assert!(checked_tsc(Path::new("missing-pinned-tsc")).is_err());
+    assert!(!exact_tsc_version(b"Version 5.8.30\n"));
+    assert!(!exact_tsc_version(b"Version 5.9.0\n"));
+    if let Some(explicit) = env::var_os("SPX_PG_TSC").or_else(|| env::var_os("TSC")) {
+        return checked_tsc(Path::new(&explicit))
+            .expect("explicit TypeScript compiler must be the pinned 5.8.3 image");
+    }
+    let mut candidates = Vec::new();
+    if let Some(path) = env::var_os("PATH") {
+        for directory in env::split_paths(&path) {
+            if cfg!(windows) {
+                candidates.push(directory.join("tsc.cmd"));
+                candidates.push(directory.join("tsc.exe"));
+            }
+            candidates.push(directory.join("tsc"));
+        }
+    }
+    if let Some(home) = env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        candidates.push(home.join("Library/pnpm/tsc"));
+        candidates.push(home.join(".local/share/pnpm/tsc"));
+    }
+    candidates
+        .iter()
+        .find_map(|candidate| checked_tsc(candidate).ok())
+        .expect("generated compiled-provider consumer requires pinned TypeScript 5.8.3")
 }
 
 fn generated_field_name(identity: &str) -> String {
@@ -252,16 +305,11 @@ if (instance.exports.spx_pg_v1_provider_close(opened.value) !== 0) throw new Err
 
 #[test]
 fn generated_typescript_package_uses_canonical_frames_with_the_compiled_provider() {
-    let node = Command::new("node").arg("--version").output();
-    let tsc = Command::new("tsc").arg("--version").output();
-    if !node.is_ok_and(|output| output.status.success())
-        || !tsc.is_ok_and(|output| {
-            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("5.8.3")
-        })
-    {
-        eprintln!("skipping: generated TypeScript package requires node and tsc 5.8.3");
-        return;
-    }
+    assert!(
+        node_available(),
+        "generated compiled-provider consumer requires Node"
+    );
+    let tsc = required_tsc();
     let artifact = artifact();
     let endpoint = endpoint();
     let input = RecordShape::new(
@@ -369,7 +417,7 @@ console.log("GENERATED COMPILED CANONICAL CARRIER PASS");
         ),
     )
     .unwrap();
-    let build = Command::new("tsc")
+    let build = Command::new(&tsc)
         .current_dir(&package)
         .args(["-p", "tsconfig.json"])
         .output()
@@ -395,17 +443,11 @@ console.log("GENERATED COMPILED CANONICAL CARRIER PASS");
 
 #[test]
 fn generated_typescript_failure_releases_the_preserved_input_before_close() {
-    if !node_available()
-        || !Command::new("tsc")
-            .arg("--version")
-            .output()
-            .is_ok_and(|output| {
-                output.status.success() && String::from_utf8_lossy(&output.stdout).contains("5.8.3")
-            })
-    {
-        eprintln!("skipping: generated TypeScript package requires node and tsc 5.8.3");
-        return;
-    }
+    assert!(
+        node_available(),
+        "generated compiled-provider consumer requires Node"
+    );
+    let tsc = required_tsc();
     let artifact = failing_artifact();
     let endpoint = endpoint_for(FAILING_SOURCE);
     let input = RecordShape::new(
@@ -481,7 +523,7 @@ console.log("GENERATED COMPILED FAILURE INPUT RELEASE PASS");
         ),
     )
     .unwrap();
-    let build = Command::new("tsc")
+    let build = Command::new(&tsc)
         .current_dir(&package)
         .args(["-p", "tsconfig.json"])
         .output()

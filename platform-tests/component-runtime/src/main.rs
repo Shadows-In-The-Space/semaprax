@@ -2585,4 +2585,9 @@ mod tests {
     -> HostResult<()> {
         public_generic_component_tests::run_public_generic_component_v1()
     }
+
+    #[test]
+    fn retained_public_generic_component_contract_failure_settles_owned_inputs() -> HostResult<()> {
+        public_generic_component_tests::run_public_generic_component_contract_failure_v1()
+    }
 }

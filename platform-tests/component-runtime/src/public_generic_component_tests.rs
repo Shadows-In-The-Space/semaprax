@@ -18,6 +18,12 @@ const EXPECTED_PUBLIC_GENERIC_PROVIDER_DIGEST: &str =
     "sha256:0c85f2bd25e1275f8b58dc221b59cc4b23d8ab71018c279f60eaef3049548a84";
 const EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256: &str =
     "cdfe4b99cae0f8be9f5ec2edba799d803b07d26a7110f332b754f1d59a6ba2ed";
+const EXPECTED_CONTRACT_FAILURE_COMPONENT_DIGEST: &str =
+    "sha256:e9fdff0086e61b2198ce245ff346e395afc1c7c25ba41d1035af2d54ceed602b";
+const EXPECTED_CONTRACT_FAILURE_DESCRIPTOR_DIGEST: &str =
+    "sha256:1cef20213f00dce6e80b9cc1eb977065018986bc5568263d6ab4cd04ba9c5d49";
+const EXPECTED_CONTRACT_FAILURE_PROVIDER_DIGEST: &str =
+    "sha256:4789dccf8b13280cebfd7029660a403ae0cdf3c52cff0acb72e14d3a6913ef8c";
 
 const MAX_LIST_BYTES: usize = 65_536;
 const REUSE_CYCLES: usize = 200;
@@ -147,6 +153,80 @@ pub(super) fn run_public_generic_component_v1() -> HostResult<()> {
         return Err(failure(
             "authenticated retained Component bytes changed during execution",
         ));
+    }
+    Ok(())
+}
+
+pub(super) fn run_public_generic_component_contract_failure_v1() -> HostResult<()> {
+    use semaprax::project::with_authenticated_project;
+
+    let manifest = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fixtures/public-generic-contract-failure-v1/semaprax.toml"
+    ));
+    let artifact = with_authenticated_project(manifest, |snapshot| {
+        snapshot.check()?;
+        let revision = snapshot.retain_revision();
+        let endpoint = revision.public_generic_wasm_provider_endpoint_v1()?;
+        let artifact = revision.public_generic_wasm_component_artifact_v1()?;
+        if endpoint.descriptor().descriptor_digest() != EXPECTED_CONTRACT_FAILURE_DESCRIPTOR_DIGEST
+            || artifact.descriptor_digest() != EXPECTED_CONTRACT_FAILURE_DESCRIPTOR_DIGEST
+            || artifact.provider_digest() != EXPECTED_CONTRACT_FAILURE_PROVIDER_DIGEST
+        {
+            return Err(vec![semaprax::diagnostic::Diagnostic::io(
+                "SPX-W121",
+                "contract-failure fixture descriptor/provider differs from pinned bytes",
+            )]);
+        }
+        revision.replay_public_generic_wasm_component_v1(
+            artifact.bytes(),
+            EXPECTED_CONTRACT_FAILURE_COMPONENT_DIGEST,
+            EXPECTED_CONTRACT_FAILURE_DESCRIPTOR_DIGEST,
+            EXPECTED_CONTRACT_FAILURE_PROVIDER_DIGEST,
+        )
+    })
+    .map_err(|errors| {
+        failure(format!(
+            "contract-failure project admission failed: {errors:?}"
+        ))
+    })?;
+
+    let mut config = Config::new();
+    config.wasm_component_model(true);
+    config.consume_fuel(true);
+    let engine = Engine::new(&config)?;
+    let component = Component::new(&engine, artifact.bytes())?;
+    if component.component_type().imports(&engine).len() != 0 {
+        return Err(failure(
+            "contract-failure Component requested ambient imports",
+        ));
+    }
+    let linker = Linker::<()>::new(&engine);
+    let mut store = Store::new(&engine, ());
+    store.set_fuel(1_000_000_000)?;
+    let bindings = PublicGenericComponentV1::instantiate(&mut store, &component, &linker)?;
+    let adapter = bindings.semaprax_public_generic_component_adapter();
+    let bytes = adapter.owned_bytes();
+    let left = bytes.call_constructor(&mut store, &[1, 2, 3])?;
+    let right = bytes.call_constructor(&mut store, &[4, 5])?;
+    let outcome = adapter.call_invoke(&mut store, left, right)?;
+    if !matches!(
+        outcome,
+        Err(super::public_generic_component_v1_bindings::exports::semaprax::public_generic_component::adapter::Failure::ContractViolation)
+    ) {
+        return Err(failure(format!(
+            "checked contract failure did not return the typed Component error: {outcome:?}"
+        )));
+    }
+
+    // The two consumed input slots must be available again, not merely absent
+    // from the result: keep all 64 fixed-arena resources live simultaneously.
+    let mut live = Vec::with_capacity(64);
+    for index in 0..64 {
+        live.push(bytes.call_constructor(&mut store, &[index])?);
+    }
+    for resource in live {
+        resource.resource_drop(&mut store)?;
     }
     Ok(())
 }

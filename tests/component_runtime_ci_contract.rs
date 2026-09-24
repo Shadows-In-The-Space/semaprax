@@ -408,6 +408,7 @@ fn capability_and_dependency_policy_are_fail_closed() {
     .join("\n");
     for required in [
         "/fixtures/public-generic-v1/semaprax.toml",
+        "/fixtures/public-generic-contract-failure-v1/semaprax.toml",
         "with_authenticated_project(manifest, |snapshot|",
         "EXPECTED_PUBLIC_GENERIC_COMPONENT_DIGEST",
         "EXPECTED_PUBLIC_GENERIC_DESCRIPTOR_DIGEST",
@@ -415,6 +416,7 @@ fn capability_and_dependency_policy_are_fail_closed() {
         "EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256",
         "raw_digest != EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256",
         "retained_public_generic_component_transfers_owned_bytes_and_recovers_after_tamper",
+        "retained_public_generic_component_contract_failure_settles_owned_inputs",
         "wasm_component_model(true)",
         "Component::new",
         "component.component_type().imports(&engine)",
@@ -604,6 +606,8 @@ fn capability_and_dependency_policy_are_fail_closed() {
     for relative in [
         "platform-tests/component-runtime/fixtures/public-generic-v1/src/app.spx",
         "platform-tests/component-runtime/fixtures/public-generic-v1/src/tests.spx",
+        "platform-tests/component-runtime/fixtures/public-generic-contract-failure-v1/src/app.spx",
+        "platform-tests/component-runtime/fixtures/public-generic-contract-failure-v1/src/tests.spx",
     ] {
         let source = read(relative);
         let parsed = semaprax::parse(&source, root().join(relative))
@@ -650,6 +654,34 @@ fn capability_and_dependency_policy_are_fail_closed() {
         mismatches.is_empty(),
         "private Component known answers differ: {mismatches:?}"
     );
+    let failure_artifact = semaprax::project::with_authenticated_project(
+        &root().join(
+            "platform-tests/component-runtime/fixtures/public-generic-contract-failure-v1/semaprax.toml",
+        ),
+        |snapshot| {
+            snapshot.check()?;
+            snapshot
+                .retain_revision()
+                .public_generic_wasm_component_artifact_v1()
+        },
+    )
+    .expect("contract-failure Component fixture must admit and emit");
+    for (name, expected) in [
+        ("COMPONENT_DIGEST", failure_artifact.digest()),
+        ("DESCRIPTOR_DIGEST", failure_artifact.descriptor_digest()),
+        ("PROVIDER_DIGEST", failure_artifact.provider_digest()),
+    ] {
+        let declaration = format!("const EXPECTED_CONTRACT_FAILURE_{name}: &str =");
+        let value = runner
+            .split_once(&declaration)
+            .and_then(|(_, rest)| rest.split_once(';'))
+            .map(|(value, _)| value.trim());
+        assert_eq!(
+            value,
+            Some(format!("\"{expected}\"").as_str()),
+            "contract-failure Component known answer changed: {name}"
+        );
+    }
     assert_eq!(
         runner
             .matches("get_typed_func::<(i64, i32, i64, i64), i32>")

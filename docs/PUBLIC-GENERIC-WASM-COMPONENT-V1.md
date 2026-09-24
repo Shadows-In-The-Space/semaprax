@@ -115,8 +115,16 @@ resource read/drop, 200 maximum-size constructor/read/drop reuse cycles, and a
 second successful invocation after replay rejected tampered bytes. This is
 focused private evidence, not a support claim.
 
+The separate contract-failure selector retains a second checked Project with
+the same two-leaf endpoint and a `requires false` guard. It replays the exact
+derived Component against that revision, invokes it in Wasmtime 47.0.4, and
+requires the typed `contract-violation` result rather than a trap or success.
+It then keeps all 64 fixed-arena resources live at once, proving the two
+consumed input slots were settled before their replacements were constructed.
+This is local failure-path evidence, not cross-target parity.
+
 Interpreter/native C11 `-O0`/`-O2`/Core-Wasm differential parity,
-contract-failure execution, stale descriptor/provider runtime bindings,
+stale descriptor/provider runtime bindings,
 use-after-close, double-close, and broader resource/payload hostile cases
 remain unclaimed and outside the evidence of this focused selector. The
 retained artifact replay test rejects mutated Component bytes and mismatched

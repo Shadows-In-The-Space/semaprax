@@ -192,17 +192,44 @@ allocation, target invocation, ownership commit, host call, and cleanup. Every
 hostile case leaves all five at zero; only the canonical control reaches the
 callback.
 
-This is callback-local native staging evidence. It is **not** a claim that the
-rendered C11 provider, the Core Wasm provider, or any generated consumer is
-guarded at its physical handoff; no production caller installs this guard
-there yet. That physical integration remains open and overlaps issue #229.
+This is callback-local native staging evidence, not physical handoff evidence.
+The separate private authenticated native identity profile installs admission
+at its C entry point; its bounded generated-caller projection is described below.
+Complete physical corpus participation remains open and overlaps issue #229.
+
+### Private generated C11/C++17 handoff projection
+
+The native adapter harness selector
+`authenticated_handoff::same_subject::caller_hostility::generated_c_and_cxx_reject_subject_bound_hostile_handoffs`
+projects seven frozen recipes onto one checked flat `Pair<Bytes>` identity
+subject: stale/future/zero generation, provider ownership before transfer,
+substituted cleanup plan, substituted leaf path, and the adjacent unknown leaf
+kind tag. It retains their case identities and expected refusal classes, not
+the synthetic corpus fixture's different three-leaf bytes or pinned digests.
+Metadata substitutions pass through the real generated encoder's digest
+recomputation. Generation/ownership refusals retain raw statuses 8/7 and the
+existing generated `ExecutionFailed` mapping; path/cleanup refusals use raw 14
+and `CarrierRejected`, and the closed kind tag uses raw 5/`CarrierRejected`.
+
+Both literal-contract subjects (`requires true`/`false`), both callers, and
+C11 `-O0`/`-O2` produce 80 process runs: 56 hostile cases, eight canonical
+controls, eight unchanged flattened-generator refusals, and eight compiled
+generation-check-omission controls. Each ordinary hostile attempt must leave
+provider preparation allocations, endpoint entries, and live handles unchanged;
+caller-owned allocations and provider-open allocation are outside that delta.
+Canonical calls assert exact non-palindromic bytes or raw contract failure 11,
+one checked endpoint entry per transform, and settled resources. The omission
+control must actually allocate and enter the endpoint, then fail the refusal
+oracle with its exact sentinel exit. C++ retains move/close/RAII assertions.
+This gate changes neither generator output nor ABI and is not full-corpus,
+Core-Wasm, hosted, sanitizer, public-support, or broader endpoint-shape evidence.
 
 ## Non-claims
 
 - Local, re-runnable evidence only. Nothing here is hosted evidence.
 - No wire format, refusal code, or existing profile is reinterpreted. The
   corpus reads the frozen carrier frame; it does not extend it.
-- The four generated calling consumers are unchanged by this corpus and make
-  no claim about `LogicalCarrierFrame`.
+- The frozen corpus itself leaves all four generated calling consumers
+  unchanged; the separate private C11/C++17 projection above is narrowly scoped.
 - A bounded property run is not a proof of absence of defects outside its
   bounds.

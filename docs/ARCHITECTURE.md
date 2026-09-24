@@ -2478,6 +2478,15 @@ publication surfaces and gain no registry, network, acquisition, cache, build,
 execution, or publication authority. See [Lock v3](OFFLINE-SEMANTIC-PACKAGE-LOCK-V3.md)
 and [Resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md).
 
+`package_registry::trust` adds a pure TUF-style local trust boundary above
+registry-v2 independently admitted entries. It verifies disjoint Ed25519
+root/timestamp/snapshot/publisher thresholds, namespace and exact manifest
+bindings, root rotation and caller-supplied checkpoint/time consistency.
+It returns only a non-authoritative candidate and required checkpoint
+transition, never cache/fetch authority. The future host owns durable root and
+checkpoint storage and its recovery relationship with cache publication;
+[Registry Trust v1](PACKAGE-REGISTRY-TRUST-V1.md) owns that boundary.
+
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary
 semantic-workspace graph derives function imports over synthetic logical paths,

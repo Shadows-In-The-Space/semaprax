@@ -277,6 +277,22 @@ fn v2_decoder_and_replay_sources_have_no_authority_surface() {
 
 #[test]
 fn real_verified_linked_build_is_admitted_and_populates_derived_api_digest() {
+    let _ = real_admitted_fixture();
+}
+
+pub(in crate::package_registry) fn real_admitted_fixture() -> (
+    ManifestBoundEntry,
+    crate::package_build_v2::LinkedOfflinePackageBuild,
+) {
+    real_admitted_fixture_with_status(PublicationStatus::Active)
+}
+
+pub(in crate::package_registry) fn real_admitted_fixture_with_status(
+    status: PublicationStatus,
+) -> (
+    ManifestBoundEntry,
+    crate::package_build_v2::LinkedOfflinePackageBuild,
+) {
     const ROOT: &str = "app.main";
     const PROVIDER: &str = "lib.math";
     let canonical = |source: &str| {
@@ -402,7 +418,7 @@ fn real_verified_linked_build_is_admitted_and_populates_derived_api_digest() {
             identity: "publisher.example".to_owned(),
             signature: "opaque".to_owned(),
         },
-        status: PublicationStatus::Active,
+        status,
         subject_bytes: root_subject_v3,
     };
     let admitted = admit_linked_build(
@@ -418,8 +434,9 @@ fn real_verified_linked_build_is_admitted_and_populates_derived_api_digest() {
     )
     .expect("admit exact verified Build-v2");
     assert!(admitted.publication().api_digest.starts_with("sha256:"));
-    assert!(build_snapshot(&[admitted]).is_ok());
+    assert!(build_snapshot(std::slice::from_ref(&admitted)).is_ok());
     std::fs::remove_file(directory.join("root.spx")).expect("remove root fixture");
     std::fs::remove_file(directory.join("provider.spx")).expect("remove provider fixture");
     std::fs::remove_dir(directory).expect("remove fixture directory");
+    (admitted, build)
 }

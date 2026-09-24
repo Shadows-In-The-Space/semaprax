@@ -13,6 +13,11 @@ format: `Unreleased` then release buckets, grouped by impact.
   descriptor/binding and once-only result-release controls. This is local
   compiled-provider evidence, not the full hostile or hosted R06 matrix.
 
+- Bridge explicit held signed root/leaf generations into the existing resolver
+  subject cache after fresh lock-bound artifact reads. CLI lock-bound fetch and
+  the bridge share the extracted held cache writer; copied subjects carry no
+  persistent signature/freshness authority and failures retain uncertain prefixes.
+
 - Add explicit offline artifact reads from a held signed Registry-v3 generation,
   bound to exact Lock-v3 and independently admitted manifests. Reads replay
   trusted-time freshness and recheck ACTIVE before returning immutable bytes;

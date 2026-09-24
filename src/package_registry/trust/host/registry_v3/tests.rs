@@ -8,6 +8,8 @@ use crate::package_registry::trust::registry_v3::tests::{
 };
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[path = "cache_tests.rs"]
+mod cache_tests;
 #[path = "read_tests.rs"]
 mod read_tests;
 static SERIAL: AtomicU64 = AtomicU64::new(0);

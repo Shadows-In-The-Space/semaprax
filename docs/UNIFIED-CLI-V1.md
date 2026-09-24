@@ -357,7 +357,7 @@ room, and the exhaustive catalog remains the grammar authority.
   exact receipt, reports refetches as `present`, feeds `resolve` directly, and
   rejects tampered, foreign, missing, and colliding subjects before any write.
 - Unit tests pin the closed grammars, the route table, and the namespace map.
-- `src/cli/fetch/locked/tests.rs` pins held publication, partial-stage failure,
+- `src/package_cache_host/tests.rs` pins held publication, partial-stage failure,
   retained-stage refusal, root/parent substitution, concurrent destination and
   same-byte replacement, partial publication, cooperative contention, bounded
   input reads and input identity replacement. This additive gate is local

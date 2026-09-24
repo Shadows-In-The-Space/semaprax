@@ -11,6 +11,22 @@ pub struct HeldTrustStore {
     generation: Generation,
 }
 impl HeldTrustStore {
+    /// Copies exact selected subjects into the ordinary resolver cache. The
+    /// destination gets data, not inherited signature/freshness authority.
+    pub fn populate_resolver_cache(
+        &self,
+        path: &Path,
+        request: &CacheFill<'_, '_>,
+    ) -> std::result::Result<CacheFillReceipt, Vec<crate::diagnostic::Diagnostic>> {
+        self.recheck().map_err(|error| vec![error])?;
+        super::cache::populate(
+            path,
+            &self.generation,
+            request,
+            || self.recheck(),
+            |read| self.read_artifact(read),
+        )
+    }
     /// One live explicit read, not a persistent bearer capability. All output
     /// bytes remain private until exact ACTIVE recheck under this held lock.
     pub fn read_artifact(&self, request: &ArtifactRead<'_, '_>) -> Result<VerifiedArtifact> {

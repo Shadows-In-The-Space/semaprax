@@ -2404,7 +2404,8 @@ into the resolver's content-addressed cache by its own digest; it decides every
 address before writing any, and `resolve` remains the cache's only reader. See
 [Unified CLI v1](UNIFIED-CLI-V1.md).
 
-`src/cli/fetch/locked.rs` owns the additive `fetch --lock` host boundary:
+`package_cache_host` owns the additive `fetch --lock` host boundary;
+`src/cli/fetch/locked.rs` is its byte-compatible CLI adapter:
 held nofollow ancestor/input handles, cooperative authority before exact lock
 replay, fd-relative directory creation, all-subject staging, no-replace
 publication and receipt rechecks. It never rolls back by pathname; retained
@@ -2412,6 +2413,10 @@ stages require explicit reconciliation and a failed publication may leave an
 authenticated prefix. Unsupported hosts fail before effects. Same-principal
 uncooperative mutation remains excluded by the host, not defeated by an
 advisory lock. The versioned CLI contract owns the exact supported scope.
+The original hostile transaction regressions live in `package_cache_host/tests`.
+The same held writer serves the explicit signed-store resolver-cache bridge;
+source generation authority is rechecked during staging/publication, with no
+multi-store atomicity or persistent trust inherited by copied subjects.
 
 `src/cli/verify.rs` is the schema-selected front over the independent
 verifiers: it reads a capsule's top-level `schema` once, selects the verifier
@@ -2524,6 +2529,12 @@ held store: exact generation/Lock-v3 pin, independently sealed Registry-v3,
 current signed-metadata freshness and manifest-bound bytes, with a final ACTIVE
 recheck before returning immutable payload/evidence. No receipt becomes a
 serializable bearer token or arbitrary filesystem/execution authority.
+
+Its `cache` child bridges complete signed-store reads to that shared cache
+writer. Every locked core artifact is freshly checked before the first cache
+write; only exact Subject-v3 bytes are copied. The real Resolver-v2 consumes
+that flat cache to reproduce the selected Lock-v3, while artifacts stay in the
+managed store. See [Registry Cache Bridge v1](PACKAGE-REGISTRY-CACHE-BRIDGE-V1.md).
 
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary

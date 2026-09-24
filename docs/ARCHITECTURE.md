@@ -2547,7 +2547,7 @@ availability. See [Package registry mirror transport v1](PACKAGE-REGISTRY-MIRROR
 
 `trust::registry_v3::verify_mirror_update` separately binds one exact acquired
 metadata-path set back into the existing signed Registry-v3 proof. It retains
-independent root/checkpoint/time and producer-sealed registry requirements,
+independent root/bridge-checkpoint/time and producer-sealed registry requirements,
 replays signed timestamp/snapshot/publisher-manifest associations, and applies
 a seven-day maximum interval after a checkpointed timestamp before accepting
 another offline mirror update. It returns the existing non-authoritative

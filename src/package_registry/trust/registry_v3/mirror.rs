@@ -22,25 +22,89 @@ pub struct MirrorMetadataPaths<'registry, 'path> {
     pub registry: &'registry registry::RegistrySnapshotV3,
 }
 
+/// Bridge-local checkpoint state. It carries the ordinary Registry-v3
+/// checkpoint plus the observation tied to the last *new* signed timestamp.
+/// Callers must retain this whole value between mirror verifications; a raw
+/// Registry-v3 checkpoint alone deliberately cannot reset mirror freshness.
+#[derive(Clone)]
+pub struct MirrorCheckpoint {
+    checkpoint: RegistryCheckpoint,
+    last_new_timestamp: Option<TimestampObservation>,
+}
+
+#[derive(Clone)]
+struct TimestampObservation {
+    version: u64,
+    digest: String,
+    observed_time: u64,
+}
+
+impl MirrorCheckpoint {
+    /// Only for an independently authorized first install.
+    pub fn initial(root: &InstalledRoot) -> Self {
+        Self {
+            checkpoint: RegistryCheckpoint::initial(root),
+            last_new_timestamp: None,
+        }
+    }
+
+    /// The ordinary checkpoint remains available for its existing durable
+    /// trust boundary, but it is insufficient to resume mirror verification.
+    pub fn registry_checkpoint(&self) -> &RegistryCheckpoint {
+        &self.checkpoint
+    }
+}
+
+/// A non-authoritative mirror verification result. Its bridge checkpoint must
+/// be retained with the ordinary candidate's proof before another mirror
+/// verification; it grants no durable commit or fetch authority.
+pub struct MirrorUpdateCandidate<'a> {
+    candidate: RegistryUpdateCandidate<'a>,
+    checkpoint: MirrorCheckpoint,
+}
+
+impl MirrorUpdateCandidate<'_> {
+    pub fn checkpoint(&self) -> &MirrorCheckpoint {
+        &self.checkpoint
+    }
+    pub fn prior_checkpoint_digest(&self) -> &str {
+        self.candidate.prior_checkpoint_digest()
+    }
+    pub fn registry_snapshot_digest(&self) -> &str {
+        self.candidate.registry_snapshot_digest()
+    }
+    pub fn check_lock(&self, lock: &str, subjects: &[String]) -> Result<()> {
+        self.candidate.check_lock(lock, subjects)
+    }
+    pub fn check_artifact(
+        &self,
+        package: &str,
+        version: &str,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<()> {
+        self.candidate.check_artifact(package, version, path, bytes)
+    }
+}
+
 /// Replays acquired mirror metadata through the ordinary signature, snapshot,
 /// publisher-manifest, revocation and checkpoint verifier. It never fetches,
 /// writes, installs roots, or returns a durable/fetch capability.
 pub fn verify_mirror_update<'registry>(
     root: &InstalledRoot,
-    stored: &RegistryCheckpoint,
+    stored: &MirrorCheckpoint,
     now: u64,
     paths: &MirrorMetadataPaths<'registry, '_>,
     downloaded: &[MirrorBytes],
-) -> Result<RegistryUpdateCandidate<'registry>> {
+) -> Result<MirrorUpdateCandidate<'registry>> {
     // A first independently authorized installation has no timestamp stamp.
     // Afterwards, reject a mirror that has been offline beyond the explicit
     // Wavect freshness interval even if its old signed expiry was longer.
-    if stored.previous.roles.contains_key("timestamp")
-        && now
-            .checked_sub(stored.previous.observed_time)
+    if stored.last_new_timestamp.as_ref().is_some_and(|timestamp| {
+        now.checked_sub(timestamp.observed_time)
             .filter(|elapsed| *elapsed <= MAX_MIRROR_OFFLINE_SECONDS)
             .is_none()
-    {
+    }) {
         return Err(stale());
     }
 
@@ -84,9 +148,9 @@ pub fn verify_mirror_update<'registry>(
         .iter()
         .map(|publisher| Ok((publisher.role, metadata(publisher.path)?)))
         .collect::<Result<Vec<_>>>()?;
-    let mut candidate = verify_update(
+    let candidate = verify_update(
         root,
-        stored,
+        &stored.checkpoint,
         now,
         &UpdateInputs {
             timestamp,
@@ -95,19 +159,33 @@ pub fn verify_mirror_update<'registry>(
             registry: paths.registry,
         },
     )?;
-    // Ordinary Trust-v2 verification records the invocation's `now`, which
-    // is correct for durable hosts that have independently acquired a newer
-    // update. A mirror can replay identical signed timestamp bytes, however;
-    // let that replay retain the original observation so it cannot roll the
-    // bridge-local seven-day offline window forward forever.
-    let previous_timestamp = stored.previous.roles.get("timestamp");
-    let next_timestamp = candidate.checkpoint.previous.roles.get("timestamp");
-    if matches!(
-        (previous_timestamp, next_timestamp),
-        (Some(previous), Some(next))
-            if previous.version == next.version && previous.digest == next.digest
-    ) {
-        candidate.checkpoint.previous.observed_time = stored.previous.observed_time;
-    }
-    Ok(candidate)
+    // Keep Trust-v2's invocation-time high-water intact. Separately preserve
+    // the observation tied to this timestamp, so identical replay cannot move
+    // the mirror-local freshness anchor forward.
+    let timestamp = candidate
+        .checkpoint()
+        .previous
+        .roles
+        .get("timestamp")
+        .ok_or_else(stale)?;
+    let last_new_timestamp = match stored.last_new_timestamp.as_ref() {
+        Some(previous)
+            if previous.version == timestamp.version && previous.digest == timestamp.digest =>
+        {
+            previous.clone()
+        }
+        _ => TimestampObservation {
+            version: timestamp.version,
+            digest: timestamp.digest.clone(),
+            observed_time: now,
+        },
+    };
+    let checkpoint = MirrorCheckpoint {
+        checkpoint: candidate.checkpoint().clone(),
+        last_new_timestamp: Some(last_new_timestamp),
+    };
+    Ok(MirrorUpdateCandidate {
+        candidate,
+        checkpoint,
+    })
 }

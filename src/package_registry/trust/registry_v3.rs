@@ -108,7 +108,10 @@ pub struct UpdateInputs<'registry, 'metadata> {
 #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
 mod mirror;
 #[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
-pub use mirror::{verify_mirror_update, MirrorMetadataPaths, MirrorPublisherPath};
+pub use mirror::{
+    verify_mirror_update, MirrorCheckpoint, MirrorMetadataPaths, MirrorPublisherPath,
+    MirrorUpdateCandidate,
+};
 
 /// Borrowed compiler-admitted registry plus a required checkpoint transition.
 /// This does not persist the checkpoint or authorize cache/fetch/execution.

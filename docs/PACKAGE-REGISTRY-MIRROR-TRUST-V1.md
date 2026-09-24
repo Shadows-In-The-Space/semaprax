@@ -8,7 +8,8 @@ support.
 
 `trust::registry_v3::verify_mirror_update` accepts only `MirrorBytes` produced
 by the separate explicit HTTPS authority, an independently installed root,
-trusted RegistryCheckpoint-v2, fixed caller time, independently producer-sealed
+trusted bridge-local `MirrorCheckpoint` (containing RegistryCheckpoint-v2 plus
+the last-new-timestamp observation), fixed caller time, independently producer-sealed
 Registry-v3, and one exact timestamp/snapshot/publisher metadata path set.
 All returned rows must be metadata, have exactly the named paths, and have no
 duplicates or extras. Bytes must be UTF-8 canonical trust documents. The bridge
@@ -30,9 +31,13 @@ or stale high-water marks still fail closed.
 
 Replaying identical signed timestamp version-and-digest bytes may be verified
 inside that interval, but it retains the preceding bridge observation rather
-than advancing it. Only a newer authenticated timestamp advances the local
-offline-age anchor, so repeated mirror replay cannot refresh the seven-day
-window without new signed freshness evidence.
+than advancing it. The ordinary RegistryCheckpoint-v2 still records the
+caller's current trusted time, preserving its monotonic high-water and refusing
+time rollback. Only a newer authenticated timestamp advances the separate
+local offline-age anchor, so repeated mirror replay cannot refresh the
+seven-day window without new signed freshness evidence. Callers must retain the
+whole `MirrorCheckpoint` returned by the candidate; its raw RegistryCheckpoint
+view cannot resume mirror verification by itself.
 
 The focused `trust::registry_v3::tests` case acquires signed fixture bytes via
 an in-process transport and proves complete replay, signature tamper refusal,

@@ -319,7 +319,8 @@ fn acquired_metadata_replays_signed_snapshot_publishers_and_offline_policy() {
         publishers: &publishers,
         registry: &f.admitted.0,
     };
-    let candidate = verify_mirror_update(&f.root, &f.initial(), 100, &paths, &downloaded).unwrap();
+    let initial = MirrorCheckpoint::initial(&f.root);
+    let candidate = verify_mirror_update(&f.root, &initial, 100, &paths, &downloaded).unwrap();
     candidate.check_lock(&f.admitted.2, &f.admitted.1).unwrap();
 
     let mut tampered = f.publishers[0].clone();
@@ -331,22 +332,32 @@ fn acquired_metadata_replays_signed_snapshot_publishers_and_offline_policy() {
         ("/metadata/publisher-lib.json", &f.publishers[1]),
     ]);
     refused(
-        verify_mirror_update(&f.root, &f.initial(), 100, &paths, &tampered_downloaded),
+        verify_mirror_update(&f.root, &initial, 100, &paths, &tampered_downloaded),
         "SPX-PKR622",
+    );
+    let replayed =
+        verify_mirror_update(&f.root, candidate.checkpoint(), 200, &paths, &downloaded).unwrap();
+    assert_eq!(
+        replayed
+            .checkpoint()
+            .registry_checkpoint()
+            .previous
+            .observed_time,
+        200,
+        "unchanged mirror bytes retain ordinary Trust-v2 trusted-time high-water"
+    );
+    refused(
+        verify_mirror_update(&f.root, replayed.checkpoint(), 150, &paths, &downloaded),
+        "SPX-PKR623",
     );
     let replayed = verify_mirror_update(
         &f.root,
-        candidate.checkpoint(),
+        replayed.checkpoint(),
         100 + MAX_MIRROR_OFFLINE_SECONDS - 1,
         &paths,
         &downloaded,
     )
     .unwrap();
-    assert_eq!(
-        replayed.checkpoint().previous.observed_time,
-        candidate.checkpoint().previous.observed_time,
-        "same timestamp bytes must not refresh the bridge-local offline age"
-    );
     refused(
         verify_mirror_update(
             &f.root,

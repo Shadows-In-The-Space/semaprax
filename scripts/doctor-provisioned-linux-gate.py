@@ -1631,14 +1631,16 @@ UNTRACKED_IGNORED_ROOTS = {
     "platform-sys-lib": (f"{PLATFORM_ROOT}/doctor",),
 }
 
-# Real `#[ignore]`d functions that are not lifecycle-gate cases: private
-# subprocess helpers selected by their own parent test in the owning harness,
-# not by this gate. Documented in DOCTOR-PROVISIONED-LINUX-GATE-V1.md's "Test
-# selection" section. Anything else the walk finds must be in `SOURCE_OF_TRUTH`.
+# Real `#[ignore]`d functions outside this Linux lifecycle gate: private
+# subprocess helpers selected by their own parent test, plus the Windows-only
+# confinement runtime cases owned by the separate Windows gate. Documented in
+# DOCTOR-PROVISIONED-LINUX-GATE-V1.md's "Test selection" section. Anything else
+# the walk finds must be in `SOURCE_OF_TRUTH`.
 EXCLUDED_IGNORED_FILES = frozenset(
     {
         f"{PLATFORM_ROOT}/doctor/offline_input/create/tests.rs",
         f"{PLATFORM_ROOT}/doctor/offline_input/create/executable_tests/native/faults.rs",
+        f"{PLATFORM_ROOT}/doctor/windows_confinement/primitive/tests.rs",
     }
 )
 

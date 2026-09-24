@@ -384,11 +384,16 @@ silently narrower gate. `--self-test` runs that comparison against the real
 tree and separately proves a synthetic narrowing is detected, so the check
 cannot pass vacuously against an inventory the parser never found.
 
-Two `#[ignore]`d functions in the doctor tree are deliberately excluded:
+Two `#[ignore]`d helper files in the doctor tree are deliberately excluded:
 `doctor::offline_input::create::tests` and its executable-fault sibling are
 private subprocess helpers selected by their own parent tests, not gates. So
 are the Windows revision-store and `owned_npm` symlink fixtures, which belong
-to separately tracked hosts.
+to separately tracked hosts. The Windows-only
+`doctor/windows_confinement/primitive/tests.rs` file is also excluded from this
+Linux gate's ignored-file inventory: its live cases belong to the separate
+exact-selector Windows confinement gate. It is `#[cfg(windows)]`, so this Linux
+libtest cannot execute those functions. Adding another ignored Linux doctor
+file still fails the untracked-file walk.
 
 `selection_drift` also walks each suite's owning directory
 (`crates/semaprax-native-rust-interop-platform-sys/src/doctor` and

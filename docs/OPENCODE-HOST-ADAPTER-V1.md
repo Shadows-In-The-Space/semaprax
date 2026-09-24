@@ -5,13 +5,12 @@ Audience: local adapter maintainers and compiler contributors.
 
 ## Status and boundary
 
-This is a **LOCAL private-host** contract for issue #112. It binds one
-explicitly configured OpenCode command to `live_invocation::ModelHandler` in
-`semaprax-toolchain`. The standalone `semaprax` compiler and SDK remain
-offline. A local source-driver smoke reached Complete with OpenCode 1.18.27;
-this contract does not claim hosted evidence, production support or OS isolation. The source adapter implements the existing
-Agent lifecycle v2 feedback callback; broader live-kernel source/HIR integration
-remains tracked separately in #177.
+This **LOCAL private-host** contract binds one configured OpenCode command to
+`live_invocation::ModelHandler` in `semaprax-toolchain`. The standalone compiler
+and SDK remain offline. A local source-driver smoke reached Complete with
+OpenCode 1.18.27, but proves no hosted support, production readiness, or OS
+isolation. The source adapter implements Agent lifecycle v2 feedback; broader
+live-kernel source/HIR integration remains tracked in #177.
 
 The only admitted profile is `opencode/muse-spark-1.3-contributor-free`. There
 is no fallback model, provider, endpoint or paid route. The adapter adds no

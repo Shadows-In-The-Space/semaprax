@@ -7,13 +7,11 @@ conversion and filesystem authority remain out of scope.
 Audience: language users, compiler contributors, standard-library authors, and
 backend implementers.
 
-This profile is the bundled `std.path.normalize` package: lexical
-normalization of the typed `Path` values [Typed Path v1](TYPED-PATH-V1.md)
-owns. It adds no type, no allocation beyond the caller's buffer, and no host
-authority. Normalization is a sibling package for the packaging reason
-[Standard Library v1](STANDARD-LIBRARY-V1.md) records for `std.data.json` and
-`std.path.value`: one library module holding both halves pushes ordinary
-multi-package consumers past the `SPX-G171` workspace-graph pre-bound.
+The bundled `std.path.normalize` package normalizes [Typed Path v1](TYPED-PATH-V1.md)
+values lexically. It adds no type, allocation beyond the caller's buffer, or
+host authority. It lives beside `std.path.value` because combining both halves
+would push ordinary multi-package consumers past the `SPX-G171` graph pre-bound,
+as [Standard Library v1](STANDARD-LIBRARY-V1.md) explains.
 
 ## Normalization policy
 

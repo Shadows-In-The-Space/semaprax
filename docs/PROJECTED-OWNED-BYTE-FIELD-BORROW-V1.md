@@ -8,10 +8,9 @@ separately gated.
 
 Audience: compiler, verifier, backend, and evidence maintainers.
 
-This specification admits one additive ownership profile on top of
-[Shared Loan Plan v1](SHARED-LOAN-PLAN-V1.md): `bytes_as_slice` may borrow one
-direct authenticated `Bytes` field from an exact named `own` local whose type
-is the flat, monomorphic Owned Byte Record v1 profile.
+This extends [Shared Loan Plan v1](SHARED-LOAN-PLAN-V1.md) in one way:
+`bytes_as_slice` may borrow a direct authenticated `Bytes` field from an exact
+named `own` local of flat monomorphic Owned Byte Record v1 type.
 
 ## Closed admission
 

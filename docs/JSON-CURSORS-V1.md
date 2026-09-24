@@ -7,12 +7,11 @@ standalone, Project v16 and cross-package roundtrip profiles.
 Audience: language users, standard-library contributors, and backend
 implementers.
 
-This specification adds small, allocation-free adapters between the existing
-`std.io` cursors and the existing bounded JSON packages. It extends the
-packages without replacing or changing any old API. A `Reader` and `Writer`
-remain the ordinary nongeneric records from [IO Cursors v1](IO-CURSORS-V1.md):
-each owns a caller-supplied `Bytes` value and carries a `usize` cursor. These
-functions do not introduce streams, handles, files, or host authority.
+These allocation-free adapters connect existing `std.io` cursors to the
+bounded JSON packages without changing older APIs. `Reader` and `Writer`
+remain the nongeneric [IO Cursors v1](IO-CURSORS-V1.md) records, each with a
+caller-supplied owned `Bytes` value and `usize` cursor. The adapters add no
+stream, handle, file, or host authority.
 
 ## API surface
 

@@ -8,19 +8,18 @@ durable-checkpoint maintainers.
 The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
 local-only and hosted-pending evidence classification.
 
-This profile composes [Workspace Execution Association v1](WORKSPACE-EXECUTION-ASSOCIATION-V1.md)
-with [Agent State Migration v3](AGENT-STATE-MIGRATION-V3.md). It binds a
-checked migration between two workspace generations while preserving the
-existing state-migration and durable-runtime contracts.
+This profile combines [Workspace Execution Association v1](WORKSPACE-EXECUTION-ASSOCIATION-V1.md)
+and [Agent State Migration v3](AGENT-STATE-MIGRATION-V3.md) to bind a checked
+migration between two workspace generations. Existing state-migration and
+durable-runtime contracts stay unchanged.
 
 ## Migration preparation
 
-Preparation consumes a matching old-workspace producer, its actual durable
-`Suspend` evidence, and a destination-workspace producer. It retains both
-workspace generations, verifies the provenance of the old suspend and the
-destination selection, and then delegates to the existing pure migration
-operation. A caller-supplied state, root, task, or proposal cannot substitute
-for either producer or its evidence.
+Preparation consumes the matching old-workspace producer, its actual durable
+`Suspend` evidence, and the destination-workspace producer. It retains both
+generations and checks the old suspend's provenance and the destination
+selection before calling the existing pure migration operation. Caller-supplied
+state, roots, tasks, or proposals cannot replace a producer or its evidence.
 
 The resulting public association uses
 `semaprax.workspace-migration-association.v1` and commits the old and
@@ -38,16 +37,17 @@ public migration association from freshly retained compiler state, then
 exact-compares the canonical receipt bytes and digest. It does not deserialize
 an arbitrary receipt or treat receipt data as authority.
 
-A fresh migration may use the consuming `run` or `run_durable` path. A
-recovered migration is durable-only. The `run_current` and `run_durable_current` paths check that the destination
-binding is current before any destination stage, checkpoint store write, or
-injected host operation. Ordinary run paths permit historical bindings. A stale destination is rejected while the previous generation
-remains a coherent historical binding.
+A fresh migration can use the consuming `run` or `run_durable` path; a recovered
+migration is durable-only. `run_current` and `run_durable_current` check the
+destination binding before any destination stage, checkpoint-store write, or
+injected host operation. They reject a stale destination. Ordinary run paths
+allow historical bindings, and the previous generation remains a valid
+historical association.
 
-The existing rich durable failure is preserved, including uncertain intent;
-uncertain work is not automatically retried. Trusted checkpoint-store
-authority remains caller-owned and unchanged. `into_evidence` preserves the
-underlying producer transfer semantics without minting a second association.
+Durable failures keep their existing details, including uncertain intent.
+Uncertain work is not retried automatically. The caller still owns trusted
+checkpoint-store authority. `into_evidence` keeps the producer's existing
+transfer semantics and creates no second association.
 
 An actual migrated durable `Suspend` may feed a subsequent migration, so a
 chain A to B to C retains the existing cumulative call, byte, fuel, iteration,

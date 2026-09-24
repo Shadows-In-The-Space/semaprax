@@ -11,6 +11,10 @@ function environmentProvider(module, maxOwnedBytes = 65536) {
     return value;
   };
   let instance,next=1;const owned=new Map();
+  let nextVec=1n;const vectors=new Map();
+  const vecKey=value=>{if(typeof value!=='bigint'||value<=0n)throw Error('Vec carrier');return value.toString()};
+  const vecRead=(value,tag)=>{const entry=vectors.get(vecKey(value));if(!entry||entry.tag!==tag)throw Error('stale or mistyped Vec');return entry};
+  const vecAlloc=(tag,capacity,values=[])=>{const handle=nextVec++;vectors.set(vecKey(handle),{tag,capacity,values});return handle};
   const memory=()=>instance.exports.memory??instance.exports.__spx_byte_memory;
   const view=()=>new DataView(memory().buffer);
   const carrier=(root,length)=>BigInt.asIntN(64,(BigInt(root>>>0)<<32n)|BigInt(length>>>0));
@@ -47,6 +51,12 @@ function environmentProvider(module, maxOwnedBytes = 65536) {
     spx_bytes_set:(value,index,byte)=>{const data=bytes(value);if(index<0n||index>=BigInt(data.length))throw Error('write bounds');data[Number(index)]=byte;return value},
     spx_bytes_drop:value=>{bytes(value);const [root]=split(value);if(!(root&0x80000000)||!owned.delete(root&0x7fffffff))throw Error('double drop')},
     spx_bytes_as_slice:value=>{bytes(value);return value},
+    spx_vec_with_capacity:(tag,capacity)=>{const n=Number(capacity);return Number.isSafeInteger(n)&&n>=0&&n<=8192?vecAlloc(tag,n):0n},
+    spx_vec_push:(value,tag,bits)=>{const old=vecRead(value,tag);if(old.values.length>=old.capacity)return 0n;vectors.delete(vecKey(value));return vecAlloc(tag,old.capacity,old.values.concat([bits]))},
+    spx_vec_len:(value,tag)=>BigInt(vecRead(value,tag).values.length),
+    spx_vec_capacity:(value,tag)=>BigInt(vecRead(value,tag).capacity),
+    spx_vec_get:(value,tag,index)=>{const old=vecRead(value,tag),n=Number(index);if(!Number.isSafeInteger(n)||n<0||n>=old.values.length)throw Error('Vec index');return old.values[n]},
+    spx_vec_drop:value=>{if(!vectors.delete(vecKey(value)))throw Error('double Vec drop')},
   });
-  return {imports,acceptsOwnedLength,attach(value){instance=value;let cursor=512;refs=entries.map(entry=>entry.map(text=>{const data=new TextEncoder().encode(text);new Uint8Array(memory().buffer).set(data,cursor);const result=carrier(cursor,data.length);cursor+=data.length+1;return result}))},settled(){if(owned.size)throw Error('unsettled byte owners')},live(){return owned.size}};
+  return {imports,acceptsOwnedLength,attach(value){instance=value;let cursor=512;refs=entries.map(entry=>entry.map(text=>{const data=new TextEncoder().encode(text);new Uint8Array(memory().buffer).set(data,cursor);const result=carrier(cursor,data.length);cursor+=data.length+1;return result}))},settled(){if(owned.size||vectors.size)throw Error('unsettled owners')},live(){return owned.size+vectors.size}};
 }

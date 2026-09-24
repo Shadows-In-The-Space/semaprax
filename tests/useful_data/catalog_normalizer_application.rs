@@ -412,6 +412,169 @@ fn published_256_record_boundary_agrees_with_independent_oracle() {
 }
 
 #[test]
+fn focused_r05_controls_agree_across_interpreter_native_and_core_wasm() {
+    // Keep every production app and bundled std source unchanged. The full
+    // published Project gate remains separate; this small tests module avoids
+    // growing its already capacity-sensitive semantic graph.
+    let cases = [
+        (
+            "canonical-control-escape",
+            "{\"id\":\"one\",\"label\":\"\\u0001x\",\"quantity\":1}\n",
+            "{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"one\",\"label\":\"\\u0001x\",\"quantity\":1}]}\n",
+            false,
+        ),
+        (
+            "trimmed-empty-label",
+            "{\"id\":\"one\",\"label\":\" \\t \",\"quantity\":1}\n",
+            "{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"one\",\"label\":\"\",\"quantity\":1}]}\n",
+            false,
+        ),
+        (
+            "reordered-field-fallback",
+            "{\"quantity\":2,\"id\":\"one\",\"label\":\"l\"}\n",
+            "{\"status\":\"ok\",\"count\":1,\"total_quantity\":2,\"records\":[{\"id\":\"one\",\"label\":\"l\",\"quantity\":2}]}\n",
+            false,
+        ),
+        (
+            "escaped-id-duplicate",
+            "{\"id\":\"caf\\u00e9\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"café\",\"label\":\"l\",\"quantity\":1}\n",
+            "{\"status\":\"error\",\"category\":\"duplicate_id\",\"record_index\":1,\"byte_offset\":6}\n",
+            false,
+        ),
+        (
+            "duplicate-before-overflow",
+            "{\"id\":\"same\",\"label\":\"l\",\"quantity\":9223372036854775807}\n{\"id\":\"same\",\"label\":\"l\",\"quantity\":1}\n",
+            "{\"status\":\"error\",\"category\":\"duplicate_id\",\"record_index\":1,\"byte_offset\":6}\n",
+            false,
+        ),
+        (
+            "enriched-shared-writer",
+            "{\"id\":\"widget-1\",\"label\":\" l \",\"quantity\":1}\n",
+            "{\"status\":\"ok\",\"count\":1,\"total_quantity\":1,\"records\":[{\"id\":\"widget-1\",\"label\":\"l\",\"quantity\":1,\"category\":7}]}\n",
+            true,
+        ),
+    ];
+    let root = fixture();
+    let scratch = ScratchRoot::new();
+    let focused = scratch.path().join("focused-r05-project");
+    copy_fixture(&root, &focused);
+    let mut tests_source = String::from(
+        "module catalog_normalizer.tests;\n\
+         use function @id(\"catalog_normalizer.app.normalizes-to\") from catalog_normalizer.app as normalizes_to;\n\
+         use function @id(\"catalog_normalizer.app.normalizes-enriched-to\") from catalog_normalizer.app as normalizes_enriched_to;\n\
+         @id(\"catalog_normalizer.tests.smoke\")\nfn smoke() -> bool { true }\n\
+         @id(\"catalog_normalizer.tests.focused-r05\")\nfn test_focused_r05() -> i64\n{\n    let mut failed = 0;\n",
+    );
+    for (index, (name, input, expected, enriched)) in cases.iter().enumerate() {
+        assert_eq!(
+            run_oracle_with(input.as_bytes(), *enriched),
+            expected.as_bytes(),
+            "{name} frozen expectation differs from the independent oracle"
+        );
+        let function = if *enriched {
+            "normalizes_enriched_to"
+        } else {
+            "normalizes_to"
+        };
+        tests_source.push_str(&format!(
+            "    let input_{index} = {};\n    let expected_{index} = {};\n    let input_text_{index} = string_as_str(input_{index});\n    let expected_text_{index} = string_as_str(expected_{index});\n    failed = failed + if {function}(str_as_bytes(input_text_{index}), str_as_bytes(expected_text_{index})) {{ 0 }} else {{ {} }};\n",
+            serde_json::to_string(input).unwrap(),
+            serde_json::to_string(expected).unwrap(),
+            1i64 << index,
+        ));
+    }
+    tests_source.push_str(
+        "    failed\n}\n@id(\"catalog_normalizer.tests.main\")\nfn main() -> i64 { test_focused_r05() }\n",
+    );
+    let tests_path = focused.join("src/tests.spx");
+    let (parsed, comments) = semaprax::parse_with_comments(&tests_source, &tests_path).unwrap();
+    let canonical = format::comments::canonical_with_comments(&parsed, &comments);
+    std::fs::write(&tests_path, canonical).unwrap();
+    project::with_authenticated_project(&focused.join("semaprax.toml"), |snapshot| {
+        snapshot.check()?;
+        for (name, input, expected, enriched) in &cases {
+            let function = if *enriched {
+                "catalog_normalizer.app.normalize-enriched"
+            } else {
+                "catalog_normalizer.app.normalize"
+            };
+            let actual = evaluate_resolved_owned_data(
+                snapshot.test_program(),
+                function,
+                input.as_bytes(),
+                MAX_STEPS_LIMIT,
+            )?;
+            assert_eq!(
+                actual.outcome,
+                OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(
+                    expected.as_bytes().to_vec()
+                )),
+                "focused case {name} disagreed with the independent oracle on the interpreter"
+            );
+        }
+        let result = snapshot.execute_test(&application_options())?;
+        assert_eq!(
+            result.outcome(),
+            &project::ProjectExecutionOutcome::Returned(0)
+        );
+        let c = codegen::emit_hir_c(snapshot.test_program()).map_err(|e| vec![e])?;
+        for optimization in ["-O0", "-O2"] {
+            let c_path = scratch.path().join(format!("focused-{optimization}.c"));
+            let executable = scratch.path().join(format!("focused-{optimization}"));
+            std::fs::write(&c_path, &c).unwrap();
+            let build = Command::new("clang")
+                .args(["-std=c11", optimization, "-Wall", "-Wextra", "-Werror"])
+                .arg(&c_path)
+                .arg("-o")
+                .arg(&executable)
+                .output()
+                .unwrap();
+            assert!(
+                build.status.success(),
+                "{}",
+                String::from_utf8_lossy(&build.stderr)
+            );
+            let run = Command::new(&executable).output().unwrap();
+            assert!(
+                run.status.success(),
+                "{}",
+                String::from_utf8_lossy(&run.stderr)
+            );
+            assert_eq!(run.stdout, b"0\n", "focused native {optimization}");
+        }
+        let wasm_path = scratch.path().join("focused.wasm");
+        std::fs::write(&wasm_path, snapshot.test_wasm_module()?).unwrap();
+        let script = scratch.path().join("focused.mjs");
+        let mut host = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/useful_data/environment_provider_fixture.mjs"),
+        )
+        .unwrap();
+        host.push('\n');
+        host.push_str(
+            &std::fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/useful_data/catalog_normalizer_application.mjs"),
+            )
+            .unwrap(),
+        );
+        std::fs::write(&script, host).unwrap();
+        let node = Command::new("node")
+            .arg(&script)
+            .arg(&wasm_path)
+            .output()
+            .unwrap();
+        assert!(
+            node.status.success(),
+            "{}",
+            String::from_utf8_lossy(&node.stderr)
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
 fn batch_boundaries_and_string_normalization_agree_across_backends() {
     let root = fixture();
     for source in SOURCE_FILES {

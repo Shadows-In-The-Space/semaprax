@@ -13,7 +13,9 @@ assert.deepEqual(
   WebAssembly.Module.imports(module).map(item => item.name).sort(),
   ['spx_add', 'spx_sub', 'spx_mul', 'spx_div', 'spx_rem', 'spx_neg',
     'spx_contract_fail', 'spx_bytes_copy', 'spx_bytes_get', 'spx_bytes_drop',
-    'spx_bytes_as_slice', 'spx_bytes_zeroed', 'spx_bytes_set'].sort(),
+    'spx_bytes_as_slice', 'spx_bytes_zeroed', 'spx_bytes_set',
+    'spx_vec_with_capacity', 'spx_vec_push', 'spx_vec_len',
+    'spx_vec_capacity', 'spx_vec_get', 'spx_vec_drop'].sort(),
 );
 const min = -(1n << 63n);
 const max = (1n << 63n) - 1n;

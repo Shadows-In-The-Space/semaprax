@@ -6,12 +6,17 @@ Audience: all documentation readers.
 
 # Public documentation
 
+## Start here
+
 - [Documentation overview](index.md)
 - [Install](INSTALL.md)
 - [Quickstart](QUICKSTART.md)
 - [Using the SEMAPRAX CLI](CLI-GUIDE.md)
 - [Language tour](LANGUAGE-TOUR.md)
 - [GitHub Linguist submission v1](GITHUB-LINGUIST-SUBMISSION-V1.md)
+
+## Agent workflows
+
 - [Agent quick reference](AGENT-QUICK-REFERENCE.md)
 - [Agent iterative lifecycle v2](AGENT-ITERATIVE-LIFECYCLE-V2.md)
 - [Agent typed effects v3](AGENT-TYPED-EFFECTS-V3.md)
@@ -41,6 +46,9 @@ Audience: all documentation readers.
 - [Generic Iterator Helpers v1](GENERIC-ITERATORS-V1.md)
 - [Generic Iterator Operations v1](GENERIC-ITERATOR-OPERATIONS-V1.md)
 - [Bounded Lazy Iterator Adapters v1](BOUNDED-LAZY-ITERATOR-ADAPTERS-V1.md)
+
+## Libraries and tools
+
 - [Standard library catalog](STANDARD-LIBRARY-CATALOG.md)
 - [Language shapes catalog](LANGUAGE-SHAPES-CATALOG.md)
 - [Public Project Scaffold Capsule v1](PROJECT-SCAFFOLD-V1.md)
@@ -60,6 +68,9 @@ Audience: all documentation readers.
 - [Calculator project publication](NEW-PROJECT-PUBLICATION-V1.md)
 - [Standalone project creation](NEW-PROJECT-STANDALONE-V1.md)
 - [Windows owned npm publication](WINDOWS-OWNED-NPM-PUBLICATION-V1.md)
+
+## Doctor and installation internals
+
 - [Doctor version-probe lifecycle](DOCTOR-PROBE-V1.md)
 - [Doctor sealed input](DOCTOR-SEALED-INPUT-V1.md)
 - [Doctor offline bundle](DOCTOR-OFFLINE-BUNDLE-V1.md)

@@ -17,6 +17,15 @@ The key rule is separation: readable source, checked meaning, agent reports,
 write authority, and target execution are different things. Passing data
 between them does not automatically transfer authority.
 
+For a first read, follow [System shape](#system-shape),
+[Representations](#representations), and
+[Trust boundaries](#trust-boundaries-and-invariants). If you are changing code,
+jump to the [repository map](#repository-map),
+[module-size rule](#module-size), or
+[integration-test harnesses](#integration-test-harnesses). The detailed owner
+notes below are for locating an implementation, not a prerequisite for writing
+your first program.
+
 `src/workflow_profile.rs` and its `enabled` submodule own the optional
 [current-thread workflow observer](WORKFLOW-PROFILING-V1.md). Instrumentation
 is absent without its Cargo feature; observations never enter canonical

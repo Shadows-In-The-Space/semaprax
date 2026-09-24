@@ -3,6 +3,8 @@
 //! Interpreter events describe result copy-out only, not physical handle cleanup.
 #[path = "same_subject_c.rs"]
 mod c;
+#[path = "same_subject_cxx.rs"]
+mod cxx;
 #[path = "same_subject_interpreter.rs"]
 mod interpreter;
 #[path = "same_subject_rust.rs"]
@@ -154,6 +156,7 @@ fn prepare_subject(root: &Path, guard: bool) -> Subject {
         guard,
     );
     rust::observe(root, endpoint.descriptor(), &native, &provider, guard);
+    cxx::observe(root, endpoint.descriptor(), &native, &provider, guard);
     let expected = if guard { 0 } else { 11 };
     let driver = format!(
         "{}\n{}\n{}\n#define EXPECT_CALL_STATUS {expected}\n{}",

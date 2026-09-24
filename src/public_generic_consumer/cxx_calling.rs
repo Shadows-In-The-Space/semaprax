@@ -110,6 +110,30 @@ pub fn generate_cxx_calling_consumer(
     Ok(CallingConsumer { files })
 }
 
+/// Private additive caller for `semaprax.authenticated-native-identity.v1`:
+/// unsupported and unpublished. The sealed C generator authenticates the exact
+/// descriptor/artifact pair and owns all framing, generation and settlement.
+/// Only the unchanged move-only C++ wrapper is added, using trusted leaf order.
+/// The legacy generator and its reversal-fixture round-trip driver are unchanged.
+pub fn generate_authenticated_identity_calling_consumer_v1(
+    descriptor: &crate::public_generic_abi::descriptor::verify::VerifiedPublicGenericDescriptor,
+    artifact: &crate::public_generic_abi::native::authenticated::AuthenticatedNativeIdentityArtifact,
+) -> Result<CallingConsumer, crate::diagnostic::Diagnostic> {
+    let c_consumer =
+        c_calling::generate_authenticated_identity_calling_consumer_v1(descriptor, artifact)?;
+    let shape = |paths: &[String]| {
+        RecordShape::new(paths.iter().cloned().map(OwnedByteField::new).collect())
+    };
+    let input = shape(&descriptor.input_facts().owned_leaves);
+    let output = shape(&descriptor.result_facts().owned_leaves);
+    let mut files = c_consumer.files().to_vec();
+    files.push((
+        WRAPPER_HEADER_FILE_NAME.to_owned(),
+        render::wrapper_header(&input, &output),
+    ));
+    Ok(CallingConsumer { files })
+}
+
 mod render;
 
 #[cfg(test)]

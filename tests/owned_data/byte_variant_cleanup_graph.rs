@@ -227,9 +227,23 @@ fn graph_v22_is_pinned_and_legacy_evidence_consumers_fail_closed() {
     assert!(json.contains("\"kind\":\"variant\",\"declaration\":\"sum.choice\""));
     assert!(json.contains("\"ownership_mode\":\"own\""));
     assert!(json.contains("\"ownership_mode\":\"borrow\""));
+    let graph: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let byte_data = &graph["portable_indexed_byte_data"];
+    assert_eq!(byte_data["max_bytes_copy_sites"], 32);
+    assert_eq!(byte_data["max_owned_byte_payload_bytes"], 2_097_152);
+    let make = byte_data["capacity_summaries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|summary| summary["function"] == "sum.make")
+        .unwrap();
+    assert_eq!(make["owned_byte_payload_bytes"], 131_072);
+    // Compared byte-for-byte with the original pin's fixture: these three
+    // capacity figures are the entire graph delta after the admitted 2 MiB
+    // owned-result expansion in 3d976386; cleanup facts are unchanged.
     assert_eq!(
         digest(&json),
-        "5616b356183c3d8cd6788144c977ac68147d292b5831ffa132d080dbaa0c028b"
+        "c040fa313cb36c9c49b4e505d87e872625190a4b988578f2b9610f262ac720ba"
     );
 
     let diagnostic = graph::reject_evidence_schema("semaprax.graph.v22").unwrap_err();

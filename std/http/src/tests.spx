@@ -1,4 +1,5 @@
 module std.http.tests;
+use function @id("std.http.diagnostic-target-byte-admitted") from std.http as diagnostic_target_byte_admitted;
 use function @id("std.http.diagnostic-target-admitted") from std.http as diagnostic_target_admitted;
 use function @id("std.http.header-projection-admitted") from std.http as header_projection_admitted;
 use function @id("std.http.body_len") from std.http as body_len;
@@ -324,7 +325,7 @@ fn diagnostic_target_cases() -> bool
     let escaped = [47u8, 37u8, 55u8, 51u8, 101u8, 99u8, 114u8, 101u8, 116u8];
     let userinfo = [47u8, 117u8, 115u8, 101u8, 114u8, 64u8, 104u8, 111u8, 115u8, 116u8];
     let injection = [47u8, 13u8, 10u8];
-    diagnostic_target_admitted(array_as_slice(path), false) && !diagnostic_target_admitted(array_as_slice(path), true) && !diagnostic_target_admitted(array_as_slice(query), false) && !diagnostic_target_admitted(array_as_slice(fragment), false) && !diagnostic_target_admitted(array_as_slice(escaped), false) && !diagnostic_target_admitted(array_as_slice(userinfo), false) && !diagnostic_target_admitted(array_as_slice(injection), false)
+    diagnostic_target_byte_admitted(47u8) && diagnostic_target_byte_admitted(126u8) && !diagnostic_target_byte_admitted(63u8) && !diagnostic_target_byte_admitted(37u8) && diagnostic_target_admitted(array_as_slice(path), false) && !diagnostic_target_admitted(array_as_slice(path), true) && !diagnostic_target_admitted(array_as_slice(query), false) && !diagnostic_target_admitted(array_as_slice(fragment), false) && !diagnostic_target_admitted(array_as_slice(escaped), false) && !diagnostic_target_admitted(array_as_slice(userinfo), false) && !diagnostic_target_admitted(array_as_slice(injection), false)
 }
 
 @id("std.http.tests.diagnostic-target-limit")

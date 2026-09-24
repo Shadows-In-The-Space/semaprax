@@ -147,7 +147,7 @@ const PACKAGES: &[BundledPackage] = &[
         name: "std.http",
         path: "dependencies/std.http/0.1.0/http.spx",
         source: include_str!("../../std/http/src/http.spx"),
-        dependencies: &[],
+        dependencies: &["std.log.redact"],
     },
     BundledPackage {
         name: "std.io",
@@ -442,6 +442,10 @@ mod tests {
         // imports `std.bytes.equals`), which must already be bundled.
         assert_eq!(package("std.jobs").unwrap().dependencies, &["std.bytes"]);
         assert!(is_bundled("std.bytes"));
+        assert_eq!(
+            package("std.http").unwrap().dependencies,
+            &["std.log.redact"]
+        );
         assert_eq!(
             package("std.metrics").unwrap().dependencies,
             &["std.log.redact", "std.num.overflow"]

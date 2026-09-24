@@ -1,4 +1,8 @@
 module std.log.redact.tests;
+use function @id("std.log.redact.normalized-name-byte") from std.log.redact as normalized_name_byte;
+use function @id("std.log.redact.name-byte-admitted") from std.log.redact as name_byte_admitted;
+use function @id("std.log.redact.normalized-name-matches") from std.log.redact as normalized_name_matches;
+use function @id("std.log.redact.projection-len-admitted") from std.log.redact as projection_len_admitted;
 use function @id("std.log.redact.projected-field-admitted") from std.log.redact as projected_field_admitted;
 use function @id("std.log.redact.field-name-is-protected") from std.log.redact as field_name_is_protected;
 use function @id("std.log.redact.field-name-admitted") from std.log.redact as field_name_admitted;
@@ -146,11 +150,12 @@ fn protected_name_aliases() -> bool
 {
     let password = [80u8, 65u8, 83u8, 83u8, 87u8, 79u8, 82u8, 68u8];
     let api_key = [65u8, 112u8, 105u8, 45u8, 75u8, 101u8, 121u8];
+    let normalized_api_key = [97u8, 112u8, 105u8, 95u8, 107u8, 101u8, 121u8];
     let bearer = [98u8, 101u8, 97u8, 114u8, 101u8, 114u8, 95u8, 116u8, 111u8, 107u8, 101u8, 110u8];
     let session = [115u8, 101u8, 115u8, 115u8, 105u8, 111u8, 110u8, 45u8, 116u8, 111u8, 107u8, 101u8, 110u8];
     let webhook = [119u8, 101u8, 98u8, 104u8, 111u8, 111u8, 107u8, 95u8, 115u8, 105u8, 103u8, 110u8, 105u8, 110u8, 103u8, 95u8, 115u8, 101u8, 99u8, 114u8, 101u8, 116u8];
     let smtp = [115u8, 109u8, 116u8, 112u8, 45u8, 99u8, 114u8, 101u8, 100u8, 101u8, 110u8, 116u8, 105u8, 97u8, 108u8];
-    field_name_is_protected(array_as_slice(password)) && field_name_is_protected(array_as_slice(api_key)) && field_name_is_protected(array_as_slice(bearer)) && field_name_is_protected(array_as_slice(session)) && field_name_is_protected(array_as_slice(webhook)) && field_name_is_protected(array_as_slice(smtp))
+    normalized_name_byte(65u8) == 97u8 && normalized_name_byte(45u8) == 95u8 && normalized_name_byte(126u8) == 126u8 && name_byte_admitted(65u8) && name_byte_admitted(45u8) && !name_byte_admitted(32u8) && !name_byte_admitted(13u8) && normalized_name_matches(array_as_slice(api_key), array_as_slice(normalized_api_key)) && !normalized_name_matches(array_as_slice(password), array_as_slice(normalized_api_key)) && field_name_is_protected(array_as_slice(password)) && field_name_is_protected(array_as_slice(api_key)) && field_name_is_protected(array_as_slice(bearer)) && field_name_is_protected(array_as_slice(session)) && field_name_is_protected(array_as_slice(webhook)) && field_name_is_protected(array_as_slice(smtp))
 }
 
 @id("std.log.redact.tests.protected-header-aliases")
@@ -184,7 +189,7 @@ fn projection_shape_bounds() -> bool
     let commitment_max = commitment_shape_admitted(max);
     let commitment_plus_one = !commitment_shape_admitted(view);
     let commitment_absent = commitment_shape_admitted(empty);
-    name_max && name_plus_one && name_empty && commitment_max && commitment_plus_one && commitment_absent
+    name_max && name_plus_one && name_empty && commitment_max && commitment_plus_one && commitment_absent && projection_len_admitted(0usize) && projection_len_admitted(4096usize) && !projection_len_admitted(4097usize)
 }
 
 @id("std.log.redact.tests.projection-commitment-is-not-a-bypass")

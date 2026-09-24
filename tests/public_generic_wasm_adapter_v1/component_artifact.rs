@@ -117,3 +117,52 @@ fn retained_component_replays_deterministically_and_rejects_tampered_identity() 
     })
     .unwrap();
 }
+
+#[test]
+fn retained_component_refuses_source_drift_before_runtime_and_accepts_new_revision() {
+    let fixture = Fixture::new();
+    let prior = with_authenticated_project(&fixture.manifest(), |snapshot| {
+        snapshot.check()?;
+        snapshot
+            .retain_revision()
+            .public_generic_wasm_component_artifact_v1()
+    })
+    .unwrap();
+
+    let drifted = APP.replace(
+        "Envelope<LeafPair> { payload: LeafPair { left: value.payload.right, right: value.payload.left } }",
+        "value",
+    );
+    assert_ne!(
+        drifted, APP,
+        "the fixture mutation must change checked source"
+    );
+    write_canonical(&fixture.0.join("src/app.spx"), &drifted);
+    with_authenticated_project(&fixture.manifest(), |snapshot| {
+        snapshot.check()?;
+        let revision = snapshot.retain_revision();
+        let error = revision
+            .replay_public_generic_wasm_component_v1(
+                prior.bytes(),
+                prior.digest(),
+                prior.descriptor_digest(),
+                prior.provider_digest(),
+            )
+            .unwrap_err();
+        assert_eq!(error[0].code, "SPX-W121");
+
+        let current = revision.public_generic_wasm_component_artifact_v1()?;
+        assert_ne!(current.bytes(), prior.bytes());
+        assert_eq!(
+            revision.replay_public_generic_wasm_component_v1(
+                current.bytes(),
+                current.digest(),
+                current.descriptor_digest(),
+                current.provider_digest(),
+            )?,
+            current
+        );
+        Ok(())
+    })
+    .unwrap();
+}

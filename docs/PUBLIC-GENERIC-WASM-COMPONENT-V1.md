@@ -128,9 +128,12 @@ stale descriptor/provider runtime bindings,
 use-after-close, double-close, and broader resource/payload hostile cases
 remain unclaimed and outside the evidence of this focused selector. The
 retained artifact replay test rejects mutated Component bytes and mismatched
-provider-digest metadata; the runtime test itself does not execute a tampered
-candidate. Component bytes remain immutable during the successful runtime
-test and the Component requests no ambient imports.
+provider-digest metadata. It also refuses old Component bytes after an
+authenticated source-body change with stable declaration identities, then
+accepts the newly derived artifact for that changed revision. The runtime test
+itself does not execute a tampered candidate. Component bytes remain immutable
+during the successful runtime test and the Component requests no ambient
+imports.
 
 Cancellation, hosted/provider acceptance, publication, PG-9 support, arbitrary
 Component Model inputs, effects, asynchronous work, and every source shape

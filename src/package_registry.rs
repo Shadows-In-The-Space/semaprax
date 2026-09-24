@@ -128,6 +128,7 @@ pub mod binding;
 pub mod catalog;
 pub mod federation;
 pub mod registry_v2;
+pub mod trust;
 pub mod wire;
 
 #[cfg(test)]

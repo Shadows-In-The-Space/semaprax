@@ -517,5 +517,41 @@ pub(crate) fn publish_bound(
     Ok(states)
 }
 
+/// Reads precisely the caller-named published cache entries through held,
+/// nofollow directory and file handles. This is intentionally crate-private:
+/// callers must already have an independently authenticated inventory rather
+/// than treating an ordinary cache directory as a catalog authority.
+pub(crate) fn read_bound(cache: &Path, names: &[String]) -> Result<Vec<String>> {
+    if names.is_empty() || names.len() > MAX_SUBJECTS {
+        return Err(failure("invalid cache subject count"));
+    }
+    let root = Root::open(cache, false)?;
+    let _authority = root.lock()?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut result = Vec::with_capacity(names.len());
+    for name in names {
+        let hex = name
+            .strip_suffix(".json")
+            .filter(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        if hex.is_none() || !seen.insert(name) {
+            return Err(failure("cache subject inventory is not exact"));
+        }
+        root.check()?;
+        let mut file = open_file(root.fd(), name.as_bytes())
+            .map_err(|_| failure("cannot open cache subject without following links"))?;
+        let held_identity =
+            identity(&fs::fstat(&file).map_err(|_| failure("cannot inspect cache subject"))?);
+        let bytes = read(&mut file, MAX_SUBJECT_BYTES)?;
+        let named = fs::statat(root.fd(), name.as_bytes(), AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|_| failure("cache subject name disappeared"))?;
+        if !FileType::from_raw_mode(named.st_mode).is_file() || identity(&named) != held_identity {
+            return Err(failure("cache subject identity changed"));
+        }
+        root.check()?;
+        result.push(String::from_utf8(bytes).map_err(|_| failure("cache subject is not UTF-8"))?);
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests;

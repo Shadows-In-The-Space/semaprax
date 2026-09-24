@@ -310,6 +310,7 @@ mod tests {
     use super::*;
     use crate::package_registry::mirror_transport::{MirrorGet, MirrorOrigin, MirrorResponse};
     use crate::package_registry::trust::registry_v3::tests::{host_fixture, host_fixture_until};
+    use crate::package_resolver_v2 as resolver;
     use std::collections::VecDeque;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1035,5 +1036,194 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.code, "SPX-PKR626");
+    }
+
+    #[test]
+    fn acquired_mirror_generation_populates_explicit_cache_then_replays_root_leaf_lock() {
+        let (root_bytes, timestamp, snapshot, publishers, admitted) = host_fixture(false, 1);
+        let temp = Temp::new();
+        let destination = Temp::new();
+        let pin = crate::audit_capsule::sha256_digest(root_bytes.as_bytes());
+        let mut store = HeldTrustStore::install(&temp.0, &root_bytes, &pin, 90).unwrap();
+        let before = store.receipt().generation_digest;
+        let metadata_digests = [
+            crate::audit_capsule::sha256_digest(timestamp.as_bytes()),
+            crate::audit_capsule::sha256_digest(snapshot.as_bytes()),
+            crate::audit_capsule::sha256_digest(publishers[0].as_bytes()),
+            crate::audit_capsule::sha256_digest(publishers[1].as_bytes()),
+        ];
+        let artifact_digests = [
+            crate::audit_capsule::sha256_digest(&admitted.3),
+            crate::audit_capsule::sha256_digest(&admitted.4),
+        ];
+        let metadata = [
+            object(
+                MirrorObjectKind::Metadata,
+                "/metadata/timestamp.json",
+                &metadata_digests[0],
+                timestamp.as_bytes(),
+            ),
+            object(
+                MirrorObjectKind::Metadata,
+                "/metadata/snapshot.json",
+                &metadata_digests[1],
+                snapshot.as_bytes(),
+            ),
+            object(
+                MirrorObjectKind::Metadata,
+                "/metadata/publisher-app.json",
+                &metadata_digests[2],
+                publishers[0].as_bytes(),
+            ),
+            object(
+                MirrorObjectKind::Metadata,
+                "/metadata/publisher-lib.json",
+                &metadata_digests[3],
+                publishers[1].as_bytes(),
+            ),
+        ];
+        let artifacts = [
+            MirrorArtifact {
+                object: object(
+                    MirrorObjectKind::Artifact,
+                    "/artifacts/app-root.wasm",
+                    &artifact_digests[0],
+                    &admitted.3,
+                ),
+                package: "app.root",
+                version: "1.0.0",
+                path: "module.wasm",
+            },
+            MirrorArtifact {
+                object: object(
+                    MirrorObjectKind::Artifact,
+                    "/artifacts/lib-leaf.wasm",
+                    &artifact_digests[1],
+                    &admitted.4,
+                ),
+                package: "lib.leaf",
+                version: "1.0.0",
+                path: "module.wasm",
+            },
+        ];
+        let publisher_paths = [
+            crate::package_registry::trust::registry_v3::MirrorPublisherPath {
+                role: "publisher-app",
+                path: "/metadata/publisher-app.json",
+            },
+            crate::package_registry::trust::registry_v3::MirrorPublisherPath {
+                role: "publisher-lib",
+                path: "/metadata/publisher-lib.json",
+            },
+        ];
+        let metadata_paths = MirrorMetadataPaths {
+            timestamp_path: "/metadata/timestamp.json",
+            snapshot_path: "/metadata/snapshot.json",
+            publishers: &publisher_paths,
+            registry: &admitted.0,
+        };
+        let cache = destination.0.join("cache");
+        let mut mirror = ScriptedMirror {
+            replies: VecDeque::from([
+                response("/metadata/timestamp.json", timestamp.as_bytes()),
+                response("/metadata/snapshot.json", snapshot.as_bytes()),
+                response("/metadata/publisher-app.json", publishers[0].as_bytes()),
+                response("/metadata/publisher-lib.json", publishers[1].as_bytes()),
+                response("/artifacts/app-root.wasm", &admitted.3),
+                response("/artifacts/lib-leaf.wasm", &admitted.4),
+            ]),
+            calls: 0,
+        };
+        let result = acquire_commit_cache_and_resolve(
+            &authority(),
+            &mut mirror,
+            &mut store,
+            &MirrorCacheFlowRequest {
+                mirror: MirrorFlowRequest {
+                    metadata_paths: &metadata_paths,
+                    metadata_objects: &metadata,
+                    artifacts: &artifacts,
+                    lock: &admitted.2,
+                    subjects: &admitted.1,
+                    read: MirrorArtifactSelection {
+                        package: "app.root",
+                        version: "1.0.0",
+                        path: "module.wasm",
+                    },
+                    update_time: 100,
+                    read_time: 100,
+                },
+                cache_path: &cache,
+                cache_time: 100,
+                resolution: MirrorResolutionTemplate {
+                    requirements: &[resolver::Requirement {
+                        package: "app.root".into(),
+                        range: "=1.0.0".into(),
+                    }],
+                    target: "wasm32",
+                    allowed_capabilities: &[],
+                    options: Default::default(),
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(mirror.calls, 6);
+        assert_ne!(result.commit.generation_digest, before);
+        assert_eq!(
+            result.cache.generation_digest,
+            result.commit.generation_digest
+        );
+        assert_eq!(result.resolved.lock, admitted.2);
+        assert_eq!(result.resolved.packages.len(), 2);
+        assert_eq!(result.artifact.bytes(), admitted.3);
+        assert!(result
+            .resolution_evidence
+            .contains("offline-package-resolution-evidence.v2"));
+
+        let before_preflight = store.receipt().generation_digest;
+        let mut refused_mirror = ScriptedMirror {
+            replies: VecDeque::new(),
+            calls: 0,
+        };
+        let error = match acquire_commit_cache_and_resolve(
+            &authority(),
+            &mut refused_mirror,
+            &mut store,
+            &MirrorCacheFlowRequest {
+                mirror: MirrorFlowRequest {
+                    metadata_paths: &metadata_paths,
+                    metadata_objects: &metadata,
+                    artifacts: &artifacts,
+                    lock: &admitted.2,
+                    subjects: &admitted.1,
+                    read: MirrorArtifactSelection {
+                        package: "app.root",
+                        version: "1.0.0",
+                        path: "module.wasm",
+                    },
+                    update_time: 101,
+                    read_time: 101,
+                },
+                cache_path: &destination.0.join("later-cache"),
+                cache_time: 100,
+                resolution: MirrorResolutionTemplate {
+                    requirements: &[],
+                    target: "wasm32",
+                    allowed_capabilities: &[],
+                    options: Default::default(),
+                },
+            },
+        ) {
+            Ok(_) => panic!("backwards cache time unexpectedly reached the mirror"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            MirrorCacheFlowError::Mirror(MirrorFlowError::Proof(ref error))
+                if error.code == "SPX-PKR623"
+        ));
+        assert_eq!(refused_mirror.calls, 0);
+        assert_eq!(store.receipt().generation_digest, before_preflight);
+        assert!(!destination.0.join("later-cache").exists());
     }
 }

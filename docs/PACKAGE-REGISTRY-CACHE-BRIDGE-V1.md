@@ -71,7 +71,12 @@ bound, not perpetual freshness. The copied flat cache deliberately does not
 retain signature, freshness or revocation authority: `resolve` still independently
 verifies every subject, while subsequent artifact reads must again use the
 held signed generation and trusted time. Discovering or acquiring remote updates
-is a separate future authority boundary. Existing unlocked fetch is unchanged.
+is normally a separate authority boundary. The narrow local mirror composition
+in [Package registry mirror flow v1](PACKAGE-REGISTRY-MIRROR-FLOW-V1.md) may
+call this bridge only after its authenticated held commit, with an explicit
+cache path and fixed time; it does not grant discovery, cache reuse, hosted
+registry or persistent cache-trust authority. Existing unlocked fetch is
+unchanged.
 
 ## Focused evidence contract
 

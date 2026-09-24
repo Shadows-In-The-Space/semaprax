@@ -4,8 +4,9 @@ Audience: package-registry host implementers and trust-boundary reviewers.
 
 Status: additive local composition of existing bounded mirror acquisition,
 Registry-v3 signed proof, held-generation commit, and one live artifact read.
-It is not a hosted registry, root discovery, resolver-cache publication,
-installation, execution, or availability route.
+It is not a hosted registry, root discovery, installation, execution, or
+availability route. The separately explicit local cache composition below is
+the only resolver-cache route it supports.
 
 `trust::host::registry_v3::acquire_commit_and_read` borrows one already
 constructed `MirrorNetworkAuthority`, caller-provided transport and live
@@ -74,4 +75,36 @@ does not bind the live held checkpoint. An injected lower held-publish
 `AfterActive` failure reports the non-receipt `SPX-PKR627` uncertainty form.
 This establishes
 no TLS peer, DNS, Internet, hosted mirror,
-production root/key, resolver cache, or physical-device support.
+production root/key, resolver-cache trust authority, or physical-device support.
+
+## Explicit cache and resolution composition
+
+`trust::host::registry_v3::acquire_commit_cache_and_resolve` is an additive
+local composition over the completed mirror flow. Its caller supplies the
+ordinary cache destination path, a fixed cache time no earlier than the final
+held artifact-read time, and a Resolver-v2 template (requirements, target,
+allowed capabilities and output bound). It derives the generation digest,
+sealed Registry-v3, Lock-v3 and selected Subject-v3 inventory only from the
+successful held commit; it accepts neither a root, checkpoint, caller-selected
+generation digest, cache-discovery route nor a reusable cache capability.
+
+After the receipt-bearing held commit/read succeeds, the existing cache bridge
+revalidates every selected artifact at the fixed cache time and publishes the
+exact subject inventory. The composition reopens only receipt-named
+`<sha256 hex>.json` files through the cache writer's held directory-FD,
+nofollow, bounded regular-file reader while it holds the cooperative cache
+lock. It independently checks every name/digest/coordinate against the receipt,
+then generates and verifies Resolver-v2 evidence and requires its Lock-v3 to
+equal the sealed lock before independently checking the signed root/leaf lock
+selection. Other cache entries are neither discovered nor resolver input.
+
+`MirrorCacheFlowError::Mirror` preserves the underlying pre-effect proof,
+publish-uncertain and receipt-bearing post-commit outcomes unchanged. A cache
+failure occurs after a confirmed held commit and is conservatively reported as
+`CachePartial` with commit/checkpoint evidence but no cache receipt: an
+authenticated prefix or stage may remain. A later cache replay or resolver
+failure reports `Resolution` with the completed cache receipt, never as an
+earlier no-effect refusal. There remains no cross-store atomic transaction,
+ambient network/cache discovery, cache-carried signature/freshness authority,
+installation, execution, hosted registry, TLS-peer, DNS, Internet, production
+root/key or availability claim.

@@ -68,6 +68,21 @@ fn settled_publication_reports_added_then_present() {
 }
 
 #[test]
+fn bound_read_refuses_a_symlink_swap_without_following_it() {
+    let fixture = Fixture::new();
+    let root = Root::open(&fixture.cache(), true).unwrap();
+    let name = format!("{}.json", "a".repeat(64));
+    let bytes = b"authenticated subject bytes".to_vec();
+    publish(&root, &BTreeMap::from([(name.clone(), bytes)]), |_| Ok(())).unwrap();
+    let outside = fixture.0.join("outside");
+    std::fs::write(&outside, b"untrusted replacement").unwrap();
+    std::fs::remove_file(fixture.cache().join(&name)).unwrap();
+    symlink(&outside, fixture.cache().join(&name)).unwrap();
+    refused(read_bound(&fixture.cache(), &[name]));
+    assert_eq!(std::fs::read(&outside).unwrap(), b"untrusted replacement");
+}
+
+#[test]
 fn held_input_replacement_and_missing_parent_swap_fail_before_creation() {
     let fixture = Fixture::new();
     let path = fixture.0.join("input");

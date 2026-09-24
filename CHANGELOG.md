@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Compose the local, caller-authorized mirror-to-held flow with the existing
+  signed resolver-cache bridge and deterministic Resolver-v2/Lock-v3 root/leaf
+  replay. Cache reads are bounded, receipt-named and held nofollow reads; cache
+  partial effects remain distinct from pre-effect, held-publish-uncertain and
+  receipt-bearing post-commit outcomes. This is local evidence only and adds
+  no hosted registry, ambient network/cache, installation or execution support.
+
 - Rewrite the documentation entry path—overview, install, quickstart, CLI
   guide, and first contribution—in shorter task-based language for new
   developers. Preserve the tested commands, diagnostic examples, and

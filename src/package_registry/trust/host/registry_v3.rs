@@ -26,6 +26,13 @@ pub use online::{
     acquire_commit_and_read, MirrorArtifact, MirrorArtifactSelection, MirrorFlowError,
     MirrorFlowRequest, MirrorFlowResult,
 };
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+mod online_cache;
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+pub use online_cache::{
+    acquire_commit_cache_and_resolve, MirrorCacheFlowError, MirrorCacheFlowRequest,
+    MirrorCacheFlowResult, MirrorResolutionTemplate,
+};
 
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 mod store;

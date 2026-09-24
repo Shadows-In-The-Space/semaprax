@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Reduce repeated catalog-normalizer control-escape work within the admitted
+  Project graph budget. Fifteen independent-oracle cases pass across the
+  interpreter, native C O0/O2 and Core Wasm; the exact 256-record maximum
+  remains unproven under the unchanged fuel limit.
+
 - Compose acquired exact mirror metadata through Registry Trust v2's signed
   timestamp/snapshot/publisher-manifest verifier and its existing rotation,
   revocation, expiry and checkpoint controls. The local mirror policy refuses

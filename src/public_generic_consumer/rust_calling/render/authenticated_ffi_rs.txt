@@ -1,0 +1,11 @@
+    // Exact signatures/status from native/authenticated_v1.h. No new ABI.
+    pub(crate) const SPX_PG_AUTH_STATUS_REPLAY_MISMATCH: Status = 14;
+    extern "C" {
+        pub(crate) fn spx_pg_authenticated_generation_v1(
+            provider: *mut RawProvider, generation: *mut u64,
+        ) -> Status;
+        pub(crate) fn spx_pg_authenticated_input_prepare_v1(
+            provider: *mut RawProvider, generation: u64, ownership: u32,
+            cleanup: *const u8, cleanup_len: usize,
+            frame: *const u8, frame_len: usize, out_input: *mut *mut RawValue,
+        ) -> Status;

@@ -1,0 +1,37 @@
+use crate::error::Error;
+use sha2::{Digest as _, Sha256};
+
+// `flat` is caller-owned scratch from the existing bounded leaf encoder, never
+// hostile input and never passed to the provider. Metadata is compiler-derived.
+pub(crate) fn encode(flat: &[u8]) -> Result<Vec<u8>, Error> {
+    let payload = flat.len().checked_sub(8 + 8 * METADATA.len())
+        .ok_or(Error::CarrierRejected("invalid internal flat scratch"))?;
+    let total = EMPTY.len().checked_add(payload).ok_or(Error::CapacityExceeded("frame length"))?;
+    let mut frame = Vec::new();
+    frame.try_reserve_exact(total).map_err(|_| Error::AllocationFailure)?;
+    frame.extend_from_slice(&EMPTY[..PREFIX]);
+    frame.extend_from_slice(&(payload as u64).to_le_bytes());
+    let mut from = 8;
+    for &(start, width) in METADATA {
+        frame.extend_from_slice(&EMPTY[start..start + width]);
+        let length = usize::try_from(u64::from_le_bytes(flat[from..from + 8].try_into().unwrap()))
+            .map_err(|_| Error::CapacityExceeded("leaf length"))?;
+        frame.extend_from_slice(&flat[from..from + 8 + length]);
+        from += 8 + length;
+    }
+    let mut hash = Sha256::new();
+    hash.update(b"semaprax.public-generic-carrier.v1.frame\0");
+    hash.update((frame.len() as u64).to_le_bytes());
+    hash.update(&frame);
+    let digest = hash.finalize();
+    let mut text = [0u8; 71];
+    text[..7].copy_from_slice(b"sha256:");
+    let hex = b"0123456789abcdef";
+    for (index, byte) in digest.iter().enumerate() {
+        text[7 + 2 * index] = hex[usize::from(byte >> 4)];
+        text[8 + 2 * index] = hex[usize::from(byte & 15)];
+    }
+    frame.extend_from_slice(&71u64.to_le_bytes());
+    frame.extend_from_slice(&text);
+    Ok(frame)
+}

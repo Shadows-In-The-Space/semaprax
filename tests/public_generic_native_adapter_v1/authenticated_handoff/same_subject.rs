@@ -5,6 +5,8 @@
 mod c;
 #[path = "same_subject_interpreter.rs"]
 mod interpreter;
+#[path = "same_subject_rust.rs"]
+mod rust;
 #[path = "same_subject_typescript.rs"]
 mod typescript;
 use super::{array, SOURCE};
@@ -151,6 +153,7 @@ fn prepare_subject(root: &Path, guard: bool) -> Subject {
         &frame,
         guard,
     );
+    rust::observe(root, endpoint.descriptor(), &native, &provider, guard);
     let expected = if guard { 0 } else { 11 };
     let driver = format!(
         "{}\n{}\n{}\n#define EXPECT_CALL_STATUS {expected}\n{}",

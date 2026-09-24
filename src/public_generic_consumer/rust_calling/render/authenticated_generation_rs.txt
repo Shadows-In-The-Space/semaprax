@@ -1,0 +1,10 @@
+        let mut generation = 0u64;
+        // SAFETY: the closed-state guard passed, this exclusive Provider owns
+        // the live handle, and generation is an initialized aligned out slot.
+        // This synchronous query neither transfers ownership nor allocates.
+        let status = unsafe { ffi::spx_pg_authenticated_generation_v1(self.handle, &mut generation) };
+        if status != ffi::SPX_PG_STATUS_OK { return Err(map_prepare_failure(status)); }
+        // The ticket, generated cleanup digest and canonical frame remain
+        // immutable until prepare returns. The caller ownership tag is zero;
+        // successful admission consumes generation even if preparation fails.
+        let mut input_handle: *mut ffi::RawValue = std::ptr::null_mut();

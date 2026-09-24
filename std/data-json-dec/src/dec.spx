@@ -160,9 +160,7 @@ fn emit_len(input: borrow Slice<u8>, index: usize) -> usize
 fn emit_at(input: borrow Slice<u8>, index: usize, offset: usize) -> i64
     ensures result >= -1 && result <= 255
 {
-    let plain = match byte_get(input, index) { Option::Some { value: byte } => byte_code(byte), Option::None {} => -1, };
-    let raw = if offset == 0usize && plain >= 32 { plain } else { -1 };
-    if at_is(input, index, 92u8) { utf8_at(scalar_at(input, index), offset) } else { raw }
+    if at_is(input, index, 92u8) { utf8_at(scalar_at(input, index), offset) } else { let plain = match byte_get(input, index) { Option::Some { value: byte } => byte_code(byte), Option::None {} => -1, }; if offset == 0usize && plain >= 32 { plain } else { -1 } }
 }
 
 @id("std.data.json.dec.scan-string")

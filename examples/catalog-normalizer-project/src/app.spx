@@ -587,13 +587,13 @@ fn next_part(done: bool, advanced: usize) -> usize
 @id("catalog_normalizer.app.enriched-phase-byte")
 fn enriched_phase_byte(body: borrow Slice<u8>, phase: usize, part: usize, count: usize, total: i64, id_cursor: usize, id_length: usize, label_cursor: usize, label_length: usize, quantity: i64, outcome: usize) -> u8
 {
-    match phase { 0usize => literal_byte(5usize, part), 1usize => usize_byte(count, part), 2usize => literal_byte(6usize, part), 3usize => i64_byte(total, part), 4usize => literal_byte(7usize, part), 5usize => literal_byte(9usize, part), 6usize => if part < id_length { escape_cursor_byte(body, id_cursor) } else { 0u8 }, 7usize => literal_byte(10usize, part), 8usize => if part < label_length { escape_cursor_byte(body, label_cursor) } else { 0u8 }, 9usize => literal_byte(11usize, part), 10usize => i64_byte(quantity, part), 11usize => literal_byte(12usize, part), 12usize => if enrichment_has_category(outcome) { i64_byte(enrichment_category_value(outcome), part) } else { literal_byte(13usize, part) }, 13usize => if part == 0usize { 125u8 } else { 44u8 }, _ => literal_byte(8usize, part), }
+    if phase < 11usize { success_phase_byte(body, phase, part, count, total, id_cursor, id_length, label_cursor, label_length, quantity) } else { match phase { 11usize => literal_byte(12usize, part), 12usize => if enrichment_has_category(outcome) { i64_byte(enrichment_category_value(outcome), part) } else { literal_byte(13usize, part) }, 13usize => if part == 0usize { 125u8 } else { 44u8 }, _ => literal_byte(8usize, part), } }
 }
 
 @id("catalog_normalizer.app.enriched-phase-len")
 fn enriched_phase_len(phase: usize, count: usize, total: i64, record: usize, id_length: usize, label_length: usize, quantity: i64, outcome: usize) -> usize
 {
-    match phase { 0usize => 23usize, 1usize => usize_len(count), 2usize => 18usize, 3usize => i64_len(total), 4usize => 12usize, 5usize => 7usize, 6usize => id_length, 7usize => 11usize, 8usize => label_length, 9usize => 13usize, 10usize => i64_len(quantity), 11usize => 12usize, 12usize => enriched_value_len(outcome), 13usize => if record + 1usize < count { 2usize } else { 1usize }, _ => 3usize, }
+    if phase < 11usize { success_phase_len(phase, count, total, record, id_length, label_length, quantity) } else { match phase { 11usize => 12usize, 12usize => enriched_value_len(outcome), 13usize => if record + 1usize < count { 2usize } else { 1usize }, _ => 3usize, } }
 }
 
 @id("catalog_normalizer.app.enriched-next-record")
@@ -628,12 +628,50 @@ fn error_response(failure: usize) -> Bytes
 // CNORM-041 writer. Validation has already established all field locations,
 // decoded bounds, duplicate freedom, and checked-total safety; this second
 // pass is therefore projection only and preserves input record order.
-@id("catalog_normalizer.app.success-response")
-fn success_response(body: borrow Slice<u8>) -> Bytes
+// Mode dispatch is scalar, so the shared owned writer does not combine
+// independent enriched branches into its cleanup replay paths.
+@id("catalog_normalizer.app.output-len-known")
+fn output_len_known(body: borrow Slice<u8>, count: usize, total: i64, enriched: bool) -> usize
+{
+    if enriched { enriched_success_len_known(body, count, total) } else { success_len_known(body, count, total) }
+}
+
+@id("catalog_normalizer.app.output-phase-byte")
+fn output_phase_byte(body: borrow Slice<u8>, enriched: bool, phase: usize, part: usize, count: usize, total: i64, id_cursor: usize, id_length: usize, label_cursor: usize, label_length: usize, quantity: i64, outcome: usize) -> u8
+{
+    if enriched { enriched_phase_byte(body, phase, part, count, total, id_cursor, id_length, label_cursor, label_length, quantity, outcome) } else { success_phase_byte(body, phase, part, count, total, id_cursor, id_length, label_cursor, label_length, quantity) }
+}
+
+@id("catalog_normalizer.app.output-phase-len")
+fn output_phase_len(enriched: bool, phase: usize, count: usize, total: i64, record: usize, id_length: usize, label_length: usize, quantity: i64, outcome: usize) -> usize
+{
+    if enriched { enriched_phase_len(phase, count, total, record, id_length, label_length, quantity, outcome) } else { success_phase_len(phase, count, total, record, id_length, label_length, quantity) }
+}
+
+@id("catalog_normalizer.app.output-next-record")
+fn output_next_record(enriched: bool, done: bool, phase: usize, record: usize) -> usize
+{
+    if enriched { enriched_next_record(done, phase, record) } else { next_record(done, phase, record) }
+}
+
+@id("catalog_normalizer.app.output-next-phase")
+fn output_next_phase(enriched: bool, done: bool, phase: usize, count: usize, record: usize) -> usize
+{
+    if enriched { enriched_next_phase(done, phase, count, record) } else { next_phase(done, phase, count, record) }
+}
+
+@id("catalog_normalizer.app.output-phase-after-empty-label")
+fn output_phase_after_empty_label(phase: usize, label_length: usize) -> usize
+{
+    if phase == 8usize && label_length == 0usize { 9usize } else { phase }
+}
+
+@id("catalog_normalizer.app.shared-success-response")
+fn shared_success_response(body: borrow Slice<u8>, enriched: bool) -> Bytes
 {
     let count = record_count(body);
     let total = success_total(body);
-    let length = success_len_known(body, count, total);
+    let terminal_phase = if enriched { 15usize } else { 13usize };
     let mut out = bytes_zeroed(69710usize);
     let mut index = 0usize;
     let mut phase = 0usize;
@@ -652,18 +690,20 @@ fn success_response(body: borrow Slice<u8>) -> Bytes
     let mut id_cursor = escape_cursor_start(body, id, 0usize);
     let mut label_cursor = escape_cursor_start(body, label, label_start);
     let mut quantity = quantity_if(body, active, quantity_at, 0);
-    while index < length {
-        let value = success_phase_byte(body, phase, part, count, total, id_cursor, id_length, label_cursor, label_length, quantity);
+    let mut outcome = outcome_if(body, active && enriched, id, 0usize);
+    while phase < terminal_phase {
+        phase = output_phase_after_empty_label(phase, label_length);
+        let value = output_phase_byte(body, enriched, phase, part, count, total, id_cursor, id_length, label_cursor, label_length, quantity, outcome);
         out = bytes_set(out, index, value);
         index = index + 1usize;
         let advanced_part = part + 1usize;
-        let segment = success_phase_len(phase, count, total, record, id_length, label_length, quantity);
+        let segment = output_phase_len(enriched, phase, count, total, record, id_length, label_length, quantity, outcome);
         let done = advanced_part >= segment;
-        let next_record_value = next_record(done, phase, record);
+        let next_record_value = output_next_record(enriched, done, phase, record);
         let changed_record = next_record_value != record && next_record_value < count;
         id_cursor = if phase == 6usize { escape_cursor_next(body, id_cursor) } else { id_cursor };
         label_cursor = if phase == 8usize { escape_cursor_next(body, label_cursor) } else { label_cursor };
-        phase = next_phase(done, phase, count, record);
+        phase = output_next_phase(enriched, done, phase, count, record);
         part = next_part(done, advanced_part);
         record = next_record_value;
         record_start = if changed_record { record_end + 1usize } else { record_start };
@@ -679,69 +719,23 @@ fn success_response(body: borrow Slice<u8>) -> Bytes
         id_cursor = if changed_record { escape_cursor_start(body, id, 0usize) } else { id_cursor };
         label_cursor = if changed_record { escape_cursor_start(body, label, label_start) } else { label_cursor };
         quantity = quantity_if(body, changed_record, quantity_at, quantity);
-        index < length
+        outcome = outcome_if(body, changed_record && enriched, id, outcome);
+        phase < terminal_phase
     }
     let view = bytes_as_slice(out);
-    bytes_copy(byte_range(view, 0usize, length))
+    bytes_copy(byte_range(view, 0usize, index))
+}
+
+@id("catalog_normalizer.app.success-response")
+fn success_response(body: borrow Slice<u8>) -> Bytes
+{
+    shared_success_response(body, false)
 }
 
 @id("catalog_normalizer.app.enriched-success-response")
 fn enriched_success_response(body: borrow Slice<u8>) -> Bytes
 {
-    let count = record_count(body);
-    let total = success_total(body);
-    let length = enriched_success_len_known(body, count, total);
-    let mut out = bytes_zeroed(69710usize);
-    let mut index = 0usize;
-    let mut phase = 0usize;
-    let mut part = 0usize;
-    let mut record = 0usize;
-    let active = count > 0usize;
-    let mut record_start = 0usize;
-    let mut record_end = line_end_if(body, active, record_start, 0usize);
-    let mut id = field_if(body, active, record_start, record_end, 1usize, 0usize);
-    let mut label = field_if(body, active, record_start, record_end, 2usize, 0usize);
-    let mut quantity_at = field_if(body, active, record_start, record_end, 3usize, 0usize);
-    let mut id_length = escaped_len_if(body, active, id, 0usize, if active { decoded_len(body, id) } else { 0usize }, 0usize);
-    let mut label_start = trim_start_if(body, active, label, 0usize);
-    let mut label_end = trim_end_if(body, active, label, label_start, label_start);
-    let mut label_length = escaped_len_if(body, active, label, label_start, label_end, 0usize);
-    let mut id_cursor = escape_cursor_start(body, id, 0usize);
-    let mut label_cursor = escape_cursor_start(body, label, label_start);
-    let mut quantity = quantity_if(body, active, quantity_at, 0);
-    let mut outcome = outcome_if(body, active, id, 0usize);
-    while index < length {
-        let value = enriched_phase_byte(body, phase, part, count, total, id_cursor, id_length, label_cursor, label_length, quantity, outcome);
-        out = bytes_set(out, index, value);
-        index = index + 1usize;
-        let advanced_part = part + 1usize;
-        let segment = enriched_phase_len(phase, count, total, record, id_length, label_length, quantity, outcome);
-        let done = advanced_part >= segment;
-        let next_record_value = enriched_next_record(done, phase, record);
-        let changed_record = next_record_value != record && next_record_value < count;
-        id_cursor = if phase == 6usize { escape_cursor_next(body, id_cursor) } else { id_cursor };
-        label_cursor = if phase == 8usize { escape_cursor_next(body, label_cursor) } else { label_cursor };
-        phase = enriched_next_phase(done, phase, count, record);
-        part = next_part(done, advanced_part);
-        record = next_record_value;
-        record_start = if changed_record { record_end + 1usize } else { record_start };
-        record_end = line_end_if(body, changed_record, record_start, record_end);
-        id = field_if(body, changed_record, record_start, record_end, 1usize, id);
-        label = field_if(body, changed_record, record_start, record_end, 2usize, label);
-        quantity_at = field_if(body, changed_record, record_start, record_end, 3usize, quantity_at);
-        let id_end = if changed_record { decoded_len(body, id) } else { 0usize };
-        id_length = escaped_len_if(body, changed_record, id, 0usize, id_end, id_length);
-        label_start = trim_start_if(body, changed_record, label, label_start);
-        label_end = trim_end_if(body, changed_record, label, label_start, label_end);
-        label_length = escaped_len_if(body, changed_record, label, label_start, label_end, label_length);
-        id_cursor = if changed_record { escape_cursor_start(body, id, 0usize) } else { id_cursor };
-        label_cursor = if changed_record { escape_cursor_start(body, label, label_start) } else { label_cursor };
-        quantity = quantity_if(body, changed_record, quantity_at, quantity);
-        outcome = outcome_if(body, changed_record, id, outcome);
-        index < length
-    }
-    let view = bytes_as_slice(out);
-    bytes_copy(byte_range(view, 0usize, length))
+    shared_success_response(body, true)
 }
 
 @id("catalog_normalizer.app.normalize")

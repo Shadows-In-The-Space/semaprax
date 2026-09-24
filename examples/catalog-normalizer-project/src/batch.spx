@@ -219,11 +219,15 @@ fn failure_offset(failure: usize) -> usize
     failure % 65537usize
 }
 
+// Accepted records contribute their absolute id opening position to one
+// bounded Copy-scalar vector. Every duplicate probe reads a populated prior
+// slot; a Vec get outside its initialized length fails closed in the
+// compiler-owned vec status domain. The owner never becomes output.
 // CNORM-001..016 first-error coordinator. Its callers carry each current
-// record range forward, and duplicate scans carry the prior range forward;
-// the intentional O(n^2) id comparisons therefore do not hide cubic prefix
-// location work. It validates one line completely, checks that line's decoded
-// id against prior accepted lines, then performs the checked total addition.
+// record range forward, and duplicate scans read prior accepted id positions
+// from a private bounded index; the intentional O(n^2) id comparisons do not
+// rescan prior record bodies. It validates one line completely, checks that
+// line's decoded id against prior accepted lines, then checks total addition.
 // A nonzero result is the only information the writer receives, so a valid
 // prefix can never be rendered as output.
 @id("catalog_normalizer.batch.record-basic-failure")
@@ -264,12 +268,13 @@ fn record_is_duplicate(body: borrow Slice<u8>, record: usize, start: usize, end:
 fn record_failure(body: borrow Slice<u8>, record: usize, start: usize, end: usize, total: i64) -> usize
 {
     let basic = record_basic_failure(body, record, start, end);
-    let duplicate = if basic == 0usize { record_is_duplicate(body, record, start, end) } else { false };
-    let line = byte_range(body, start, end);
-    let id = if basic == 0usize { record_id_value(line) } else { 0usize };
-    let quantity = if basic == 0usize && !duplicate { quantity_or(line, record_quantity_value(line), -1) } else { 0 };
-    let overflow = basic == 0usize && !duplicate && total_would_overflow(total, quantity);
-    if basic != 0usize { basic } else { if duplicate { pack_failure(5usize, record + 1usize, id) } else { if overflow { pack_failure(6usize, record + 1usize, id) } else { 0usize } } }
+    if basic != 0usize { basic } else { let duplicate = record_is_duplicate(body, record, start, end); let line = byte_range(body, start, end); let id = record_id_value(line); if duplicate { pack_failure(5usize, record + 1usize, id) } else { let quantity = quantity_or(line, record_quantity_value(line), -1); if total_would_overflow(total, quantity) { pack_failure(6usize, record + 1usize, id) } else { 0usize } } }
+}
+
+@id("catalog_normalizer.batch.indexed-record-failure")
+fn indexed_record_failure(body: borrow Slice<u8>, record: usize, start: usize, end: usize, total: i64, basic: usize, id: usize, duplicate: bool) -> usize
+{
+    if basic != 0usize { basic } else { if duplicate { pack_failure(5usize, record + 1usize, id) } else { let line = byte_range(body, start, end); let quantity = quantity_or(line, record_quantity_value(line), -1); if total_would_overflow(total, quantity) { pack_failure(6usize, record + 1usize, id) } else { 0usize } } }
 }
 
 @id("catalog_normalizer.batch.valid-record-quantity")
@@ -279,8 +284,16 @@ fn valid_record_quantity(body: borrow Slice<u8>, start: usize, end: usize) -> i6
     quantity_or(line, record_quantity_value(line), -1)
 }
 
-@id("catalog_normalizer.batch.first-failure")
-fn first_failure(body: borrow Slice<u8>) -> usize
+// Provider selection follows the regular structural, duplicate, and total
+// checks. A terminal outcome is sticky before the next record is examined.
+@id("catalog_normalizer.batch.provider-failure-if")
+fn provider_failure_if(line: borrow Slice<u8>, enriched: bool, regular: usize, record: usize, id: usize) -> usize
+{
+    if regular != 0usize { regular } else { if enriched { let provider = enrichment_outcome(line, id); if enrichment_terminal(provider) { pack_failure(enrichment_failure_category(provider), record + 1usize, id) } else { 0usize } } else { 0usize } }
+}
+
+@id("catalog_normalizer.batch.scan-first-failure")
+fn scan_first_failure(body: borrow Slice<u8>, enriched: bool) -> usize
 {
     let count = record_count(body);
     let whole = body_too_long(body);
@@ -288,11 +301,26 @@ fn first_failure(body: borrow Slice<u8>) -> usize
     let mut record = 0usize;
     let mut start = 0usize;
     let mut total = 0;
+    let mut index = vec_with_capacity<usize>(256usize);
     let mut failure = if whole { pack_failure(1usize, 0usize, 65536usize) } else { if many { pack_failure(1usize, 257usize, 0usize) } else { 0usize } };
     let mut scanning = failure == 0usize && record < count;
     while scanning {
         let end = line_end(body, start);
-        failure = record_failure(body, record, start, end, total);
+        let basic = record_basic_failure(body, record, start, end);
+        let line = byte_range(body, start, end);
+        let id = if basic == 0usize { record_id_value(line) } else { 0usize };
+        let mut prior = 0usize;
+        let mut duplicate = false;
+        let mut comparing = basic == 0usize && prior < record;
+        while comparing {
+            duplicate = same_decoded_id(body, vec_get<usize>(index, prior), start + id);
+            prior = prior + 1usize;
+            comparing = !duplicate && prior < record;
+            comparing
+        }
+        let regular = indexed_record_failure(body, record, start, end, total, basic, id, duplicate);
+        failure = provider_failure_if(line, enriched, regular, record, id);
+        let _ = if failure == 0usize { index = vec_push<usize>(index, start + id); 0usize } else { 0usize };
         total = if failure == 0usize { total_after(total, valid_record_quantity(body, start, end)) } else { total };
         record = if failure == 0usize { record + 1usize } else { count };
         start = end + 1usize;
@@ -302,33 +330,14 @@ fn first_failure(body: borrow Slice<u8>) -> usize
     failure
 }
 
-// CNORM-062 keeps the provider check inside the same input-order transaction
-// as parsing, duplicate detection, and checked totals. A terminal fixture
-// outcome wins before a later record is examined, and no response allocation
-// occurs until this whole selection has returned zero.
+@id("catalog_normalizer.batch.first-failure")
+fn first_failure(body: borrow Slice<u8>) -> usize
+{
+    scan_first_failure(body, false)
+}
+
 @id("catalog_normalizer.batch.first-enriched-failure")
 fn first_enriched_failure(body: borrow Slice<u8>) -> usize
 {
-    let count = record_count(body);
-    let whole = body_too_long(body);
-    let many = !whole && count > 256usize;
-    let mut record = 0usize;
-    let mut start = 0usize;
-    let mut total = 0;
-    let mut failure = if whole { pack_failure(1usize, 0usize, 65536usize) } else { if many { pack_failure(1usize, 257usize, 0usize) } else { 0usize } };
-    let mut scanning = failure == 0usize && record < count;
-    while scanning {
-        let end = line_end(body, start);
-        let regular = record_failure(body, record, start, end, total);
-        let line = byte_range(body, start, end);
-        let id = if regular == 0usize { record_id_value(line) } else { 0usize };
-        let provider = if regular == 0usize { enrichment_outcome(line, id) } else { 0usize };
-        failure = if regular != 0usize { regular } else { if enrichment_terminal(provider) { pack_failure(enrichment_failure_category(provider), record + 1usize, id) } else { 0usize } };
-        total = if failure == 0usize { total_after(total, valid_record_quantity(body, start, end)) } else { total };
-        record = if failure == 0usize { record + 1usize } else { count };
-        start = end + 1usize;
-        scanning = failure == 0usize && record < count;
-        scanning
-    }
-    failure
+    scan_first_failure(body, true)
 }

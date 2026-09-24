@@ -381,6 +381,37 @@ fn enriched_response_literals_match_the_independent_oracle() {
 }
 
 #[test]
+fn published_256_record_boundary_agrees_with_independent_oracle() {
+    let case = published_cases()
+        .iter()
+        .find(|case| case.name == "records-count-256-boundary-success")
+        .expect("published 256-record boundary case");
+    let records = case
+        .input
+        .split(|byte| *byte == b'\n')
+        .filter(|record| !record.is_empty())
+        .count();
+    assert_eq!(records, 256);
+    assert!(!case.enriched);
+    let root = fixture();
+    project::with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
+        let actual = evaluate_resolved_owned_data(
+            snapshot.test_program(),
+            "catalog_normalizer.app.normalize",
+            &case.input,
+            MAX_STEPS_LIMIT,
+        )?;
+        assert_eq!(
+            actual.outcome,
+            OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(case.expected.clone())),
+            "the 256-record boundary must match the independent oracle"
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
 fn batch_boundaries_and_string_normalization_agree_across_backends() {
     let root = fixture();
     for source in SOURCE_FILES {
@@ -413,11 +444,37 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
     // only source-authored expected literals.
     let published = published_cases();
     let maximal_body = maximal_output_body();
+    let final_start = maximal_body
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .unwrap()
+        + 1;
+    assert!(
+        final_start + 6 > 10_000 && maximal_body[final_start..].starts_with(b"{\"id\":\""),
+        "maximal valid case must exercise a five-digit absolute id offset"
+    );
     let maximal_plain = run_oracle_with(&maximal_body, false);
     let maximal_enriched = run_oracle_with(&maximal_body, true);
+    assert_eq!(maximal_enriched.len(), OUTPUT_CAPACITY);
+    assert_eq!(
+        maximal_plain.len(),
+        MAX_REQUEST_BYTES + SUCCESS_ENVELOPE_MAX_BYTES
+    );
     let scratch = ScratchRoot::new();
     project::with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
         for case in published {
+            if case.name == "records-count-256-boundary-success" {
+                let lines = case
+                    .input
+                    .split(|byte| *byte == b'\n')
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>();
+                assert_eq!(lines.len(), 256, "published 256-record fixture shape");
+                assert!(
+                    lines.iter().all(|line| line.starts_with(b"{\"id\": ")),
+                    "published 256-record fixture must exercise first-key id lookup"
+                );
+            }
             let function = if case.enriched {
                 "catalog_normalizer.app.normalize-enriched"
             } else {
@@ -436,6 +493,189 @@ fn batch_boundaries_and_string_normalization_agree_across_backends() {
                 case.name
             );
         }
+        let single = b"{\"id\":\"one\",\"label\":\"l\",\"quantity\":1}\n";
+        for (name, input, enriched) in [
+            ("empty-enriched-terminal", &b""[..], true),
+            ("one-plain-terminal", &single[..], false),
+            ("one-enriched-terminal", &single[..], true),
+            (
+                "empty-label-plain-terminal",
+                &b"{\"id\":\"one\",\"label\":\"\",\"quantity\":1}\n"[..],
+                false,
+            ),
+            (
+                "trimmed-empty-label-enriched-terminal",
+                &b"{\"id\":\"one\",\"label\":\" \\t \",\"quantity\":1}\n"[..],
+                true,
+            ),
+            (
+                "escaped-label-enriched-terminal",
+                &b"{\"id\":\"one\",\"label\":\"\\u0001x\",\"quantity\":1}\n"[..],
+                true,
+            ),
+            (
+                "named-escaped-label-plain-terminal",
+                &b"{\"id\":\"one\",\"label\":\"line\\nnext\",\"quantity\":1}\n"[..],
+                false,
+            ),
+            (
+                "quote-backslash-label-plain-terminal",
+                &b"{\"id\":\"one\",\"label\":\"q\\\"\\\\z\",\"quantity\":1}\n"[..],
+                false,
+            ),
+            (
+                "unicode-escaped-label-enriched-terminal",
+                &b"{\"id\":\"one\",\"label\":\"caf\\u00e9\",\"quantity\":1}\n"[..],
+                true,
+            ),
+            (
+                "surrogate-label-enriched-terminal",
+                &b"{\"id\":\"one\",\"label\":\"\\ud83d\\ude00\",\"quantity\":1}\n"[..],
+                true,
+            ),
+            (
+                "raw-utf8-label-plain-terminal",
+                "{\"id\":\"one\",\"label\":\"café\",\"quantity\":1}\n".as_bytes(),
+                false,
+            ),
+            (
+                "reordered-quantity-fallback",
+                &b"{\"quantity\":2,\"id\":\"one\",\"label\":\"l\"}\n"[..],
+                false,
+            ),
+            (
+                "spaced-quantity-suffix-fallback",
+                &b"{\"id\":\"one\",\"label\":\"l\",\"quantity\": 2 }\n"[..],
+                true,
+            ),
+        ] {
+            let function = if enriched {
+                "catalog_normalizer.app.normalize-enriched"
+            } else {
+                "catalog_normalizer.app.normalize"
+            };
+            let expected = run_oracle_with(input, enriched);
+            let actual = evaluate_resolved_owned_data(
+                snapshot.test_program(),
+                function,
+                input,
+                MAX_STEPS_LIMIT,
+            )?;
+            assert_eq!(
+                actual.outcome,
+                OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(expected)),
+                "{name} disagreed with the independent oracle"
+            );
+        }
+        // Exercise the duplicate walk at its late-byte boundary and through
+        // both decoded escape paths. These use the same admitted application
+        // entrypoint and independent oracle as the published corpus.
+        let prefix = "x".repeat(63);
+        let late_difference = format!(
+            "{{\"id\":\"{prefix}a\",\"label\":\"l\",\"quantity\":1}}\n{{\"id\":\"{prefix}b\",\"label\":\"l\",\"quantity\":1}}\n"
+        );
+        let overlong_id = "x".repeat(65);
+        let overlong_input = format!(
+            "{{\"id\":\"{overlong_id}\",\"label\":\"l\",\"quantity\":1}}\n"
+        );
+        for (name, input, category) in [
+            ("late-64-byte-difference", late_difference.into_bytes(), None),
+            (
+                "plain-65-byte-id-rejected",
+                overlong_input.into_bytes(),
+                Some("oversized_input"),
+            ),
+            (
+                "unicode-escape-equals-raw",
+                "{\"id\":\"caf\\u00e9\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"café\",\"label\":\"l\",\"quantity\":1}\n"
+                    .as_bytes()
+                    .to_vec(),
+                Some("duplicate_id"),
+            ),
+            (
+                "surrogate-pair-equals-raw",
+                "{\"id\":\"\\uD83D\\uDE00\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"😀\",\"label\":\"l\",\"quantity\":1}\n"
+                    .as_bytes()
+                    .to_vec(),
+                Some("duplicate_id"),
+            ),
+            (
+                "reordered-spaced-id-fallback",
+                "{ \"label\":\"l\", \"quantity\":1, \"id\":\"same\"}\n{\"id\":\"same\",\"label\":\"l\",\"quantity\":1}\n"
+                    .as_bytes()
+                    .to_vec(),
+                Some("duplicate_id"),
+            ),
+            (
+                "late-duplicate-multidigit-offset",
+                "{\"id\":\"first\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"second\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"third\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"first\",\"label\":\"l\",\"quantity\":1}\n"
+                    .as_bytes()
+                    .to_vec(),
+                Some("duplicate_id"),
+            ),
+            (
+                "escaped-id-key-stays-schema",
+                "{\"\\u0069d\":\"a\",\"label\":\"l\",\"quantity\":1}\n"
+                    .as_bytes()
+                    .to_vec(),
+                Some("schema"),
+            ),
+            (
+                "malformed-key-precedes-schema",
+                "{\"i\\q\":\"a\",\"label\":\"l\",\"quantity\":1}\n"
+                    .as_bytes()
+                    .to_vec(),
+                Some("malformed_json"),
+            ),
+            (
+                "duplicate-quantity-key-precedes-suffix-lookup",
+                "{\"id\":\"a\",\"quantity\":1,\"label\":\"l\",\"quantity\":2}\n"
+                    .as_bytes()
+                    .to_vec(),
+                Some("schema"),
+            ),
+            (
+                "duplicate-precedes-total-overflow",
+                "{\"id\":\"same\",\"label\":\"l\",\"quantity\":9223372036854775807}\n{\"id\":\"same\",\"label\":\"l\",\"quantity\":1}\n"
+                    .as_bytes()
+                    .to_vec(),
+                Some("duplicate_id"),
+            ),
+        ] {
+            let expected = run_oracle_with(&input, false);
+            if let Some(category) = category {
+                let response: serde_json::Value = serde_json::from_slice(&expected).unwrap();
+                assert_eq!(response["category"], category, "oracle category for {name}");
+            }
+            let actual = evaluate_resolved_owned_data(
+                snapshot.test_program(),
+                "catalog_normalizer.app.normalize",
+                &input,
+                MAX_STEPS_LIMIT,
+            )?;
+            assert_eq!(
+                actual.outcome,
+                OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(expected)),
+                "catalog-normalizer application disagreed with the oracle for {name}"
+            );
+        }
+        let denied_input = b"{\"id\":\"widget-1\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"blocked-vendor\",\"label\":\"l\",\"quantity\":1}\n{\"id\":\"later\",\"label\":\"l\",\"quantity\":1}\n";
+        let denied_expected = run_oracle_with(denied_input, true);
+        let denied_response: serde_json::Value =
+            serde_json::from_slice(&denied_expected).unwrap();
+        assert_eq!(denied_response["category"], "provider_denied");
+        assert_eq!(denied_response["record_index"], 1);
+        let denied_actual = evaluate_resolved_owned_data(
+            snapshot.test_program(),
+            "catalog_normalizer.app.normalize-enriched",
+            denied_input,
+            MAX_STEPS_LIMIT,
+        )?;
+        assert_eq!(
+            denied_actual.outcome,
+            OwnedDataEvaluationOutcome::Returned(OwnedDataValue::Bytes(denied_expected)),
+            "terminal provider failure after an accepted id must win before a later record"
+        );
         for (function, expected) in [
             ("catalog_normalizer.app.normalize", maximal_plain),
             (

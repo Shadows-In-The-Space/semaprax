@@ -216,11 +216,7 @@ fn quantity_or(line: borrow Slice<u8>, start: usize, fallback: i64) -> i64
 fn structure_and_key_problem(line: borrow Slice<u8>) -> usize
 {
     let structural = structural_problem(line);
-    let decoded_key_fault = if structural == 0usize { key_decode_problem(line) } else { byte_len(line) + 1usize };
-    let key_decode_failure = if decoded_key_fault <= byte_len(line) { pack_problem(3usize, decoded_key_fault) } else { 0usize };
-    let keys = if key_decode_failure == 0usize && structural == 0usize { key_problem(line) } else { byte_len(line) + 1usize };
-    let key_failure = if keys <= byte_len(line) { pack_problem(4usize, keys) } else { 0usize };
-    if structural != 0usize { structural } else { if key_decode_failure != 0usize { key_decode_failure } else { key_failure } }
+    if structural != 0usize { structural } else { let decoded_key_fault = key_decode_problem(line); if decoded_key_fault <= byte_len(line) { pack_problem(3usize, decoded_key_fault) } else { let keys = key_problem(line); if keys <= byte_len(line) { pack_problem(4usize, keys) } else { 0usize } } }
 }
 
 @id("catalog_normalizer.record.id-field-problem")
@@ -245,9 +241,7 @@ fn quantity_field_problem(line: borrow Slice<u8>) -> usize
 fn value_problem(line: borrow Slice<u8>) -> usize
 {
     let id = id_field_problem(line);
-    let label = if id == 0usize { label_field_problem(line) } else { 0usize };
-    let quantity = if id == 0usize && label == 0usize { quantity_field_problem(line) } else { 0usize };
-    if id != 0usize { id } else { if label != 0usize { label } else { quantity } }
+    if id != 0usize { id } else { let label = label_field_problem(line); if label != 0usize { label } else { quantity_field_problem(line) } }
 }
 
 @id("catalog_normalizer.record.record-problem")
@@ -262,7 +256,12 @@ fn record_problem(line: borrow Slice<u8>) -> usize
 @id("catalog_normalizer.record.id-value")
 fn id_value(line: borrow Slice<u8>) -> usize
 {
-    field_value(line, 1usize)
+    // After record_problem accepts the line, an exact first id key needs
+    // only the whitespace after its colon located. Other key orders and
+    // whitespace before the key retain the general member walker.
+    let first_key = at_in(line, 0usize, 123u8, 123u8) && at_in(line, 1usize, 34u8, 34u8) && at_in(line, 2usize, 105u8, 105u8) && at_in(line, 3usize, 100u8, 100u8) && at_in(line, 4usize, 34u8, 34u8) && at_in(line, 5usize, 58u8, 58u8);
+    let compact = if first_key { skip_space(line, 6usize) } else { byte_len(line) + 1usize };
+    if first_key && at_in(line, compact, 34u8, 34u8) { compact } else { field_value(line, 1usize) }
 }
 
 @id("catalog_normalizer.record.quantity-value")
@@ -284,9 +283,16 @@ fn label_value(line: borrow Slice<u8>) -> usize
 @id("catalog_normalizer.record.id-pair-emitted")
 fn id_pair_emitted(input: borrow Slice<u8>, opening: bool, left_index: usize, right_index: usize, left_width: usize, right_width: usize, left_part: usize, right_part: usize, count: usize) -> bool
 {
-    let first = emit_at(input, left_index, left_part);
-    let second = emit_at(input, right_index, right_part);
-    opening && !at_in(input, left_index, 34u8, 34u8) && !at_in(input, right_index, 34u8, 34u8) && count < max_id_bytes() && left_width > 0usize && right_width > 0usize && first >= 0 && first == second
+    let ready = opening && !at_in(input, left_index, 34u8, 34u8) && !at_in(input, right_index, 34u8, 34u8) && count < max_id_bytes() && left_width > 0usize && right_width > 0usize;
+    if !ready { false } else { let first = emit_at(input, left_index, left_part); let second = emit_at(input, right_index, right_part); first >= 0 && first == second }
+}
+
+// A rejected byte pair never advances either cursor. Keeping this branch in
+// one scalar callee avoids multiplying the caller's cleanup replay paths.
+@id("catalog_normalizer.record.id-advanced-cursor")
+fn id_advanced_cursor(input: borrow Slice<u8>, cursor: usize, width: usize, emitted: bool) -> usize
+{
+    if !emitted { cursor } else { if cursor % 4usize + 1usize >= width { token_end(input, cursor / 4usize) * 4usize } else { cursor + 1usize } }
 }
 
 @id("catalog_normalizer.record.id-pair-step")
@@ -303,18 +309,49 @@ fn id_pair_step(input: borrow Slice<u8>, left: usize, right: usize, left_cursor:
     let left_width = emit_len(input, left_index);
     let right_width = emit_len(input, right_index);
     let emitted = id_pair_emitted(input, opening, left_index, right_index, left_width, right_width, left_part, right_part, count);
-    let next_left = if left_part + 1usize >= left_width { token_end(input, left_index) * 4usize } else { left_cursor + 1usize };
-    let next_right = if right_part + 1usize >= right_width { token_end(input, right_index) * 4usize } else { right_cursor + 1usize };
-    let next_valid = !is_failure(input, next_left / 4usize) && !is_failure(input, next_right / 4usize);
+    let advanced_left = id_advanced_cursor(input, left_cursor, left_width, emitted);
+    let advanced_right = id_advanced_cursor(input, right_cursor, right_width, emitted);
+    let next_valid = emitted && !is_failure(input, advanced_left / 4usize) && !is_failure(input, advanced_right / 4usize);
     let status = if opening && closed && count > 0usize { 2usize } else { if emitted && next_valid { 1usize } else { 0usize } };
-    let advanced_left = if emitted { next_left } else { left_cursor };
-    let advanced_right = if emitted { next_right } else { right_cursor };
     let advanced_count = if emitted { count + 1usize } else { count };
     ((advanced_left * 524300usize + advanced_right) * 65usize + advanced_count) * 4usize + status
 }
 
 @id("catalog_normalizer.record.same-id")
 fn same_decoded_id(input: borrow Slice<u8>, left: usize, right: usize) -> bool
+{
+    let plain = id_plain_comparison(input, left, right);
+    if plain == 2usize { true } else { if plain == 1usize { false } else { decoded_id_comparison(input, left, right) } }
+}
+
+// Both inputs have already passed record_problem. An aligned ordinary byte
+// mismatch is final, while any escape needs the decoder from the beginning.
+// Status: 0 decoded fallback, 1 unequal or missing, 2 equal.
+@id("catalog_normalizer.record.id-plain-comparison")
+fn id_plain_comparison(input: borrow Slice<u8>, left: usize, right: usize) -> usize
+{
+    let opening = at_in(input, left, 34u8, 34u8) && at_in(input, right, 34u8, 34u8);
+    let mut offset = 1usize;
+    let mut status = if opening { 3usize } else { 1usize };
+    while status == 3usize {
+        status = id_plain_step(input, left + offset, right + offset, offset);
+        offset = offset + 1usize;
+        status == 3usize
+    }
+    status
+}
+
+// Status 3 continues the raw walk; all other statuses terminate it.
+@id("catalog_normalizer.record.id-plain-step")
+fn id_plain_step(input: borrow Slice<u8>, left_index: usize, right_index: usize, offset: usize) -> usize
+{
+    let first = match byte_get(input, left_index) { Option::Some { value } => value, Option::None {} => 0u8, };
+    let second = match byte_get(input, right_index) { Option::Some { value } => value, Option::None {} => 0u8, };
+    if first == 92u8 || second == 92u8 { 0usize } else { if first != second { 1usize } else { if first == 34u8 { if offset > 1usize && offset <= max_id_bytes() + 1usize { 2usize } else { 1usize } } else { if first < 32u8 || offset > max_id_bytes() { 1usize } else { 3usize } } } }
+}
+
+@id("catalog_normalizer.record.id-decoded-comparison")
+fn decoded_id_comparison(input: borrow Slice<u8>, left: usize, right: usize) -> bool
 {
     // CNORM-014 calls this for every prior accepted id.  Do not pre-measure
     // both tokens and then restart the decoder for equality: a single pair

@@ -99,6 +99,16 @@ fn lengths() -> bool
     scan_string(source, 0usize, false) == 6usize && scan_string(source, 0usize, true) == 3usize && decoded_len(source, 0usize) == 3usize && decoded_size(source) == 3usize && decoded_len(emoji, 0usize) == 4usize && decoded_size(emoji) == 4usize && capacity() == 256usize
 }
 
+@id("std.data.json.dec.tests.emission-dispatch")
+fn emission_dispatch() -> bool
+{
+    let raw = [97u8, 92u8, 117u8, 48u8, 48u8, 48u8, 49u8, 255u8, 31u8];
+    let source = array_as_slice(raw);
+    let invalid_escape = [92u8, 113u8];
+    let invalid = array_as_slice(invalid_escape);
+    emit_at(source, 0usize, 0usize) == 97 && emit_at(source, 0usize, 1usize) == -1 && emit_at(source, 1usize, 0usize) == 1 && emit_at(source, 1usize, 1usize) == -1 && emit_at(source, 7usize, 0usize) == 255 && emit_at(source, 8usize, 0usize) == -1 && emit_at(source, 9usize, 0usize) == -1 && emit_at(invalid, 0usize, 0usize) == -1
+}
+
 @id("std.data.json.dec.tests.buffer")
 fn buffer() -> bool
 {
@@ -132,5 +142,5 @@ fn token_equality() -> bool
 @id("std.data.json.dec.tests.main")
 fn main() -> i64
 {
-    if primitives() && hex() && escapes() && surrogates() && lone_surrogate() && encoding() && conversion() && tokens() && lengths() && buffer() && buffer_unicode() && token_equality() { 0 } else { 1 }
+    if primitives() && hex() && escapes() && surrogates() && lone_surrogate() && encoding() && conversion() && tokens() && lengths() && emission_dispatch() && buffer() && buffer_unicode() && token_equality() { 0 } else { 1 }
 }

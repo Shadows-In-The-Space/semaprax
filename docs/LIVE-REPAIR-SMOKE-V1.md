@@ -7,17 +7,15 @@ claimed.
 
 Audience: operators running the repair workflow, and runtime integrators.
 
-The repair workflow's ordinary mode is offline. It observes a real failed
-check, obtains proposals from a fixture provider, previews a checked candidate
-and exports reviewable evidence, and it does all of that with no credential and
-no network. That path is owned by
+Ordinary repair runs offline: it observes a failed check, asks a fixture
+provider for proposals, previews a checked candidate, and exports reviewable
+evidence without credentials or network. That path is owned by
 [`crates/semaprax-toolchain/src/source_live_cli/repair.rs`](../crates/semaprax-toolchain/src/source_live_cli/repair.rs)
 and reached as `semaprax-full source-live repair run|resume <config.json>
 <checkpoint-dir>`.
 
-This document covers the one thing that path deliberately cannot do: spend real
-money against a real provider. That is gated behind an explicit operator act,
-and this contract is that gate.
+This document gates the separate live-provider path, where an explicit operator
+act can authorize spending real money.
 
 ## Why a gate rather than a flag
 

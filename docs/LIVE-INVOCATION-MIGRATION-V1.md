@@ -8,11 +8,10 @@ of the migration boundary this document adds around [Live Invocation
 Contract v1](LIVE-INVOCATION-CONTRACT-V1.md) and [Live Invocation
 Persistence v1](LIVE-INVOCATION-PERSISTENCE-V1.md).
 
-This document assumes the reader already knows both of those: the causal
-journal's record format and ordering rules, `kernel::run_live_invocation`'s
-fresh-start/resume/replay/uncertain-intent behavior, and how a journal is
-persisted and recovered across a process boundary. Everything below is
-additive to that contract, not a restatement of it.
+Read the linked invocation and persistence contracts first. They define the
+journal order, `kernel::run_live_invocation`'s fresh-start/resume/replay and
+uncertain-intent behavior, and cross-process recovery. This document adds
+migration; it does not restate those rules.
 
 ## What issue #115 asks for, and why it cannot live inside the kernel
 

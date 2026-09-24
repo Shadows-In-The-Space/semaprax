@@ -6,16 +6,14 @@ Status: implemented bounded traversal; **HOSTED GREEN** under the
 Audience: language users, compiler contributors, backend implementers, and
 workspace-service authors.
 
-This LANG-07 profile adds one consuming traversal form over the existing
-private scalar iterator protocol:
+LANG-07 adds one consuming loop over the private scalar iterator protocol:
 
 ```spx
 for own item in iterator { body }
 ```
 
-It is distinct from the frozen bounded-Vec traversal spelling `for item in
-values { body }`. The older syntax, cache bytes, lowering, and contracts retain
-their exact meaning.
+The frozen bounded-Vec form, `for item in values { body }`, remains separate.
+Its syntax, cache bytes, lowering, and contracts do not change.
 
 ## Admission and evaluation
 

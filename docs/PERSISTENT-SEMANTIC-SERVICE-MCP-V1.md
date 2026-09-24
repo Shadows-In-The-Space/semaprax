@@ -9,8 +9,8 @@ broader product completion remain separately gated.
 Audience: local MCP hosts, agent clients, compiler contributors, and reviewers
 of persistent semantic-service authority boundaries.
 
-This protocol exposes one already authenticated Persistent Incremental
-Semantic Workspace Service v1 to an MCP client. The exact command is:
+This protocol gives an MCP client access to one already authenticated
+Persistent Incremental Semantic Workspace Service v1. Run:
 
 ```text
 semaprax service <project> --mcp
@@ -24,13 +24,12 @@ transport.
 
 ## Framing and lifecycle
 
-The facade uses one UTF-8 JSON-RPC 2.0 object per LF-delimited MCP frame. The
-request bound is 64 MiB. The response bound is six times the existing 128 MiB
-inner service-response bound plus 4096 bytes, accounting for worst-case JSON
-string escaping and fixed MCP syntax. The complete response capacity is
-reserved before a tool dispatch, so a successful refresh cannot become an
-unreportable post-mutation overflow. This is a byte bound, not a general heap or
-allocator-failure claim.
+Each LF-delimited MCP frame holds one UTF-8 JSON-RPC 2.0 object. Requests are
+limited to 64 MiB. Responses are limited to six times the existing 128 MiB
+inner-service bound plus 4096 bytes for worst-case JSON escaping and MCP syntax.
+The facade reserves full response capacity before dispatch, so a successful
+refresh cannot overflow after mutation without a report. The limit bounds
+bytes, not general heap use or allocator failure.
 
 The schema identity is:
 

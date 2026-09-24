@@ -7,10 +7,9 @@ Audience: contributors verifying the clean-install journey described in
 
 ## Why this exists
 
-Every other case in `tests/quickstart_v1.rs` drives `CARGO_BIN_EXE_semaprax`,
-the dev-built binary from this checkout's own `cargo test`, and reads paths
-through `CARGO_MANIFEST_DIR` (this checkout). That proves the CLI grammar
-against the source tree; it does not prove the documented install route
+Other cases in `tests/quickstart_v1.rs` run the checkout's dev-built
+`CARGO_BIN_EXE_semaprax` and use its `CARGO_MANIFEST_DIR`. They verify CLI
+grammar against source, not whether the documented install command
 (`cargo install --locked --path .`) produces a binary that works away from
 this checkout, with no repository, prior package cache, or ambient home
 directory to fall back on.

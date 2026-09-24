@@ -7,11 +7,10 @@ conversations without redispatching recorded work") and its neighbours in the
 #108–#116 lane, and reviewers of the persistence/recovery boundary this
 document adds around [Live Invocation Contract v1](LIVE-INVOCATION-CONTRACT-V1.md).
 
-This document assumes the reader already knows Live Invocation Contract v1:
-the causal journal's record format, its ordering rules, and
-`kernel::run_live_invocation`'s fresh-start/resume/replay/uncertain-intent
-behavior. Everything below is additive to that contract, not a restatement
-of it.
+Read Live Invocation Contract v1 first for journal format and order and
+`kernel::run_live_invocation`'s fresh-start/resume/replay and uncertain-intent
+behavior. This document adds persistence and recovery; it does not redefine
+the kernel.
 
 ## What issue #114 asked for, and what already existed
 

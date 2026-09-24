@@ -5,9 +5,9 @@ Audience: language users, tool authors, and compiler contributors.
 Status: implemented narrow Core Wasm slice; the full cross-target vertical
 contract remains open
 
-`semaprax.wasm-owned.v1` is the first public WebAssembly execution path for
-SEMAPRAX uniquely owned resources. It is intentionally smaller than the final
-RFC 0003 ABI. Unsupported resource shapes still fail with `SPX-W111`.
+`semaprax.wasm-owned.v1` is the first public WebAssembly path for uniquely
+owned SEMAPRAX resources. It is narrower than the final RFC 0003 ABI;
+unsupported resource shapes still fail with `SPX-W111`.
 
 ## Admission
 

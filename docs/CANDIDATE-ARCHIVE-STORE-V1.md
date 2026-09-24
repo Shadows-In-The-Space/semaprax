@@ -5,12 +5,12 @@ Status: implemented bounded Unix store; **HOSTED GREEN** under the
 
 Audience: embedding hosts, compiler contributors, and agent workflow integrators.
 
-This store persists one complete, source-backed `ProjectCandidateArchive` as an
-immutable file under an explicitly selected host root. It is separate from the
-Project Revision Store and changes neither its format nor its authority. No
-root is discovered from a manifest, current directory, environment, archive,
-candidate, or protocol request. Stored bytes are recovery inputs, never trusted
-HIR, source-commit approval, or evidence of current source admission.
+The store writes a complete, source-backed `ProjectCandidateArchive` as an
+immutable file under a host-selected root. It is separate from the Project
+Revision Store and changes neither its format nor authority. It never discovers
+a root from a manifest, working directory, environment, archive, candidate, or
+request. Stored bytes are recovery inputs—not trusted HIR, source-commit
+approval, or proof that current source is admitted.
 
 The additive [typed-draft persistence](DRAFT-ARCHIVE-PERSISTENCE-V1.md) APIs
 share this root format and its aggregate limits. A root may contain complete

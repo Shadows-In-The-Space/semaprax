@@ -8,11 +8,11 @@ separately gated.
 
 Audience: compiler contributors and hosts managing trusted compiler installations.
 
-This opt-in host store preserves compiler-created checked-module HIR across
-processes. A fresh process authenticates the complete private cache, parses its
-canonical source again, and rebuilds the linked Project and graph while reusing
-checked module HIR. This is actual resolver reuse, with bounded private decoding;
-it is not a portable source archive or a general incremental compiler.
+This opt-in host store keeps compiler-created checked-module HIR across
+processes. A fresh process authenticates the private cache, reparses canonical
+source, and rebuilds the linked Project and graph while reusing checked HIR.
+That reuses resolver work with bounded private decoding; it is neither a
+portable source archive nor a general incremental compiler.
 
 ## Host surface
 

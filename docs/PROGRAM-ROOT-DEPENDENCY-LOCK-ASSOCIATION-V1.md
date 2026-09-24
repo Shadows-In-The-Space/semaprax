@@ -9,10 +9,11 @@ broader product completion remain separately gated.
 Audience: compiler contributors, package-tooling authors, semantic-service
 implementers, and reviewers of exact ProgramRoot dependency associations.
 
-This contract associates already-admitted Project Lock v1 bytes with one
-[ProgramRoot v1](PROGRAM-ROOT-V1.md). It leaves the workspace
-`dependency_lock_digest` and Project Lock v1's legacy `program_root` field
-unchanged.
+This contract binds exact admitted Project Lock v1 bytes to one
+[ProgramRoot v1](PROGRAM-ROOT-V1.md). It leaves two older identities unchanged:
+`dependency_lock_digest` still hashes the canonical workspace's local admitted
+dependency closure, and Project Lock v1's legacy `program_root` field still
+names the `ProjectRevision`.
 
 ## Derivation
 

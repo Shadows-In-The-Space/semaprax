@@ -8,8 +8,8 @@ Audience: language users, tool authors, and compiler contributors.
 
 ### Historical evidence record
 
-The following original record describes its stated subjects and host scope,
-not the current release evidence ceiling.
+This historical record applies only to its stated subjects and host scope. It
+is not the current release evidence ceiling.
 
 implemented as a bounded public Core-Wasm and generated JavaScript/
 TypeScript package profile. Local executable evidence covers admission,

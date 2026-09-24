@@ -7,12 +7,11 @@ The earlier five-case local witness retains its original execution scope.
 Audience: compiler contributors, coding agents, CLI users, and reviewers of
 version-matched installed guidance.
 
-Installed Agent Guidance v1 packages a closed set of descriptive resources
-inside the `semaprax` binary. It lets an agent obtain compiler-version-matched
-language, graph, standard-library, package, effect, and workflow guidance
-without locating a checkout or consulting a network service. It also exposes
-the exact eight operations installed by Universal Semantic Query v1 and the
-closed four-operation Universal Semantic Transaction v1 algebra.
+The `semaprax` binary includes a closed set of compiler-version-matched guides
+for language, graph, standard library, packages, effects, and workflows. Agents
+need neither a checkout nor a network service to read them. The set also lists
+Universal Semantic Query v1's exact eight operations and Universal Semantic
+Transaction v1's closed four-operation algebra.
 
 These documents are data. They are not compiler input, executable
 instructions, binary attestation, live service discovery, or a capability

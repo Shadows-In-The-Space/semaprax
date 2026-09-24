@@ -2,10 +2,12 @@
 
 Audience: runtime integrators and compiler contributors.
 
-Status: **HOSTED GREEN** for the bounded v0.4.0 durable continuation.
-This adds durable continuation to [State Migration v2](AGENT-STATE-MIGRATION-V2.md).
-The [release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
-local-only and hosted-pending evidence classification.
+Migration v3 adds a durable handoff and trusted-store recovery to
+[State Migration v2](AGENT-STATE-MIGRATION-V2.md). The destination commits its
+initial migrated State before running a stage or handler.
+
+Status: **HOSTED GREEN** for bounded v0.4.0 continuation under the
+[release baseline](RELEASE-0.4.0-STATUS.md).
 
 ## Handoff and authority
 

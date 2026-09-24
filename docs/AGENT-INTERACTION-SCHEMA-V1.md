@@ -1,38 +1,23 @@
 # Agent Interaction Schema v1
 
-Audience: agent and tool authors consuming interaction schemas, and compiler contributors maintaining the derivation.
+Audience: agent and tool authors; compiler and runtime contributors.
 
-Status: **LOCAL** bounded implementation with an executable reference and
-focused regression corpus. This document specifies `semaprax.agent-
-interaction-schema.v1` (the derived canonical schema) and `semaprax.agent-
-interaction-value.v1` (one decoded value), implemented in
-`src/agent_interaction_schema/`.
+This page defines two documents for a checked Agent: the derived
+`semaprax.agent-interaction-schema.v1` and one decoded
+`semaprax.agent-interaction-value.v1`. It covers derivation and decoding, not
+moving a value into a running program.
 
-Audience: implementers of the fourteen open issues in the `agent-runtime`
-lane that consume a rich interaction schema, and reviewers of this bounded
-admission profile.
-
-This is issue #109 ("Derive bounded rich Agent interaction schemas from
-checked source"). It owns schema derivation and decoding only; runtime value
-transfer into an executing program is a separate, later concern.
+Status: **LOCAL** bounded implementation in `src/agent_interaction_schema/`,
+with an executable reference and focused regressions. This is issue #109.
 
 ## Why a new module instead of extending `agent_proposal`/`agent_observation`
 
-`agent_proposal` and `agent_observation` already derive a closed schema from
-one checked record/variant declaration, but only over **flat** fields: every
-field must be a direct scalar (`bool`/`i32`/`i64`/`u8`/`usize`/`string`); a
-field naming another record/variant type is rejected. That existing profile
-and its wire behavior are unchanged by this document — this module neither
-reads nor edits their internals.
-
-This document defines an independent, additional profile: a **bounded,
-nonrecursive** interaction schema whose fields may also be bounded `Bytes`
-or a reference to exactly one further monomorphic record/variant
-declaration, up to a bounded type-graph size and nesting depth. Where the
-two profiles overlap (direct scalar fields), this module uses the exact
-same wire conventions (bare `bool`, decimal-string integers, plain JSON
-strings) so a genuinely flat type produces a compatible value under either
-profile.
+`agent_proposal` and `agent_observation` accept only flat fields: direct
+`bool`/`i32`/`i64`/`u8`/`usize`/`string` values, not fields naming another
+record or variant. Their behavior is unchanged. This separate profile adds
+bounded `Bytes` and references to monomorphic records or variants in a bounded,
+acyclic type graph. Shared scalar fields keep the same wire encoding: bare
+booleans, decimal-string integers, and plain JSON strings.
 
 ## Scope
 
@@ -55,18 +40,12 @@ function value, an empty variant, or a non-persistent identity anywhere in
 the graph is refused with an explicit `SPX-Z202` diagnostic naming exactly
 which rule failed — never silently approximated as opaque JSON.
 
-**A variant case's fields go through the same rule as a record's fields**
-in this module's derivation and decoder, so a case may in principle carry
-`string`, `Bytes`, or a nested type reference. Today's `source_verify`
-independently enforces a narrower "Copy Variants v1" rule (`SPX-T215`):
-a case field must be a direct Copy scalar or, as of the additive Copy
-Aggregate Variant Payload v1, a direct, monomorphic, drop-free nested
-`record` (its own fields must recursively need no drop at all, so it can
-never itself reach an owned `Bytes` or `string`). That is a base compiler
-restriction this module does not relax or work around — it means a case's
-field is *practically* limited to a direct scalar or a Copy-only nested
-record until a future language revision admits `string` or an owned nested
-payload, without this module needing to change when that happens.
+The derivation and decoder apply the same field rules to records and variant
+cases. The base compiler still narrows variants with `SPX-T215`: a case field
+must be a direct Copy scalar or a direct, monomorphic, drop-free nested record.
+That record cannot reach owned `Bytes` or `string`. Thus this schema can
+describe richer cases, but checked source currently admits only scalars and
+Copy-only nested records until the language rule expands.
 
 **Non-goals**, matching the issue's bounded scope: resources, arbitrary
 recursion, raw pointers, borrowed values escaping the call, callbacks, and

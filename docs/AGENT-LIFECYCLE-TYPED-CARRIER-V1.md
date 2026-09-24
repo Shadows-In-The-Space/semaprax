@@ -1,17 +1,15 @@
 # Agent Lifecycle Typed Carrier v1
 
-Audience: runtime integrators wiring [Agent Interaction Schema v1](AGENT-INTERACTION-SCHEMA-V1.md)
-values into checked Agent lifecycle stages and effect operations, and
-compiler contributors maintaining the carrier.
+Audience: runtime integrators and compiler contributors.
 
-Status: **LOCAL** bounded implementation with an executable reference and
-focused regression corpus, implemented in `src/agent_lifecycle_typed_carrier/`.
+This carrier takes values decoded by [Agent Interaction Schema v1](AGENT-INTERACTION-SCHEMA-V1.md)
+through checked lifecycle stages and effect calls without losing their types.
+It uses the real interpreter's retained-call path; it does not change that path
+or the schema decoder.
 
-This is issue #110 ("Carry rich typed Proposal and effect values through the
-checked Agent lifecycle"). Its prerequisite, issue #109 (Agent Interaction
-Schema v1: the derived rich schema and its strict decoder), is accepted and
-unmodified by this work — this module reads it and the real checked
-interpreter's retained-call seam, and adds nothing to either.
+Status: **LOCAL** bounded implementation in `src/agent_lifecycle_typed_carrier/`,
+with an executable reference and focused regressions. This is issue #110;
+the prerequisite schema is issue #109.
 
 ## Outcome
 
@@ -26,31 +24,20 @@ edge.
 
 ## Why projection into `RetainedValue`, not a new value representation
 
-The checked interpreter's real owned-call seam
-(`crate::interpreter::retained_call`) already carries recursive, nominally
-identified `Record`/`Variant` values with real ownership and cleanup
-semantics — a strictly richer vocabulary than the flat, single-level scalar
-projection `agent_lifecycle::iterative::effects`'s `EffectScalar`/
-`EffectArgument`/`EffectResult` boundary uses today. That existing flat
-boundary is untouched and remains fully available; this module is additive.
+The interpreter's existing `crate::interpreter::retained_call` path already
+handles owned, nominal `Record` and `Variant` values. This module projects a
+decoded value into that path; it does not change the older flat
+`EffectScalar`/`EffectArgument`/`EffectResult` boundary.
 
 [`projection::to_retained`](../src/agent_lifecycle_typed_carrier/projection.rs)
-recursively projects one admitted `DecodedInteractionValue` into
-`RetainedValue`, walking the decoded value and its derivation `TypeGraph` in
-lockstep — the decoded value alone does not retain a nested field's nominal
-type identity, only the derivation graph does, so both are required to
-build a `RetainedRecord`/`RetainedVariant` correctly keyed by persistent
-stable identity. Every leaf and shape `retained_call` admits round-trips
-exactly: `bool`/`i32`/`i64`/`u8`/`usize`, owned `Bytes`, and bounded acyclic
-nested records/variants over exactly those leaves.
+walks the decoded value alongside its derivation `TypeGraph`. Both are needed:
+the value alone does not retain nested nominal identities. It round-trips
+`bool`/`i32`/`i64`/`u8`/`usize`, owned `Bytes`, and bounded acyclic nested
+records or variants over those leaves.
 
-**One leaf kind is structurally excluded.** `retained_call` deliberately has
-no owned-`String` carrier (owned UTF-8 stays on its own profile there); a
-decoded value carrying a `string` field is refused explicitly
-(`SPX-Z210`, `projection.string_unsupported`) rather than silently dropped,
-truncated, or re-encoded as bytes. This is the module's concrete instance of
-"a value that cannot be carried while preserving its type/ownership identity
-must be refused, never silently degraded."
+The retained-call path has no owned-`String` carrier. A decoded `string` field
+therefore fails explicitly with `SPX-Z210` / `projection.string_unsupported`;
+it is never dropped, truncated, or silently converted to bytes.
 
 ## Admission: `StageBinding`
 

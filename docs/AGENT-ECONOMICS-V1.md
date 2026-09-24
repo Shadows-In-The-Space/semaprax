@@ -1,9 +1,12 @@
 # Agent context economics v1
 
-Audience: agent and tool authors, plus compiler contributors.
+Audience: agent and tool authors; compiler contributors.
 
-Status: deterministic offline evidence for the current context contract. It is
-not a model-token, latency, answer-quality, or repository-scale benchmark.
+This offline benchmark measures how much checked context a fixed question
+returns. It does not measure model tokens, latency, answer quality, or a whole
+repository.
+
+Status: deterministic evidence for the current context contract.
 
 `semaprax context-benchmark <manifest>` evaluates checked maintenance questions
 from a strict tab-separated `semaprax.agent-context-benchmark.v1` manifest.

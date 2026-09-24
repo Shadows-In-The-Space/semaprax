@@ -1,12 +1,13 @@
 # Agent iterative lifecycle v2
 
-Status: **HOSTED GREEN** for the bounded v0.4.0 implementation.
+Audience: runtime integrators and compiler contributors.
 
-Audience: compiler contributors and runtime integrators.
+This lifecycle runs checked Agent stages in a bounded loop. The reducer alone
+chooses whether to continue, complete, suspend, or fail; suspension is data,
+not durable restart authority in this version.
 
-The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
-local-only evidence status. The admitted lifecycle and compatibility limits
-below are unchanged.
+Status: **HOSTED GREEN** under the [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
+That evidence update does not change the limits below.
 
 `agent_lifecycle::iterative::compile_agent_lifecycle_v2` binds the checked
 initialize, observe, authorize and reduce operations from an unchanged

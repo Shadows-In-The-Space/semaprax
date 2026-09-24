@@ -1,38 +1,30 @@
 # Agent Skill Bundle v1
 
-Status: **LOCAL** bounded implementation with an executable reference,
-regression corpus, and a pinned drift gate, implemented in
-`src/agent_skill_bundle.rs`. This is issue #196
-("Generate a version-matched Agent Skill bundle and simplify the public
-semantic workflow"). It is the second consumer of the shared
-`SEMANTIC-DISCOVERY` package foundation (issue #125,
-[Semantic Discovery v1](SEMANTIC-DISCOVERY-V1.md)): it composes that module's
-operation catalog rather than restating it.
+Audience: coding agents, SDK/MCP client authors, and compiler contributors.
 
-Audience: coding agents and SDK/MCP client authors who need one small,
-version-matched description of the exact supported workflow, without reading
-this repository, plus compiler contributors extending the bundle.
+The installed compiler generates this small, version-matched workflow bundle
+for coding agents and SDK/MCP clients. It reuses the operation catalog from
+[Semantic Discovery v1](SEMANTIC-DISCOVERY-V1.md) instead of maintaining a
+second hand-written list.
+
+Status: **LOCAL** bounded implementation in `src/agent_skill_bundle.rs`, with
+an executable reference, regression corpus, and pinned drift gate. This is
+issue #196 and builds on issue #125.
 
 ## Why a bundle instead of a hand-written skill file
 
-A hand-authored Markdown or JSON "skill" file for an agent tool drifts from
-the compiler the moment either changes independently. This issue's whole
-point is that the bundle must be **generated** from the installed compiler's
-real, compiled-in capabilities and must **fail closed** the moment it no
-longer matches them — not describe a workflow the installed compiler cannot
-actually perform.
+A hand-written skill file can drift from the installed compiler. This bundle
+is generated from compiled-in capabilities and fails closed if they disagree.
 
-`generate_agent_skill_bundle()` is a pure function of the compiled-in
-toolchain: `CARGO_PKG_VERSION`, the optional `SEMAPRAX_BUILD_COMMIT`, the
-live [`installed_query_capabilities`](INSTALLED-AGENT-GUIDANCE-V1.md) and
-[installed diagnostic catalog](INSTALLED-DIAGNOSTICS-V1.md) digests, the
-bundled `std/catalog.json` bytes, and the closed
-[`SEMANTIC_DISCOVERY_OPERATIONS`](SEMANTIC-DISCOVERY-V1.md) catalog. It takes
-no source file: unlike `semantic_discovery::generate_discovery_manifest`,
-which binds one module's exact revision, this bundle describes the
-**installed compiler itself**, not any one `.spx` file, so there is nothing
-to bind to a file revision. Two calls in the same build always produce
-byte-identical output (`tests::generation_is_byte_identical_on_repetition`).
+`generate_agent_skill_bundle()` depends only on `CARGO_PKG_VERSION`, optional
+`SEMAPRAX_BUILD_COMMIT`, the live
+[`installed_query_capabilities`](INSTALLED-AGENT-GUIDANCE-V1.md) and
+[diagnostic catalog](INSTALLED-DIAGNOSTICS-V1.md) digests, bundled
+`std/catalog.json`, and closed
+[`SEMANTIC_DISCOVERY_OPERATIONS`](SEMANTIC-DISCOVERY-V1.md). Unlike a discovery
+manifest, it describes the installed compiler, not a source revision. Repeated
+calls in one build produce identical bytes
+(`tests::generation_is_byte_identical_on_repetition`).
 
 ## The envelope: `semaprax.agent-skill.v1`
 

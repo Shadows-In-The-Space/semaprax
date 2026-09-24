@@ -12,8 +12,10 @@ format: `Unreleased` then release buckets, grouped by impact.
   execution of restricted-token child launch, job limit/membership, scratch
   DACL, descendant refusal, successful settlement, and timeout cancellation
   tests. The gate uses structural capsule fixture bytes with an unverified
-  signature; Windows runtime execution and signed-capsule admission remain
-  unclaimed.
+  signature, requires successful `taskkill /T` and direct Cargo PID absence on
+  timeout, and checks exact marker/scratch cleanup. Descendant quiescence is
+  not independently enumerated. Windows runtime execution and signed-capsule
+  admission remain unclaimed.
 
 - Re-pin exact Semantic Workspace Change and Operations artifact/evidence/receipt
   KATs to the expanded Project graph and serialized limits while retaining

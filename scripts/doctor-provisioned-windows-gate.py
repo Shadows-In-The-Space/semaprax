@@ -10,6 +10,7 @@ verify capsule signatures, so this gate is not sealed-input evidence.
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import platform
 import re
@@ -17,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 PACKAGE = "semaprax-native-rust-interop-platform-sys"
@@ -27,6 +29,8 @@ EXPECTED_TESTS = (
     "doctor::windows_confinement::primitive::tests::windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation",
 )
 REPO_ROOT = Path(__file__).resolve().parents[1]
+TERMINATION_TIMEOUT_SECONDS = 30
+RUNTIME_TIMEOUT_SECONDS = 600
 
 
 def precondition_failures(
@@ -125,6 +129,9 @@ def self_test():
     assert not libtest_failures(passing_output, 0)
     assert libtest_failures("test result: ok. 0 passed; 0 failed; 0 ignored; 10 filtered out", 0)
     assert libtest_failures(passing_output.replace(" ... ok", " ... ignored"), 0)
+    assert "taskkill" in windows_tree_kill_command(1234)
+    assert tasklist_contains_pid('"cargo.exe","1234","Console","1","2,000 K"', 1234)
+    assert not tasklist_contains_pid('"cargo.exe","1234","Console","1","2,000 K"', 4321)
     previous_parent = os.environ.get(PARENT_ENV)
     with tempfile.TemporaryDirectory(prefix="semaprax-windows-gate-self-test-") as directory:
         os.environ[PARENT_ENV] = directory
@@ -140,6 +147,68 @@ def self_test():
         assert "host operating system is not Windows" in parent_failures, parent_failures
     print("self-test passed: gate rejects missing host/provisioning and zero/ignored runtime tests; no runtime evidence produced")
     return 0
+
+
+def windows_tree_kill_command(pid):
+    return ["taskkill", "/T", "/F", "/PID", str(pid)]
+
+
+def tasklist_contains_pid(output, pid):
+    return any(len(row) > 1 and row[1] == str(pid) for row in csv.reader(output.splitlines()))
+
+
+def terminate_timed_out_process(process):
+    """Kill Cargo and its Windows process tree; fail if quiescence is unclear."""
+    if os.name != "nt":
+        process.kill()
+        process.wait(timeout=TERMINATION_TIMEOUT_SECONDS)
+        return
+
+    try:
+        killed = subprocess.run(
+            windows_tree_kill_command(process.pid),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=TERMINATION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"could not terminate timed-out Cargo process tree: {error}") from error
+    if killed.returncode != 0:
+        raise RuntimeError(
+            "taskkill failed to terminate timed-out Cargo process tree "
+            f"(status {killed.returncode}): {killed.stdout}"
+        )
+    try:
+        process.communicate(timeout=TERMINATION_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("timed-out Cargo process pipes did not settle after taskkill /T /F") from error
+    if process.poll() is None:
+        raise RuntimeError("timed-out Cargo process remained alive after taskkill /T /F")
+
+    # Require taskkill's tree-termination report and independently verify the
+    # direct Cargo PID is absent. Descendants reparented before verification
+    # are not independently enumerated here.
+    deadline = time.monotonic() + TERMINATION_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            probe = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {process.pid}", "/FO", "CSV", "/NH"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"could not verify Cargo PID termination: {error}") from error
+        if probe.returncode != 0:
+            raise RuntimeError(f"could not verify Cargo PID termination: {probe.stdout}")
+        if not tasklist_contains_pid(probe.stdout, process.pid):
+            return
+        time.sleep(0.1)
+    raise RuntimeError("could not prove the timed-out Cargo PID is absent")
 
 
 def run_gate():
@@ -166,24 +235,41 @@ def run_gate():
     print(f"provisioned Windows test parent: {parent}")
     print("running both named restricted-token, child-launch, job, ACL, and settlement tests")
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=REPO_ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=600,
-            check=False,
         )
-    except subprocess.TimeoutExpired as error:
-        output = error.stdout or ""
-        if isinstance(output, bytes):
-            output = output.decode("utf-8", errors="replace")
-        print(output, end="")
-        print("Windows confinement gate refusal: runtime suite exceeded 600 seconds", file=sys.stderr)
+    except OSError as error:
+        print(f"Windows confinement gate refusal: could not start Cargo: {error}", file=sys.stderr)
         return 1
-    print(completed.stdout, end="")
-    failures = libtest_failures(completed.stdout, completed.returncode)
+    try:
+        output, _ = process.communicate(timeout=RUNTIME_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        partial = error.stdout or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
+        print(partial, end="")
+        try:
+            terminate_timed_out_process(process)
+        except RuntimeError as termination_error:
+            print(
+                "Windows confinement gate refusal: runtime exceeded "
+                f"{RUNTIME_TIMEOUT_SECONDS}s and process-tree quiescence is unproven: "
+                f"{termination_error}",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"Windows confinement gate refusal: runtime suite exceeded {RUNTIME_TIMEOUT_SECONDS} seconds; "
+            "taskkill reported tree termination and the direct Cargo PID is absent",
+            file=sys.stderr,
+        )
+        return 1
+    print(output, end="")
+    failures = libtest_failures(output, process.returncode)
     if failures:
         for failure in failures:
             print(f"Windows confinement gate refusal: {failure}", file=sys.stderr)

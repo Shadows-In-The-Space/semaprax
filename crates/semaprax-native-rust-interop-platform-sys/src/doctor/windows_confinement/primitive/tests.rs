@@ -27,7 +27,18 @@ fn runtime_parent() -> PathBuf {
             "runtime parent must not be a reparse point"
         );
     }
+    assert_parent_empty(&parent);
     parent
+}
+
+fn assert_parent_empty(parent: &Path) {
+    assert!(
+        std::fs::read_dir(parent)
+            .expect("provisioned runtime parent can be enumerated")
+            .next()
+            .is_none(),
+        "owned runtime scratch was removed from the explicit parent"
+    );
 }
 
 fn test_capsule_body() -> Vec<u8> {
@@ -139,6 +150,7 @@ fn windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it()
     let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
         .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
     let marker = child._scratch.dir.join(TEST_MARKER);
+    let scratch_dir = child._scratch.dir.clone();
     wait_for_marker(&marker);
 
     let mut restricted_token = std::ptr::null_mut();
@@ -305,13 +317,19 @@ fn windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it()
         std::ptr::null_mut()
     );
 
+    let marker_contents = std::fs::read(&marker).unwrap();
+    std::fs::remove_file(&marker).expect("remove exact child marker before scratch settlement");
     let settled = settle(child, Duration::from_secs(30));
     assert_eq!(settled.status, Settlement::Completed);
     assert_eq!(
-        std::fs::read(marker).unwrap(),
-        b"active-process-limit-refused",
+        marker_contents, b"active-process-limit-refused",
         "the one-process job limit refuses a launched child's descendant"
     );
+    assert!(
+        !scratch_dir.exists(),
+        "settlement removes the now-empty per-child scratch directory"
+    );
+    assert_parent_empty(&parent);
 }
 
 #[test]
@@ -324,9 +342,17 @@ fn windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation(
     let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
         .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
     let marker = child._scratch.dir.join(TEST_MARKER);
+    let scratch_dir = child._scratch.dir.clone();
     wait_for_marker(&marker);
+    assert_eq!(std::fs::read(&marker).unwrap(), b"started");
+    std::fs::remove_file(&marker).expect("remove exact child marker before scratch settlement");
     let settled = settle(child, Duration::from_millis(100));
     assert_eq!(settled.status, Settlement::Cancelled);
+    assert!(
+        !scratch_dir.exists(),
+        "settlement removes the now-empty per-child scratch directory"
+    );
+    assert_parent_empty(&parent);
 }
 
 #[test]

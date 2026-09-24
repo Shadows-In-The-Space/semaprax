@@ -303,6 +303,14 @@ Those tests launch the owning test executable through `confined_spawn`, inspect
 the child's disabled privilege set and job membership/limits, read back the
 scratch DACL and its SID, exercise the one-process job limit, observe a
 successful settlement, and observe timeout cancellation.
+Each live test captures then removes its exact child marker before settlement,
+and requires the per-invocation scratch directory and provisioned parent to be
+empty afterward. If the 600-second gate timeout fires on Windows, the gate
+uses `taskkill /T /F` on Cargo's PID, waits for pipe/process settlement, and
+verifies Cargo's PID is absent; inability to verify the direct process exit is
+itself a gate failure. Descendants reparented before the post-kill process-list
+check are not independently enumerated, so this is not a general descendant
+quiescence proof.
 
 The test capsule is deliberately structural fixture data with a placeholder
 signature. The Windows primitive currently does not verify capsule signatures,

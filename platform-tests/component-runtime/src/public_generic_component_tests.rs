@@ -229,6 +229,36 @@ pub(super) fn run_public_generic_component_contract_failure_v1() -> HostResult<(
     for resource in live {
         resource.resource_drop(&mut store)?;
     }
+    let fresh = bytes.call_constructor(&mut store, &[3, 2, 1])?;
+    if bytes.call_read(&mut store, fresh)? != [3, 2, 1] {
+        return Err(failure(
+            "Component did not recover after resource saturation",
+        ));
+    }
+    fresh.resource_drop(&mut store)?;
+
+    // A constructor trap leaves this Wasmtime instance unable to run a guest
+    // destructor; isolate the cap control in a disposable Store, after the
+    // positive settlement and re-entry observations above have completed.
+    let mut saturated = Store::new(&engine, ());
+    saturated.set_fuel(1_000_000_000)?;
+    let saturated_bindings =
+        PublicGenericComponentV1::instantiate(&mut saturated, &component, &linker)?;
+    let saturated_bytes = saturated_bindings
+        .semaprax_public_generic_component_adapter()
+        .owned_bytes();
+    let mut saturated_live = Vec::with_capacity(64);
+    for index in 0..64 {
+        saturated_live.push(saturated_bytes.call_constructor(&mut saturated, &[index])?);
+    }
+    if saturated_bytes
+        .call_constructor(&mut saturated, &[255])
+        .is_ok()
+    {
+        return Err(failure("Component admitted a 65th live resource"));
+    }
+    drop(saturated_live);
+    drop(saturated);
     Ok(())
 }
 

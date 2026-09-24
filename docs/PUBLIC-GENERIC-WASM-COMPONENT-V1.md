@@ -123,7 +123,11 @@ derived Component against that revision, invokes it in Wasmtime 47.0.4, and
 requires the typed `contract-violation` result rather than a trap or success.
 It then keeps all 64 fixed-arena resources live at once, proving the two
 consumed input slots were settled before their replacements were constructed.
-This is local failure-path evidence, not cross-target parity.
+After dropping all 64, a new resource can be constructed, read and dropped.
+In a separate disposable Wasmtime Store, the 65th live constructor traps.
+The trapped instance is not claimed to support destructor re-entry; its Store
+is discarded. This is local failure-path and saturation evidence, not
+cross-target parity.
 
 Interpreter/native C11 `-O0`/`-O2`/Core-Wasm differential parity,
 stale descriptor/provider runtime bindings and broader resource/payload

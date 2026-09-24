@@ -97,8 +97,8 @@ owned-`Bytes` profile remain separate.
 
 ## Private lifecycle admission
 
-Zero is an absent-slot sentinel, never an issued provider, input, or result
-handle. Every handle-taking compiled-provider operation requires a nonzero
+Zero is an absent-slot sentinel, never admitted as a live provider, input, or
+result handle. Every handle-taking compiled-provider operation requires a nonzero
 handle equal to its live slot; an absent or stale identity returns status 8
 before checked invocation, copy-out, or release. This includes the initial
 state and state after release/close. It does not change the export inventory.

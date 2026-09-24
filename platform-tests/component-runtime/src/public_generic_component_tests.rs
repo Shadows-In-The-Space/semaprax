@@ -11,19 +11,21 @@ use super::{HostResult, failure, public_generic_component_v1_bindings::PublicGen
 // Independent known answers for the checked-in, explicitly acquired project.
 // Replay must not accept identity claims supplied by the emitter under test.
 const EXPECTED_PUBLIC_GENERIC_COMPONENT_DIGEST: &str =
-    "sha256:18a1e58a15962d9f902174f0523bd2c2a6d1a018f19c991cdede6c6d0f2002f7";
+    "sha256:789876c888fec9ebfe5779ae8c6408d9c801ecd94c55c8a6144b03573339198a";
 const EXPECTED_PUBLIC_GENERIC_DESCRIPTOR_DIGEST: &str =
     "sha256:52473587274784c87a62e109cd8640bf337306117f8fa943a6b930aeb6a75b1a";
 const EXPECTED_PUBLIC_GENERIC_PROVIDER_DIGEST: &str =
-    "sha256:0c85f2bd25e1275f8b58dc221b59cc4b23d8ab71018c279f60eaef3049548a84";
+    "sha256:da3094e1ecfed1eff85dc77d3173a9852ef6e1aeb8239b9093ce03b5ff518929";
 const EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256: &str =
-    "cdfe4b99cae0f8be9f5ec2edba799d803b07d26a7110f332b754f1d59a6ba2ed";
+    "77d1bf363d7b9ad50fa8d52cbc7c00d02b8bb79942c033e2377b18f0fde7b914";
 const EXPECTED_CONTRACT_FAILURE_COMPONENT_DIGEST: &str =
-    "sha256:e9fdff0086e61b2198ce245ff346e395afc1c7c25ba41d1035af2d54ceed602b";
+    "sha256:8d52ae69cd785a6c540423e57326d2763eccedc41cd1bf5514a209a972417466";
 const EXPECTED_CONTRACT_FAILURE_DESCRIPTOR_DIGEST: &str =
     "sha256:1cef20213f00dce6e80b9cc1eb977065018986bc5568263d6ab4cd04ba9c5d49";
 const EXPECTED_CONTRACT_FAILURE_PROVIDER_DIGEST: &str =
-    "sha256:4789dccf8b13280cebfd7029660a403ae0cdf3c52cff0acb72e14d3a6913ef8c";
+    "sha256:dab363ccdb1fe282b1888d414d96d34fd03b545d4b8ce44b0b68c9a675be497a";
+const EXPECTED_CONTRACT_FAILURE_COMPONENT_SHA256: &str =
+    "047882ae67d64fccdec671e95212c98dd62f8f9c88e6b64a83dd8ce46ceb5501";
 
 const MAX_LIST_BYTES: usize = 65_536;
 const REUSE_CYCLES: usize = 200;
@@ -192,6 +194,8 @@ pub(super) fn run_public_generic_component_contract_failure_v1() -> HostResult<(
         ))
     })?;
 
+    verify_contract_failure_component_bytes(artifact.bytes())?;
+
     let mut config = Config::new();
     config.wasm_component_model(true);
     config.consume_fuel(true);
@@ -259,6 +263,19 @@ pub(super) fn run_public_generic_component_contract_failure_v1() -> HostResult<(
     }
     drop(saturated_live);
     drop(saturated);
+    Ok(())
+}
+
+fn verify_contract_failure_component_bytes(bytes: &[u8]) -> HostResult<()> {
+    let mut raw_digest = String::with_capacity(64);
+    for byte in Sha256::digest(bytes) {
+        write!(raw_digest, "{byte:02x}")?;
+    }
+    if raw_digest != EXPECTED_CONTRACT_FAILURE_COMPONENT_SHA256 {
+        return Err(failure(
+            "contract-failure Component differs from pinned bytes",
+        ));
+    }
     Ok(())
 }
 

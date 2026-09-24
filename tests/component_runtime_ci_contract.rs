@@ -415,6 +415,8 @@ fn capability_and_dependency_policy_are_fail_closed() {
         "EXPECTED_PUBLIC_GENERIC_PROVIDER_DIGEST",
         "EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256",
         "raw_digest != EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256",
+        "raw_digest != EXPECTED_CONTRACT_FAILURE_COMPONENT_SHA256",
+        "verify_contract_failure_component_bytes(artifact.bytes())?",
         "retained_public_generic_component_transfers_owned_bytes_and_recovers_after_tamper",
         "retained_public_generic_component_contract_failure_settles_owned_inputs",
         "prove_closed_and_transferred_handles_refuse",
@@ -667,10 +669,15 @@ fn capability_and_dependency_policy_are_fail_closed() {
         },
     )
     .expect("contract-failure Component fixture must admit and emit");
+    let mut failure_raw_digest = String::with_capacity(64);
+    for byte in Sha256::digest(failure_artifact.bytes()) {
+        write!(failure_raw_digest, "{byte:02x}").unwrap();
+    }
     for (name, expected) in [
         ("COMPONENT_DIGEST", failure_artifact.digest()),
         ("DESCRIPTOR_DIGEST", failure_artifact.descriptor_digest()),
         ("PROVIDER_DIGEST", failure_artifact.provider_digest()),
+        ("COMPONENT_SHA256", failure_raw_digest.as_str()),
     ] {
         let declaration = format!("const EXPECTED_CONTRACT_FAILURE_{name}: &str =");
         let value = runner

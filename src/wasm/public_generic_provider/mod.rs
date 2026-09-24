@@ -1071,7 +1071,7 @@ fn body_provider_close(code: &mut Vec<u8>) {
     code.extend(body);
 }
 
-// Zero is the empty slot sentinel, never an issued provider/value/result.
+// Zero is the empty slot sentinel, never admitted as a live provider/value/result.
 // Equality alone would authenticate an absent handle after initialization or
 // release, including a zero-input call before any owned value was prepared.
 fn emit_live_handle_match(body: &mut Vec<u8>, local: u32, global: u32) {

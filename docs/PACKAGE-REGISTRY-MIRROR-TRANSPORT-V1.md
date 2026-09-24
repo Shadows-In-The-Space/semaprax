@@ -17,7 +17,9 @@ percent-escaped and control-character paths fail before dispatch.
 
 `Metadata` is limited to 1 MiB and `Artifact` to 16 MiB. Duplicate paths,
 empty batches, wrong digest syntax and bounds fail before the transport is
-called. Returned objects preserve caller request order, but no partial result
+called. The checked sum of all declared object bounds is at most 64 MiB, so the
+all-or-nothing returned batch cannot reserve a larger accepted payload than the
+held-generation ceiling. Returned objects preserve caller request order, but no partial result
 is returned: every requested response must be successful, remain at the exact
 requested URL, fit its bound and match its raw SHA-256. The module sends no
 caller-controlled headers, credentials, cookies, proxy selection or redirect
@@ -52,6 +54,6 @@ hosted-registry end-to-end result.
 
 `package_registry::mirror_transport::tests` owns four local cases: ordered
 metadata/artifact exact URL acquisition; invalid origin/path/duplicate/timeout
-pre-dispatch refusal; redirect, status, URL, size and digest hostile responses;
-and construction of the concrete native transport. The latter inspects no
+or aggregate bound pre-dispatch refusal; redirect, status, URL, size and digest
+hostile responses; and construction of the concrete native transport. The latter inspects no
 network and makes no availability claim.

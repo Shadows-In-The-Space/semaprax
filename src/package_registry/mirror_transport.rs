@@ -15,6 +15,9 @@ pub const MAX_MIRROR_PATH_BYTES: usize = 2_048;
 pub const MAX_MIRROR_OBJECTS: usize = 64;
 pub const MAX_MIRROR_METADATA_BYTES: usize = 1_048_576;
 pub const MAX_MIRROR_ARTIFACT_BYTES: usize = 16 * 1_048_576;
+/// Complete batches retain every accepted object until all digest checks pass,
+/// so their declared bounds must fit the held-generation ceiling too.
+pub const MAX_MIRROR_TOTAL_BYTES: usize = 64 * 1_048_576;
 pub const MAX_MIRROR_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Closed object classes. The class only fixes a byte ceiling; signed
@@ -168,11 +171,16 @@ impl MirrorNetworkAuthority {
         }
         let mut paths = BTreeSet::new();
         let mut planned = Vec::with_capacity(request.objects.len());
+        let mut total_bytes = 0_usize;
         // Validate the complete batch before the first effect. In particular,
         // a later duplicate cannot turn a rejected request into a published
         // prefix of network observations.
         for object in request.objects {
             let max_bytes = validate_object(*object)?;
+            total_bytes = total_bytes
+                .checked_add(max_bytes)
+                .filter(|total| *total <= MAX_MIRROR_TOTAL_BYTES)
+                .ok_or(MirrorError::InvalidRequest)?;
             if !paths.insert(object.path) {
                 return Err(MirrorError::InvalidRequest);
             }
@@ -507,6 +515,51 @@ mod tests {
             ),
             Err(MirrorError::InvalidTimeout)
         ));
+        let digest = sha256(bytes);
+        let oversized = [
+            MirrorObject {
+                kind: MirrorObjectKind::Artifact,
+                path: "/artifacts/a",
+                digest: &digest,
+                max_bytes: MAX_MIRROR_ARTIFACT_BYTES,
+            },
+            MirrorObject {
+                kind: MirrorObjectKind::Artifact,
+                path: "/artifacts/b",
+                digest: &digest,
+                max_bytes: MAX_MIRROR_ARTIFACT_BYTES,
+            },
+            MirrorObject {
+                kind: MirrorObjectKind::Artifact,
+                path: "/artifacts/c",
+                digest: &digest,
+                max_bytes: MAX_MIRROR_ARTIFACT_BYTES,
+            },
+            MirrorObject {
+                kind: MirrorObjectKind::Artifact,
+                path: "/artifacts/d",
+                digest: &digest,
+                max_bytes: MAX_MIRROR_ARTIFACT_BYTES,
+            },
+            MirrorObject {
+                kind: MirrorObjectKind::Artifact,
+                path: "/artifacts/e",
+                digest: &digest,
+                max_bytes: MAX_MIRROR_ARTIFACT_BYTES,
+            },
+        ];
+        let mut transport = ScriptedTransport {
+            expected: VecDeque::new(),
+        };
+        assert_eq!(
+            authority().acquire(
+                &mut transport,
+                &MirrorRequest {
+                    objects: &oversized
+                }
+            ),
+            Err(MirrorError::InvalidRequest)
+        );
     }
 
     #[test]

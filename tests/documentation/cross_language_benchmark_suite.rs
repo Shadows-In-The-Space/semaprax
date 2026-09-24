@@ -33,6 +33,8 @@ mod clean_install_calculator;
 mod cold_chain_release_gate;
 #[path = "cross_language_benchmark_suite/concurrent_delta_merge.rs"]
 mod concurrent_delta_merge;
+#[path = "cross_language_benchmark_suite/hidden_overlay_admission.rs"]
+mod hidden_overlay_admission;
 #[path = "cross_language_benchmark_suite/owned_byte_sentinel_balance.rs"]
 mod owned_byte_sentinel_balance;
 #[path = "cross_language_benchmark_suite/reproducibility.rs"]
@@ -43,8 +45,6 @@ mod stable_dispatch_order;
 mod stale_edit_preservation;
 #[path = "cross_language_benchmark_suite/telemetry_overflow_diagnosis.rs"]
 mod telemetry_overflow_diagnosis;
-#[path = "cross_language_benchmark_suite/hidden_overlay_admission.rs"]
-mod hidden_overlay_admission;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()

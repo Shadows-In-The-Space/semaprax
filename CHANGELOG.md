@@ -17,8 +17,9 @@ format: `Unreleased` then release buckets, grouped by impact.
   signature, requires successful `taskkill /T` and direct Cargo PID absence on
   timeout, and checks exact marker/scratch cleanup. Descendant quiescence is
   not independently enumerated. The original two-test slice passed on exact
-  checkout `c6bf9902`; the expanded five-test selector and signed-capsule
-  admission remain unverified.
+  checkout `c6bf9902`; the expanded five-test selector passed in hosted
+  Windows run `35988348061` at `3d4220b6`. Signed-capsule admission and
+  production support remain unverified.
 
 - Re-pin exact Semantic Workspace Change and Operations artifact/evidence/receipt
   KATs to the expanded Project graph and serialized limits while retaining

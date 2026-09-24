@@ -4,9 +4,8 @@ Audience: release engineers, platform maintainers, and security reviewers
 with access to a real Windows host or a Windows CI runner.
 
 Status: the `#[cfg(windows)]` primitive has hosted type-check evidence and a
-two-test runtime witness on exact checkout `c6bf9902`. This change adds three
-additional live cases and expands the dispatch selector to five; those new
-cases have not yet run on Windows. The authoring host remains macOS arm64
+five-test runtime witness on exact checkout `3d4220b6`, extending the earlier
+two-test witness at `c6bf9902`. The authoring host remains macOS arm64
 without a Windows toolchain, and no cross-compilation or emulated substitute
 is treated as Windows evidence. Host-independent capsule, admission-ordering,
 and settlement logic remains separately testable on non-Windows hosts. See
@@ -49,9 +48,14 @@ Hosted [run 35986090171](https://github.com/wavect/semaprax/actions/runs/3598609
 executed the original two-test Windows runtime selector successfully (2
 passed, 0 failed) on exact checkout
 `c6bf9902966f5c1fda0c8e70687c261ffacf37c4`. It covers the restricted-token,
-ACL/job success and timeout-settlement cases described below. The five-test
-selector added afterward has not run on Windows; this result is evidence only
-for that exact checkout and its two selected tests.
+ACL/job success and timeout-settlement cases described below. Hosted
+[run 35988348061](https://github.com/wavect/semaprax/actions/runs/35988348061),
+Windows Server 2025 job `107596231695`, then ran the expanded exact selector
+on `3d4220b633283e76c277f6042550275c8f1c3327`: **5 passed, 0 failed,
+0 ignored, 113 filtered**. Its three added cases exercised an actual
+test-admitted job descendant during timeout, nonzero-exit classification and
+cleanup, and repeated filesystem-stage refusal with stable handle count.
+Neither run establishes signed-capsule admission or general Windows support.
 
 ## Why the first revision had no accompanying code, and why this one does
 
@@ -349,29 +353,30 @@ The test capsule is deliberately structural fixture data with a placeholder
 signature. The Windows primitive currently does not verify capsule signatures,
 so these tests do not establish signed-capsule admission or production
 provisioner support. The original two-test dispatch selector passed at
-`c6bf9902`; the expanded five-test selector still requires its first hosted
-run before claims about the added failure/handle cases can be made.
+`c6bf9902`; the expanded five-test selector passed on exact checkout
+`3d4220b6`. The added cases prove only their asserted hosted behavior.
 
 ## Acceptance criteria status
 
 | Criterion | State |
 |---|---|
 | Versioned Windows contract, cross-referenced from V1 | met |
-| Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted type-check at exact checkout `7cab8aa8` and limited runtime execution for two tests at exact checkout `c6bf9902`; see [Nonclaims](#nonclaims) |
+| Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted type-check at exact checkout `7cab8aa8` and five selected runtime tests passed at exact checkout `3d4220b6`; see [Nonclaims](#nonclaims) |
 | Sealed-capsule consumption | structural body decode only (`doctor::windows_confinement::capsule`, host-independent, tested on every host); signature verification still needs `semaprax-doctor-capsule` as a `cfg(windows)` `Cargo.toml` dependency, outside every session's lease so far |
 | Hostile-input tests for the host-independent parts | 29 tests across `capsule`, `refusal`, and `settlement` pass on this authoring host (macOS arm64); `cargo test -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement` |
-| Runtime tests for the Win32 primitive itself | original restricted-token/ACL/job and timeout cases passed in [run 35986090171](https://github.com/wavect/semaprax/actions/runs/35986090171) on exact checkout `c6bf9902`; actual-descendant timeout, nonzero-exit, and repeated scratch-refusal/handle-count cases await Windows execution |
-| Fail-closed gate authored and run | workflow/script self-test run locally; original two-test live selector passed at `c6bf9902`; expanded five-test selector **not yet run** |
+| Runtime tests for the Win32 primitive itself | exact five-test selector passed in [run 35988348061](https://github.com/wavect/semaprax/actions/runs/35988348061) on `3d4220b6`, including actual-descendant timeout, nonzero exit and repeated scratch-refusal/handle-count cases |
+| Fail-closed gate authored and run | script self-test passed locally; five-test live selector passed at `3d4220b6` with no filtered or ignored selected case |
 | Linux, macOS, or existing job-object evidence never cited as Windows proof | met |
 | `docs/COMPLETION-MATRIX.md` WP-05 promoted for Windows | not done; not claimed |
 
 ## Nonclaims
 
-This contract does not: claim that the current five-test revision of
-`doctor::windows_confinement::primitive` has passed a Windows runtime gate. The
-two-test run at `c6bf9902` is evidence only for its exact checkout and tests.
+This contract does not claim that the five-test Windows runtime gate is a
+complete hostile corpus or production-support gate. The two-test run at
+`c6bf9902` and five-test run at `3d4220b6` each bind only their exact checkout
+and selected tests.
 The hosted Windows compilation recorded above type-checks only exact checkout
-`7cab8aa8`; by itself it establishes no execution behavior. The two runtime
+`7cab8aa8`; by itself it establishes no execution behavior. The five runtime
 tests give narrow observations only for their exact checkout and assertions.
 Earlier hand-checking against vendored `windows-sys` was diligence, not
 substitute execution evidence. The tests use an unverified-signature capsule
@@ -388,11 +393,9 @@ touches a job object, a token, or the filesystem; run on a cross-compiled or
 emulated target as a substitute for real Windows execution; wire any new path
 into the CLI; or promote `docs/COMPLETION-MATRIX.md` WP-05 for Windows.
 
-The original two live tests ran on Windows at `c6bf9902`, providing bounded
+The five live tests ran on Windows at `3d4220b6`, providing bounded
 observations of the restricted token, protected DACL, production job limits,
-descendant launch refusal, normal settlement, and cancellation. Three added
-tests have not yet run on Windows; they cover test-owned descendant timeout,
-nonzero-exit classification, and repeated filesystem-stage refusal/handle
-cleanup. The remaining real-host work includes executing the expanded
-selector, restricted-token refinement, signed-capsule verification, and a
-broader hostile corpus across supported Windows runners.
+descendant launch refusal, test-owned descendant timeout, normal/nonzero
+settlement, cancellation, and repeated filesystem-stage refusal/handle cleanup.
+The remaining work includes restricted-token refinement, signed-capsule
+verification, and a broader hostile corpus across supported Windows runners.

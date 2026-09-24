@@ -27,7 +27,7 @@ fn standalone_runner_is_pinned_private_and_outside_the_root_workspace() {
         "license = \"Apache-2.0\"",
         "[workspace]",
         "resolver = \"2\"",
-        "semaprax = { version = \"=0.5.0\", path = \"../..\", default-features = false, features = [\"unstable-wit-component-harness\"] }",
+        "semaprax = { version = \"=0.6.0\", path = \"../..\", default-features = false, features = [\"unstable-wit-component-harness\"] }",
         "sha2 = { version = \"=0.11.0\", default-features = false }",
         "wasmtime = { version = \"=47.0.4\", default-features = false, features = [\"component-model\", \"cranelift\", \"runtime\", \"std\"] }",
         "unsafe_code = \"forbid\"",
@@ -145,7 +145,7 @@ fn main() -> i64 { 0 }
     assert_eq!(checked_in_source_v6, expected_source_v6);
 
     let checked_in_v7 = read("platform-tests/component-runtime/wit/semaprax-private-v7.wit");
-    let expected_v7 = "package semaprax:private@0.5.0;\n\ninterface generic-records {\n  record status { domain: string, code: u32, class: u8, retryable: option<bool> }\n  record duo-i64-bool { left: s64, right: bool }\n  record duo-bool-i64 { left: bool, right: s64 }\n  record phantom-i64 { marker: bool }\n  record phantom-bool { marker: bool }\n  transform-i64-bool: func(input: duo-i64-bool, delta: s64, divisor: s64) -> result<duo-i64-bool, status>;\n  transform-bool-i64: func(input: duo-bool-i64, delta: s64, divisor: s64) -> result<duo-bool-i64, status>;\n  preserve-phantom-i64: func(input: phantom-i64) -> result<phantom-i64, status>;\n  invert-phantom-bool: func(input: phantom-bool) -> result<phantom-bool, status>;\n}\n\nworld semaprax-private-v7 {\n  export generic-records;\n}\n";
+    let expected_v7 = "package semaprax:private@0.6.0;\n\ninterface generic-records {\n  record status { domain: string, code: u32, class: u8, retryable: option<bool> }\n  record duo-i64-bool { left: s64, right: bool }\n  record duo-bool-i64 { left: bool, right: s64 }\n  record phantom-i64 { marker: bool }\n  record phantom-bool { marker: bool }\n  transform-i64-bool: func(input: duo-i64-bool, delta: s64, divisor: s64) -> result<duo-i64-bool, status>;\n  transform-bool-i64: func(input: duo-bool-i64, delta: s64, divisor: s64) -> result<duo-bool-i64, status>;\n  preserve-phantom-i64: func(input: phantom-i64) -> result<phantom-i64, status>;\n  invert-phantom-bool: func(input: phantom-bool) -> result<phantom-bool, status>;\n}\n\nworld semaprax-private-v7 {\n  export generic-records;\n}\n";
     assert_eq!(checked_in_v7, expected_v7);
 
     let checked_in_source_v7 = read("platform-tests/component-runtime/v7.spx");
@@ -495,7 +495,7 @@ fn capability_and_dependency_policy_are_fail_closed() {
         "call_result_bool_bool",
         "semaprax:private/scalar-algebra@0.3.0",
         "semaprax:private/nested-records@0.4.0",
-        "semaprax:private/generic-records@0.5.0",
+        "semaprax:private/generic-records@0.6.0",
         "semaprax:private/record-pattern-projections@0.6.0",
         "semaprax:private/generic-function-instances@0.7.0",
         "semaprax:private/option-propagation@0.8.0",

@@ -8,6 +8,8 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+## 0.6.0 — 2026-09-24
+
 - Project a frozen malformed-result carrier recipe through generated TypeScript
   against the compiler-produced checked Wasm provider, alongside exact
   descriptor/binding and once-only result-release controls. This is local

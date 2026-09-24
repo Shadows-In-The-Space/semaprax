@@ -8,6 +8,18 @@ For complete chronological detail, including historical context and archived art
 - [CHANGELOG.md](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md)
 - [docs/CHANGELOG-ARCHIVE.md](CHANGELOG-ARCHIVE.md).
 
+## 0.6.0 highlights
+
+- Local Registry-v3 now has independently verified signed root/leaf metadata,
+  lock-bound artifact reads, a held generation store, and a resolver-cache
+  bridge. These are offline/local building blocks, not hosted distribution.
+- Private native owned-Bytes and Core Wasm stage work gained bounded physical
+  fixtures and observed JS-arena settlement evidence. Public parity, complete
+  cleanup/fuel accounting, and hosted validation remain open.
+- The release verifier now pins Wavect GmbH's approved GitHub repository and
+  owner IDs in the verified Fulcio certificate. v0.6.0's hosted signing and
+  release evidence remain pending until the authorized tag gate succeeds.
+
 ## 0.5.0 highlights
 
 - Durable source-model quote accounting (V6) now carries observed and unknown
@@ -85,7 +97,9 @@ For complete chronological detail, including historical context and archived art
 
 ## Latest published milestone
 
-- `v0.5.0` is the current prerelease tag used by installation and distribution docs.
+- `v0.6.0` is the current prerelease tag used by installation and distribution
+  docs; hosted signed-release evidence is pending the authorized tag gate.
+- `v0.5.0` remains the immediately preceding published prerelease.
 - `v0.4.1` remains the immediately preceding prerelease.
 - `v0.4.0` remains the prerelease before that, and its
   [release baseline](RELEASE-0.4.0-STATUS.md) remains the accepted hosted-green

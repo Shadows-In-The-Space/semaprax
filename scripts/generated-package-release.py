@@ -671,8 +671,9 @@ def prepare(kind, package_dir, project_name, project_version, commit, output_dir
         (payload_dir / name).write_bytes(contents[name])
 
     readme = render_readme(kind, project_name, project_version, commit, descriptor_sha256, toolchain)
-    (output_dir / "README.md").write_text(readme, encoding="utf-8")
-    scan_bytes("README.md", readme.encode("utf-8"), forbidden_substrings)
+    readme_bytes = readme.encode("utf-8")
+    scan_bytes("README.md", readme_bytes, forbidden_substrings)
+    (output_dir / "README.md").write_bytes(readme_bytes)
     (output_dir / "LICENSE").write_bytes(license_bytes)
 
     manifest = {
@@ -688,14 +689,14 @@ def prepare(kind, package_dir, project_name, project_version, commit, output_dir
         "files": sorted(
             payload_manifest_from_contents(contents)
             + [
-                {"path": "README.md", "sha256": sha256_hex(readme.encode("utf-8")), "size": len(readme.encode("utf-8"))},
+                {"path": "README.md", "sha256": sha256_hex(readme_bytes), "size": len(readme_bytes)},
                 {"path": "LICENSE", "sha256": sha256_hex(license_bytes), "size": len(license_bytes)},
             ],
             key=lambda entry: entry["path"],
         ),
     }
-    (output_dir / "package-preview-manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    (output_dir / "package-preview-manifest.json").write_bytes(
+        (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
     )
     return manifest
 

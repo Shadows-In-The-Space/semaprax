@@ -369,6 +369,29 @@ class CheckTests(NpmFixtureMixin, RustFixtureMixin, unittest.TestCase):
         report = gpr.check("npm", prepared, publish=False)
         self.assertTrue(any("skipped" in line for line in report))
 
+    def test_prepared_metadata_uses_exact_lf_bytes_recorded_in_manifest(self):
+        package_dir = self.rust_package_dir(self.root)
+        prepared = self.root / "prepared"
+        def windows_text_write(path, text, encoding=None):
+            return path.write_bytes(text.replace("\n", "\r\n").encode(encoding or "utf-8"))
+
+        with mock.patch.object(Path, "write_text", autospec=True, side_effect=windows_text_write):
+            gpr.prepare("rust", package_dir, "frame-payload", "0.1.0", None, prepared)
+        readme = (prepared / "README.md").read_bytes()
+        manifest_bytes = (prepared / "package-preview-manifest.json").read_bytes()
+        self.assertIn(b"\n", readme)
+        self.assertNotIn(b"\r\n", readme)
+        self.assertTrue(manifest_bytes.endswith(b"\n"))
+        self.assertNotIn(b"\r\n", manifest_bytes)
+        manifest = json.loads(manifest_bytes)
+        recorded = next(entry for entry in manifest["files"] if entry["path"] == "README.md")
+        self.assertEqual(recorded["size"], len(readme))
+        self.assertEqual(recorded["sha256"], gpr.sha256_hex(readme))
+        gpr.check("rust", prepared, publish=False)
+        (prepared / "README.md").write_bytes(readme.replace(b"\n", b"\r\n"))
+        with self.assertRaisesRegex(gpr.Rejected, "on-disk file digests disagree"):
+            gpr.check("rust", prepared, publish=False)
+
     def test_tampered_payload_file_is_detected(self):
         package_dir = self.npm_package_dir(self.root)
         prepared = self.root / "prepared"

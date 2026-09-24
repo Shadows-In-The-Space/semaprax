@@ -2,15 +2,14 @@
 
 Audience: repository maintainers and administrators.
 
-Status: **proposal, not applied.** The workflow-side half -- an aggregate gate
-that cannot report success on a failed, skipped, cancelled, missing, or
-foreign-commit shard -- is implemented and locally tested in this repository.
-The repository-side half -- the ruleset that makes that gate a *required* check
--- is written out below as an exact, reviewable API request and has **not** been
-executed. Creating or reviewing this document changes no repository setting,
-ruleset, membership, credential, or branch permission. Nothing here is enforced
-until a maintainer with administration authority applies it and records the
-read-back evidence in [Applying the proposal](#applying-the-proposal).
+Status: proposal; the repository ruleset has not been applied.
+
+The workflow already has a locally tested aggregate gate that refuses failed,
+skipped, cancelled, missing, and foreign-commit shards. That gate is not a
+required check on `main` until an administrator applies the ruleset below and
+records its read-back under [Applying the proposal](#applying-the-proposal).
+Reading this document changes no repository setting or permission. The dated
+observations below are history; requery GitHub before acting on them.
 
 ## Observed configuration
 

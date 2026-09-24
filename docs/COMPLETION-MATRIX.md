@@ -4,17 +4,22 @@ Status: living internal audit; v0.4.0 implementation evidence **HOSTED GREEN**.
 
 Audience: maintainers, contributors, reviewers, and technical evaluators.
 
-This document is the authoritative status audit for the complete SEMAPRAX
-objective. It separates the mature product requirement, the implemented bounded
-slice, and the functionality or support decision still needed to complete the
-requirement. The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) owns the
-current hosted-green evidence classification.
+Use the tables below to answer three separate questions: what the finished
+product must do, what a bounded implementation can do now, and what is still
+missing. **Partial** does not mean broken; it means the full completion gate
+is not yet met. The [v0.4.0 baseline](RELEASE-0.4.0-STATUS.md) owns accepted
+hosted-green evidence for its exact release commit, not automatically for a
+newer head.
 
-Historical status transitions belong in the [changelog](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md).
-Protocol details, exact known-answer digests, test counts, and historical CI run
-IDs belong in the linked versioned specifications. Future sequencing belongs
-in the [roadmap](ROADMAP.md). The evidence summaries below describe the current
-implementation rather than repeat superseded pre-release local-only ledgers.
+For chronology, use the [changelog](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md).
+For exact schemas and test subjects, follow each row's specification. For work
+order, use the [roadmap](ROADMAP.md).
+
+Start with [status rules](#status-rules) and the [current summary](#current-summary).
+Use the [work-package audit](#wp-01wp-15-implementation-and-promotion-audit)
+for near-term gates, the [long-term contract](#long-term-product-contract) for
+all 55 product requirements, and the [final validation product](#final-validation-product)
+for the end-to-end exit condition.
 
 ## Status rules
 
@@ -24,11 +29,10 @@ implementation rather than repeat superseded pre-release local-only ledgers.
 | Partial | Useful executable evidence exists, but the full completion gate remains open. |
 | Missing | No qualifying executable evidence exists for the row. |
 
-**HOSTED GREEN** is an evidence classification, not a replacement for these
-product-completion statuses. The implemented v0.4.0 slices have the accepted
-hosted-green release baseline. Design-only functionality, a proof model, a
-private ABI, an unpublished package, and an explicit public-support decision
-remain distinct. A private profile tested on hosted CI is still private.
+**HOSTED GREEN** classifies evidence for a named commit and gate; it is not a
+product status. A hosted test does not turn a private ABI into a public one,
+publish a package, or replace an explicit support decision. A proof model is
+not physical execution.
 
 Pre-release labels such as **Authored, unrun**, **Local, partial**, and
 "hosted promotion pending" no longer describe the released implementation's

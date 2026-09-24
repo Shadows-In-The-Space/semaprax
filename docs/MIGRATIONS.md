@@ -4,15 +4,14 @@ Status: living compatibility reference for versioned protocols.
 
 Audience: agent and tool authors, plus compiler contributors.
 
-SEMAPRAX is alpha, but agent-facing changes are still explicit. Consumers must inspect the declared schema field rather than assuming every JSON object has the latest shape.
+Find the old and new version in a heading below, then update only the consumer
+behavior that section names. Always read a document's `schema` field: alpha
+formats do not silently upgrade to the newest shape. Historical digests and
+hosted-run links are exact-version evidence, not a claim about current `main`.
 
-Bounded Native Agent Runtime v1 C1 is additive. Existing consumers require no
-migration; callers opt into the injected `AgentHost` API explicitly, and no CLI,
-language, Graph, backend, provider transport, write, or wallet surface changed.
-
-Economic Agent v1 is additive and requires no migration. Callers may opt into
-the injected-host API; it adds no CLI, built-in transport, custody, wallet,
-language, Graph, cleanup, or backend authority.
+Two additive APIs need no migration: Bounded Native Agent Runtime v1 C1 uses an
+explicit injected `AgentHost`, and Economic Agent v1 uses an injected host.
+Neither adds ambient transport, wallet, write, or backend authority.
 
 ## CLI Help v1 to v2 typo guidance
 

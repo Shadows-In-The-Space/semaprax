@@ -6,9 +6,13 @@ Audience: documentation readers, contributors, maintainers, and coding agents.
 
 Baseline date: 2026-09-10.
 
+This is a historical acceptance record for the exact v0.4.0 implementation,
+not a green verdict for current `main`, v0.5.0, or the unfinished v0.6.0 tag.
+Use the [completion matrix](COMPLETION-MATRIX.md) for present product status.
+
 ## Authoritative release baseline
 
-The current documentation baseline is the published
+The accepted hosted-green baseline is the published
 [SEMAPRAX v0.4.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.4.0),
 commit `dfc15e2ddc818fa97744b5a9d69fd6108dd6a321`. The maintainer has confirmed
 **HOSTED GREEN** for the implemented code and its release evidence. The
@@ -21,7 +25,7 @@ are documentation-only; the compiler, runtime, packages, tests, and workflow
 logic are the same as the release baseline. Subsequent documentation-only
 commits do not create a new language or protocol version.
 
-This record establishes the current release acceptance; it does not invent a
+This record establishes v0.4.0 release acceptance; it does not invent a
 new workflow-run identifier or rewrite the conclusions of historical workflow
 attempts. Exact older run IDs, logs, test counts, and known-answer values remain
 attached to the executions that produced them.

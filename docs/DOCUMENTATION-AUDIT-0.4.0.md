@@ -6,6 +6,10 @@ Audience: maintainers, contributors, documentation readers and coding agents.
 
 Audit date: 2026-09-10.
 
+Read this as a dated audit of v0.4.0, not a review of today's documentation.
+It preserves the file inventory and evidence from that snapshot; newer pages
+and code need their own checks.
+
 ## Scope and authoritative subject
 
 The audit accounts for **all 485 pre-existing tracked files under `docs/`**:

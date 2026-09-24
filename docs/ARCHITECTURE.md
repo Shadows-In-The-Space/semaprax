@@ -56,9 +56,8 @@ canonical .spx source or held Project inputs
  evidence + transactions      Clang       JS/Node host
 ```
 
-No backend bypasses source verification or validated-HIR checks. Cleanup-plan
-vectors are canonical execution order and must not be sorted or repaired by a
-graph projection or backend.
+Every backend passes source verification and validated HIR. Cleanup-plan vectors
+are canonical runtime order; projections and backends must never sort or repair them.
 
 ### Agent and generic owners
 
@@ -105,12 +104,10 @@ separate admission boundary.
 
 ## Representations
 
-The registry compiler and unpublished full toolchain share one compiler library
-and `src/cli_driver.rs`. The root retains dispatch;
-`src/cli_driver/options.rs` owns command-specific bounded option parsing,
-`src/cli_driver/report_options.rs` owns report and analysis option parsing, and
-`src/cli_driver/source_execution.rs` owns single-file build, run, and diagnostic
-publication.
+The registry compiler and unpublished toolchain share one compiler library and
+`src/cli_driver.rs`. The root dispatches; `options.rs` parses bounded command
+options, `report_options.rs` parses report/analysis options, and
+`source_execution.rs` owns single-file build, run, and diagnostics.
 The standalone binary supplies no private-host hooks.
 The private `source_live_cli` host supplies the versioned durable source CLI,
 held-directory checkpoint store and restart-stable clock. It derives bindings
@@ -730,10 +727,9 @@ publication authority. See [Target Evidence v1](SEMANTIC-TARGET-EVIDENCE-V1.md).
 
 ### Interpreter
 
-`src/interpreter.rs` evaluates an admitted verified-HIR profile with bounded
-fuel and normalized runtime statuses. `src/hosted_interpreter.rs` adds the
-bounded host-facing execution used by Project profiles. The interpreter is a
-development and conformance lane, not a target backend or proof engine.
+`src/interpreter.rs` evaluates admitted verified HIR with bounded fuel and
+normalized statuses. `src/hosted_interpreter.rs` adds Project-facing execution.
+This is a development/conformance lane, not a target backend or proof engine.
 
 `src/interpreter/internal_strings.rs` owns the additive `interpret-strings`
 facade and strict report boundary. A private profile selects internal String
@@ -743,10 +739,9 @@ results stay unchanged; ordinary, Project, prepared, and effectful evaluators
 retain their prior admission. This route adds no second execution engine or
 target runtime. See [Internal String Interpreter v1](INTERPRETER-INTERNAL-STRINGS-V1.md).
 
-`src/interpreter/prepared.rs` owns the additive cached closure/index types,
-cooperative cancellation seam, prepared evaluation entry, and expression-trace
-traversal hook. The root interpreter retains the shared evaluator and only the
-minimal crate-private reexports needed by the Project lane.
+`src/interpreter/prepared.rs` owns cached closure/index state, cooperative
+cancellation, prepared evaluation, and trace traversal. The root interpreter
+keeps the shared evaluator and only minimal Project-lane reexports.
 
 `src/interpreter/retained_call/execution.rs` shares retained-call staging,
 evaluation and harvesting between the existing worker API and the sealed
@@ -982,10 +977,9 @@ publication occurs only after postconditions and non-result cleanup.
 
 ### Single-file queries and changes
 
-`src/agent_transport.rs` serves a bounded JSON-RPC loop over one checked
-program. `src/patch.rs` owns the supported single-file transaction format and
-A0 commit boundary. `src/repair.rs`, `src/impact.rs`, and `src/review.rs` are
-read-only planners and projections.
+`src/agent_transport.rs` serves bounded JSON-RPC over one checked program.
+`src/patch.rs` owns single-file transactions and A0; `repair.rs`, `impact.rs`,
+and `review.rs` are read-only planners/projections.
 
 `src/patch_evidence.rs` independently reconstructs supported evidence. The
 evidence-gated apply route acquires ordinary A0 authority first, replays before
@@ -994,9 +988,8 @@ remains a separate legacy route.
 
 ### Managed workspace
 
-`src/workspace.rs` owns immutable generations and the authenticated `ACTIVE`
-pivot. `src/workspace_patch_evidence.rs` binds exact per-file child evidence
-and replays it before candidate creation.
+`src/workspace.rs` owns immutable generations and authenticated `ACTIVE`.
+`workspace_patch_evidence.rs` binds and replays exact child evidence before a candidate.
 
 `src/semantic_workspace.rs`, `src/workspace_graph.rs`, and
 `src/workspace_analysis.rs` own cross-file initialization, graph construction,
@@ -1006,8 +999,8 @@ change are separate, bounded derivation layers in
 `src/semantic_workspace_operations.rs` and
 `src/semantic_workspace_structural_change.rs`.
 
-Only the live workspace invocation owns the final publication pivot. Evidence
-capsules never carry reusable authority.
+Only the live workspace invocation may publish. Evidence capsules never carry
+reusable authority.
 
 ### Operational semantic images
 
@@ -2344,33 +2337,26 @@ tool-provenance, registry, or hosted-client authority claim.
 
 ## Reports and projections
 
-Read-only commands are implemented in focused modules such as
+Read-only commands live in focused modules such as
 `src/abi_report.rs`, `src/c_header.rs`, `src/cxx_shim.rs` and its bounded
 `src/cxx_shim/package.rs` replay/package child,
 `src/capability_manifest.rs`, `src/freestanding_object.rs`, `src/openapi.rs`,
 `src/package_report.rs`, `src/plugin_manifest.rs`, `src/region_report.rs`,
 `src/simd_report.rs`, and `src/ui_schema.rs`.
 
-`src/doc.rs` is the documentation projection. It builds one model of a checked
-module's declarations from the parsed program and its comments (identities,
-canonical signatures without bodies, ownership modes, effects, contracts,
-members, and leading-comment descriptions) and renders it as Markdown or as a
-one-line `semaprax.doc.v1` document, both carrying `graph::revision`. It
-reuses the canonical formatter's type, contract, and escaping writers, so a
-signature is the formatter's text. `src/cli/doc.rs` owns the closed
-`doc <file> [--json]` grammar and verifies before rendering. The projections
-harness proves that every documented identity of a graph-carried kind is a
-node of `semaprax graph` at the same revision. See
+`src/doc.rs` projects checked declarations and comments—identity, signature,
+ownership, effects, contracts, members, descriptions—to Markdown or one-line
+`semaprax.doc.v1`, both with `graph::revision`. It reuses formatter writers, so
+signatures match canonical formatting. `src/cli/doc.rs` verifies before its
+closed `doc <file> [--json]` render. The harness ensures each documented graph
+identity is a `semaprax graph` node at that revision. See
 [Documentation Projection v1](DOC-PROJECTION-V1.md).
 
-`src/query.rs` is the declaration query: it filters the documentation model of
-`src/doc.rs` by kind, name, identity prefix, and effect. Single-module queries
-join `src/call_index.rs`; Project queries parse each retained authenticated
-source for presentation facts and join the call edges of that same revision's
-retained semantic graph. Project matches therefore include path/module/source
-identity and cross-file callers without accepting an arbitrary library file as
-a standalone executable. `src/cli/query.rs` owns input selection and the closed
-grammar; `src/cli/package.rs`
+`src/query.rs` filters the documentation model by kind, name, ID prefix, and
+effect. Single modules join `call_index.rs`; Projects join retained source facts
+and graph calls from the same revision. Results include path/module/source and
+cross-file callers without treating a library as standalone. `src/cli/query.rs`
+owns selection/grammar; `src/cli/package.rs`
 rewrites `package report|lock|resolve` to the long-form routes and re-enters
 the dispatcher. See [Unified CLI v1](UNIFIED-CLI-V1.md).
 
@@ -2659,8 +2645,7 @@ the runtime or ecosystem feature it describes.
 
 ## Private host and proof boundaries
 
-The following areas are deliberately quarantined from the public compiler
-contract:
+These areas are deliberately outside the public compiler contract:
 
 - `crates/semaprax-native-loader`: unsafe dynamic-loader boundary;
 - `crates/semaprax-native-host`: connected callable and settlement host;
@@ -2687,7 +2672,7 @@ contract:
 - `platform-tests/`: installed application and runtime fixtures whose claims
   count only when the owning hosted jobs are green.
 
-Private or proof-only evidence may validate a design boundary without creating
+Private or proof-only evidence can validate a design boundary without creating
 a supported language, CLI, ABI, or runtime surface.
 
 ## Trust boundaries and invariants
@@ -2713,11 +2698,10 @@ a supported language, CLI, ABI, or runtime surface.
 
 `workspace_graph/owned_function_import.rs` authenticates explicit nongeneric
 record signatures over Bytes and Copy scalars. `expected_projection/defaults.rs`
-precharges checking-only empty byte leaves with separate admitted/closed memo
-entries; actual execution retains the provider body and ordinary HIR/cleanup
-replay. Ordinary owning record-match results use the same result transfer
-before arm settlement in source verification, HIR, cleanup replay, interpreter,
-C11 and Core Wasm. No target repairs the canonical plan.
+precharges checking-only empty leaves; execution retains provider body and
+ordinary HIR/cleanup replay. Record-match results use the same transfer before
+settlement across verifier, HIR, interpreter, C11, and Wasm. No target repairs
+the canonical plan.
 
 The Project v8 empty-export route admits checked internal libraries in either
 manifest layout while leaving descriptor and public-package routes absent.

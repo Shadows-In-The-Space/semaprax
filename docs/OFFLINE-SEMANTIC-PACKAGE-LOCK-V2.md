@@ -7,8 +7,8 @@ their narrower scope; public promotion and broader product completion remain
 separately gated.
 Audience: package tooling authors and compiler contributors.
 
-Lock v2 is a distinct authority-free graph over at most four exact
-caller-owned Semantic Package Report v2 subjects. Each subject embeds the
+Lock v2 is an authority-free graph over at most four caller-owned Report-v2
+subjects. Each subject embeds the
 report as raw canonical JSON with exact byte count and domain-separated
 digest; admission independently source-replays it. Generation rejects graph,
 identity, version, cycle, depth, edge, byte, work, capability, and target

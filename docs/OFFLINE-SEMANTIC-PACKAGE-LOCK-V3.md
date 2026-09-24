@@ -6,8 +6,8 @@ The package surface remains unpublished and unpromoted.
 
 Audience: package-tool authors and compiler contributors.
 
-Lock v3 is an additive authority-free proof over one to four caller-supplied
-Semantic Package Subject-v3 envelopes. A Subject v3 authenticates an exact
+Lock v3 is an authority-free proof over one to four caller-supplied Subject-v3
+envelopes. A Subject v3 authenticates an exact
 Package Report-v2 envelope and a strictly package-sorted list of dependency
 requirements. Each requirement uses only `=x.y.z`, `~x.y.z`, or `^x.y.z`,
 where every component is canonical `u32` decimal.

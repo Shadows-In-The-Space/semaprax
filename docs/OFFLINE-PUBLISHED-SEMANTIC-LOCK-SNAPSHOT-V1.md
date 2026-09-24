@@ -10,12 +10,10 @@ Audience: package-tooling, compiler, and platform-authority contributors.
 
 ## Purpose and authority boundary
 
-Offline Published Semantic Lock Snapshot v1 turns one exact caller-owned
-[Resolver v1](OFFLINE-PACKAGE-RESOLVER-V1.md) input/evidence pair into three
-independently replayable byte strings. The compiler layer is authority-free.
-The separate safe lower crate can publish those three strings only into one
-fresh directory through the existing held, no-replace package-publication
-state machine.
+This snapshot turns one exact caller-owned [Resolver v1](OFFLINE-PACKAGE-RESOLVER-V1.md)
+input/evidence pair into three replayable byte strings. The compiler layer is
+authority-free; a separate lower crate may publish them only to one fresh
+directory through the held no-replace state machine.
 
 The snapshot is not an updateable lockfile, registry, cache, `ACTIVE` pivot,
 signature, provenance record, build, sandbox, or target-execution result.

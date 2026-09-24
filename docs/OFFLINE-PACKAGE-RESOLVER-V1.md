@@ -6,11 +6,10 @@ Status: implemented bounded authority-free resolver; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 Acquisition, registry publication and general package support remain separate.
 
-Offline Deterministic Package Resolver v1 selects one integrity-bound version
-per package from a finite caller-owned catalog of source-replayed subjects. It is an
-authority-free planning layer above Semantic Package Report v2 and Offline
-Semantic Package Lock v2. It never discovers, fetches, builds, executes,
-caches, or publishes a package.
+Resolver v1 selects one integrity-bound version per package from a finite,
+caller-owned, source-replayed catalog. It is an authority-free planning layer
+above Report v2 and Lock v2; it never discovers, fetches, builds, executes,
+caches, or publishes packages.
 
 ## Public schemas and API
 

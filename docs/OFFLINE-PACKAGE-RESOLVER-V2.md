@@ -7,8 +7,8 @@ The generated package surface remains unpublished and unpromoted.
 Audience: package-tool authors and compiler contributors.
 
 Resolver v2 deterministically selects Subject-v3 packages from a complete,
-caller-owned finite offline catalog. Roots and transitive dependencies use the
-same closed exact/tilde/caret range grammar. Search selects the byte-lowest
+caller-owned offline catalog. Roots and dependencies use the same closed
+exact/tilde/caret grammar. Search selects the byte-lowest
 unresolved identity and tries numeric versions in descending order. Every
 constraint occurrence remains tagged and intersected; branch selection,
 constraints, edges, and depth roll back together while decision/work charges

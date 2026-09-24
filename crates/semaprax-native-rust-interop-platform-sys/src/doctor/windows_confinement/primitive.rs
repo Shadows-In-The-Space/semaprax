@@ -10,10 +10,12 @@
 //! layout, and constant used below was cross-checked against the exact
 //! vendored `windows-sys = "=0.61.2"` source
 //! (`~/.cargo/registry/src/.../windows-sys-0.61.2`) already pinned by this
-//! crate's `Cargo.toml`, using only features already enabled there
-//! (`Win32_Foundation`, `Win32_Security`, `Win32_Storage_FileSystem`,
-//! `Win32_System_JobObjects`, `Win32_System_Threading`) -- no `Cargo.toml`
-//! change accompanies this file. That cross-check raises confidence that the
+//! crate's `Cargo.toml`, using its enabled features
+//! (`Win32_Foundation`, `Win32_Security`, `Win32_Security_Authorization`,
+//! `Win32_Storage_FileSystem`,
+//! `Win32_System_JobObjects`, `Win32_System_Threading`). The Authorization
+//! feature lets runtime tests inspect the resulting scratch DACL. That
+//! cross-check raises confidence that the
 //! code compiles; it is not a substitute for real Windows execution and must
 //! never be described as one. Treat every claim this file's doc comments
 //! make about its own behavior as a design intent, not evidence, until a
@@ -71,9 +73,9 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::{
     AddAccessAllowedAceEx, CreateRestrictedToken, GetTokenInformation, InitializeAcl,
-    InitializeSecurityDescriptor, SetSecurityDescriptorDacl, TokenUser, ACL, ACL_REVISION,
-    DISABLE_MAX_PRIVILEGE, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, TOKEN_ASSIGN_PRIMARY,
-    TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER,
+    InitializeSecurityDescriptor, SetSecurityDescriptorControl, SetSecurityDescriptorDacl,
+    TokenUser, ACL, ACL_REVISION, DISABLE_MAX_PRIVILEGE, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
+    SE_DACL_PROTECTED, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateDirectoryW, CreateFileW, CREATE_NEW, DELETE, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ,
@@ -230,10 +232,8 @@ fn read_token_user_sid(token: &Handle, buffer: &mut [u8; 256]) -> Result<(), ()>
 /// Create a fresh scratch subdirectory of `scratch_root` whose DACL grants
 /// only `sid_buffer`'s `TOKEN_USER.User.Sid` read/write/delete access. No
 /// other principal is listed, which is an implicit deny under Windows DACL
-/// evaluation. This session did not verify whether an inheritable ACE from
-/// `scratch_root`'s own parent can still additively grant access alongside
-/// this explicit DACL; a Windows-capable reviewer should confirm that, and
-/// add `SE_DACL_PROTECTED` to this security descriptor's control bits if so.
+/// evaluation. The protected DACL prevents inheritable ACEs from the supplied
+/// parent's own parent from adding principals to the created directory.
 fn confined_scratch_root(scratch_root: &Path, sid_buffer: &[u8; 256]) -> Result<ScratchRoot, ()> {
     // SAFETY: `sid_buffer` was populated by `GetTokenInformation(TokenUser)`
     // and is large enough for a `TOKEN_USER`; the resulting `Sid` pointer
@@ -278,6 +278,14 @@ fn confined_scratch_root(scratch_root: &Path, sid_buffer: &[u8; 256]) -> Result<
     // SAFETY: `descriptor_ptr` was just initialized; `acl_ptr` outlives this
     // call and this descriptor's use in `CreateDirectoryW` below.
     if unsafe { SetSecurityDescriptorDacl(descriptor_ptr, 1, acl_ptr, 0) } == 0 {
+        return Err(());
+    }
+    // SAFETY: `descriptor_ptr` is a live initialized descriptor. Prevent
+    // inheritable ACEs on the supplied parent from broadening this explicit
+    // user-only DACL.
+    if unsafe { SetSecurityDescriptorControl(descriptor_ptr, SE_DACL_PROTECTED, SE_DACL_PROTECTED) }
+        == 0
+    {
         return Err(());
     }
 

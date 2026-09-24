@@ -1,0 +1,50 @@
+# Provisioned Windows doctor confinement runtime gate.
+#
+# This is dispatch-only and never consumes pull-request code. The gate uses a
+# fresh directory created beneath this ephemeral runner's RUNNER_TEMP; the
+# test and its controller both fail if that explicit provisioning is absent.
+name: Doctor provisioned Windows gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: doctor-provisioned-windows
+  cancel-in-progress: false
+
+jobs:
+  doctor-provisioned-windows:
+    name: Windows confinement runtime (provisioned)
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Allow Windows to check out long evidence paths
+        shell: pwsh
+        run: git config --system core.longpaths true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          fetch-tags: false
+          lfs: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.97.1
+      - name: Prove the gate rejects missing Windows runtime evidence
+        run: python scripts/doctor-provisioned-windows-gate.py --self-test
+      - name: Provision a fresh explicit scratch parent
+        shell: pwsh
+        run: |
+          $parent = Join-Path $env:RUNNER_TEMP 'semaprax-doctor-confinement'
+          if (Test-Path -LiteralPath $parent) {
+            throw "refusing to reuse an existing runtime parent: $parent"
+          }
+          New-Item -ItemType Directory -Path $parent | Out-Null
+          "SEMAPRAX_WINDOWS_CONFINEMENT_TEST_PARENT=$parent" >> $env:GITHUB_ENV
+      - name: Fetch the locked dependency closure
+        run: cargo fetch --locked
+      - name: Execute restricted-token, child-launch, job, ACL, and settlement tests
+        run: python scripts/doctor-provisioned-windows-gate.py

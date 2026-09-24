@@ -283,59 +283,32 @@ on every host this crate builds on; `primitive::settle_confined`
 (`#[cfg(windows)]`, unexecuted here) is the code that actually observes a real
 job object and drives it.
 
-## Proposed gate workflow (not landed; `.github/workflows/**` is out of scope
-## for this authoring session)
+## Windows runtime gate
 
-Unlike the macOS contract, this document proposes a `workflow_dispatch`-only
-gate, per the issue's explicit request, because the confinement primitive
-above -- once implemented -- mutates job-object limits, restricted tokens,
-and possibly an AppContainer profile or ACL'd filesystem root, none of which
-this authoring session can characterize as non-destructive to a shared runner
-without real execution evidence. The proposed shape mirrors
-`.github/workflows/doctor-provisioned-linux.yml`:
+The dispatch-only
+[`.github/workflows/doctor-provisioned-windows.yml`](../.github/workflows/doctor-provisioned-windows.yml)
+uses an ephemeral `windows-2025` runner and creates a fresh, explicit scratch
+parent under `RUNNER_TEMP`. The gate fails when the host is not 64-bit Windows,
+the parent is missing, nonempty, or a reparse point, Cargo fails, either named
+test is filtered or ignored, or the test summary does not report both runtime
+cases as passed. It never treats an absent prerequisite or a zero-test run as
+a skip/pass.
 
-```yaml
-name: Doctor provisioned Windows gate
+`scripts/doctor-provisioned-windows-gate.py --self-test` checks the gate's
+refusal and libtest-result parsing on any host; it provides no Windows runtime
+evidence. `--plan` prints the exact two-test selector. The live selection runs
+`windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it`
+and `windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation`.
+Those tests launch the owning test executable through `confined_spawn`, inspect
+the child's disabled privilege set and job membership/limits, read back the
+scratch DACL and its SID, exercise the one-process job limit, observe a
+successful settlement, and observe timeout cancellation.
 
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: doctor-provisioned-windows
-  cancel-in-progress: false
-
-jobs:
-  doctor-provisioned-windows:
-    name: Windows offline doctor lifecycle (provisioned)
-    runs-on: windows-2025
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 1
-          filter: blob:none
-          fetch-tags: false
-          lfs: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
-        with:
-          toolchain: 1.97.1
-      - name: Prove the gate refuses absent provisioning
-        run: python scripts/doctor-provisioned-windows-gate.py --self-test
-      - name: Run the confinement primitive's hostile-input corpus
-        run: cargo test --locked --offline -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement
-```
-
-`scripts/doctor-provisioned-windows-gate.py` does not exist yet; it should be
-authored analogous to `scripts/doctor-provisioned-linux-gate.py`'s
-`--self-test`/pure-decision-logic pattern (fail-closed, never a skip, and
-self-testable on any host including this one) by whoever implements the
-primitive above, since its exact precondition list depends on which
-filesystem-confinement design (restricted ACL vs AppContainer) is chosen.
-Neither the workflow file nor the gate script is added by this document; both
-are specified here as the exact delta a maintainer should land.
+The test capsule is deliberately structural fixture data with a placeholder
+signature. The Windows primitive currently does not verify capsule signatures,
+so these tests do not establish signed-capsule admission or production
+provisioner support. The gate is dispatch-only; its first successful run is
+still required before any Windows runtime result can be claimed.
 
 ## Acceptance criteria status
 
@@ -345,37 +318,37 @@ are specified here as the exact delta a maintainer should land.
 | Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted Windows type-checked for exact checkout `7cab8aa8` in [job 105948054658](https://github.com/wavect/semaprax/actions/runs/35462242188/job/105948054658), but never executed -- see [Nonclaims](#nonclaims) |
 | Sealed-capsule consumption | structural body decode only (`doctor::windows_confinement::capsule`, host-independent, tested on every host); signature verification still needs `semaprax-doctor-capsule` as a `cfg(windows)` `Cargo.toml` dependency, outside every session's lease so far |
 | Hostile-input tests for the host-independent parts | 29 tests across `capsule`, `refusal`, and `settlement` pass on this authoring host (macOS arm64); `cargo test -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement` |
-| Hostile-input tests for the Win32 primitive itself | not attempted: needs a live process, a real job object, and a real token -- `HUMAN_BLOCKED: needs a Windows host` |
-| Fail-closed gate authored and run | proposed only (workflow YAML embedded above); **never run** |
+| Runtime tests for the Win32 primitive itself | authored for restricted-token child launch, job limits and membership, scratch ACL, descendant refusal, successful settlement, and timeout cancellation; not run on Windows in this change |
+| Fail-closed gate authored and run | workflow and result-checking script authored; script self-test run locally; live Windows gate **not run** |
 | Linux, macOS, or existing job-object evidence never cited as Windows proof | met |
 | `docs/COMPLETION-MATRIX.md` WP-05 promoted for Windows | not done; not claimed |
 
 ## Nonclaims
 
 This contract does not: claim that `doctor::windows_confinement::primitive`
-has been executed anywhere. The hosted Windows compilation recorded above
+has passed a Windows runtime gate. The hosted Windows compilation recorded above
 type-checks only exact checkout `7cab8aa8`; it does not establish an execution,
 confinement, token, job-object, ACL, filesystem, or settlement claim. Earlier
 hand-checking against vendored `windows-sys` was diligence, not substitute
-execution evidence; claim the existing ordinary-probe job-object
-confinement in `windows.rs` as evidence of production-grade sandboxing (it
-confines process *lifetime*, not filesystem or network access, and was not
-designed as a security boundary); claim Linux or macOS evidence proves
-anything about Windows; claim that this revision's own host-independent test
-pass (`capsule`, `refusal`, `settlement`, run on macOS arm64) is Windows
+execution evidence. The new tests use an unverified-signature capsule fixture,
+and do not close signed-input, independent hostile-corpus, descendant-tree, or
+production-support requirements. Do not claim the existing ordinary-probe
+job-object confinement in `windows.rs` as evidence of production-grade
+sandboxing (it confines process *lifetime*, not filesystem or network access,
+and was not designed as a security boundary); claim Linux or macOS evidence
+proves anything about Windows; claim that this revision's own host-independent
+test pass (`capsule`, `refusal`, `settlement`, run on macOS arm64) is Windows
 execution evidence of any kind -- it proves only that logic with no Win32
 dependency behaves as designed, nothing about the primitive that actually
 touches a job object, a token, or the filesystem; run on a cross-compiled or
 emulated target as a substitute for real Windows execution; wire any new path
-into the CLI; or promote `docs/COMPLETION-MATRIX.md` WP-05 for Windows. It
-also does not claim that `CreateRestrictedToken`'s returned token carries
-sufficient access rights for the later `GetTokenInformation`/
-`CreateProcessAsUserW` calls the primitive makes on it, or that an explicit
-DACL on a freshly created directory is not additively widened by an
-inheritable ACE from its parent -- both are flagged as open, unverified
-questions in `primitive.rs`'s own doc comments for a Windows-capable reviewer
-to resolve. It records the design decisions and now the code a Windows-capable
-session should review and verify, and the exact places (the restricted-token
-refinement, sealed-capsule signature verification, the DACL-inheritance
-question, hostile-input tests for the primitive itself, the gate script) that
-still need real Windows execution to close.
+into the CLI; or promote `docs/COMPLETION-MATRIX.md` WP-05 for Windows.
+
+The newly authored runtime assertions have not yet run on Windows, so they do
+not establish that `CreateRestrictedToken` returns a token with sufficient
+rights for the later token-query/process-creation calls, that the protected
+DACL survives creation with exactly the expected ACE, or that cancellation
+leaves no descendant process. The remaining real-host work includes the
+restricted-token refinement, signed-capsule verification, a broader hostile
+corpus, descendant-tree cleanup evidence, and the first execution of the
+dispatch-only gate.

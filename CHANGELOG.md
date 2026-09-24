@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a dispatch-only Windows confinement runtime gate that requires nonzero
+  execution of restricted-token child launch, job limit/membership, scratch
+  DACL, descendant refusal, successful settlement, and timeout cancellation
+  tests. The gate uses structural capsule fixture bytes with an unverified
+  signature; Windows runtime execution and signed-capsule admission remain
+  unclaimed.
+
 - Re-pin exact Semantic Workspace Change and Operations artifact/evidence/receipt
   KATs to the expanded Project graph and serialized limits while retaining
   domain, reference, API/CLI parity, tamper, replay, budget, and stale/no-write

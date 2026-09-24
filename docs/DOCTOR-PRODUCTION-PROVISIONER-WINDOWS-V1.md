@@ -262,7 +262,10 @@ leader process handle returns `WAIT_OBJECT_0`, *and* a subsequent
 `ActiveProcesses == 0` -- mirroring the existing ordinary-probe `Child::settle`
 in `windows.rs`, which already performs exactly this check
 (`accounting.ActiveProcesses == 0`) after `TerminateJobObject`. This document's
-one addition to that existing logic is the *sticky, four-way* outcome
+timeout route gives a successful `TerminateJobObject` one fixed five-second
+grace to observe the leader signaled before the empty-job reread. A leader
+that remains live is `Uncertain(KillWaitTimedOut)`, not settled cancellation.
+The contract also requires the *sticky, four-way* outcome
 distinction: the current ordinary probe only distinguishes "settled" from
 "abort the whole harness process" (`std::process::abort()` on any observation
 failure), which is correct for a bounded developer-machine probe but is not

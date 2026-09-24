@@ -40,6 +40,9 @@ pub enum UncertainReason {
     /// The post-timeout `TerminateJobObject`/`TerminateProcess` call could
     /// not be distinguished from "already gone".
     KillAmbiguous,
+    /// Termination was requested, but the leader did not become signaled
+    /// within the fixed post-kill cleanup grace.
+    KillWaitTimedOut,
 }
 
 /// The four settlement outcomes this contract requires stay distinct. See

@@ -39,6 +39,7 @@ fn sticky_settlement_never_lets_a_later_completed_override_an_earlier_terminal_s
         Settlement::Uncertain(UncertainReason::WaitFailed),
         Settlement::Uncertain(UncertainReason::QueryFailed),
         Settlement::Uncertain(UncertainReason::KillAmbiguous),
+        Settlement::Uncertain(UncertainReason::KillWaitTimedOut),
     ] {
         let mut state = StickySettlement::default();
         state.select(first);

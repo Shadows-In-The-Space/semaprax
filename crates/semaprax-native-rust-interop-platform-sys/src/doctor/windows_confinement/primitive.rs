@@ -600,6 +600,7 @@ pub fn settle(mut confined: ConfinedProcess, deadline: Duration) -> Settled {
 fn settle_confined(confined: &mut ConfinedProcess, deadline: Instant) -> Settlement {
     let mut state = StickySettlement::default();
     let mut timed_out = false;
+    let mut killed_and_reaped = false;
     let mut exit_code = None;
     loop {
         // SAFETY: `confined.process` is a live, held process handle.
@@ -635,7 +636,16 @@ fn settle_confined(confined: &mut ConfinedProcess, deadline: Instant) -> Settlem
         if !killed {
             state.select(Settlement::Uncertain(UncertainReason::KillAmbiguous));
         } else {
-            state.select(Settlement::Cancelled);
+            // TerminateJobObject requests termination; it does not prove that
+            // the leader has released its inherited scratch-file handles.
+            // Keep one fixed cleanup grace after the caller's own deadline.
+            match unsafe { WaitForSingleObject(confined.process.raw(), 5_000) } {
+                WAIT_OBJECT_0 => killed_and_reaped = true,
+                WAIT_TIMEOUT => {
+                    state.select(Settlement::Uncertain(UncertainReason::KillWaitTimedOut));
+                }
+                _ => state.select(Settlement::Uncertain(UncertainReason::WaitFailed)),
+            }
         }
     } else if let Some(code) = exit_code {
         if code == 0 {
@@ -663,6 +673,9 @@ fn settle_confined(confined: &mut ConfinedProcess, deadline: Instant) -> Settlem
         state.select(Settlement::Uncertain(
             UncertainReason::ActiveProcessesNonZero,
         ));
+    } else if timed_out && killed_and_reaped {
+        // Only a reaped leader and empty job prove cancellation settlement.
+        state.select(Settlement::Cancelled);
     }
 
     state

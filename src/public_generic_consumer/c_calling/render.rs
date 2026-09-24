@@ -65,7 +65,7 @@ pub(super) fn consumer_source(
 }
 
 pub(super) struct InputProfile {
-    pub header: &'static str,
+    pub header: String,
     pub support: String,
     pub encoder: &'static str,
     pub prepare: &'static str,
@@ -99,7 +99,7 @@ pub(super) fn consumer_source_with_profile(
         // The private authenticated profile adds replay refusal to the existing
         // carrier-rejected category; the legacy renderer is byte-unchanged.
         const MALFORMED: &str = "case SPX_PG_STATUS_MALFORMED_CARRIER:";
-        out.push_str(profile.header);
+        out.push_str(&profile.header);
         assert_eq!(SOURCE_CODEC_AND_LIFECYCLE.matches(MALFORMED).count(), 1);
         out.push_str(&SOURCE_CODEC_AND_LIFECYCLE.replace(
             MALFORMED,

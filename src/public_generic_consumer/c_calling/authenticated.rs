@@ -9,7 +9,13 @@ use crate::public_generic_abi::{
         trace::Direction,
     },
     descriptor::verify::VerifiedPublicGenericDescriptor,
-    native::authenticated::{AuthenticatedNativeIdentityArtifact, HEADER},
+    native::{
+        authenticated::{
+            AuthenticatedNativeIdentityArtifact, AuthenticatedNativeMovesArtifact, HEADER,
+            MOVES_PROFILE, PROFILE,
+        },
+        binding::NativeProviderBindingV1,
+    },
 };
 
 use super::{render, CallingConsumer, OwnedByteField, RecordShape};
@@ -22,7 +28,35 @@ pub fn generate_authenticated_identity_calling_consumer_v1(
     descriptor: &VerifiedPublicGenericDescriptor,
     artifact: &AuthenticatedNativeIdentityArtifact,
 ) -> Result<CallingConsumer, Diagnostic> {
-    if descriptor.accepted_bytes() != artifact.descriptor_bytes() {
+    generate(
+        descriptor,
+        artifact.descriptor_bytes(),
+        artifact.binding(),
+        PROFILE,
+    )
+}
+
+/// Private closed movement-body profile. Framing and settlement are identical
+/// to identity-v1, but only the independently admitted moves artifact binds it.
+pub fn generate_authenticated_moves_calling_consumer_v1(
+    descriptor: &VerifiedPublicGenericDescriptor,
+    artifact: &AuthenticatedNativeMovesArtifact,
+) -> Result<CallingConsumer, Diagnostic> {
+    generate(
+        descriptor,
+        artifact.descriptor_bytes(),
+        artifact.binding(),
+        MOVES_PROFILE,
+    )
+}
+
+fn generate(
+    descriptor: &VerifiedPublicGenericDescriptor,
+    artifact_descriptor: &[u8],
+    binding: &NativeProviderBindingV1,
+    profile_name: &str,
+) -> Result<CallingConsumer, Diagnostic> {
+    if descriptor.accepted_bytes() != artifact_descriptor {
         return Err(Diagnostic::io(
             "SPX-PG803",
             "authenticated C caller descriptor/provider mismatch",
@@ -34,7 +68,8 @@ pub fn generate_authenticated_identity_calling_consumer_v1(
     let input = shape(&descriptor.input_facts().owned_leaves);
     let output = shape(&descriptor.result_facts().owned_leaves);
     let plan = CarrierFrameBinding::from_verified_descriptor(descriptor, Direction::Input);
-    let profile = input_profile(descriptor, &plan)?;
+    let mut profile = input_profile(descriptor, &plan)?;
+    profile.header = HEADER.replace(PROFILE, profile_name);
     Ok(CallingConsumer {
         files: vec![
             (
@@ -49,7 +84,7 @@ pub fn generate_authenticated_identity_calling_consumer_v1(
                 super::CONSUMER_SOURCE_FILE_NAME.to_owned(),
                 render::consumer_source_with_profile(
                     descriptor.accepted_bytes(),
-                    &artifact.binding().encode(),
+                    &binding.encode(),
                     &input,
                     &output,
                     Some(&profile),
@@ -124,7 +159,7 @@ fn input_profile(
     }
     support.push_str(include_str!("render/authenticated_input.c.txt"));
     Ok(render::InputProfile {
-        header: HEADER,
+        header: HEADER.to_owned(),
         support,
         encoder: "spx_pg_ccc_encode_authenticated",
         prepare: "uint64_t generation = 0;\n    status = spx_pg_authenticated_generation_v1(consumer->provider, &generation);\n    if (status == SPX_PG_STATUS_OK) status = spx_pg_authenticated_input_prepare_v1(consumer->provider, generation, SPX_PG_AUTH_OWNERSHIP_CALLER, spx_pg_ccc_auth_cleanup, sizeof(spx_pg_ccc_auth_cleanup), carrier, carrier_len, &input_handle);",

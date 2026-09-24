@@ -147,7 +147,7 @@ fn cases(descriptor: &VerifiedPublicGenericDescriptor, source: &str) -> Vec<Case
     output
 }
 
-fn run(root: &Path, cxx: bool, opt: &str, expected: i32) {
+pub(super) fn run(root: &Path, cxx: bool, opt: &str, expected: i32) {
     let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
     let executable = root.join(format!("probe{opt}{}", env::consts::EXE_SUFFIX));
     let assert_compiled = |command: &mut Command| {

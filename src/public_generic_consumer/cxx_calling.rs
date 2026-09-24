@@ -121,6 +121,24 @@ pub fn generate_authenticated_identity_calling_consumer_v1(
 ) -> Result<CallingConsumer, crate::diagnostic::Diagnostic> {
     let c_consumer =
         c_calling::generate_authenticated_identity_calling_consumer_v1(descriptor, artifact)?;
+    Ok(wrap_authenticated(descriptor, &c_consumer))
+}
+
+/// Private movement-body profile; delegates all codec, binding and settlement
+/// work to the sealed C generator without changing the move-only wrapper.
+pub fn generate_authenticated_moves_calling_consumer_v1(
+    descriptor: &crate::public_generic_abi::descriptor::verify::VerifiedPublicGenericDescriptor,
+    artifact: &crate::public_generic_abi::native::authenticated::AuthenticatedNativeMovesArtifact,
+) -> Result<CallingConsumer, crate::diagnostic::Diagnostic> {
+    let c_consumer =
+        c_calling::generate_authenticated_moves_calling_consumer_v1(descriptor, artifact)?;
+    Ok(wrap_authenticated(descriptor, &c_consumer))
+}
+
+fn wrap_authenticated(
+    descriptor: &crate::public_generic_abi::descriptor::verify::VerifiedPublicGenericDescriptor,
+    c_consumer: &c_calling::CallingConsumer,
+) -> CallingConsumer {
     let shape = |paths: &[String]| {
         RecordShape::new(paths.iter().cloned().map(OwnedByteField::new).collect())
     };
@@ -131,7 +149,7 @@ pub fn generate_authenticated_identity_calling_consumer_v1(
         WRAPPER_HEADER_FILE_NAME.to_owned(),
         render::wrapper_header(&input, &output),
     ));
-    Ok(CallingConsumer { files })
+    CallingConsumer { files }
 }
 
 mod render;

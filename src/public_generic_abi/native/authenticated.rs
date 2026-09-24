@@ -8,6 +8,8 @@
 //! contracts are executable in this initial profile; all other bodies fail at
 //! generation, never fall back to the reversal fixture. Results retain the
 //! predecessor flat export encoding; this is not a general public ABI.
+//! The separate moves-v1 constructor extends only body admission to checked
+//! non-allocating movement expressions; it never widens identity-v1 admission.
 
 use std::fmt::Write as _;
 
@@ -27,6 +29,46 @@ pub const HEADER: &str = include_str!("authenticated_v1.h");
 const SHA: &str = include_str!("authenticated_sha256.c");
 const PREPARE: &str = include_str!("authenticated_prepare.c");
 const PLACEHOLDER: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+pub const MOVES_PROFILE: &str = "semaprax.authenticated-native-moves.v1";
+
+/// A separately admitted private movement-body artifact, not an identity-v1
+/// artifact or a general allocating-body/public-support claim.
+pub struct AuthenticatedNativeMovesArtifact {
+    inner: AuthenticatedNativeIdentityArtifact,
+}
+
+impl AuthenticatedNativeMovesArtifact {
+    pub fn source(&self) -> &str {
+        self.inner.source()
+    }
+    pub fn descriptor_bytes(&self) -> &[u8] {
+        self.inner.descriptor_bytes()
+    }
+    pub fn binding(&self) -> &NativeProviderBindingV1 {
+        self.inner.binding()
+    }
+}
+
+pub fn render_authenticated_moves_provider(
+    program: &ResolvedProgram,
+    source_revision: &str,
+    descriptor: &VerifiedPublicGenericDescriptor,
+) -> Result<AuthenticatedNativeMovesArtifact, Diagnostic> {
+    let (source, bridge) =
+        crate::codegen::emit_public_generic_moves_bridge(program, source_revision, descriptor)?;
+    Ok(AuthenticatedNativeMovesArtifact {
+        inner: render_admitted(
+            descriptor,
+            &source,
+            &bridge,
+            MOVES_PROFILE,
+            b"semaprax.authenticated-native-moves.v1.runtime\0",
+            b"semaprax.authenticated-native-moves.v1.artifact\0",
+            "spx_pg_endpoint_checked_moves_v1(",
+        )?,
+    })
+}
 
 /// Deterministic in-memory C artifact. No compilation, invocation or publication
 /// authority is acquired by generating it.
@@ -56,6 +98,26 @@ pub fn render_authenticated_identity_provider(
     // The compiler owns both legality and physical layout of the selected body.
     let (checked_source, bridge) =
         crate::codegen::emit_public_generic_identity_bridge(program, source_revision, descriptor)?;
+    render_admitted(
+        descriptor,
+        &checked_source,
+        &bridge,
+        PROFILE,
+        b"semaprax.authenticated-native-identity.v1.runtime\0",
+        b"semaprax.authenticated-native-identity.v1.artifact\0",
+        "spx_pg_endpoint_checked_identity_v1(",
+    )
+}
+
+fn render_admitted(
+    descriptor: &VerifiedPublicGenericDescriptor,
+    checked_source: &str,
+    bridge: &str,
+    profile: &str,
+    runtime_domain: &[u8],
+    artifact_domain: &[u8],
+    endpoint: &str,
+) -> Result<AuthenticatedNativeIdentityArtifact, Diagnostic> {
     let plan = CarrierFrameBinding::from_verified_descriptor(descriptor, Direction::Input);
     let empty = plan
         .frame_with_leaves(
@@ -81,10 +143,7 @@ pub fn render_authenticated_identity_provider(
     let carrier = CarrierBindingV1::new(
         descriptor.descriptor_digest(),
         TargetProfile::NativeC11,
-        digest(
-            b"semaprax.authenticated-native-identity.v1.runtime\0",
-            PROFILE.as_bytes(),
-        ),
+        digest(runtime_domain, profile.as_bytes()),
     );
     let make_binding = |artifact: &str| {
         NativeProviderBindingV1::new(
@@ -103,27 +162,25 @@ pub fn render_authenticated_identity_provider(
             .find("/* --- Provider binding / descriptor replay. --- */")
             .map(|offset| start + offset)
             .ok_or_else(template_drift)?;
-        source.replace_range(start..end, &bridge);
+        source.replace_range(start..end, bridge);
         let fixture_call = "spx_pg_endpoint_reverse_bytes_v1(";
         if source.matches(fixture_call).count() != 1 {
             return Err(template_drift());
         }
-        source = source.replacen(fixture_call, "spx_pg_endpoint_checked_identity_v1(", 1);
+        source = source.replacen(fixture_call, endpoint, 1);
         let bypass = "spx_pg_status_v1 outcome = spx_pg_input_prepare_v1_impl(provider, carrier_bytes, carrier_len, out_input);";
         if source.matches(bypass).count() != 1 {
             return Err(template_drift());
         }
         source = source.replacen(bypass,
             "(void)provider; (void)carrier_bytes; (void)carrier_len;\n    if (out_input != NULL) *out_input = NULL;\n    spx_pg_status_v1 outcome = SPX_PG_STATUS_MALFORMED_CARRIER;", 1);
-        Ok(format!("/* {PROFILE}: unsupported, unpublished */\n{checked_source}\n{source}\n{HEADER}\n{constants}\n{SHA}\n{PREPARE}"))
+        let header = HEADER.replace(PROFILE, profile);
+        Ok(format!("/* {profile}: unsupported, unpublished */\n{checked_source}\n{source}\n{header}\n{constants}\n{SHA}\n{PREPARE}"))
     };
     // Normalize the one artifact-digest slot to the fixed placeholder. This
     // commits the complete checked body, plan, codec and provider implementation.
     let normalized = assemble(&make_binding(PLACEHOLDER))?;
-    let artifact_digest = digest(
-        b"semaprax.authenticated-native-identity.v1.artifact\0",
-        normalized.as_bytes(),
-    );
+    let artifact_digest = digest(artifact_domain, normalized.as_bytes());
     let binding = make_binding(&artifact_digest);
     let source = assemble(&binding)?;
     Ok(AuthenticatedNativeIdentityArtifact {

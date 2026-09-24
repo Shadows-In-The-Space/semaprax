@@ -401,7 +401,11 @@ fn capability_and_dependency_policy_are_fail_closed() {
         assert!(deny.contains(required), "missing deny rule: {required}");
     }
 
-    let runner = read("platform-tests/component-runtime/src/main.rs");
+    let runner = [
+        read("platform-tests/component-runtime/src/main.rs"),
+        read("platform-tests/component-runtime/src/public_generic_component_tests.rs"),
+    ]
+    .join("\n");
     for required in [
         "/fixtures/public-generic-v1/semaprax.toml",
         "with_authenticated_project(manifest, |snapshot|",

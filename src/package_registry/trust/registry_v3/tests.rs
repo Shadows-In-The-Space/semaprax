@@ -32,6 +32,25 @@ pub(in crate::package_registry::trust) fn host_fixture(
         f.admitted,
     )
 }
+/// Long-lived test-only signing fixture for offline-age controls. The caller
+/// chooses an expiry beyond the seven-day boundary so a refusal pins the
+/// bridge's local policy rather than ordinary metadata expiry.
+pub(in crate::package_registry::trust) fn host_fixture_until(
+    yanked: bool,
+    version: u64,
+    expires: u64,
+) -> (String, String, String, [String; 2], &'static Admission) {
+    let mut f = Fixture::new_until(yanked, expires);
+    f.publish(version, 4);
+    f.refresh(version, version);
+    (
+        wire(&root_value_until(1, 1, 4, expires)),
+        f.timestamp,
+        f.snapshot,
+        f.publishers,
+        f.admitted,
+    )
+}
 pub(in crate::package_registry::trust) fn host_rotation_fixture(
 ) -> (String, String, String, [String; 2], &'static Admission) {
     let mut f = Fixture::new(false);
@@ -77,6 +96,9 @@ fn sign(signed: Value, seeds: &[u8], domain: &[u8]) -> String {
     wire(&json!({"signed":signed,"signatures":signatures}))
 }
 fn root_value(version: u64, root_seed: u8, publisher_seed: u8) -> Value {
+    root_value_until(version, root_seed, publisher_seed, 1000)
+}
+fn root_value_until(version: u64, root_seed: u8, publisher_seed: u8, expires: u64) -> Value {
     let roles = [
         ("root", "", vec![root_seed]),
         ("timestamp", "", vec![2]),
@@ -102,7 +124,7 @@ fn root_value(version: u64, root_seed: u8, publisher_seed: u8) -> Value {
         .collect::<Vec<_>>();
     let roles = roles.iter().map(|(name,namespace,seeds)|json!({"name":name,"namespace":namespace,
         "keyids":seeds.iter().map(|seed|keyid(&key(*seed))).collect::<Vec<_>>(),"threshold":seeds.len()})).collect::<Vec<_>>();
-    json!({"schema":ROOT_SCHEMA,"registry":"test.registry","version":version,"expires":1000,"keys":keys,"roles":roles})
+    json!({"schema":ROOT_SCHEMA,"registry":"test.registry","version":version,"expires":expires,"keys":keys,"roles":roles})
 }
 struct Fixture {
     root: InstalledRoot,
@@ -110,17 +132,24 @@ struct Fixture {
     publishers: [String; 2],
     snapshot: String,
     timestamp: String,
+    expires: u64,
 }
 impl Fixture {
     fn new(yanked: bool) -> Self {
-        let root =
-            InstalledRoot::from_independently_installed_bytes(&wire(&root_value(1, 1, 4))).unwrap();
+        Self::new_until(yanked, 1000)
+    }
+    fn new_until(yanked: bool, expires: u64) -> Self {
+        let root = InstalledRoot::from_independently_installed_bytes(&wire(&root_value_until(
+            1, 1, 4, expires,
+        )))
+        .unwrap();
         let mut f = Self {
             root,
             admitted: admission(yanked),
             publishers: Default::default(),
             snapshot: String::new(),
             timestamp: String::new(),
+            expires,
         };
         f.publish(1, 4);
         f.refresh(1, 1);
@@ -151,7 +180,7 @@ impl Fixture {
             self.publishers[i] = self.metadata(
                 ["publisher-app", "publisher-lib"][i],
                 version,
-                500,
+                self.expires,
                 json!({"targets":targets}),
                 &[seed + i as u8 * 2, seed + i as u8 * 2 + 1],
             );
@@ -161,7 +190,7 @@ impl Fixture {
         self.snapshot = self.metadata(
             "snapshot",
             snapshot_version,
-            400,
+            self.expires,
             json!({"registry":{"schema":registry::SNAPSHOT_SCHEMA,
             "file":blob(self.admitted.0.envelope().as_bytes())},"publishers":[
             {"role":"publisher-app","metadata":metadata_ref(&self.publishers[0])},
@@ -174,7 +203,7 @@ impl Fixture {
         self.timestamp = self.metadata(
             "timestamp",
             version,
-            300,
+            self.expires,
             json!({"snapshot":metadata_ref(&self.snapshot)}),
             &[2],
         );

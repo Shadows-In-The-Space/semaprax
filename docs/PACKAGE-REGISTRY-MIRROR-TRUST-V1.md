@@ -35,9 +35,12 @@ than advancing it. The ordinary RegistryCheckpoint-v2 still records the
 caller's current trusted time, preserving its monotonic high-water and refusing
 time rollback. Only a newer authenticated timestamp advances the separate
 local offline-age anchor, so repeated mirror replay cannot refresh the
-seven-day window without new signed freshness evidence. Callers must retain the
-whole `MirrorCheckpoint` returned by the candidate; its raw RegistryCheckpoint
-view cannot resume mirror verification by itself.
+seven-day window without new signed freshness evidence. Pure callers must
+retain the whole `MirrorCheckpoint` returned by the candidate; its raw
+RegistryCheckpoint view cannot resume mirror verification by itself. The
+separate held-host mirror flow persists the same opaque anchor in its immutable
+generation-v3 and derives the next bridge checkpoint from that live store
+instead of accepting caller state.
 
 The focused `trust::registry_v3::tests` case acquires signed fixture bytes via
 an in-process transport and proves complete replay, signature tamper refusal,

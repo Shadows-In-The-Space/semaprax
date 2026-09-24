@@ -89,7 +89,7 @@ and ACTIVE symlink, post-verification ACTIVE/generation mutation before return,
 installed root rotation/stale pins, bootstrap and interrupted-update refusal.
 These are local invocation-bound read checks, not hosted availability claims.
 
-## Generation-v2 and exact CAS
+## Generation-v2/v3 and exact CAS
 
 The canonical sorted compact JSON schema is
 `semaprax.registry-trust-generation.v2`. Closed fields are `schema`,
@@ -122,6 +122,19 @@ directory sync; no-replace completion marker and directory sync; final chain
 recheck. Any ambiguous effect returns no success receipt and requires explicit
 recovery. This gives one managed-generation pivot, not atomic visibility for
 arbitrary raw-path readers or the existing flat `fetch --lock` cache.
+
+The additive local mirror-resume route may write
+`semaprax.registry-trust-generation.v3`. It preserves every v2 field and adds
+one closed `mirror` field: either `null`, or the exact authenticated timestamp
+anchor `{version,digest,observed_time}`. The anchor is not caller input on
+resume: the live held generation reconstructs it with the full checkpoint under
+the held lock. A v2 generation without an anchor may enter mirror acquisition
+only when it is the original bootstrap generation; an ordinary v2 update does
+not receive an implicit freshness reset. A v3 ordinary update retains its
+anchor and cannot advance the timestamp role; a mirror update validates the
+next ordinary checkpoint and timestamp role before atomically replacing the
+anchor in the same generation pivot. v2 generations and prefixes remain
+readable exactly as before; no automatic rewrite or migration occurs.
 
 ## Explicit one-way migration
 

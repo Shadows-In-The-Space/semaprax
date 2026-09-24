@@ -71,6 +71,34 @@ impl MirrorCheckpoint {
     pub fn is_initial(&self) -> bool {
         self.last_new_timestamp.is_none()
     }
+
+    /// Reconstructs bridge state only from an authenticated held generation.
+    /// This is crate-private so a caller cannot mint an old observation or
+    /// detach it from the generation checkpoint that authenticated it.
+    pub(crate) fn from_held(
+        checkpoint: RegistryCheckpoint,
+        anchor: Option<(u64, String, u64)>,
+    ) -> Self {
+        Self {
+            checkpoint,
+            last_new_timestamp: anchor.map(|(version, digest, observed_time)| {
+                TimestampObservation {
+                    version,
+                    digest,
+                    observed_time,
+                }
+            }),
+        }
+    }
+
+    /// The anchor is opaque outside the trust/host boundary. Its values are
+    /// only serialized after the held generation independently binds them to
+    /// the candidate's authenticated timestamp role.
+    pub(crate) fn anchor(&self) -> Option<(u64, &str, u64)> {
+        self.last_new_timestamp
+            .as_ref()
+            .map(|anchor| (anchor.version, anchor.digest.as_str(), anchor.observed_time))
+    }
 }
 
 /// A non-authoritative mirror verification result. Its bridge checkpoint must

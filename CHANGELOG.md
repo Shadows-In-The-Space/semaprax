@@ -15,12 +15,15 @@ format: `Unreleased` then release buckets, grouped by impact.
   v0.6.0 tag gate without promoting it to a signed or published release.
 
 - Compose caller-authorized bounded mirror bytes through signed Registry-v3
-  proof, the existing held-generation commit and one live Lock-v3 artifact
-  read, binding an initial bridge checkpoint to the live bootstrap generation
-  and distinguishing a post-commit read failure from a no-effect refusal. This
-  one-shot local flow intentionally does not refresh or resume a mirror. It
-  returns evidence only; it does not add hosted registry, resolver-cache,
-  root, filesystem or execution authority.
+  proof, a held-generation-v3 authenticated timestamp-age anchor and one live
+  Lock-v3 artifact read. Resume state is derived from the live held generation,
+  not caller checkpoints; identical timestamp replay retains the original
+  observation and a newer signed timestamp is the only anchor advance. v2
+  history remains readable with no automatic migration. Receipt-bearing
+  post-commit read or confirmed-pivot uncertainty remains distinct from
+  no-effect refusal; lower held-publish uncertainty carries no receipt. This
+  is local evidence only; it adds no hosted registry, resolver-cache, root,
+  filesystem or execution authority.
 
 - Allow the unchanged GEN-05B hosted generic-instance corpus enough job time;
   the v0.6.0 release gate reached its former 90-minute ceiling before the

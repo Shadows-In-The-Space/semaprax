@@ -2516,12 +2516,14 @@ candidate; the v1 managed host and CLI do not consume it. See
 [Registry Trust v2](PACKAGE-REGISTRY-TRUST-V2.md).
 
 `package_registry::trust::host::registry_v3` owns additive generation-v2 durable
-commit/recovery and explicit one-way v1 migration, requiring complete Lock-v3
-selection and one exact core Wasm artifact per selected root/leaf coordinate.
-Its `generation` child owns canonical wire and lineage; `store` owns held CAS,
-commit and exact recovery. The existing Unix effect primitive is shared through
-a predecessor-decoding callback; ordinary v1 bytes/routes remain unchanged.
-Receipts grant no fetch/read/execution capability. See
+commit/recovery and explicit one-way v1 migration, plus an additive
+generation-v3 mirror timestamp anchor for the local mirror-refresh route. It
+requires complete Lock-v3 selection and one exact core Wasm artifact per
+selected root/leaf coordinate. Its `generation` child owns canonical wire and
+lineage; `store` owns held CAS, commit and exact recovery. The existing Unix
+effect primitive is shared through a predecessor-decoding callback; ordinary
+v1 bytes/routes and historical v2 reads remain unchanged. Receipts grant no
+fetch/read/execution capability. See
 [Registry Host v2](PACKAGE-REGISTRY-HOST-V2.md).
 
 Its `read` child owns explicit offline artifact consumption through the live
@@ -2555,14 +2557,17 @@ candidate only; durable Host v2 commit remains required. See [Package registry
 mirror trust v1](PACKAGE-REGISTRY-MIRROR-TRUST-V1.md).
 
 `trust::host::registry_v3::acquire_commit_and_read` is a native local
-composition layer that borrows the preceding mirror authority, independently
-installed root, bridge checkpoint, sealed registry, fixed times and existing
-held store. It proves acquired metadata and lock/manifest-bound artifacts
-before Host-v2 commit, then performs one live generation/Lock-v3 artifact read.
-It binds the bridge checkpoint to the live held checkpoint before dispatch and
-reports a distinct receipt-bearing outcome if its post-commit read fails. Its
-result is only evidence plus next bridge state: it confers no resolver cache,
-root, filesystem, execution or hosted-availability authority. See
+composition layer that borrows the preceding mirror authority, sealed registry,
+fixed times and existing held store. It derives the root and bridge checkpoint
+from the live held generation—not caller state—then proves acquired metadata
+and lock/manifest-bound artifacts before the Host-v3 mirror commit and one live
+generation/Lock-v3 artifact read. The immutable pivot carries an authenticated
+timestamp version/digest/first-observation anchor; replay preserves it and only
+a newer signed timestamp moves it. A v2 generation without that anchor may
+start this route only at the original bootstrap generation. A post-commit read
+failure carries receipt and next bridge evidence distinctly. The result
+confers no resolver cache, root, filesystem, execution or hosted-availability
+authority. See
 [Package registry mirror flow v1](PACKAGE-REGISTRY-MIRROR-FLOW-V1.md).
 
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two

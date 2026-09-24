@@ -4,13 +4,21 @@ use crate::package_registry::trust::{verify_root_rotation, Checkpoint, Installed
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
-pub(super) const SCHEMA: &str = "semaprax.registry-trust-generation.v2";
+pub(super) const SCHEMA_V2: &str = "semaprax.registry-trust-generation.v2";
+pub(super) const SCHEMA: &str = "semaprax.registry-trust-generation.v3";
+#[derive(Clone)]
+pub(super) struct MirrorAnchor {
+    pub version: u64,
+    pub digest: String,
+    pub observed_time: u64,
+}
 pub(super) struct Generation {
     pub bytes: String,
     pub value: Value,
     pub root: InstalledRoot,
     pub checkpoint: proof::RegistryCheckpoint,
     pub base: Checkpoint,
+    pub mirror: Option<MirrorAnchor>,
 }
 fn checkpoint_base(checkpoint: &proof::RegistryCheckpoint) -> Result<Checkpoint> {
     let outer = parse(&checkpoint.canonical_bytes())?;
@@ -25,22 +33,66 @@ pub(super) fn decode(bytes: String) -> Result<Generation> {
     .map_err(|_| refused("invalid generation-v2 encoding"))?;
     let value: Value =
         serde_json::from_str(&bytes).map_err(|_| refused("invalid generation-v2 JSON"))?;
-    fields(
-        &value,
-        &[
-            "schema",
-            "transition",
-            "previous",
-            "root",
-            "checkpoint",
-            "rotation",
-            "time",
-            "cache",
-            "metadata",
-        ],
-    )?;
-    if value["schema"] != SCHEMA || wire(&value) != bytes {
-        return Err(refused("noncanonical generation-v2"));
+    let schema = string(&value["schema"])?;
+    let mirror = match schema {
+        SCHEMA_V2 => {
+            fields(
+                &value,
+                &[
+                    "schema",
+                    "transition",
+                    "previous",
+                    "root",
+                    "checkpoint",
+                    "rotation",
+                    "time",
+                    "cache",
+                    "metadata",
+                ],
+            )?;
+            None
+        }
+        SCHEMA => {
+            fields(
+                &value,
+                &[
+                    "schema",
+                    "transition",
+                    "previous",
+                    "root",
+                    "checkpoint",
+                    "rotation",
+                    "time",
+                    "cache",
+                    "metadata",
+                    "mirror",
+                ],
+            )?;
+            if value["mirror"].is_null() {
+                None
+            } else {
+                let anchor = &value["mirror"];
+                fields(anchor, &["version", "digest", "observed_time"])?;
+                let digest = string(&anchor["digest"])?;
+                if !digest.starts_with("sha256:")
+                    || digest.len() != 71
+                    || !digest[7..]
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                {
+                    return Err(refused("invalid mirror timestamp digest"));
+                }
+                Some(MirrorAnchor {
+                    version: number(&anchor["version"])?,
+                    digest: digest.to_owned(),
+                    observed_time: number(&anchor["observed_time"])?,
+                })
+            }
+        }
+        _ => return Err(refused("unknown generation schema")),
+    };
+    if wire(&value) != bytes {
+        return Err(refused("noncanonical generation encoding"));
     }
     let previous = string(&value["previous"])?;
     if !previous.is_empty() && !valid_name(previous) {
@@ -69,12 +121,25 @@ pub(super) fn decode(bytes: String) -> Result<Generation> {
     {
         return Err(refused("checkpoint publisher bindings disagree"));
     }
+    if let Some(anchor) = mirror.as_ref() {
+        let timestamp = base
+            .roles
+            .get("timestamp")
+            .ok_or_else(super::super::stale)?;
+        if timestamp.version != anchor.version
+            || timestamp.digest != anchor.digest
+            || anchor.observed_time > base.observed_time
+        {
+            return Err(refused("mirror timestamp provenance disagrees"));
+        }
+    }
     Ok(Generation {
         bytes,
         value,
         root,
         checkpoint,
         base,
+        mirror,
     })
 }
 pub(super) fn bootstrap(root: &str, pin: &str, now: u64) -> Result<Generation> {
@@ -82,7 +147,7 @@ pub(super) fn bootstrap(root: &str, pin: &str, now: u64) -> Result<Generation> {
     let checkpoint =
         proof::RegistryCheckpoint::migrate_from_v1(&initial.checkpoint, &initial.root)?;
     let mut value = initial.value;
-    value["schema"] = json!(SCHEMA);
+    value["schema"] = json!(SCHEMA_V2);
     value["transition"] = json!("bootstrap");
     value["checkpoint"] = json!(checkpoint.canonical_bytes());
     decode(wire(&value))
@@ -95,6 +160,7 @@ pub(super) fn from_v1(old: super::super::Generation) -> Result<Generation> {
         root: old.root,
         checkpoint,
         base: old.checkpoint,
+        mirror: None,
     })
 }
 pub(super) fn prepare(
@@ -205,25 +271,122 @@ pub(super) fn prepare(
     publishers.sort_by(|a, b| a["role"].as_str().cmp(&b["role"].as_str()));
     let mut subjects = update.subjects.to_vec();
     subjects.sort();
-    let bytes = wire(
-        &json!({"schema":SCHEMA,"transition":if migration {"migrate-v1"}else{"update"},
+    let schema = if old.value["schema"] == SCHEMA {
+        SCHEMA
+    } else {
+        SCHEMA_V2
+    };
+    let mut value = json!({"schema":schema,"transition":if migration {"migrate-v1"}else{"update"},
         "previous":generation_name(old.bytes.as_bytes()),"root":root_bytes,"checkpoint":candidate.checkpoint().canonical_bytes(),
         "rotation":update.rotation,"time":update.trusted_time,
         "metadata":{"timestamp":update.metadata.timestamp,"snapshot":update.metadata.snapshot,"publishers":publishers,
             "registry":update.metadata.registry.envelope()},
-        "cache":{"lock":update.lock,"subjects":subjects,"artifacts":artifacts}}),
-    );
+        "cache":{"lock":update.lock,"subjects":subjects,"artifacts":artifacts}});
+    if schema == SCHEMA {
+        // A mirror update validates and attaches its next anchor below. An
+        // ordinary update restores the prior anchor only after proving that
+        // it did not move the timestamp role.
+        value["mirror"] = Value::Null;
+    }
+    let bytes = wire(&value);
     if bytes.len() > MAX_GENERATION {
         return Err(refused("generation exceeds bound"));
     }
     decode(bytes)
 }
 
+/// The ordinary host route may retain a previously authenticated mirror anchor,
+/// but it may not advance the timestamp role without the mirror proof route.
+/// Otherwise an ambient non-mirror update could silently create a new
+/// seven-day freshness window.
+pub(super) fn prepare_ordinary(
+    old: &Generation,
+    update: &Update<'_, '_>,
+    migration: bool,
+) -> Result<Generation> {
+    let generation = prepare(old, update, migration)?;
+    if let Some(anchor) = old.mirror.as_ref() {
+        let old_timestamp = old
+            .base
+            .roles
+            .get("timestamp")
+            .ok_or_else(super::super::stale)?;
+        let next_timestamp = generation
+            .base
+            .roles
+            .get("timestamp")
+            .ok_or_else(super::super::stale)?;
+        if old_timestamp.version != next_timestamp.version
+            || old_timestamp.digest != next_timestamp.digest
+        {
+            return Err(refused(
+                "ordinary update cannot advance a mirror-bound timestamp",
+            ));
+        }
+        return attach_mirror(generation, anchor);
+    }
+    Ok(generation)
+}
+
+/// Converts a verified mirror candidate into a durable generation-v3 anchor.
+/// The opaque bridge value is accepted only when its ordinary checkpoint and
+/// timestamp role are exactly the candidate independently replayed below.
+pub(super) fn prepare_mirror(
+    old: &Generation,
+    update: &Update<'_, '_>,
+    checkpoint: &proof::MirrorCheckpoint,
+) -> Result<Generation> {
+    let generation = prepare(old, update, false)?;
+    if checkpoint.registry_checkpoint().canonical_bytes() != generation.checkpoint.canonical_bytes()
+    {
+        return Err(refused("mirror checkpoint does not bind held update"));
+    }
+    let (version, digest, observed_time) = checkpoint
+        .anchor()
+        .ok_or_else(|| refused("mirror update lacks timestamp provenance"))?;
+    let timestamp = generation
+        .base
+        .roles
+        .get("timestamp")
+        .ok_or_else(super::super::stale)?;
+    if timestamp.version != version || timestamp.digest != digest {
+        return Err(refused("mirror timestamp provenance disagrees"));
+    }
+    match old.mirror.as_ref() {
+        Some(previous)
+            if previous.version == version
+                && previous.digest == digest
+                && previous.observed_time == observed_time => {}
+        Some(previous) if version > previous.version && observed_time == update.trusted_time => {}
+        Some(_) => return Err(refused("mirror timestamp anchor regressed or was rebased")),
+        None if old.value["transition"] == "bootstrap" && observed_time == update.trusted_time => {}
+        None => {
+            return Err(refused(
+                "mirror anchor requires an original held bootstrap generation",
+            ));
+        }
+    }
+    attach_mirror(
+        generation,
+        &MirrorAnchor {
+            version,
+            digest: digest.to_owned(),
+            observed_time,
+        },
+    )
+}
+
+fn attach_mirror(mut generation: Generation, anchor: &MirrorAnchor) -> Result<Generation> {
+    generation.value["schema"] = json!(SCHEMA);
+    generation.value["mirror"] = json!({"version":anchor.version,"digest":anchor.digest,"observed_time":anchor.observed_time});
+    decode(wire(&generation.value))
+}
+
 /// Shared low-level recovery only needs the exact predecessor link. Full chain
 /// authentication happens in load_chain first, not in this callback.
 pub(super) fn predecessor(bytes: String) -> Result<(String, String)> {
     let value: Value = serde_json::from_str(&bytes).map_err(|_| refused("invalid generation"))?;
-    if value["schema"] == SCHEMA {
+    if value["schema"] == SCHEMA || value["schema"] == SCHEMA_V2 {
         let generation = decode(bytes)?;
         let previous = string(&generation.value["previous"])?.to_owned();
         Ok((generation.bytes, previous))
@@ -259,7 +422,7 @@ pub(super) fn load_chain(
         }
         let value: Value =
             serde_json::from_str(&bytes).map_err(|_| refused("invalid generation"))?;
-        if value["schema"] != SCHEMA {
+        if value["schema"] != SCHEMA && value["schema"] != SCHEMA_V2 {
             legacy = Some(from_v1(super::super::load_chain(held, &next, pin, true)?)?);
             // Inventory includes the entire authenticated legacy prefix.
             let mut previous = string(&value["previous"])?.to_owned();
@@ -305,7 +468,7 @@ pub(super) fn load_chain(
     }
     for pair in nodes.windows(2) {
         let (new, old) = (&pair[0], &pair[1]);
-        let expected = if old.value["schema"] == SCHEMA {
+        let expected = if old.value["schema"] == SCHEMA || old.value["schema"] == SCHEMA_V2 {
             "update"
         } else {
             "migrate-v1"

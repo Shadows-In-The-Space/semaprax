@@ -1,6 +1,24 @@
 use super::super::Held;
-use super::generation::{bootstrap, from_v1, load_chain, predecessor, prepare, Generation};
+use super::generation::{
+    bootstrap, from_v1, load_chain, predecessor, prepare_mirror, prepare_ordinary, Generation,
+};
 use super::*;
+use crate::package_registry::trust::registry_v3::{MirrorCheckpoint, MirrorUpdateCandidate};
+
+pub(super) enum MirrorCommitError {
+    Refused(crate::diagnostic::Diagnostic),
+    /// `Held::publish` has an intentionally fail-stop uncertain boundary:
+    /// PENDING, an immutable generation, or ACTIVE may already exist. This is
+    /// not a receipt because the final completed generation was not confirmed.
+    Uncertain {
+        candidate_generation_digest: String,
+        error: crate::diagnostic::Diagnostic,
+    },
+    PostCommit {
+        commit: CommitReceipt,
+        error: crate::diagnostic::Diagnostic,
+    },
+}
 use crate::package_registry::trust::{stale, verify_root_rotation};
 
 /// Non-cloneable live held authority. No serialized receipt restores this lock.
@@ -90,13 +108,80 @@ impl HeldTrustStore {
             ),
         }
     }
+    /// Reconstructs the sole bridge checkpoint from the authenticated live
+    /// held generation. A caller cannot supply an alternate initial checkpoint
+    /// to reset the mirror freshness age. Anchorless state is usable only for
+    /// the exact first held bootstrap generation.
+    pub fn mirror_checkpoint(&self) -> Result<MirrorCheckpoint> {
+        self.recheck()?;
+        if self.generation.mirror.is_none() && self.generation.value["transition"] != "bootstrap" {
+            return Err(refused("mirror resume requires a durable timestamp anchor"));
+        }
+        Ok(MirrorCheckpoint::from_held(
+            self.generation.checkpoint.clone(),
+            self.generation
+                .mirror
+                .as_ref()
+                .map(|anchor| (anchor.version, anchor.digest.clone(), anchor.observed_time)),
+        ))
+    }
+    /// The installed root that is already authenticated by the live held
+    /// generation. Mirror callers never provide a substitute root.
+    pub fn mirror_root(&self) -> Result<&crate::package_registry::trust::InstalledRoot> {
+        self.recheck()?;
+        Ok(&self.generation.root)
+    }
     pub fn commit_update(&mut self, update: &Update<'_, '_>) -> Result<CommitReceipt> {
         self.recheck()?;
-        let generation = prepare(&self.generation, update, false)?;
+        let generation = prepare_ordinary(&self.generation, update, false)?;
         self.recheck()?;
         self.active = self.held.publish(Some(&self.active), &generation.bytes)?;
         self.generation = generation;
         self.recheck().map_err(|_| uncertain())?;
+        Ok(self.receipt())
+    }
+    /// Commits an update whose timestamp-age anchor was produced by the
+    /// opaque mirror verifier against `mirror_checkpoint()`. The held store
+    /// replays the ordinary update, binds its checkpoint and timestamp role,
+    /// and persists the anchor in the same immutable generation pivot.
+    pub(super) fn commit_mirror_update(
+        &mut self,
+        update: &Update<'_, '_>,
+        candidate: &MirrorUpdateCandidate<'_>,
+    ) -> std::result::Result<CommitReceipt, MirrorCommitError> {
+        self.recheck().map_err(MirrorCommitError::Refused)?;
+        if candidate.prior_checkpoint_digest()
+            != hash(self.generation.checkpoint.canonical_bytes().as_bytes())
+        {
+            return Err(MirrorCommitError::Refused(refused(
+                "mirror candidate predecessor does not bind the held generation",
+            )));
+        }
+        let generation = prepare_mirror(&self.generation, update, candidate.checkpoint())
+            .map_err(MirrorCommitError::Refused)?;
+        self.recheck().map_err(MirrorCommitError::Refused)?;
+        let candidate_generation_digest = hash(generation.bytes.as_bytes());
+        self.active = match self.held.publish(Some(&self.active), &generation.bytes) {
+            Ok(active) => active,
+            Err(error) => {
+                return Err(MirrorCommitError::Uncertain {
+                    candidate_generation_digest,
+                    error,
+                });
+            }
+        };
+        self.generation = generation;
+        #[cfg(test)]
+        after_mirror_pivot();
+        if self.recheck().is_err() {
+            return Err(MirrorCommitError::PostCommit {
+                commit: self.receipt(),
+                error: crate::diagnostic::Diagnostic::io(
+                    "SPX-PKR628",
+                    "mirror generation pivot may have committed; retain the receipt and revalidate before retry",
+                ),
+            });
+        }
         Ok(self.receipt())
     }
     /// One-way same-store migration, never fallback from a v2 parse error. A
@@ -114,7 +199,7 @@ impl HeldTrustStore {
             return Err(refused("migration generation CAS disagrees"));
         }
         let previous = from_v1(old)?;
-        let generation = prepare(&previous, update, true)?;
+        let generation = prepare_ordinary(&previous, update, true)?;
         // Recheck exact legacy state immediately before effects under the same lock.
         if held.read("ACTIVE", 66)? != active
             || super::super::load_chain(&held, &active, independent_pin, false)?.bytes
@@ -196,7 +281,7 @@ impl HeldTrustStore {
         };
         // Recovery must be fresh now as well as exact at original update time.
         proof::verify_update(root, &previous.checkpoint, now, &update.metadata)?;
-        let generation = prepare(&previous, update, migration)?;
+        let generation = prepare_ordinary(&previous, update, migration)?;
         let active = held.recover_profile(Some(&previous_name), &generation.bytes, predecessor)?;
         let store = Self {
             held,
@@ -230,4 +315,15 @@ impl HeldTrustStore {
         store.recheck().map_err(|_| uncertain())?;
         Ok(store)
     }
+}
+
+#[cfg(test)]
+thread_local! {pub(super) static AFTER_MIRROR_PIVOT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };}
+#[cfg(test)]
+fn after_mirror_pivot() {
+    AFTER_MIRROR_PIVOT.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().take() {
+            hook();
+        }
+    });
 }

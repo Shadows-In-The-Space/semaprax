@@ -12,7 +12,6 @@ use crate::package_registry::mirror_transport::{
 use crate::package_registry::trust::registry_v3::{
     verify_mirror_update, verify_update, MirrorCheckpoint, MirrorMetadataPaths, UpdateInputs,
 };
-use crate::package_registry::trust::InstalledRoot;
 
 /// One exact remote artifact object and its separately signed logical
 /// coordinate. Remote paths do not become local filesystem paths.
@@ -31,11 +30,10 @@ pub struct MirrorArtifactSelection<'a> {
 }
 
 /// All caller-owned inputs for one local mirror-to-held-store transaction.
-/// The root, sealed registry, lock and trusted times remain explicit; remote
-/// bytes cannot supply or replace any of them.
+/// The installed root is derived from the live held generation; the sealed
+/// registry, lock and trusted times remain explicit. Remote bytes cannot
+/// supply or replace any of those bindings.
 pub struct MirrorFlowRequest<'registry, 'input> {
-    pub root: &'input InstalledRoot,
-    pub checkpoint: &'input MirrorCheckpoint,
     pub metadata_paths: &'input MirrorMetadataPaths<'registry, 'input>,
     pub metadata_objects: &'input [MirrorObject<'input>],
     pub artifacts: &'input [MirrorArtifact<'input>],
@@ -51,6 +49,13 @@ pub struct MirrorFlowRequest<'registry, 'input> {
 pub enum MirrorFlowError {
     Acquisition(MirrorError),
     Proof(Diagnostic),
+    /// The held publish boundary did not confirm a completed generation. Its
+    /// candidate digest is correlation evidence only, never a commit receipt.
+    Uncertain {
+        checkpoint: MirrorCheckpoint,
+        candidate_generation_digest: String,
+        error: Diagnostic,
+    },
     /// The generation pivot succeeded, but the required final live read did
     /// not. The caller must retain this evidence and use normal held-store
     /// recovery/revalidation rather than treating the result as no-effect.
@@ -65,6 +70,15 @@ impl std::fmt::Debug for MirrorFlowError {
         match self {
             Self::Acquisition(error) => formatter.debug_tuple("Acquisition").field(error).finish(),
             Self::Proof(error) => formatter.debug_tuple("Proof").field(error).finish(),
+            Self::Uncertain {
+                candidate_generation_digest,
+                error,
+                ..
+            } => formatter
+                .debug_struct("Uncertain")
+                .field("candidate_generation_digest", candidate_generation_digest)
+                .field("error", error)
+                .finish(),
             Self::PostCommit { commit, error, .. } => formatter
                 .debug_struct("PostCommit")
                 .field("generation_digest", &commit.generation_digest)
@@ -95,20 +109,7 @@ pub fn acquire_commit_and_read<'registry, T: MirrorTransport>(
     store: &mut HeldTrustStore,
     request: &MirrorFlowRequest<'registry, '_>,
 ) -> std::result::Result<MirrorFlowResult, MirrorFlowError> {
-    if !request.checkpoint.is_initial()
-        || crate::audit_capsule::sha256_digest(
-            request
-                .checkpoint
-                .registry_checkpoint()
-                .canonical_bytes()
-                .as_bytes(),
-        ) != store.receipt().checkpoint_digest
-    {
-        return Err(MirrorFlowError::Proof(Diagnostic::io(
-            "SPX-PKR623",
-            "mirror flow only admits the matching held bootstrap checkpoint",
-        )));
-    }
+    let stored_checkpoint = store.mirror_checkpoint().map_err(MirrorFlowError::Proof)?;
     if request
         .metadata_objects
         .iter()
@@ -149,8 +150,8 @@ pub fn acquire_commit_and_read<'registry, T: MirrorTransport>(
     let metadata_count = request.metadata_objects.len();
     let (metadata, artifact_bytes) = downloaded.split_at(metadata_count);
     let candidate = verify_mirror_update(
-        request.root,
-        request.checkpoint,
+        store.mirror_root().map_err(MirrorFlowError::Proof)?,
+        &stored_checkpoint,
         request.update_time,
         request.metadata_paths,
         metadata,
@@ -205,7 +206,7 @@ pub fn acquire_commit_and_read<'registry, T: MirrorTransport>(
     // an expired or otherwise non-readable caller request from producing a
     // durable generation that cannot satisfy this flow's promised live read.
     let read_candidate = verify_update(
-        request.root,
+        store.mirror_root().map_err(MirrorFlowError::Proof)?,
         candidate.checkpoint().registry_checkpoint(),
         request.read_time,
         &UpdateInputs {
@@ -255,10 +256,30 @@ pub fn acquire_commit_and_read<'registry, T: MirrorTransport>(
         artifacts: &artifacts,
         trusted_time: request.update_time,
     };
-    let commit = store
-        .commit_update(&update)
-        .map_err(MirrorFlowError::Proof)?;
     let checkpoint = candidate.checkpoint().clone();
+    let commit = match store.commit_mirror_update(&update, &candidate) {
+        Ok(commit) => commit,
+        Err(super::store::MirrorCommitError::Refused(error)) => {
+            return Err(MirrorFlowError::Proof(error));
+        }
+        Err(super::store::MirrorCommitError::Uncertain {
+            candidate_generation_digest,
+            error,
+        }) => {
+            return Err(MirrorFlowError::Uncertain {
+                checkpoint,
+                candidate_generation_digest,
+                error,
+            });
+        }
+        Err(super::store::MirrorCommitError::PostCommit { commit, error }) => {
+            return Err(MirrorFlowError::PostCommit {
+                checkpoint,
+                commit,
+                error,
+            });
+        }
+    };
     let artifact = match store.read_artifact(&ArtifactRead {
         expected_generation_digest: &commit.generation_digest,
         lock: request.lock,
@@ -288,7 +309,7 @@ pub fn acquire_commit_and_read<'registry, T: MirrorTransport>(
 mod tests {
     use super::*;
     use crate::package_registry::mirror_transport::{MirrorGet, MirrorOrigin, MirrorResponse};
-    use crate::package_registry::trust::registry_v3::tests::host_fixture;
+    use crate::package_registry::trust::registry_v3::tests::{host_fixture, host_fixture_until};
     use std::collections::VecDeque;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -370,12 +391,18 @@ mod tests {
 
     #[test]
     fn acquired_signed_metadata_commits_then_returns_live_lock_bound_artifact() {
-        let (root_bytes, timestamp, snapshot, publishers, admitted) = host_fixture(false, 1);
-        let root = InstalledRoot::from_independently_installed_bytes(&root_bytes).unwrap();
-        let checkpoint = MirrorCheckpoint::initial_at(&root, 90);
+        let (root_bytes, timestamp, snapshot, publishers, admitted) = host_fixture_until(
+            false,
+            1,
+            100 + crate::package_registry::trust::registry_v3::MAX_MIRROR_OFFLINE_SECONDS + 100,
+        );
         let temp = Temp::new();
         let pin = crate::audit_capsule::sha256_digest(root_bytes.as_bytes());
         let mut store = HeldTrustStore::install(&temp.0, &root_bytes, &pin, 90).unwrap();
+        let bootstrap_active = std::fs::read_to_string(temp.0.join("ACTIVE")).unwrap();
+        let bootstrap: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(temp.0.join(bootstrap_active)).unwrap()).unwrap();
+        assert_eq!(bootstrap["schema"], "semaprax.registry-trust-generation.v2");
         let before = store.receipt().generation_digest;
         let metadata_digests = [
             crate::audit_capsule::sha256_digest(timestamp.as_bytes()),
@@ -479,8 +506,6 @@ mod tests {
             &mut fault_mirror,
             &mut fault_store,
             &MirrorFlowRequest {
-                root: &root,
-                checkpoint: &checkpoint,
                 metadata_paths: &metadata_paths,
                 metadata_objects: &metadata,
                 artifacts: &artifacts,
@@ -518,6 +543,120 @@ mod tests {
             other => panic!("post-commit read fault failed through wrong path: {other:?}"),
         }
         assert_eq!(fault_mirror.calls, 6);
+        let pivot_temp = Temp::new();
+        let mut pivot_store =
+            HeldTrustStore::install(&pivot_temp.0, &root_bytes, &pin, 90).unwrap();
+        let pivot_old_active = std::fs::read(pivot_temp.0.join("ACTIVE")).unwrap();
+        let pivot_directory = pivot_temp.0.clone();
+        super::super::store::AFTER_MIRROR_PIVOT.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                std::fs::write(pivot_directory.join("ACTIVE"), pivot_old_active).unwrap();
+            }));
+        });
+        let mut pivot_mirror = ScriptedMirror {
+            replies: VecDeque::from([
+                response("/metadata/timestamp.json", timestamp.as_bytes()),
+                response("/metadata/snapshot.json", snapshot.as_bytes()),
+                response("/metadata/publisher-app.json", publishers[0].as_bytes()),
+                response("/metadata/publisher-lib.json", publishers[1].as_bytes()),
+                response("/artifacts/app-root.wasm", &admitted.3),
+                response("/artifacts/lib-leaf.wasm", &admitted.4),
+            ]),
+            calls: 0,
+        };
+        let pivot = match acquire_commit_and_read(
+            &authority(),
+            &mut pivot_mirror,
+            &mut pivot_store,
+            &MirrorFlowRequest {
+                metadata_paths: &metadata_paths,
+                metadata_objects: &metadata,
+                artifacts: &artifacts,
+                lock: &admitted.2,
+                subjects: &admitted.1,
+                read: MirrorArtifactSelection {
+                    package: "app.root",
+                    version: "1.0.0",
+                    path: "module.wasm",
+                },
+                update_time: 100,
+                read_time: 100,
+            },
+        ) {
+            Ok(_) => panic!("post-pivot mirror recheck fault unexpectedly accepted"),
+            Err(error) => error,
+        };
+        match pivot {
+            MirrorFlowError::PostCommit {
+                checkpoint,
+                commit,
+                error,
+            } => {
+                assert_eq!(error.code, "SPX-PKR628");
+                assert_eq!(
+                    crate::audit_capsule::sha256_digest(
+                        checkpoint
+                            .registry_checkpoint()
+                            .canonical_bytes()
+                            .as_bytes()
+                    ),
+                    commit.checkpoint_digest
+                );
+            }
+            other => panic!("post-pivot mirror recheck fault had wrong outcome: {other:?}"),
+        }
+        assert_eq!(pivot_mirror.calls, 6);
+        let uncertain_temp = Temp::new();
+        let mut uncertain_store =
+            HeldTrustStore::install(&uncertain_temp.0, &root_bytes, &pin, 90).unwrap();
+        super::super::super::unix::FAIL.with(|fail| {
+            fail.set(Some(super::super::super::unix::Point::AfterActive));
+        });
+        let mut uncertain_mirror = ScriptedMirror {
+            replies: VecDeque::from([
+                response("/metadata/timestamp.json", timestamp.as_bytes()),
+                response("/metadata/snapshot.json", snapshot.as_bytes()),
+                response("/metadata/publisher-app.json", publishers[0].as_bytes()),
+                response("/metadata/publisher-lib.json", publishers[1].as_bytes()),
+                response("/artifacts/app-root.wasm", &admitted.3),
+                response("/artifacts/lib-leaf.wasm", &admitted.4),
+            ]),
+            calls: 0,
+        };
+        let uncertain = match acquire_commit_and_read(
+            &authority(),
+            &mut uncertain_mirror,
+            &mut uncertain_store,
+            &MirrorFlowRequest {
+                metadata_paths: &metadata_paths,
+                metadata_objects: &metadata,
+                artifacts: &artifacts,
+                lock: &admitted.2,
+                subjects: &admitted.1,
+                read: MirrorArtifactSelection {
+                    package: "app.root",
+                    version: "1.0.0",
+                    path: "module.wasm",
+                },
+                update_time: 100,
+                read_time: 100,
+            },
+        ) {
+            Ok(_) => panic!("uncertain held mirror pivot unexpectedly accepted"),
+            Err(error) => error,
+        };
+        match uncertain {
+            MirrorFlowError::Uncertain {
+                candidate_generation_digest,
+                error,
+                ..
+            } => {
+                assert_eq!(error.code, "SPX-PKR627");
+                assert!(candidate_generation_digest.starts_with("sha256:"));
+            }
+            other => panic!("uncertain held mirror pivot had wrong outcome: {other:?}"),
+        }
+        assert_eq!(uncertain_mirror.calls, 6);
         let tampered_timestamp = corrupt_signature(&timestamp);
         let tampered_digest = crate::audit_capsule::sha256_digest(tampered_timestamp.as_bytes());
         let mut tampered_metadata = metadata;
@@ -538,8 +677,6 @@ mod tests {
             &mut tampered_mirror,
             &mut store,
             &MirrorFlowRequest {
-                root: &root,
-                checkpoint: &checkpoint,
                 metadata_paths: &metadata_paths,
                 metadata_objects: &tampered_metadata,
                 artifacts: &artifacts,
@@ -582,8 +719,6 @@ mod tests {
             &mut mirror,
             &mut store,
             &MirrorFlowRequest {
-                root: &root,
-                checkpoint: &checkpoint,
                 metadata_paths: &metadata_paths,
                 metadata_objects: &metadata,
                 artifacts: &artifacts,
@@ -618,18 +753,176 @@ mod tests {
             store.receipt().checkpoint_digest
         );
         let committed_generation = result.commit.generation_digest.clone();
-        let reset = MirrorCheckpoint::initial_at(&root, 90);
-        let mut reset_mirror = ScriptedMirror {
-            replies: VecDeque::new(),
+        let reset_root =
+            crate::package_registry::trust::InstalledRoot::from_independently_installed_bytes(
+                &root_bytes,
+            )
+            .unwrap();
+        let reset_checkpoint = MirrorCheckpoint::initial_at(&reset_root, 100);
+        let mut reset_transport = ScriptedMirror {
+            replies: VecDeque::from([
+                response("/metadata/timestamp.json", timestamp.as_bytes()),
+                response("/metadata/snapshot.json", snapshot.as_bytes()),
+                response("/metadata/publisher-app.json", publishers[0].as_bytes()),
+                response("/metadata/publisher-lib.json", publishers[1].as_bytes()),
+            ]),
             calls: 0,
         };
-        let reset_error = match acquire_commit_and_read(
+        let reset_downloaded = authority()
+            .acquire(&mut reset_transport, &MirrorRequest { objects: &metadata })
+            .unwrap();
+        let reset_candidate = verify_mirror_update(
+            &reset_root,
+            &reset_checkpoint,
+            101,
+            &metadata_paths,
+            &reset_downloaded,
+        )
+        .unwrap();
+        let reset_publisher_rows = [
+            ("publisher-app", publishers[0].as_str()),
+            ("publisher-lib", publishers[1].as_str()),
+        ];
+        let reset_artifact_rows = [
+            Artifact {
+                package: "app.root",
+                version: "1.0.0",
+                path: "module.wasm",
+                bytes: &admitted.3,
+            },
+            Artifact {
+                package: "lib.leaf",
+                version: "1.0.0",
+                path: "module.wasm",
+                bytes: &admitted.4,
+            },
+        ];
+        let reset_error = match store.commit_mirror_update(
+            &Update {
+                metadata: UpdateInputs {
+                    timestamp: &timestamp,
+                    snapshot: &snapshot,
+                    publishers: &reset_publisher_rows,
+                    registry: &admitted.0,
+                },
+                rotation: None,
+                lock: &admitted.2,
+                subjects: &admitted.1,
+                artifacts: &reset_artifact_rows,
+                trusted_time: 101,
+            },
+            &reset_candidate,
+        ) {
+            Ok(_) => panic!("caller-reset mirror candidate bypassed held predecessor binding"),
+            Err(super::super::store::MirrorCommitError::Refused(error)) => error,
+            Err(super::super::store::MirrorCommitError::Uncertain { .. }) => {
+                panic!("caller-reset mirror candidate reached the held publish boundary")
+            }
+            Err(super::super::store::MirrorCommitError::PostCommit { .. }) => {
+                panic!("caller-reset mirror candidate reached the pivot")
+            }
+        };
+        assert_eq!(reset_error.code, "SPX-PKR626");
+        assert_eq!(store.receipt().generation_digest, committed_generation);
+        let mut resume_mirror = ScriptedMirror {
+            replies: VecDeque::from([
+                response("/metadata/timestamp.json", timestamp.as_bytes()),
+                response("/metadata/snapshot.json", snapshot.as_bytes()),
+                response("/metadata/publisher-app.json", publishers[0].as_bytes()),
+                response("/metadata/publisher-lib.json", publishers[1].as_bytes()),
+                response("/artifacts/app-root.wasm", &admitted.3),
+                response("/artifacts/lib-leaf.wasm", &admitted.4),
+            ]),
+            calls: 0,
+        };
+        let resumed = acquire_commit_and_read(
             &authority(),
-            &mut reset_mirror,
+            &mut resume_mirror,
             &mut store,
             &MirrorFlowRequest {
-                root: &root,
-                checkpoint: &reset,
+                metadata_paths: &metadata_paths,
+                metadata_objects: &metadata,
+                artifacts: &artifacts,
+                lock: &admitted.2,
+                subjects: &admitted.1,
+                read: MirrorArtifactSelection {
+                    package: "app.root",
+                    version: "1.0.0",
+                    path: "module.wasm",
+                },
+                update_time: 101,
+                read_time: 101,
+            },
+        )
+        .unwrap();
+        assert_eq!(resume_mirror.calls, 6);
+        assert_ne!(resumed.commit.generation_digest, committed_generation);
+        assert!(matches!(resumed.checkpoint.anchor(), Some((1, _, 100))));
+        let refresh_generation = resumed.commit.generation_digest.clone();
+        let (_, next_timestamp, next_snapshot, next_publishers, next_admitted) = host_fixture_until(
+            false,
+            2,
+            100 + crate::package_registry::trust::registry_v3::MAX_MIRROR_OFFLINE_SECONDS + 100,
+        );
+        let next_publisher_rows = [
+            ("publisher-app", next_publishers[0].as_str()),
+            ("publisher-lib", next_publishers[1].as_str()),
+        ];
+        let next_artifacts = [
+            Artifact {
+                package: "app.root",
+                version: "1.0.0",
+                path: "module.wasm",
+                bytes: &next_admitted.3,
+            },
+            Artifact {
+                package: "lib.leaf",
+                version: "1.0.0",
+                path: "module.wasm",
+                bytes: &next_admitted.4,
+            },
+        ];
+        let ordinary_error = match store.commit_update(&Update {
+            metadata: UpdateInputs {
+                timestamp: &next_timestamp,
+                snapshot: &next_snapshot,
+                publishers: &next_publisher_rows,
+                registry: &next_admitted.0,
+            },
+            rotation: None,
+            lock: &next_admitted.2,
+            subjects: &next_admitted.1,
+            artifacts: &next_artifacts,
+            trusted_time: 102,
+        }) {
+            Ok(_) => panic!("ordinary update advanced mirror-bound timestamp"),
+            Err(error) => error,
+        };
+        assert_eq!(ordinary_error.code, "SPX-PKR626");
+        assert_eq!(store.receipt().generation_digest, refresh_generation);
+        drop(store);
+        let mut store = HeldTrustStore::open(&temp.0, &pin).unwrap();
+        assert_eq!(store.receipt().generation_digest, refresh_generation);
+        assert!(matches!(
+            store.mirror_checkpoint().unwrap().anchor(),
+            Some((1, _, 100))
+        ));
+        let mut stale_mirror = ScriptedMirror {
+            replies: VecDeque::from([
+                response("/metadata/timestamp.json", timestamp.as_bytes()),
+                response("/metadata/snapshot.json", snapshot.as_bytes()),
+                response("/metadata/publisher-app.json", publishers[0].as_bytes()),
+                response("/metadata/publisher-lib.json", publishers[1].as_bytes()),
+                response("/artifacts/app-root.wasm", &admitted.3),
+                response("/artifacts/lib-leaf.wasm", &admitted.4),
+            ]),
+            calls: 0,
+        };
+        let stale_error = match acquire_commit_and_read(
+            &authority(),
+            &mut stale_mirror,
+            &mut store,
+            &MirrorFlowRequest {
                 metadata_paths: &metadata_paths,
                 metadata_objects: &metadata,
                 artifacts: &artifacts,
@@ -648,56 +941,20 @@ mod tests {
                     + 1,
             },
         ) {
-            Ok(_) => panic!("initial checkpoint reset unexpectedly accepted"),
+            Ok(_) => panic!("expired durable mirror anchor unexpectedly refreshed"),
             Err(error) => error,
         };
-        match reset_error {
+        match stale_error {
             MirrorFlowError::Proof(error) => assert_eq!(error.code, "SPX-PKR623"),
-            other => panic!("initial checkpoint reset failed through wrong path: {other:?}"),
+            other => panic!("durable mirror age anchor failed through wrong path: {other:?}"),
         }
-        assert_eq!(reset_mirror.calls, 0);
-        assert_eq!(store.receipt().generation_digest, committed_generation);
-        let mut resume_mirror = ScriptedMirror {
-            replies: VecDeque::new(),
-            calls: 0,
-        };
-        let resume_error = match acquire_commit_and_read(
-            &authority(),
-            &mut resume_mirror,
-            &mut store,
-            &MirrorFlowRequest {
-                root: &root,
-                checkpoint: &result.checkpoint,
-                metadata_paths: &metadata_paths,
-                metadata_objects: &metadata,
-                artifacts: &artifacts,
-                lock: &admitted.2,
-                subjects: &admitted.1,
-                read: MirrorArtifactSelection {
-                    package: "app.root",
-                    version: "1.0.0",
-                    path: "module.wasm",
-                },
-                update_time: 101,
-                read_time: 101,
-            },
-        ) {
-            Ok(_) => panic!("mirror refresh unexpectedly accepted"),
-            Err(error) => error,
-        };
-        match resume_error {
-            MirrorFlowError::Proof(error) => assert_eq!(error.code, "SPX-PKR623"),
-            other => panic!("mirror refresh failed through wrong path: {other:?}"),
-        }
-        assert_eq!(resume_mirror.calls, 0);
-        assert_eq!(store.receipt().generation_digest, committed_generation);
+        assert_eq!(stale_mirror.calls, 6);
+        assert_eq!(store.receipt().generation_digest, refresh_generation);
     }
 
     #[test]
     fn unselected_artifact_refuses_before_network_or_held_generation_effects() {
-        let (root_bytes, _, _, _, admitted) = host_fixture(false, 1);
-        let root = InstalledRoot::from_independently_installed_bytes(&root_bytes).unwrap();
-        let checkpoint = MirrorCheckpoint::initial_at(&root, 90);
+        let (root_bytes, timestamp, snapshot, publishers, admitted) = host_fixture(false, 1);
         let temp = Temp::new();
         let pin = crate::audit_capsule::sha256_digest(root_bytes.as_bytes());
         let mut store = HeldTrustStore::install(&temp.0, &root_bytes, &pin, 90).unwrap();
@@ -712,44 +969,11 @@ mod tests {
             replies: VecDeque::new(),
             calls: 0,
         };
-        let wrong_time = MirrorCheckpoint::initial_at(&root, 89);
-        let wrong_time_error = match acquire_commit_and_read(
-            &authority(),
-            &mut mirror,
-            &mut store,
-            &MirrorFlowRequest {
-                root: &root,
-                checkpoint: &wrong_time,
-                metadata_paths: &paths,
-                metadata_objects: &[],
-                artifacts: &[],
-                lock: &admitted.2,
-                subjects: &admitted.1,
-                read: MirrorArtifactSelection {
-                    package: "app.root",
-                    version: "1.0.0",
-                    path: "module.wasm",
-                },
-                update_time: 100,
-                read_time: 100,
-            },
-        ) {
-            Ok(_) => panic!("wrong bootstrap time unexpectedly accepted"),
-            Err(error) => error,
-        };
-        match wrong_time_error {
-            MirrorFlowError::Proof(error) => assert_eq!(error.code, "SPX-PKR623"),
-            other => panic!("wrong bootstrap time failed through wrong path: {other:?}"),
-        }
-        assert_eq!(mirror.calls, 0);
-        assert_eq!(store.receipt().generation_digest, before);
         let error = match acquire_commit_and_read(
             &authority(),
             &mut mirror,
             &mut store,
             &MirrorFlowRequest {
-                root: &root,
-                checkpoint: &checkpoint,
                 metadata_paths: &paths,
                 metadata_objects: &[],
                 artifacts: &[],
@@ -773,5 +997,43 @@ mod tests {
         ));
         assert_eq!(mirror.calls, 0);
         assert_eq!(store.receipt().generation_digest, before);
+        let publisher_rows = [
+            ("publisher-app", publishers[0].as_str()),
+            ("publisher-lib", publishers[1].as_str()),
+        ];
+        let artifact_rows = [
+            Artifact {
+                package: "app.root",
+                version: "1.0.0",
+                path: "module.wasm",
+                bytes: &admitted.3,
+            },
+            Artifact {
+                package: "lib.leaf",
+                version: "1.0.0",
+                path: "module.wasm",
+                bytes: &admitted.4,
+            },
+        ];
+        store
+            .commit_update(&Update {
+                metadata: UpdateInputs {
+                    timestamp: &timestamp,
+                    snapshot: &snapshot,
+                    publishers: &publisher_rows,
+                    registry: &admitted.0,
+                },
+                rotation: None,
+                lock: &admitted.2,
+                subjects: &admitted.1,
+                artifacts: &artifact_rows,
+                trusted_time: 100,
+            })
+            .unwrap();
+        let error = match store.mirror_checkpoint() {
+            Ok(_) => panic!("ordinary nonbootstrap generation reset mirror bridge"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "SPX-PKR626");
     }
 }

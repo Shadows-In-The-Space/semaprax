@@ -11,53 +11,44 @@ hosted-run links are exact-version evidence, not a claim about current `main`.
 
 Two additive APIs need no migration: Bounded Native Agent Runtime v1 C1 uses an
 explicit injected `AgentHost`, and Economic Agent v1 uses an injected host.
-Neither adds ambient transport, wallet, write, or backend authority.
+Neither adds CLI, language, Graph, cleanup, backend, built-in transport,
+custody, wallet, or write authority.
 
 ## CLI Help v1 to v2 typo guidance
 
-Global help and successful scoped help bytes are unchanged. An unknown command
-that has one unique nearby name in the capability-visible static catalog now
-adds a `did you mean` suffix naming that candidate to stderr. Unrelated,
-ambiguous, non-ASCII, and
-over-limit names keep the v1 diagnostic. Scripts that intentionally snapshot a
-near-miss diagnostic should accept the v2 suffix; status remains 2 and the
-capability-appropriate global help remains on stdout.
+Global and successful scoped help bytes stay unchanged. An unknown command with
+one nearby visible catalog name adds `did you mean` to stderr. Unrelated,
+ambiguous, non-ASCII, and over-limit names keep v1 diagnostics. Snapshot tests
+must accept the suffix; status remains 2 and global help remains on stdout.
 
 ## CLI Help v2 to v3 known-command recovery
 
-A capability-visible known command that rejects its invocation with status 2
-now appends a stderr hint directing the user to `<command> --help`. Existing
-diagnostic text and status are unchanged. Unknown and hidden commands, empty
-invocations, and malformed help-flag placement retain their v2 bytes. Scripts
-that snapshot known-command usage errors should accept the added final line.
+A visible known command that rejects with status 2 now adds a stderr hint for
+`<command> --help`. Existing text and status stay unchanged. Unknown/hidden
+commands, empty input, and malformed help flags retain v2 bytes; snapshots must
+accept the final line.
 
 ## Human diagnostic source locations
 
-Human-readable diagnostics that carry a source path now render
-`path:line:column` instead of only `line:column`. Pathless diagnostics are
-unchanged, and `--json` output is unchanged. Terminal-output snapshots should
-accept the added path; tools should continue consuming JSON rather than parsing
-the human representation.
+Human diagnostics with a path now render `path:line:column`, not only
+`line:column`. Pathless and `--json` output stay unchanged. Terminal snapshots
+must accept the path; tools should consume JSON rather than parse display text.
 
 ## Graph-v6 CLI context to agent-context v1
 
-`semaprax context` now emits `semaprax.agent-context.v1` instead of a Graph-v6
-context view. Consumers must check `schema`, honor byte/node budgets,
-truncation reasons, omitted counts, and resume frontiers, and must not interpret
-unavailable target/diagnostic/test filters as empty facts. The legacy Rust
-`graph::context_json(program, symbol, depth)` API is unchanged; new Rust
-consumers use `graph::agent_context_json` with `AgentContextOptions`. There is
-no schema negotiation or silent fallback.
+`semaprax context` now emits `semaprax.agent-context.v1`, not Graph-v6 context.
+Consumers must check `schema`, budgets, truncation, omissions, and frontiers;
+unavailable filters are not empty facts. Legacy Rust API stays unchanged; new
+Rust consumers use `graph::agent_context_json` with `AgentContextOptions`.
+There is no negotiation or silent fallback.
 
 ## Agent Context v1 to v2 directional queries
 
-Agent Context v1 remains the exact CLI and Rust API default. An explicit
-`--direction forward|reverse|both` selects `semaprax.agent-context.v2`; Rust
-consumers use `AgentContextV2Options` and `agent_context_v2_json`. Consumers
-must bind replay to the query direction and treat `frontier` as omitted
-selected-direction traversal nodes while treating `reference_frontier` as
-referenced non-selected relation targets. Reference closure is not a
-truncation reason and does not contribute to traversal omitted/deferred counts.
+Agent Context v1 remains the CLI and Rust default. Explicit
+`--direction forward|reverse|both` selects v2; Rust uses
+`AgentContextV2Options` and `agent_context_v2_json`. Bind replay to direction:
+`frontier` is omitted traversal, `reference_frontier` is non-selected relation
+targets. Reference closure is not truncation and adds no omitted/deferred count.
 
 V2 retains the v1 byte, node, depth, filter, and fail-closed limits. It reports
 the same program-selected Graph v10/v11/v12/v13/v14 schema and changes no Graph
@@ -415,7 +406,9 @@ Graph v3 is a breaking migration from parsed syntax to validated resolved HIR:
 - textual `requires` and `ensures` arrays are removed; `requires_graph` and `ensures_graph` are authoritative structured contracts;
 - HIR spans are omitted because the canonical source revision is whitespace-insensitive while source positions are not.
 
-The `revision` remains derived from the canonical human-readable source projection; graph wire-format changes alone do not alter it. A v2 consumer must reject `semaprax.graph.v3` until it supports the new type/value identity tables and fallible API. Exact v3 module fixtures live in `tests/snapshots/meaning.graph.json` and `tests/snapshots/control_flow.graph.json`.
+`revision` still derives from canonical source; wire-only graph changes do not
+alter it. A v2 consumer must reject `semaprax.graph.v3` until it supports the
+new identity tables and fallible API. Exact fixtures remain in the named snapshots.
 
 ## Semantic graph v3 to v4
 
@@ -429,13 +422,16 @@ Graph v4 adds the first algebraic-data declarations and expressions:
 - the type-facts table includes every field type required by selected record declarations;
 - validated-HIR and graph reference checks fail closed before an unresolved or foreign record/field reference can be serialized.
 
-The SHA-256 revision contract is unchanged. A v3 consumer must reject `semaprax.graph.v4` until it understands record/field nodes and record expression kinds.
+The SHA-256 revision contract is unchanged. A v3 consumer must reject
+`semaprax.graph.v4` until it understands record/field nodes and expressions.
 
 ## Semantic graph v4 to v5 and explicit resource lifecycles
 
 Graph v5 adds persistent resource-lifecycle, interface, and logical-import declarations. Resource nodes now reference a `resource_drop` node. Imported drop nodes reference an `import` node and target-neutral `import_key`; interface nodes expose their authority ceiling and import IDs; import nodes serialize parameter ownership, consumption on failure, unit-result publication rules, effects, required authority, and normalized failure contracts. Context slices close a referenced resource through its lifecycle, complete owning interface, import signatures, and their nominal types.
 
-The initial source grammar deliberately uses an import's explicit `@id` as its v1 logical import key while resolved HIR stores `import_id` and `import_key` separately. This is a versioned source projection choice, not a permanent conflation of conceptual identity and target binding keys.
+The first source grammar uses an import's explicit `@id` as its v1 logical key,
+while HIR stores `import_id` and `import_key` separately. That is a versioned
+projection choice, not permanent conflation of identity and target binding.
 
 Rust API consumers must update exhaustive matches and construction code:
 
@@ -463,7 +459,9 @@ The SHA-256 algorithm and domain separator are unchanged, but migrated canonical
 
 ## Rust HIR cleanup inventory
 
-`ResolvedFunction` now carries a mandatory `cleanup: CleanupInventory`. Direct Rust consumers that construct or transform resolved HIR must preserve the exact inventory or rerun source resolution; `hir::validate`, native lowering, and Wasm lowering reject a missing or stale inventory with `SPX-H006` before any target feature gate.
+`ResolvedFunction` now requires `cleanup: CleanupInventory`. Rust consumers that
+construct or transform HIR must preserve it or rerun resolution; validation and
+both lowerings reject missing/stale inventory with `SPX-H006` before target gates.
 
 The inventory schema is `semaprax.cleanup-inventory.v1`. It catalogs canonical storage candidates for owned non-copy parameters, droppable local bindings, owned-producing expression temporaries, and droppable provisional results. Recursive shapes retain declaration-ordered field IDs, and every resource leaf has an exact projected place, lifecycle ID, and distinct liveness-flag identity. Entry state lists only owned droppable parameters. `discovery_index` is deterministic structural discovery order, not runtime initialization or finalization order.
 
@@ -775,13 +773,19 @@ The internal native invocation context and first-slice trace storage are now one
 
 The public pre-alpha Rust AST migration from the earlier graph v4 tranche represents both resources and records through `Program::types: Vec<TypeDeclaration>`. `Program::resources` is removed, and `Type::Resource(String)` becomes `Type::Named(String)` because a nominal reference may name either kind. Graph v5 further changes the resource variant as described above.
 
-The lexer now tokenizes `.` separately so expression projection is unambiguous. Module names, capability/effect names, and named types still accept qualified identifiers through parser-specific `IDENT ("." IDENT)*` rules. Canonical formatting expands record initializer shorthand (`Point { x }` becomes `Point { x: x }`) and preserves initializer evaluation order.
+The lexer tokenizes `.` separately so projection is unambiguous. Module,
+capability/effect, and type names still use `IDENT ("." IDENT)*`. Formatting
+expands `Point { x }` to `Point { x: x }` without changing evaluation order.
 
 This migration enables `check`, HIR, `graph`, and `context` for records. `build` fails closed with `SPX-B103` (native) or `SPX-W110` (Wasm) until aggregate layout and cleanup semantics land.
 
 ## Whole-record to prefix-aware ownership
 
-Resource-containing record projections now carry prefix-aware availability instead of conservatively moving the complete root. Moving one owned non-copy field leaves disjoint sibling fields available. Reusing that field or an enclosing parent reports `SPX-O109`; a place moved on only some control-flow paths reports `SPX-O110`. Existing whole-resource moves retain `SPX-O101` and `SPX-O107`. Borrowed or shared projections cannot cross an owned field or parameter boundary and report `SPX-O108`. Validated HIR independently replays the same rules; Graph v6 additionally exposes the resulting cleanup-plan places, flags, transfers, and guarded exits.
+Resource-containing records now track prefix availability, so moving one owned
+non-copy field leaves disjoint siblings available. Reusing it or its parent is
+`SPX-O109`; path-dependent moves are `SPX-O110`. Whole-resource moves retain
+`SPX-O101`/`SPX-O107`, and borrow/shared projections crossing owned boundaries
+remain `SPX-O108`. HIR replays these rules; Graph v6 exposes the cleanup facts.
 
 ## Web manifest v2 to v3 and Wasm owned ABI v1
 
@@ -803,19 +807,12 @@ an unknown parameter/result kind, or a mapping that disagrees with the module.
 A v2-only consumer must reject v3; migration consists of validating the new
 object before instantiation, not silently treating it as optional metadata.
 
-`semaprax.wasm-owned.v1` is narrower than RFC 0003 and the Component Model. It
-admits one direct trivial-resource identity and a restricted direct body. Its
-generated JavaScript facade binds invocation to the exact generated metadata,
-uses branded one-shot trusted-adoption tickets, keeps ownership imports private,
-authenticates the exact generated Wasm bytes with an embedded SHA-256 digest,
-checks canonical argument encodings and aligned result ranges before commit,
-and exposes normalized
-`semaprax.status.v1` records with the canonical `domain_id` field. Unsupported
-resource shapes retain `SPX-W111`. A same-realm `Symbol.for` allocator
-coordinates runtime tags across separately evaluated copies of the generated
-host. The surrounding realm and that reserved global binding are trusted v1
-host state; hostile pre-poisoning, cross-realm, and worker identity isolation
-remain outside v1.
+`semaprax.wasm-owned.v1` is narrower than RFC 0003 and Components: one direct
+trivial-resource identity and restricted body. Its generated JavaScript binds
+exact metadata and Wasm digest, keeps ownership imports private, validates
+arguments/results before commit, and exposes normalized status. Unsupported
+shapes retain `SPX-W111`. Same-realm `Symbol.for` tags are trusted v1 state;
+pre-poisoning, cross-realm, and worker isolation remain outside v1.
 The adapter emits compiler-generated semantic event ordinals and the shared
 14-case suite materializes them to exact reference/native-host/Wasm traces and
 outcomes. The full [owned-resource vertical
@@ -1018,10 +1015,10 @@ new independent known answers rather than silently accepting old values.
 ## Private Apple Swift ownership adapter v1
 
 The feature-gated Swift adapter reuses generation-tagged handles and the
-callable-v3 receipt ledger, but is not a public handle ABI or framework
-compatibility promise. The generated zero-argument fixture is the sole open
-entry; migrations must not restore caller-selected evidence hooks or expose the
-hidden registration bridge. The bounded hosted Apple gate is green in
+callable-v3 receipt ledger, but promises neither a public handle ABI nor
+framework compatibility. Its zero-argument fixture is the only open entry;
+migrations must not restore caller evidence hooks or expose registration. The
+bounded hosted Apple gate is green in
 [run 31333469714, job
 93295293995](https://github.com/wavect/semaprax/actions/runs/31333469714/job/93295293995);
 that evidence must not be generalized to public frameworks, physical devices,
@@ -1029,10 +1026,9 @@ UI, or general lifecycle support.
 
 ## Private WIT boundary v1
 
-`SPXWIT01` freezes one exact private WIT/schema/JavaScript bundle. Changes to
-its WIT text, mapping JSON, adapter bytes, status constraints, or framing
-require a new known answer and explicit migration note. This identity must not
-be reinterpreted as a Component Model binary or public WIT package version.
+`SPXWIT01` freezes one private WIT/schema/JavaScript bundle. Any WIT, mapping,
+adapter, status, or framing change needs a new known answer and migration note.
+It is not a Component binary or public WIT package version.
 
 The separate private scalar Component Model profile freezes a standards-valid
 binary with digest
@@ -1046,9 +1042,8 @@ package.
 ## Private source-result component v4
 
 Private Source-Result Component v4 is a new profile, not an in-place change to
-the v1 scalar fixture, checked component v2, or Portable Result Component v3.
-Its package/interface version is `semaprax:private@0.2.0`, and its sole admitted
-export is:
+the v1 fixture, checked v2, or Portable Result v3. Its package/interface is
+`semaprax:private@0.2.0`, with one admitted export:
 
 ```wit
 type language-result = result<bool, bool>;
@@ -1081,10 +1076,9 @@ job 93357169796](https://github.com/wavect/semaprax/actions/runs/31356536123/job
 
 ## Private generic-record component v7
 
-Private Generic Record Component v7 is another separate default-off profile,
-not an in-place change to any v1-v6 fixture. It freezes WIT package
-`semaprax:private@0.5.0`, interface `generic-records`, world
-`semaprax-private-v7`, and exactly four exports:
+Private Generic Record Component v7 is a separate default-off profile, not an
+in-place v1-v6 change. It freezes `semaprax:private@0.5.0`, `generic-records`,
+`semaprax-private-v7`, and four exports:
 
 ```wit
 transform-i64-bool: func(input: duo-i64-bool, delta: s64) -> result<duo-i64-bool, status>;
@@ -1127,13 +1121,11 @@ conformance, package/version negotiation, or `SPX-B104`/`SPX-W111` widening.
 
 ## Private record-pattern projection component v8
 
-Private Component v8 is another separate default-off profile, not an in-place
-change to v1-v7. It freezes WIT package `semaprax:private@0.6.0`, interface
-`record-pattern-projections`, world `semaprax-private-v8`, and four ordered
-monomorphic preserve/invert exports over exact `Phantom<i64>` and
-`Phantom<bool>` records. The two named records deliberately share physical
-fields while retaining distinct source-instance, layout, WIT-type, and export
-identity. Its primary known answers are:
+Private Component v8 is a separate default-off profile, not an in-place v1-v7
+change. It freezes `semaprax:private@0.6.0`, `record-pattern-projections`,
+`semaprax-private-v8`, and four ordered monomorphic exports over exact Phantom
+records. The records share fields but retain distinct source, layout, WIT, and
+export identity. Primary known answers are:
 
 ```text
 source revision: sha256:2baac0c0920dbb153789767bf506a4a81713081586a81444d8e5f5a8f5a8516d
@@ -1162,10 +1154,9 @@ conformance, package negotiation, or `SPX-B104`/`SPX-W111` widening.
 
 ## Private generic-function instance component v9
 
-Private Component v9 is another separate default-off profile, not an in-place
-change to v1-v8. It freezes WIT package `semaprax:private@0.7.0`, interface
-`generic-function-instances`, world `semaprax-private-v9`, and these six exports
-in exact order:
+Private Component v9 is a separate default-off profile, not an in-place v1-v8
+change. It freezes `semaprax:private@0.7.0`, `generic-function-instances`,
+`semaprax-private-v9`, and six ordered exports:
 
 ```wit
 preserve-i64: func(marker: bool, control: s64) -> result<bool, status>;
@@ -1211,9 +1202,9 @@ package negotiation, or `SPX-B104`/`SPX-W111` widening.
 
 ## Private source-Option propagation component v10
 
-Private Component v10 is another separate default-off profile, not an in-place
-change to v1-v9. It freezes WIT package `semaprax:private@0.8.0`, interface
-`option-propagation`, world `semaprax-private-v10`, and this sole export:
+Private Component v10 is a separate default-off profile, not an in-place v1-v9
+change. It freezes `semaprax:private@0.8.0`, `option-propagation`,
+`semaprax-private-v10`, and one export:
 
 ```wit
 evaluate: func(input: option<s64>, divisor: s64) -> result<option<bool>, status>;

@@ -8,18 +8,14 @@ Audience: maintainers, release engineers, and security reviewers.
 
 ## Scope and current state
 
-[Issue #168](https://github.com/wavect/semaprax/issues/168) asks for
-authentic signing and machine-verifiable provenance for tagged releases.
-Nobody working this issue has a signing key, a local keyless-signing (Sigstore)
-identity, a registry credential, or authority to publish, tag, or trigger a
-release workflow; per `AGENTS.md`, generated code and this repository's own
-tooling gain no ambient signing authority. The configured GitHub-hosted
-`publish-release` job alone receives a short-lived OIDC token when it runs.
-This document and its paired implementation therefore split the work into what
-is safely buildable without any secret -- the **provenance document**, the
-**identity policy**, **binding verification**, and cryptographic replay against
-caller-supplied historical trusted-root bytes -- and the hosted evidence and
-human review that remain after wiring.
+[Issue #168](https://github.com/wavect/semaprax/issues/168) tracks signed,
+machine-verifiable tagged releases. Wavect GmbH authorized a v0.6.0 tag gate,
+but that gate has not produced a qualifying release. Generated code and the
+compiler have no signing or publication authority. Only the configured GitHub
+`publish-release` job can receive a short-lived OIDC token. Local work covers
+the provenance format, trusted identity, binding checks, and replay against an
+explicit historical trusted-root snapshot. Hosted signing and human review
+remain separate steps.
 
 **The release archives remain unsigned.** `docs/RELEASE-PROCESS.md`'s
 nonclaims correctly still say so, and this document must not be read as
@@ -473,11 +469,12 @@ repository has, which is unrelated -- it authenticates a *doctor-installed
 generation directory*, not a release archive), production support, or
 semantic/compiler correctness.
 
-## Hosted-release follow-up (authorized v0.6.0 gate in progress)
+## Hosted-release follow-up (v0.6.0 gate has a failure)
 
 The old-head v0.6.0 tag run has [partial successful hosted jobs](RELEASE-0.6.0-STATUS.md),
-but its failed and unfinished jobs prevent aggregate acceptance. Those exact-job
-observations do not certify newer `main`, a signed artifact, or publication.
+but at least one job failed and others have not concluded. A source-locked
+coverage repair is now on `main`, but it does not retroactively certify that
+tag, a signed artifact, or publication.
 
 The workflow now applies items 1-4 below on a qualifying tag. They are listed
 as an auditable configuration contract, not as a claim that a signed release

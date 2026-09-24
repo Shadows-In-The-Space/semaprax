@@ -5,6 +5,8 @@ release artifact, a public ABI, a formatter authority grant, hosted evidence,
 or a self-hosting-rung promotion. Version 2 is a new closed wire: it does not
 silently reinterpret or accept v1 artifacts.
 
+Audience: compiler contributors and reviewers of Kernel-0 bootstrap evidence.
+
 This document owns `semaprax.kernel-zero-rung-two-bootstrap.v2`, the closed
 binary artifact emitted by `src/kernel_zero/rung_two_bootstrap/`. It retains
 one exact compiler output for all five current pure renderer fragments so an

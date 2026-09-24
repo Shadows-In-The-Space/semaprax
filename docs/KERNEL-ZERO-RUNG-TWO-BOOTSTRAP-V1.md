@@ -4,6 +4,8 @@ Status: local, private reproducibility evidence for issue #188. This is not a
 release artifact, a public ABI, a formatter authority grant, target-execution
 evidence, hosted evidence, or a self-hosting-rung promotion.
 
+Audience: compiler contributors and reviewers of Kernel-0 bootstrap evidence.
+
 This document owns `semaprax.kernel-zero-rung-two-bootstrap.v1`, the closed
 binary artifact emitted by `src/kernel_zero/rung_two_bootstrap/`. Its purpose
 is deliberately narrow: a future reviewer can retain one exact compiler output

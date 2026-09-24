@@ -15,6 +15,7 @@ Audience: all documentation readers.
 - [Agent quick reference](AGENT-QUICK-REFERENCE.md)
 - [Agent iterative lifecycle v2](AGENT-ITERATIVE-LIFECYCLE-V2.md)
 - [Agent typed effects v3](AGENT-TYPED-EFFECTS-V3.md)
+- [Agent target host-call protocol v1](AGENT-TARGET-HOST-PROTOCOL-V1.md)
 - [Direct Agent Runtime v2](AGENT-RUNTIME-V2.md)
 - [Source Model Operation v1](SOURCE-MODEL-OPERATION-V1.md)
 - [Live Repair Smoke v1](LIVE-REPAIR-SMOKE-V1.md)
@@ -408,6 +409,8 @@ Audience: all documentation readers.
 - [Public Generic Descriptor v1](PUBLIC-GENERIC-DESCRIPTOR-V1.md)
 - [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md)
 - [Public Generic Carrier Hostile Corpus v1](PUBLIC-GENERIC-CARRIER-HOSTILE-CORPUS-V1.md)
+- [Public Generic Wasm Provider Target v1](PUBLIC-GENERIC-WASM-PROVIDER-TARGET-V1.md)
+- [Public Generic Wasm Component v1](PUBLIC-GENERIC-WASM-COMPONENT-V1.md)
 - [C header emission](C-HEADER-V1.md)
 - [C++ shim projection](CXX-SHIM-V1.md)
 - [C++ scalar package](CXX-PACKAGE-V1.md)
@@ -431,7 +434,9 @@ Audience: all documentation readers.
 - [Offline deterministic package resolver](OFFLINE-PACKAGE-RESOLVER-V1.md)
 - [Offline published semantic lock snapshot](OFFLINE-PUBLISHED-SEMANTIC-LOCK-SNAPSHOT-V1.md)
 - [Offline deterministic package resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md)
+- [Package Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md)
 - [Package registry snapshot v1](PACKAGE-REGISTRY-SNAPSHOT-V1.md)
+- [Package Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md)
 - [Package registry federation v1](PACKAGE-REGISTRY-FEDERATION-V1.md)
 - [Registry-bound resolution v1](PACKAGE-REGISTRY-BOUND-RESOLUTION-V1.md)
 - [Offline pure Wasm package build](OFFLINE-PURE-WASM-PACKAGE-BUILD-V1.md)
@@ -511,6 +516,11 @@ Audience: all documentation readers.
 - [Native Rust interoperability](NATIVE-RUST-INTEROP-V1.md)
 - [Rust-host sanitizer evidence](RUST-HOST-SANITIZERS.md)
 - [Private WIT boundary](WIT-COMPONENT-BOUNDARY-V1.md)
+- [Kernel-0 Rung-2 Formatter Authority v1](KERNEL-ZERO-RUNG-TWO-AUTHORITY-V1.md)
+- [Kernel-0 Rung-2 Bootstrap Artifact v1](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V1.md)
+- [Kernel-0 Rung-2 Bootstrap Artifact v2](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V2.md)
+- [Kernel-0 Rung-2 Owned Handoff v1](KERNEL-ZERO-RUNG-TWO-OWNED-HANDOFF-V1.md)
+- [Kernel-0 Rung-2 Target and Recovery Evidence v1](KERNEL-ZERO-RUNG-TWO-TARGET-RECOVERY-V1.md)
 
 ## Private platform adapters
 

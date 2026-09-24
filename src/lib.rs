@@ -110,17 +110,22 @@ pub mod outbound_host_adapter;
 pub mod owned_resource_corpus;
 pub mod package_build;
 pub mod package_build_v2;
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "redox"
+    )
+))]
+pub mod package_cache_host;
 pub mod package_compatibility;
 pub mod package_lock;
 pub mod package_lock_v2;
 pub mod package_lock_v3;
 mod package_range;
 pub mod package_registry;
-#[cfg(all(
-    unix,
-    any(target_os = "linux", target_os = "android", target_vendor = "apple", target_os = "redox")
-))]
-pub mod package_cache_host;
 pub mod package_report;
 pub mod package_report_v2;
 pub mod package_resolution_snapshot;

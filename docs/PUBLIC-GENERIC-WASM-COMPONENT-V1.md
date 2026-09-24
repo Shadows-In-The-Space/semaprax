@@ -117,6 +117,13 @@ uses copied handles to require read and double-drop refusal after an explicit
 close or transfer, then constructs, reads and drops a fresh resource in the
 same instance. This is focused private evidence, not a support claim.
 
+A separate Wasmtime 47.0.4 selector instantiates the exact retained Component
+twice in one Store, requires the second instance's `read` to refuse the first
+instance's resource with a resource-type mismatch, and proves the first
+resource remains readable/droppable before the second instance successfully
+constructs, reads and drops a fresh resource. This is foreign-instance
+resource-owner refusal evidence only.
+
 The separate contract-failure selector retains a second checked Project with
 the same two-leaf endpoint and a `requires false` guard. It replays the exact
 derived Component against that revision, invokes it in Wasmtime 47.0.4, and

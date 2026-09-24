@@ -436,3 +436,67 @@ fn prove_closed_and_transferred_handles_refuse(
     fresh.resource_drop(&mut *store)?;
     Ok(())
 }
+
+#[test]
+fn retained_public_generic_component_rejects_foreign_instance_resource_owner() -> HostResult<()> {
+    let artifact_bytes = retained_component_bytes()?;
+    let mut actual_digest = String::with_capacity(64);
+    for byte in Sha256::digest(&artifact_bytes) {
+        write!(actual_digest, "{byte:02x}")?;
+    }
+    if actual_digest != EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256 {
+        return Err(failure(
+            "retained Component bytes differ from pinned fixture",
+        ));
+    }
+
+    let mut config = Config::new();
+    config.wasm_component_model(true);
+    config.consume_fuel(true);
+    let engine = Engine::new(&config)?;
+    let component = Component::new(&engine, &artifact_bytes)?;
+    if component.component_type().imports(&engine).len() != 0 {
+        return Err(failure(
+            "public-generic Component requested ambient imports",
+        ));
+    }
+    let linker = Linker::<()>::new(&engine);
+    let mut store = Store::new(&engine, ());
+    store.set_fuel(1_000_000_000)?;
+    let instance_a = PublicGenericComponentV1::instantiate(&mut store, &component, &linker)?;
+    let instance_b = PublicGenericComponentV1::instantiate(&mut store, &component, &linker)?;
+    let bytes_a = instance_a
+        .semaprax_public_generic_component_adapter()
+        .owned_bytes();
+    let bytes_b = instance_b
+        .semaprax_public_generic_component_adapter()
+        .owned_bytes();
+
+    let original = [0x31, 0xa7, 0x5c];
+    let owner_a = bytes_a.call_constructor(&mut store, &original)?;
+    let mismatch = bytes_b
+        .call_read(&mut store, owner_a)
+        .expect_err("instance B must refuse instance A's resource type");
+    let mismatch_chain = format!("{mismatch:#}");
+    if !mismatch_chain.contains("mismatched resource types") {
+        return Err(failure(format!(
+            "foreign-instance handle refusal was not a resource type mismatch: {mismatch_chain}"
+        )));
+    }
+
+    if bytes_a.call_read(&mut store, owner_a)? != original {
+        return Err(failure(
+            "foreign-instance refusal changed or consumed instance A's resource",
+        ));
+    }
+    owner_a.resource_drop(&mut store)?;
+
+    let fresh_b = bytes_b.call_constructor(&mut store, &[0x90, 0x42])?;
+    if bytes_b.call_read(&mut store, fresh_b)? != [0x90, 0x42] {
+        return Err(failure(
+            "instance B did not recover after foreign-resource refusal",
+        ));
+    }
+    fresh_b.resource_drop(&mut store)?;
+    Ok(())
+}

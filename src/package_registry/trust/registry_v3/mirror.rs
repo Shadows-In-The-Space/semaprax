@@ -84,7 +84,7 @@ pub fn verify_mirror_update<'registry>(
         .iter()
         .map(|publisher| Ok((publisher.role, metadata(publisher.path)?)))
         .collect::<Result<Vec<_>>>()?;
-    verify_update(
+    let mut candidate = verify_update(
         root,
         stored,
         now,
@@ -94,5 +94,20 @@ pub fn verify_mirror_update<'registry>(
             publishers: &publishers,
             registry: paths.registry,
         },
-    )
+    )?;
+    // Ordinary Trust-v2 verification records the invocation's `now`, which
+    // is correct for durable hosts that have independently acquired a newer
+    // update. A mirror can replay identical signed timestamp bytes, however;
+    // let that replay retain the original observation so it cannot roll the
+    // bridge-local seven-day offline window forward forever.
+    let previous_timestamp = stored.previous.roles.get("timestamp");
+    let next_timestamp = candidate.checkpoint.previous.roles.get("timestamp");
+    if matches!(
+        (previous_timestamp, next_timestamp),
+        (Some(previous), Some(next))
+            if previous.version == next.version && previous.digest == next.digest
+    ) {
+        candidate.checkpoint.previous.observed_time = stored.previous.observed_time;
+    }
+    Ok(candidate)
 }

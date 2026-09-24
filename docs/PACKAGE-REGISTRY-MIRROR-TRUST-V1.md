@@ -26,6 +26,12 @@ This conservative offline-staleness cap is not a clock source and does not
 weaken ordinary metadata expiry; expiry equality, backwards time, bad rotation
 or stale high-water marks still fail closed.
 
+Replaying identical signed timestamp version-and-digest bytes may be verified
+inside that interval, but it retains the preceding bridge observation rather
+than advancing it. Only a newer authenticated timestamp advances the local
+offline-age anchor, so repeated mirror replay cannot refresh the seven-day
+window without new signed freshness evidence.
+
 The focused `trust::registry_v3::tests` case acquires signed fixture bytes via
 an in-process transport and proves complete replay, signature tamper refusal,
 and the seven-day offline refusal. This is local verification only, not a TLS,

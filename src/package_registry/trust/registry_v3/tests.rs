@@ -260,9 +260,43 @@ fn mirror_bytes(rows: [(&str, &str); 4]) -> Vec<MirrorBytes> {
         .unwrap()
 }
 
+fn long_lived_mirror_fixture() -> Fixture {
+    let mut f = Fixture::new(false);
+    let expires = 100 + MAX_MIRROR_OFFLINE_SECONDS + 100;
+    let mut root = root_value(1, 1, 4);
+    root["expires"] = json!(expires);
+    f.root = InstalledRoot::from_independently_installed_bytes(&wire(&root)).unwrap();
+    f.publish(1, 4);
+    f.refresh(1, 1);
+    f.publishers[0] = rewrite(&f.publishers[0], &[4, 5], |value| {
+        value["expires"] = json!(expires)
+    });
+    f.publishers[1] = rewrite(&f.publishers[1], &[6, 7], |value| {
+        value["expires"] = json!(expires)
+    });
+    f.snapshot = f.metadata(
+        "snapshot",
+        1,
+        expires,
+        json!({"registry":{"schema":registry::SNAPSHOT_SCHEMA,
+        "file":blob(f.admitted.0.envelope().as_bytes())},"publishers":[
+        {"role":"publisher-app","metadata":metadata_ref(&f.publishers[0])},
+        {"role":"publisher-lib","metadata":metadata_ref(&f.publishers[1])}]}),
+        &[3],
+    );
+    f.timestamp = f.metadata(
+        "timestamp",
+        1,
+        expires,
+        json!({"snapshot":metadata_ref(&f.snapshot)}),
+        &[2],
+    );
+    f
+}
+
 #[test]
 fn acquired_metadata_replays_signed_snapshot_publishers_and_offline_policy() {
-    let f = Fixture::new(false);
+    let f = long_lived_mirror_fixture();
     let downloaded = mirror_bytes([
         ("/metadata/timestamp.json", &f.timestamp),
         ("/metadata/snapshot.json", &f.snapshot),
@@ -300,10 +334,23 @@ fn acquired_metadata_replays_signed_snapshot_publishers_and_offline_policy() {
         verify_mirror_update(&f.root, &f.initial(), 100, &paths, &tampered_downloaded),
         "SPX-PKR622",
     );
+    let replayed = verify_mirror_update(
+        &f.root,
+        candidate.checkpoint(),
+        100 + MAX_MIRROR_OFFLINE_SECONDS - 1,
+        &paths,
+        &downloaded,
+    )
+    .unwrap();
+    assert_eq!(
+        replayed.checkpoint().previous.observed_time,
+        candidate.checkpoint().previous.observed_time,
+        "same timestamp bytes must not refresh the bridge-local offline age"
+    );
     refused(
         verify_mirror_update(
             &f.root,
-            candidate.checkpoint(),
+            replayed.checkpoint(),
             100 + MAX_MIRROR_OFFLINE_SECONDS + 1,
             &paths,
             &downloaded,

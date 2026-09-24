@@ -12,11 +12,9 @@ contributors.
 `semaprax project-scaffold` prepares the calculator, library, or service
 template as checked bytes. [Public Project Scaffold Capsule
 v2](PROJECT-SCAFFOLD-V2.md) emits the frozen `semaprax.project.v1` manifest
-layout and is pinned to those exact bytes. Capsule v3 adds one axis: the
-`--layout` flag chooses whether the scaffold's `semaprax.toml` uses that
-frozen layout or the extensible `semaprax.manifest.v1` table layout
-([Package Manifest v1](PACKAGE-MANIFEST-V1.md)), so a new project can start in
-the format the ecosystem tooling reads.
+layout and is pinned to those exact bytes. Capsule v3 adds the `--layout` choice: use the frozen layout or the extensible
+`semaprax.manifest.v1` table layout ([Package Manifest v1](PACKAGE-MANIFEST-V1.md)).
+The table layout lets a new project start in the format ecosystem tooling reads.
 
 ## Command
 
@@ -32,9 +30,9 @@ stable identity from `src/app.spx`; the library inventory is unchanged. A
 `--layout` value other than `frozen` or `tables` exits with status 2 before any
 output. The service template only derives under `--layout tables`: its
 manifest carries a `[dependencies]` table, which the frozen `semaprax.project.v1`
-layout has no room for, so `--template service` under the default `frozen`
-layout is refused (`SPX-J115`) before anything is rendered, not silently
-downgraded to a dependency-free project.
+layout cannot represent. Therefore `--template service` with the default
+`frozen` layout is refused (`SPX-J115`) before rendering; dependencies are never
+silently removed.
 
 ## Capsule
 

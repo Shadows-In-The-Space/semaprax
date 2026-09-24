@@ -9,9 +9,9 @@ Audience: coding agents and people running project tests, tool authors
 consuming the `semaprax.project-execution.v1` envelope, and compiler
 contributors.
 
-This reference owns two additive behaviors of the reference interpreter's
-project runner: named test cases inside the manifest-declared test module, and
-the contract-failure detail that accompanies a language failure. It extends
+This reference defines two additions to the reference interpreter's project
+runner: named cases in the manifest-declared test module, and contract-failure
+details accompanying a language failure. It extends
 the `run`/`test` contract in [Project Manifest v1](PROJECT-MANIFEST-V1.md)
 without changing the envelope schema string, the normalized status object,
 the entry closure, or the test module's `main`.
@@ -30,9 +30,8 @@ is a *case* and is executed on its own:
 - it carries an explicit `@id`.
 
 A `test_`-prefixed function of any other shape, such as `fn test_helper(value:
-i64) -> i64`, is an ordinary function and is not a case. A function of another
-module is never a case, whatever its name. Cases are ordered by stable
-identity, which is the order of the linked program's function index.
+i64) -> i64`, is an ordinary function and is not a case. Functions in other modules are never cases, regardless of name. Cases use
+stable-identity order, matching the linked program's function index.
 
 Each case runs after `main`, on its own fixed 64 MiB stack, with the whole
 `--max-steps` budget; the envelope's top-level `fuel` still describes `main`

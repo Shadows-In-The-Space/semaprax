@@ -1,7 +1,7 @@
 name: CI
 
-# Triggers are deliberately narrow: a push to `main`, or an explicit manual
-# dispatch. CI does not run on other branches and does not run on
+# Triggers are deliberately narrow: a push to `main`, a `v*` release tag, or
+# an explicit manual dispatch. CI does not run on other branches and does not run on
 # `pull_request`. This repository takes direct pushes to `main` from many
 # worktrees and agent sessions; running the full matrix on every intermediate
 # branch push spent runner capacity on refs nothing gates on. Branch protection
@@ -12,6 +12,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: read

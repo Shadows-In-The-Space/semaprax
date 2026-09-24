@@ -8,10 +8,9 @@ or a self-hosting-rung promotion. Version 2 is a new closed wire: it does not
 silently reinterpret or accept v1 artifacts.
 
 This document owns `semaprax.kernel-zero-rung-two-bootstrap.v2`, the closed
-binary artifact emitted by `src/kernel_zero/rung_two_bootstrap/`. It retains
-one exact compiler output for all five current pure renderer fragments so an
-independent consumer can decode it and replay ordinary compiler routes rather
-than trust an old in-memory `BoundTranslation` or a self-reported build.
+artifact from `src/kernel_zero/rung_two_bootstrap/`. It retains one exact output
+for the five pure renderer fragments so an independent consumer can decode and
+replay it instead of trusting cached translation state or a build report.
 
 ## Subject and boundary
 

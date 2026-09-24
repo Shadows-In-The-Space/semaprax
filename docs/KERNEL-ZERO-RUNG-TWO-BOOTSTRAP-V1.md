@@ -7,11 +7,9 @@ release artifact, a public ABI, a formatter authority grant, target-execution
 evidence, hosted evidence, or a self-hosting-rung promotion.
 
 This document owns `semaprax.kernel-zero-rung-two-bootstrap.v1`, the closed
-binary artifact emitted by `src/kernel_zero/rung_two_bootstrap/`. Its purpose
-is deliberately narrow: a future reviewer can retain one exact compiler output
-for all current pure renderer fragments, decode it independently, and replay
-the ordinary compiler routes from the exact retained source instead of trusting
-an old in-memory `BoundTranslation` or a self-reported build result.
+artifact from `src/kernel_zero/rung_two_bootstrap/`. It lets a reviewer retain,
+independently decode, and replay one exact output for the pure renderer
+fragments rather than trusting cached translation state or a build report.
 
 ## Subject and boundary
 

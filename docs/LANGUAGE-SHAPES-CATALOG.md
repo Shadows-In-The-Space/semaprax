@@ -4,7 +4,12 @@ Status: generated from `examples/*.spx` through the `semaprax doc` documentation
 
 Audience: agents and humans writing SEMAPRAX declarations from an installed compiler.
 
-Every shape below is the canonical header of a declaration in a committed, verified example, rendered by the same documentation model as `semaprax doc`, so the catalog cannot show a shape the compiler rejects. `semaprax help shapes` prints this document. The [agent quick reference](AGENT-QUICK-REFERENCE.md) explains the rules behind the shapes, and [Documentation Projection v1](DOC-PROJECTION-V1.md) owns the model. Identities are the examples' own `@id` attributes; bodies are omitted.
+Every shape below is a canonical declaration header from a committed verified
+example, rendered by the same model as `semaprax doc`; the catalog therefore
+cannot show rejected syntax. `semaprax help shapes` prints it. The
+[agent quick reference](AGENT-QUICK-REFERENCE.md) explains the rules, and
+[Documentation Projection v1](DOC-PROJECTION-V1.md) owns the model. IDs come
+from the examples; bodies are omitted.
 
 ## Records
 

@@ -8,7 +8,8 @@ Date: 2026-08-23
 
 ## Goals
 
-Add heap-owned `String` and a minimal but complete OO system (classes, single inheritance, interfaces, `impl` dispatch) to SEMAPRAX without breaking invariants:
+Add heap-owned `String` and a small complete OO system (classes, single
+inheritance, interfaces, and `impl` dispatch) without breaking these invariants:
 
 - deterministic canonical formatting & graph revisions
 - ownership errors are diagnostics, never backend accidents
@@ -17,10 +18,10 @@ Add heap-owned `String` and a minimal but complete OO system (classes, single in
 
 ## Non-goals (deferred)
 
-- generics over String/classes (closed initially)
-- operator overloading, generics variance, multiple inheritance
-- GC, reference counting beyond simple owned drop
-- reflection, dynamic loading
+- String/class generics (closed initially)
+- operator overloading, generic variance, and multiple inheritance
+- GC or reference counting beyond simple owned drop
+- reflection or dynamic loading
 
 ## Badge Decomposition (parallelizable)
 
@@ -127,4 +128,3 @@ fn main() -> i64 {
 2. Lanes A/B/C proceed in parallel on own sub-worktrees.
 3. Daily merge to `feat/string-oo-types`.
 4. Final Badge 6 integration runs full gate suite.
-

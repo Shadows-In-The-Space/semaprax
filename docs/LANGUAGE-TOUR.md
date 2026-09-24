@@ -6,13 +6,13 @@ Status: alpha tour of committed examples, not a readiness claim. See the
 [completion matrix](COMPLETION-MATRIX.md) for supported features and
 [RFC 0001](RFC-0001.md) for exact language rules.
 
-Start with a small program, then learn identities, contracts, data types,
-ownership, effects, and the semantic graph. Each section links to the
-specification that owns the full rule.
+Start with a program, then learn persistent IDs, contracts, mutation,
+ownership, effects, and the semantic graph. Each section links to the exact
+rule in its owning specification.
 
 ## How to read this tour
 
-Every SEMAPRAX block is an exact excerpt from the linked example file.
+Every SEMAPRAX block is a verbatim excerpt from the linked example file.
 `tests/documentation.rs` checks that excerpts stay in sync.
 
 Run commands from the repository root. Use [Quickstart](QUICKSTART.md) to

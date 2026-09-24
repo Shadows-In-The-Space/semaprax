@@ -41,6 +41,7 @@ SIGSTORE_BUNDLE_MEDIA_TYPE = "application/vnd.dev.sigstore.bundle.v0.3+json"
 TRUSTED_ISSUER = "https://token.actions.githubusercontent.com"
 TRUSTED_REPOSITORY = "wavect/semaprax"
 TRUSTED_WORKFLOW_PATH = ".github/workflows/ci.yml"
+TRUSTED_OIDC_SUBJECT_PREFIX = "repo:wavect@47505194/semaprax@1326961553"
 MAX_PROVENANCE_BYTES = 4 * 1024 * 1024
 MAX_BUNDLE_BYTES = 2 * 1024 * 1024
 MAX_CLAIM_BYTES = 64 * 1024
@@ -233,7 +234,7 @@ def build_claim(provenance_bytes, bundle_bytes):
         "subject_name": "release-provenance.json",
         "identity": {
             "issuer": TRUSTED_ISSUER,
-            "subject": f"repo:{TRUSTED_REPOSITORY}:ref:refs/tags/{tag}",
+            "subject": f"{TRUSTED_OIDC_SUBJECT_PREFIX}:ref:refs/tags/{tag}",
             "workflow_ref": workflow_ref,
         },
         "algorithm": ALGORITHM,

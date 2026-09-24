@@ -73,7 +73,7 @@ fn provenance_json(tag: &str, commit: &str, manifest_bytes: &[u8]) -> String {
 fn claim_json(tag: &str, provenance_bytes: &[u8]) -> String {
     let subject_digest = sha256_digest(provenance_bytes);
     let workflow_ref = format!("{TRUSTED_REPOSITORY}/{TRUSTED_WORKFLOW_PATH}@refs/tags/{tag}");
-    let subject = format!("repo:{TRUSTED_REPOSITORY}:ref:refs/tags/{tag}");
+    let subject = format!("{TRUSTED_OIDC_SUBJECT_PREFIX}:ref:refs/tags/{tag}");
     format!(
         r#"{{
   "schema": "semaprax.release-signature-claim.v1",
@@ -205,7 +205,7 @@ fn fixture_expected_identity() -> ExpectedReleaseIdentity {
         repository: TRUSTED_REPOSITORY.to_owned(),
         workflow_path: TRUSTED_WORKFLOW_PATH.to_owned(),
         tag: "v9.9.9".to_owned(),
-        subject: "repo:wavect/semaprax:ref:refs/tags/v9.9.9".to_owned(),
+        subject: "repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/v9.9.9".to_owned(),
         workflow_ref: format!("{TRUSTED_REPOSITORY}/{TRUSTED_WORKFLOW_PATH}@refs/tags/v9.9.9"),
     }
 }
@@ -412,6 +412,26 @@ fn signature_claim_from_an_unapproved_issuer_is_rejected() {
         verify_signature_claim_binds_provenance(claim.as_bytes(), fixture.provenance.as_bytes())
             .expect_err("a claim naming an unapproved OIDC issuer must be rejected");
     assert!(error.message.contains("issuer"));
+}
+
+#[test]
+fn signature_claim_with_legacy_or_wrong_immutable_subject_is_rejected() {
+    let fixture = valid_fixture();
+    for subject in [
+        "repo:wavect/semaprax:ref:refs/tags/v9.9.9",
+        "repo:wavect@47505194/semaprax@1:ref:refs/tags/v9.9.9",
+    ] {
+        let claim = fixture.claim.replace(
+            "repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/v9.9.9",
+            subject,
+        );
+        let error = verify_signature_claim_binds_provenance(
+            claim.as_bytes(),
+            fixture.provenance.as_bytes(),
+        )
+        .expect_err("a legacy or wrong-repository-id subject must be rejected");
+        assert!(error.message.contains("identity.subject"));
+    }
 }
 
 #[test]
@@ -679,7 +699,8 @@ fn throwaway_hmac_capability_verifies_a_correct_signature_and_rejects_tampering(
         subject_digest: sha256_digest(subject_bytes),
         algorithm: "test-only-hmac-sha256".to_owned(),
         identity_issuer: TRUSTED_ISSUER.to_owned(),
-        identity_subject: "repo:wavect/semaprax:ref:refs/tags/v9.9.9".to_owned(),
+        identity_subject: "repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/v9.9.9"
+            .to_owned(),
         identity_workflow_ref: format!(
             "{TRUSTED_REPOSITORY}/{TRUSTED_WORKFLOW_PATH}@refs/tags/v9.9.9"
         ),

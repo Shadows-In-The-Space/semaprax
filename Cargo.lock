@@ -1727,6 +1727,7 @@ dependencies = [
  "wasmparser",
  "webpki-roots",
  "winapi-util",
+ "x509-cert",
  "zeroize",
 ]
 

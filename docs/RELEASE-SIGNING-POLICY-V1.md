@@ -53,13 +53,15 @@ cross-checks all three (code, script, and this table) agree.
 | Trusted OIDC issuer | `https://token.actions.githubusercontent.com` | The only accepted token issuer for a keyless (Sigstore/Fulcio) identity -- GitHub Actions' own OIDC provider. A claim from any other issuer is rejected regardless of its other fields. |
 | Trusted repository | `wavect/semaprax` | The only accepted GitHub repository slug. |
 | Trusted workflow path | `.github/workflows/ci.yml` | The only workflow file whose run may claim to have produced a release. |
+| Immutable OIDC subject prefix | `repo:wavect@47505194/semaprax@1326961553` | Pins the GitHub owner and repository IDs for this repository's current immutable-subject configuration; a rename/transfer requires an explicit policy revision. |
+| Policy owner | Wavect GmbH release maintainers | Own the workflow, identity rotation and revocation decision; a coding agent cannot change trust roots or publish a release on its own. |
 | Tag pattern | `refs/tags/v<MAJOR>.<MINOR>.<PATCH>` | Bound per-release, not globally: verification always compares against the *exact* tag the provenance statement under test itself declares (its `tag` field), not a wildcard. This is what makes "replayed provenance from another version" fail: the expected identity subject is recomputed from the tag under test, so a claim minted for `v0.4.1` cannot satisfy a check against `v0.4.2`. |
 
 The expected GitHub OIDC **`sub` claim** for a release built from tag
 `vX.Y.Z` is exactly:
 
 ```
-repo:wavect/semaprax:ref:refs/tags/vX.Y.Z
+repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/vX.Y.Z
 ```
 
 The Fulcio certificate identity used by `cosign verify-blob` is the workflow
@@ -76,11 +78,15 @@ without the URL scheme and host) is exactly:
 wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z
 ```
 
-These are GitHub Actions' standard identity representations for a
-tag-triggered workflow run using `id-token: write`. The OIDC `sub` claim and
-the Fulcio certificate URL SAN are deliberately distinct; the former belongs
-in the structural signature claim below, while the latter is passed to
-cosign's `--certificate-identity` verification option.
+The immutable `sub` prefix is the repository's currently configured GitHub
+OIDC policy (`use_immutable_subject: true`), not an inferred name-only subject.
+The OIDC `sub` and Fulcio certificate URL SAN are deliberately distinct. The
+structural signature claim records the expected `sub`. After verifying the
+signature and certificate chain, the offline verifier checks the Fulcio leaf's
+embedded original-token subject (OID `1.3.6.1.4.1.57264.1.24`) and immutable
+repository/owner IDs (OIDs `.15` and `.17`) against this policy, as well as the
+certificate URL SAN and issuer. The structural claim is not itself evidence;
+all three extension values must be present exactly once in the verified leaf.
 
 ### Rotation and revocation
 
@@ -161,7 +167,7 @@ claim that a signed release already exists.
 | `subject_digest` | `sha256:<64 lowercase hex>` | Digest of the exact `semaprax.release-provenance.v1` document bytes this claim signs. |
 | `subject_name` | string | Human-readable label for the subject (e.g. `release-provenance.json`). |
 | `identity.issuer` | string | Must equal the trusted OIDC issuer. |
-| `identity.subject` | string | Must equal `repo:<trusted repository>:ref:refs/tags/<tag>` for the exact tag the provenance document declares. |
+| `identity.subject` | string | Must equal the pinned immutable OIDC subject prefix plus `:ref:refs/tags/<tag>` for the exact tag the provenance document declares. This is a policy expectation, not an independently extracted certificate fact. |
 | `identity.workflow_ref` | string | Must equal `<trusted repository>/<trusted workflow path>@refs/tags/<tag>`, and must also agree with the provenance document's own `builder.workflow_identity`. |
 | `algorithm` | string | One recognized value (currently only `sigstore-cosign-bundle-v0.3`); recognizing a value here is a structural admission, not a cryptographic endorsement. |
 | `signature` | string (opaque) | A deterministic projection copied from the bundle and checked byte-for-byte against it. Cryptographic verification consumes the canonical bundle field rather than treating this duplicate string as another signature. |
@@ -479,7 +485,8 @@ historical evidence are changed.
    Sigstore/Fulcio certificate whose URL SAN is bound to
    `https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/<tag>`
    over the final aggregate provenance. The underlying GitHub OIDC `sub`
-   remains `repo:wavect/semaprax:ref:refs/tags/<tag>`; it is not the
+   is `repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/<tag>` under
+   this repository's immutable-subject configuration; it is not the
    certificate identity accepted by `cosign verify-blob`. No repository
    signing secret is configured.
 2. **The signing tools are pinned.** The workflow pins both

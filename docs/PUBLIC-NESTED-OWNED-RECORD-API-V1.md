@@ -7,6 +7,8 @@ Release regression evidence is **HOSTED GREEN** under the
 Audience: compiler contributors, generated-package integrators, and promotion
 reviewers.
 
+In plain terms: this is a small, fixed record API with generated adapters; it is not a general public record feature.
+
 ## Purpose and fixed identifiers
 
 Project v11 exposes the already admitted bounded nested owned-record result

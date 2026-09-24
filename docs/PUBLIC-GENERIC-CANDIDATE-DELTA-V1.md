@@ -1,5 +1,7 @@
 # Public Generic Candidate Delta v1
 
+In plain terms: this compares one candidate against its exact reviewed baseline.
+
 Status: implemented bounded candidate route, hosted green on Linux, macOS, and
 Windows; gate PG-4 of the
 [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md).

@@ -1,5 +1,7 @@
 # Public C++ Owned-Data Package v1
 
+In plain terms: this defines the exact C++ package boundary; it does not promote that boundary to a public product.
+
 Status: additive library-first contract; not a promoted Project target or CLI.
 Audience: compiler, native-provider, C ABI, and C++ SDK maintainers.
 

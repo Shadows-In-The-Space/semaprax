@@ -7,6 +7,8 @@ and formal public promotion remains open. Release regression evidence is **HOSTE
 Audience: language users, generated-SDK consumers, tool authors, and compiler
 contributors.
 
+In plain terms: this is a fixed safe-data API for a named set of functions, with generated clients but no package publication.
+
 GitHub issue [#145](https://github.com/wavect/semaprax/issues/145) chose this
 exact profile as the candidate for a maintained, reproducible generated-package
 consumer route. `scripts/generated-package-release.py` prepares a preview

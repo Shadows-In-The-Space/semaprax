@@ -1,5 +1,7 @@
 # Public Generic Boundary Profile v1
 
+In plain terms: this is the fixed test for what may cross the generic boundary.
+
 Audience: compiler contributors implementing the admission classifier, and reviewers of the generic boundary scope.
 
 Status: frozen predicate and bounds table, now implemented by a pure

@@ -1,5 +1,7 @@
 # Public Generic Compatibility v1
 
+In plain terms: this states when two generic projections are compatible.
+
 Status: implemented bounded projection, hosted green on Linux, macOS, and
 Windows; gate PG-3 of the
 [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md).

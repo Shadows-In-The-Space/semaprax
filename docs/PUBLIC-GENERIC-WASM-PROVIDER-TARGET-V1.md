@@ -9,6 +9,8 @@ Manifest v1 profile `public-generic-wasm-provider.v1`. It creates a checked,
 replayable compiler subject and a closed executable provider for issues #162
 and #229. It does not publish a supported public generic ABI.
 
+In plain terms: the compiler can build this narrowly defined Wasm provider, but nobody is promised a supported public interface.
+
 ## Manifest contract
 
 The profile is available only through the canonical `semaprax.manifest.v1`

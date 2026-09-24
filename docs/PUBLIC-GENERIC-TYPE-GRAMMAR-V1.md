@@ -7,6 +7,8 @@ It is not selected by any public descriptor, carrier, package, or consumer, and
 public generic ownership remains unsupported and unpublished. A term of this
 grammar is not a public ABI.
 
+In plain terms: it turns already checked generic types into a stable description; it does not accept new source code or publish an ABI.
+
 Audience: ABI, package, evidence, and generated-consumer maintainers.
 
 ## Scope

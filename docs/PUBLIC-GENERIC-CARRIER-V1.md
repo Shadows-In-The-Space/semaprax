@@ -1,5 +1,7 @@
 # Public Generic Carrier v1
 
+In plain terms: this is the ownership-carrying wire contract used by providers.
+
 Audience: backend provider authors on native and Core Wasm, and reviewers of the ownership and settlement contract.
 
 Status: frozen logical specification with a reference codec and local

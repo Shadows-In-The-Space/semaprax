@@ -1,5 +1,7 @@
 # Public Generic Carrier Hostile Corpus v1
 
+In plain terms: these hostile inputs prove that malformed carriers fail closed.
+
 Audience: ABI, carrier, ownership and generated-consumer maintainers, and
 reviewers of the fail-closed replay claim.
 

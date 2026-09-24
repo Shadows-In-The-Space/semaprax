@@ -6,6 +6,8 @@ authoring-time, ignored, device/simulator, or separately provisioned evidence
 below retains its narrower scope; public promotion, registry publication and
 broader product completion remain separately gated.
 
+In plain terms: this records the exact scalar WIT shape from an approved Project; it neither emits nor runs a Component.
+
 Audience: Project, interoperability, package, and host-tool maintainers.
 
 This specification defines an authority-free public WIT interface artifact for

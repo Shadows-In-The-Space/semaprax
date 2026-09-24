@@ -9,6 +9,8 @@ the existing `public-generic-wasm-provider.v1` subject. It does not change the
 WIT type projection, descriptor, carrier, Project profile, legacy build routes,
 or PG-9 decision.
 
+In plain terms: this produces one private Component Model artifact from an already admitted provider; it does not make the provider public.
+
 ## Admission and derivation
 
 The input is the exact checked `ProjectRevision` and the retained

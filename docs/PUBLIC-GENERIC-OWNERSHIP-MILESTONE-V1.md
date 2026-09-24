@@ -8,6 +8,8 @@ this commit. This document owns the milestone's identity, its gates, the
 separation invariants, and the standing support/publication decision. It is a
 charter, not evidence.
 
+In plain terms: this is the gate checklist and standing decision, not proof that a public API exists.
+
 Audience: language, ABI, package, evidence, and promotion reviewers.
 
 **Local implementation update, 2026-09-23:** the compiler-owned zero-import

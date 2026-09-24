@@ -16,6 +16,8 @@ component built from this projection. What exists is a deterministic,
 refusal-total *type* projection from an already-checked Boundary Profile v1
 admission to WIT `record`/`resource` text.
 
+In plain terms: this writes safe, repeatable WIT type text from approved types; it does not create or run a public component.
+
 Implementation: [`src/public_generic_abi/wit_projection.rs`](../src/public_generic_abi/wit_projection.rs).
 
 ## Why this exists before PG-9

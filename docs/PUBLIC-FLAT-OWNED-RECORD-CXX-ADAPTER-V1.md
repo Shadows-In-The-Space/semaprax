@@ -1,5 +1,7 @@
 # Public Flat Owned Record C++ Adapter v1
 
+In plain terms: this explains how the checked flat record maps into C++.
+
 Status: implemented bounded profile; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). Historical local,
 authoring-time, ignored, device/simulator, or separately provisioned evidence

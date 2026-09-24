@@ -1,5 +1,7 @@
 # Public Generic Metadata Consumers v1
 
+In plain terms: this defines what each generated consumer must independently check.
+
 Audience: generated-consumer integrators, ABI reviewers, and promotion
 reviewers.
 

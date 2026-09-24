@@ -7,6 +7,8 @@ and explicit v9/v10 promotion decisions remain open. Release evidence is **HOSTE
 Audience: compiler contributors, generated-package integrators, and promotion
 reviewers.
 
+In plain terms: this is the bounded UTF-8 API contract and its evidence; it does not approve publishing a package.
+
 The v0.2.0 tag commit `5f6fb9655fdec92c57ab71615cfd7bfa8cc76051`
 passed the complete blocking
 [release run](https://github.com/wavect/semaprax/actions/runs/33608662244),

@@ -8,6 +8,8 @@ here allocates, transfers, releases, or observes a runtime, and no engine
 evidence is claimed. No hosted run is recorded, and public generic ownership
 remains unsupported and unpublished.
 
+In plain terms: this describes how a future consumer must clean up owned values, without creating that consumer yet.
+
 Audience: ownership, cleanup, backend, and ABI reviewers.
 
 ## What this settles

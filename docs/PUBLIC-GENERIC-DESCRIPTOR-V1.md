@@ -1,5 +1,7 @@
 # Public Generic Descriptor v1
 
+In plain terms: this is the canonical descriptor that consumers replay.
+
 Audience: compiler contributors producing descriptors, and authors of independent verifiers and foreign-language consumers.
 
 Status: frozen wire-format specification with a reference codec, local

@@ -1,5 +1,7 @@
 # Public Flat Owned Record API v1
 
+In plain terms: this is the bounded record API contract, not a publication promise.
+
 Status: implemented bounded Project-v9 API; generated packages remain unpublished
 and formal public promotion remains open. Release regression evidence is **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).

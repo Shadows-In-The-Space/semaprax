@@ -15,6 +15,8 @@ conclusions rather than only aggregate run conclusions. This is real hosted
 evidence, not a frozen #164 candidate: see the corrected §2.16 and §3 below.
 Section 3 lists every #164 requirement that remains open.
 
+In plain terms: the recorded runs are useful history, but they do not freeze a release candidate.
+
 **Second revision, 2026-09-19 (same-day follow-up, documentation-only
 pass):** a third hosted run has since been found, at a **different, earlier**
 prior head: [run 35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886)

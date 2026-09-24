@@ -1,5 +1,8 @@
 //! One checked subject on two physical backends, not full settlement parity.
 //! In particular, native consumes failed inputs; Wasm retains them until release.
+//! Interpreter events describe result copy-out only, not physical handle cleanup.
+#[path = "same_subject_interpreter.rs"]
+mod interpreter;
 use super::{array, SOURCE};
 use semaprax::public_generic_abi::{
     carrier::{
@@ -12,6 +15,13 @@ use semaprax::public_generic_abi::{
 use std::{fs, path::Path, process::Command};
 
 const PAYLOADS: [&[u8]; 2] = [&[1, 7, 13], &[2, 11, 17, 23]];
+
+struct Subject {
+    provider: String,
+    driver: String,
+    result_binding: CarrierFrameBinding,
+    interpreted: (u32, Vec<Vec<u8>>),
+}
 
 fn decode_native(bytes: &[u8]) -> Vec<Vec<u8>> {
     fn length(bytes: &mut &[u8]) -> usize {
@@ -76,7 +86,7 @@ fn native_run(root: &Path, provider: &str, driver: &str, opt: &str, negative: bo
         .collect()
 }
 
-fn prepare_subject(root: &Path, guard: bool) -> (String, String, CarrierFrameBinding) {
+fn prepare_subject(root: &Path, guard: bool) -> Subject {
     let source = SOURCE.replace(
         "requires true",
         if guard {
@@ -91,6 +101,7 @@ fn prepare_subject(root: &Path, guard: bool) -> (String, String, CarrierFrameBin
     let program = semaprax::hir::resolve(&parsed).unwrap();
     let endpoint =
         derive_admitted_public_generic_endpoint_v1(&program, &revision, "auth.identity").unwrap();
+    let interpreted = interpreter::observe(&program, &endpoint, guard);
     let native =
         render_authenticated_identity_provider(&program, &revision, endpoint.descriptor()).unwrap();
     let wasm = semaprax::wasm::emit_public_generic_wasm_provider_v1(&program, &endpoint).unwrap();
@@ -143,7 +154,12 @@ fn prepare_subject(root: &Path, guard: bool) -> (String, String, CarrierFrameBin
     fs::write(root.join("probe.mjs"), include_str!("same_subject.mjs")).unwrap();
     let result =
         CarrierFrameBinding::from_verified_descriptor(endpoint.descriptor(), Direction::Result);
-    (provider, driver, result)
+    Subject {
+        provider,
+        driver,
+        result_binding: result,
+        interpreted,
+    }
 }
 
 #[test]
@@ -162,8 +178,14 @@ fn checked_identity_native_and_core_wasm_share_one_subject() {
         let case = root.join(if guard { "true" } else { "false" });
         fs::create_dir(&case).unwrap();
         let root = &case;
-        let (provider, driver, result_binding) = prepare_subject(root, guard);
+        let Subject {
+            provider,
+            driver,
+            result_binding,
+            interpreted,
+        } = prepare_subject(root, guard);
         let expected = if guard { 0 } else { 11 };
+        assert_eq!(interpreted.0, expected);
         let execution = Command::new("node")
             .arg("probe.mjs")
             .arg(expected.to_string())
@@ -188,6 +210,7 @@ fn checked_identity_native_and_core_wasm_share_one_subject() {
             assert!(wasm_bytes.is_empty(), "failed call published a result");
             Vec::new()
         };
+        assert_eq!(interpreted.1, wasm_leaves);
         for opt in ["-O0", "-O2"] {
             let bytes = native_run(root, &provider, &driver, opt, false);
             let native_leaves = if guard {
@@ -200,7 +223,7 @@ fn checked_identity_native_and_core_wasm_share_one_subject() {
             if guard {
                 assert_eq!(native_leaves, PAYLOADS);
             }
-            eprintln!("same subject requires={guard} native={opt} core-wasm status={expected} exact leaves; settled");
+            eprintln!("same subject requires={guard} interpreter/native={opt}/core-wasm status={expected} exact leaves; backend-local settlement checked");
             if !guard {
                 let call = provider
                     .lines()

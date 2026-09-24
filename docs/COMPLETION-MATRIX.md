@@ -34,34 +34,33 @@ product status. A hosted test does not turn a private ABI into a public one,
 publish a package, or replace an explicit support decision. A proof model is
 not physical execution.
 
-Pre-release labels such as **Authored, unrun**, **Local, partial**, and
-"hosted promotion pending" no longer describe the released implementation's
-current evidence when the only missing condition was execution of its release
-gates. Historical local runs remain valid historical witnesses, not the current
-evidence ceiling. Future or separately unimplemented gates are not marked
-complete by changing an evidence label.
+Do not use old pre-release labels such as **Authored, unrun**,
+**Local, partial**, or "hosted promotion pending" for released work whose release
+gates ran. Local runs remain historical witnesses, not the current evidence
+ceiling. Conversely, changing an evidence label does not complete a future
+or separately unimplemented gate.
 
 ## Current summary
 
 The separate [Persistent Semantic Cache v1](PERSISTENT-SEMANTIC-CACHE-V1.md)
-implements authenticated cross-process checked-HIR reuse with independent
-source/HIR validation. Its release regressions are HOSTED GREEN; full
-incremental compilation and measured task-level performance remain open.
+reuses authenticated checked HIR across processes and independently validates
+source and HIR. Its release regressions are HOSTED GREEN. Full incremental
+compilation and measured task-level performance remain open.
 
 **Release implementation evidence: HOSTED GREEN**
 
 **Overall product objective: Partial**
 
-The long-term contract below contains **55 requirements: 55 Partial, 0
-Implemented, 0 Missing**. This is the count of the actual requirement rows:
+The long-term contract below has **55 requirements: 55 Partial, 0
+Implemented, 0 Missing**. These counts include the actual requirement rows:
 six semantic-foundation, fifteen language-and-safety, five compiler-and-target,
 ten ecosystem, nine application-platform, and ten agent/operations rows.
-The previous 50-row dashboard did not include all rows already present in its
-own tables. This reconciliation preserves every requirement and corrects the
-count; it does not add requirements or change their completion thresholds.
+The previous 50-row dashboard missed rows already in its tables. This count
+corrects the dashboard without adding requirements or changing completion
+thresholds.
 Work-package and release-exit tables are not included in that denominator.
 
-The released implementation includes canonical source and stable-ID HIR;
+The released implementation already includes canonical source and stable-ID HIR;
 bounded semantic queries, candidates and replay-checked changes; interpreter,
 native C11/Clang and Core-Wasm execution of admitted scalar and owned-data
 profiles; generated consumer and private platform integrations; and the current
@@ -153,8 +152,8 @@ validation product. They are not a backlog of unexecuted v0.4.0 hosted gates.
 
 ## v0.2 product-exit audit
 
-This historical audit measures the shipped v0.2.0 objective against the broader
-product goal. The annotated tag resolves to
+This historical audit compares the shipped v0.2.0 objective with the broader
+product goal. Its annotated tag resolves to
 `5f6fb9655fdec92c57ab71615cfd7bfa8cc76051`; all 45 jobs in
 [release run 33608662244](https://github.com/wavect/semaprax/actions/runs/33608662244)
 passed and the prerelease was published. "Exact-tag hosted" in this historical
@@ -173,9 +172,9 @@ unprovisioned, broader-browser, physical-device, registry, or production claim.
 | Multi-module line-filter product | Exact-tag hosted native and Node/Core-Wasm | Add real-browser or multi-engine evidence before claiming that breadth. |
 | Full promotion CI for every v0.2.0 release claim | Exact-tag hosted and published | Repeat the complete blocking gate for every later release tag. |
 
-The v0.2.0 prerelease completed its artifact milestone, not the full product
-contract. Its narrower browser and unpublished-builder limitations remain
-historical facts; current evidence is recorded separately below.
+The v0.2.0 prerelease completed the artifact milestone, not the full product
+contract. Its browser scope and unpublished builder remain historical limits;
+the current evidence appears separately below.
 
 Evidence owners: [Project Manifest v1](PROJECT-MANIFEST-V1.md) and its additive
 profiles, [Bounded Language Command I/O](BOUNDED-LANGUAGE-COMMAND-IO-V1.md),
@@ -206,17 +205,16 @@ and the exact three-archive inventory and digests.
 | Multi-module line-filter product | HOSTED GREEN for admitted native and Node/Core-Wasm execution | Do not infer broader browser support from this profile. |
 | Implemented v0.4.0 release gates and published archives | HOSTED GREEN; three archives published | Later code changes need their own evidence; release acceptance is not general production support. |
 
-The release milestone is complete. The broader product-exit objective remains
-**Partial** because publication/support decisions and functionality beyond the
-admitted profiles remain open, not because the implemented v0.4.0 evidence is
-local-only or awaiting a tag rerun. Historical workflow attempts and retained
-logs keep their original identities and outcomes.
+The release milestone is complete, but the broader product objective remains
+**Partial**. Publication/support decisions and features beyond the admitted
+profiles are still open; the implemented v0.4.0 work is not awaiting a tag
+rerun. Historical workflow attempts and logs keep their original outcomes.
 
 ## WP-01–WP-15 implementation and promotion audit
 
-This programme is separate from the 55-row product contract. "HOSTED GREEN"
-here refers to the implemented v0.4.0 slice. An explicit registry, API, transport
-or platform support decision remains separate from CI execution.
+This programme is separate from the 55-row product contract. Here, "HOSTED
+GREEN" covers the implemented v0.4.0 slice; CI execution does not make a
+registry, API, transport, or platform support decision.
 
 | Work package | Current source state | Evidence owner or implemented scope | Remaining gate |
 | --- | --- | --- | --- |
@@ -246,18 +244,17 @@ or platform support decision remains separate from CI execution.
 | Project v11 nested owned-record follow-on | HOSTED GREEN; unpublished and unpromoted | Separate descriptor/evaluator replay, cumulative-boundary npm and Rust execution, C11 multi-owner settlement | Record prerequisite and v11 support decisions and complete any additional claimed platform/browser scope. |
 | Project Revision Store v1 follow-on | HOSTED GREEN for admitted Unix/Windows profiles; unpromoted | Authority, identity, bounded replay, profile round trips and publication regressions | Explicit physical-host and public-support breadth remains bounded by the owning specification. |
 
-The Project v8–v11 generated packages remain developer-preview, non-registry
-surfaces unless their owning promotion decision says otherwise. Their hosted
-implementation evidence is no longer an outstanding task. An authority-free
-promotion receipt is a replay mechanism, not itself a support decision.
+Project v8–v11 generated packages remain developer-preview, non-registry
+surfaces unless an owning promotion decision changes that status. Their
+hosted implementation evidence is complete. An authority-free promotion
+receipt replays evidence; it does not decide support.
 
 ## Long-term product contract
 
-Every row below remains **Partial** at the mature-product level. The linked
-implemented slices have **HOSTED GREEN** v0.4.0 evidence. A link to a private,
-proof-only or bounded specification does not broaden its scope. The "Complete
-when" column describes the remaining mature-product threshold, not a claim
-that all of that functionality already exists.
+Every row below remains **Partial** for the mature product, even where an
+implemented slice has **HOSTED GREEN** v0.4.0 evidence. A private, proof-only,
+or bounded specification stays within its own scope. Read "Complete when" as
+the remaining threshold, not as a list of existing features.
 
 ### Semantic foundation
 
@@ -369,15 +366,15 @@ their separate requirements.
 
 ## Final validation product
 
-Completion requires one maintained offline-first product built from a shared
-SEMAPRAX codebase with web, iOS, Android, macOS, Windows, and Linux clients;
+The final gate requires one maintained offline-first product built from a
+shared SEMAPRAX codebase with web, iOS, Android, macOS, Windows, and Linux clients;
 native notifications and secure storage; local databases; native or WASI
 server execution; authentication; background synchronization; a custom
 accelerated visual; one C library; one JavaScript package; and one WebAssembly
 component.
 
-Every artifact must be built and exercised in CI or on representative
-simulators/devices. Platform-specific implementations must be declared rather
-than hidden behind false portability. No current narrow prototype satisfies
-this final gate. The v0.4.0 hosted-green release advances the implemented
-slices without claiming this mature-product completion.
+Build and exercise every artifact in CI or on representative
+simulators/devices. Declare platform-specific implementations rather than
+claiming false portability. No current narrow prototype satisfies this final
+gate. The v0.4.0 hosted-green release advances bounded slices; it does not
+complete the mature product.

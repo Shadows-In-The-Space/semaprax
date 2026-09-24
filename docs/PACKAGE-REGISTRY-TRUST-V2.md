@@ -66,7 +66,8 @@ confusion and mixed-version metadata fail closed.
 ## One-way protocol checkpoint floor
 
 `RegistryCheckpoint` is a sealed wrapper whose canonical wire is exactly
-`{checkpoint:<exact canonical Checkpoint-v1 JSON string>,schema:
+`{checkpoint:<exact canonical Checkpoint-v1 JSON string>,publishers:
+[{namespace,role}],schema:
 "semaprax.registry-trust-checkpoint.v2"}` (compact sorted object keys).
 The embedded string is bounded by the enclosing document, rather than the
 512-byte scalar-label limit. Both outer and embedded documents must reproduce
@@ -74,8 +75,17 @@ their input bytes exactly, including sorted role stamps. The required prior
 digest hashes the complete outer bytes actually accepted from storage.
 
 `initial` is only for independently authorized first installation.
-`migrate_from_v1` is an explicit one-way transition preserving every original
-root, observed-time and role-version/digest stamp. No unwrap or conversion to
+`migrate_from_v1(checkpoint, root)` is an explicit one-way transition requiring
+the exact installed root registry/version/digest recorded in the checkpoint,
+preserving every original root, observed-time and role-version/digest stamp.
+Unknown prior stamped roles refuse migration. Initial installation and migration
+also pin the complete publisher role-to-namespace inventory (sorted by role),
+including when no role stamps yet exist. Every update requires this inventory
+to equal the current root's inventory. Root key/threshold rotation remains
+possible, but adding/removing/renaming publishers or reassigning their namespaces
+is refused until a future explicit delegation-migration protocol. This prevents
+resetting namespace high-water marks through role-name churn or reassignment.
+No unwrap or conversion to
 Checkpoint-v1 exists. Trust-v1 rejects Checkpoint-v2 wire, and the v3 verifier
 cannot accept a Checkpoint-v1 type. Changing metadata profile or root does not
 reset stamps: lower versions or different bytes at the same version fail;
@@ -99,6 +109,7 @@ Wasm artifacts; exact checkpoint CAS bytes; target/path/hash/profile/inventory
 tamper; publisher thresholds/namespace/domain; timestamp/snapshot/publisher
 mix-and-match; every role expiry and clock rollback; version rollback and
 same-version equivocation; dual-threshold root rotation/revocation; signed yank;
-one-way protocol floor and malformed checkpoint ordering. Existing Trust-v1
+one-way protocol floor, renamed/reassigned publisher rotation, exact migration
+root association and malformed checkpoint ordering. Existing Trust-v1
 tests guard the schema/domain-parameterized authentication helper's old route.
 These are offline proof regressions, not hosted or durable integration evidence.

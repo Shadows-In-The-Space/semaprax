@@ -349,6 +349,71 @@ fn rollback_equivocation_and_cross_profile_high_water_are_refused() {
 
 #[test]
 fn dual_threshold_root_rotation_revokes_old_publishers() {
+    for rename in [true, false] {
+        let mut f = Fixture::new(false);
+        f.publish(5, 4);
+        f.refresh(5, 5);
+        let checkpoint = f.verify(&f.initial(), 100).unwrap().checkpoint().clone();
+        let mut next = root_value(2, 10, 20);
+        if rename {
+            next["roles"][3]["name"] = json!("publisher-app-renamed");
+        } else {
+            next["roles"][3]["namespace"] = json!("lib.");
+            next["roles"][4]["namespace"] = json!("app.");
+        }
+        let rotated = verify_root_rotation(
+            &f.root,
+            &sign(next, &[1, 10], b"semaprax.registry-trust-root.v1\0"),
+            100,
+        )
+        .unwrap();
+        f.root = rotated.root;
+        f.publish(6, 20);
+        let app_role = if rename {
+            "publisher-app-renamed"
+        } else {
+            "publisher-app"
+        };
+        if rename {
+            f.publishers[0] = rewrite(&f.publishers[0], &[20, 21], |v| {
+                v["role"] = json!(app_role);
+                v["version"] = json!(1);
+            });
+        } else {
+            let app: Value = serde_json::from_str(&f.publishers[0]).unwrap();
+            let lib: Value = serde_json::from_str(&f.publishers[1]).unwrap();
+            f.publishers[0] = rewrite(&f.publishers[0], &[20, 21], |v| {
+                v["payload"] = lib["signed"]["payload"].clone()
+            });
+            f.publishers[1] = rewrite(&f.publishers[1], &[22, 23], |v| {
+                v["payload"] = app["signed"]["payload"].clone()
+            });
+        }
+        f.refresh(6, 6);
+        if rename {
+            f.snapshot = rewrite(&f.snapshot, &[3], |v| {
+                v["payload"]["publishers"][0]["role"] = json!(app_role)
+            });
+            f.refresh_timestamp(6);
+        }
+        let publishers = [
+            (app_role, f.publishers[0].as_str()),
+            ("publisher-lib", f.publishers[1].as_str()),
+        ];
+        let inputs = UpdateInputs {
+            timestamp: &f.timestamp,
+            snapshot: &f.snapshot,
+            publishers: &publishers,
+            registry: &f.admitted.0,
+        };
+        // This otherwise coherent signed metadata passes from a fresh authorized
+        // root but must not resume the existing namespace high-water chain.
+        verify_update(&f.root, &RegistryCheckpoint::initial(&f.root), 100, &inputs).unwrap();
+        refused(
+            verify_update(&f.root, &checkpoint, 100, &inputs),
+            "SPX-PKR623",
+        );
+    }
     let mut f = Fixture::new(false);
     let checkpoint = f.verify(&f.initial(), 100).unwrap().checkpoint().clone();
     let next = root_value(2, 10, 20);
@@ -402,7 +467,14 @@ fn checkpoint_protocol_floor_is_one_way_and_byte_exact() {
             digest: hash(b"wrong"),
         },
     );
-    let migrated = RegistryCheckpoint::migrate_from_v1(&old);
+    let migrated = RegistryCheckpoint::migrate_from_v1(&old, &f.root).unwrap();
+    assert_eq!(migrated.previous.canonical_bytes(), old.canonical_bytes());
+    let other =
+        InstalledRoot::from_independently_installed_bytes(&wire(&root_value(2, 10, 20))).unwrap();
+    refused(
+        RegistryCheckpoint::migrate_from_v1(&old, &other),
+        "SPX-PKR623",
+    );
     refused(f.verify(&migrated, 100), "SPX-PKR623");
     refused(
         Checkpoint::from_trusted_store_bytes(&migrated.canonical_bytes()),

@@ -12,34 +12,78 @@ const CHECKPOINT_SCHEMA_V2: &str = "semaprax.registry-trust-checkpoint.v2";
 #[derive(Clone)]
 pub struct RegistryCheckpoint {
     previous: Checkpoint,
+    publishers: BTreeMap<String, String>,
+}
+fn publisher_bindings(root: &InstalledRoot) -> BTreeMap<String, String> {
+    root.roles
+        .iter()
+        .filter(|(_, role)| !role.namespace.is_empty())
+        .map(|(name, role)| (name.clone(), role.namespace.clone()))
+        .collect()
 }
 impl RegistryCheckpoint {
     /// Only for independently authorized first install, never corrupt-store fallback.
     pub fn initial(root: &InstalledRoot) -> Self {
         Self {
             previous: Checkpoint::initial(root),
+            publishers: publisher_bindings(root),
         }
     }
     /// Explicit one-way protocol migration. The caller must durably commit this
     /// transition before treating it as authoritative; no high-water is reset.
-    pub fn migrate_from_v1(checkpoint: &Checkpoint) -> Self {
-        Self {
-            previous: checkpoint.clone(),
+    pub fn migrate_from_v1(checkpoint: &Checkpoint, root: &InstalledRoot) -> Result<Self> {
+        if checkpoint.registry != root.registry
+            || checkpoint.root_version != root.version
+            || checkpoint.root_digest != root.digest
+            || checkpoint
+                .roles
+                .keys()
+                .any(|name| !root.roles.contains_key(name))
+        {
+            return Err(stale());
         }
+        Ok(Self {
+            previous: checkpoint.clone(),
+            publishers: publisher_bindings(root),
+        })
     }
     pub fn canonical_bytes(&self) -> String {
-        wire(&json!({"schema":CHECKPOINT_SCHEMA_V2,"checkpoint":self.previous.canonical_bytes()}))
+        let publishers = self
+            .publishers
+            .iter()
+            .map(|(role, namespace)| json!({"role":role,"namespace":namespace}))
+            .collect::<Vec<_>>();
+        wire(
+            &json!({"schema":CHECKPOINT_SCHEMA_V2,"checkpoint":self.previous.canonical_bytes(),"publishers":publishers}),
+        )
     }
     pub fn from_trusted_store_bytes(bytes: &str) -> Result<Self> {
         let value = parse(bytes)?;
-        fields(&value, &["schema", "checkpoint"])?;
+        fields(&value, &["schema", "checkpoint", "publishers"])?;
         if value["schema"] != CHECKPOINT_SCHEMA_V2 {
             return Err(shape());
+        }
+        let mut publishers = BTreeMap::new();
+        for row in array(&value["publishers"], MAX_ROLES - 3)? {
+            fields(row, &["role", "namespace"])?;
+            let role = text(&row["role"])?;
+            let namespace = text(&row["namespace"])?;
+            label(role)?;
+            label(namespace)?;
+            if matches!(role, "root" | "timestamp" | "snapshot")
+                || !namespace.ends_with('.')
+                || publishers
+                    .insert(role.to_owned(), namespace.to_owned())
+                    .is_some()
+            {
+                return Err(shape());
+            }
         }
         let checkpoint = Self {
             previous: Checkpoint::from_trusted_store_bytes(
                 value["checkpoint"].as_str().ok_or_else(shape)?,
             )?,
+            publishers,
         };
         if checkpoint.canonical_bytes() != bytes {
             return Err(shape());
@@ -138,6 +182,9 @@ pub fn verify_update<'a>(
     input: &UpdateInputs<'a, '_>,
 ) -> Result<RegistryUpdateCandidate<'a>> {
     let checkpoint = &stored.previous;
+    if stored.publishers != publisher_bindings(root) {
+        return Err(stale());
+    }
     if root.registry != checkpoint.registry
         || root.expires <= now
         || now < checkpoint.observed_time
@@ -271,7 +318,10 @@ pub fn verify_update<'a>(
     }
     Ok(RegistryUpdateCandidate {
         registry: input.registry,
-        checkpoint: RegistryCheckpoint { previous: next },
+        checkpoint: RegistryCheckpoint {
+            previous: next,
+            publishers: stored.publishers.clone(),
+        },
         prior_checkpoint_digest: hash(stored.canonical_bytes().as_bytes()),
     })
 }

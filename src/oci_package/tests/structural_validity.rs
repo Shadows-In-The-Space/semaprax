@@ -10,7 +10,7 @@ use std::fs;
 use sha2::{Digest, Sha256};
 
 use super::{fixture_plan, fresh_output_dir, TEST_LOCK};
-use crate::build_and_publish;
+use crate::oci_package::build_and_publish;
 
 fn hex_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
@@ -123,7 +123,7 @@ fn manifest_declares_the_artifact_type_and_no_runnable_image_claim() {
     let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
     assert_eq!(
         manifest["artifactType"].as_str(),
-        Some(crate::ARTIFACT_TYPE)
+        Some(crate::oci_package::ARTIFACT_TYPE)
     );
 
     let config_digest = manifest["config"]["digest"].as_str().unwrap();

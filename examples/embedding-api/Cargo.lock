@@ -1419,7 +1419,6 @@ dependencies = [
  "rustix",
  "rustls",
  "same-file",
- "semaprax-oci-package",
  "serde_json",
  "sha2 0.11.0",
  "sigstore-verify",
@@ -1435,14 +1434,6 @@ name = "semaprax-embedding-api-consumer"
 version = "0.0.0"
 dependencies = [
  "semaprax",
-]
-
-[[package]]
-name = "semaprax-oci-package"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "sha2 0.11.0",
 ]
 
 [[package]]

@@ -6,9 +6,9 @@
 //! second assertion even if it happened not to crash.
 
 use super::{fixture_plan, fresh_output_dir, TEST_LOCK};
-use crate::{build_and_publish, OciErrorKind};
+use crate::oci_package::{build_and_publish, OciErrorKind};
 
-fn assert_refused(mutate: impl FnOnce(&mut crate::OciPlan), label: &str) {
+fn assert_refused(mutate: impl FnOnce(&mut crate::oci_package::OciPlan), label: &str) {
     let _guard = TEST_LOCK.lock().unwrap();
     let mut plan = fixture_plan();
     mutate(&mut plan);
@@ -111,7 +111,7 @@ fn empty_wasm_module_is_refused() {
     assert_refused(
         |plan| {
             plan.wasm_bytes = Vec::new();
-            plan.wasm_sha256 = crate::render::sha256_digest_fact(&[]);
+            plan.wasm_sha256 = crate::oci_package::render::sha256_digest_fact(&[]);
         },
         "wasm-empty",
     );
@@ -121,8 +121,8 @@ fn empty_wasm_module_is_refused() {
 fn oversized_wasm_module_is_refused() {
     assert_refused(
         |plan| {
-            let bytes = vec![0u8; crate::MAX_WASM_BYTES + 1];
-            plan.wasm_sha256 = crate::render::sha256_digest_fact(&bytes);
+            let bytes = vec![0u8; crate::oci_package::MAX_WASM_BYTES + 1];
+            plan.wasm_sha256 = crate::oci_package::render::sha256_digest_fact(&bytes);
             plan.wasm_bytes = bytes;
         },
         "wasm-oversized",

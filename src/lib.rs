@@ -102,6 +102,7 @@ pub mod model_call_receipt;
 #[cfg(any(test, feature = "unstable-native-host-internal"))]
 #[doc(hidden)]
 pub(crate) mod native_settlement;
+pub(crate) mod oci_package;
 pub mod openapi;
 pub mod outbound_host_adapter;
 #[cfg(any(test, feature = "unstable-native-host-internal"))]

@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Keep the standalone compiler archive independent of unpublished crates by
+  moving the private OCI emitter and all hostile tests into one internal
+  compiler module. Preserve the typed input boundary, exact artifact bytes,
+  credential refusal, and unchanged no-signing/no-registry-publication scope.
+
 - Keep the private public-generic Component runtime inside its ambient-authority
   source contract: acquire a checked-in canonical project explicitly, replay
   against pinned identities, and authenticate exact Component bytes before

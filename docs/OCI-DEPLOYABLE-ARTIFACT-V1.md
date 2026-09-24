@@ -92,7 +92,7 @@ extending this route to them is open follow-up scope, not implemented here.
 Every blob file is named after its own SHA-256 digest in lowercase hex, and
 every digest referenced from `index.json` or the manifest is that same hash
 recomputed from the bytes actually on disk -- see
-`crates/semaprax-oci-package/src/tests/structural_validity.rs` for the
+`src/oci_package/tests/structural_validity.rs` for the
 executable check.
 
 ### `oci-layout`
@@ -202,7 +202,7 @@ anywhere in the layout ever carries a wall-clock timestamp, a random nonce,
 a host path, a process ID, or anything else that depends on when, where, or
 how many times the emitter has run. The output directory's own path is never
 embedded in any emitted byte.
-`crates/semaprax-oci-package/src/tests/determinism.rs` pins this with a real
+`src/oci_package/tests/determinism.rs` pins this with a real
 wall-clock gap between two runs.
 
 ## No ambient authority, no network
@@ -210,10 +210,10 @@ wall-clock gap between two runs.
 The emitter reads only the bytes handed to it (the project's own verified
 Wasm module and identity) and the local filesystem path it is told to create.
 It performs no DNS lookup, no TCP/TLS connection, and no registry handshake;
-`crates/semaprax-oci-package` has no HTTP client dependency at all. It also
+the private `src/oci_package` module imports no network client. It also
 refuses to run at all if a container-registry-credential-shaped environment
 variable (`DOCKER_PASSWORD`, `REGISTRY_TOKEN`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
-and similar -- see `crates/semaprax-oci-package/src/validation.rs` for the
+and similar -- see `src/oci_package/validation.rs` for the
 exact list) is present in the process environment, before touching any file.
 This mirrors `scripts/generated-package-release.py`'s
 `assert_no_credential_env`: the emitter has no legitimate use for such a
@@ -221,7 +221,7 @@ credential, so its mere presence is refused rather than silently ignored.
 
 ## No publish path
 
-`crates/semaprax-oci-package` implements no registry client, no `push`
+`src/oci_package` implements no registry client, no `push`
 subcommand, and no `--publish` flag of any kind: `build_and_publish` writes
 one local directory and returns. This is a stronger guarantee than "declines
 to publish by default" -- there is no live-publish code path to enable, the
@@ -259,17 +259,22 @@ traversal sequence (`..`), an embedded NUL byte, or an over-long value (over
 `OciErrorKind::Identity`, not sanitized. A claimed Wasm digest that disagrees
 with the actual bytes is refused the same way. An output path carrying an
 embedded NUL byte is refused before any directory is created.
-`crates/semaprax-oci-package/src/tests/hostile_input.rs` exercises each case
+`src/oci_package/tests/hostile_input.rs` exercises each case
 and additionally asserts the output directory was never created, proving the
 refusal happens before any filesystem effect.
 
 ## Evidence and nonclaims
 
-`cargo test -p semaprax-oci-package` (local only; not run in any hosted CI
-here) covers determinism, structural OCI validity, hostile-input refusal, and
+`cargo test --locked -p semaprax --lib oci_package::tests::` selects the
+relocated tests for determinism, structural OCI validity, hostile-input refusal, and
 environment-credential refusal. `src/project/oci.rs`'s glue from a
 `ProjectWebBuild` envelope is exercised by the `semaprax` crate's own project
 build tests.
+
+The private helper's implementation and tests are part of the compiler
+archive, not a separate registry package. This packaging-boundary repair
+does not authorize publication or add a support claim; the historical local
+evidence does not become a fresh hosted result by relocation.
 
 This capsule makes no claim about:
 

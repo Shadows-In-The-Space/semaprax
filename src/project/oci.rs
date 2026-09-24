@@ -1,9 +1,9 @@
 //! Glue between the compiler's selected, replayable scalar-Web or Useful Data
-//! npm build envelope and the standalone, dependency-inverted
-//! `semaprax-oci-package` crate.
+//! npm build envelope and the dependency-inverted
+//! private `crate::oci_package` module.
 //!
 //! This module owns no OCI rendering or publication logic itself -- that
-//! authority lives entirely in `semaprax-oci-package`, which knows neither
+//! authority lives entirely in `crate::oci_package`, which knows neither
 //! HIR nor Project manifests. This module's only job is to independently
 //! replay an already-produced carrier, extract its identity and `app.wasm`
 //! artifact, and hand them across that boundary exactly as received. The npm
@@ -28,7 +28,7 @@ fn error(code: &'static str, message: impl Into<String>) -> Diagnostic {
 pub(super) fn build_and_publish(
     build: &ProjectWebBuild,
     output: &Path,
-) -> Result<semaprax_oci_package::OciBundle, Diagnostic> {
+) -> Result<crate::oci_package::OciBundle, Diagnostic> {
     build.verify().map_err(|_| {
         error(
             "SPX-J143",
@@ -107,7 +107,7 @@ pub(super) fn build_and_publish(
             )
         })?;
 
-    let plan = semaprax_oci_package::OciPlan {
+    let plan = crate::oci_package::OciPlan {
         project_name,
         project_revision,
         workspace_revision,
@@ -127,14 +127,14 @@ pub(super) fn build_and_publish_useful_data(
     build: &ProjectNpmBuild,
     entry_module: &str,
     output: &Path,
-) -> Result<semaprax_oci_package::OciBundle, Diagnostic> {
+) -> Result<crate::oci_package::OciBundle, Diagnostic> {
     let subject = build.useful_data_oci_subject().map_err(|_| {
         error(
             "SPX-J145",
             "OCI packaging input failed independent Useful Data package replay",
         )
     })?;
-    let plan = semaprax_oci_package::OciPlan {
+    let plan = crate::oci_package::OciPlan {
         project_name: subject.project_name,
         project_revision: subject.project_revision,
         workspace_revision: subject.workspace_revision,
@@ -147,10 +147,10 @@ pub(super) fn build_and_publish_useful_data(
 }
 
 fn publish(
-    plan: semaprax_oci_package::OciPlan,
+    plan: crate::oci_package::OciPlan,
     output: &Path,
-) -> Result<semaprax_oci_package::OciBundle, Diagnostic> {
-    semaprax_oci_package::build_and_publish(plan, output)
+) -> Result<crate::oci_package::OciBundle, Diagnostic> {
+    crate::oci_package::build_and_publish(plan, output)
         .map_err(|_| error("SPX-J144", "OCI artifact publication failed"))
 }
 
@@ -269,6 +269,7 @@ mod tests {
     /// build instead of packaging it.
     #[test]
     fn scalar_project_publishes_a_structurally_valid_oci_layout() {
+        let _guard = crate::oci_package::tests::TEST_LOCK.lock().unwrap();
         let root = scalar_fixture("ocilayout");
         let output = root.join("oci-out");
         with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
@@ -289,6 +290,7 @@ mod tests {
     /// private-owned-record admission ceases to compose with a public export.
     #[test]
     fn useful_data_v2_project_publishes_a_structurally_valid_oci_layout() {
+        let _guard = crate::oci_package::tests::TEST_LOCK.lock().unwrap();
         let root = useful_data_v2_fixture("ociv2");
         let output = root.join("oci-out");
         with_authenticated_project(&root.join("semaprax.toml"), |snapshot| {
@@ -312,6 +314,7 @@ mod tests {
     /// attempted, not packaged as if it were scalar.
     #[test]
     fn non_scalar_project_is_refused_before_any_packaging() {
+        let _guard = crate::oci_package::tests::TEST_LOCK.lock().unwrap();
         let root = scalar_fixture("ocinonscalar");
         std::fs::write(
             root.join("semaprax.toml"),

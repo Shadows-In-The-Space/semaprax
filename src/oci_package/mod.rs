@@ -1,14 +1,13 @@
 //! Deterministic, offline OCI Image Layout emitter for one checked SEMAPRAX
 //! project's already-compiled, already-verified deterministic Wasm module.
 //!
-//! This crate deliberately knows nothing about SEMAPRAX HIR, Project
+//! This private module deliberately knows nothing about SEMAPRAX HIR, Project
 //! manifests, or the compiler's descriptor/replay machinery. Its input is
 //! exactly the caller-authenticated identity and Wasm bytes; see
-//! `src/project/oci.rs` in the main crate for the glue that extracts those
-//! from a `ProjectWebBuild` envelope. This split mirrors
-//! `semaprax-native-rust-owned-data-package`: a lower, dependency-inverted
-//! packaging crate that neither compiles nor trusts anything it was not
-//! itself handed.
+//! `src/project/oci.rs` for the glue that extracts those from a
+//! `ProjectWebBuild` envelope. The typed, dependency-inverted boundary
+//! remains inside the compiler package so its archive needs no unpublished
+//! helper crate. It neither compiles nor trusts anything it was not handed.
 //!
 //! ## What this is, and is not
 //!
@@ -22,7 +21,7 @@
 //! human or a separate deployment pipeline must still supply to turn this
 //! into something a container runtime can execute.
 //!
-//! This crate has no registry client, no network code, and no `--publish`
+//! This module has no registry client, no network code, and no `--publish`
 //! path of any kind: [`build_and_publish`] writes one local directory and
 //! nothing else. It also refuses to run at all if a container-registry
 //! credential-shaped environment variable is present -- see
@@ -254,4 +253,4 @@ pub fn build_and_publish(plan: OciPlan, output: &std::path::Path) -> Result<OciB
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

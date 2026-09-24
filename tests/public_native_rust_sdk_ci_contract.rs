@@ -283,10 +283,9 @@ fn quality_gate_and_example_are_promotion_evidence_not_a_private_claim() {
 
 #[test]
 fn root_package_does_not_create_a_dependency_cycle_to_the_builder() {
-    // A private normal dependency of the root `semaprax` package is only a
-    // cycle risk if it reaches back into `semaprax`. Banning every
-    // `semaprax-*` normal dependency outright is a proxy for that, and it
-    // refused `semaprax-oci-package`, a genuine leaf.
+    // Check both independent requirements: a normal dependency must not
+    // cycle back into the compiler, and it must not be unpublished. An
+    // acyclic private leaf still breaks the compiler's registry archive.
     //
     // Check the real property instead, and check it TRANSITIVELY: a
     // dependency two hops away reaches back just as effectively as a direct
@@ -325,6 +324,25 @@ fn root_package_does_not_create_a_dependency_cycle_to_the_builder() {
             .map(str::to_owned)
     }
 
+    fn is_unpublished(manifest: &str) -> bool {
+        manifest.lines().any(|line| {
+            line.split_once('=').is_some_and(|(key, value)| {
+                key.trim() == "publish"
+                    && value.split('#').next().unwrap_or_default().trim() == "false"
+            })
+        })
+    }
+
+    // A leaf with no dependencies is not a cycle, but is still forbidden
+    // when Cargo cannot resolve it from the compiler's packaged manifest.
+    assert!(is_unpublished(
+        "[package]\nname = \"private-leaf\"\npublish = false\n"
+    ));
+    assert!(is_unpublished("[package]\npublish=false # private\n"));
+    assert!(!is_unpublished(
+        "[package]\nname = \"public-leaf\"\npublish = true\n"
+    ));
+
     // The builder really does depend on `semaprax`; that is the edge which
     // makes any path back to the builder a cycle, so pin it rather than
     // assume it.
@@ -354,6 +372,10 @@ fn root_package_does_not_create_a_dependency_cycle_to_the_builder() {
         }
         visited.push(directory.clone());
         let manifest = read(&format!("{directory}/Cargo.toml"));
+        assert!(
+            !is_unpublished(&manifest),
+            "normal dependency `{name}` at `{directory}` is unpublished; the compiler archive must not depend on it"
+        );
         for key in dependency_keys(&manifest) {
             assert_ne!(
                 key, "semaprax",

@@ -5,7 +5,7 @@
 use std::fs;
 
 use super::{fixture_plan, fresh_output_dir, TEST_LOCK};
-use crate::build_and_publish;
+use crate::oci_package::build_and_publish;
 
 /// The three things a byte-identical emission must reproduce exactly:
 /// `oci-layout` bytes, `index.json` bytes, and every blob as

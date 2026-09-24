@@ -9,16 +9,17 @@ mod structural_validity;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::OciPlan;
+use crate::oci_package::OciPlan;
 
-/// [`crate::validation::refuse_if_credential_environment_present`] reads the
+/// [`crate::oci_package::validation::refuse_if_credential_environment_present`] reads the
 /// real process environment, which is global process state shared by every
 /// test thread in this binary. Any test that mutates a credential-shaped
-/// variable, and any test that calls [`crate::build_and_publish`] (which
+/// variable, and any test that calls [`crate::oci_package::build_and_publish`] (which
 /// checks that same environment), must serialize against every other one:
 /// otherwise a credential-mutating test can make an unrelated concurrent
 /// test observe a spurious refusal, exactly as this suite discovered the
 /// first time it ran multi-threaded.
+/// The Project OCI glue tests now share this binary and take the same lock.
 pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 pub(crate) fn fixture_wasm() -> Vec<u8> {
@@ -30,7 +31,7 @@ pub(crate) fn fixture_wasm() -> Vec<u8> {
 
 pub(crate) fn fixture_plan() -> OciPlan {
     let wasm_bytes = fixture_wasm();
-    let wasm_sha256 = crate::render::sha256_digest_fact(&wasm_bytes);
+    let wasm_sha256 = crate::oci_package::render::sha256_digest_fact(&wasm_bytes);
     OciPlan {
         project_name: "calculator".to_owned(),
         project_revision: format!("sha256:{}", "1".repeat(64)),

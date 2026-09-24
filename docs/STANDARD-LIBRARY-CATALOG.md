@@ -4,9 +4,16 @@ Status: generated from `std/` through the `semaprax doc` documentation model by 
 
 Audience: agents and humans choosing a standard-library declaration.
 
-Every declaration below is verified, canonical, and executed by its package's conformance module on the interpreter, native C11, and Core Wasm lanes. [Standard Library v1](STANDARD-LIBRARY-V1.md) owns the contract; `std/catalog.json` is the same catalog for tools.
+Use this catalog to find a bundled declaration and its required project profile.
+Each entry is compiler-verified and exercised by its package's interpreter,
+native C11, and Core Wasm conformance module. [Standard Library v1](STANDARD-LIBRARY-V1.md)
+owns the full contract; `std/catalog.json` is the machine-readable catalog.
 
-Consume a package from an installed compiler by adding its dependency line to the extensible manifest, then importing the selected stable identity: `[dependencies] std.num = "^0.1.0"` and `use function @id("std.num.abs") from std.num as abs;`. Set `[package] profile` to the package's required profile below; `scalar` means omit the profile key. The compiler supplies the closed bundled package without a source checkout, cache, or network access.
+To use a package, add its dependency in `semaprax.toml`, then import its stable
+identity. For example: `[dependencies] std.num = "^0.1.0"` and
+`use function @id("std.num.abs") from std.num as abs;`. Set `[package] profile`
+to the package's listed profile; omit it for `scalar`. Bundled packages need no
+source checkout, cache, or network access.
 
 ## `std.agent`
 

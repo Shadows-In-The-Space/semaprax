@@ -249,6 +249,8 @@ pub struct MirrorResponse {
 /// disabled proxy policy. Redirects and retries are both disabled.
 pub struct NativeHttpsMirrorTransport {
     client: reqwest::blocking::Client,
+    origin: MirrorOrigin,
+    timeout: Duration,
 }
 
 impl NativeHttpsMirrorTransport {
@@ -274,12 +276,29 @@ impl NativeHttpsMirrorTransport {
             .retry(reqwest::retry::never())
             .build()
             .map_err(|_| MirrorError::TransportFailed)?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            origin: authority.origin.clone(),
+            timeout: authority.timeout,
+        })
+    }
+
+    fn validate_get(&self, request: MirrorGet<'_>) -> Result<(), MirrorError> {
+        if request.timeout != self.timeout || request.max_bytes == 0 {
+            return Err(MirrorError::InvalidRequest);
+        }
+        let url = reqwest::Url::parse(request.url).map_err(|_| MirrorError::InvalidRequest)?;
+        let expected = self.origin.object_url(url.path())?;
+        if url.as_str() != expected.as_str() {
+            return Err(MirrorError::InvalidRequest);
+        }
+        Ok(())
     }
 }
 
 impl MirrorTransport for NativeHttpsMirrorTransport {
     fn get(&mut self, request: MirrorGet<'_>) -> Result<MirrorResponse, MirrorError> {
+        self.validate_get(request)?;
         let mut response = self
             .client
             .get(request.url)
@@ -530,6 +549,30 @@ mod tests {
         assert_eq!(
             std::mem::size_of::<MirrorGet<'_>>(),
             std::mem::size_of::<(&str, Duration, usize)>()
+        );
+    }
+
+    #[test]
+    fn native_transport_refuses_cross_authority_origin_or_timeout_reuse_before_dispatch() {
+        let mut transport = NativeHttpsMirrorTransport::new(&authority()).unwrap();
+        let object = object(MirrorObjectKind::Metadata, "/metadata/x", b"ok");
+        let other_origin = MirrorNetworkAuthority::new(
+            MirrorOrigin::parse("https://other.example.test/").unwrap(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert_eq!(
+            other_origin.acquire(&mut transport, &MirrorRequest { objects: &[object] }),
+            Err(MirrorError::InvalidRequest)
+        );
+        let other_timeout = MirrorNetworkAuthority::new(
+            MirrorOrigin::parse("https://mirror.example.test/").unwrap(),
+            Duration::from_millis(1),
+        )
+        .unwrap();
+        assert_eq!(
+            other_timeout.acquire(&mut transport, &MirrorRequest { objects: &[object] }),
+            Err(MirrorError::InvalidRequest)
         );
     }
 }

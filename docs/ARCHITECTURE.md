@@ -2510,6 +2510,15 @@ It shares root/threshold authentication but returns only a non-authoritative
 candidate; the v1 managed host and CLI do not consume it. See
 [Registry Trust v2](PACKAGE-REGISTRY-TRUST-V2.md).
 
+`package_registry::trust::host::registry_v3` owns additive generation-v2 durable
+commit/recovery and explicit one-way v1 migration, requiring complete Lock-v3
+selection and one exact core Wasm artifact per selected root/leaf coordinate.
+Its `generation` child owns canonical wire and lineage; `store` owns held CAS,
+commit and exact recovery. The existing Unix effect primitive is shared through
+a predecessor-decoding callback; ordinary v1 bytes/routes remain unchanged.
+Receipts grant no fetch/read/execution capability. See
+[Registry Host v2](PACKAGE-REGISTRY-HOST-V2.md).
+
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary
 semantic-workspace graph derives function imports over synthetic logical paths,

@@ -2,13 +2,40 @@ use super::*;
 use ed25519_dalek::{Signer, SigningKey};
 use std::sync::OnceLock;
 
-type Admission = (
+pub(in crate::package_registry::trust) type Admission = (
     registry::RegistrySnapshotV3,
     Vec<String>,
     String,
     Vec<u8>,
     Vec<u8>,
 );
+
+// Test-only producer replay and signing. No production constructor is exposed.
+pub(in crate::package_registry::trust) fn host_fixture(
+    yanked: bool,
+    version: u64,
+) -> (String, String, String, [String; 2], &'static Admission) {
+    let mut f = Fixture::new(yanked);
+    f.publish(version, 4);
+    f.refresh(version, version);
+    (
+        wire(&root_value(1, 1, 4)),
+        f.timestamp,
+        f.snapshot,
+        f.publishers,
+        f.admitted,
+    )
+}
+pub(in crate::package_registry::trust) fn host_rotation_fixture(
+) -> (String, String, String, [String; 2], &'static Admission) {
+    let mut f = Fixture::new(false);
+    let root = root_value(2, 10, 20);
+    let rotation = sign(root.clone(), &[1, 10], b"semaprax.registry-trust-root.v1\0");
+    f.root = InstalledRoot::from_independently_installed_bytes(&wire(&root)).unwrap();
+    f.publish(2, 20);
+    f.refresh(2, 2);
+    (rotation, f.timestamp, f.snapshot, f.publishers, f.admitted)
+}
 fn admission(yanked: bool) -> &'static Admission {
     static ACTIVE: OnceLock<Admission> = OnceLock::new();
     static YANKED: OnceLock<Admission> = OnceLock::new();

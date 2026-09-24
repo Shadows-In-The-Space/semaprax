@@ -13,6 +13,11 @@ format: `Unreleased` then release buckets, grouped by impact.
   descriptor/binding and once-only result-release controls. This is local
   compiled-provider evidence, not the full hostile or hosted R06 matrix.
 
+- Add an explicit local Registry-v3 generation store coordinating signed trust,
+  full root/leaf Lock-v3 selection and exact core artifacts, with one-way v1
+  migration and exact interrupted-commit recovery. Receipts remain evidence;
+  no fetch/read/execution capability or hosted registry support is added.
+
 - Add pure offline signed metadata-v2 verification for producer-backed
   Registry-v3 linked roots and leaves, exact lock/artifact checks, and a one-way
   Checkpoint-v2 protocol floor preserving prior version/digest high-water marks.

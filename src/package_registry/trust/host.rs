@@ -5,6 +5,8 @@
 use super::*;
 use std::path::Path;
 
+pub mod registry_v3;
+
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 mod unix;
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]

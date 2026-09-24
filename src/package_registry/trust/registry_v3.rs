@@ -327,4 +327,4 @@ pub fn verify_update<'a>(
 }
 
 #[cfg(test)]
-mod tests;
+pub(in crate::package_registry::trust) mod tests;

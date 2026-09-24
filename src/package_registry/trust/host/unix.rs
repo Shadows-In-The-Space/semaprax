@@ -276,6 +276,18 @@ impl Held {
         self.sync()
     }
     pub(super) fn recover(&self, previous: Option<&str>, bytes: &str) -> Result<String> {
+        self.recover_profile(previous, bytes, |bytes| {
+            let generation = decode(bytes)?;
+            let previous = string(&generation.value["previous"])?.to_owned();
+            Ok((generation.bytes, previous))
+        })
+    }
+    pub(super) fn recover_profile(
+        &self,
+        previous: Option<&str>,
+        bytes: &str,
+        predecessor: impl Fn(String) -> Result<(String, String)>,
+    ) -> Result<String> {
         let name = generation_name(bytes.as_bytes());
         let inventory = self.inventory()?;
         // Build the exact expected old chain; no unknown effects may be erased.
@@ -289,11 +301,11 @@ impl Held {
                 return Err(uncertain());
             }
             allowed.insert(format!("c-{next}"));
-            let generation = decode(self.read(&next, MAX_GENERATION)?)?;
-            if generation_name(generation.bytes.as_bytes()) != next {
+            let (generation, parent) = predecessor(self.read(&next, MAX_GENERATION)?)?;
+            if generation_name(generation.as_bytes()) != next {
                 return Err(uncertain());
             }
-            next = string(&generation.value["previous"])?.to_owned();
+            next = parent;
         }
         allowed.extend([
             "PENDING".to_owned(),

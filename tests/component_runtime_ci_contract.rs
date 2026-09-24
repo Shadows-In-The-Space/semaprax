@@ -145,7 +145,8 @@ fn main() -> i64 { 0 }
     assert_eq!(checked_in_source_v6, expected_source_v6);
 
     let checked_in_v7 = read("platform-tests/component-runtime/wit/semaprax-private-v7.wit");
-    let expected_v7 = "package semaprax:private@0.6.0;\n\ninterface generic-records {\n  record status { domain: string, code: u32, class: u8, retryable: option<bool> }\n  record duo-i64-bool { left: s64, right: bool }\n  record duo-bool-i64 { left: bool, right: s64 }\n  record phantom-i64 { marker: bool }\n  record phantom-bool { marker: bool }\n  transform-i64-bool: func(input: duo-i64-bool, delta: s64, divisor: s64) -> result<duo-i64-bool, status>;\n  transform-bool-i64: func(input: duo-bool-i64, delta: s64, divisor: s64) -> result<duo-bool-i64, status>;\n  preserve-phantom-i64: func(input: phantom-i64) -> result<phantom-i64, status>;\n  invert-phantom-bool: func(input: phantom-bool) -> result<phantom-bool, status>;\n}\n\nworld semaprax-private-v7 {\n  export generic-records;\n}\n";
+    // WIT package versions are frozen profile identities, not the crate release version.
+    let expected_v7 = "package semaprax:private@0.5.0;\n\ninterface generic-records {\n  record status { domain: string, code: u32, class: u8, retryable: option<bool> }\n  record duo-i64-bool { left: s64, right: bool }\n  record duo-bool-i64 { left: bool, right: s64 }\n  record phantom-i64 { marker: bool }\n  record phantom-bool { marker: bool }\n  transform-i64-bool: func(input: duo-i64-bool, delta: s64, divisor: s64) -> result<duo-i64-bool, status>;\n  transform-bool-i64: func(input: duo-bool-i64, delta: s64, divisor: s64) -> result<duo-bool-i64, status>;\n  preserve-phantom-i64: func(input: phantom-i64) -> result<phantom-i64, status>;\n  invert-phantom-bool: func(input: phantom-bool) -> result<phantom-bool, status>;\n}\n\nworld semaprax-private-v7 {\n  export generic-records;\n}\n";
     assert_eq!(checked_in_v7, expected_v7);
 
     let checked_in_source_v7 = read("platform-tests/component-runtime/v7.spx");
@@ -495,7 +496,7 @@ fn capability_and_dependency_policy_are_fail_closed() {
         "call_result_bool_bool",
         "semaprax:private/scalar-algebra@0.3.0",
         "semaprax:private/nested-records@0.4.0",
-        "semaprax:private/generic-records@0.6.0",
+        "semaprax:private/generic-records@0.5.0",
         "semaprax:private/record-pattern-projections@0.6.0",
         "semaprax:private/generic-function-instances@0.7.0",
         "semaprax:private/option-propagation@0.8.0",
@@ -673,6 +674,7 @@ fn capability_and_dependency_policy_are_fail_closed() {
     for byte in Sha256::digest(failure_artifact.bytes()) {
         write!(failure_raw_digest, "{byte:02x}").unwrap();
     }
+    let mut failure_mismatches = Vec::new();
     for (name, expected) in [
         ("COMPONENT_DIGEST", failure_artifact.digest()),
         ("DESCRIPTOR_DIGEST", failure_artifact.descriptor_digest()),
@@ -684,12 +686,14 @@ fn capability_and_dependency_policy_are_fail_closed() {
             .split_once(&declaration)
             .and_then(|(_, rest)| rest.split_once(';'))
             .map(|(value, _)| value.trim());
-        assert_eq!(
-            value,
-            Some(format!("\"{expected}\"").as_str()),
-            "contract-failure Component known answer changed: {name}"
-        );
+        if value != Some(format!("\"{expected}\"").as_str()) {
+            failure_mismatches.push(format!("{name}: {expected}"));
+        }
     }
+    assert!(
+        failure_mismatches.is_empty(),
+        "contract-failure Component known answers differ: {failure_mismatches:?}"
+    );
     assert_eq!(
         runner
             .matches("get_typed_func::<(i64, i32, i64, i64), i32>")

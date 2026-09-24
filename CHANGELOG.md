@@ -10,6 +10,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## 0.6.0 — 2026-09-24
 
+- Keep the frozen private Component v7 WIT identity at `0.5.0` while the crate
+  advances to `0.6.0`, and repin the version-bound public-generic Component
+  known answers against independently emitted success and contract-failure
+  fixtures. The four exact Component CI contract tests pass locally; hosted
+  release evidence remains pending.
+
 - Pin the Wavect GmbH release verifier to GitHub's immutable owner/repository
   OIDC subject and require matching subject and ID extensions in the verified
   Fulcio certificate. This is local offline verification, not hosted signature

@@ -417,6 +417,7 @@ fn capability_and_dependency_policy_are_fail_closed() {
         "raw_digest != EXPECTED_PUBLIC_GENERIC_COMPONENT_SHA256",
         "retained_public_generic_component_transfers_owned_bytes_and_recovers_after_tamper",
         "retained_public_generic_component_contract_failure_settles_owned_inputs",
+        "prove_closed_and_transferred_handles_refuse",
         "wasm_component_model(true)",
         "Component::new",
         "component.component_type().imports(&engine)",

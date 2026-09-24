@@ -112,8 +112,10 @@ successful invocation under the repository-pinned Wasmtime 47.0.4 harness. The
 runtime selector checks no ambient imports, ordered two-leaf byte identity at
 the exact 64 KiB per-leaf bound, preservation of an unrelated live resource,
 resource read/drop, 200 maximum-size constructor/read/drop reuse cycles, and a
-second successful invocation after replay rejected tampered bytes. This is
-focused private evidence, not a support claim.
+second successful invocation after replay rejected tampered bytes. It also
+uses copied handles to require read and double-drop refusal after an explicit
+close or transfer, then constructs, reads and drops a fresh resource in the
+same instance. This is focused private evidence, not a support claim.
 
 The separate contract-failure selector retains a second checked Project with
 the same two-leaf endpoint and a `requires false` guard. It replays the exact
@@ -124,9 +126,8 @@ consumed input slots were settled before their replacements were constructed.
 This is local failure-path evidence, not cross-target parity.
 
 Interpreter/native C11 `-O0`/`-O2`/Core-Wasm differential parity,
-stale descriptor/provider runtime bindings,
-use-after-close, double-close, and broader resource/payload hostile cases
-remain unclaimed and outside the evidence of this focused selector. The
+stale descriptor/provider runtime bindings and broader resource/payload
+hostile cases remain unclaimed and outside this focused selector. The
 retained artifact replay test rejects mutated Component bytes and mismatched
 provider-digest metadata. It also refuses old Component bytes after an
 authenticated source-body change with stable declaration identities, then

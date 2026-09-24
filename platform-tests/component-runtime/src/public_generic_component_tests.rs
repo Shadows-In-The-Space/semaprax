@@ -149,6 +149,7 @@ pub(super) fn run_public_generic_component_v1() -> HostResult<()> {
     prove_maximum_leaf_transfer(&bindings, &mut store)?;
     prove_constructor_reuse(&bindings, &mut store)?;
     prove_transfer_reentry(&bindings, &mut store)?;
+    prove_closed_and_transferred_handles_refuse(&bindings, &mut store)?;
     if Sha256::digest(&artifact_bytes) != before {
         return Err(failure(
             "authenticated retained Component bytes changed during execution",
@@ -361,5 +362,47 @@ fn prove_transfer_reentry(
         .resource_drop(&mut *store)
         .map_err(|error| failure(format!("recovery right output drop trapped: {error}")))?;
 
+    Ok(())
+}
+
+fn prove_closed_and_transferred_handles_refuse(
+    bindings: &PublicGenericComponentV1,
+    store: &mut Store<()>,
+) -> HostResult<()> {
+    let adapter = bindings.semaprax_public_generic_component_adapter();
+    let bytes = adapter.owned_bytes();
+    let closed = bytes.call_constructor(&mut *store, &[9, 8, 7])?;
+    let stale_closed = closed;
+    closed.resource_drop(&mut *store)?;
+    if bytes.call_read(&mut *store, stale_closed).is_ok()
+        || stale_closed.resource_drop(&mut *store).is_ok()
+    {
+        return Err(failure("closed Component resource was accepted again"));
+    }
+
+    let left = bytes.call_constructor(&mut *store, &[1])?;
+    let right = bytes.call_constructor(&mut *store, &[2])?;
+    let stale_left = left;
+    let stale_right = right;
+    let (left_result, right_result) = adapter
+        .call_invoke(&mut *store, left, right)?
+        .map_err(|status| failure(format!("valid transfer refused: {status:?}")))?;
+    if bytes.call_read(&mut *store, stale_left).is_ok()
+        || bytes.call_read(&mut *store, stale_right).is_ok()
+        || stale_left.resource_drop(&mut *store).is_ok()
+        || stale_right.resource_drop(&mut *store).is_ok()
+    {
+        return Err(failure("transferred Component input was accepted again"));
+    }
+    left_result.resource_drop(&mut *store)?;
+    right_result.resource_drop(&mut *store)?;
+
+    let fresh = bytes.call_constructor(&mut *store, &[6, 5, 4])?;
+    if bytes.call_read(&mut *store, fresh)? != [6, 5, 4] {
+        return Err(failure(
+            "Component resource failed re-entry after stale refusals",
+        ));
+    }
+    fresh.resource_drop(&mut *store)?;
     Ok(())
 }

@@ -30,3 +30,8 @@ The focused `trust::registry_v3::tests` case acquires signed fixture bytes via
 an in-process transport and proves complete replay, signature tamper refusal,
 and the seven-day offline refusal. This is local verification only, not a TLS,
 DNS, hosted-mirror, production-key or physical-device claim.
+
+No Wavect GmbH production registry root, operational registry owner, or package
+publisher key custody is provisioned here. In particular, a GitHub release or
+workflow identity is not package-publisher authorization and cannot substitute
+for independently installed root material.

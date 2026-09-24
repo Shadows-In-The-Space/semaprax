@@ -8,7 +8,60 @@ use semaprax::{
     },
     wasm::PublicGenericWasmProviderArtifactV1,
 };
-use std::{fs, path::Path, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+fn exact_tsc_version(stdout: &[u8]) -> bool {
+    std::str::from_utf8(stdout).is_ok_and(|text| text.trim() == "Version 5.8.3")
+}
+
+fn checked_tsc(candidate: &Path) -> Result<PathBuf, String> {
+    // Resolve before changing cwd for compilation. An explicit missing or
+    // wrong-version tool must not silently fall back to an ambient compiler.
+    let resolved = candidate
+        .canonicalize()
+        .map_err(|error| format!("{}: {error}", candidate.display()))?;
+    let version = Command::new(&resolved)
+        .arg("--version")
+        .output()
+        .map_err(|error| format!("{}: {error}", resolved.display()))?;
+    if !version.status.success() || !exact_tsc_version(&version.stdout) {
+        return Err(format!(
+            "{} requires exactly TypeScript 5.8.3, got {:?}",
+            resolved.display(),
+            String::from_utf8_lossy(&version.stdout)
+        ));
+    }
+    Ok(resolved)
+}
+
+fn locate_tsc() -> Result<PathBuf, String> {
+    if let Some(explicit) = env::var_os("SPX_PG_TSC").or_else(|| env::var_os("TSC")) {
+        return checked_tsc(Path::new(&explicit));
+    }
+    let mut candidates = Vec::new();
+    if let Some(path) = env::var_os("PATH") {
+        for directory in env::split_paths(&path) {
+            if cfg!(windows) {
+                candidates.push(directory.join("tsc.cmd"));
+                candidates.push(directory.join("tsc.exe"));
+            }
+            candidates.push(directory.join("tsc"));
+        }
+    }
+    if let Some(home) = env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        candidates.push(home.join("Library/pnpm/tsc"));
+        candidates.push(home.join(".local/share/pnpm/tsc"));
+    }
+    candidates
+        .iter()
+        .find_map(|candidate| checked_tsc(candidate).ok())
+        .ok_or_else(|| "generated consumer requires tsc 5.8.3 (SPX_PG_TSC or TSC)".into())
+}
 
 pub(super) fn observe(
     root: &Path,
@@ -16,15 +69,10 @@ pub(super) fn observe(
     artifact: &PublicGenericWasmProviderArtifactV1,
     guard: bool,
 ) -> (u32, Vec<Vec<u8>>) {
-    let version = Command::new("tsc")
-        .arg("--version")
-        .output()
-        .expect("generated consumer requires tsc 5.8.3");
-    assert!(version.status.success());
-    assert_eq!(
-        String::from_utf8(version.stdout).unwrap().trim(),
-        "Version 5.8.3"
-    );
+    assert!(checked_tsc(&root.join("missing-tsc")).is_err());
+    assert!(!exact_tsc_version(b"Version 5.8.30\n"));
+    assert!(!exact_tsc_version(b"Version 5.9.0\n"));
+    let tsc = locate_tsc().expect("generated consumer requires pinned TypeScript");
     let shape = |paths: &[String]| {
         RecordShape::new(paths.iter().cloned().map(OwnedByteField::new).collect())
     };
@@ -70,7 +118,7 @@ pub(super) fn observe(
         include_str!("same_subject_typescript.mjs"),
     )
     .unwrap();
-    let built = Command::new("tsc")
+    let built = Command::new(&tsc)
         .current_dir(&package)
         .args(["-p", "tsconfig.json"])
         .output()

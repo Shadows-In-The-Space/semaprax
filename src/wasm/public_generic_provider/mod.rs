@@ -813,9 +813,8 @@ fn body_input_prepare(
     // exact self-digest check has succeeded, no input id is stored or
     // exposed; this preserves a clean failure boundary for malformed bytes.
     let mut body = locals_i32_i64(1, 1);
-    body.extend(local_get(0));
-    body.extend(global_get(GLOBAL_PROVIDER));
-    body.extend([0x46, 0x04, 0x40]);
+    emit_live_handle_match(&mut body, 0, GLOBAL_PROVIDER);
+    body.extend([0x04, 0x40]);
     body.push(0x05);
     lane(&mut body, 8, 0);
     body.push(0x0f);
@@ -903,16 +902,14 @@ fn body_input_prepare(
 
 fn body_call(code: &mut Vec<u8>, selected_index: u32, encode_index: u32, layout: ProviderLayout) {
     let mut body = locals_i32_i64(1, 1);
-    body.extend(local_get(0));
-    body.extend(global_get(GLOBAL_PROVIDER));
-    body.extend([0x46, 0x04, 0x40]);
+    emit_live_handle_match(&mut body, 0, GLOBAL_PROVIDER);
+    body.extend([0x04, 0x40]);
     body.push(0x05);
     lane(&mut body, 8, 0);
     body.push(0x0f);
     body.push(0x0b);
-    body.extend(local_get(1));
-    body.extend(global_get(GLOBAL_INPUT));
-    body.extend([0x46, 0x04, 0x40]);
+    emit_live_handle_match(&mut body, 1, GLOBAL_INPUT);
+    body.extend([0x04, 0x40]);
     body.push(0x05);
     lane(&mut body, 8, 0);
     body.push(0x0f);
@@ -980,9 +977,8 @@ fn body_call(code: &mut Vec<u8>, selected_index: u32, encode_index: u32, layout:
 
 fn body_result_export(code: &mut Vec<u8>) {
     let mut body = vec![0];
-    body.extend(local_get(0));
-    body.extend(global_get(GLOBAL_RESULT));
-    body.extend([0x46, 0x04, 0x40]);
+    emit_live_handle_match(&mut body, 0, GLOBAL_RESULT);
+    body.extend([0x04, 0x40]);
     body.push(0x05);
     lane(&mut body, 8, 0);
     body.push(0x0f);
@@ -1015,9 +1011,8 @@ fn body_result_export(code: &mut Vec<u8>) {
 
 fn body_value_release(code: &mut Vec<u8>) {
     let mut body = vec![0];
-    body.extend(local_get(0));
-    body.extend(global_get(GLOBAL_INPUT));
-    body.extend([0x46, 0x04, 0x40]);
+    emit_live_handle_match(&mut body, 0, GLOBAL_INPUT);
+    body.extend([0x04, 0x40]);
     body.push(0x05);
     body.extend(i32_const(8));
     body.push(0x0f);
@@ -1036,9 +1031,8 @@ fn body_value_release(code: &mut Vec<u8>) {
 
 fn body_result_release(code: &mut Vec<u8>) {
     let mut body = vec![0];
-    body.extend(local_get(0));
-    body.extend(global_get(GLOBAL_RESULT));
-    body.extend([0x46, 0x04, 0x40]);
+    emit_live_handle_match(&mut body, 0, GLOBAL_RESULT);
+    body.extend([0x04, 0x40]);
     body.push(0x05);
     body.extend(i32_const(8));
     body.push(0x0f);
@@ -1055,9 +1049,8 @@ fn body_result_release(code: &mut Vec<u8>) {
 
 fn body_provider_close(code: &mut Vec<u8>) {
     let mut body = vec![0];
-    body.extend(local_get(0));
-    body.extend(global_get(GLOBAL_PROVIDER));
-    body.extend([0x46, 0x04, 0x40]);
+    emit_live_handle_match(&mut body, 0, GLOBAL_PROVIDER);
+    body.extend([0x04, 0x40]);
     body.push(0x05);
     body.extend(i32_const(8));
     body.push(0x0f);
@@ -1076,6 +1069,17 @@ fn body_provider_close(code: &mut Vec<u8>) {
     body.push(0x0b);
     u32_leb(code, body.len() as u32);
     code.extend(body);
+}
+
+// Zero is the empty slot sentinel, never an issued provider/value/result.
+// Equality alone would authenticate an absent handle after initialization or
+// release, including a zero-input call before any owned value was prepared.
+fn emit_live_handle_match(body: &mut Vec<u8>, local: u32, global: u32) {
+    body.extend(local_get(local));
+    body.extend(global_get(global));
+    body.push(0x46); // i32.eq
+    body.extend(local_get(local));
+    body.extend([0x45, 0x45, 0x71]); // nonzero && equal
 }
 
 fn emit_exact_compare(

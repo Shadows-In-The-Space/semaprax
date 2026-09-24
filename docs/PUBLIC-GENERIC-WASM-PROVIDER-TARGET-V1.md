@@ -95,6 +95,29 @@ mismatch, but not #229's broader acceptance: hosted evidence, the full
 hostile/settlement matrix, and endpoint shapes beyond the admitted flat
 owned-`Bytes` profile remain separate.
 
+## Private lifecycle admission
+
+Zero is an absent-slot sentinel, never an issued provider, input, or result
+handle. Every handle-taking compiled-provider operation requires a nonzero
+handle equal to its live slot; an absent or stale identity returns status 8
+before checked invocation, copy-out, or release. This includes the initial
+state and state after release/close. It does not change the export inventory.
+
+The exact-source `Pair<Bytes>` lifecycle gate compares native C11 O0/O2 and
+compiled Core-Wasm short-capacity export refusal (12), untouched destination,
+non-consuming exact retry, stale result refusal, and close/reopen. Literal
+`requires false` returns 11 without a result on both targets. Native consumes
+that failed input, while Core-Wasm retains it until explicit value release;
+the gate asserts each rule rather than declaring transfer parity. Native null
+provider status 13 and Core-Wasm invalid-provider status 8 remain distinct.
+Native allocation balance and Core-Wasm opaque-slot release are different
+observations: no shared heap peak, physical leaf-release order, injected cleanup
+failure, or all-phase settlement parity is inferred from this lifecycle cell.
+
+Its owning selector is
+`authenticated_handoff::same_subject::lifecycle::checked_identity_native_and_core_wasm_refuse_absent_handles_and_retry_export`
+in `public_generic_native_adapter_v1`.
+
 ## Nonclaims
 
 The implemented Phase A product is not:

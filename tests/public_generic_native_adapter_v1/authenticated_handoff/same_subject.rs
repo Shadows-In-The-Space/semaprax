@@ -7,6 +7,8 @@ mod c;
 mod cxx;
 #[path = "same_subject_interpreter.rs"]
 mod interpreter;
+#[path = "same_subject_lifecycle.rs"]
+mod lifecycle;
 #[path = "same_subject_physical.rs"]
 mod physical;
 #[path = "same_subject_rust.rs"]

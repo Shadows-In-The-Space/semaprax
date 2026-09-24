@@ -1,17 +1,14 @@
 # Release process
 
-Status: bounded tag-release procedure with exact published evidence.
-
-The main sections below record the most recently published tagged milestone.
-Later releases inherit the same release workflow; this archive keeps the detailed
-evidence for that milestone.
+Status: tag-release procedure and historical evidence; v0.6.0 is not published.
 
 Audience: maintainers and release reviewers.
 
-SEMAPRAX tag releases are produced only by the repository CI workflow after
-the exact tag commit passes every job aggregated by `release-gate`. A local
-archive can establish scoped local packaging and product behavior, but is not
-release-promotion evidence.
+Only the repository CI workflow can publish a tag release, and only after the
+exact tag commit passes every job in `release-gate`. A local archive can test
+packaging, but cannot certify a release. This page combines the procedure with
+historical v0.4.x evidence; use [v0.6.0 status](RELEASE-0.6.0-STATUS.md) for
+the current tag.
 
 ## Tag admission
 
@@ -25,7 +22,9 @@ CLI's agreement with it; they do not independently authenticate the checkout
 against Git HEAD or the tag. Exact-checkout provenance remains the release
 workflow's responsibility, not a consequence of this self-consistency check.
 
-The admitted release hosts and target archives are:
+The v0.4.0 release used these hosts and archives. Replace the version in the
+filename for a later release; do not treat the table as evidence for that later
+tag.
 
 | Hosted runner | Exercised target | Archive |
 | --- | --- | --- |
@@ -50,17 +49,19 @@ before the archive can be uploaded.
 
 ## Pre-tag release checklist
 
-A package-version release is a repository-wide consistency change, not only a
-root-manifest edit. Before committing the release, update and verify all of the
-following surfaces together:
+A release version must agree across the workspace, lockfiles, CLI, docs, and
+packaging. Before committing, update these surfaces together.
 
 The mechanical portion is automated and intentionally excludes historical
 evidence, frozen protocol identities, the human-written release record, and
 release-note curation:
 
+Set `RELEASE_VERSION` and `RELEASE_DATE` to the approved version and UTC date
+before running either command.
+
 ```sh
-python3 scripts/prepare-release.py --write --version 0.4.0 --date 2026-09-06
-python3 scripts/prepare-release.py --check --version 0.4.0
+python3 scripts/prepare-release.py --write --version "$RELEASE_VERSION" --date "$RELEASE_DATE"
+python3 scripts/prepare-release.py --check --version "$RELEASE_VERSION"
 ```
 
 The write mode requires a clean worktree, updates the declared current-version

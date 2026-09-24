@@ -4,19 +4,18 @@ Status: living internal implementation and trust-boundary map.
 
 Audience: compiler contributors and reviewers.
 
-This document owns the current implementation map, data flow, and trust
-boundaries. It does not own product status, protocol details, historical
-changes, or test inventories:
+Use this page to find the code that owns a behavior and to see where trust
+checks happen. It is a contributor map, not a feature catalogue. For other
+questions, start here:
 
 - current status: [completion matrix](COMPLETION-MATRIX.md);
 - exact protocols and ABIs: their versioned reference documents;
 - required checks: [quality gates](QUALITY-GATES.md);
 - history: [changelog](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md).
 
-SEMAPRAX v0.4 is a set of bounded vertical slices through a larger language
-design (v0.2 remains the first archived tag milestone). The architecture keeps
-human source, verified meaning, agent projections, mutation authority, and
-target execution distinct.
+The key rule is separation: readable source, checked meaning, agent reports,
+write authority, and target execution are different things. Passing data
+between them does not automatically transfer authority.
 
 `src/workflow_profile.rs` and its `enabled` submodule own the optional
 [current-thread workflow observer](WORKFLOW-PROFILING-V1.md). Instrumentation
@@ -51,6 +50,8 @@ canonical .spx source or held Project inputs
 No backend bypasses source verification or validated-HIR checks. Cleanup-plan
 vectors are canonical execution order and must not be sorted or repaired by a
 graph projection or backend.
+
+### Agent and generic owners
 
 The additive `agent_lifecycle/iterative` module owns checked Step transitions,
 per-turn authorization, bounded stage execution, and iterative evidence. Its

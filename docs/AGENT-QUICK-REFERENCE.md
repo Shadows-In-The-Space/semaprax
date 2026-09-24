@@ -8,65 +8,40 @@ already be canonical; blocks with one must produce exactly that diagnostic code.
 Audience: coding agents and their operators writing SEMAPRAX programs with a
 bounded context window.
 
-This page is the cheapest correct picture of the admitted language. It states
-the shapes that compile today, the diagnostics that unfamiliar habits trigger,
-and how to spend as few tokens as possible per edit-check cycle. It owns no
-rule: [RFC 0001](RFC-0001.md) is the contract and the
-[completion matrix](COMPLETION-MATRIX.md) is the status authority. The
-[language tour](LANGUAGE-TOUR.md) explains the same shapes at length.
+Use this card when writing a `.spx` file. It shows accepted syntax, common
+diagnostics, and the shortest useful check loop. For explanations, read the
+[language tour](LANGUAGE-TOUR.md). [RFC 0001](RFC-0001.md) defines the rules;
+the [completion matrix](COMPLETION-MATRIX.md) says what is implemented.
 
 The installed compiler prints this page verbatim with `semaprax help language`,
 so it is available without the source checkout.
 
 ## Spend tokens on source, not on dumps
 
-- Edit loop: write the file, `semaprax fmt <file>` (rewrites canonically),
-  `semaprax check <file> --json`, `semaprax run <file>`. `check` resolves and
-  validates the same HIR and cleanup plans used by every backend. One diagnostic per
-  line with `code`, `message`, `location`, and `help`; stop on the first
-  error's line and column.
-- `fmt` and `patch` keep `//` comments, each printed on its own line above
-  the item it precedes or right after the item it follows. Workspace-level
-  transactions make no such promise, so intent that must survive every
-  semantic change belongs in `@id` names, contracts, and tests.
-- Read the `.spx` source when it fits. On the committed calculator example,
-  the source is 606 bytes, `semaprax graph` emits 24,419 bytes, and
-  `semaprax context <file> app.main --depth 1` emits 2,279 bytes. `graph` is
-  for tools that need cleanup plans and expression trees, not for orientation.
-- For one declaration's callers, callees, contracts, or ownership across a
-  file, use `semaprax context <file> <stable-id> --depth 1 --filters
-  contracts,ownership --max-bytes 4096` and read `truncation` before trusting
-  the answer. [Agent Context v2](AGENT-CONTEXT-V2.md) owns the schema.
-- In a Project, locate declarations before requesting context: `semaprax query
-  <project-dir> --id <stable-id>` prints the owning path and canonical header;
-  `--calls <stable-id>` prints cross-file callers. Add `--json` only when a tool
-  needs exact Project/graph/source revisions and relationship arrays. The
-  calculator's exact `calculator.add` JSON query is guarded below 1 KiB and 256
-  repository lexical units, instead of transferring its complete Project graph.
-- For the selected declaration's bounded cross-file neighborhood, continue with
-  `semaprax context <project-dir> <stable-id> --direction both --depth 1
-  --max-bytes 2048 --max-nodes 16`; do not request or reconstruct the full graph.
-  The calculator result is guarded at no more than 2 KiB and 600 lexical units,
-  and at less than one sixth of its full authenticated Project graph.
-- `semaprax --help` is a guided overview under 2 KB: the commands above,
-  grouped by task, with one-line purposes. `semaprax help all` is the 7 KB
-  exhaustive catalog; use `semaprax help <command>` for one command's exact
-  grammar.
-- Use `semaprax help language topics` to list the stable language-card topics,
-  then `semaprax help language <topic>` to transfer only the compiler-checked
-  section needed for the current question. Matching is exact; the full
-  `semaprax help language` card remains available when several topics are
-  needed.
-- When a diagnostic code is already known, use `semaprax help diagnostic
-  <SPX-code>` for only its indexed correction; list the exact supported codes
-  with `semaprax help diagnostic codes`.
-- When one canonical declaration example is enough, use `semaprax help shapes
-  <kind|stable-id|path#stable-id>` instead of the full shapes catalog. Kind
-  selectors return the smallest compiler-verified exemplar. The guarded
-  `calculator.add` result is 114 bytes and 33 lexical units instead of 22,888
-  bytes and 7,571 units.
-- Diagnostics carry stable `SPX-…` codes. Bind tests and repair logic to the
-  code, never to the message text.
+1. Write the file, run `semaprax fmt <file>`, then
+   `semaprax check <file> --json`. Run it with `semaprax run <file>` when the
+   check succeeds. Fix the first diagnostic at its reported line and column.
+   Diagnostics contain `code`, `message`, `location`, and `help`; tests should
+   match the stable `SPX-…` code, not message wording.
+2. Read a small `.spx` file directly. Use `semaprax graph <file>` only when a
+   tool needs the whole expression tree or cleanup plan. On the calculator
+   example, the graph is about 40 times larger than source.
+3. For one declaration, ask `semaprax context <file> <stable-id> --depth 1
+   --filters contracts,ownership --max-bytes 4096`. Check `truncation` before
+   relying on the result. [Agent Context v2](AGENT-CONTEXT-V2.md) defines it.
+4. In a Project, first locate a declaration with `semaprax query
+   <project-dir> --id <stable-id>`; use `--calls <stable-id>` for callers. Then
+   request a bounded neighborhood with `semaprax context <project-dir>
+   <stable-id> --direction both --depth 1 --max-bytes 2048 --max-nodes 16`.
+   Use `--json` only when you need exact revision and relationship fields.
+5. Ask for narrow help: `semaprax help <command>`, `semaprax help language
+   topics`, `semaprax help language <topic>`, `semaprax help diagnostic
+   <SPX-code>`, or `semaprax help shapes <kind|stable-id|path#stable-id>`.
+   `semaprax help all` and the full language card are for broad questions.
+
+`fmt` and single-file `patch` preserve `//` comments. Workspace transactions
+do not promise that, so put durable intent in stable `@id` names, contracts,
+and tests.
 
 ## A complete file
 

@@ -25,6 +25,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use semaprax::agent_deployment::{bind_agent_deployment, migrate_agent_definition_v1};

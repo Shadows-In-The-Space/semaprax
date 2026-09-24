@@ -136,12 +136,16 @@ fn graph_v17_bytes_remain_frozen_without_stdout_v18_facts() {
     assert!(graph.contains("\"schema\":\"semaprax.graph.v17\""));
     assert!(!graph.contains("stdout_write_sites"));
     assert!(!graph.contains("bounded_stdout_transcript"));
+    // The 3d976386 capacity widening changed only these two v17 bounds;
+    // an old/current canonical-JSON comparison found no other byte drift.
+    assert!(graph.contains("\"max_bytes_copy_sites\":32"));
+    assert!(graph.contains("\"max_owned_byte_payload_bytes\":2097152"));
     assert_eq!(
         format!(
             "{:x}",
             semaprax::digest_hex::LowerHex(Sha256::digest(graph.as_bytes()))
         ),
-        "35e44f3d697abb3d406955d76bfd2395eb7d0cd1ccecf05699057712d571209b"
+        "c6d281751e07c9b187c739120a2ca28a083678458172c57876318514ee298be4"
     );
 }
 

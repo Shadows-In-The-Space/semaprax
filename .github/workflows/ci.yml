@@ -503,9 +503,9 @@ jobs:
   std-library-depth:
     name: STD-08 bundled library depth
     runs-on: ubuntu-latest
-    # The full bounded std corpus reached the old 45-minute limit while its
-    # per-package backend audit was still running, before examples/docs.
-    timeout-minutes: 60
+    # The complete per-package backend audit also reached 60 minutes after
+    # passing its logging and catalog selectors; retain the remaining gates.
+    timeout-minutes: 120
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"

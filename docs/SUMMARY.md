@@ -15,6 +15,7 @@ Audience: all documentation readers.
 - [Agent quick reference](AGENT-QUICK-REFERENCE.md)
 - [Agent iterative lifecycle v2](AGENT-ITERATIVE-LIFECYCLE-V2.md)
 - [Agent typed effects v3](AGENT-TYPED-EFFECTS-V3.md)
+- [Agent target host-call protocol v1](AGENT-TARGET-HOST-PROTOCOL-V1.md)
 - [Direct Agent Runtime v2](AGENT-RUNTIME-V2.md)
 - [Source Model Operation v1](SOURCE-MODEL-OPERATION-V1.md)
 - [Live Repair Smoke v1](LIVE-REPAIR-SMOKE-V1.md)

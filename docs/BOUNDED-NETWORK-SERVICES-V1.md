@@ -22,25 +22,23 @@ Connection and listener handles occupy one invocation-wide dense 1–8 space in
 the evaluator and are type-checked dynamically. All open streams and listeners
 are released during settlement on success and failure.
 
-`TcpNetworkProvider` implements outbound TLS 1.2/1.3 with Rustls and Mozilla
-roots from `webpki-roots`. The checked DNS name is the authenticated server
-name. `with_tls_config` lets an explicit host install private roots. The same
-provider implements bounded blocking TCP bind/accept. Raw OS and TLS errors
-are normalized to the closed `TLS_FAILED`, `LISTEN_FAILED`, or `ACCEPT_FAILED`
-statuses.
+`TcpNetworkProvider` uses Rustls and Mozilla roots from `webpki-roots` for
+outbound TLS 1.2/1.3. It authenticates the checked DNS name as the server name.
+An explicit host can install private roots with `with_tls_config`. The provider
+also supports bounded blocking TCP bind/accept and maps raw OS/TLS errors to
+`TLS_FAILED`, `LISTEN_FAILED`, or `ACCEPT_FAILED`.
 
 The TLS client and server lifecycles run under the same caller-selected
 aggregate operation deadline as plain TCP, described in [Bounded Language
-Network I/O v1](BOUNDED-LANGUAGE-NETWORK-IO-V1.md#three-different-bounds). One
-budget covers name resolution, every candidate address, and the whole
-handshake: each record the handshake reads or writes passes through a socket
-whose per-syscall timeout is re-derived from what is *left*, so a peer that
-trickles handshake bytes cannot extend the operation. `listen` binds without
+Network I/O v1](BOUNDED-LANGUAGE-NETWORK-IO-V1.md#three-different-bounds). One budget covers name resolution, all candidate addresses and the entire
+handshake. Each socket read or write uses a timeout recalculated from the
+remaining budget. A peer cannot extend the operation by trickling handshake
+bytes. `listen` binds without
 blocking; `accept` and `accept_tls` stop waiting at the deadline and issue no
 handle.
 
-Fixture v2 preserves v1 and adds `tls: true` to outbound and accepted connections plus a
-bounded `listeners` array with ordered `accept` queues. npm/Web remain on
+Fixture v2 preserves v1, adds `tls: true` to outbound and accepted connections,
+and adds a bounded `listeners` array with ordered `accept` queues. npm/Web remain on
 fixture v1 through Project v12; no browser receives raw sockets.
 Fixture v3 is the additive ordered HTTPS replay carrier specified by
 [HTTPS Client I/O v1](HTTPS-CLIENT-IO-V1.md); v1 and v2 reject its `https`

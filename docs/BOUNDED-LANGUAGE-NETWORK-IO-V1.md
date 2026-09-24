@@ -12,11 +12,10 @@ broader product completion remain separately gated.
 
 [Bounded Language Command I/O v1](BOUNDED-LANGUAGE-COMMAND-IO-V1.md) made a
 process's arguments, stdin, stdout, and stderr visible to checked SEMAPRAX code
-without granting ambient process authority. This tranche extends the same
-closed host-command operation family with explicit, effect-gated TCP client
-operations. Like command I/O, these are not authored imports: their complete
-signature, authority, status space, and capacity are derived from one closed
-operation table (`src/network_io_ops.rs`) that every backend consumes.
+without granting ambient process authority. This profile adds explicit TCP client operations gated by effects to the same
+closed host-command family. These are not authored imports. Every backend uses
+one closed operation table (`src/network_io_ops.rs`) for their signatures,
+authority, status space and capacity.
 
 | Operation | Stable identity | Effect (`uses`) | Result |
 | --- | --- | --- | --- |
@@ -37,17 +36,16 @@ call with the wrong arity or argument types is `SPX-T270`.
 
 ## Handles
 
-A handle is an invocation-scoped `usize` token. Successful `net_connect`
-calls hand out dense handles `1`, `2`, … up to `8`; a handle is never reused
-within one invocation, and closing one does not free its number. Handles are
-not file descriptors and never leave the invocation: they cannot be stored
-across invocations, and a forged, stale, or closed handle fails with
-`UNKNOWN_HANDLE`.
+A handle is a `usize` token valid only for its invocation, not a file
+descriptor. Successful `net_connect` calls assign dense handles `1`, `2`, … up
+to `8`. Closing a handle does not free its number, and numbers are never reused
+within the invocation. Handles cannot be stored across invocations. Forged,
+stale or closed handles fail with `UNKNOWN_HANDLE`.
 
-The provider or adapter that granted network authority closes every handle
-that is still open at settlement, on success and on failure alike. Program
-outcome therefore never depends on `net_close` order, and a program that
-omits `net_close` leaks nothing past its own invocation.
+At settlement, the provider or adapter that granted network authority closes
+all remaining open handles, whether execution succeeded or failed. The program
+outcome does not depend on `net_close` order. Omitting `net_close` leaks nothing
+beyond the invocation.
 
 ## Limits
 

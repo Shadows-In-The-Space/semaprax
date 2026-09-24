@@ -28,10 +28,9 @@ positive checked-evaluator step limit. `run` requires a new, private checkpoint
 directory. `resume` requires its existing latest journal. `migrate` accepts a
 committed unpriced v2 Suspend or a committed priced v4 Suspend from the
 predecessor directory, and writes a fresh or same-claim destination journal.
-The private CLI performs one predecessor-to-destination handoff; it does not
-offer a general migration-chain command. A v3 predecessor is explicitly
-refused by this CLI version; the checked embedding migration API has a separate
-A→B→C gate. The executable is the one explicitly chosen OpenCode binary, and
+The private CLI performs one handoff from predecessor to destination, not a
+general migration chain. This CLI version rejects v3 predecessors. The checked
+embedding migration API has its own separate A→B→C gate. The executable is the one explicitly chosen OpenCode binary, and
 every process attempt uses the fixed
 `opencode/muse-spark-1.3-contributor-free` profile without a paid fallback.
 Scratch must be a new empty absolute directory for each CLI invocation.
@@ -90,11 +89,11 @@ bounded `passed`, `failed`, or `refused` outcome. The host rejects malformed,
 oversized, foreign-candidate, stale-base, stale-source, or wrong-capability
 documents. There is deliberately no JSON operand that selects a test runner.
 
-When such an embedding observes a candidate, its canonical outcome is reduced
-to a deterministic typed `i64` feedback code bound to the entire observation.
-That result is settled through the existing typed-effect/journal boundary before
-any later proposal request, so a failed candidate test becomes actual bounded
-feedback rather than a fixture-side annotation. The capability identity is also
+When an embedding observes a candidate, it converts the canonical outcome to a
+deterministic typed `i64` feedback code bound to the complete observation. The
+existing typed-effect/journal boundary settles that result before any later
+proposal request. A failed candidate test therefore supplies real bounded
+feedback, not a fixture-only annotation. The capability identity is also
 bound into the V2 model/journal binding: resuming with a different selected
 capability refuses before provider or test-observer dispatch. A terminal replay
 dispatches neither and does not fabricate a fresh observation. `refused` is an
@@ -102,11 +101,11 @@ honest host observation, not a pass or an authorization to retry outside the
 checked loop. The callback returns fixed-size bounded observation storage; it
 cannot hand validation an unbounded allocation.
 
-V2 interprets `deadline_millis` in the restart-stable Unix-epoch-millisecond
-clock domain. The process timeout is the smaller of 30 seconds and the time
-remaining when the host is constructed, while the runtime checks the same
-absolute deadline around every attempt and settlement. V1 keeps its fixed-zero
-fixture clock so its committed credential-free examples remain deterministic.
+V2 reads `deadline_millis` as Unix-epoch milliseconds, so the deadline survives
+restarts. At host construction, the process timeout is the smaller of 30 seconds
+and the time remaining. The runtime checks the same absolute deadline around
+every attempt and settlement. V1 retains its fixed-zero fixture clock to keep
+committed credential-free examples deterministic.
 
 V2 adapts that same bounded `ProcessOpenCodeRunner` through the Provider Adapter
 SDK boundary used by Direct Runtime v2. The OpenCode process receives the

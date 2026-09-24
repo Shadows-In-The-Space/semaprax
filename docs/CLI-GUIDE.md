@@ -89,16 +89,16 @@ semaprax check examples/meaning.spx
 semaprax run examples/meaning.spx
 ```
 
-Single-file `run` evaluates `@id("app.main")` in the bounded reference
-interpreter. It does not launch a generated executable. Use `--max-steps` and
-`--max-bytes` to set limits, `--json` for a machine-readable result, or
-`--native` when you need the generated C11 executable. The exact
+By default, single-file `run` evaluates `@id("app.main")` in the bounded
+reference interpreter, not a generated executable. Set `--max-steps` and
+`--max-bytes` to control limits and `--json` for machine-readable results.
+Choose `--native` to run the generated C11 executable. The exact
 `permit { process.stdout.write }` profile uses bounded stdout publication.
 
-`fmt <file> --check` reports changes without writing; `fmt <file>` writes
-canonical source. Both also accept a project directory or `semaprax.toml`.
-For a project, `fmt . --check` lists drift in manifest order; `fmt .` parses
-all files before rewriting any. Write-capable formatting rejects path aliases
+Use `fmt <file> --check` to report formatting changes without writing, or
+`fmt <file>` to write canonical source. Both accept a project directory or
+`semaprax.toml`. For projects, `fmt . --check` lists differences in manifest
+order. `fmt .` parses every file before rewriting any. Write-capable formatting rejects path aliases
 with `SPX-J102`. The formatter keeps `//` comments; the
 [comment contract](CANONICAL-COMMENTS-V1.md) defines exact placement.
 
@@ -110,9 +110,9 @@ semaprax context examples/meaning.spx app.main --depth 1
 semaprax context examples/calculator-project calculator.add --direction both --depth 1 --max-bytes 2048 --max-nodes 16
 ```
 
-`graph` emits the whole checked graph. `context` returns a bounded answer for
-one identity. Both return deterministic JSON and leave source unchanged. A
-Project input authenticates cross-file context. Project `context` does not
+Choose `graph` for the whole checked graph or `context` for a bounded answer
+about one identity. Both return deterministic JSON without changing source.
+Project inputs authenticate cross-file context. Project `context` does not
 accept single-file `--filters`; its compact schema still records revision,
 traversal, and truncation.
 

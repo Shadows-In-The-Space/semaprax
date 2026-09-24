@@ -32,22 +32,21 @@ authoritative.
 
 ## Semantic transcript
 
-`stdout_write` does not call libc stdio, WASI, JavaScript console APIs, an
-arbitrary callback, or an operating-system handle. It atomically appends the
-exact bytes of its authenticated slice to a fresh invocation-owned semantic
-transcript and returns the exact semantic `usize` length.
+`stdout_write` appends its authenticated slice's exact bytes atomically to a
+fresh semantic transcript owned by the invocation. It returns the exact
+semantic `usize` length. It calls no libc stdio, WASI, JavaScript console API,
+arbitrary callback, or operating-system handle.
 
-The transcript is staged during evaluation. It becomes observable only when
-the root invocation reaches terminal success after contracts, cleanup, and
-result publication. Any semantic failure, capacity failure, interpreter guard,
-or target invariant discards the staged transcript. This success-only seal
-keeps interpreter, native, and Wasm behavior equivalent and prevents a later
-checked failure from leaving externally visible partial language output.
+Evaluation stages the transcript privately. It becomes observable only after
+the root invocation completes successfully, including contracts, cleanup and
+result publication. Semantic failure, capacity failure, an interpreter guard,
+or a target invariant discards it. This success-only seal keeps interpreter,
+native and Wasm behavior equivalent: a later checked failure cannot leave
+externally visible partial language output.
 
-A separate fixed-purpose application adapter may physically flush one sealed
-transcript after successful invocation. Adapter flush failure is an adapter
-failure; it cannot retroactively become checked-language success or a semantic
-status.
+After a successful invocation, a separate fixed-purpose application adapter
+may physically flush one sealed transcript. A failed flush remains an adapter
+failure; it cannot become checked-language success or a semantic status.
 
 ## Static admission and bounds
 

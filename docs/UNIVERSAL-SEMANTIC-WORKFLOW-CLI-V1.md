@@ -11,10 +11,10 @@ first simplified semantic workflow surface.
 
 Universal Semantic Workflow CLI v1 exposes the existing Universal Semantic
 Query v1 and Universal Semantic Transaction v1 cores through two familiar
-commands. It is deliberately a thin adapter: every successful query prints the
-exact canonical `SemanticQueryResult` bytes, and every change preview prints an
-exact existing transaction artifact. It introduces no competing query,
-candidate, impact, review, or result schema.
+commands. The CLI is a thin adapter. Successful queries print exact canonical
+`SemanticQueryResult` bytes; change previews print an exact existing transaction
+artifact. It adds no competing query, candidate, impact, review, or result
+schema.
 
 The separate [Installed Agent Guidance v1](INSTALLED-AGENT-GUIDANCE-V1.md)
 `query --capabilities` form prints static installed-support metadata. It does
@@ -28,10 +28,10 @@ v1](UNIVERSAL-SEMANTIC-TRANSACTION-COMPOSITION-V1.md) also supplies exact-output
 transaction and Project Candidate cores; the composition spec owns their exact
 grammar, results, limits, and narrower evidence status.
 
-This badge is one-shot and read-only. Each invocation authenticates one Project,
-derives one process-local semantic service, performs one operation, rechecks the
-held Project inputs, prints the result, and exits. It is not the persistent
-shared service, a transaction-input protocol, or a source commit command.
+This route is one-shot and read-only. Each invocation authenticates a Project,
+derives a process-local semantic service, performs one operation, rechecks held
+Project inputs, prints the result and exits. It is not a persistent shared
+service, transaction-input protocol, or source commit command.
 
 ## Command surface
 
@@ -48,9 +48,8 @@ semaprax query <project> available-operations <stable-id> [--revision <digest>]
 
 `<project>` is a Project directory or `semaprax.toml`. If `--revision` is
 omitted, the adapter binds the query to the canonical workspace revision it
-just derived from the authenticated Project. If supplied, it is passed to the
-core as the exact expected revision; stale or malformed values retain Universal
-Semantic Query diagnostics. Paging, filters, analysis options, operation
+just derived from the authenticated Project. If supplied, the core uses it as the exact expected revision. Stale or
+malformed values keep Universal Semantic Query diagnostics. Paging, filters, analysis options, operation
 eligibility, limits, canonical rendering, digests, and result schemas remain
 owned by Universal Semantic Query v1 and its delegated cores.
 

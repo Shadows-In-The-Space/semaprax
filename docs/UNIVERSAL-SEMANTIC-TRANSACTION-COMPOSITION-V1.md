@@ -11,9 +11,9 @@ revision-bound semantic change composition.
 Universal Semantic Transaction Composition v1 adds a bounded structural diff,
 single-transaction rebase, and explicit ordered merge over the existing
 [Universal Semantic Transaction v1](UNIVERSAL-SEMANTIC-TRANSACTION-V1.md)
-`RenameDisplayName` slice. It reuses complete Project Candidate validation and
-conflict selection. It does not create a second change engine, publish source,
-or widen the frozen one-operation transaction envelope.
+`RenameDisplayName` slice. It reuses complete Project Candidate validation and conflict selection rather
+than adding another change engine. It neither publishes source nor widens the
+frozen one-operation transaction envelope.
 
 The implementation is owned by
 `src/project/semantic_transaction_composition.rs` and exports:
@@ -39,8 +39,8 @@ pub const MAX_SEMANTIC_TRANSACTION_COMPOSITION_BYTES: usize = 64 * 1024 * 1024;
 ```
 
 `SemanticTransaction::rebase` and `SemanticTransaction::merge` are convenience
-entry points to the same core. Every returned object is immutable derived
-evidence. No method applies it to disk or to a managed Workspace generation.
+entry points to the same core. All returned objects are immutable derived evidence. No method applies them
+to disk or a managed Workspace generation.
 
 ## Canonical structural diff
 
@@ -65,8 +65,8 @@ result and returns:
 - the exact Candidate digest, report limit, `authority: false`, and bounded
   nonclaims.
 
-The classification is exact canonical-revision and authored-structure
-projection equality. It is not behavioral equivalence, complete dynamic
+Classification compares exact canonical revisions and projections of authored
+structure. It does not establish behavioral equivalence, complete dynamic
 impact, a source patch, trivia preservation, runtime or test execution, or
 source-publication authority.
 

@@ -7,10 +7,10 @@ interpreter, native C11, Core Wasm, and provider-constructor checks.
 Audience: compiler contributors, standard-library authors, host-adapter
 implementers, and reviewers of capability boundaries.
 
-Bounded Environment I/O v1 defines the `EnvironmentV1` input snapshot and the
-Project `environment-io.v1` profile (Project v17). It exposes a
-caller-supplied immutable environment to checked code through explicit host
-operations. It never reads ambient process state or calls `getenv`.
+Bounded Environment I/O v1 defines the `EnvironmentV1` snapshot and Project
+`environment-io.v1` profile (Project v17). Checked code reads an immutable
+environment supplied by the caller through explicit host operations. It never
+reads ambient process state or calls `getenv`.
 
 ## Operations
 
@@ -34,13 +34,13 @@ The Core Wasm provider imports are exact and private to this profile:
 | `spx_environment_name_utf8_v1` | `(i64 index, i32 out) -> i32` | writes an `i64` borrowed carrier |
 | `spx_environment_value_utf8_v1` | `(i64 index, i32 out) -> i32` | writes an `i64` borrowed carrier |
 
-The generated command uses one fixed 64 KiB environment arena. A provider
-status of zero is accepted only after the corresponding output has passed the
-root, bounds, NUL/`=` name, and strict UTF-8 checks; the output slot is
-initialized to `-1` poison before each import. A failed lookup must leave the
-carrier at `-1`; nonzero status leaves poison in place and follows the closed
-status contract below. Root zero is valid for an empty borrowed value. These
-imports are read-only and widen no authority.
+The generated command uses one fixed 64 KiB environment arena. Before each
+import, its output slot is initialized to `-1` poison. Even a zero provider
+status is accepted only after checking the output's root, bounds, NUL/`=` name
+rules and strict UTF-8. A failed lookup must leave the carrier at `-1`.
+Nonzero status leaves poison in place and follows the closed status contract
+below. Root zero is valid for an empty borrowed value. The read-only imports
+add no authority.
 
 ## Explicit Wasm provider construction
 
@@ -52,8 +52,8 @@ complete combined snapshot before returning imports: environment entries are
 values, and stdin is an explicit `Uint8Array`. Text accepts strings or strict
 UTF-8 byte arrays. Construction rejects isolated UTF-16 surrogates, malformed
 UTF-8, duplicate names, invalid name/value bytes, and count or combined-byte
-overflow. It sorts names by raw bytes and retains private copies; subsequent
-caller mutation cannot change the snapshot.
+overflow. It sorts names by raw bytes and keeps private copies. Later caller mutations
+cannot change the snapshot.
 
 The owned literal arena remains a separate 64 KiB region at byte offset
 393216 (the seventh Wasm page), disjoint from the six command-input pages; this

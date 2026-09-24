@@ -36,15 +36,15 @@ its temporaries before branching, and an arm settles them after transferring
 its result and before joining. Nested lexical regions retain their own exits.
 A single unguarded catchall lowers its value directly in the enclosing region.
 
-Variant cleanup uses the authenticated active case and its declaration-order
-field paths. Inactive cases have no live owners. Existing plan transition wire
-shapes remain unchanged; the new primitive lifecycle is additive. A prior
-compiler that cannot reconstruct the new lifecycle must reject its plan.
+Cleanup follows the authenticated active case and its field paths in declaration
+order. Inactive cases have no live owners. Adding the primitive lifecycle does
+not change existing plan transition wire shapes. An older compiler must reject
+the plan if it cannot reconstruct this lifecycle.
 
-An owned `string` result is represented in conformance traces by the additive
-primitive marker `{"kind":"string"}`. It carries no text, allocation,
-pointer, or handle. Existing `bytes` and nominal `owned` result encodings are
-unchanged.
+Conformance traces represent an owned `string` result with the new primitive
+marker `{"kind":"string"}`. The marker records the result kind, not its text,
+allocation, pointer, or handle. The existing `bytes` and nominal `owned`
+result encodings do not change.
 
 ## Internal representations
 

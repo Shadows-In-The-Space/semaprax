@@ -29,10 +29,11 @@ source authenticated by the capsule. A graph identity binds the derived facts
 and the selected package subject. Stale graph expectations and a different
 version of the same package do not select the retained facts.
 
-Import declarations and authenticated cross-package call sites remain distinct.
-An imported symbol can have no call site. A source call is a static relationship,
-not proof of execution, test coverage, or membership in every deployed artifact.
-Absence from this selected graph does not prove absence of external consumers.
+An import declaration is not a call site: a program can import a symbol without
+calling it. Authenticated cross-package calls record static source relationships.
+They do not prove execution, test coverage, or inclusion in every deployed
+artifact. Likewise, a consumer missing from this selected graph may still exist
+outside it.
 
 ## Queries and host attachment
 
@@ -45,10 +46,10 @@ expression identity, AST path, alias and ordinal. Call sites cover authenticated
 cross-package source calls, including callers outside the linked export closure;
 local calls are outside this relationship family.
 
-The library exposes a compact revision-bound summary and a consumer query
-selected by exact provider coordinate and stable declaration identity. Queries
-read only the already derived graph. They neither fetch dependencies nor build
-or execute an artifact.
+Use the library's compact, revision-bound summary to inspect the graph.
+To query consumers, supply the exact provider coordinate and stable declaration
+identity. Both queries read only the already derived graph; they do not fetch
+dependencies, build artifacts, or execute them.
 
 A v5 embedding host may attach one immutable verified package graph before
 processing any frame or parallel-read invocation. Attachment is a typed host

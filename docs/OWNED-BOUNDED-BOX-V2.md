@@ -24,12 +24,14 @@ Prelude v5 adds exactly two owned-Bytes operations to the existing
 would require a separate payload and cloning contract. No replacement,
 mutable borrow, inference, or additional payload types are admitted.
 
-`box_new<Bytes>` stages and transfers its owned Bytes payload only after the
-allocation succeeds. Allocation refusal leaves the staged Bytes owner for the
-ordinary failure cleanup path. `box_into_inner<Bytes>` detaches and returns the
-same owned payload. A Box that remains live at scope exit recursively drops its
-inner Bytes payload exactly once. The Box carrier is non-Copy, and its address,
-allocation identity, and layout are unobservable.
+The transfer in `box_new<Bytes>` happens only after allocation succeeds.
+If allocation is refused, the staged Bytes owner remains available to ordinary
+failure cleanup. `box_into_inner<Bytes>` detaches and returns that same owned
+payload.
+
+A Box still live at scope exit recursively drops its inner Bytes exactly once.
+The Box is non-Copy. Programs cannot observe its address, allocation identity,
+or layout.
 
 ## Target compatibility
 
@@ -59,8 +61,8 @@ and Core-Wasm execution with a host that tracks Bytes handles. The Wasm host
 also checks recursive drop, consuming detachment and legacy-host refusal.
 Source admission rejects `box_get<Bytes>` with `SPX-T285`.
 
-The implemented release corpus is hosted green. Historical local observations
-retain their original subjects; neither classification establishes public ABI
+The implemented release corpus is hosted green; historical local observations
+still apply only to their original subjects. Neither establishes public ABI
 support or production allocator guarantees.
 
 ## Nonclaims

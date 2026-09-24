@@ -20,12 +20,14 @@ storage. The compiler-owned operations are `str_len_bytes`, `str_is_empty`,
 `core.str.*`. They operate on UTF-8 bytes, so `len_bytes` is not a character
 count and embedded NUL is ordinary data.
 
-One invocation admits at most 65,536 cumulative borrowed-text bytes; each
-external argument is charged exactly once. Internal forwarding and
-aliasing do not charge the same admitted invocation-root view again. `contains`
-uses fixed-capacity Knuth-Morris-Pratt prefix search in native C and Wasm, and
-the same byte-KMP semantics in the interpreter, so periodic hostile inputs are
-linear in value plus needle length rather than quadratic.
+Each invocation admits at most 65,536 borrowed-text bytes in total. It charges
+each external argument once; forwarding or aliasing the same admitted
+invocation-root view internally adds no second charge.
+
+For `contains`, native C and Wasm use fixed-capacity Knuth-Morris-Pratt prefix
+search. The interpreter uses the same byte-KMP semantics. Even on hostile
+periodic inputs, search time is linear in the combined value and needle length,
+not quadratic.
 
 The interpreter retains an invocation-root provenance identity with shared
 borrow evidence rather than manufacturing an owned `String`. Native C uses a
@@ -56,10 +58,9 @@ call graph; direct and mutual recursion reject before emission. Export-root link
 including roots disconnected from the entry function, while preserving the
 legacy scalar and Project-v1 Web bytes when the profile is absent.
 
-Generated JavaScript maps JavaScript strings through checked UTF-8 encoding
-into fixed Wasm scratch and maps results to `bigint` or `boolean`. Generated
-TypeScript exposes `string`, `bigint`, and `boolean` for exactly those admitted
-signatures.
+Generated JavaScript checks and UTF-8-encodes input strings into the fixed Wasm
+scratch area. It returns `bigint` or `boolean` results. Generated TypeScript
+uses `string`, `bigint`, and `boolean` for exactly these admitted signatures.
 
 ## Evidence and nonclaims
 

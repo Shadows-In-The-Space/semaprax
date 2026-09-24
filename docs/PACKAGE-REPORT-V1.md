@@ -83,23 +83,22 @@ order:
   domain-separated source digest), `limits`, `package`, `targets`,
   `exports`, `exclusions`, `unavailable_capabilities`, and `nonclaims`.
 
-`package_report::verify_envelope` independently recomputes the outer payload
-digest over the exact serialized payload bytes, re-checks the declared byte
-count, replays the package counts against the listed inventories, compares
-the target matrix and the unavailable-capability list against their closed
-canonical forms, checks every exclusion reason against the closed vocabulary,
-verifies strict stable-id ordering, and re-authenticates every embedded
-export-signature digest before returning the export summaries. This proves
-exact-byte integrity and the listed closed structural derivations. It does
-not authenticate the semantic truth of open interface fields after an
-attacker self-consistently changes those fields and re-mints every dependent
-digest. Source-authenticated semantic meaning is deliberately outside v1 and
-belongs exclusively to additive [Semantic Package Report v2](PACKAGE-REPORT-V2.md).
+Before returning export summaries, `package_report::verify_envelope`
+independently checks the exact payload digest and byte count. It replays package
+counts against inventories, compares the target matrix and unavailable-capability
+list with their closed canonical forms, checks exclusion reasons and strict
+stable-ID order, and authenticates every embedded export-signature digest.
 
-Source bytes are snapshotted before parsing and re-checked after rendering;
-drift fails the whole command closed. All diagnostics use the previously
-unused `SPX-P3xx` family: `SPX-P301` options, `SPX-P302` budget exhaustion,
-`SPX-P303` envelope/backend consistency.
+These checks prove exact-byte integrity and the listed structural derivations,
+not the semantic truth of open interface fields. An attacker can change those
+fields consistently and recompute every dependent digest. Source-authenticated
+meaning is outside v1; additive [Semantic Package Report v2](PACKAGE-REPORT-V2.md)
+owns that check.
+
+The command snapshots source bytes before parsing and checks them again after
+rendering. Any drift fails the whole command closed. Diagnostics use the
+previously unused `SPX-P3xx` family: `SPX-P301` for options, `SPX-P302` for
+budget exhaustion, and `SPX-P303` for envelope/backend consistency.
 
 ## Evidence
 

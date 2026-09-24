@@ -13,10 +13,10 @@ result transfers to a later commit. The runner remains:
 python3 scripts/graph-operational-evidence.py
 ```
 
-It requires a clean exact local commit and invokes three locked, offline Cargo
-integration binaries serially. A qualifying envelope uses schema
-`semaprax.graph-operational-execution-evidence.v2` and contains three Cargo logs
-plus the SHA-1 and SHA-256 task-economics reports.
+Run it against a clean, exact local commit. It runs three locked, offline Cargo
+integration binaries one at a time. A qualifying envelope uses
+`semaprax.graph-operational-execution-evidence.v2` and includes three Cargo logs
+and both task-economics reports: SHA-1 and SHA-256.
 
 ## Closed selected inventory
 
@@ -36,11 +36,11 @@ raw source. The integrated managed workflow joins signature evolution, sibling
 merge, impact/diff review, interpreter tests, separate managed publication, and
 stale-base rejection.
 
-Every row must be nonignored and pass. The runner rejects additional rows,
-missing reports, dirty input or output state, subject drift, malformed summaries,
-and artifact inventory or digest mismatches. `Cargo.toml` and `Cargo.lock` remain
-bound repository inputs. Output is private derived evidence, never source or
-publication authority.
+Every selected row must run and pass; none may be ignored. The runner rejects
+extra rows, missing reports, dirty input or output state, subject drift,
+malformed summaries, and mismatched artifact inventories or digests.
+`Cargo.toml` and `Cargo.lock` are bound repository inputs. The output is private
+derived evidence. It is neither source nor permission to publish.
 
 The reviewed Darwin arm64 invocation used Cargo/Rust 1.98.0, Git 2.47.1 and
 Python 3.14.2. Its five artifacts and envelope replay under the v2 bundle

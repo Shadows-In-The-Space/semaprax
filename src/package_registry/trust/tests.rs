@@ -10,7 +10,9 @@ pub(super) fn host_fixture(
     let fixture = if yanked {
         Fixture::with_entry(
             super::super::registry_v2::tests::real_admitted_fixture_with_status(
-                super::super::PublicationStatus::Yanked,
+                super::super::PublicationStatus::Yanked {
+                    reason: "host regression yank".to_owned(),
+                },
             )
             .0,
         )

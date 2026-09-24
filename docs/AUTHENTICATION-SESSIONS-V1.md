@@ -17,7 +17,7 @@ implementation, a real PKCE `S256` hash computation, an OAuth token-endpoint
 or discovery-document client, or any new host operation, `permit`, or
 dependency. A third tranche adds `std.auth.secret.Secret<T>`, a narrow
 `.spx`-visible opaque scalar wrapper — see
-[Secret value semantics](#secret-value-semantics-secrett) for exactly what it
+[Secret value semantics](#secret-value-semantics-secret) for exactly what it
 covers and does not. See
 [Non-claims and remaining work](#non-claims-and-remaining-work) for exactly
 why and what would be required to lift each one, and
@@ -540,7 +540,7 @@ Restated plainly, matched against issue #191's "In scope" list:
 
 | In scope (#191) | Status here |
 | --- | --- |
-| Opaque `Secret<T>` or equivalent | **Shipped**, narrowly: `std.auth.secret.Secret<T>` for `T = i64`/`T = bool` (an opaque handle/decided-flag), with whole-value equality refused at compile time (`SPX-T207`) and no format/print facility reachable for any type. See [Secret value semantics](#secret-value-semantics-secrett) for exactly what is and is not covered, including the real interpreter-backend ceiling (`SPX-F102`) this tranche found and reported rather than routed around. |
+| Opaque `Secret<T>` or equivalent | **Shipped**, narrowly: `std.auth.secret.Secret<T>` for `T = i64`/`T = bool` (an opaque handle/decided-flag), with whole-value equality refused at compile time (`SPX-T207`) and no format/print facility reachable for any type. See [Secret value semantics](#secret-value-semantics-secret) for exactly what is and is not covered, including the real interpreter-backend ceiling (`SPX-F102`) this tranche found and reported rather than routed around. |
 | Password hashing via a maintained memory-hard algorithm through an explicit host/runtime implementation | **Not shipped**, `HUMAN_BLOCKED`. Policy bounds only; see [Password hashing](#password-hashing-policy-only-not-an-algorithm). |
 | Session IDs, storage contract, rotation, expiry, revocation, CSRF policy, secure cookies | **Shipped** as pure decision procedures (this document's session/CSRF/cookie sections). A storage contract (where session records actually live) is not shipped — like `std.db` and `std.jobs`, that is a host/driver concern this pure layer only decides over, never performs. |
 | Signed token verification with algorithm/key policy and claims validation | **Policy shipped**; the signature/MAC computation itself is not (same reason as password hashing). |
@@ -571,7 +571,7 @@ Issue #191's acceptance criteria, matched exactly:
   opaque handle/flag type whose whole-value comparison is refused at compile
   time. Still not met in the sense of a `Secret<T>` that wraps raw secret
   *bytes* — the type argument is bounded to `i64`/`bool` today — see
-  [Secret value semantics](#secret-value-semantics-secrett).
+  [Secret value semantics](#secret-value-semantics-secret).
 - "Authentication and authorization remain separate typed concepts" — **met**,
   including as a distinct *nominal type* the compiler enforces one cannot
   smuggle past: see

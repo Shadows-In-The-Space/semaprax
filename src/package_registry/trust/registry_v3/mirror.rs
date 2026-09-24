@@ -48,10 +48,28 @@ impl MirrorCheckpoint {
         }
     }
 
+    /// Bootstrap bridge state for a held store installed at this explicit
+    /// trusted time. The host flow exact-compares its complete checkpoint wire
+    /// with the live held receipt before allowing any network operation.
+    pub fn initial_at(root: &InstalledRoot, bootstrap_trusted_time: u64) -> Self {
+        let mut checkpoint = RegistryCheckpoint::initial(root);
+        checkpoint.previous.observed_time = bootstrap_trusted_time;
+        Self {
+            checkpoint,
+            last_new_timestamp: None,
+        }
+    }
+
     /// The ordinary checkpoint remains available for its existing durable
     /// trust boundary, but it is insufficient to resume mirror verification.
     pub fn registry_checkpoint(&self) -> &RegistryCheckpoint {
         &self.checkpoint
+    }
+
+    /// True only before any signed timestamp has been accepted through this
+    /// bridge. This does not expose a way to reconstruct bridge state.
+    pub fn is_initial(&self) -> bool {
+        self.last_new_timestamp.is_none()
     }
 }
 

@@ -19,6 +19,13 @@ mod read;
 pub use read::{ArtifactRead, VerifiedArtifact};
 mod cache;
 pub use cache::{CacheFill, CacheFillReceipt, CachedSubject};
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+mod online;
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+pub use online::{
+    acquire_commit_and_read, MirrorArtifact, MirrorArtifactSelection, MirrorFlowError,
+    MirrorFlowRequest, MirrorFlowResult,
+};
 
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 mod store;

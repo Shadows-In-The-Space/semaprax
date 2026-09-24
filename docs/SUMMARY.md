@@ -448,6 +448,7 @@ Audience: all documentation readers.
 - [Signed managed-store to resolver-cache bridge v1](PACKAGE-REGISTRY-CACHE-BRIDGE-V1.md)
 - [Package registry mirror transport v1](PACKAGE-REGISTRY-MIRROR-TRANSPORT-V1.md)
 - [Package registry mirror trust v1](PACKAGE-REGISTRY-MIRROR-TRUST-V1.md)
+- [Package registry mirror flow v1](PACKAGE-REGISTRY-MIRROR-FLOW-V1.md)
 - [Package registry federation v1](PACKAGE-REGISTRY-FEDERATION-V1.md)
 - [Registry-bound resolution v1](PACKAGE-REGISTRY-BOUND-RESOLUTION-V1.md)
 - [Offline pure Wasm package build](OFFLINE-PURE-WASM-PACKAGE-BUILD-V1.md)

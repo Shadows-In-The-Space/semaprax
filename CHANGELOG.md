@@ -8,6 +8,14 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Compose caller-authorized bounded mirror bytes through signed Registry-v3
+  proof, the existing held-generation commit and one live Lock-v3 artifact
+  read, binding an initial bridge checkpoint to the live bootstrap generation
+  and distinguishing a post-commit read failure from a no-effect refusal. This
+  one-shot local flow intentionally does not refresh or resume a mirror. It
+  returns evidence only; it does not add hosted registry, resolver-cache,
+  root, filesystem or execution authority.
+
 - Allow the unchanged GEN-05B hosted generic-instance corpus enough job time;
   the v0.6.0 release gate reached its former 90-minute ceiling before the
   authored-variant and owned-result checks could finish.

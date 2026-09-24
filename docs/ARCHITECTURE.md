@@ -2554,6 +2554,17 @@ another offline mirror update. It returns the existing non-authoritative
 candidate only; durable Host v2 commit remains required. See [Package registry
 mirror trust v1](PACKAGE-REGISTRY-MIRROR-TRUST-V1.md).
 
+`trust::host::registry_v3::acquire_commit_and_read` is a native local
+composition layer that borrows the preceding mirror authority, independently
+installed root, bridge checkpoint, sealed registry, fixed times and existing
+held store. It proves acquired metadata and lock/manifest-bound artifacts
+before Host-v2 commit, then performs one live generation/Lock-v3 artifact read.
+It binds the bridge checkpoint to the live held checkpoint before dispatch and
+reports a distinct receipt-bearing outcome if its post-commit read fails. Its
+result is only evidence plus next bridge state: it confers no resolver cache,
+root, filesystem, execution or hosted-availability authority. See
+[Package registry mirror flow v1](PACKAGE-REGISTRY-MIRROR-FLOW-V1.md).
+
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary
 semantic-workspace graph derives function imports over synthetic logical paths,

@@ -4,7 +4,7 @@ Status: implemented local-fixture execution extension; external-language admissi
 
 Audience: benchmark operators and reviewers of offline adapter provenance.
 
-This reference defines `benchmark.cross_language.runnable_adapter.v1`. It is
+This reference defines `benchmark.cross_language.runnable_adapter.v1`; it is
 an execution extension of the existing unavailable-only
 [Agent Task Comparison v1](AGENT-TASK-COMPARISON-V1.md) baseline admission,
 not a second corpus, identity parser, or equivalence policy. The baseline

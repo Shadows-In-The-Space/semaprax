@@ -10,8 +10,8 @@ Issue #211 asks for a reproducible cross-language Agent benchmark laboratory
 comparing SEMAPRAX against Zero, NTNT, Aver, Vera, Hale, MoonBit, Rust, and
 TypeScript, with frozen tasks, recorded provenance, hidden tests, and
 regression scoring — driven by measured outcomes rather than intuition, and
-explicitly not one synthetic leaderboard score. This page is the short
-pointer; the suite itself lives in
+explicitly not one synthetic leaderboard score. This page is a short pointer;
+the suite lives in
 [`benchmarks/cross-language-v1/`](../benchmarks/cross-language-v1/) and its
 full contract in
 [`benchmarks/cross-language-v1/docs/METHODOLOGY.md`](../benchmarks/cross-language-v1/docs/METHODOLOGY.md).

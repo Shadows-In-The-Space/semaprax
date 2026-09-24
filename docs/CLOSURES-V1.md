@@ -8,8 +8,8 @@ Public callable ABI and owning captures remain separate.
 Audience: language users, compiler contributors, backend implementers, and
 workspace-service authors.
 
-This additive LANG-07 profile extends Function Values v1/v2 with anonymous
-functions carrying scalar snapshots. It is not a general owning closure ABI.
+This additive LANG-07 profile adds anonymous functions that capture scalar
+snapshots to Function Values v1/v2. It is not a general owning-closure ABI.
 
 ## Syntax and eligibility
 

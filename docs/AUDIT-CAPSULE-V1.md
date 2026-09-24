@@ -19,7 +19,7 @@ read as claiming otherwise.
 [Issue #209](https://github.com/wavect/semaprax/issues/209) asks for one
 independently verifiable capsule that unifies SEMAPRAX's source, semantic,
 transaction, assurance, execution, model/tool, artifact, package, decision,
-and publication evidence. This document and `src/audit_capsule.rs` implement
+and publication evidence. This document and `src/audit_capsule.rs` provide
 the **envelope**: a `semaprax.audit-capsule.v1` manifest, a content-addressed
 object set referenced by plain SHA-256 digest, an association graph, a
 redaction mechanism, a signature policy that verifies `ed25519-raw-v1`

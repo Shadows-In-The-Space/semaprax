@@ -9,7 +9,7 @@
 
 ## Summary
 
-This document fixes the bounded target-neutral model that a future
+This document fixes the target-neutral model that a future
 shared-immutable ARC and managed-zone implementation must preserve. The
 repository contains `src/arc_zones.rs`, a deterministic proof-data model of
 retain/release reference counting inside explicit opt-in managed zones: a

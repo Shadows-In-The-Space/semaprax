@@ -7,7 +7,7 @@ Audience: C++ integration authors, compiler contributors, and reviewers.
 
 ## Purpose and compatibility
 
-`semaprax cxx-package <file.spx> --function <name-or-id>` emits one canonical
+`semaprax cxx-package <file.spx> --function <name-or-id>` emits a canonical
 JSON envelope containing a C++17 header and a C11 provider translation unit.
 The provider embeds the production native projection and adds externally
 linked wrappers around the selected internal functions. This closes the

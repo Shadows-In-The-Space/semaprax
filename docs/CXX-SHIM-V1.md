@@ -4,7 +4,7 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax cxx-shim <file.spx>` is a deterministic, read-only projection that
+`semaprax cxx-shim <file.spx>` is a deterministic read-only projection that
 derives one C++17-compatible header fragment from verified program facts for
 explicitly selected public monomorphic scalar functions. It is the first
 executable slice of the completion-matrix row "C++" under Ecosystem

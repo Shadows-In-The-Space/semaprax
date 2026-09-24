@@ -9,7 +9,7 @@ broader product completion remain separately gated.
 Audience: compiler contributors, semantic-workspace implementers, and
 reviewers of contract and declared-test identity.
 
-Contracts and Tests Facts v1 is an authority-free, content-addressed inventory
+Contracts and Tests Facts v1 is an authority-free content-addressed inventory
 derived from one already-admitted immutable `ProjectRevision`. It closes the
 first bounded contract/test association gap without changing the frozen
 `ContractsAndTests` node of Canonical Semantic Workspace Revision v1.

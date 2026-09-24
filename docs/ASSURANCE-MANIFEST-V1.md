@@ -7,15 +7,10 @@ later SMT (#184), model-checking (#185), and proof-kernel (#186) backends and
 the sibling consumers of the shared `ASSURANCE-SUMMARY` contract (#129, #202,
 #205).
 
-Assurance Manifest v1 (`semaprax.assurance-manifest.v1`) is a deterministic,
-read-only, per-obligation record of exactly what was checked about one
-verified single-file SEMAPRAX module, how strongly it was checked, under
-which explicit assumptions, and what remains open. It replaces
-undifferentiated "verified" language with one canonical document spanning
-every obligation kind this repository can currently derive or accept evidence
-for. It is proof data, not permission: the manifest grants no execution,
-publication, signing, or review authority, matching the repository's evidence
-capsule invariant.
+Assurance Manifest v1 (`semaprax.assurance-manifest.v1`) records what was
+checked for each obligation in one verified module, its strength, assumptions,
+and open work. It replaces vague “verified” language with one canonical record.
+It is proof data, not permission for execution, publication, signing, or review.
 
 For authenticated multi-file Project evidence, see the additive [Project
 Assurance Manifest v1](PROJECT-ASSURANCE-MANIFEST-V1.md). That profile binds a

@@ -2,7 +2,7 @@
 
 Audience: language users, tool authors, and compiler contributors.
 
-Status: first bounded slice of issue #191's authentication/session profile,
+Status: a first bounded slice of issue #191's authentication/session profile,
 a second tranche adding the OAuth/OIDC authorization-code callback policy,
 and a third tranche adding the `std.auth.secret.Secret<T>` opaque scalar
 handle type. `std.auth` ships the pure, effect-free decision procedures for

@@ -15,7 +15,7 @@ and `body\n` followed by the selected JSON bytes with dictionary references.
 The digest uses v1’s existing domain-separated SHA-256 over the source length
 and exact reconstructed selected bytes.
 
-For a selected document smaller than 16,384 bytes, the dictionary is empty.
+Documents smaller than 16,384 bytes use an empty dictionary.
 Otherwise, only JSON string literals at least 16 bytes long, including quotes
 and escape spelling, that occur at least twice enter the dictionary. Entries
 are sorted by their exact UTF-8 bytes and numbered from zero. The body replaces

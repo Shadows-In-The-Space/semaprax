@@ -9,13 +9,11 @@ broader product completion remain separately gated.
 Audience: compiler contributors, workspace-service authors, agent-tool authors,
 and reviewers of semantic subjects.
 
-Canonical Semantic Workspace Revision v1 is an authority-free, immutable,
-Project-derived semantic object. It gives one already admitted
-`ProjectRevision` a single canonical object family with typed projections for
-source, checked meaning, identity, dependencies, contracts and tests, agents,
-authority, targets, and projection metadata. It does not replace canonical
-`.spx` source as the Git representation and does not make a serialized object
-trusted compiler state.
+Canonical Semantic Workspace Revision v1 is an authority-free immutable object
+derived from one admitted `ProjectRevision`. It provides typed projections for
+source, meaning, identity, dependencies, contracts/tests, agents, authority,
+targets, and metadata. It neither replaces `.spx` in Git nor makes serialized
+objects trusted compiler state.
 
 This version is a compatibility-preserving foundation. Existing Project,
 managed Workspace, Workspace Semantic Graph, Semantic Workspace Image v1,

@@ -6,8 +6,8 @@ maintainers.
 Status: bounded GEN-05B/GEN-05C internal tranche hosted on Linux. The pre-nested-relay
 generic-owned corpus is hosted green in [CI run 34031917437, Ubuntu job
 101482963175](https://github.com/wavect/semaprax/actions/runs/34031917437/job/101482963175).
-The additive nested-relay and identity-forwarding selectors have **no
-successful hosted run on record**. This document previously called them
+The additive nested-relay and identity-forwarding selectors have **no successful
+hosted run on record**. This document previously called them
 "hosted green in CI run 34048713967, Ubuntu job 101528399406"; that job
 (`Rust ubuntu-latest`) concluded **cancelled**, and no Rust lane in that run
 succeeded — `Rust macos-latest` and `Rust windows-latest` were cancelled and

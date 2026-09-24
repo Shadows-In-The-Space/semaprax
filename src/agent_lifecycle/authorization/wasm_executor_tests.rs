@@ -1,4 +1,5 @@
 use super::*;
+use crate::cleanup_plan::StatusCase;
 use std::time::Duration;
 
 const SOURCE: &str = r#"module test.wasm_target_binding;
@@ -128,19 +129,123 @@ fn target_binding_rejects_source_and_subject_remints_before_any_build_or_node() 
 
 #[test]
 fn structured_outcome_rejects_malformed_and_mismatched_status_before_publication() {
-    let ok = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v1\",\"kind\":\"returned\",\"value\":\"7\"}";
+    let ok = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v2\",\"kind\":\"returned\",\"value\":\"7\"}";
     let malformed_tail = format!("{ok}\n{{\"schema\":false}}\n");
     assert!(decode_node_outcomes(&malformed_tail, 2).is_err());
 
-    let mismatch = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v1\",\"kind\":\"language_failure\",\"raw_status\":4,\"status\":{\"schema\":\"semaprax.status.v1\",\"domain_id\":\"semaprax.arithmetic.v1\",\"code\":5,\"class\":\"arithmetic\",\"retryable\":false}}\n";
+    let mismatch = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v2\",\"kind\":\"language_failure\",\"raw_status\":4,\"status\":{\"schema\":\"semaprax.status.v1\",\"domain_id\":\"semaprax.arithmetic.v1\",\"code\":5,\"class\":\"arithmetic\",\"retryable\":false}}\n";
     let error = decode_node_outcomes(mismatch, 1)
         .expect_err("raw and normalized status disagreement must not publish an outcome");
     assert!(error
         .message
         .contains("wasm_executor.outcome.status_mismatch"));
 
-    let failure = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v1\",\"kind\":\"language_failure\",\"raw_status\":9,\"status\":{\"schema\":\"semaprax.status.v1\",\"domain_id\":\"semaprax.contract.v1\",\"code\":1,\"class\":\"contract\",\"retryable\":false}}";
+    let failure = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v2\",\"kind\":\"language_failure\",\"raw_status\":9,\"status\":{\"schema\":\"semaprax.status.v1\",\"domain_id\":\"semaprax.contract.v1\",\"code\":1,\"class\":\"contract\",\"retryable\":false}}";
     assert!(decode_node_outcomes(&format!("{failure}\n{ok}\n"), 2).is_err());
+}
+
+#[test]
+fn owned_bytes_receipt_rejects_forged_omitted_and_duplicate_rows() {
+    let tagged = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v2\",\"kind\":\"settled_owned_bytes\",\"value\":\"00ff\",\"byte_length\":2}";
+    let scalar = "{\"schema\":\"semaprax.agent-wasm-stage-outcome.v2\",\"kind\":\"returned\",\"value\":\"00ff\"}";
+    let NodeStageRun::Returned(mut values) =
+        decode_node_outcomes(&format!("{tagged}\n"), 1).unwrap()
+    else {
+        panic!("owned observation must return")
+    };
+    let observed = values.pop().unwrap();
+    observed.require_projection(true).unwrap();
+    assert!(observed.require_projection(false).is_err());
+    let NodeStageRun::Returned(mut omitted) =
+        decode_node_outcomes(&format!("{scalar}\n"), 1).unwrap()
+    else {
+        panic!("scalar observation must return")
+    };
+    assert!(omitted.pop().unwrap().require_projection(true).is_err());
+    assert!(decode_node_outcomes(&format!("{tagged}\n{tagged}\n"), 1).is_err());
+    let NodeStageRun::Returned(duplicated) =
+        decode_node_outcomes(&format!("{tagged}\n{tagged}\n"), 2).unwrap()
+    else {
+        panic!("two rows must decode before projection binding")
+    };
+    duplicated[0].require_projection(true).unwrap();
+    assert!(duplicated[1].require_projection(false).is_err());
+    for forged in [
+        tagged.replace("\"byte_length\":2", "\"byte_length\":1"),
+        tagged.replace("\"value\":\"00ff\"", "\"value\":\"00FG\""),
+        tagged.replace("\"byte_length\":2", "\"byte_length\":2,\"settled\":true"),
+    ] {
+        assert!(decode_node_outcomes(&format!("{forged}\n"), 1).is_err());
+    }
+}
+
+#[test]
+fn wasm_record_owned_bytes_copy_out_is_observed_only_after_facade_settlement() {
+    let Some(host) = node_host() else { return };
+    const OWNED_SOURCE: &str = r#"module test.wasm_owned_receipt;
+@id("test.wasm_owned_receipt.Output")
+record Output {
+    @id("test.wasm_owned_receipt.Output.first") first: Bytes,
+    @id("test.wasm_owned_receipt.Output.marker") marker: i64,
+    @id("test.wasm_owned_receipt.Output.second") second: Bytes,
+}
+@id("test.wasm_owned_receipt.make")
+fn make(divisor: i64) -> Output {
+    let first_seed = [0u8, 255u8];
+    let second_seed = [7u8];
+    Output {
+        first: bytes_copy(array_as_slice(first_seed)),
+        marker: 10 / divisor,
+        second: bytes_copy(array_as_slice(second_seed)),
+    }
+}
+@id("app.main") fn main() -> i64 { 0 }
+"#;
+    let checked = crate::check(OWNED_SOURCE, Path::new("wasm-owned-receipt.spx")).unwrap();
+    let program = hir::resolve(&checked).unwrap();
+    hir::validate(&program).unwrap();
+    let prepared = crate::interpreter::retained_call::prepare_retained_call(
+        &program,
+        "test.wasm_owned_receipt.make",
+    )
+    .unwrap();
+    let actual = run(
+        &host,
+        OWNED_SOURCE,
+        &program,
+        &prepared,
+        &[RetainedValue::I64(2)],
+        100,
+    )
+    .unwrap();
+    let expected = crate::interpreter::retained_call::evaluate_retained_call(
+        &program,
+        &prepared,
+        &[RetainedValue::I64(2)],
+        100,
+    )
+    .unwrap();
+    assert_eq!(actual.outcome, expected.outcome);
+    assert_eq!(actual.cleanup_events, expected.cleanup_events);
+    assert_eq!(actual.cleanup_events.len(), 2);
+    assert_eq!(
+        actual.steps_used, 0,
+        "Wasm instruction fuel remains unmeasured"
+    );
+    let failed = run(
+        &host,
+        OWNED_SOURCE,
+        &program,
+        &prepared,
+        &[RetainedValue::I64(0)],
+        100,
+    )
+    .unwrap();
+    assert!(matches!(
+        failed.outcome,
+        RetainedCallOutcome::LanguageFailure(_)
+    ));
+    assert!(failed.cleanup_events.is_empty());
 }
 
 #[test]

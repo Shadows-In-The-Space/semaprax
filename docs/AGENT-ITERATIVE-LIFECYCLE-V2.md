@@ -73,8 +73,14 @@ is not execution evidence. Native now additionally settles borrowed stage
 arguments and returned `Bytes` at the real boundary, with local allocation,
 free, call, cancellation, receipt, and omission/duplication controls. The
 reported native cleanup count remains limited to result-copy-out settlement;
-it is not full instruction/finalizer parity, and Wasm still reports no such
-cleanup-event count. The public target-stage route instead records one
+it is not full instruction/finalizer parity. Core Wasm now reports that same
+event only for a record `Bytes` projection that the replay-verified generated
+Node facade returned as an owned `Uint8Array`: that return follows its private
+arena's consume and settlement. The stage observer checks this typed result,
+and the host requires an exact tagged row at the selected projection before
+counting it; missing, extra, malformed and duplicate rows fail closed. This
+does not report Wasm memory frees, variant-indexed-`Bytes` cleanup, or full
+stage finalizer parity. The public target-stage route instead records one
 backend-neutral reservation per settled stage: the checked per-stage cap times
 the recorded stage count, bounded by the run-stage cap. Pre-dispatch
 cancellation settles before this accounting; otherwise the sealed dispatch

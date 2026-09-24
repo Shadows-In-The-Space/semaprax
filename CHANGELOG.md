@@ -21,6 +21,12 @@ format: `Unreleased` then release buckets, grouped by impact.
   Windows run `35988348061` at `3d4220b6`. Signed-capsule admission and
   production support remain unverified.
 
+- Harden additive lock-bound offline fetch with held-directory authority,
+  bounded retained inputs, private staging and no-replace cache publication.
+  Failures retain stages or a published prefix for explicit reconciliation,
+  without pathname rollback or a misleading success receipt; unsupported
+  hosts refuse before cache effects.
+
 - Re-pin exact Semantic Workspace Change and Operations artifact/evidence/receipt
   KATs to the expanded Project graph and serialized limits while retaining
   domain, reference, API/CLI parity, tamper, replay, budget, and stale/no-write

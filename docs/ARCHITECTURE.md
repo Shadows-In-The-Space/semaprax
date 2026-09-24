@@ -2404,6 +2404,15 @@ into the resolver's content-addressed cache by its own digest; it decides every
 address before writing any, and `resolve` remains the cache's only reader. See
 [Unified CLI v1](UNIFIED-CLI-V1.md).
 
+`src/cli/fetch/locked.rs` owns the additive `fetch --lock` host boundary:
+held nofollow ancestor/input handles, cooperative authority before exact lock
+replay, fd-relative directory creation, all-subject staging, no-replace
+publication and receipt rechecks. It never rolls back by pathname; retained
+stages require explicit reconciliation and a failed publication may leave an
+authenticated prefix. Unsupported hosts fail before effects. Same-principal
+uncooperative mutation remains excluded by the host, not defeated by an
+advisory lock. The versioned CLI contract owns the exact supported scope.
+
 `src/cli/verify.rs` is the schema-selected front over the independent
 verifiers: it reads a capsule's top-level `schema` once, selects the verifier
 admitted for that schema and operand count from a closed table, and hands the

@@ -250,6 +250,7 @@ and contacts nothing; the next steps stay explicit (`fetch`, then `resolve`).
 
 ```sh
 semaprax fetch <cache-dir> <subject.json>...
+semaprax fetch --lock <lock.json> <cache-dir> <subject.json>...
 ```
 
 `fetch` is the caller-populating step [Project Dependency Resolution v1](PROJECT-DEPENDENCY-RESOLUTION-V1.md)
@@ -267,9 +268,42 @@ resolver's 64-subject bound. One receipt line is printed:
 {"schema":"semaprax.fetch-receipt.v1","cache":"cache","subjects":[{"package":"examples.meaning","version":"1.0.0","digest":"sha256:...","state":"added"}]}
 ```
 
-`fetch` reads only the paths it is given. It performs no network access, no
-registry lookup, no version selection, and no build; `resolve` remains the
-only reader of the cache and still replays every subject itself.
+`fetch` reads only the paths it is given. Its optional `--lock` form
+independently verifies that the exact Lock-v3 file replays the complete
+subject-byte set before it creates any cache entry. A stale lock, substituted
+valid subject, or tampered content-addressed entry is refused without a
+cache-key or byte substitution. It performs no network access, registry
+lookup, version selection, signature/trust verification, or build; `resolve`
+remains the only reader of the cache and still replays every subject itself.
+
+The additive lock-bound host implementation uses held-directory operations on
+Linux, Android, Apple Unix hosts and Redox; other hosts refuse with `SPX-J128`
+before cache effects. Relative and absolute paths, `.` and descriptor-relative
+`..` traversal are admitted; symlink path components and symlink inputs are
+refused. The selected cache must be caller-owned and not group/world writable.
+Its ordinary cooperative directory lock (or the deepest existing parent's
+lock for a new cache) is acquired before replay. Missing directories are
+created relative to that held authority only after replay; retained input
+handles are checked against their names and exact bytes before creation.
+
+All missing subjects are written and settled under exclusive `.fetch-stage-*`
+names before any digest name is published. Those names are not resolver
+`.json` inputs. Publication uses descriptor-relative no-replace renames, then
+checks held identities, exact bytes and the directory chain before producing
+`semaprax.fetch-receipt.v2` with `lock_binding: true`. `present` means the exact
+entry was held during preflight; `added` means this invocation published it.
+A competing new destination is refused, even when its bytes match.
+
+This is not atomic multi-file visibility. An I/O or interference failure can
+retain stages and a published prefix; failures after any publication explicitly
+report partial/uncertain completion and print no success receipt. There is no
+pathname rollback or automatic deletion. A retained `.fetch-stage-*` entry
+blocks subsequent lock-bound fetches until the caller explicitly reconciles
+the cache. The directory lock coordinates cooperating writers only: the host
+must exclude uncooperative same-principal namespace/content mutation during the
+invocation. Path and byte rechecks detect interference but do not turn advisory
+locking into protection against a malicious process with the same credentials.
+The existing unlocked fetch form does not acquire this stronger host contract.
 
 ## Guided help
 
@@ -323,6 +357,11 @@ room, and the exhaustive catalog remains the grammar authority.
   exact receipt, reports refetches as `present`, feeds `resolve` directly, and
   rejects tampered, foreign, missing, and colliding subjects before any write.
 - Unit tests pin the closed grammars, the route table, and the namespace map.
+- `src/cli/fetch/locked/tests.rs` pins held publication, partial-stage failure,
+  retained-stage refusal, root/parent substitution, concurrent destination and
+  same-byte replacement, partial publication, cooperative contention, bounded
+  input reads and input identity replacement. This additive gate is local
+  evidence only, not part of the historical release baseline above.
 
 ## `semaprax network-run`
 

@@ -54,7 +54,11 @@ keeping with the rule that registry access is never an implicit compiler
 action. `semaprax fetch <cache-dir> <subject.json>...` ([Unified CLI v1](UNIFIED-CLI-V1.md))
 is that explicit step over caller-named local subject files: it replays each
 subject and files it by digest, with no registry, network, or version
-selection. This toolchain ships no `update` and no registry client.
+selection. Its narrower `fetch --lock <lock.json> <cache-dir> <subject.json>...`
+form requires the exact caller-supplied Lock-v3 bytes to replay the complete
+supplied subject set before the CLI host files anything. It is a local
+held-artifact/cache boundary, not a registry client or a trust decision. This
+toolchain ships no `update` and no registry client.
 
 ## Determinism and authority
 

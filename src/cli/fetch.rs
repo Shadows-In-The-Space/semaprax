@@ -4,7 +4,9 @@
 //! is filed under its own digest; a subject that fails replay, a digest that
 //! does not match, or a cache entry with different bytes at the same address
 //! rejects the whole run before any write. The command reads only the paths it
-//! is given and contacts no registry or network.
+//! is given and contacts no registry or network. `--lock` adds a held-artifact
+//! boundary: the exact caller-supplied Lock-v3 must replay precisely the named
+//! subject bytes before this host writes the caller-selected cache directory.
 
 use std::path::{Path, PathBuf};
 
@@ -12,18 +14,48 @@ use semaprax::diagnostic::{quote_json, Diagnostic};
 use semaprax::package_lock_v3::{verify_dependency_subject, VerifiedDependencySubject};
 use semaprax::package_resolver_v2::{MAX_SUBJECTS, MAX_SUBJECT_BYTES};
 
-const USAGE: &str = "fetch requires exactly <cache-dir> <subject.json>...";
+const USAGE: &str = "fetch requires <cache-dir> <subject.json>... or --lock <lock.json> <cache-dir> <subject.json>...";
 const CODE: &str = "SPX-J128";
+
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "redox"
+    )
+))]
+mod locked;
 
 pub(crate) struct FetchOptions {
     pub(crate) cache: PathBuf,
     pub(crate) subjects: Vec<PathBuf>,
+    pub(crate) lock: Option<PathBuf>,
 }
 
 pub(crate) fn parse(args: &[String]) -> Result<FetchOptions, u8> {
-    if args.len() < 2
-        || args.len() > MAX_SUBJECTS + 1
-        || args
+    let (lock, cache, subjects) = match args {
+        [flag, lock, cache, subjects @ ..]
+            if flag == "--lock"
+                && !lock.is_empty()
+                && !cache.is_empty()
+                && !lock.starts_with('-')
+                && !cache.starts_with('-') =>
+        {
+            (Some(PathBuf::from(lock)), cache, subjects)
+        }
+        [cache, subjects @ ..] if !cache.is_empty() && !cache.starts_with('-') => {
+            (None, cache, subjects)
+        }
+        _ => {
+            eprintln!("{USAGE}");
+            return Err(2);
+        }
+    };
+    if subjects.is_empty()
+        || subjects.len() > MAX_SUBJECTS
+        || subjects
             .iter()
             .any(|argument| argument.is_empty() || argument.starts_with('-'))
     {
@@ -31,8 +63,9 @@ pub(crate) fn parse(args: &[String]) -> Result<FetchOptions, u8> {
         return Err(2);
     }
     Ok(FetchOptions {
-        cache: PathBuf::from(&args[0]),
-        subjects: args[1..].iter().map(PathBuf::from).collect(),
+        cache: PathBuf::from(cache),
+        subjects: subjects.iter().map(PathBuf::from).collect(),
+        lock,
     })
 }
 
@@ -63,6 +96,20 @@ fn read_subject(path: &Path) -> Result<String, Vec<Diagnostic>> {
 /// Replay every subject, decide each cache address, and only then write the
 /// ones that are new. The receipt names every subject in operand order.
 pub(crate) fn run(options: &FetchOptions) -> Result<String, Vec<Diagnostic>> {
+    if options.lock.is_some() {
+        #[cfg(all(
+            unix,
+            any(
+                target_os = "linux",
+                target_os = "android",
+                target_vendor = "apple",
+                target_os = "redox"
+            )
+        ))]
+        return locked::run(options);
+        #[cfg(not(all(unix, any(target_os = "linux", target_os = "android", target_vendor = "apple", target_os = "redox"))))]
+        return Err(cache_error("lock-bound fetch requires held-directory no-replace publication unavailable on this host".to_owned()));
+    }
     let cache = &options.cache;
     if let Ok(metadata) = std::fs::symlink_metadata(cache) {
         if !metadata.is_dir() {
@@ -119,7 +166,13 @@ pub(crate) fn run(options: &FetchOptions) -> Result<String, Vec<Diagnostic>> {
                 }
                 true
             }
-            Err(_) => false,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                return Err(cache_error(format!(
+                    "cannot inspect cache entry {}: {error}",
+                    destination.display()
+                )));
+            }
         };
         filed.push(Filed {
             subject,
@@ -138,7 +191,13 @@ pub(crate) fn run(options: &FetchOptions) -> Result<String, Vec<Diagnostic>> {
                     .is_some_and(|extension| extension == "json")
             })
             .count(),
-        Err(_) => 0,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => {
+            return Err(cache_error(format!(
+                "cannot inspect cache {}: {error}",
+                cache.display()
+            )));
+        }
     };
     let mut added = std::collections::BTreeSet::new();
     for entry in &filed {
@@ -160,15 +219,47 @@ pub(crate) fn run(options: &FetchOptions) -> Result<String, Vec<Diagnostic>> {
             continue;
         }
         let destination = cache.join(format!("{}.json", entry.hex));
-        if destination.exists() {
-            continue;
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                if let Err(error) = file
+                    .write_all(entry.bytes.as_bytes())
+                    .and_then(|_| file.sync_all())
+                {
+                    return Err(cache_error(format!(
+                        "cannot write cache entry {}; cache may be partially written: {error}",
+                        destination.display()
+                    )));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let existing = match std::fs::read_to_string(&destination) {
+                    Ok(existing) => existing,
+                    Err(read_error) => {
+                        return Err(cache_error(format!(
+                            "cannot read cache entry {} after concurrent creation: {read_error}",
+                            destination.display()
+                        )));
+                    }
+                };
+                if existing != entry.bytes {
+                    return Err(cache_error(format!(
+                        "cache entry {} changed to different bytes during filing",
+                        destination.display()
+                    )));
+                }
+            }
+            Err(error) => {
+                return Err(cache_error(format!(
+                    "cannot create cache entry {}: {error}",
+                    destination.display()
+                )));
+            }
         }
-        std::fs::write(&destination, &entry.bytes).map_err(|error| {
-            cache_error(format!(
-                "cannot write cache entry {}: {error}",
-                destination.display()
-            ))
-        })?;
     }
     let mut receipt = format!(
         "{{\"schema\":\"semaprax.fetch-receipt.v1\",\"cache\":{},\"subjects\":[",
@@ -203,6 +294,9 @@ mod tests {
         let options = parse(&strings(&["cache", "a.json", "b.json"])).unwrap();
         assert_eq!(options.cache, PathBuf::from("cache"));
         assert_eq!(options.subjects.len(), 2);
+        assert!(options.lock.is_none());
+        let held = parse(&strings(&["--lock", "held.lock", "cache", "a.json"])).unwrap();
+        assert_eq!(held.lock, Some(PathBuf::from("held.lock")));
         let mut too_many = vec!["cache".to_owned()];
         too_many.extend((0..=MAX_SUBJECTS).map(|index| format!("{index}.json")));
         assert!(parse(&too_many).is_err());
@@ -211,6 +305,8 @@ mod tests {
             &["cache"][..],
             &["cache", "--json"][..],
             &["", "a.json"][..],
+            &["--lock", "held.lock", "cache"][..],
+            &["--lock", "", "cache", "a.json"][..],
         ] {
             assert!(parse(&strings(malformed)).is_err(), "{malformed:?}");
         }

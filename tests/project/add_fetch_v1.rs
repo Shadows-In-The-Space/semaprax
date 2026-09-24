@@ -313,3 +313,152 @@ fn fetch_rejects_tampered_subjects_and_content_address_collisions_before_writing
         assert_eq!(output.status.code(), Some(2), "{arguments:?}");
     }
 }
+
+#[test]
+#[cfg(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "redox"
+    )
+))]
+fn lock_bound_fetch_files_only_the_exact_held_subject_set() {
+    let fixture = fixture("lock-bound-fetch", MANIFEST);
+    let root = &fixture.root;
+    let meaning = subject("examples.meaning", "1.0.0", "examples/meaning.spx", &[]);
+    let calculator = subject(
+        "examples.calculator",
+        "2.0.0",
+        "examples/calculator.spx",
+        &[],
+    );
+    let lock = package_lock_v3::generate(
+        std::slice::from_ref(&meaning),
+        &package_lock_v3::LockOptions::default(),
+    )
+    .expect("exact lock");
+    std::fs::create_dir_all(root.join("inbox")).unwrap();
+    std::fs::write(root.join("inbox/lock.json"), &lock).unwrap();
+    std::fs::write(root.join("inbox/meaning.json"), &meaning).unwrap();
+    std::fs::write(root.join("inbox/calculator.json"), &calculator).unwrap();
+
+    let fetched = cli(
+        root,
+        &[
+            "fetch",
+            "--lock",
+            "inbox/lock.json",
+            "held-cache",
+            "inbox/meaning.json",
+        ],
+    );
+    assert!(fetched.status.success(), "{}", text(&fetched.stderr));
+    let receipt: Value = serde_json::from_str(&text(&fetched.stdout)).unwrap();
+    assert_eq!(receipt["schema"], "semaprax.fetch-receipt.v2");
+    assert_eq!(receipt["lock_binding"], true);
+    assert_eq!(receipt["subjects"][0]["state"], "added");
+    let repeated = cli(
+        root,
+        &[
+            "fetch",
+            "--lock",
+            "inbox/lock.json",
+            "held-cache",
+            "inbox/meaning.json",
+        ],
+    );
+    assert!(repeated.status.success(), "{}", text(&repeated.stderr));
+    let receipt: Value = serde_json::from_slice(&repeated.stdout).unwrap();
+    assert_eq!(receipt["subjects"][0]["state"], "present");
+    let hex = digest_hex(&meaning);
+    assert_eq!(
+        std::fs::read_to_string(root.join("held-cache").join(format!("{hex}.json"))).unwrap(),
+        meaning
+    );
+
+    // A subject swapped for another valid subject cannot stand in for the
+    // lock's held bytes. The all-or-nothing preflight leaves no new cache.
+    let swapped = cli(
+        root,
+        &[
+            "fetch",
+            "--lock",
+            "inbox/lock.json",
+            "swapped-cache",
+            "inbox/calculator.json",
+        ],
+    );
+    assert_eq!(swapped.status.code(), Some(1));
+    assert!(!root.join("swapped-cache").exists());
+
+    // A stale lock is also exact-byte replay failure, not a cache-key
+    // substitution. Reusing the old lock after changing the held input cannot
+    // roll a cache backwards.
+    let stale = cli(
+        root,
+        &[
+            "fetch",
+            "--lock",
+            "inbox/lock.json",
+            "stale-cache",
+            "inbox/meaning.json",
+            "inbox/calculator.json",
+        ],
+    );
+    assert_eq!(stale.status.code(), Some(1));
+    assert!(!root.join("stale-cache").exists());
+
+    // A tampered cache address is never overwritten, even when the supplied
+    // lock and subject themselves replay exactly.
+    std::fs::create_dir(root.join("tampered-cache")).unwrap();
+    std::fs::write(
+        root.join("tampered-cache").join(format!("{hex}.json")),
+        "foreign\n",
+    )
+    .unwrap();
+    let tampered = cli(
+        root,
+        &[
+            "fetch",
+            "--lock",
+            "inbox/lock.json",
+            "tampered-cache",
+            "inbox/meaning.json",
+        ],
+    );
+    assert_eq!(tampered.status.code(), Some(1));
+    assert_eq!(
+        std::fs::read_to_string(root.join("tampered-cache").join(format!("{hex}.json"))).unwrap(),
+        "foreign\n"
+    );
+}
+
+#[test]
+#[cfg(not(all(
+    unix,
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "redox"
+    )
+)))]
+fn lock_bound_fetch_refuses_unsupported_host_before_cache_effects() {
+    let fixture = fixture("lock-bound-unsupported", MANIFEST);
+    let output = cli(
+        &fixture.root,
+        &[
+            "fetch",
+            "--lock",
+            "missing-lock.json",
+            "cache",
+            "missing-subject.json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("SPX-J128"));
+    assert!(output.stdout.is_empty());
+    assert!(!fixture.root.join("cache").exists());
+}

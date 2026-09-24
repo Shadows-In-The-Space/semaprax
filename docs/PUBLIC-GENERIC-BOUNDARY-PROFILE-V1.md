@@ -22,11 +22,9 @@ implementer of issue #150 and every issue downstream of it.
 
 ## Why this document exists
 
-Three overlapping issue packs describe the same callable public generic
-boundary at different levels of detail: the original design issue (#132), the
-granular implementation spine (#149-#166), and the descriptor/carrier pair
-(#170-#171). Read together rather than singly, they disagree on how wide the
-admitted shape is:
+Three issue packs describe this boundary at different levels: design (#132),
+implementation (#149-#166), and descriptor/carrier work (#170-#171). Their
+scope wording conflicts:
 
 - #132's own "Bounded scope" section proposes "one nonrecursive owned record
   with one `Bytes` leaf and admitted Copy fields" as the experimental

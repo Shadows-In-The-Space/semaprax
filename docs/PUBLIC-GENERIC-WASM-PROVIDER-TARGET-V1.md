@@ -13,9 +13,8 @@ In plain terms: the compiler can build this narrowly defined Wasm provider, but 
 
 ## Manifest contract
 
-The profile is available only through the canonical `semaprax.manifest.v1`
-table layout. It lowers to the internal project contract
-`semaprax.project.v20`; no frozen positional v20 manifest is accepted.
+The profile is available only through canonical `semaprax.manifest.v1` tables.
+It lowers to `semaprax.project.v20`; frozen positional v20 manifests fail.
 
 The manifest must contain:
 
@@ -25,9 +24,8 @@ The manifest must contain:
 - no effect, interface, permit, or publication authority; and
 - the ordinary bounded source and test-module inventories.
 
-Existing scalar, text, byte, owned-data, and record profiles are unchanged.
-In particular, this profile does not relax `SPX-W115` or reinterpret an
-existing `web_export` calling convention.
+Existing profiles are unchanged. In particular, this one does not relax
+`SPX-W115` or reinterpret an existing `web_export` calling convention.
 
 ## Admission product
 

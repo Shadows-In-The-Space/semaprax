@@ -10,12 +10,10 @@ broader product completion remain separately gated.
 
 Audience: compiler contributors, generated-package integrators, and promotion reviewers.
 
-This additive Project-v9 projection is derived from an authenticated
-`semaprax.public-flat-owned-record-api.v1` descriptor. It layers a safe C++17
-value API over the low-level C provider boundary described by
+This Project-v9 projection derives a safe C++17 value API from the authenticated
+descriptor and the C provider boundary in
 [Public Flat Owned Record API v1](PUBLIC-FLAT-OWNED-RECORD-API-V1.md). It does
-not change Project-v9 admission, descriptor bytes, provider symbols, or the
-provider carrier.
+not change admission, descriptor bytes, provider symbols, or the carrier.
 
 ## Generated surface
 

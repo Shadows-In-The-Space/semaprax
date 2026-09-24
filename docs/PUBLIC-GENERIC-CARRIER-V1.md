@@ -4,22 +4,15 @@ In plain terms: this is the ownership-carrying wire contract used by providers.
 
 Audience: backend provider authors on native and Core Wasm, and reviewers of the ownership and settlement contract.
 
-Status: frozen logical specification with a reference codec and local
-evidence (`src/public_generic_abi/carrier.rs`, and its `frame`, `machine`,
-and `trace` submodules). This is the carrier half of gate #150-#153 of the
+Status: frozen logical specification with a reference codec and local evidence
+(`src/public_generic_abi/carrier.rs` and its `frame`, `machine`, and `trace`
+submodules). This is the carrier half of gate #150-#153 of the
 [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md)
 and answers issue #171 and issue #153. It defines the ownership state
-machine, the phase ledger, a `CarrierBindingV1` wire binding, [Canonical
-carrier bytes](#canonical-carrier-bytes) (`LogicalCarrierFrame`, the
-payload-bearing wire frame, and `CarrierFrameBinding`, which validates one
-against a real `VerifiedPublicGenericDescriptor`-derived plan), the
-[call-machine orchestration](#the-call-machine) that drives the state
-machine and phase ledger together atomically, and the [normalized trace
-vocabulary](#the-normalized-trace) — all as pure, locally-tested logic. It
-defines **no physical target mapping** — no C struct layout, no Wasm handle
-table implementation, no Rust FFI boundary — and executes nothing itself:
-there is no provider, no allocator, and no real target to allocate,
-transfer, or release against, in this LOGICAL section.
+machine, phase ledger, `CarrierBindingV1`, canonical bytes, call orchestration,
+and normalized traces as pure local logic. Its LOGICAL part defines **no** C
+layout, Wasm handle table, Rust FFI boundary, provider, allocator, or target
+operation.
 [Native C11 physical adapter (issue #154)](#native-c11-physical-adapter-issue-154)
 and [Core Wasm physical adapter (issue #155)](#core-wasm-physical-adapter-issue-155)
 below are the first two PHYSICAL adapters built on top of it, each with real

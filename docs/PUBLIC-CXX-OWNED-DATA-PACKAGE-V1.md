@@ -7,10 +7,9 @@ Audience: compiler, native-provider, C ABI, and C++ SDK maintainers.
 
 ## Subject and artifact
 
-The package is available only for an already authenticated exact
-`semaprax.project.v8` / `owned-data-api.v1` Project. The compiler reuses and
-replays `semaprax.public-owned-data-api.v1`, then emits the existing native
-provider and two new projections. It does not rediscover admission from source.
+The package starts only from an authenticated exact
+`semaprax.project.v8` / `owned-data-api.v1` Project. It replays the existing
+descriptor instead of deciding admission again from source.
 
 `semaprax.project-cxx-owned-data-package.v1` is compact canonical JSON in this
 order: `schema`, Project schema/revision/workspace revision/graph digest, then
@@ -22,12 +21,10 @@ canonical byte length, and the exact canonical bytes. Verification regenerates
 all bytes from the held Project and compares them exactly; hashes cannot remint
 an artifact.
 
-The complete canonical package is at most 4,194,304 bytes. Semantic-provider
-and canonical-provider logical output bytes are pre-bounded; an explicit
-structural reserve covers the fixed runtime and maximum 32 export adapters.
-This is not a claim about allocator capacity or total resident memory.
-Borrowed input and owned output remain cumulatively bounded to 65,536 bytes.
-Project v1-v7 and v9-v11 artifacts are unchanged.
+The canonical package is at most 4,194,304 bytes, including a fixed runtime
+and at most 32 adapters. This bounds artifact bytes, not allocator capacity or
+resident memory. Borrowed input and owned output together stay within 65,536
+bytes; Project v1-v7 and v9-v11 remain unchanged.
 
 ## C boundary
 

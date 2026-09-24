@@ -5,10 +5,9 @@ In plain terms: this defines what each generated consumer must independently che
 Audience: generated-consumer integrators, ABI reviewers, and promotion
 reviewers.
 
-Status: the four metadata consumers below are an implemented bounded
-generator, hosted green on Linux, macOS, and Windows with all four consumer
-toolchains exercised on each. This closes the *grammar* half of gates PG-5
-and PG-6 of the
+Status: the four metadata consumers are an implemented bounded generator,
+hosted green on Linux, macOS, and Windows with all four toolchains exercised.
+This closes the *grammar* half of gates PG-5 and PG-6 of the
 [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md).
 The *calling* half now has a first, local-only implementation for Rust (see
 [Rust calling consumer (issue #156)](#rust-calling-consumer-issue-156)
@@ -26,14 +25,11 @@ that did not exist when the metadata half closed; both gates stay open for
 hosted evidence of all four languages. Public generic ownership remains
 unsupported and unpublished.
 
-The generated TypeScript calling package now emits canonical descriptor-bound
-Logical Carrier v1 frames and drives the compiler-owned zero-import Wasm
-provider through open/prepare/call/export/release/close. The earlier stand-in
-and flat-frame passages below describe the still-active, explicitly selected
-reference shared-corpus lane; they must not be read as the current compiled-
-package limitation or as a fallback from the compiled binding. Full shared-
-corpus migration, broader endpoint shapes, browser/hosted evidence, and
-publication remain open.
+The TypeScript package emits descriptor-bound Logical Carrier v1 frames and
+drives the compiler-owned zero-import Wasm provider through its full lifecycle.
+Earlier stand-in and flat-frame text describes the separately selected reference
+corpus lane, not a fallback. Shared-corpus migration, broader endpoints,
+browser/hosted evidence, and publication remain open.
 
 The four calling-consumer generators retain their byte-oriented configuration
 API: generation embeds the supplied trusted descriptor bytes without granting

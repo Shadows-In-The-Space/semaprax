@@ -9,13 +9,11 @@ reviewers.
 
 In plain terms: this is the bounded UTF-8 API contract and its evidence; it does not approve publishing a package.
 
-The v0.2.0 tag commit `5f6fb9655fdec92c57ab71615cfd7bfa8cc76051`
-passed the complete blocking
+The v0.2.0 commit passed its blocking
 [release run](https://github.com/wavect/semaprax/actions/runs/33608662244),
-including the Windows v10 generated-Rust consumer and the tagged Rust/Project
-matrices. Authoring-time “unrun” statements below are superseded only for
-nonignored cases selected by that workflow. No package publication, separate
-provisioned/ignored gate, or formal v9/v10 promotion is inferred.
+including the Windows v10 Rust consumer and tagged matrices. That does not
+publish a package, cover separately provisioned or ignored gates, or promote
+v9/v10.
 
 ## Closed identity
 

@@ -4,26 +4,14 @@ In plain terms: this is the canonical descriptor that consumers replay.
 
 Audience: compiler contributors producing descriptors, and authors of independent verifiers and foreign-language consumers.
 
-Status: frozen wire-format specification with a reference codec, local
-evidence, and a real-HIR producer (`src/public_generic_abi/descriptor.rs` and
-its `producer` submodule). This is the descriptor half of gate #150-#152 of
-the [Public Generic Ownership
-milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md) and answers issues #170
-and #151. The reference codec encodes and decodes a `DescriptorV1` value and
-replays it byte-for-byte. `producer::generate_public_generic_descriptor`
-(issue #151) derives that value from a real checked `ResolvedProgram` and a
-caller-supplied source revision — see [Derivation from checked
-facts](#derivation-from-checked-facts-the-producer) below. [Public Generic
-Boundary Profile v1](PUBLIC-GENERIC-BOUNDARY-PROFILE-V1.md)'s own classifier
-(`src/public_generic_abi/classifier.rs`, issue #150's implementation half)
-now exists; the producer still performs its own local v1 export-shape
-predicate rather than calling the classifier wholesale (the two modules'
-refusal vocabularies and precedence order are independently documented and
-tested, and converging them into one call path is separate, reviewable
-follow-on work), but it now reuses the classifier's own `pub(crate)`
-per-record field-count check directly rather than leaving that frozen bound
-unenforced here, closing a gap this document previously left open. Public
-generic ownership remains unsupported and unpublished.
+Status: frozen wire format with a reference codec, local evidence, and a
+real-HIR producer (`src/public_generic_abi/descriptor.rs` and `producer`). It
+is the descriptor half of gates #150-#152 and issues #170/#151. The codec
+replays `DescriptorV1` byte-for-byte; the producer derives it from checked HIR
+and a source revision. The boundary classifier exists, but this producer keeps
+its separately specified v1 shape predicate and refusal order while reusing the
+classifier's `pub(crate)` per-record field-count check. Public generic ownership
+remains unsupported and unpublished.
 
 Audience: ABI, package, evidence, and generated-consumer maintainers.
 

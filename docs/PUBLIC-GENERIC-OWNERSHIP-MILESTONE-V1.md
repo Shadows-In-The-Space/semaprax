@@ -12,16 +12,12 @@ In plain terms: this is the gate checklist and standing decision, not proof that
 
 Audience: language, ABI, package, evidence, and promotion reviewers.
 
-**Local implementation update, 2026-09-23:** the compiler-owned zero-import
-Wasm provider now runs through its generated TypeScript package using canonical
-descriptor-bound carrier frames. A separate private
-`semaprax.authenticated-native-identity.v1` profile authenticates that frame at
-the physical C entry point and invokes one compiler-checked flat owned-`Bytes`
-identity body. These local additions supersede older blanket statements below
-that no compiled Wasm provider or compiler-derived physical endpoint exists;
-they do not change the `unsupported`/`unpublished` decision. Broader endpoint
-shapes, shared hostile/settlement coverage, hosted evidence, and the formal
-freeze remain open.
+**Local implementation update, 2026-09-23:** the zero-import Wasm provider now
+runs through its TypeScript package with descriptor-bound carrier frames. The
+private `semaprax.authenticated-native-identity.v1` profile authenticates the
+same frame at C and calls one checked flat owned-`Bytes` identity body. These
+local additions do not change the `unsupported`/`unpublished` decision; broader
+endpoints, shared corpus coverage, hosted evidence, and the formal freeze remain open.
 
 **Correction, 2026-09-19 (issue #164 audit):** six of the eight hosted-green
 gates above (PG-1 through PG-4, PG-8) were already hosted green for

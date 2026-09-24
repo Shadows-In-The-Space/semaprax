@@ -7,14 +7,12 @@ recorded. It projects types and nothing calls it.
 
 Audience: ABI, WIT/Component, package, and evidence reviewers.
 
-A documentation-tracked slice of issue #176, gated behind PG-9 of the
+This is issue #176's documentation-tracked slice, gated behind PG-9 of the
 [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md).
-**Public generic ownership is not supported or published, and this document
-does not change that.** No public generic export exists, no compiled `.wasm`
-implements the provider ABI (open issue #229), and no engine has executed a
-component built from this projection. What exists is a deterministic,
-refusal-total *type* projection from an already-checked Boundary Profile v1
-admission to WIT `record`/`resource` text.
+**Public generic ownership remains unsupported and unpublished.** There is no
+public export or compiled provider ABI here. The implemented part is a
+deterministic, refusal-total projection from checked Boundary Profile v1 facts
+to WIT `record`/`resource` text.
 
 In plain terms: this writes safe, repeatable WIT type text from approved types; it does not create or run a public component.
 

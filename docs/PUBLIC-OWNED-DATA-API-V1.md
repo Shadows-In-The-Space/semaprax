@@ -9,27 +9,19 @@ contributors.
 
 In plain terms: this is a fixed safe-data API for a named set of functions, with generated clients but no package publication.
 
-GitHub issue [#145](https://github.com/wavect/semaprax/issues/145) chose this
-exact profile as the candidate for a maintained, reproducible generated-package
-consumer route. `scripts/generated-package-release.py` prepares a preview
-bundle (deterministic README/LICENSE/checksum manifest around the compiler's
-own unchanged output) and dry-run-checks it; it never publishes anything. See
-[docs/GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md](GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md)
-for the unapproved draft maintainer decision this prepares for.
+Issue [#145](https://github.com/wavect/semaprax/issues/145) selected this
+profile for a reproducible generated-package route.
+`scripts/generated-package-release.py` only prepares and dry-run-checks a
+deterministic preview bundle; it never publishes it. The decision remains an
+[unapproved draft](GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md).
 
-Public Owned Data API v1 defines one additive Project profile for calling a
-closed set of stable-ID functions from JavaScript/TypeScript and safe Rust. It
-extends the existing fixed-memory byte-data mechanism with controlled owned
-byte results. Project Manifest v8, both generated consumer routes, the
-reference-interpreter lane, and their focused evidence are present in the
-current source tree. The v0.2.0 tag commit
+Public Owned Data API v1 adds one Project profile for a closed stable-ID
+function set in JavaScript/TypeScript and safe Rust. It adds controlled owned
+byte results to the fixed-memory byte-data mechanism. The v0.2.0 commit
 `5f6fb9655fdec92c57ab71615cfd7bfa8cc76051` passed the complete blocking
 [release run](https://github.com/wavect/semaprax/actions/runs/33608662244),
-including the three-host Rust inventories and selected consumer/sanitizer
-jobs. This supersedes authoring-time “unrun” wording only for nonignored tests
-actually selected by that workflow. It does not publish either generated
-package, execute every separately provisioned case, or complete formal API
-promotion.
+including listed Rust and consumer coverage. It does not publish a package,
+cover separately provisioned cases, or complete promotion.
 
 The profile deliberately copies every successful owned result into host-owned
 storage before publication. It does not expose a SEMAPRAX pointer, allocator,

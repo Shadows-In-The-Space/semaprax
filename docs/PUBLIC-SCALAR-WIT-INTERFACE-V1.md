@@ -10,12 +10,10 @@ In plain terms: this records the exact scalar WIT shape from an approved Project
 
 Audience: Project, interoperability, package, and host-tool maintainers.
 
-This specification defines an authority-free public WIT interface artifact for
-the exact retained Project-v1 scalar export surface. It does not emit or run a
-WebAssembly Component. The distinction is mandatory: current public scalar
-Core Wasm reports checked language failures through its existing host/runtime
-boundary, so presenting a direct canonical lift as a typed WIT result would be
-false.
+This specification derives an authority-free WIT interface from the retained
+Project-v1 scalar export surface. It does not emit or run a Component. The
+existing Core Wasm path reports checked language failures through its host/runtime
+boundary, so it cannot truthfully be presented as a direct typed WIT lift.
 
 ## Closed admission
 

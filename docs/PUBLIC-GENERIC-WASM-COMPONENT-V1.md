@@ -13,11 +13,10 @@ In plain terms: this produces one private Component Model artifact from an alrea
 
 ## Admission and derivation
 
-The input is the exact checked `ProjectRevision` and the retained
-`AdmittedPublicGenericEndpointV1` replayed by that revision. The endpoint must
-remain synchronous and effect-free. The existing provider admission rule is
-unchanged: both input and result have exactly two ordered owned-`Bytes` leaves.
-No new source forms or leaf-count allowance are admitted here.
+Input is the checked `ProjectRevision` and its retained
+`AdmittedPublicGenericEndpointV1`. The endpoint stays synchronous and
+effect-free, with exactly two ordered owned-`Bytes` leaves on both sides. This
+admits no new source form or leaf count.
 
 Derivation is deterministic and takes no caller-selected descriptor, endpoint,
 binding, WIT, or toolchain facts. The artifact binds the exact replayed

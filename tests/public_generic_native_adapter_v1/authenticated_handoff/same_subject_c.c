@@ -3,6 +3,9 @@
 extern size_t auth_allocations(void);
 extern size_t auth_live(void);
 extern size_t auth_calls(void);
+#ifndef EXPECT_REFUSAL
+#define EXPECT_REFUSAL 14
+#endif
 #if MODE == 1
 /* CANONICAL_FRAME */
 #endif
@@ -48,7 +51,12 @@ int main(void) {
             assert(output.OUTPUT1.len == sizeof(second) && memcmp(output.OUTPUT1.data, second, sizeof(second)) == 0);
         } else { assert(!output.OUTPUT0.data && !output.OUTPUT1.data && !output.OUTPUT0.len && !output.OUTPUT1.len); }
 #elif MODE == 2
-        assert(status == SPX_PG_CONSUMER_CARRIER_REJECTED && report.native_status == 14);
+        const spx_pg_consumer_status expected = EXPECT_REFUSAL == 7 || EXPECT_REFUSAL == 8
+            ? SPX_PG_CONSUMER_EXECUTION_FAILED : SPX_PG_CONSUMER_CARRIER_REJECTED;
+        if (status != expected || report.native_status != EXPECT_REFUSAL) {
+            assert(auth_calls() == 1 && auth_allocations() > before);
+            return 77; /* A check-omission control must actually reach physical work. */
+        }
 #else
         assert(status == SPX_PG_CONSUMER_CARRIER_REJECTED && report.native_status == SPX_PG_STATUS_MALFORMED_CARRIER);
 #endif

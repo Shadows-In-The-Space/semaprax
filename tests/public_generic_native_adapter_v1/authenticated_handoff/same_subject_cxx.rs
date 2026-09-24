@@ -90,7 +90,7 @@ pub(super) fn observe(
             ),
         )
         .unwrap();
-        write_driver(&directory, &input, &output, mode, guard);
+        write_driver(&directory, &input, &output, mode, guard, 14);
         for opt in ["-O0", "-O2"] {
             compile_and_run(&directory, opt);
             eprintln!("generated C++17 requires={guard} {label} {opt}: two transforms, typed/raw status, zero prephysical refusal, move/RAII/close assertions passed");
@@ -162,7 +162,14 @@ fn write_consumer(root: &Path, consumer: &CallingConsumer) {
     }
 }
 
-fn write_driver(root: &Path, input: &RecordShape, output: &RecordShape, mode: u8, guard: bool) {
+pub(super) fn write_driver(
+    root: &Path,
+    input: &RecordShape,
+    output: &RecordShape,
+    mode: u8,
+    guard: bool,
+    refusal: u8,
+) {
     let field = |path: &str| {
         format!(
             "field_{}",
@@ -175,6 +182,7 @@ fn write_driver(root: &Path, input: &RecordShape, output: &RecordShape, mode: u8
     for (token, value) in [
         ("@MODE@", mode.to_string()),
         ("@GUARD@", guard.to_string()),
+        ("@REFUSAL@", refusal.to_string()),
         ("@INPUT0@", field(&input.fields[0].identity)),
         ("@INPUT1@", field(&input.fields[1].identity)),
         ("@OUTPUT0@", field(&output.fields[0].identity)),

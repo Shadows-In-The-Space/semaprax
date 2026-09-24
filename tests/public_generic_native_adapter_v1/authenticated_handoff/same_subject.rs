@@ -3,6 +3,8 @@
 //! Interpreter events describe result copy-out only, not physical handle cleanup.
 #[path = "same_subject_c.rs"]
 mod c;
+#[path = "caller_hostility.rs"]
+mod caller_hostility;
 #[path = "same_subject_cxx.rs"]
 mod cxx;
 #[path = "same_subject_interpreter.rs"]

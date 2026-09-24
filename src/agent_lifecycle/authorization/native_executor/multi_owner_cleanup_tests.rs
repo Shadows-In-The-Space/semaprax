@@ -110,19 +110,28 @@ fn native_multi_owner_cleanup_order_is_physical_and_hostile_mutants_reject() {
         field_symbol(&DeclarationId::new("fixture.multi_owner.Output.second"))
     );
 
+    let mut argument_emitter = Emitter::new();
+    argument_emitter.bytes_expr(b"left");
+    argument_emitter.bytes_expr(b"right!");
+    let original_owned_expression = argument_emitter.bytes_expr(b"owned");
+    assert_eq!(base_body.matches(&original_owned_expression).count(), 1);
+    let captured_owned_expression =
+        format!("(test_original_owned = {original_owned_expression}, test_original_owned)");
+    let mut body = base_body.replacen(&original_owned_expression, &captured_owned_expression, 1);
+    body.insert_str(0, "    spx_bytes_v1 test_original_owned = {0};\n");
+
     let call_prefix = format!(
         "    spx_status_token spx_native_exec_token = {}(",
         function_symbol(&entry.id)
     );
-    let call_start = base_body.find(&call_prefix).expect("entry call rendered");
-    let call_end = base_body[call_start..]
+    let call_start = body.find(&call_prefix).expect("entry call rendered");
+    let call_end = body[call_start..]
         .find('\n')
         .map(|offset| call_start + offset + 1)
         .expect("entry call line ends");
     let identity_probe = format!(
-        "    test_expected[0] = (void *)({left_arg}).ptr;\n    test_expected[1] = (void *)({right_arg}).ptr;\n    test_expected[2] = (void *)({output_second}).ptr;\n    test_expected[3] = (void *)({output_first}).ptr;\n"
+        "    if ((void *)({output_second}).ptr != (void *)test_original_owned.ptr || (void *)({output_first}).ptr == (void *)test_original_owned.ptr) return 94;\n    test_expected[0] = (void *)({left_arg}).ptr;\n    test_expected[1] = (void *)({right_arg}).ptr;\n    test_expected[2] = (void *)test_original_owned.ptr;\n    test_expected[3] = (void *)({output_first}).ptr;\n"
     );
-    let mut body = base_body.clone();
     body.insert_str(call_end, &identity_probe);
 
     let left_drop = settlement(&left_arg, "spx_borrowed_settled");

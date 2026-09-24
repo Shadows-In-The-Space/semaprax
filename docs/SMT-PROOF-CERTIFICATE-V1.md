@@ -10,12 +10,10 @@ obligation join (#129, #183).
 
 `semaprax.smt-proof-certificate.v1`
 (`../src/assurance_manifest/proof_certificate/`) exports one [Bounded SMT
-Discharge v1](SMT-DISCHARGE-V1.md) attempt as a standalone, self-contained
-document bound to the exact source bytes, declaration, and ensures clause it
-was produced from. It is proof data, not permission: exporting or verifying
-a certificate never runs a target, discovers or runs project tests, writes
-source, or removes a runtime guard, and a certificate grants no execution,
-publication, or signing authority.
+Discharge v1](SMT-DISCHARGE-V1.md) attempt as a self-contained document bound
+to exact source bytes, declaration, and `ensures` clause. Export and
+verification never run a target or tests, write source, or remove a runtime
+guard. The certificate grants no execution, publication, or signing authority.
 
 ## Why a separate document, not a manifest merge
 

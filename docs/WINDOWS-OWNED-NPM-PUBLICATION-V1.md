@@ -7,9 +7,9 @@ Audience: compiler contributors, Windows package consumers, and release reviewer
 
 ## Availability and compatibility
 
-Windows Project v8, v9 and v10 npm/Web publication belongs to the unpublished
-`semaprax-full` toolchain. `build --target npm`, `--target web`, `--target wasm`
-and the default Project build select the same profile-specific six-file package.
+The unpublished `semaprax-full` toolchain owns Windows npm/Web publication for
+Project v8, v9, and v10. `build --target npm`, `--target web`, `--target wasm`,
+and default Project build select the same profile-specific six-file package.
 The standalone registry `semaprax` CLI and ordinary root library publication
 reject these Windows routes with `SPX-W120`, directing the caller to
 `semaprax-full`. Rejection precedes output-parent creation. Inline generation,

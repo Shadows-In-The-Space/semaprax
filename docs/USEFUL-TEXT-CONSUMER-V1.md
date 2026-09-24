@@ -4,8 +4,8 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: language users, tool authors, and compiler contributors.
 
-Useful Text Consumer v1 is a deliberately restrictive borrowed UTF-8 input
-profile. Its nonignored regression inventory is exact-tag hosted green at
+Useful Text Consumer v1 admits a narrow borrowed UTF-8 input profile. Its
+nonignored regressions are exact-tag hosted green at
 v0.2.0 commit `5f6fb9655fdec92c57ab71615cfd7bfa8cc76051` in
 [run 33608662244](https://github.com/wavect/semaprax/actions/runs/33608662244).
 That does not widen the profile or imply broader text support.

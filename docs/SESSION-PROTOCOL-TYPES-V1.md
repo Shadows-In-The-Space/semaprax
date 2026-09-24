@@ -15,12 +15,11 @@ Two real subsystems -- `project_transport::session` and
 every lifecycle decision through this engine at runtime, so it is a
 reference validator that real code actually runs on, not one that only
 models real code.
-A later session added a `context`-envelope projection of this module's own
-fixed catalog as declaration-independent reference data
-(`session_protocol_kernel`, gated on `--filters session_protocol`,
-CLI-reachable today) plus the same catalog's full per-transition detail as a
-standalone Rust API, `graph::session_protocol_kernel_json()`, deliberately
-without a CLI verb of its own. A further session evaluated
+A `context`-envelope projection now exposes this module's fixed catalog as
+declaration-independent reference data (`session_protocol_kernel`, selected by
+`--filters session_protocol`, CLI-reachable today). The standalone Rust API
+`graph::session_protocol_kernel_json()` exposes full per-transition detail
+without its own CLI verb. A later review evaluated
 `architecture_claims` and `assurance_manifest` for the same projection and
 argued both are not a fit, with evidence. That argument is a proposed
 *narrowing* of issue #206's architecture/assurance criterion, not

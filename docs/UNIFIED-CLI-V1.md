@@ -11,10 +11,9 @@ compiler contributors.
 
 ## Purpose
 
-The 1.0 command surface converges public workflows on one `semaprax` binary
-and a short list of verbs. These verbs front capabilities the compiler already
-had under protocol-specific names or library APIs. They select and delegate;
-they add no semantic validation or authority of their own.
+The 1.0 CLI gives public workflows one `semaprax` binary and a short verb list.
+Each verb selects an existing compiler capability and delegates to it. The
+verbs add neither semantic validation nor authority.
 
 ## `semaprax review`
 

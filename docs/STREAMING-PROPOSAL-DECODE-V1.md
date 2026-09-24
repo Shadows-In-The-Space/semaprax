@@ -16,16 +16,12 @@ UTF-8, escapes and mutated object keys.
 
 ## Why a new module instead of extending `agent_interaction_schema`
 
-`src/agent_interaction_schema/` derives `CompiledInteractionSchema` from one
-checked source record or variant and decodes one complete `&[u8]` response
-through `CompiledInteractionSchema::decode`. Its own module documentation is
-explicit that this is deliberate: "Whole-value, not streaming... A streaming
-transport can buffer provider output into one complete response before
-calling this same boundary — this module needs nothing from a streaming
-extension to exist." That module (and `src/live_invocation/`, which defines
-the `ProposalDecoder` seam a real deployment binds a whole-document decoder
-to) is leased to other issues' ownership for this round and is read-only
-here regardless.
+`src/agent_interaction_schema/` compiles one checked source record or variant
+and decodes a complete `&[u8]` with `CompiledInteractionSchema::decode`. Its
+whole-value boundary is deliberate: a streaming transport can buffer a complete
+response before calling it. `src/live_invocation/` likewise owns the
+`ProposalDecoder` seam for a whole-document decoder. Both modules belong to
+other issues and remain unchanged here.
 
 This document does not change either module's admitted source language or
 canonical wire format. The streaming module uses the schema's compiled

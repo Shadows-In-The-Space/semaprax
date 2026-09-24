@@ -7,11 +7,10 @@ The complete Everyday testing scope remains open.
 Audience: standard-library authors, compiler contributors, and agents writing
 bounded conformance checks.
 
-This specification adds exact byte comparisons in the same helper family as
-`std.test`, supplied by the sibling `std.test.bytes` package at
-`std/test-bytes`. It does not change the existing `std.test` facade or its
-public descriptor, report schemas, or ambient authority model. The existing
-scalar predicates and failure-bit helpers remain unchanged.
+The sibling `std.test.bytes` package at `std/test-bytes` adds exact byte
+comparisons to the `std.test` helper family. It changes no existing facade,
+public descriptor, report schema, authority model, scalar predicate, or
+failure-bit helper.
 
 ## Functions
 

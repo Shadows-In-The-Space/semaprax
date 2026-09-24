@@ -18,8 +18,7 @@ exactly `string_len(s) == 0`.
 
 ## Admission shape
 
-Free-function intrinsics with compiler-reserved identities were chosen over
-the two alternatives:
+Compiler-reserved free functions avoid two larger changes:
 
 - **Method-call syntax** (`s.len()`) would require primitive-receiver dispatch
   in the verifier, resolver, validator, cleanup planner, graph projection, and

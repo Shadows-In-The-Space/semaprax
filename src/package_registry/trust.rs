@@ -271,7 +271,8 @@ pub fn verify_root_rotation(
     let mut all_signers = BTreeSet::new();
     let mut message = b"semaprax.registry-trust-root.v1\0".to_vec();
     message.extend_from_slice(root_bytes.as_bytes());
-    for row in array(&value["signatures"], MAX_KEYS)? {
+    // A rotation may need the union of two disjoint full root key sets.
+    for row in array(&value["signatures"], MAX_KEYS * 2)? {
         fields(row, &["keyid", "sig"])?;
         let id = digest(&row["keyid"])?;
         if !all_signers.insert(id.clone()) {

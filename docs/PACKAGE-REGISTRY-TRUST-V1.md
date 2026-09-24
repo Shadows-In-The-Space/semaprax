@@ -49,7 +49,8 @@ and role names are 1–128 bytes from lowercase ASCII, digits, dot, and hyphen.
 
 Each trust document is at most 1 MiB. A root has at most 64 distinct keys and
 19 roles: root, timestamp, snapshot, and at most 16 publisher roles. Each
-signature list is at most 64 entries. The complete publisher target inventory
+metadata signature list is at most 64 entries; a root rotation may carry up
+to 128 signatures for the union of old and new key sets. The complete publisher target inventory
 is bounded by the registry's 256 entries. The exact registry snapshot retains
 its existing 16 MiB bound; each manifest retains its 256 KiB bound and closed
 three-artifact linked scalar Wasm profile.

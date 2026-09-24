@@ -184,7 +184,6 @@ macro_rules! typed_process_restart_case {
                 let checkpoint = session.session_checkpoint().expect("terminal checkpoint");
                 let digest = checkpoint.digest();
                 let capacity = checkpoint.capacity();
-                drop(store);
                 drop(directory);
                 spawn_child(TEST_NAME, temp.path(), &digest, capacity, false);
             }
@@ -256,7 +255,6 @@ fn separate_process_content_tamper_refuses_before_adapter() {
     fs::write(&replacement, b"tampered checkpoint").unwrap();
     fs::rename(replacement, temp.path().join(filename))
         .expect("hostile owner rename-replaces checkpoint before fresh child open");
-    drop(store);
     drop(directory);
     spawn_child(TEST_NAME, temp.path(), &digest, capacity, true);
 }

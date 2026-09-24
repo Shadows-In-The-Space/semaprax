@@ -5,6 +5,8 @@ change, so it is not yet a passing local-evidence result. This document does
 not promote a self-hosting rung, transfer formatter authority, define a public
 target ABI, or introduce an owned `Bytes`/string buffer.
 
+Audience: compiler contributors and reviewers of Kernel-0 target evidence.
+
 ## Subject
 
 The closed subject is the five existing scalar byte lanes, in their authored

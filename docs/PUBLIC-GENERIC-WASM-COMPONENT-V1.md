@@ -2,6 +2,9 @@
 
 Status: **private local execution profile; not public support**.
 
+Audience: compiler contributors and reviewers of the private Component Model
+execution profile.
+
 This specification defines an additive callable Component Model artifact over
 the existing `public-generic-wasm-provider.v1` subject. It does not change the
 WIT type projection, descriptor, carrier, Project profile, legacy build routes,

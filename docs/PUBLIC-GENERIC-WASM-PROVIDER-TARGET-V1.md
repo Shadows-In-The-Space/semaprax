@@ -2,6 +2,9 @@
 
 Status: **internal admission and compiler-owned Core Wasm artifact implemented**.
 
+Audience: compiler contributors and reviewers of the internal public-generic
+Wasm provider target.
+
 This document owns the additive compiler target selected by the Package
 Manifest v1 profile `public-generic-wasm-provider.v1`. It creates a checked,
 replayable compiler subject and a closed executable provider for issues #162

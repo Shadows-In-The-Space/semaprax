@@ -7,6 +7,8 @@ claim, authority transfer, or owned Kernel-0 buffer. The private
 checked owned-Bytes transfer around the assembled scalar candidate without
 changing the scalar proof boundary.
 
+Audience: compiler contributors and reviewers of Kernel-0 formatter evidence.
+
 ## Closed subject
 
 `src/kernel_zero/rung_two_authority.rs` owns the one production adapter for

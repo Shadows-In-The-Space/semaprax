@@ -5,6 +5,8 @@ recorded below. This is not accepted-head, hosted, full-gate, or self-hosting-ru
 evidence. Remaining acceptance gates and the exact accepted revision must be
 recorded independently.
 
+Audience: compiler contributors and reviewers of Kernel-0 ownership evidence.
+
 ## Closed subject and proof boundary
 
 The five scalar renderer sources, Kernel-0 grammar, evaluator, translation,

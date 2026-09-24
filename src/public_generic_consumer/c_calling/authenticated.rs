@@ -11,8 +11,8 @@ use crate::public_generic_abi::{
     descriptor::verify::VerifiedPublicGenericDescriptor,
     native::{
         authenticated::{
-            AuthenticatedNativeIdentityArtifact, AuthenticatedNativeMovesArtifact, HEADER,
-            MOVES_PROFILE, PROFILE,
+            AuthenticatedNativeAllocatingArtifact, AuthenticatedNativeIdentityArtifact,
+            AuthenticatedNativeMovesArtifact, ALLOCATING_PROFILE, HEADER, MOVES_PROFILE, PROFILE,
         },
         binding::NativeProviderBindingV1,
     },
@@ -92,6 +92,20 @@ fn generate(
             ),
         ],
     })
+}
+
+/// Private reservation-backed profile; only an exact compiler-admitted artifact
+/// grants this caller shape. This does not widen either predecessor profile.
+pub fn generate_authenticated_allocating_calling_consumer_v1(
+    descriptor: &VerifiedPublicGenericDescriptor,
+    artifact: &AuthenticatedNativeAllocatingArtifact,
+) -> Result<CallingConsumer, Diagnostic> {
+    generate(
+        descriptor,
+        artifact.descriptor_bytes(),
+        artifact.binding(),
+        ALLOCATING_PROFILE,
+    )
 }
 
 fn input_profile(

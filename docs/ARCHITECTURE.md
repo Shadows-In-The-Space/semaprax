@@ -2867,6 +2867,19 @@ separate moves-v1 artifact, while the existing generated C/C++ consumers and
 provider admission retain carrier, ownership and settlement authority. The
 focused harness checks real checked-body output and postcondition cleanup;
 neither private profile grants general native-body or public support.
+The additive private allocating profile is owned separately by
+`codegen/native_emit/public_generic_bridge/allocating.rs` and its admission
+child. They close checked Bytes-only body/callee admission, replay the existing
+capacity summary, own the explicit-context reservation and result preflight,
+and require a zero semantic-lease ledger before publication.
+`codegen/native_byte_data/` owns only that profile's reserved allocator/drop
+fragments; the default runtime emitter retains its independently pinned bytes.
+`public_generic_abi/native/authenticated/allocating.rs` binds the checked
+artifact, while the existing sealed C/C++ caller generators retain framing
+and wrapper ownership. Canonical compiler cleanup, not arena teardown, owns
+semantic finalization; freeing bridge-owned backing cannot hide a leaked lease
+or replace the selected failure. This remains a private native-only bounded
+profile, not general-body, cross-backend or public-support acceptance.
 The authoritative contracts and nonclaims live in [Settlement Corpus
 v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162).
 

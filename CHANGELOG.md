@@ -14,6 +14,15 @@ format: `Unreleased` then release buckets, grouped by impact.
   focused tamper, yank, missing-leaf and API-claim controls pass locally.
   Existing profiles remain unchanged; trusted v3 distribution is separate.
 
+- Add a separate private authenticated-native-allocating.v1 handoff for a
+  closed checked Bytes body/callee subset. An explicit-context reservation,
+  canonical lease settlement and all-leaf result preflight preserve sticky
+  failure through generated C11/C++17 callers. Focused controls cover real
+  allocating callees, reservation/body/postcondition refusals, oversized
+  results and missing-drop/dispatch controls; the actual legacy runtime
+  emitter retains its frozen bytes. General-body, cross-backend, hosted and
+  public acceptance remain open.
+
 - Add a separate private authenticated-native-moves.v1 handoff that executes
   checked flat-`Bytes` record movement bodies through generated C11/C++17
   callers. Focused physical controls cover both branches, malformed/legacy

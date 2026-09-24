@@ -24,6 +24,12 @@ use crate::public_generic_abi::digest;
 use super::binding::NativeProviderBindingV1;
 use super::template::render_reference_provider;
 
+mod allocating;
+pub use allocating::{
+    render_authenticated_allocating_provider, AuthenticatedNativeAllocatingArtifact,
+    ALLOCATING_PROFILE,
+};
+
 pub const PROFILE: &str = "semaprax.authenticated-native-identity.v1";
 pub const HEADER: &str = include_str!("authenticated_v1.h");
 const SHA: &str = include_str!("authenticated_sha256.c");

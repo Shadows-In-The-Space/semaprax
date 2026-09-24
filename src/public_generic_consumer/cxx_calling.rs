@@ -152,6 +152,17 @@ fn wrap_authenticated(
     CallingConsumer { files }
 }
 
+/// Private reservation-backed profile, reusing the sealed C caller and the
+/// unchanged move-only C++ wrapper without another framing/ownership codec.
+pub fn generate_authenticated_allocating_calling_consumer_v1(
+    descriptor: &crate::public_generic_abi::descriptor::verify::VerifiedPublicGenericDescriptor,
+    artifact: &crate::public_generic_abi::native::authenticated::AuthenticatedNativeAllocatingArtifact,
+) -> Result<CallingConsumer, crate::diagnostic::Diagnostic> {
+    let c_consumer =
+        c_calling::generate_authenticated_allocating_calling_consumer_v1(descriptor, artifact)?;
+    Ok(wrap_authenticated(descriptor, &c_consumer))
+}
+
 mod render;
 
 #[cfg(test)]

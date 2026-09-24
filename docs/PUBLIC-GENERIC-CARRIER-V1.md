@@ -253,6 +253,54 @@ exceeds the physical carrier's 64 KiB leaf bound. General allocation/status
 settlement and result-capacity admission remain separate prerequisites. This
 private, unpublished profile does not close R07 or claim public support.
 
+The additive private `semaprax.authenticated-native-allocating.v1` profile
+addresses a bounded part of those prerequisites without widening identity-v1
+or moves-v1. Its compiler-owned admission closes the selected body and every
+direct checked callee over the same flat record, `Bytes`, byte views, inline
+byte arrays and scalars. It admits immutable bindings, construction,
+conditionals, checked scalar operations, byte ranges, copy/zeroed/set and
+ordinary direct calls; contracts remain literal booleans. Other allocation
+families, effects/imports, indirect calls, recursion, loops and other nominal
+shapes are refused at artifact generation. The ordinary HIR verifier, native
+emitter and canonical cleanup plans still own evaluation and transfers.
+`bytes_zeroed` requires a literal no larger than the internal 128 KiB bound;
+the existing 32-site/2 MiB cumulative body-capacity limits are not widened.
+
+Before the endpoint executes, the bridge obtains one bounded backing
+reservation using the provider allocator. Its checked size is the independently
+replayed cumulative byte-capacity summary (including reached callees), plus
+actual input payload, plus aligned private lease-header overhead for every
+possible body allocation and input leaf. Allocation failure returns raw 10
+before endpoint entry. All active copy/zeroed calls pass the existing explicit
+`spx_context` to private `_in` helpers; `target_state` holds only this
+invocation's arena. No current-arena global/TLS or replacement C adapter is
+introduced. Moves retain a pointer's exact lease, canonical drops discharge it
+once, and the reservation never recycles slots. Exhaustion of this verified
+reservation is an invariant defect checked before a write, not an invented
+fallible language allocation edge.
+
+After checked execution and postconditions, **every** result leaf is
+preflighted against 64 KiB and the cumulative carrier limit before the first
+result-payload allocation hook. Provider result-table metadata was already
+staged; no claim of zero metadata allocation is made. Overbound results return
+raw 6, checked-body failures raw 11, and cleanup preserves that selected status.
+Success publication additionally requires zero semantic leases after ordinary
+cleanup and reverse result drops. A nonzero ledger refuses publication; the
+bridge releases its independently owned backing once without claiming it
+synthesized or ran a missing semantic finalizer.
+
+The owning `generated_c_and_cxx_settle_reserved_allocating_bodies` selector
+contains 34 physical processes: eight subjects through generated C11/C++17 at
+O0/O2, two calls each, plus selected-call omission and wrong allocation-ordinal
+controls. Subjects cover allocating/moving callees, pre-endpoint reservation
+failure, callee status, requires/ensures failure, oversized result, missing
+result drop, and sticky oversized-result refusal with a missing drop.
+Actual lease issuance/drop/peak/final state, result-payload hooks, consumed
+inputs, absent failed output, no live handles and close-to-zero are observed.
+The legacy runtime's exact 7,489-byte concatenation is pinned independently.
+This is native-only, private and unpublished: no full arbitrary-body,
+cross-backend, sanitizer, hosted, or public-support acceptance follows.
+
 ## The logical value state machine
 
 Every handle (root or leaf) is in exactly one of these states:

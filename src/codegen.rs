@@ -71,7 +71,8 @@ macro_rules! format {
 
 mod native_emit;
 pub(crate) use native_emit::public_generic_bridge::{
-    emit_public_generic_identity_bridge, emit_public_generic_moves_bridge,
+    emit_public_generic_allocating_bridge, emit_public_generic_identity_bridge,
+    emit_public_generic_moves_bridge,
 };
 
 #[cfg(test)]

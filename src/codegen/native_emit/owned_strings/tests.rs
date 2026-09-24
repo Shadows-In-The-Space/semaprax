@@ -231,6 +231,7 @@ fn length_aware_runtime_groups_do_not_grant_provider_carriers() {
             length_delimited: true,
             provider_carriers: true,
             include_instances: false,
+            reserved_bytes: false,
         })
     );
     assert!(v10.0.contains("borrowed_str_depth"));

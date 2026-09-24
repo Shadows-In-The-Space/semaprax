@@ -5,6 +5,8 @@
 mod c;
 #[path = "caller_hostility.rs"]
 mod caller_hostility;
+#[path = "checked_allocating.rs"]
+mod checked_allocating;
 #[path = "checked_moves.rs"]
 mod checked_moves;
 #[path = "same_subject_cxx.rs"]

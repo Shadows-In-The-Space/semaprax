@@ -7,6 +7,9 @@ use crate::public_generic_abi::descriptor::verify::{
     verify_public_generic_descriptor, VerificationOptions, VerifiedPublicGenericDescriptor,
 };
 
+mod allocating;
+pub(crate) use allocating::emit_public_generic_allocating_bridge;
+
 pub(crate) fn emit_public_generic_identity_bridge(
     program: &ResolvedProgram,
     revision: &str,

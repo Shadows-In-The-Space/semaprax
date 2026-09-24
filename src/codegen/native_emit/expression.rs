@@ -377,15 +377,10 @@ impl<'a, O: COutput> CEmitter<'a, O> {
                 self.indent -= 1;
                 self.line("}");
             }
-            crate::byte_ops::ByteOp::Copy => {
+            crate::byte_ops::ByteOp::Copy | crate::byte_ops::ByteOp::Zeroed => {
+                let (allocator, context) = self.output_profile.byte_allocator(op);
                 self.line(&format!(
-                    "{temporary} = spx_bytes_copy({});",
-                    arguments[0].code
-                ));
-            }
-            crate::byte_ops::ByteOp::Zeroed => {
-                self.line(&format!(
-                    "{temporary} = spx_bytes_zeroed({});",
+                    "{temporary} = {allocator}({context}{});",
                     arguments[0].code
                 ));
             }

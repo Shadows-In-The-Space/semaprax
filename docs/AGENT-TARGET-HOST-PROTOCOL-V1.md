@@ -1,5 +1,7 @@
 # Agent target host-call protocol v1
 
+Audience: agent-runtime integrators and compiler contributors maintaining the target host-call boundary.
+
 Status: **authored implementation for #182; publicly selectable through the
 source-live typed-effect target adapter with an explicitly injected host.** It
 is not deployed native or Wasm target support.

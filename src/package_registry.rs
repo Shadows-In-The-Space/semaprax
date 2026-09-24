@@ -128,6 +128,8 @@ pub mod binding;
 pub mod catalog;
 pub mod federation;
 pub mod registry_v2;
+pub mod leaf_manifest_v1;
+pub mod registry_v3;
 pub mod trust;
 pub mod wire;
 

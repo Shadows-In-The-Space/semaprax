@@ -3,6 +3,8 @@
 //! Interpreter events describe result copy-out only, not physical handle cleanup.
 #[path = "same_subject_interpreter.rs"]
 mod interpreter;
+#[path = "same_subject_typescript.rs"]
+mod typescript;
 use super::{array, SOURCE};
 use semaprax::public_generic_abi::{
     carrier::{
@@ -151,6 +153,10 @@ fn prepare_subject(root: &Path, guard: bool) -> Subject {
     fs::write(root.join("descriptor.bin"), wasm.descriptor_bytes()).unwrap();
     fs::write(root.join("binding.bin"), wasm.binding_bytes()).unwrap();
     fs::write(root.join("input.bin"), &frame).unwrap();
+    assert_eq!(
+        typescript::observe(root, &endpoint, &wasm, guard),
+        interpreted
+    );
     fs::write(root.join("probe.mjs"), include_str!("same_subject.mjs")).unwrap();
     let result =
         CarrierFrameBinding::from_verified_descriptor(endpoint.descriptor(), Direction::Result);

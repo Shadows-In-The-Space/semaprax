@@ -8,6 +8,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Rewrite the documentation entry path—overview, install, quickstart, CLI
+  guide, and first contribution—in shorter task-based language for new
+  developers. Preserve the tested commands, diagnostic examples, and
+  versioned contracts; update the v0.6.0 release-gate status without claiming
+  publication.
+
 - Remove a stale coordinator-only ABI handoff and deduplicate the 0.3.5/0.2.0
   changelog history, retaining the full older record in the linked archive.
 

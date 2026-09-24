@@ -1,57 +1,42 @@
 # Installing SEMAPRAX
 
 Status: public alpha installation guide; not a production-readiness claim.
+Audience: new users and contributors.
 
-Audience: new SEMAPRAX users and contributors putting a working toolchain on a
-local machine.
-
-This document is the single owner of "how do I get a working SEMAPRAX". It
-covers the prerequisites and why each one is needed, the two installation
-routes and their different binary names, `PATH` setup, how to confirm the
-install works, and what the first failure messages mean. The
-[quickstart](QUICKSTART.md) then walks the calculator project flow, and the
-[CLI user guide](CLI-GUIDE.md) covers day-to-day command shapes.
-
-SEMAPRAX is alpha research software. Installing it does not make any
-feature production-ready; the [completion matrix](COMPLETION-MATRIX.md) is the
-sole authority for what is implemented and what evidence backs it.
+Install from source for the newest local build, or use the last published
+[v0.5.0 archive](https://github.com/wavect/semaprax/releases/tag/v0.5.0).
+Then follow the [quickstart](QUICKSTART.md) to run a calculator project. For
+command syntax, use the [CLI guide](CLI-GUIDE.md). For feature status and
+evidence, use the [completion matrix](COMPLETION-MATRIX.md).
 
 ## Which binary do you need?
 
-Three different names appear across the repository, the release archives, and
-the documentation. They are not three products.
+There are two builds. Release archives rename the full build:
 
 | Name | Where it comes from | What it can do |
 | --- | --- | --- |
-| `semaprax` | `cargo install --locked --path .`, or the crates.io compiler package | The standalone compiler: create a project with `new`, format, check, run, test, inspect, patch and build admitted source/projects; `doctor` uses the shared fail-closed profile interface. |
-| `semaprax-full` | `cargo install --locked --path crates/semaprax-toolchain`, from a source checkout only | Everything the standalone compiler does, plus private Native Rust package publication, Windows revision-store host operations, Windows owned npm publication, and the held-parent staged publication route behind its `new`. The `doctor` command is shared by both binaries. |
-| `semaprax` inside a tag archive | The last published [v0.5.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.5.0) archives | The archive's `semaprax` *is* the `semaprax-full` binary, renamed during staging, so archive users write `semaprax doctor`, not `semaprax-full doctor`. |
+| `semaprax` | Standalone source install or compiler package | Common commands: `new`, `fmt`, `check`, `run`, `test`, `graph`, `build`, and `doctor`. |
+| `semaprax-full` | Source checkout only | Common commands plus private host and publication operations. Its `new` uses staged publication. |
+| `semaprax` in a release archive | Published [v0.5.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.5.0) | The full build, renamed when packaged. |
 
-The `semaprax-toolchain` package is `publish = false`; it is never fetched
-from a registry. The naming split and what the standalone package excludes are
-owned by the [release process](RELEASE-PROCESS.md#tag-admission).
-
-Every common command shown here, including `doctor`, is dispatched by both
-binaries; the [quickstart](QUICKSTART.md) also works with the standalone compiler. Both
-binaries accept `semaprax new <destination>`; the standalone compiler creates
-the project through the bounded create-new route in
-[standalone project creation](NEW-PROJECT-STANDALONE-V1.md), while the full
-toolchain publishes it through a held-parent staged rename. If a documented
-command is missing from `semaprax help all`, you installed the standalone
-compiler and the command is private; that is a capability boundary, not a
-broken install.
+The full toolchain is unpublished (`publish = false`), so build it from a
+checkout. Both binaries accept the common commands, including `doctor`. The
+standalone `new` uses a [create-new route](NEW-PROJECT-STANDALONE-V1.md); the
+full build uses a [staged route](NEW-PROJECT-PUBLICATION-V1.md). If a command is
+missing from `semaprax help all`, check whether it is private before treating
+the installation as broken. The [release process](RELEASE-PROCESS.md#tag-admission)
+owns the exact split.
 
 ## Prerequisites
 
-| Prerequisite | Version | Why it is needed | Where the requirement is recorded |
-| --- | --- | --- | --- |
-| Rust toolchain (`cargo`, `rustc`) | 1.88 or newer | Builds and installs both CLIs from source. | `rust-version` in [Cargo.toml](../Cargo.toml); the CLI reports it as `rust_min` in `semaprax version --json`; CI runs a dedicated "Rust 1.88 minimum" job. |
-| Clang | any C11-capable driver | The native lane emits C11 and invokes `clang` to produce the executable, so `--target native` and `--target native-callable` fail without it. | `.github/workflows/ci.yml` resolves `clang` for every native job; the compiler spawns `clang` by name. |
-| Node.js | 22 or newer | Runs the repository's WebAssembly and Web verification scripts and the generated npm packages. Not needed to check, run, or build source. | `node-version: 22` in `.github/workflows/ci.yml`. |
-| Git | any recent version | Only to obtain a source checkout. SEMAPRAX itself never initializes or invokes Git during a build. | — |
+| Prerequisite | When you need it |
+| --- | --- |
+| Rust 1.88 or newer (`cargo`, `rustc`) | Build or install from source. [Cargo.toml](../Cargo.toml) records the minimum. |
+| Clang with C11 support | Build native executables; SEMAPRAX calls `clang`. |
+| Node.js 22 or newer | Run repository WebAssembly/Web verification scripts and generated npm packages. Not needed for ordinary source checks. |
+| Git | Clone the source repository; SEMAPRAX does not invoke Git during builds. |
 
-There is no `rust-toolchain.toml` in this repository, so your default
-toolchain is used; a newer stable Rust is fine.
+There is no `rust-toolchain.toml`; a newer stable Rust is fine.
 
 Neither the compiler nor generated code acquires ambient filesystem, process,
 network, home-directory, or signing authority from being installed. The
@@ -59,7 +44,7 @@ project generator uses only compiled-in files and does not touch the network.
 
 ## Route 1: install from source
 
-This is the route that gives you both CLIs.
+Use this route if you need either CLI or current source changes.
 
 ```sh
 git clone https://github.com/wavect/semaprax.git
@@ -79,12 +64,10 @@ cargo install --locked --path crates/semaprax-toolchain
 ```
 
 The first command installs `semaprax`; the second installs `semaprax-full`.
-`--locked` keeps the recorded dependency graph. Installation fetches Rust
-dependencies from the network; nothing in a later SEMAPRAX build does.
+`--locked` uses the recorded dependencies. Cargo may fetch them while
+installing; a later SEMAPRAX build does not fetch dependencies.
 
-You can also skip installation entirely and drive the compiler out of the
-checkout, which is what the repository's own documentation uses when it wants
-to be unambiguous about which build is running:
+To try the compiler without installing it, run it from the checkout:
 
 ```sh
 cargo run --locked -p semaprax -- check examples/meaning.spx
@@ -116,8 +99,10 @@ command -v semaprax
 
 ## Route 2: install from a release archive
 
-The v0.6.0 tag failed its hosted release gate and has no downloadable archives.
-The last published [v0.5.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.5.0)
+At this document's 2026-09-24 update, the
+[v0.6.0 tag gate](https://github.com/wavect/semaprax/actions/runs/36047757697)
+was still running; v0.6.0 had no published archive or signature. The last
+published [v0.5.0 prerelease](https://github.com/wavect/semaprax/releases/tag/v0.5.0)
 publishes one archive per admitted host plus a `SHA256SUMS` file:
 
 | Host | Archive |

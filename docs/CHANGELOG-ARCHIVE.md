@@ -1798,8 +1798,8 @@ Audience: maintainers and historians requiring chronological context.
   inert staging and its primary diagnostic; successful publication, templates,
   schemas and platform rename behavior remain unchanged. The destructive
   regression fails before and passes after the fix on macOS and Linux; all nine
-  publication tests and 15 calculator CLI cases pass on both. The full lower
-  package's 46 tests and package Clippy pass on macOS. No hosted or Windows
+  publication tests and 16 calculator-and-library CLI cases pass on both. The
+  full lower package's 46 tests and package Clippy pass on macOS. No hosted or Windows
   promotion is implied.
 
 - Corrected a doctor report test oracle that omitted a byte after partial writes;

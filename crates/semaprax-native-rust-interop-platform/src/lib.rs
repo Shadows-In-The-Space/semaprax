@@ -737,6 +737,20 @@ pub fn sync_regular_file(file: &HeldRegularFile) -> Result<(), Error> {
     semaprax_native_rust_interop_platform_sys::sync_regular_file(&file.0)
 }
 
+/// Sync the caller-held directory namespace, never a path-derived substitute.
+/// Non-Unix platforms fail closed rather than acknowledging an unsynced name.
+pub fn sync_directory(directory: &HeldDirectory) -> Result<(), Error> {
+    #[cfg(unix)]
+    {
+        semaprax_native_rust_interop_platform_sys::sync_directory(&directory.0)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = directory;
+        Err(Error::Unsupported)
+    }
+}
+
 /// Reopen `name` through a bounded held-directory capability and verify it
 /// still resolves to the exact authenticated regular file supplied by the
 /// caller. This check is a lock-free linearization point; later replacement

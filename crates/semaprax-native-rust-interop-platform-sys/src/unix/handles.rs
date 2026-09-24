@@ -239,6 +239,13 @@ pub fn sync_regular_file(file: &RegularFile) -> Result<(), Error> {
     file.file.sync_all().map_err(|_| Error::Changed)
 }
 
+/// Flush the existing held directory; no path lookup grants fresh authority.
+pub fn sync_directory(directory: &Directory) -> Result<(), Error> {
+    recheck_directory(directory)?;
+    directory.file.sync_all().map_err(|_| Error::Changed)?;
+    recheck_directory(directory)
+}
+
 pub fn recheck_regular_file_named_bounded(
     directory: &Directory,
     name: &OsStr,

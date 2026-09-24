@@ -166,11 +166,34 @@ exact digest retained by the host, then still requires the existing
 authenticated restore API and its independently supplied digest/capacity
 capability. The store does not enumerate or select a latest checkpoint. Hosts
 remain responsible for directory provisioning, retention/quota, and the
-trusted reference that identifies a checkpoint. File-content sync does not
-flush the containing directory, so this slice does not claim power-loss
-durability of the namespace entry or multi-process coordination. Its
-reopen/tamper and no-redispatch tests use local temporary directories and
-recording adapters only.
+trusted reference that identifies a checkpoint.
+
+`OutboundDeliveryStore::new` preserves the default `FileOnly` acknowledgment:
+file-content sync does not flush the containing directory. A trusted host can
+explicitly select `OutboundCheckpointSyncMode::NamespaceSynced` through
+`with_sync_mode`, still supplying its independently held directory capability.
+The mode is a durability request, not a path or authority grant. Both new and
+idempotent existing commits require, in order, exact byte comparison, successful
+held-file sync, successful held-directory sync, then the same named identity
+and content recheck before `Committed`. Neither an existing filename nor a
+previous successful acknowledgment permits either sync to be skipped. Either
+sync failure, unsupported directory sync, or failed final recheck yields
+`Uncertain`; no adapter dispatch or automatic storage retry is authorized by
+that result. A same-content replacement object during directory sync refuses
+at the final named recheck.
+
+The safe platform facade performs directory sync through the already-held
+Unix directory descriptor, with identity rechecks around the OS call. Non-Unix
+platforms return `Unsupported`, never a no-op success; the local outbound store
+currently compiles on Linux, macOS, and Windows, so the stronger store mode is
+available on Linux/macOS and fails closed on Windows. `Committed` records these
+successful OS synchronization calls and the final named recheck, not an
+unconditional hardware/filesystem power-loss guarantee. It does not sync or
+authenticate ancestor directories, create durable provisioning authority,
+coordinate multiple processes, select a latest record, or prevent later
+external replacement/rollback. Reopen/tamper, ordered sync/refusal, and typed
+HTTP/webhook/email no-redispatch tests use local temporary directories and
+recording adapters only; no provider or network call is made by these tests.
 
 This is local adapter implementation evidence, not real-provider acceptance,
 provider authentication/interoperability, hosted execution, or authorization to

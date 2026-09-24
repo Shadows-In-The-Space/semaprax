@@ -39,6 +39,16 @@ pub enum OutboundCheckpointReadRefusal {
     StorageUnavailable,
 }
 
+/// Selects the local acknowledgment boundary, not filesystem authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OutboundCheckpointSyncMode {
+    /// Sync checkpoint contents only (the unchanged default).
+    FileOnly,
+    /// Also sync the caller-held directory before the final named recheck.
+    /// Unsupported platforms or sync failures leave the commit uncertain.
+    NamespaceSynced,
+}
+
 /// A bounded file store rooted at a directory held by its caller.
 ///
 /// A fresh directory capability is required after process restart. The host
@@ -46,12 +56,25 @@ pub enum OutboundCheckpointReadRefusal {
 /// the store intentionally does not enumerate or select a "latest" record.
 pub struct OutboundDeliveryStore<'directory> {
     directory: &'directory HeldDirectory,
+    sync_mode: OutboundCheckpointSyncMode,
 }
 
 impl<'directory> OutboundDeliveryStore<'directory> {
     /// Bind the store to a directory authority already acquired by the caller.
     pub fn new(directory: &'directory HeldDirectory) -> Self {
-        Self { directory }
+        Self::with_sync_mode(directory, OutboundCheckpointSyncMode::FileOnly)
+    }
+
+    /// Select an acknowledgment boundary using independently acquired authority.
+    /// This does not provision storage or derive authority from configuration.
+    pub fn with_sync_mode(
+        directory: &'directory HeldDirectory,
+        sync_mode: OutboundCheckpointSyncMode,
+    ) -> Self {
+        Self {
+            directory,
+            sync_mode,
+        }
     }
 
     /// Read one exact typed checkpoint by its previously retained digest.
@@ -113,6 +136,35 @@ impl<'directory> OutboundDeliveryStore<'directory> {
         ) -> Result<platform::HeldRegularFile, platform::Error>,
         S: Fn(&platform::HeldRegularFile) -> Result<(), platform::Error>,
     {
+        self.commit_rendered_with_directory_sync(
+            kind,
+            digest,
+            rendered,
+            write_new,
+            sync_file,
+            platform::sync_directory,
+        )
+    }
+
+    fn commit_rendered_with_directory_sync<W, S, D>(
+        &mut self,
+        kind: OutboundCheckpointKind,
+        digest: &str,
+        rendered: &str,
+        write_new: W,
+        sync_file: S,
+        sync_directory: D,
+    ) -> CheckpointCommit
+    where
+        W: FnOnce(
+            &HeldDirectory,
+            &OsStr,
+            &[u8],
+            u32,
+        ) -> Result<platform::HeldRegularFile, platform::Error>,
+        S: Fn(&platform::HeldRegularFile) -> Result<(), platform::Error>,
+        D: Fn(&HeldDirectory) -> Result<(), platform::Error>,
+    {
         let Some(name) = checkpoint_filename(kind, digest) else {
             return CheckpointCommit::NotCommitted;
         };
@@ -140,6 +192,8 @@ impl<'directory> OutboundDeliveryStore<'directory> {
                     Ok(_) | Err(_) => return CheckpointCommit::Uncertain,
                 }
                 if sync_file(&existing).is_err()
+                    || (self.sync_mode == OutboundCheckpointSyncMode::NamespaceSynced
+                        && sync_directory(self.directory).is_err())
                     || platform::recheck_regular_file_named_bounded(
                         self.directory,
                         OsStr::new(&name),
@@ -206,6 +260,7 @@ impl EmailDeliverySessionCheckpointStore for OutboundDeliveryStore<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod namespace_sync;
     use semaprax::outbound_host_adapter::{
         prepare_http_delivery, AdapterObservation, DeliverySessionCheckpointRefusal,
         DurableHttpDeliveryOutcome, HttpDeliverySession, HttpDeliverySessionRestoreCapability,

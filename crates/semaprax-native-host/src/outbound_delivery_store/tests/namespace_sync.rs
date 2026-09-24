@@ -180,4 +180,6 @@ fn wrong_bytes_refuse_before_sync_and_same_byte_replacement_after_sync_refuses()
 }
 
 #[cfg(unix)]
+mod process_restart;
+#[cfg(unix)]
 mod typed_recovery;

@@ -25,14 +25,14 @@ The implementation subject remains release `v0.4.0`, commit
 `dfc15e2ddc818fa97744b5a9d69fd6108dd6a321`. The
 [release baseline](RELEASE-0.4.0-STATUS.md) records the maintainer-accepted
 **HOSTED GREEN** classification. The release-note publication problem is not
-an outstanding implementation or conformance task. A documentation update does
-not create a new compiler version or provide evidence for later code changes.
+an outstanding implementation or conformance task. Updating documentation does not create a compiler version or supply evidence
+for later code changes.
 
-Concurrent documentation changes were reconciled rather than discarded. In
-particular, current Status/Audience metadata and the already-pushed Agent,
-generic, collection, library/I/O and roadmap corrections are retained or
-refined within the same release scope. The audit does not change application
-code, tests, executable examples, frozen protocol formats or target admission.
+The audit reconciled concurrent documentation changes. It retained or refined
+current Status/Audience metadata and the already-pushed Agent, generic,
+collection, library/I/O and roadmap corrections within the same release scope.
+It changes no application code, tests, executable examples, frozen protocol
+formats or target admission.
 
 ## Corrections closed
 

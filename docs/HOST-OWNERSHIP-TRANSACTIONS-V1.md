@@ -17,11 +17,11 @@ that authority to this ledger and the exact loader instance; raw bearer bytes
 still retain nothing, and only the synchronized registry makes authenticated
 bytes linear.
 
-The private native staging lane also derives ownership contracts in
-`src/codegen/native_host_contract.rs`. Derivation accepts a validated program
-and exact function ID, rebuilds and compares the resource ABI, and consumes the
-exact cleanup/value evidence already admitted by compiler preflight without
-classifying or planning again. Its deterministic authority-free template fixes
+The private native staging lane derives ownership contracts in
+`src/codegen/native_host_contract.rs`. It takes a validated program and exact
+function ID, rebuilds and compares the resource ABI, then consumes the exact
+cleanup/value evidence accepted by compiler preflight. It does not classify
+or plan that evidence again. Its deterministic authority-free template fixes
 the complete ordered scalar/resource signature, dense owner ordinals, exact
 scalar/owned result mapping, lifecycle identities, module ABI fingerprint, and
 function-template fingerprint. Private admission capabilities reject detached
@@ -136,8 +136,8 @@ resource export can ship, all of the following remain mandatory:
 - exact adapter-to-reference trace comparison across Windows, macOS, Linux,
   sanitizers, and eventually Wasm plus platform hosts.
 
-Until those gates pass, raw payload adoption remains outside the safe contract,
-the execution model remains private, and ordinary public resource-bearing
-native execution/admission returns the exact generic `SPX-B104` diagnostic.
-The public callable-v2 build target packages a non-executing bundle only; it
-does not expose host admission, invocation, adoption, or ownership authority.
+Until those gates pass, the safe contract excludes raw payload adoption and the
+execution model stays private. Ordinary public resource-bearing native
+execution/admission returns the exact generic `SPX-B104` diagnostic.
+The public callable-v2 build target only packages a non-executing bundle.
+It grants no host admission, invocation, adoption, or ownership authority.

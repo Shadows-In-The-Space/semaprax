@@ -15,11 +15,10 @@ AGENT-03. This bridge instead lets a caller explicitly associate already
 compiler-admitted AgentDefinition bundles with one exact admitted Project when
 deriving its Canonical Semantic Workspace Revision.
 
-The association is explicit input. It is not proof that the Agent definitions
-originated in the Project, is not `.spx` Agent syntax, and does not make the
-definitions language-native or executable. The resulting non-empty
-`AgentDefinitions` node flows automatically into ProgramRoot's existing
-content-addressed `agent_definitions` segment.
+The caller supplies the association explicitly. It does not prove the Agent
+definitions came from the Project, introduce `.spx` Agent syntax, or make them
+language-native or executable. The non-empty `AgentDefinitions` node flows into
+ProgramRoot's existing content-addressed `agent_definitions` segment.
 
 ## API and preconditions
 
@@ -45,11 +44,11 @@ already in strictly increasing stable agent-ID byte order, and has no duplicate
 agent identity. The combined exact definition, graph, and Runtime Profile bytes
 are capped at 8 MiB before the existing 32 MiB canonical-workspace cap.
 
-Every entry is independently recompiled with
-`compile_agent_definition` and checked by `verify_agent_graph_bundle`. The
-compiler-owned canonical AgentDefinition bytes/digest, AgentGraph bytes/digest,
-and byte-identical Runtime Profile plus its graph-bound digest must agree before
-derivation. No submitted JSON is trusted as HIR or runtime state.
+Each entry is independently recompiled with `compile_agent_definition` and
+checked by `verify_agent_graph_bundle`. Before derivation, the canonical
+AgentDefinition bytes/digest, AgentGraph bytes/digest and byte-identical Runtime
+Profile with its graph-bound digest must agree. Submitted JSON is not trusted
+as HIR or runtime state.
 
 ## Canonical payload
 

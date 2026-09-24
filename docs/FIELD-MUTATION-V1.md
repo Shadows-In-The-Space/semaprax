@@ -10,20 +10,20 @@ broader product completion remain separately gated.
 
 ## Objective
 
-Records and classes are value-semantics aggregates. This tranche admits
-whole-field replacement of one direct checked Copy scalar field of a `let mut`
-record- or class-typed local:
+Records and classes have value semantics. This profile allows replacing one
+direct, checked Copy scalar field of a `let mut` local whose type is a record
+or class:
 
 ```text
 let mut point = Point { x: 1, y: 2, enabled: false };
 point.x = point.x + 41;
 ```
 
-Everything else stays closed: nested place chains (`a.b.c = ...`), aggregate
-or String/resource fields, mutation through parameters or immutable bindings
-(including method receivers), arrays (none exist), and any new expression
-forms. Simple `<binding> = <expr>;` assignment keeps its exact previous
-behavior, diagnostics, and serialization.
+The profile still excludes nested place chains (`a.b.c = ...`), aggregate or
+String/resource fields, mutation through parameters or immutable bindings
+(including method receivers), arrays (none exist), and new expression forms.
+Simple `<binding> = <expr>;` assignment keeps its exact behavior, diagnostics
+and serialization.
 
 ## Semantics
 

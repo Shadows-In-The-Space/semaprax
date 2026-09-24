@@ -12,18 +12,18 @@ shutdown, connection-limit/deadline enforcement, TLS, middleware, JSON
 bodies, and hosted (non-loopback) evidence remain explicitly out of scope;
 see [Non-claims](#non-claims-and-remaining-work).
 
-This tranche composes the existing [Bounded Language Network
-I/O v1](BOUNDED-LANGUAGE-NETWORK-IO-V1.md) and [Bounded Network Services
-v1](BOUNDED-NETWORK-SERVICES-V1.md) transport primitives, [Bounded Stdout
-Transcript v1](BOUNDED-STDOUT-TRANSCRIPT-V1.md)'s capability model, and
-`std.http`'s byte-parsing idiom into a routing/dispatch convention. It adds no
-host operation, no new effect, no new ABI, and no second network stack: a
-route handler receives bytes a transport already delivered (`net_recv`, a
-`net_stream_stdout` accumulation, or — for this slice's tests — a literal
-fixture byte array standing in for either) and returns bytes for the
-transport to send; how those bytes arrived or leave remains entirely the
-concern of [Bounded Language Network I/O v1](BOUNDED-LANGUAGE-NETWORK-IO-V1.md)
-and [Bounded Network Services v1](BOUNDED-NETWORK-SERVICES-V1.md).
+This routing convention combines the transport primitives from
+[Bounded Language Network I/O v1](BOUNDED-LANGUAGE-NETWORK-IO-V1.md) and
+[Bounded Network Services v1](BOUNDED-NETWORK-SERVICES-V1.md), the capability model
+from [Bounded Stdout Transcript v1](BOUNDED-STDOUT-TRANSCRIPT-V1.md), and
+`std.http` byte parsing. It adds no host operation, effect, ABI, or network stack.
+
+A handler receives bytes already delivered by `net_recv` or accumulated by
+`net_stream_stdout`, then returns bytes for the transport to send. This slice's
+tests substitute a literal fixture byte array for that delivery.
+[Bounded Language Network I/O v1](BOUNDED-LANGUAGE-NETWORK-IO-V1.md) and
+[Bounded Network Services v1](BOUNDED-NETWORK-SERVICES-V1.md) still own all transport
+behavior.
 
 ## Objective
 
@@ -36,11 +36,11 @@ names its stable identity there.
 
 ## Route and status identity
 
-A route is a closed `i64` domain, the same idiom every existing hosted status
-domain in this repository already uses (`semaprax.network.v1`,
-`std.net.wait_is_readable`/`wait_is_closed`): a small integer with a fixed,
-documented meaning, checked by ordinary `requires`/`ensures` contracts instead
-of a bespoke enum-like runtime. This profile's example fixes:
+A route is a small `i64` with a fixed, documented meaning. This follows the
+existing hosted status domains (`semaprax.network.v1`,
+`std.net.wait_is_readable`/`wait_is_closed`). Ordinary `requires`/`ensures`
+contracts check the closed domain; there is no separate enum-like runtime.
+The example defines:
 
 | Route | Code | Status |
 | --- | ---: | ---: |

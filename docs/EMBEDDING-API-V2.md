@@ -29,10 +29,9 @@ naming collision worth stating plainly rather than leaving implicit:
   interpretation, semantic query, candidate validation, and selected
   execution without spawning the CLI or receiving ambient host authority."
 
-Concretely: a host wanting the vector-embedding boundary imports
-`semaprax::semantic_embedding`; a host wanting to check SEMAPRAX source
-in-process imports `semaprax::embedding_api`. Neither module re-exports or
-depends on the other.
+Import `semaprax::semantic_embedding` for vector embeddings, or
+`semaprax::embedding_api` to check SEMAPRAX source in-process. Neither module
+re-exports or depends on the other.
 
 ## What issue #203 asks for, and where each part actually stands on `main`
 
@@ -57,11 +56,9 @@ The convenience functions (`check_source`, `format_source`, `graph_source`,
 `context_source`, and `context_v2_source`) all first admit their caller bytes
 through fixed caps: at most 16 MiB of source and 4 KiB each of `unit_name`
 label and a context symbol selector. They return the stable `SPX-EMB005`
-capacity diagnostic before parsing when an input exceeds a bound. Refusal
-outcomes truncate echoed labels and symbols at their admitted UTF-8 boundary,
-so rejected caller strings cannot defeat those caps through report allocation.
-Labels remain diagnostic data only; this admission never treats one as a host
-path.
+capacity diagnostic before parsing when an input exceeds a bound. Refusal outcomes truncate echoed labels and symbols at the admitted UTF-8
+boundary, preventing rejected strings from bypassing the caps through report
+allocation. Labels are diagnostic data, never host paths.
 
 A host that needs tighter per-request bounds or cooperative cancellation uses
 [`AnalysisRequest`](../src/embedding_api/analysis_request.rs) and

@@ -13,9 +13,9 @@ ProgramRoot, the default Project-derived canonical workspace and v1 ProgramRoot,
 exact `InterfaceArtifactFacts`, an exact `ProgramRootDependencyLockAssociation`,
 and `ProgramRootV2`.
 
-The two v1-root slots are explicit. They are distinct for the legacy external
-association bridge and may be identical when the default Project-derived
-workspace is already populated from source-owned `.spx` Agents. The dependency-lock association
+The two v1-root slots are explicit. The legacy external association bridge
+uses distinct roots. They may be identical when source-owned `.spx` Agents
+already populate the default Project-derived workspace. The dependency-lock association
 and interface facts are admitted against the default Project subject. The
 semantic workspace has a non-empty compiler-admitted AgentDefinitions node.
 ProgramRoot v2 binds both
@@ -31,10 +31,10 @@ association and its privately retained exact lock-byte digest, derives the
 enriched v1 root, and invokes exact ProgramRoot-v2 replay.
 
 `assemble` performs the same checks after deriving ProgramRoot v2 internally.
-`select` always requires both the exact enriched workspace revision and exact
-ProgramRoot-v2 digest. Neither selector alone identifies a context generation.
-The same dual selection is reused by the additive exact query replay,
-transaction replay, service-query replay, and service-history selectors. These
+`select` requires both the exact enriched workspace revision and ProgramRoot-v2
+digest; either alone is insufficient to identify a context generation. Exact
+query replay, transaction replay, service-query replay and service-history
+selectors use the same pair. These
 routes retain the selected `ProgramRootV2` only on their typed in-memory result;
 they do not widen a frozen v1 query, transaction, evidence, history-query, or
 history-result document.

@@ -25,11 +25,11 @@ std.format.append_bool(value: bool, output: own std.io.Writer)
     -> std.io.Writer
 ```
 
-Each function consumes and returns the Writer, appending its exact byte
-representation at the current position. `append_str` copies the borrowed
-string's UTF-8 bytes. Integer rendering is decimal ASCII without leading
-zeroes; signed `i64` values include `-` when negative, including the minimum
-value. Boolean rendering is `true` or `false`.
+Each function takes ownership of the Writer, appends the exact byte
+representation at its current position, and returns it. `append_str` copies
+borrowed UTF-8 bytes. Integers use decimal ASCII without leading zeroes;
+negative `i64` values, including the minimum, start with `-`. Booleans render
+as `true` or `false`.
 
 The helper functions `byte`, `digit_byte`, `usize_len`, `usize_byte`,
 `i64_len`, and `i64_byte` provide the checked length and indexed-byte policy
@@ -50,11 +50,9 @@ std.format.append_usize_right(value: usize, width: usize, fill: u8,
     output: own std.io.Writer) -> std.io.Writer
 ```
 
-`pad_len` is the field width actually written: the larger of the content length
-and the requested width, so a field is never narrower than its content.
-Content longer than the field is written in full and **never truncated**; the
-caller sees the true bytes and the returned cursor, rather than a silently
-clipped value. `append_str_left` writes the content and then fill bytes;
+`pad_len` is the larger of content length and requested width. A field is
+therefore never narrower than its content. Longer content is written in full,
+**never truncated**, and the returned cursor reflects all bytes written. `append_str_left` writes the content and then fill bytes;
 `append_usize_right` writes fill bytes and then the decimal digits.
 `append_fill` is the shared primitive and is useful alone for separators and
 indentation, with a `count` of zero writing nothing and leaving the cursor

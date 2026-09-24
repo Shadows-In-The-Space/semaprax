@@ -6,18 +6,16 @@ Audience: compiler contributors and release reviewers.
 
 Schema: `semaprax.feature-composition-corpus.v1`.
 
-This is the bounded acceptance inventory for issue #103.  A row names a real
-owning test and the independent facts it preserves.  It does not turn a
-backend/profile that rejects a source shape into execution support, and it
-does not normalize semantic status, ordered events, values, or live-owner
-counts away.
+This bounded acceptance inventory for issue #103 maps each row to its owning
+test and the independent facts that test preserves. A rejected source shape
+is not execution support. Semantic status, event order, values and live-owner
+counts remain part of the comparison.
 
 The checked inventory in
 `tests/project/standard_library/composition_inventory.rs` protects every row
 below against deletion, duplicate identity, lost module registration, a
-missing owner test, or a missing document row.  The inventory only binds the
-matrix to its real executable owners; it never replaces those owners' runtime
-observers with a text scan.
+missing owner test, or a missing document row.  The inventory links the matrix to executable tests. Its text checks do not
+replace those tests' runtime observations.
 
 ## Executable rows
 

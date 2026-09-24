@@ -9,11 +9,10 @@ local-only evidence status. Existing root schemas and authority boundaries
 are unchanged.
 
 `execution_revision::bind_execution_revision` consumes only retained, checked
-Project source and a compiler-produced ProgramRoot v1, v2, or v3. It checks the
-expected root digest and independently compares all six source-owned segment
-descriptors with a freshly derived retained Project root. Additional policy,
-target, and projection nodes remain owned by their existing workspace producer.
-No second semantic graph is created.
+Project source and a compiler-produced ProgramRoot v1, v2, or v3. It checks the expected root digest, then independently compares all six
+source-owned segment descriptors with a freshly derived retained Project root.
+The existing workspace producer still owns additional policy, target and
+projection nodes. No second semantic graph is created.
 
 The selected source path must belong to the retained Project. Its checked Agent
 must lower to the exact retained AgentDefinition. The existing v1-to-v2 migration
@@ -24,9 +23,9 @@ retained source, including its ordinary proposal schema and authorization rules.
 DeploymentRoot commits program, semantic definition, deployment binding, source
 selection and lifecycle. InstanceRoot commits deployment, task/proposal digests,
 task budget and stage fuel. ExecutionRevision joins those roots with the retained
-Project revision. Task and proposal bytes are held privately, never rendered in
-root documents. Each root uses compact sorted JSON with terminal LF, domain
-separation by schema followed by NUL, and SHA-256 before its digest is inserted.
+Project revision. Task and proposal bytes stay private and never appear in root documents. Roots
+use compact sorted JSON with terminal LF. Their SHA-256 digest uses the schema
+followed by NUL for domain separation and is computed before digest insertion.
 
 Consuming the opaque ExecutionRevision runs the existing lifecycle with the
 explicit injected read operation and live cancellation. Only that producer can

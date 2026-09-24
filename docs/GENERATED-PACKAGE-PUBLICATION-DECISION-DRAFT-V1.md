@@ -23,13 +23,11 @@ for a maintained, reproducible external-consumer route:
 | Generated Rust package identifier | `semaprax.native-rust-owned-data-sdk.v1` |
 | Owning specification | [docs/PUBLIC-OWNED-DATA-API-V1.md](PUBLIC-OWNED-DATA-API-V1.md) |
 
-This profile is chosen, not invented, because it is the one existing
-generated-package route the repository already treats as feature-complete and
-release-regressed (HOSTED GREEN under the v0.4.0 baseline) while explicitly
-flagging publication as the remaining open decision. The separate public
-generic ABI (issue #144/SPX-AI-045 territory) is out of scope: nothing here
-changes which profile is admitted, and no generic package gains any authority
-from this document.
+This draft uses the existing generated-package route marked feature-complete and
+release-regressed (HOSTED GREEN under the v0.4.0 baseline). Publication remains
+an open decision. The public generic ABI (issue #144/SPX-AI-045 territory) is
+out of scope: this draft changes no admission rule and grants no authority to
+generic packages.
 
 ## What is genuinely new in this slice
 
@@ -121,8 +119,7 @@ artifact to roll back. Once (if) a maintainer approves real publication:
 
 ## Review checkpoint
 
-Per issue #145's guardrails, this document is the bounded design submitted
-for independent maintainer review, not a self-approved decision. A
-maintainer accepting this draft should edit this file's Status line to
-record the acceptance (reviewer, date, and which open items above remain
-deferred vs. resolved) rather than have an implementing agent do so.
+This draft requires independent maintainer review under issue #145's guardrails;
+it is not an approved decision. If accepted, the maintainer—not an implementing
+agent—should update the Status line with the reviewer, date, and which open
+items remain deferred or are resolved.

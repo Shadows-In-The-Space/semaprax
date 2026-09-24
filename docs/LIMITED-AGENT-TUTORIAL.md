@@ -9,16 +9,17 @@ Audience: agent and integration authors wiring a *limited* agent — one that
 never needs `source_write` or `candidate_only` authority — against the
 public CLI.
 
+Build a limited agent that reads source, reviews someone else's patch, runs
+tests, and publishes an already-approved result. It needs fewer authority
+classes, not a smaller CLI.
+
 [Agent Skill Bundle v1](AGENT-SKILL-BUNDLE-V1.md) defines `PUBLIC_WORKFLOW`:
-ten verbs, each stamped with exactly one of five authority classes
-(`read_only`, `candidate_only`, `source_write`, `test_execute`,
-`publication`). This tutorial follows one useful subset of that workflow —
-`inspect` → `review` → `test` → `publish` — chosen because it never needs
-`source_write` (`apply`/`repair`) or `candidate_only` (`propose`/`rebase`):
-a bot that only reads, reviews someone else's proposed patch, runs the
-project's tests, and publishes an already-approved result never needs write
-access to source at all. That is what "limited agent" means here: fewer
-authority classes than the full ten-verb workflow, not a smaller CLI.
+ten verbs across five authority classes (`read_only`, `candidate_only`,
+`source_write`, `test_execute`, `publication`). This walkthrough uses only
+`inspect` → `review` → `test` → `publish`. It needs neither `source_write`
+(`apply`/`repair`) nor `candidate_only` (`propose`/`rebase`). The final step
+requires a separately prepared and approved candidate; it is not a continuation
+that applies the simple patch from step 2.
 
 | Step | Verb | Authority class | Wraps |
 | --- | --- | --- | --- |
@@ -27,8 +28,8 @@ authority classes than the full ten-verb workflow, not a smaller CLI.
 | 3 | `test` | `test_execute` | `semaprax test` |
 | 4 | `publish` | `publication` | `semaprax project-candidate-git-publish` |
 
-Every command below is the same top-level `semaprax` command
-`PUBLIC_WORKFLOW` names; nothing here is a new command surface, matching
+The commands below are the existing top-level `semaprax` commands named by
+`PUBLIC_WORKFLOW`, not a new command surface. See
 [Agent Skill Bundle v1](AGENT-SKILL-BUNDLE-V1.md#the-public-semantic-workflow).
 
 ## 1. `inspect` — read the semantic graph (`read_only`)
@@ -53,13 +54,11 @@ read, with no other authority.
 
 ## 2. `review` — preview a proposed change (`read_only`)
 
-The committed [`examples/rename.spatch`](../examples/rename.spatch) is the
-same three-line patch [`examples/README.md`](../examples/README.md#semantic-change-input)
-uses for `impact`; `review` accepts the identical `<file> <patch.spatch>`
-shape. As committed, its `base` line names a placeholder
-(`GRAPH_REVISION`) so a stale copy never accidentally reviews clean: running
-`review` against the committed file fails closed instead of silently
-reviewing the wrong base:
+Use the three-line [`examples/rename.spatch`](../examples/rename.spatch) patch
+from [`examples/README.md`](../examples/README.md#semantic-change-input).
+Both `impact` and `review` accept `<file> <patch.spatch>`. The committed patch
+deliberately uses `GRAPH_REVISION` as a placeholder in its `base` line. Running
+it unchanged rejects the stale base rather than reviewing the wrong revision:
 
 ```sh
 semaprax review examples/meaning.spx examples/rename.spatch
@@ -70,10 +69,10 @@ error[SPX-G409]: stale semantic patch: expected graph GRAPH_REVISION, current gr
   help: regenerate the patch against the current semantic graph
 ```
 
-Substituting the real revision `check` reports (into a working copy — never
-edit the committed fixture; `examples/README.md` explains why) and rerunning
-produces a `semaprax.semantic-review.v1` document. Executed for the same
-exact subject, its `sections` classify the rename as
+Copy the patch, replace the placeholder with the real revision from `check`,
+and rerun against that copy. Do not edit the committed fixture; the examples
+README explains why. This produces a `semaprax.semantic-review.v1` document.
+For the same exact subject, its `sections` classify the rename as
 `bounded_no_change`/`change` per section (behavior unchanged, API identity
 renamed but stable, no new effects, ownership and cleanup unchanged), and its
 embedded `semaprax.semantic-impact.v1` evidence names exactly one affected
@@ -109,19 +108,18 @@ pass/fail. It does not write source, stage a candidate, or publish anything.
 semaprax project-candidate-git-publish <manifest> <capsule.json> <approved-candidate-digest> <host-policy.json>
 ```
 
-Unlike the first three steps, this command cannot run against a bare `.spx`
-file and a hand-edited patch: `capsule.json` is a complete-candidate recovery
-capsule, and `<approved-candidate-digest>` must match it exactly — both come
-from the managed-workspace protocol (`workspace/open`, candidate
-construction, `candidate/source-review`, capsule export), not from this
-tutorial's simple file-plus-patch shape. [Candidate Git publication
-CLI v1](CANDIDATE-GIT-PUBLICATION-CLI-V1.md) is the exact reference for the
-command and the bounded `host-policy.json` shape (repository, ref, base
-commit, author identity, message, and process limits — no ambient identity,
-clock, or signing service). A limited agent's `publication` authority is
-exactly this one command against an already-produced capsule and an
-already-external approval of its digest; it is not authority to construct or
-approve the candidate itself.
+This step needs more than a `.spx` file and patch. `capsule.json` must be a
+complete-candidate recovery capsule, and `<approved-candidate-digest>` must
+match it exactly. These inputs belong to the managed-workspace workflow
+(`workspace/open`, candidate construction, `candidate/source-review`, capsule
+export), not the file-plus-patch example above. The approval must already come
+from outside the limited agent; `publication` does not let it construct or
+approve a candidate.
+
+[Candidate Git publication CLI v1](CANDIDATE-GIT-PUBLICATION-CLI-V1.md)
+defines the command and bounded `host-policy.json`: repository, ref, base
+commit, author identity, message and process limits. No ambient identity,
+clock or signing service is used.
 
 This tutorial does not fabricate that capsule inline: producing one requires
 the full managed-workspace sequence documented in [Project graph-operational
@@ -137,12 +135,10 @@ have executed `publish` itself.
 
 ## What this tutorial does not run
 
-`inspect`, `review`, and `test` above were executed locally, against the
-exact subject named in each step, on Darwin arm64 — that is local evidence
-for one host and one commit, not a hosted or cross-platform claim. `publish`
-is documented, not executed here; its cited fixture's own hosted status is
-stated above rather than repeated as this tutorial's own. None of the four
-steps grants filesystem, network, or process authority beyond what its own
-command already has; a limited agent combining exactly these four verbs gets
-`read_only` + `test_execute` + `publication` and nothing else — never
-`source_write` or `candidate_only`.
+The observed `inspect`, `review`, and `test` runs cover one exact commit on
+Darwin arm64. They are local evidence, not hosted or cross-platform evidence.
+`publish` was not run here; the cited fixture owns its separate hosted status.
+
+These four verbs grant only `read_only` + `test_execute` + `publication`,
+never `source_write` or `candidate_only`. Combining them adds no filesystem,
+network or process authority beyond each command's existing boundary.

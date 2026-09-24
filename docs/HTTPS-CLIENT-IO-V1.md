@@ -18,17 +18,18 @@ non-empty UTF-8 without NUL, at most 2,048 bytes, and use the `https` scheme.
 result: redirects, protocol negotiation, headers, and the complete body must
 fit before the owned result becomes visible.
 
-The returned bytes are a deterministic HTTP/1.1-shaped response accepted by
-the existing `std.http` parsers. `x-semaprax-http-version` records the actually
-negotiated `0.9`, `1.0`, `1.1`, `2`, or `3` version; hop-by-hop framing is
-removed and `content-length` is regenerated from the collected body. Response
-header names are lowercase and sorted by `(name, value)`.
+The operation returns deterministic HTTP/1.1-shaped bytes that existing
+`std.http` parsers accept. The `x-semaprax-http-version` header records the
+negotiated version: `0.9`, `1.0`, `1.1`, `2`, or `3`. The response removes
+hop-by-hop framing, regenerates `content-length` from the collected body, and
+uses lowercase header names sorted by `(name, value)`.
 
-The injected provider owns authority and transport. `TcpNetworkProvider`
-retains one reusable client, uses Mozilla roots and hostname validation,
-disables ambient proxy discovery, negotiates HTTP/1.1 or HTTP/2, follows at
-most ten redirects, and keeps at most eight idle connections per origin. The
-ordinary interpreter has no provider and cannot perform network I/O.
+The injected provider controls transport and its authority.
+`TcpNetworkProvider` keeps one reusable client. It uses Mozilla roots and
+hostname validation, disables ambient proxy discovery, negotiates HTTP/1.1 or
+HTTP/2, follows at most ten redirects, and keeps at most eight idle connections
+per origin. The ordinary interpreter has no provider, so it cannot perform
+network I/O.
 
 `semaprax.network-fixture.v3` is the deterministic carrier. It preserves v1
 TCP and v2 TLS/listener fields and adds an ordered `https` array whose entries

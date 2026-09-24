@@ -39,10 +39,9 @@ code, `.spx` source, diagnostic, or CLI surface.
 | Depends on (blocked) | [ABI-09A.13 (#162)](https://github.com/wavect/semaprax/issues/162), [ABI-09A.14 (#163)](https://github.com/wavect/semaprax/issues/163) |
 | Governed by | [PG-9 decision](https://github.com/wavect/semaprax/issues/165) — not affected by this document |
 
-This product is two real, already-shipped foundations composed in one
-project, deliberately **not wired together** into one combined
-Agent-effect-calls-fs pipeline. See [Nonclaims](#nonclaims) for exactly why,
-with reproductions.
+This project combines two already-shipped foundations, but they are
+**not wired together** as an Agent-effect-calls-fs pipeline.
+[Nonclaims](#nonclaims) explains the boundary and provides reproductions.
 
 ## What it proves
 
@@ -92,11 +91,10 @@ The fixed, flat, three-record manifest (`fixtures/input.json`):
 `record_count` is pinned at exactly 3 (see [Bounds](#bounds) for why); each
 record has an identifier, a Copy-scalar `tag` (`"ok"` accepts, anything
 else including `"warn"` is rejected), and an owned text `payload` bounded at
-16 bytes. This is a fixed fixture schema, not the configurable
-`input_manifest`/`output_report`/`max_input_bytes`/digest-bearing work
-request the issue's illustrative scenario sketches — building that general
-request layer on top of `std.fs` plus `std.data.json.doc` is exactly what
-hits `SPX-G171` (below).
+16 bytes. This fixed fixture schema is not the issue's configurable
+`input_manifest`/`output_report`/`max_input_bytes`/digest-bearing work request.
+Building that general request layer on `std.fs` plus `std.data.json.doc` hits
+`SPX-G171`, as described below.
 
 ## Output report schema
 

@@ -10,9 +10,9 @@ broader product completion remain separately gated.
 
 ## Objective
 
-SEMAPRAX is immutable by default. This tranche adds the smallest end-to-end
-language slice for explicit mutation of local values while keeping every
-other mutation surface closed:
+SEMAPRAX remains immutable by default. This profile adds a restricted,
+end-to-end way to mutate local values explicitly; other mutation forms remain
+closed:
 
 - Local bindings may declare mutability with a `mut` modifier directly after
   `let`: `let mut total = 0;`. Plain `let` stays immutable.
@@ -36,9 +36,9 @@ expression grammar admits no `=`, `(x = 2)` fails to parse
 
 ## Semantics
 
-Immutable by default remains the rule: every parameter, match binding,
-contract binding, and plain `let` is immutable, and assigning to one is a
-compile-time diagnostic. Assignment semantics are deliberately narrow:
+Parameters, match bindings, contract bindings and plain `let` bindings remain
+immutable. Assigning to any of them produces a compile-time diagnostic. The
+supported assignment semantics are restricted:
 
 1. The assigned value is evaluated completely before the store; checked
    arithmetic failure statuses propagate exactly as they would from the same
@@ -54,7 +54,7 @@ compile-time diagnostic. Assignment semantics are deliberately narrow:
 
 Assignment targets and assigned values must be checked Copy scalar values:
 `i64`, `i32`, `u8`, `char`, `f32`, `f64`, or `bool`, with value ownership.
-Everything else is rejected at compile time rather than approximated:
+Other values are rejected at compile time, not given approximate semantics:
 
 - No field mutation (`p.x = ...`), no record/variant replacement-in-place;
   `with { .. }` stays a pure copy-producing update.

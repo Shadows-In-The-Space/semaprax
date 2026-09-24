@@ -28,13 +28,15 @@ before dispatch and are not refunded after failure.
 
 ## Authority and failures
 
-Declaring the effect alone does not authorize any POST destination. The provider
-must receive an explicit host-selected HTTPS origin policy (at most eight origins). No source-selected
-authentication header, source credential, ambient proxy, or environment-derived
-origin grants authority. The concrete Rust and native hosts do not follow redirects for
-POST and perform no automatic retries. The host retains TLS trust configuration.
-Origin authorization is not IP pinning or a guarantee about DNS rebinding; hosts
-requiring network-range restrictions must enforce them at their network boundary.
+Declaring the effect does not authorize a POST destination. The host must give
+the provider an explicit HTTPS origin policy containing at most eight origins.
+Source-selected authentication headers, source credentials, ambient proxies,
+and environment-derived origins grant no authority.
+
+The concrete Rust and native hosts neither follow POST redirects nor retry
+automatically. The host controls TLS trust configuration. Origin authorization
+does not pin IP addresses or protect against DNS rebinding; hosts that need
+network-range restrictions must enforce them at their network boundary.
 
 The existing `semaprax.http.v1` status domain remains closed: 1 invalid URL,
 2 insecure scheme, 3 transport failure, 4 capacity overflow, 5 unsupported HTTP
@@ -43,7 +45,7 @@ response bounds. A status after dispatch does not prove that an external effect
 failed: even timeout, response overflow or response loss may follow successful
 remote processing. Source failure aborts the invocation and publishes no partial
 response; this operation does not return a checked delivery-outcome value.
-Evidence and errors do not authorize a retry. Webhook delivery reconciliation,
+Neither evidence nor errors grant permission to retry. Webhook delivery reconciliation,
 checked uncertain-result APIs, signing and email remain separate work.
 
 ## Explicit host configuration

@@ -8,10 +8,9 @@ library completion and broader physical-filesystem support remain separate.
 Audience: language users, standard-library authors, compiler contributors, and
 host-adapter implementers.
 
-Filesystem I/O v2 extends the frozen Filesystem I/O v1 profile with metadata,
-directory listing, directory creation, removal, and explicit atomic replacement.
-The v1 operation identities, signatures, status domain, limits, provider
-authority model, and projections remain frozen. A v1 program continues to
+Filesystem I/O v2 adds metadata, directory listing, directory creation, removal
+and explicit atomic replacement. V1 operation identities, signatures, status
+domain, limits, provider authority and projections remain frozen. A v1 program continues to
 select Graph v41 and the v1 facts; reaching any v2 operation selects Graph v42
 and the additive v2 facts.
 
@@ -37,13 +36,12 @@ success. `write_atomic` returns the exact data length on success.
 
 ## Paths, listing, and accounting
 
-Paths are bounded byte prefixes with a logical `path_length`; bytes outside the
-prefix are ignored. Non-root paths use v1's relative slash-separated grammar:
+A path is the bounded byte prefix selected by its logical `path_length`.
+Bytes outside that prefix are ignored. Non-root paths use v1's relative slash-separated grammar:
 components are nonempty, and `.`, `..`, NUL, backslash, and colon are rejected.
-The logical path is at most 4,096 bytes and need not be UTF-8. An empty logical
-path is admitted only by `file_stat` and `file_list`, where it denotes the
-provider's explicitly selected root. Empty paths remain invalid for create,
-remove, atomic write, read, and create-new write.
+The logical path is at most 4,096 bytes and need not be UTF-8. Only `file_stat` and `file_list` accept an empty logical path, meaning the
+provider's explicitly selected root. Create, remove, atomic write, read and
+create-new write still reject empty paths.
 
 `file_list` returns immediate entry names as raw bytes, each followed by one
 NUL byte. Names are unique and sorted by unsigned raw-byte order; the result is

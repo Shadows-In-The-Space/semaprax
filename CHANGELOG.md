@@ -8,6 +8,11 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Persist and restore semantic caches for admitted Projects whose bundled
+  standard-library closure exceeds the authored-source manifest limit. The
+  private snapshot now validates the complete bounded source inventory before
+  warm replay; no source or cache authority is widened.
+
 - Reduce repeated catalog-normalizer control-escape work within the admitted
   Project graph budget. Fifteen independent-oracle cases pass across the
   interpreter, native C O0/O2 and Core Wasm; the exact 256-record maximum

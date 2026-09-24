@@ -140,6 +140,11 @@ contract or a way for an agent to submit graph facts as canonical meaning.
 After decoding authenticated state, load independently parses/formats every
 stored canonical source and rederives each synthetic resolver input, including
 imports, declarations, IDs, and spans. Checked reuse requires exact equality.
+The private snapshot inventories the full admitted workspace closure, including
+compiler-bundled standard-library modules and exact local dependency sources;
+the manifest's authored-source limit does not truncate that closure. Inventory
+paths remain sorted, unique, bounded by the workspace module limit, and checked
+against the manifest's authored and bundled paths before warm replay.
 It reruns HIR validation, cross-file/stub checks, linking, Project-profile
 admission, and graph generation, then requires exact stored project/workspace
 revisions and graph bytes. Every module must be a checked-HIR hit; unexpected

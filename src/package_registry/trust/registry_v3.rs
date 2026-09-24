@@ -4,6 +4,11 @@ use super::*;
 use crate::package_registry::{artifact_manifest, leaf_manifest_v1, registry_v3 as registry};
 
 pub const METADATA_SCHEMA_V2: &str = "semaprax.registry-trust-metadata.v2";
+/// Wavect's local mirror policy: after a successful signed timestamp update,
+/// an offline consumer may not keep accepting the old state for over seven
+/// days. The first independently authorized install is exempt because it has
+/// no prior timestamp observation to age.
+pub const MAX_MIRROR_OFFLINE_SECONDS: u64 = 7 * 24 * 60 * 60;
 const DOMAIN: &[u8] = b"semaprax.registry-trust-metadata.v2\0";
 const CHECKPOINT_SCHEMA_V2: &str = "semaprax.registry-trust-checkpoint.v2";
 
@@ -99,6 +104,11 @@ pub struct UpdateInputs<'registry, 'metadata> {
     /// Only an independently admitted snapshot; inspection types cannot enter.
     pub registry: &'registry registry::RegistrySnapshotV3,
 }
+
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+mod mirror;
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+pub use mirror::{verify_mirror_update, MirrorMetadataPaths, MirrorPublisherPath};
 
 /// Borrowed compiler-admitted registry plus a required checkpoint transition.
 /// This does not persist the checkpoint or authorize cache/fetch/execution.

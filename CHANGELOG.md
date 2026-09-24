@@ -8,6 +8,12 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Compose acquired exact mirror metadata through Registry Trust v2's signed
+  timestamp/snapshot/publisher-manifest verifier and its existing rotation,
+  revocation, expiry and checkpoint controls. The local mirror policy refuses
+  a follow-up update after seven days without a checkpointed timestamp; this
+  remains local proof, not hosted distribution support.
+
 - Add a capability-explicit native HTTPS registry-mirror byte acquisition
   boundary. It accepts only caller-named origin-relative digest-bound metadata
   and artifact paths with disabled proxy discovery, credentials, redirects and

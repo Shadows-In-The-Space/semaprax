@@ -1,6 +1,12 @@
 use super::*;
+use crate::package_registry::mirror_transport::{
+    MirrorBytes, MirrorError, MirrorGet, MirrorNetworkAuthority, MirrorObject, MirrorObjectKind,
+    MirrorOrigin, MirrorResponse, MirrorTransport,
+};
 use ed25519_dalek::{Signer, SigningKey};
+use std::collections::VecDeque;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 pub(in crate::package_registry::trust) type Admission = (
     registry::RegistrySnapshotV3,
@@ -207,6 +213,103 @@ fn refused<T>(result: Result<T>, code: &str) {
         Ok(_) => panic!("expected {code}"),
         Err(error) => assert_eq!(error.code, code),
     }
+}
+
+struct ScriptedMirror {
+    replies: VecDeque<MirrorResponse>,
+}
+impl MirrorTransport for ScriptedMirror {
+    fn get(&mut self, request: MirrorGet<'_>) -> std::result::Result<MirrorResponse, MirrorError> {
+        assert!(request
+            .url()
+            .starts_with("https://mirror.example.test/metadata/"));
+        self.replies.pop_front().ok_or(MirrorError::TransportFailed)
+    }
+}
+
+fn mirror_bytes(rows: [(&str, &str); 4]) -> Vec<MirrorBytes> {
+    let digests = rows.map(|(_, bytes)| hash(bytes.as_bytes()));
+    let objects = rows
+        .iter()
+        .zip(&digests)
+        .map(|((path, bytes), digest)| MirrorObject {
+            kind: MirrorObjectKind::Metadata,
+            path,
+            digest,
+            max_bytes: bytes.len(),
+        })
+        .collect::<Vec<_>>();
+    let replies = rows
+        .iter()
+        .map(|(path, bytes)| MirrorResponse {
+            status: 200,
+            final_url: format!("https://mirror.example.test{path}"),
+            body: bytes.as_bytes().to_vec(),
+        })
+        .collect();
+    let authority = MirrorNetworkAuthority::new(
+        MirrorOrigin::parse("https://mirror.example.test/").unwrap(),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    authority
+        .acquire(
+            &mut ScriptedMirror { replies },
+            &crate::package_registry::mirror_transport::MirrorRequest { objects: &objects },
+        )
+        .unwrap()
+}
+
+#[test]
+fn acquired_metadata_replays_signed_snapshot_publishers_and_offline_policy() {
+    let f = Fixture::new(false);
+    let downloaded = mirror_bytes([
+        ("/metadata/timestamp.json", &f.timestamp),
+        ("/metadata/snapshot.json", &f.snapshot),
+        ("/metadata/publisher-app.json", &f.publishers[0]),
+        ("/metadata/publisher-lib.json", &f.publishers[1]),
+    ]);
+    let publishers = [
+        MirrorPublisherPath {
+            role: "publisher-app",
+            path: "/metadata/publisher-app.json",
+        },
+        MirrorPublisherPath {
+            role: "publisher-lib",
+            path: "/metadata/publisher-lib.json",
+        },
+    ];
+    let paths = MirrorMetadataPaths {
+        timestamp_path: "/metadata/timestamp.json",
+        snapshot_path: "/metadata/snapshot.json",
+        publishers: &publishers,
+        registry: &f.admitted.0,
+    };
+    let candidate = verify_mirror_update(&f.root, &f.initial(), 100, &paths, &downloaded).unwrap();
+    candidate.check_lock(&f.admitted.2, &f.admitted.1).unwrap();
+
+    let mut tampered = f.publishers[0].clone();
+    tampered = tampered.replacen("\"version\":1", "\"version\":2", 1);
+    let tampered_downloaded = mirror_bytes([
+        ("/metadata/timestamp.json", &f.timestamp),
+        ("/metadata/snapshot.json", &f.snapshot),
+        ("/metadata/publisher-app.json", &tampered),
+        ("/metadata/publisher-lib.json", &f.publishers[1]),
+    ]);
+    refused(
+        verify_mirror_update(&f.root, &f.initial(), 100, &paths, &tampered_downloaded),
+        "SPX-PKR622",
+    );
+    refused(
+        verify_mirror_update(
+            &f.root,
+            candidate.checkpoint(),
+            100 + MAX_MIRROR_OFFLINE_SECONDS + 1,
+            &paths,
+            &downloaded,
+        ),
+        "SPX-PKR623",
+    );
 }
 
 #[test]

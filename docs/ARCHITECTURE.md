@@ -2545,6 +2545,15 @@ the Registry-v3 signed proof and held-host update APIs; mirror acquisition has
 no root/store/cache/resolver/execution authority and establishes no hosted
 availability. See [Package registry mirror transport v1](PACKAGE-REGISTRY-MIRROR-TRANSPORT-V1.md).
 
+`trust::registry_v3::verify_mirror_update` separately binds one exact acquired
+metadata-path set back into the existing signed Registry-v3 proof. It retains
+independent root/checkpoint/time and producer-sealed registry requirements,
+replays signed timestamp/snapshot/publisher-manifest associations, and applies
+a seven-day maximum interval after a checkpointed timestamp before accepting
+another offline mirror update. It returns the existing non-authoritative
+candidate only; durable Host v2 commit remains required. See [Package registry
+mirror trust v1](PACKAGE-REGISTRY-MIRROR-TRUST-V1.md).
+
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary
 semantic-workspace graph derives function imports over synthetic logical paths,

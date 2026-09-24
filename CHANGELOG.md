@@ -8,6 +8,13 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a capability-explicit native HTTPS registry-mirror byte acquisition
+  boundary. It accepts only caller-named origin-relative digest-bound metadata
+  and artifact paths with disabled proxy discovery, credentials, redirects and
+  retries; returned bytes still require the existing signed Registry-v3 and
+  held-store admission flow. Local scripted transport controls are not hosted
+  registry, TLS-peer, availability or production evidence.
+
 ## 0.6.0 — 2026-09-24
 
 - Keep the frozen private Component v7 WIT identity at `0.5.0` while the crate

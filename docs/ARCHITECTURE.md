@@ -2536,6 +2536,15 @@ write; only exact Subject-v3 bytes are copied. The real Resolver-v2 consumes
 that flat cache to reproduce the selected Lock-v3, while artifacts stay in the
 managed store. See [Registry Cache Bridge v1](PACKAGE-REGISTRY-CACHE-BRIDGE-V1.md).
 
+`package_registry::mirror_transport` is a distinct native host acquisition
+boundary. A host supplies one HTTPS origin, timeout and exact immutable
+metadata/artifact paths with raw SHA-256 bindings; the module disables ambient
+proxies, credentials, redirects and retries, bounds every response, and returns
+only matching bytes. Those bytes remain untrusted until separately passed to
+the Registry-v3 signed proof and held-host update APIs; mirror acquisition has
+no root/store/cache/resolver/execution authority and establishes no hosted
+availability. See [Package registry mirror transport v1](PACKAGE-REGISTRY-MIRROR-TRANSPORT-V1.md).
+
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary
 semantic-workspace graph derives function imports over synthetic logical paths,

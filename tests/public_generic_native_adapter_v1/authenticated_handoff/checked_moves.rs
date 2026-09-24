@@ -1,5 +1,8 @@
 //! Actual compiler-owned movement bodies through generated C11/C++17 callers.
 //! Neither output assembly nor a test label implements the selected endpoint.
+#[path = "checked_moves_postconditions.rs"]
+mod postconditions;
+
 use super::*;
 use semaprax::{
     public_generic_abi::{
@@ -362,5 +365,6 @@ fn generated_c_and_cxx_execute_checked_movement_bodies() {
             run_callers(&root, descriptor, &artifact, swap, guard);
         }
     }
+    postconditions::run(&root);
     fs::remove_dir_all(root).unwrap();
 }

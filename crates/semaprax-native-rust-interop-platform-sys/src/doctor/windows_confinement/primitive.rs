@@ -1,12 +1,14 @@
 //! `#[cfg(windows)]` Windows confinement primitive for
 //! [`DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1`][doc].
 //!
-//! # This code has never been compiled or executed
+//! # Authoring-host and hosted evidence boundaries
 //!
 //! The authoring host for this module is macOS arm64 with no `rustup`, no
 //! installed `*-pc-windows-*` target, and no Windows toolchain of any kind,
 //! so `cfg(windows)` code is never even parsed here -- `cargo check` on this
-//! host does not select this module. Every function signature, struct
+//! host does not select this module. The original restricted-token launch and
+//! timeout cases later passed in a hosted Windows run, but subsequent runtime
+//! additions still require the exact expanded gate. Every function signature, struct
 //! layout, and constant used below was cross-checked against the exact
 //! vendored `windows-sys = "=0.61.2"` source
 //! (`~/.cargo/registry/src/.../windows-sys-0.61.2`) already pinned by this
@@ -18,8 +20,8 @@
 //! cross-check raises confidence that the
 //! code compiles; it is not a substitute for real Windows execution and must
 //! never be described as one. Treat every claim this file's doc comments
-//! make about its own behavior as a design intent, not evidence, until a
-//! Windows-capable session builds and runs it (see the proposed gate in
+//! make about its own behavior as a design intent, not evidence beyond those
+//! exact hosted cases, until a Windows-capable session builds and runs it (see the gate in
 //! `DOCTOR-PRODUCTION-PROVISIONER-WINDOWS-V1.md`).
 //!
 //! # Scope
@@ -601,6 +603,7 @@ fn settle_confined(confined: &mut ConfinedProcess, deadline: Instant) -> Settlem
     let mut state = StickySettlement::default();
     let mut timed_out = false;
     let mut killed_and_reaped = false;
+    let mut empty_job_deadline = None;
     let mut exit_code = None;
     loop {
         // SAFETY: `confined.process` is a live, held process handle.
@@ -638,9 +641,15 @@ fn settle_confined(confined: &mut ConfinedProcess, deadline: Instant) -> Settlem
         } else {
             // TerminateJobObject requests termination; it does not prove that
             // the leader has released its inherited scratch-file handles.
-            // Keep one fixed cleanup grace after the caller's own deadline.
+            // Keep one fixed leader-reap grace after the caller's deadline.
             match unsafe { WaitForSingleObject(confined.process.raw(), 5_000) } {
-                WAIT_OBJECT_0 => killed_and_reaped = true,
+                WAIT_OBJECT_0 => {
+                    killed_and_reaped = true;
+                    // A signaled leader does not prove its descendants have
+                    // completed termination. Give the job a bounded drain
+                    // interval before choosing a sticky nonempty-job result.
+                    empty_job_deadline = Some(Instant::now() + Duration::from_secs(5));
+                }
                 WAIT_TIMEOUT => {
                     state.select(Settlement::Uncertain(UncertainReason::KillWaitTimedOut));
                 }
@@ -655,27 +664,41 @@ fn settle_confined(confined: &mut ConfinedProcess, deadline: Instant) -> Settlem
         }
     }
 
-    let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
-    // SAFETY: `confined.job` is live; `accounting` is a live,
-    // exclusively-owned local of the exact size passed.
-    let queried = unsafe {
-        QueryInformationJobObject(
-            confined.job.raw(),
-            JobObjectBasicAccountingInformation,
-            (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
-            std::mem::size_of_val(&accounting) as u32,
-            std::ptr::null_mut(),
-        )
-    } != 0;
-    if !queried {
-        state.select(Settlement::Uncertain(UncertainReason::QueryFailed));
-    } else if accounting.ActiveProcesses != 0 {
-        state.select(Settlement::Uncertain(
-            UncertainReason::ActiveProcessesNonZero,
-        ));
-    } else if timed_out && killed_and_reaped {
-        // Only a reaped leader and empty job prove cancellation settlement.
-        state.select(Settlement::Cancelled);
+    loop {
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: `confined.job` is live; `accounting` is a live,
+        // exclusively-owned local of the exact size passed.
+        let queried = unsafe {
+            QueryInformationJobObject(
+                confined.job.raw(),
+                JobObjectBasicAccountingInformation,
+                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of_val(&accounting) as u32,
+                std::ptr::null_mut(),
+            )
+        } != 0;
+        if !queried {
+            state.select(Settlement::Uncertain(UncertainReason::QueryFailed));
+            break;
+        }
+        if accounting.ActiveProcesses == 0 {
+            if timed_out && killed_and_reaped {
+                // Only a reaped leader and empty job prove cancellation.
+                state.select(Settlement::Cancelled);
+            }
+            break;
+        }
+        match empty_job_deadline {
+            Some(deadline) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            _ => {
+                state.select(Settlement::Uncertain(
+                    UncertainReason::ActiveProcessesNonZero,
+                ));
+                break;
+            }
+        }
     }
 
     state

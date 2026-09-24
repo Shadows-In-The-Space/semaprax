@@ -1,5 +1,5 @@
 //! These tests exercise the pure helpers and the live Win32 spawn/settle seam.
-//! The two live cases require the gate's explicit
+//! The live cases require the gate's explicit
 //! `SEMAPRAX_WINDOWS_CONFINEMENT_TEST_PARENT`; absent or unusable provisioning
 //! is a test failure. Their capsule bytes are structurally valid test input
 //! with an unverified signature because this primitive currently performs
@@ -9,6 +9,7 @@ use std::ffi::OsString;
 
 const TEST_PARENT_ENV: &str = "SEMAPRAX_WINDOWS_CONFINEMENT_TEST_PARENT";
 const TEST_MARKER: &str = "runtime-child-started.bin";
+const DESCENDANT_PERMIT: &str = "runtime-descendant-permit.bin";
 
 fn runtime_parent() -> PathBuf {
     let parent = std::env::var_os(TEST_PARENT_ENV)
@@ -133,6 +134,163 @@ fn runtime_child_marks_start_then_waits_for_job_termination() {
 }
 
 #[test]
+#[ignore = "spawned only by the live confinement runtime tests"]
+fn runtime_child_exits_with_nonzero_status() {
+    publish_child_marker(b"exit-37");
+    std::process::exit(37);
+}
+
+#[test]
+#[ignore = "spawned only by the live confinement runtime tests"]
+fn runtime_child_launches_descendant_after_parent_permit() {
+    let directory = std::env::current_dir().expect("confined current directory");
+    publish_child_marker(b"ready-for-descendant");
+    let permit = directory.join(DESCENDANT_PERMIT);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !permit.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "parent did not permit descendant launch"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let executable = std::env::current_exe().expect("confined executable path");
+    let args = child_test_args("runtime_child_waits_for_job_termination");
+    match std::process::Command::new(executable).args(args).spawn() {
+        Ok(descendant) => {
+            drop(descendant);
+            publish_child_marker(b"descendant-started");
+            loop {
+                std::thread::sleep(Duration::from_secs(30));
+            }
+        }
+        Err(_) => publish_child_marker(b"descendant-spawn-refused"),
+    }
+}
+
+#[test]
+#[ignore = "spawned only by the live confinement runtime tests"]
+fn runtime_child_waits_for_job_termination() {
+    loop {
+        std::thread::sleep(Duration::from_secs(30));
+    }
+}
+
+fn current_process_handle_count() -> u32 {
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
+
+    let mut count = 0;
+    assert_ne!(
+        unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut count) },
+        0,
+        "query the current process's live handle count"
+    );
+    count
+}
+
+struct RuntimeChildCleanupGuard {
+    process: windows_sys::Win32::Foundation::HANDLE,
+    job: windows_sys::Win32::Foundation::HANDLE,
+    scratch_dir: PathBuf,
+    armed: bool,
+}
+
+impl RuntimeChildCleanupGuard {
+    fn new(child: &ConfinedProcess) -> Self {
+        Self {
+            process: child.process.raw(),
+            job: child.job.raw(),
+            scratch_dir: child._scratch.dir.clone(),
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for RuntimeChildCleanupGuard {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+        use windows_sys::Win32::System::JobObjects::{
+            JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        };
+        use windows_sys::Win32::System::Threading::WaitForSingleObject;
+
+        if !self.armed {
+            return;
+        }
+
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        let mut queried = unsafe {
+            QueryInformationJobObject(
+                self.job,
+                JobObjectBasicAccountingInformation,
+                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of_val(&accounting) as u32,
+                std::ptr::null_mut(),
+            )
+        } != 0;
+        if queried && accounting.ActiveProcesses != 0 {
+            if unsafe { TerminateJobObject(self.job, 126) } == 0 {
+                eprintln!("runtime-test cleanup could not terminate its exact confined job");
+                return;
+            }
+            if unsafe { WaitForSingleObject(self.process, 5_000) } != WAIT_OBJECT_0 {
+                eprintln!("runtime-test cleanup could not reap its confined leader");
+                return;
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+                queried = unsafe {
+                    QueryInformationJobObject(
+                        self.job,
+                        JobObjectBasicAccountingInformation,
+                        (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                        std::mem::size_of_val(&accounting) as u32,
+                        std::ptr::null_mut(),
+                    )
+                } != 0;
+                if !queried {
+                    eprintln!("runtime-test cleanup could not query its confined job");
+                    return;
+                }
+                if accounting.ActiveProcesses == 0 {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    eprintln!("runtime-test cleanup could not prove its job empty");
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        if !queried
+            || accounting.ActiveProcesses != 0
+            || unsafe { WaitForSingleObject(self.process, 0) } != WAIT_OBJECT_0
+        {
+            eprintln!("runtime-test cleanup will not remove files before process settlement");
+            return;
+        }
+
+        for name in [
+            TEST_MARKER,
+            "runtime-child-started.bin.tmp",
+            DESCENDANT_PERMIT,
+        ] {
+            match std::fs::remove_file(self.scratch_dir.join(name)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => eprintln!("runtime-test cleanup could not remove {name}: {error}"),
+            }
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires the explicitly provisioned Windows runtime gate"]
 fn windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it() {
     use windows_sys::Win32::Foundation::LocalFree;
@@ -157,6 +315,7 @@ fn windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it()
     let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
     let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
         .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
+    let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
     let marker = child._scratch.dir.join(TEST_MARKER);
     let scratch_dir = child._scratch.dir.clone();
     wait_for_marker(&marker);
@@ -327,6 +486,7 @@ fn windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it()
 
     let marker_contents = std::fs::read(&marker).unwrap();
     std::fs::remove_file(&marker).expect("remove exact child marker before scratch settlement");
+    cleanup_guard.disarm();
     let settled = settle(child, Duration::from_secs(30));
     assert_eq!(settled.status, Settlement::Completed);
     assert_eq!(
@@ -349,16 +509,185 @@ fn windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation(
     let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
     let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
         .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
+    let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
     let marker = child._scratch.dir.join(TEST_MARKER);
     let scratch_dir = child._scratch.dir.clone();
     wait_for_marker(&marker);
     assert_eq!(std::fs::read(&marker).unwrap(), b"started");
     std::fs::remove_file(&marker).expect("remove exact child marker before scratch settlement");
+    cleanup_guard.disarm();
     let settled = settle(child, Duration::from_millis(100));
     assert_eq!(settled.status, Settlement::Cancelled);
     assert!(
         !scratch_dir.exists(),
         "settlement removes the now-empty per-child scratch directory"
+    );
+    assert_parent_empty(&parent);
+}
+
+#[test]
+#[ignore = "requires the explicitly provisioned Windows runtime gate"]
+fn windows_runtime_timeout_terminates_an_actual_job_descendant() {
+    use windows_sys::Win32::System::JobObjects::{
+        JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+    };
+
+    let parent = runtime_parent();
+    let executable = std::env::current_exe().expect("current test executable exists");
+    let args = child_test_args("runtime_child_launches_descendant_after_parent_permit");
+    let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+    let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
+        .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
+    let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
+    let marker = child._scratch.dir.join(TEST_MARKER);
+    let scratch_dir = child._scratch.dir.clone();
+    wait_for_marker(&marker);
+    assert_eq!(std::fs::read(&marker).unwrap(), b"ready-for-descendant");
+
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    assert_ne!(
+        unsafe {
+            QueryInformationJobObject(
+                child.job.raw(),
+                JobObjectExtendedLimitInformation,
+                (&mut limits as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of_val(&limits) as u32,
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    assert_ne!(
+        limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
+        0
+    );
+    assert_eq!(limits.BasicLimitInformation.ActiveProcessLimit, 1);
+    // This isolated test relaxes only its own job after confirming production's
+    // configured one-process cap; the separate success test proves that cap.
+    limits.BasicLimitInformation.ActiveProcessLimit = 2;
+    assert_ne!(
+        unsafe {
+            SetInformationJobObject(
+                child.job.raw(),
+                JobObjectExtendedLimitInformation,
+                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of_val(&limits) as u32,
+            )
+        },
+        0,
+        "test-owned job admits one descendant solely to exercise tree timeout"
+    );
+
+    std::fs::remove_file(&marker).expect("remove readiness marker before signaling child");
+    std::fs::write(child._scratch.dir.join(DESCENDANT_PERMIT), b"go")
+        .expect("permit exact confined child to launch one descendant");
+    wait_for_marker(&marker);
+    assert_eq!(std::fs::read(&marker).unwrap(), b"descendant-started");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut accounting =
+            windows_sys::Win32::System::JobObjects::JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default(
+            );
+        assert_ne!(
+            unsafe {
+                windows_sys::Win32::System::JobObjects::QueryInformationJobObject(
+                    child.job.raw(),
+                    windows_sys::Win32::System::JobObjects::JobObjectBasicAccountingInformation,
+                    (&mut accounting as *mut windows_sys::Win32::System::JobObjects::JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                    std::mem::size_of_val(&accounting) as u32,
+                    std::ptr::null_mut(),
+                )
+            },
+            0,
+            "observe live job membership before timed cancellation"
+        );
+        if accounting.ActiveProcesses == 2 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "job never contained leader and descendant"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    std::fs::remove_file(&marker).expect("remove descendant marker before job settlement");
+    std::fs::remove_file(child._scratch.dir.join(DESCENDANT_PERMIT))
+        .expect("remove exact descendant permit before job settlement");
+    cleanup_guard.disarm();
+    let settled = settle(child, Duration::from_millis(100));
+    assert_eq!(settled.status, Settlement::Cancelled);
+    assert!(
+        !scratch_dir.exists(),
+        "empty-job settlement closes both processes before scratch cleanup"
+    );
+    assert_parent_empty(&parent);
+}
+
+#[test]
+#[ignore = "requires the explicitly provisioned Windows runtime gate"]
+fn windows_runtime_nonzero_exit_settles_failed_and_cleans_resources() {
+    let parent = runtime_parent();
+    let executable = std::env::current_exe().expect("current test executable exists");
+    let args = child_test_args("runtime_child_exits_with_nonzero_status");
+    let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+    let child = confined_spawn(&executable, &borrowed_args, &parent, &test_capsule_body())
+        .expect("restricted-token child launch, job assignment, and ACL scratch setup succeed");
+    let mut cleanup_guard = RuntimeChildCleanupGuard::new(&child);
+    let marker = child._scratch.dir.join(TEST_MARKER);
+    let scratch_dir = child._scratch.dir.clone();
+    wait_for_marker(&marker);
+    assert_eq!(std::fs::read(&marker).unwrap(), b"exit-37");
+    std::fs::remove_file(&marker).expect("remove exact child marker before scratch settlement");
+    cleanup_guard.disarm();
+    let settled = settle(child, Duration::from_secs(30));
+    assert_eq!(
+        settled.status,
+        Settlement::Failed(FailureReason::ExitCode(37))
+    );
+    assert!(
+        !scratch_dir.exists(),
+        "settlement removes the now-empty per-child scratch directory"
+    );
+    assert_parent_empty(&parent);
+}
+
+#[test]
+#[ignore = "requires the explicitly provisioned Windows runtime gate"]
+fn windows_runtime_scratch_refusal_closes_setup_handles() {
+    let parent = runtime_parent();
+    let missing_parent = parent.join(format!("missing-scratch-parent-{}", std::process::id()));
+    assert!(!missing_parent.exists());
+    let executable = std::env::current_exe().expect("current test executable exists");
+    let args = child_test_args("runtime_child_marks_start_then_waits_for_job_termination");
+    let borrowed_args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
+    let capsule = test_capsule_body();
+
+    // Warm dynamic Windows call paths before taking the handle baseline, then
+    // require repeated real token/job/ACL-stage refusal to settle all handles.
+    for _ in 0..2 {
+        assert_eq!(
+            confined_spawn(&executable, &borrowed_args, &missing_parent, &capsule).err(),
+            Some(Refusal::FilesystemConfinement)
+        );
+    }
+    let baseline = current_process_handle_count();
+    for _ in 0..4 {
+        assert_eq!(
+            confined_spawn(&executable, &borrowed_args, &missing_parent, &capsule).err(),
+            Some(Refusal::FilesystemConfinement)
+        );
+        assert_eq!(
+            current_process_handle_count(),
+            baseline,
+            "token, job, and filesystem-stage failure handles are settled"
+        );
+    }
+    assert!(
+        !missing_parent.exists(),
+        "refusal does not create the absent parent"
     );
     assert_parent_empty(&parent);
 }

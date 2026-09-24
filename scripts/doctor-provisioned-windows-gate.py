@@ -2,7 +2,7 @@
 """Run the explicitly provisioned Windows confinement runtime tests.
 
 This gate fails if its Windows host or scratch parent is absent, if Cargo or
-libtest fails, or if either live test is filtered, ignored, or missing. The
+libtest fails, or if any named live test is filtered, ignored, or missing. The
 test capsule is structural fixture data: the current primitive does not
 verify capsule signatures, so this gate is not sealed-input evidence.
 """
@@ -27,6 +27,9 @@ FILTER = "doctor::windows_confinement::primitive::tests::windows_runtime_"
 EXPECTED_TESTS = (
     "doctor::windows_confinement::primitive::tests::windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it",
     "doctor::windows_confinement::primitive::tests::windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation",
+    "doctor::windows_confinement::primitive::tests::windows_runtime_timeout_terminates_an_actual_job_descendant",
+    "doctor::windows_confinement::primitive::tests::windows_runtime_nonzero_exit_settles_failed_and_cleans_resources",
+    "doctor::windows_confinement::primitive::tests::windows_runtime_scratch_refusal_closes_setup_handles",
 )
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TERMINATION_TIMEOUT_SECONDS = 30
@@ -82,7 +85,7 @@ def libtest_failures(output, return_code):
         passed, failed, ignored = map(int, summary.groups())
         if passed != len(EXPECTED_TESTS) or failed != 0 or ignored != 0:
             failures.append(
-                "libtest summary must show both selected runtime tests passing "
+                f"libtest summary must show all {len(EXPECTED_TESTS)} selected runtime tests passing "
                 f"and no ignored matches; got {passed} passed, {failed} failed, {ignored} ignored"
             )
     return failures
@@ -124,7 +127,7 @@ def self_test():
     assert precondition_failures("Linux", "x86_64", 64, False, False, False, False, False)
     passing_output = "\n".join(
         [*(f"test {name} ... ok" for name in EXPECTED_TESTS),
-         "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 1.00s"]
+         f"test result: ok. {len(EXPECTED_TESTS)} passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 1.00s"]
     )
     assert not libtest_failures(passing_output, 0)
     assert libtest_failures("test result: ok. 0 passed; 0 failed; 0 ignored; 10 filtered out", 0)
@@ -233,7 +236,7 @@ def run_gate():
         "--test-threads=1",
     ]
     print(f"provisioned Windows test parent: {parent}")
-    print("running both named restricted-token, child-launch, job, ACL, and settlement tests")
+    print(f"running all {len(EXPECTED_TESTS)} named restricted-token, child-launch, job, ACL, and settlement tests")
     try:
         process = subprocess.Popen(
             command,
@@ -274,7 +277,7 @@ def run_gate():
         for failure in failures:
             print(f"Windows confinement gate refusal: {failure}", file=sys.stderr)
         return 1
-    print("both explicitly selected Windows runtime tests executed and passed")
+    print(f"all {len(EXPECTED_TESTS)} explicitly selected Windows runtime tests executed and passed")
     return 0
 
 

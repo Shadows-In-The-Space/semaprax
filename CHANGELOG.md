@@ -10,12 +10,15 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 - Add a dispatch-only Windows confinement runtime gate that requires nonzero
   execution of restricted-token child launch, job limit/membership, scratch
-  DACL, descendant refusal, successful settlement, and timeout cancellation
-  tests. The gate uses structural capsule fixture bytes with an unverified
+  DACL, descendant refusal and test-owned descendant timeout, normal/nonzero
+  settlement, timeout cancellation, and filesystem-stage refusal with
+  handle-count cleanup. The gate uses
+  structural capsule fixture bytes with an unverified
   signature, requires successful `taskkill /T` and direct Cargo PID absence on
   timeout, and checks exact marker/scratch cleanup. Descendant quiescence is
-  not independently enumerated. Windows runtime execution and signed-capsule
-  admission remain unclaimed.
+  not independently enumerated. The original two-test slice passed on exact
+  checkout `c6bf9902`; the expanded five-test selector and signed-capsule
+  admission remain unverified.
 
 - Re-pin exact Semantic Workspace Change and Operations artifact/evidence/receipt
   KATs to the expanded Project graph and serialized limits while retaining

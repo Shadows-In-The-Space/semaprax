@@ -3,18 +3,16 @@
 Audience: release engineers, platform maintainers, and security reviewers
 with access to a real Windows host or a Windows CI runner.
 
-Status: **code lands with this revision; it is unexecuted on every host that
-has touched it, but its `#[cfg(windows)]` source has one later hosted Windows
-compilation witness.** Every *execution* claim in this document remains
-`HUMAN_BLOCKED: needs a Windows host` -- both authoring sessions ran on macOS
-arm64 with no `rustup`, no `*-pc-windows-*` target, and no Windows toolchain,
-and no cross-compilation or emulated substitute is treated as Windows evidence
-anywhere below. This revision adds the confinement primitive's Win32 wiring
-plus its host-independent sealed-capsule, admission-ordering, and settlement
-logic (compiled and tested on every host this crate builds on, this one
-included). See [Hosted Windows compilation evidence](#hosted-windows-compilation-evidence-type-check-only)
-and [Current state](#current-state-unchanged-by-the-first-revision) for the
-exact, deliberately narrow evidence and remaining verification.
+Status: the `#[cfg(windows)]` primitive has hosted type-check evidence and a
+two-test runtime witness on exact checkout `c6bf9902`. This change adds three
+additional live cases and expands the dispatch selector to five; those new
+cases have not yet run on Windows. The authoring host remains macOS arm64
+without a Windows toolchain, and no cross-compilation or emulated substitute
+is treated as Windows evidence. Host-independent capsule, admission-ordering,
+and settlement logic remains separately testable on non-Windows hosts. See
+[Hosted Windows compilation evidence](#hosted-windows-compilation-evidence-type-check-only),
+[Hosted Windows runtime evidence](#hosted-windows-runtime-evidence), and
+[Windows runtime gate](#windows-runtime-gate) for the exact evidence ceiling.
 
 The macOS half of this split is
 [DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1](DOCTOR-PRODUCTION-PROVISIONER-MACOS-V1.md),
@@ -44,6 +42,16 @@ restricted token, start a confined child, assign a job, apply an ACL, or
 observe settlement. It is compilation evidence only, not a confinement or
 hostile-input execution witness. `7cab8aa8` is an ancestor of the tree audited
 for this update; no claim is made about a later unrun commit.
+
+## Hosted Windows runtime evidence
+
+Hosted [run 35986090171](https://github.com/wavect/semaprax/actions/runs/35986090171)
+executed the original two-test Windows runtime selector successfully (2
+passed, 0 failed) on exact checkout
+`c6bf9902966f5c1fda0c8e70687c261ffacf37c4`. It covers the restricted-token,
+ACL/job success and timeout-settlement cases described below. The five-test
+selector added afterward has not run on Windows; this result is evidence only
+for that exact checkout and its two selected tests.
 
 ## Why the first revision had no accompanying code, and why this one does
 
@@ -122,7 +130,7 @@ This is still a **standalone confinement primitive**, not the production
 provisioner: it is not wired into any ordinary CLI route or into
 `provisioned_doctor_*`, per the issue's explicit request.
 
-## Confinement primitive (implemented; hosted type-checked, unexecuted)
+## Confinement primitive (implemented; hosted type-checked, limited runtime evidence)
 
 Windows has no namespace or cgroup-v2 equivalent. The three building blocks
 this contract proposed, all already partially present in `windows-sys`'
@@ -263,8 +271,11 @@ leader process handle returns `WAIT_OBJECT_0`, *and* a subsequent
 in `windows.rs`, which already performs exactly this check
 (`accounting.ActiveProcesses == 0`) after `TerminateJobObject`. This document's
 timeout route gives a successful `TerminateJobObject` one fixed five-second
-grace to observe the leader signaled before the empty-job reread. A leader
-that remains live is `Uncertain(KillWaitTimedOut)`, not settled cancellation.
+grace to observe the leader signaled, then allows one additional fixed
+five-second interval for repeated job accounting to reach zero. A leader that
+remains live is `Uncertain(KillWaitTimedOut)`; if the job remains nonempty
+after the second bound, settlement is `Uncertain(ActiveProcessesNonZero)`, not
+settled cancellation.
 The contract also requires the *sticky, four-way* outcome
 distinction: the current ordinary probe only distinguishes "settled" from
 "abort the whole harness process" (`std::process::abort()` on any observation
@@ -292,23 +303,42 @@ The dispatch-only
 [`.github/workflows/doctor-provisioned-windows.yml`](../.github/workflows/doctor-provisioned-windows.yml)
 uses an ephemeral `windows-2025` runner and creates a fresh, explicit scratch
 parent under `RUNNER_TEMP`. The gate fails when the host is not 64-bit Windows,
-the parent is missing, nonempty, or a reparse point, Cargo fails, either named
-test is filtered or ignored, or the test summary does not report both runtime
-cases as passed. It never treats an absent prerequisite or a zero-test run as
-a skip/pass.
+the parent is missing, nonempty, or a reparse point, Cargo fails, any named
+test is filtered or ignored, or the test summary does not report all five
+runtime cases as passed. It never treats an absent prerequisite or a zero-test
+run as a skip/pass.
 
 `scripts/doctor-provisioned-windows-gate.py --self-test` checks the gate's
 refusal and libtest-result parsing on any host; it provides no Windows runtime
-evidence. `--plan` prints the exact two-test selector. The live selection runs
+evidence. `--plan` prints the exact five-test selector. The live selection runs
 `windows_runtime_launches_restricted_child_inside_acl_scratch_and_settles_it`
-and `windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation`.
-Those tests launch the owning test executable through `confined_spawn`, inspect
-the child's disabled privilege set and job membership/limits, read back the
-scratch DACL and its SID, exercise the one-process job limit, observe a
-successful settlement, and observe timeout cancellation.
-Each live test captures then removes its exact child marker before settlement,
-and requires the per-invocation scratch directory and provisioned parent to be
-empty afterward. If the 600-second gate timeout fires on Windows, the gate
+and `windows_runtime_timeout_terminates_the_confined_job_and_settles_cancellation`,
+plus `windows_runtime_timeout_terminates_an_actual_job_descendant`,
+`windows_runtime_nonzero_exit_settles_failed_and_cleans_resources` and
+`windows_runtime_scratch_refusal_closes_setup_handles`.
+The four child-launch tests use `confined_spawn`. The success case inspects
+the child's disabled privilege set and job membership/limits, reads back the
+scratch DACL and SID, exercises the one-process job limit, and observes
+successful settlement. The other launch cases observe timeout cancellation or
+an exact nonzero exit status.
+The nonzero-exit case requires exact `Failed(ExitCode(37))` plus cleanup. The
+scratch-refusal case repeats an attempt against an absent scratch parent,
+requires the filesystem-stage refusal without creating that parent, and checks
+that the current process handle count returns to its warmed baseline after each
+attempt. The production-configured active-process-limit case verifies
+descendant launch refusal. In the separate timeout-descendant test only, the
+test first asserts the job limit is one, holds the child at a file handshake,
+then raises that test-owned job's limit to two so one exact-filter grandchild
+can start. It observes exactly two active job processes before timing out and
+requires empty-job cancellation settlement and scratch cleanup. This isolated
+test override does not change the primitive's production job limit or weaken
+the one-process refusal test. A live assertion-failure guard terminates its
+owned job, waits for the job to empty, and removes only the exact marker,
+marker temporary, and permit files before scratch teardown.
+Each child-launch test captures then removes its exact marker before
+settlement, and requires the per-invocation scratch directory and provisioned
+parent to be empty afterward. The refusal case requires no scratch entry. If
+the 600-second gate timeout fires on Windows, the gate
 uses `taskkill /T /F` on Cargo's PID, waits for pipe/process settlement, and
 verifies Cargo's PID is absent; inability to verify the direct process exit is
 itself a gate failure. Descendants reparented before the post-kill process-list
@@ -318,32 +348,35 @@ quiescence proof.
 The test capsule is deliberately structural fixture data with a placeholder
 signature. The Windows primitive currently does not verify capsule signatures,
 so these tests do not establish signed-capsule admission or production
-provisioner support. The gate is dispatch-only; its first successful run is
-still required before any Windows runtime result can be claimed.
+provisioner support. The original two-test dispatch selector passed at
+`c6bf9902`; the expanded five-test selector still requires its first hosted
+run before claims about the added failure/handle cases can be made.
 
 ## Acceptance criteria status
 
 | Criterion | State |
 |---|---|
 | Versioned Windows contract, cross-referenced from V1 | met |
-| Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted Windows type-checked for exact checkout `7cab8aa8` in [job 105948054658](https://github.com/wavect/semaprax/actions/runs/35462242188/job/105948054658), but never executed -- see [Nonclaims](#nonclaims) |
+| Confinement primitive exists in the owning crate | implemented in `doctor::windows_confinement::primitive`; hosted type-check at exact checkout `7cab8aa8` and limited runtime execution for two tests at exact checkout `c6bf9902`; see [Nonclaims](#nonclaims) |
 | Sealed-capsule consumption | structural body decode only (`doctor::windows_confinement::capsule`, host-independent, tested on every host); signature verification still needs `semaprax-doctor-capsule` as a `cfg(windows)` `Cargo.toml` dependency, outside every session's lease so far |
 | Hostile-input tests for the host-independent parts | 29 tests across `capsule`, `refusal`, and `settlement` pass on this authoring host (macOS arm64); `cargo test -p semaprax-native-rust-interop-platform-sys --lib doctor::windows_confinement` |
-| Runtime tests for the Win32 primitive itself | authored for restricted-token child launch, job limits and membership, scratch ACL, descendant refusal, successful settlement, and timeout cancellation; not run on Windows in this change |
-| Fail-closed gate authored and run | workflow and result-checking script authored; script self-test run locally; live Windows gate **not run** |
+| Runtime tests for the Win32 primitive itself | original restricted-token/ACL/job and timeout cases passed in [run 35986090171](https://github.com/wavect/semaprax/actions/runs/35986090171) on exact checkout `c6bf9902`; actual-descendant timeout, nonzero-exit, and repeated scratch-refusal/handle-count cases await Windows execution |
+| Fail-closed gate authored and run | workflow/script self-test run locally; original two-test live selector passed at `c6bf9902`; expanded five-test selector **not yet run** |
 | Linux, macOS, or existing job-object evidence never cited as Windows proof | met |
 | `docs/COMPLETION-MATRIX.md` WP-05 promoted for Windows | not done; not claimed |
 
 ## Nonclaims
 
-This contract does not: claim that `doctor::windows_confinement::primitive`
-has passed a Windows runtime gate. The hosted Windows compilation recorded above
-type-checks only exact checkout `7cab8aa8`; it does not establish an execution,
-confinement, token, job-object, ACL, filesystem, or settlement claim. Earlier
-hand-checking against vendored `windows-sys` was diligence, not substitute
-execution evidence. The new tests use an unverified-signature capsule fixture,
-and do not close signed-input, independent hostile-corpus, descendant-tree, or
-production-support requirements. Do not claim the existing ordinary-probe
+This contract does not: claim that the current five-test revision of
+`doctor::windows_confinement::primitive` has passed a Windows runtime gate. The
+two-test run at `c6bf9902` is evidence only for its exact checkout and tests.
+The hosted Windows compilation recorded above type-checks only exact checkout
+`7cab8aa8`; by itself it establishes no execution behavior. The two runtime
+tests give narrow observations only for their exact checkout and assertions.
+Earlier hand-checking against vendored `windows-sys` was diligence, not
+substitute execution evidence. The tests use an unverified-signature capsule
+fixture, and do not close signed-input, independent hostile-corpus, general
+descendant-tree, or production-support requirements. Do not claim the existing ordinary-probe
 job-object confinement in `windows.rs` as evidence of production-grade
 sandboxing (it confines process *lifetime*, not filesystem or network access,
 and was not designed as a security boundary); claim Linux or macOS evidence
@@ -355,11 +388,11 @@ touches a job object, a token, or the filesystem; run on a cross-compiled or
 emulated target as a substitute for real Windows execution; wire any new path
 into the CLI; or promote `docs/COMPLETION-MATRIX.md` WP-05 for Windows.
 
-The newly authored runtime assertions have not yet run on Windows, so they do
-not establish that `CreateRestrictedToken` returns a token with sufficient
-rights for the later token-query/process-creation calls, that the protected
-DACL survives creation with exactly the expected ACE, or that cancellation
-leaves no descendant process. The remaining real-host work includes the
-restricted-token refinement, signed-capsule verification, a broader hostile
-corpus, descendant-tree cleanup evidence, and the first execution of the
-dispatch-only gate.
+The original two live tests ran on Windows at `c6bf9902`, providing bounded
+observations of the restricted token, protected DACL, production job limits,
+descendant launch refusal, normal settlement, and cancellation. Three added
+tests have not yet run on Windows; they cover test-owned descendant timeout,
+nonzero-exit classification, and repeated filesystem-stage refusal/handle
+cleanup. The remaining real-host work includes executing the expanded
+selector, restricted-token refinement, signed-capsule verification, and a
+broader hostile corpus across supported Windows runners.

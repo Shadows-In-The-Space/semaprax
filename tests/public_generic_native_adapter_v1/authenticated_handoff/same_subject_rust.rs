@@ -147,7 +147,7 @@ fn malformed_template(descriptor: &VerifiedPublicGenericDescriptor) -> (String, 
     )
 }
 
-fn write_consumer(root: &Path, consumer: &CallingConsumer) {
+pub(super) fn write_consumer(root: &Path, consumer: &CallingConsumer) {
     for (name, contents) in consumer.files() {
         let path = root.join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -185,7 +185,7 @@ fn write_driver(root: &Path, input: &RecordShape, output: &RecordShape, mode: u8
     fs::write(root.join("src/bin/same_subject.rs"), driver).unwrap();
 }
 
-fn cargo(root: &Path, target: &Path) -> Command {
+pub(super) fn cargo(root: &Path, target: &Path) -> Command {
     let mut command = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     command
         .current_dir(root)
@@ -198,7 +198,7 @@ fn cargo(root: &Path, target: &Path) -> Command {
     command
 }
 
-fn compile_provider(root: &Path, opt: &str) -> PathBuf {
+pub(super) fn compile_provider(root: &Path, opt: &str) -> PathBuf {
     let directory = root.join(format!("provider{opt}"));
     fs::create_dir(&directory).unwrap();
     let object = directory.join("provider.o");

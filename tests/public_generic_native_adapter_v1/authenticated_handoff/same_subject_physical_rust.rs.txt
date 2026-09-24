@@ -1,0 +1,31 @@
+// Only test recipe/observation wiring is unsafe; the real generated safe API
+// performs all framing, dispatch, result guarding and settlement.
+#![allow(unsafe_code)]
+use spx_pg_private_authenticated_rust_v1::{diagnostics, Error, Input, Provider, TRUSTED_BINDING_BYTES, TRUSTED_DESCRIPTOR_BYTES};
+extern "C" {
+    fn auth_recipe(mode: u32);
+    fn auth_receipt(mode: u32, primary: i32, secondary: i32);
+}
+fn main() {
+    for mode in 0..3 {
+        // SAFETY: test-only scalar recipe; no pointers/ownership cross it.
+        unsafe { auth_recipe(mode); }
+        let mut provider = Provider::open(TRUSTED_DESCRIPTOR_BYTES, TRUSTED_BINDING_BYTES).unwrap();
+        let result = provider.transform(Input { @INPUT0@: vec![1, 7, 13], @INPUT1@: vec![2, 11, 17, 23] });
+        let primary = if mode == 1 {
+            assert!(matches!(result, Err(Error::ExecutionFailed(11))));
+            11
+        } else {
+            let output = result.unwrap();
+            assert_eq!(output.@OUTPUT0@, [1, 7, 13]);
+            assert_eq!(output.@OUTPUT1@, [2, 11, 17, 23]);
+            drop(output.@OUTPUT1@); drop(output.@OUTPUT0@);
+            0
+        };
+        let secondary = provider.last_release_status();
+        assert_eq!(diagnostics::live_handles(&provider), 0);
+        provider.close().unwrap(); drop(provider);
+        // SAFETY: scalar observations of already settled test provider state.
+        unsafe { auth_receipt(mode, primary, secondary); }
+    }
+}

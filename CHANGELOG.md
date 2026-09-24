@@ -8,11 +8,28 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Add a separate private authenticated-native-moves.v1 handoff that executes
+  checked flat-`Bytes` record movement bodies through generated C11/C++17
+  callers. Focused physical controls cover both branches, malformed/legacy
+  refusals, identity-body omission, and postcondition-failure settlement;
+  allocating/status-producing bodies and public acceptance remain open.
+
+- Add an explicit local registry trust host with held owner-private storage,
+  independently pinned bootstrap, immutable signed-evidence/checkpoint and
+  selected-artifact generations, one durable `ACTIVE` pivot, and exact
+  fail-stop recovery. Focused local crash-point and hostile-state tests pass;
+  this adds no fetch/network authority or physical power-loss claim.
+
+- Correct catalog-normalizer JSON control escapes at `\\u0010`–`\\u001f`
+  and exercise ten oracle-frozen controls across interpreter, native C and
+  Core Wasm. The maximal 65,536-byte response still exhausts the unchanged
+  100M-step fuel bound, so the catalog acceptance milestone remains open.
+
 - Add a TUF-style local registry verifier with independently installed roots,
   namespace-delegated Ed25519 thresholds, dual-threshold root rotation, exact
   registry/manifest bindings, freshness, rollback and yank checks. Results are
-  non-authoritative checkpoint candidates; durable trust storage and trusted
-  distribution remain separate host work.
+  non-authoritative checkpoint candidates; the managed durable host above is
+  separate, and trusted distribution remains open.
 
 - Add a dispatch-only Windows confinement runtime gate that requires nonzero
   execution of restricted-token child launch, job limit/membership, scratch

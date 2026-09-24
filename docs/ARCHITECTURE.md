@@ -2482,10 +2482,15 @@ and [Resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md).
 registry-v2 independently admitted entries. It verifies disjoint Ed25519
 root/timestamp/snapshot/publisher thresholds, namespace and exact manifest
 bindings, root rotation and caller-supplied checkpoint/time consistency.
-It returns only a non-authoritative candidate and required checkpoint
-transition, never cache/fetch authority. The future host owns durable root and
-checkpoint storage and its recovery relationship with cache publication;
-[Registry Trust v1](PACKAGE-REGISTRY-TRUST-V1.md) owns that boundary.
+Its verifier returns only a non-authoritative candidate. The separate
+`package_registry::trust::host` owns an explicit owner-private held directory
+and cooperative lock, independently pinned bootstrap root, immutable
+root/checkpoint/selected-artifact generations, one `ACTIVE` pivot, and exact
+revalidation after ambiguous effects. A host receipt is evidence, not a
+fetch/read capability. This managed store is separate from the existing flat
+offline `fetch --lock` cache; neither route gains online registry authority,
+and no physical power-loss or hostile same-principal storage guarantee follows.
+[Registry Trust v1](PACKAGE-REGISTRY-TRUST-V1.md) owns these boundaries.
 
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary
@@ -2840,7 +2845,17 @@ observations, not a second provider. The Cargo bridge byte-compares actual
 generator output with fixture assembly before executing it. The generated
 route now carries the descriptor, native binding, and field identities derived
 and independently replayed from one checked generic source subject into the
-external driver; the physical endpoint remains the labelled reversal fixture.
+external driver; that legacy settlement-corpus route retains its labelled
+reversal fixture. Separately, `codegen/native_emit/public_generic_bridge.rs`
+owns compiler-checked body admission and ordinary native emission for the
+private authenticated identity and movement-body profiles. The latter admits
+only origin-scoped field/record moves, immutable locals and literal branches;
+it rejects allocating or status-producing bodies before the physical handoff.
+`public_generic_abi/native/authenticated.rs` binds those checked bytes to a
+separate moves-v1 artifact, while the existing generated C/C++ consumers and
+provider admission retain carrier, ownership and settlement authority. The
+focused harness checks real checked-body output and postcondition cleanup;
+neither private profile grants general native-body or public support.
 The authoritative contracts and nonclaims live in [Settlement Corpus
 v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162).
 

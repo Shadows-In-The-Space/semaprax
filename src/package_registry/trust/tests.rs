@@ -2,6 +2,81 @@ use super::*;
 use ed25519_dalek::{Signer, SigningKey};
 use std::sync::OnceLock;
 
+// Test-only signed bytes and independently replayed admission for the physical
+// host regressions. No signing constructor is exposed by production modules.
+pub(super) fn host_fixture(
+    yanked: bool,
+) -> (String, String, String, String, String, ManifestBoundEntry) {
+    let fixture = if yanked {
+        Fixture::with_entry(
+            super::super::registry_v2::tests::real_admitted_fixture_with_status(
+                super::super::PublicationStatus::Yanked,
+            )
+            .0,
+        )
+    } else {
+        Fixture::new()
+    };
+    (
+        wire(&root_value(1, 1, 4, 2)),
+        fixture.timestamp,
+        fixture.snapshot,
+        fixture.publisher,
+        fixture.registry,
+        fixture.entry,
+    )
+}
+
+pub(super) fn host_artifact_fixture() -> (
+    String,
+    String,
+    String,
+    String,
+    String,
+    ManifestBoundEntry,
+    Vec<u8>,
+) {
+    let fixture = Fixture::new();
+    (
+        wire(&root_value(1, 1, 4, 2)),
+        fixture.timestamp,
+        fixture.snapshot,
+        fixture.publisher,
+        fixture.registry,
+        fixture.entry,
+        admitted().1.module_wasm.clone(),
+    )
+}
+
+pub(super) fn host_rotation_fixture() -> (String, String, String, String, String, ManifestBoundEntry)
+{
+    let mut fixture = Fixture::new();
+    let next = root_value(2, 10, 20, 2);
+    let rotation = sign(
+        next.clone(),
+        &[key(1), key(10)],
+        b"semaprax.registry-trust-root.v1\0",
+    );
+    fixture.root = InstalledRoot::from_independently_installed_bytes(&wire(&next)).unwrap();
+    let mut publisher: Value = serde_json::from_str(&fixture.publisher).unwrap();
+    publisher["signed"]["root_digest"] = json!(fixture.root.digest);
+    publisher["signed"]["version"] = json!(2);
+    fixture.publisher = sign(
+        publisher["signed"].clone(),
+        &[key(20), key(21)],
+        SIGN_DOMAIN,
+    );
+    fixture.refresh(2, 2);
+    (
+        rotation,
+        fixture.timestamp,
+        fixture.snapshot,
+        fixture.publisher,
+        fixture.registry,
+        fixture.entry,
+    )
+}
+
 fn key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
 }

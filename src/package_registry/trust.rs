@@ -1,6 +1,7 @@
 //! TUF-style local policy v1, not a TUF wire implementation. Verification is
 //! pure and yields a NON-authoritative candidate: no durable checkpoint store,
-//! clock, network, cache publication, or fetch permission is provided here.
+//! clock, network, cache publication, or fetch permission is provided by the
+//! verifier. The additive `host` module owns explicit local durable storage.
 use std::collections::{BTreeMap, BTreeSet};
 
 use ed25519_dalek::{Signature, VerifyingKey};
@@ -8,6 +9,9 @@ use serde_json::{json, Value};
 
 use super::registry_v2::{ManifestBoundEntry, RegistrySnapshotV2};
 use crate::diagnostic::Diagnostic;
+
+/// Explicit durable local storage; separate from the offline flat fetch cache.
+pub mod host;
 
 const ROOT_SCHEMA: &str = "semaprax.registry-trust-root.v1";
 const METADATA_SCHEMA: &str = "semaprax.registry-trust-metadata.v1";

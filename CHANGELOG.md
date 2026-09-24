@@ -8,6 +8,9 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## Unreleased
 
+- Record exact-job, old-head partial hosted evidence for the in-progress
+  v0.6.0 tag gate without promoting it to a signed or published release.
+
 - Compose caller-authorized bounded mirror bytes through signed Registry-v3
   proof, the existing held-generation commit and one live Lock-v3 artifact
   read, binding an initial bridge checkpoint to the live bootstrap generation

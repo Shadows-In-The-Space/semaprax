@@ -473,7 +473,11 @@ repository has, which is unrelated -- it authenticates a *doctor-installed
 generation directory*, not a release archive), production support, or
 semantic/compiler correctness.
 
-## Hosted-release follow-up (authorized v0.6.0 gate pending)
+## Hosted-release follow-up (authorized v0.6.0 gate in progress)
+
+The old-head v0.6.0 tag run has [partial successful hosted jobs](RELEASE-0.6.0-STATUS.md),
+but its failed and unfinished jobs prevent aggregate acceptance. Those exact-job
+observations do not certify newer `main`, a signed artifact, or publication.
 
 The workflow now applies items 1-4 below on a qualifying tag. They are listed
 as an auditable configuration contract, not as a claim that a signed release

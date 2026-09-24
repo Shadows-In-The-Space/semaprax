@@ -56,7 +56,7 @@ pub(super) fn signed_test_fixture(architecture: u8) -> (Vec<u8>, String) {
     let mut bytes =
         semaprax_doctor_capsule::encode_body(&specification).expect("test capsule spec is valid");
     bytes.extend_from_slice(&signing.sign(&bytes).to_bytes());
-    let public_key_hex = signing
+    let public_key_hex: String = signing
         .verifying_key()
         .to_bytes()
         .iter()

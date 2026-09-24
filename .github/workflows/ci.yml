@@ -2554,6 +2554,21 @@ jobs:
             --bundle dist/release-provenance.bundle \
             --check dist/release-signature-claim.json
           test -s dist/release-signature-claim.json
+      - name: Independently verify the signed release before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="semaprax-$GITHUB_REF_NAME-x86_64-unknown-linux-gnu"
+          archive="dist/$package.tar.gz"
+          test -s "$archive"
+          test ! -e "$RUNNER_TEMP/semaprax-release-verify"
+          # Stream only the exact smoke-tested CLI member, never extract the
+          # archive's remaining paths into the publisher filesystem.
+          tar -xOzf "$archive" "$package/semaprax" > "$RUNNER_TEMP/semaprax-release-verify"
+          chmod 0500 "$RUNNER_TEMP/semaprax-release-verify"
+          root_digest="$(sha256sum dist/trusted_root.jsonl | cut -d ' ' -f1)"
+          "$RUNNER_TEMP/semaprax-release-verify" doctor verify-release dist \
+            --trusted-root-sha256 "$root_digest"
       - name: Publish the alpha archives only after complete aggregation
         env:
           GH_TOKEN: ${{ github.token }}

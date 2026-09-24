@@ -71,6 +71,11 @@ URL SAN, exactly:
 https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z
 ```
 
+An independent `cosign verify-blob` invocation must pin
+`--certificate-identity "https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z"`;
+that URL-SAN check alone does not replace this verifier's immutable OIDC
+subject and repository/owner ID extension checks.
+
 The corresponding provenance **workflow reference** (the same identity
 without the URL scheme and host) is exactly:
 
@@ -157,9 +162,9 @@ certificate encodings. It does **not** sign, verify a signature, contact a
 transparency log, select/download a trust root, read a CI environment
 variable, or publish. The independent Rust consumer still parses the complete
 closed bundle framing before a caller-supplied offline verifier receives it.
-The current workflow does not invoke this builder or publish a claim/root yet;
-the script is deliberately a reviewable offline prerequisite rather than a
-claim that a signed release already exists.
+The current workflow invokes this builder and publishes a claim/root only on a
+qualifying tag after its release gate. No such signed hosted release has yet
+been accepted; the script alone remains no signature or publication evidence.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -468,7 +473,7 @@ repository has, which is unrelated -- it authenticates a *doctor-installed
 generation directory*, not a release archive), production support, or
 semantic/compiler correctness.
 
-## Hosted-release follow-up (`HUMAN_BLOCKED`)
+## Hosted-release follow-up (authorized v0.6.0 gate pending)
 
 The workflow now applies items 1-4 below on a qualifying tag. They are listed
 as an auditable configuration contract, not as a claim that a signed release
@@ -501,8 +506,11 @@ historical evidence are changed.
    `SHA256SUMS`. It then runs `scripts/release-manifest.py`,
    `scripts/release-provenance.py`, and signs the resulting
    `release-provenance.json`. It never signs a manifest before the last archive
-   is built and independently attested, and `gh release create` fails rather
-   than replacing an existing release's assets.
+   is built and independently attested. Before `gh release create`, the
+   publisher streams the exact Linux CLI member from the attested archive and
+   runs `doctor verify-release` against the frozen trusted-root digest and
+   complete held directory. A cryptographic/identity refusal stops publication;
+   `gh release create` also fails rather than replacing existing assets.
 4. **The concrete configured shape is:**
    ```sh
    gh attestation trusted-root | head -c 4194305 > dist/trusted_root.jsonl
@@ -551,14 +559,15 @@ historical evidence are changed.
    unsigned, and add that release's own dated hosted-evidence section
    recording the real signature/provenance assets, exactly as its existing
    sections record archives today.
-7. **Decide and record identity rotation ownership**: who (which maintainer
-   role) is authorized to edit the trusted identity policy table above, and
-   what review is required before that edit merges. This document does not
-   itself grant that authority to anyone.
+7. **Rotate or revoke only through Wavect GmbH release maintainers**: an
+   identity change requires a reviewed policy revision and a new exact-ID
+   verifier, with old identity acceptance explicitly retired. Offline replay
+   against a historical root cannot prove current trust. This document grants
+   no coding agent independent signing, publication, or policy-approval power.
 
 Items 1-4 are configuration now present in the workflow, including the
-deterministic claim and offline-root release assets; items 5-7 remain
-human-owned. The schemas, identity policy, binding verifier, and source-locked
+deterministic claim and offline-root release assets; hosted publication and
+its evidence review remain human-owned. The schemas, identity policy, binding verifier, and source-locked
 workflow contract make a real hosted signature mechanically checkable rather
 than a fact trusted only from prose. They do not substitute for that hosted
 signature or its review.

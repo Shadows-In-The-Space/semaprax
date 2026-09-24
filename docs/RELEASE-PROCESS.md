@@ -455,7 +455,11 @@ manifest, provenance, or publication. Only after this archive-attestation gate
 does the workflow write `dist/SHA256SUMS`, run `scripts/release-manifest.py`,
 run `scripts/release-provenance.py`, and keylessly `cosign sign-blob` the final
 provenance. It then derives and byte-replays `release-signature-claim.json`
-from the exact provenance/bundle pair. The workflow uploads
+from the exact provenance/bundle pair. It publishes only after streaming the
+exact Linux CLI member from its already-attested
+archive and independently running `doctor verify-release` over the final
+directory against the frozen trusted-root digest; a certificate/identity
+disagreement fails before `gh release create`. The workflow uploads
 `release-manifest.json`, `release-provenance.json`, the Sigstore
 `release-provenance.bundle`, its deterministic
 `release-signature-claim.json`, and the explicit `trusted_root.jsonl` snapshot

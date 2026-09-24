@@ -10,6 +10,16 @@ format: `Unreleased` then release buckets, grouped by impact.
 
 ## 0.6.0 — 2026-09-24
 
+- Pin the Wavect GmbH release verifier to GitHub's immutable owner/repository
+  OIDC subject and require matching subject and ID extensions in the verified
+  Fulcio certificate. This is local offline verification, not hosted signature
+  evidence until the authorized v0.6.0 tag gate publishes immutable assets.
+
+- Observe Core Wasm record-`Bytes` copy-out only after the generated Node
+  facade returns owned bytes from its settled JS arena, with strict transport
+  refusal controls. Physical Wasm free, instruction-fuel parity and hosted
+  target acceptance remain open.
+
 - Project a frozen malformed-result carrier recipe through generated TypeScript
   against the compiler-produced checked Wasm provider, alongside exact
   descriptor/binding and once-only result-release controls. This is local

@@ -192,7 +192,7 @@ fn release_automation_checks_version_surfaces_and_renders_only_one_changelog_buc
     for exact in [
         title.as_str(),
         "## Changes",
-        "Project a frozen malformed-result carrier recipe",
+        "Pin the Wavect GmbH release verifier",
         "Add a deterministic, non-executing cross-language benchmark",
         "Share one bounded, digest-pinned public-generic settlement manifest",
         "These unsigned archives are not notarized",

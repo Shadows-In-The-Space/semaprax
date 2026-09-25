@@ -503,6 +503,10 @@ pub(super) fn base_fixture() -> BaseFixture {
 }
 
 fn base_fixture_with_order(reverse_sources: bool) -> BaseFixture {
+    base_fixture_with_extra_sources(reverse_sources, 0)
+}
+
+fn base_fixture_with_extra_sources(reverse_sources: bool, extra: usize) -> BaseFixture {
     let mut sources = vec![
         semantic_workspace::SemanticWorkspaceSource {
             path: "a/provider.spx".to_owned(),
@@ -521,6 +525,16 @@ fn base_fixture_with_order(reverse_sources: bool) -> BaseFixture {
             source: entry(),
         },
     ];
+    sources.extend((0..extra).map(|index| {
+        let path = format!("s/extra{index:02}.spx");
+        let source = canonical(
+            &format!(
+                "module structural.extra{index};\n@id(\"extra{index}.f\") fn f() -> i64 {{ 0 }}\n"
+            ),
+            &path,
+        );
+        semantic_workspace::SemanticWorkspaceSource { path, source }
+    }));
     let mut paths = sources
         .iter()
         .map(|source| source.path.clone())
@@ -852,42 +866,22 @@ fn overlay_preserves_exact_move_bytes_and_enforces_final_cardinality() {
     );
     assert_eq!(supplied_bytes, created().len() + entry_replacement().len());
 
-    let base = base_fixture();
-    let exact_operations = (0..12)
-        .map(|index| create_operation(&format!("x/{index:02}.spx"), ""))
-        .collect::<Vec<_>>();
-    let exact = parse_proposal(&proposal(
-        &base.revision,
-        "structural.entry",
-        &exact_operations,
-    ))
-    .unwrap();
-    assert_eq!(
-        derive_candidate_overlay(&base.revision, base.sources, &exact)
-            .unwrap()
-            .into_parts()
-            .1
-            .len(),
-        16
-    );
-    let base = base_fixture();
-    let over_operations = (0..13)
-        .map(|index| create_operation(&format!("x/{index:02}.spx"), ""))
-        .collect::<Vec<_>>();
-    let over = parse_proposal(&proposal(
-        &base.revision,
-        "structural.entry",
-        &over_operations,
-    ))
-    .unwrap();
-    assert_eq!(
-        error_code(derive_candidate_overlay(
-            &base.revision,
-            base.sources,
-            &over
-        )),
-        "SPX-G190"
-    );
+    // A 20-file authenticated base reaches 32/33 without exceeding 16 operations.
+    for additions in [12, 13] {
+        let base = base_fixture_with_extra_sources(false, 16);
+        assert_eq!(base.sources.len(), 20);
+        let operations = (0..additions)
+            .map(|index| create_operation(&format!("x/{index:02}.spx"), ""))
+            .collect::<Vec<_>>();
+        let change =
+            parse_proposal(&proposal(&base.revision, "structural.entry", &operations)).unwrap();
+        let result = derive_candidate_overlay(&base.revision, base.sources, &change);
+        if additions == 12 {
+            assert_eq!(result.unwrap().into_parts().1.len(), 32);
+        } else {
+            assert_eq!(error_code(result), "SPX-G190");
+        }
+    }
 
     let base = base_fixture();
     let exact_min = parse_proposal(&proposal(
@@ -1264,11 +1258,11 @@ fn managed_generate_and_verify_are_exact_read_only_kats_under_one_shared_lock() 
             raw_sha(artifacts.evidence()),
         ],
         [
-            "sha256:12a5cf81cfee0762b585af64f2fa748ed1a9dec883074e881db73130576eee9e",
-            "sha256:76b64b168d2195ef516151ec6ecd94c97811dea519b639d174fb3b7c09734a41",
-            "sha256:75dc059fcd47aa9dff77cdbbfbb44bbefc5a5fd3151d9fe59f2ce7f8655bdfad",
-            "sha256:7421886e26e05994a597519500cc6d24224af7d1f1391e74663fca62f80d5341",
-            "sha256:ca436c23619e62ce5fd94c7a698110c2a3db24a7cd552f91f4cbcf87e97ca449",
+            "sha256:a2e678d1aa876b52c9c8a2057194a07ed177a5a4952e39d32beb8202798b89dd",
+            "sha256:c64fd676941025157e347a5e144db758c8e10c904d6f6d0aff3c820145e749a0",
+            "sha256:8bc90661ec9683517db424bf91197c1607a59b5d946aa5db276402ee3737bad9",
+            "sha256:b61b0ac5d5de544c747d232aff802950e69a3ade7eaba2617f264f09e6f27faf",
+            "sha256:546be22f4709bb148a29865fcad1aa9489567b0fa8f026588b8f611e139e09a1",
         ]
     );
 
@@ -1315,7 +1309,7 @@ fn managed_generate_and_verify_are_exact_read_only_kats_under_one_shared_lock() 
     assert_eq!(value["budget"]["used_receipt_bytes"], receipt.len());
     assert_eq!(
         raw_sha(&receipt),
-        "sha256:c80f20339b8e19e60514a00264f805a405e57a8585a012648a1ac77576b269d9"
+        "sha256:cae9eb3b85f18d0b89ea2bf6b4408094a7b10de20c4c684bdc8b17edf2f7c28d"
     );
     fixture.assert_exclusive_reacquire();
 }
@@ -1983,7 +1977,7 @@ fn structural_apply_publishes_exact_candidate_once_without_raw_writes() {
     assert_eq!(receipt_value["result"], "applied");
     assert_eq!(
         raw_sha(&receipt),
-        "sha256:c8f3f145def19393332c951221071360425248d33397fca4f1b63cb81cbfdba7"
+        "sha256:7ec9a805e7cceccd4d9690db98188c641f0d910293a907a07d6e4b1370213988"
     );
     assert_eq!(fixture.raw_inventory(), raw_before);
     assert_ne!(

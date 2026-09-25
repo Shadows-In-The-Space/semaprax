@@ -554,6 +554,25 @@ pub(in crate::agent_lifecycle) fn native_stage_host() -> Option<authorization::N
         .find_map(|path| authorization::NativeStageHost::open(&path).ok())
 }
 
+/// Test-only acquisition of the held Wasm runtime, alongside the native
+/// fixture above. Environment selection belongs to this test harness, not
+/// the audited authorization module; production dispatch requires a host.
+pub(in crate::agent_lifecycle) fn wasm_stage_host() -> &'static authorization::WasmStageHost {
+    static HOST: std::sync::OnceLock<authorization::WasmStageHost> = std::sync::OnceLock::new();
+    HOST.get_or_init(|| {
+        std::env::var_os("SEMAPRAX_TEST_WASM_STAGE_NODE")
+            .map(std::path::PathBuf::from)
+            .into_iter()
+            .chain([
+                std::path::PathBuf::from("/usr/bin/node"),
+                std::path::PathBuf::from("/usr/local/bin/node"),
+                std::path::PathBuf::from("/opt/homebrew/bin/node"),
+            ])
+            .find_map(|path| authorization::WasmStageHost::open(&path).ok())
+            .expect("Core Wasm tests require an explicit absolute Node fixture path")
+    })
+}
+
 pub(in crate::agent_lifecycle) fn native_backend(
     host: &authorization::NativeStageHost,
 ) -> authorization::StageBackend<'_> {

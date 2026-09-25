@@ -1989,7 +1989,7 @@ mod tests {
         )
         .unwrap();
     }
-
+    // fe2ac68e replay: only 636744fa/b740e4ed limits and dependent digests changed.
     #[test]
     fn whole_document_kats_keys_domains_refs_paths_and_fixed_point_are_exact() {
         let prepared = prepared();
@@ -2007,11 +2007,11 @@ mod tests {
                 raw_sha(artifacts.evidence()),
             ],
             [
-                "sha256:12a5cf81cfee0762b585af64f2fa748ed1a9dec883074e881db73130576eee9e",
-                "sha256:76b64b168d2195ef516151ec6ecd94c97811dea519b639d174fb3b7c09734a41",
-                "sha256:75dc059fcd47aa9dff77cdbbfbb44bbefc5a5fd3151d9fe59f2ce7f8655bdfad",
-                "sha256:7421886e26e05994a597519500cc6d24224af7d1f1391e74663fca62f80d5341",
-                "sha256:ca436c23619e62ce5fd94c7a698110c2a3db24a7cd552f91f4cbcf87e97ca449",
+                "sha256:a2e678d1aa876b52c9c8a2057194a07ed177a5a4952e39d32beb8202798b89dd",
+                "sha256:c64fd676941025157e347a5e144db758c8e10c904d6f6d0aff3c820145e749a0",
+                "sha256:8bc90661ec9683517db424bf91197c1607a59b5d946aa5db276402ee3737bad9",
+                "sha256:b61b0ac5d5de544c747d232aff802950e69a3ade7eaba2617f264f09e6f27faf",
+                "sha256:546be22f4709bb148a29865fcad1aa9489567b0fa8f026588b8f611e139e09a1",
             ]
         );
 

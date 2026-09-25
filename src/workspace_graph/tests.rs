@@ -2109,10 +2109,8 @@ fn callable_limit_exact_advances_and_one_over_is_g171() {
         "module leaf;\n@id(\"leaf.f\") fn f() -> i64 { 0 }\n",
     );
     let exact = callable_boundary_source(MAX_CALLABLES - 1);
-    let error = build_owned(vec![exact, leaf.clone()])
-        .err()
-        .expect("later gate expected");
-    assert!(!is_named_limit(&error, "callables"));
+    let built = build_owned(vec![exact, leaf.clone()]).expect("exact callable limit succeeds");
+    assert_eq!(built.usage.callables, MAX_CALLABLES);
     let over = callable_boundary_source(MAX_CALLABLES);
     let error = build_owned(vec![over, leaf])
         .err()

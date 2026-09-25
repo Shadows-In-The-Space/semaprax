@@ -27,23 +27,22 @@ fn workspace_ci_keeps_bounded_test_executables_and_fail_fast_coverage() {
     let workflow = read(".github/workflows/ci.yml");
     // ci_msrv_sharding_contract independently checks the router's actual
     // workspace inventory and exact Cargo selectors, including shared names.
-    for (name, test_command) in [(
+    let (name, test_command) = (
         "verify-tests",
         "python3 scripts/ci-msrv.py --label \"Rust $RUNNER_OS\" --shard \"${{ matrix.shard }}\"",
-    )] {
-        let selected = job(&workflow, name);
-        assert!(
-            selected.contains("CARGO_PROFILE_DEV_DEBUG: \"0\""),
-            "{name}"
-        );
-        assert!(
-            selected.contains("CARGO_PROFILE_TEST_DEBUG: \"0\""),
-            "{name}"
-        );
-        assert!(selected.contains(test_command), "{name}");
-        assert!(!selected.contains("--no-fail-fast"));
-        assert!(!selected.contains("continue-on-error"));
-    }
+    );
+    let selected = job(&workflow, name);
+    assert!(
+        selected.contains("CARGO_PROFILE_DEV_DEBUG: \"0\""),
+        "{name}"
+    );
+    assert!(
+        selected.contains("CARGO_PROFILE_TEST_DEBUG: \"0\""),
+        "{name}"
+    );
+    assert!(selected.contains(test_command), "{name}");
+    assert!(!selected.contains("--no-fail-fast"));
+    assert!(!selected.contains("continue-on-error"));
     let msrv = job(&workflow, "msrv");
     assert!(msrv.contains("cargo check --locked --workspace --all-targets --all-features"));
     assert!(!msrv.contains("scripts/ci-msrv.py --shard"));

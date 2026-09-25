@@ -540,7 +540,10 @@ fn stable_id_rename_inspect_preview_apply_and_retest_preserve_the_service() {
         )?;
         let artifacts = service.validate_transaction(transaction.to_json().as_bytes())?;
         assert!(artifacts.impact().contains(target));
-        assert!(artifacts.review().contains(target));
+        let review: Value = serde_json::from_str(artifacts.review()).unwrap();
+        assert_eq!(review["transaction_digest"], transaction.digest());
+        assert_eq!(review["impact_digest"], artifacts.impact_digest());
+        assert_eq!(review["review"]["stable_identity_preserved"], true);
         let candidate = artifacts.candidate();
         let candidate_revision = candidate.revision();
         assert_ne!(
@@ -936,8 +939,13 @@ fn replace_expression_v2_succeeds_against_the_commented_bundled_dependency_closu
             let (_, comments) =
                 semaprax::parse_with_comments(own_source.source(), Path::new(path)).unwrap();
             assert!(
-                !comments.items.is_empty(),
-                "{path} must retain comments because v2 does not rewrite it"
+                comments.items.is_empty(),
+                "{path} was stripped for this fixture"
+            );
+            assert_eq!(
+                own_source.source(),
+                std::fs::read_to_string(scratch.join(path)).unwrap(),
+                "{path} must retain its exact comment-free source before v2 validation"
             );
         }
         for (dependency, path) in [

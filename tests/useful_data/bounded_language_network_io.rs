@@ -875,18 +875,18 @@ fn drain(handle: usize) -> usize uses {{ network.read }} {{
         )
     }
 
-    // Sixteen reads on one path: exactly the 1 MiB owned-byte payload bound.
-    let ast = verified(&module(16), "sixteen-recv-sites.spx");
+    // Thirty-two reads on one path: exactly the 2 MiB owned-byte payload bound.
+    let ast = verified(&module(32), "thirty-two-recv-sites.spx");
     let program = hir::resolve(&ast).unwrap();
     hir::validate(&program).unwrap();
     let json = graph::to_json(&ast).unwrap();
     assert!(json.contains(
-        "\"function\":\"net.drain\",\"inline_array_frame_bytes\":0,\"active_array_call_path_bytes\":0,\"bytes_copy_sites\":16,\"stdin_read_sites\":0,\"owned_byte_payload_bytes\":1048576"
+        "\"function\":\"net.drain\",\"inline_array_frame_bytes\":0,\"active_array_call_path_bytes\":0,\"bytes_copy_sites\":32,\"stdin_read_sites\":0,\"owned_byte_payload_bytes\":2097152"
     ));
 
-    // Seventeen reads exceed MAX_BYTES_COPY_SITES; source and HIR agree.
-    let seventeen = module(17);
-    let ast = parse(&seventeen, "seventeen-recv-sites.spx").unwrap();
+    // Thirty-three reads exceed MAX_BYTES_COPY_SITES; source and HIR agree.
+    let thirty_three = module(33);
+    let ast = parse(&thirty_three, "thirty-three-recv-sites.spx").unwrap();
     let diagnostics = verify::verify(&ast);
     assert!(
         diagnostics.iter().any(|item| item.code == "SPX-T267"),

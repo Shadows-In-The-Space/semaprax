@@ -322,27 +322,8 @@ fn escaped_len(line: borrow Slice<u8>, token: usize, start: usize, end: usize) -
 @id("catalog_normalizer.app.escaped-byte-at")
 fn escaped_byte_at(line: borrow Slice<u8>, token: usize, start: usize, end: usize, wanted: usize) -> u8
 {
-    let mut source = token + 1usize;
-    let mut part = 0usize;
-    let mut emitted = 0usize;
-    let mut offset = 0usize;
-    let mut found = false;
-    let mut value = 0u8;
-    while emitted < end && !found {
-        let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, };
-        let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw };
-        let active = emitted >= start;
-        let width = if active { escape_len(decoded) } else { 0usize };
-        found = active && wanted < offset + width;
-        value = if found { escape_byte(decoded, wanted - offset) } else { value };
-        offset = if active && !found { offset + width } else { offset };
-        let last = part + 1usize >= emit_len(line, source);
-        source = if last { token_end(line, source) } else { source };
-        part = if last { 0usize } else { part + 1usize };
-        emitted = emitted + 1usize;
-        emitted < end && !found
-    }
-    value
+    let length = escaped_len(line, token, start, end);
+    if wanted >= length { 0u8 } else { let mut cursor = escape_cursor_start(line, token, start); let mut index = 0usize; while index < wanted { cursor = escape_cursor_next(line, cursor); index = index + 1usize; index < wanted } escape_cursor_byte(line, cursor) }
 }
 
 // Response writers carry this compact cursor while emitting an escaped token.

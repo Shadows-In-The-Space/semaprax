@@ -3,12 +3,13 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 
-const SHARDS: [&str; 5] = [
+const SHARDS: [&str; 6] = [
     "unit",
     "integration-0",
     "integration-1",
     "integration-2",
     "integration-3",
+    "integration-4",
 ];
 
 fn root() -> &'static Path {
@@ -126,6 +127,19 @@ fn msrv_shards_select_every_actual_workspace_target_exactly_once() {
         }
     }
     assert_eq!(visited, expected);
+    let shard_for = |name: &str| {
+        shards
+            .iter()
+            .position(|shard| {
+                shard["targets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|target| target["name"] == name)
+            })
+            .unwrap()
+    };
+    assert_ne!(shard_for("project"), shard_for("agent_runtime_v1"));
 }
 
 #[test]
@@ -140,11 +154,11 @@ fn msrv_router_fails_closed_and_propagates_the_first_cargo_failure() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(output.stdout, b"MSRV integration-0: 2 workspace targets\n");
+    assert_eq!(output.stdout, b"MSRV integration-0: 3 workspace targets\n");
 }
 
 #[test]
-fn msrv_matrix_preserves_checks_timeout_complete_results_and_release_dependency() {
+fn msrv_check_covers_all_targets_once_and_remains_a_release_dependency() {
     let workflow = std::fs::read_to_string(root().join(".github/workflows/ci.yml")).unwrap();
     let msrv = workflow
         .split_once("\n  msrv:\n")
@@ -154,19 +168,16 @@ fn msrv_matrix_preserves_checks_timeout_complete_results_and_release_dependency(
         .unwrap()
         .0;
     for required in [
-        "name: Rust 1.88 minimum (${{ matrix.shard }})",
-        "fail-fast: false",
-        "shard: [unit, integration-0, integration-1, integration-2, integration-3]",
+        "name: Rust 1.88 minimum",
+        "timeout-minutes: 180",
         "toolchain: \"1.88\"",
         "run: cargo fetch --locked",
         "run: cargo check --locked --workspace --all-targets --all-features",
-        "run: python3 scripts/ci-msrv.py --shard \"${{ matrix.shard }}\"",
     ] {
         assert!(msrv.contains(required), "missing MSRV contract: {required}");
     }
-    assert!(msrv.contains("if: matrix.shard == 'unit'\n        run: cargo check --locked --workspace --all-targets --all-features"));
     assert_eq!(msrv.matches("run: cargo check ").count(), 1);
-    assert!(msrv.find("cargo check").unwrap() < msrv.find("python3 scripts/ci-msrv.py").unwrap());
+    assert!(!msrv.contains("python3 scripts/ci-msrv.py --shard"));
     for forbidden in [
         "continue-on-error",
         "--no-fail-fast",
@@ -186,7 +197,7 @@ fn msrv_matrix_preserves_checks_timeout_complete_results_and_release_dependency(
         .split_once("\n  release-artifacts:\n")
         .unwrap()
         .0;
-    // The aggregate must run even when an MSRV shard fails so it can publish a
+    // The aggregate must run even when the MSRV check fails so it can publish a
     // failing required-check conclusion instead of a skipped one.
     assert!(release.contains("if: ${{ always() }}"));
     assert!(!release.contains("if: ${{ success() }}"));
@@ -207,7 +218,7 @@ fn current_rust_matrix_reuses_the_exact_inventory_in_parallel_platform_shards() 
         "name: Rust tests ${{ matrix.os }} (${{ matrix.shard }})",
         "fail-fast: false",
         "os: [ubuntu-latest, macos-latest, windows-latest]",
-        "shard: [unit, integration-0, integration-1, integration-2, integration-3]",
+        "shard: [unit, integration-0, integration-1, integration-2, integration-3, integration-4]",
         "python3 scripts/ci-msrv.py --label \"Rust $RUNNER_OS\" --shard \"${{ matrix.shard }}\"",
         "python3 scripts/ci-msrv.py --label \"Rust Windows\" --shard \"${{ matrix.shard }}\" --exclude-package semaprax-native-rust-interop --nocapture",
     ] {
@@ -260,17 +271,17 @@ else:
 def target(kind, name):
     return {'kind': [kind], 'name': name}
 metadata = {'workspace_members': ['one', 'two'], 'packages': [
-    {'id': 'one', 'name': 'one', 'targets': [target('lib', 'one'), target('custom-build', 'build-script-build'), target('test', 'a'), target('test', 'b'), target('test', 'd')]},
+    {'id': 'one', 'name': 'one', 'targets': [target('lib', 'one'), target('custom-build', 'build-script-build'), target('test', 'a'), target('test', 'b'), target('test', 'd'), target('test', 'e'), target('test', 'f')]},
     {'id': 'two', 'name': 'two', 'targets': [target('bin', 'two'), target('example', 'embedding-api'), target('test', 'a'), target('test', 'c')]},
     {'id': 'external', 'name': 'external', 'targets': [target('example', 'not_in_workspace')]},
 ]}
 plan = router['plan'](metadata)
-assert [len(shard['targets']) for shard in plan['shards']] == [4, 2, 1, 1, 1]
+assert [len(shard['targets']) for shard in plan['shards']] == [4, 3, 1, 1, 1, 1]
 assert {'package': 'two', 'kind': 'example', 'name': 'embedding-api'} in plan['shards'][0]['targets']
 assert '--examples' in plan['shards'][0]['command']
 assert router['plan'](dict(metadata, packages=list(reversed(metadata['packages'])))) == plan
 excluded = copy.deepcopy(metadata)
-excluded['packages'][0]['targets'].append(target('test', 'e'))
+excluded['packages'][0]['targets'].append(target('test', 'g'))
 excluded_plan = router['plan'](excluded, ['two'])
 assert all(row['package'] == 'one' for row in excluded_plan['inventory'])
 assert all(command_part not in ('two',) for shard in excluded_plan['shards'] for command_part in shard['command'][7:])
@@ -285,7 +296,7 @@ for mutation, message in [
     (lambda m: m['packages'][0]['targets'].append(target('unknown', 'future')), 'unrouted'),
     (lambda m: m['packages'][0]['targets'].append(target('test', 'a')), 'duplicate'),
     (lambda m: m['packages'].pop(1), 'incomplete'),
-    (lambda m: m['packages'][1]['targets'].pop(), 'empty shard'),
+    (lambda m: (m['packages'][0]['targets'].pop(), m['packages'][1]['targets'].pop()), 'empty shard'),
 ]:
     bad = copy.deepcopy(metadata)
     mutation(bad)

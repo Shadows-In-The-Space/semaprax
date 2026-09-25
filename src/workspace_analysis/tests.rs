@@ -548,9 +548,9 @@ fn context_impact_and_review_documents_have_frozen_kats_and_exact_digest_replay(
             .each_ref()
             .map(|artifact| document_sha(&artifact.json)),
         [
-            // Independently replayed fe2ac68e: only max_builder_bytes (64 MiB),
-            // max_managed_files/max_reachable_modules (32), and dependent digests
-            // moved after 636744fa/b740e4ed; all used budgets and facts are unchanged.
+            // Reconstructed against 6cc54637: only `used_builder_bytes`, the
+            // workspace-graph digest, and dependent artifact digests moved;
+            // every semantic field remained byte-identical.
             "sha256:ab7010540d23944529e3c3da31bc6cd6faa39c381be3d8c4af886cced61a80ff",
             "sha256:be4b96d07409d40cbe4e1e983eebbfbfe323b678365d1a63f9352c8971d758f7",
             "sha256:6786c8857731e3ec856ae345cdbaf2f2d397289d9b2016c9c55f34e65e64df4f",

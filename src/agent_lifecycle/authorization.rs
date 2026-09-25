@@ -586,7 +586,7 @@ fn dispatch_on_admitted(
         }
         #[cfg(test)]
         StageBackend::Wasm { source } => WasmStageExecutor {
-            host: super::tests::wasm_stage_host(),
+            host: super::tests::test_wasm_stage_host(),
             source,
         }
         .execute(

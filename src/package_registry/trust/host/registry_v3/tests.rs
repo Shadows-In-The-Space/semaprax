@@ -57,6 +57,11 @@ impl Fixture {
             admitted,
         }
     }
+    fn expired_time(&self) -> u64 {
+        serde_json::from_str::<serde_json::Value>(&self.root).unwrap()["expires"]
+            .as_u64()
+            .unwrap()
+    }
     fn update<'a>(
         &'a self,
         publishers: &'a [(&'a str, &'a str)],
@@ -217,7 +222,7 @@ fn full_lock_artifact_and_time_refusals_have_no_effects() {
     update.artifacts = &artifacts;
     update.trusted_time = 89;
     code(store.commit_update(&update), "SPX-PKR623");
-    update.trusted_time = 300;
+    update.trusted_time = f.expired_time();
     code(store.commit_update(&update), "SPX-PKR623");
     update.trusted_time = 100;
     let tampered = [Artifact {
@@ -331,7 +336,7 @@ fn update_crash_points_recover_only_exact_fresh_full_request() {
         assert!(HeldTrustStore::open(&temp.0, &f.pin).is_err());
         let before = inventory(&temp);
         code(
-            HeldTrustStore::recover_update(&temp.0, &f.pin, &previous, &update, 300),
+            HeldTrustStore::recover_update(&temp.0, &f.pin, &previous, &update, f.expired_time()),
             "SPX-PKR623",
         );
         assert_eq!(inventory(&temp), before);

@@ -29,12 +29,12 @@ owns the exact split.
 
 ## Prerequisites
 
-| Prerequisite | When you need it |
-| --- | --- |
-| Rust 1.88 or newer (`cargo`, `rustc`) | Build or install from source. [Cargo.toml](../Cargo.toml) records the minimum. |
-| Clang with C11 support | Build native executables; SEMAPRAX calls `clang`. |
-| Node.js 22 or newer | Run repository WebAssembly/Web verification scripts and generated npm packages. Not needed for ordinary source checks. |
-| Git | Clone the source repository; SEMAPRAX does not invoke Git during builds. |
+| Tool | Version | When you need it |
+| --- | --- | --- |
+| Rust (`cargo`, `rustc`) | 1.88 or newer | Build or install from source. [Cargo.toml](../Cargo.toml) records the minimum. |
+| Clang | C11 support | Build native executables; SEMAPRAX calls `clang`. |
+| Node.js | 22 or newer | Run repository WebAssembly/Web verification scripts and generated npm packages. Not needed for ordinary source checks. |
+| Git | Any supported version | Clone the source repository; SEMAPRAX does not invoke Git during builds. |
 
 There is no `rust-toolchain.toml`; a newer stable Rust is fine.
 

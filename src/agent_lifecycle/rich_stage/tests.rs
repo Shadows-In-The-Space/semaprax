@@ -264,8 +264,9 @@ fn assert_raw_target_parity(
     assert_eq!(actual.outcome, expected.outcome, "{label}: raw outcome");
     assert_eq!(actual.failure, expected.failure, "{label}: failure");
     assert_eq!(
-        actual.cleanup_events, expected_cleanup,
-        "{label}: target result copy-out settlement"
+        actual.cleanup_events,
+        [crate::interpreter::OwnedDataCleanupEvent::CopyOutAndSettleBytes],
+        "{label}: the one owned result leaf is copied out and settled exactly once"
     );
 }
 

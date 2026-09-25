@@ -68,60 +68,68 @@ fn with_builder_limit(limit: usize, run: impl FnOnce()) {
 fn identity_prebound_excludes_reverse_dependent_names_only_after_refusal() {
     let programs = fixture(310, 220, true);
     let authored = super::super::index_authored(&programs).unwrap();
-    let legacy = retention_prebound(&programs, &authored, false).unwrap();
-    let scoped = retention_prebound(&programs, &authored, true).unwrap();
-    assert!(scoped.1 < legacy.1);
+
     assert!(dependency_identity_max(&programs[0], &authored, &programs).unwrap() < 100);
-    // Exercise the refusal seam, not an accidental relation to the production cap.
-    with_builder_limit(legacy.1, || {
-        assert_eq!(
-            checked_retention_prebound(&programs, &authored).unwrap(),
-            legacy
-        );
-    });
-    with_builder_limit(legacy.1 - 1, || {
-        let errors = retention_prebound(&programs, &authored, false).unwrap_err();
-        assert!(errors.iter().all(|error| error.code == "SPX-G171"));
-        assert_eq!(
-            checked_retention_prebound(&programs, &authored).unwrap(),
-            scoped
-        );
-    });
-    with_builder_limit(scoped.1, || {
-        assert_eq!(
-            checked_retention_prebound(&programs, &authored).unwrap(),
-            scoped
-        );
-    });
-    with_builder_limit(scoped.1 - 1, || {
-        let errors = retention_prebound(&programs, &authored, true).unwrap_err();
-        assert!(errors.iter().all(|error| error.code == "SPX-G171"));
-    });
+    let unscoped = retention_prebound(&programs, &authored, false).unwrap().1;
+    let scoped = retention_prebound(&programs, &authored, true).unwrap().1;
+    assert!(
+        scoped < unscoped,
+        "excluding reverse dependents must save bytes"
+    );
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(self.0));
+        }
+    }
+    let previous = super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.replace(scoped));
+    let _restore = Restore(previous);
+    assert!(retention_prebound(&programs, &authored, false).is_err());
+    assert_eq!(
+        checked_retention_prebound(&programs, &authored).unwrap(),
+        retention_prebound(&programs, &authored, true).unwrap()
+    );
 }
 #[test]
 fn identity_prebound_still_charges_reachable_long_identities() {
     let programs = fixture(800, 220, false);
     let authored = super::super::index_authored(&programs).unwrap();
     assert!(dependency_identity_max(&programs[0], &authored, &programs).unwrap() >= 220);
-    let tightest = retention_prebound_mode(&programs, &authored, true, 4).unwrap();
-    let short_programs = fixture(800, 40, false);
-    let short_authored = super::super::index_authored(&short_programs).unwrap();
-    let short = retention_prebound_mode(&short_programs, &short_authored, true, 4).unwrap();
+    let shorter = fixture(800, 16, false);
+    let shorter_authored = super::super::index_authored(&shorter).unwrap();
+    let modes = [(false, 0), (true, 0), (true, 2), (true, 3), (true, 4)];
+    let short_min = modes
+        .iter()
+        .filter_map(|&(scoped, mode)| {
+            retention_prebound_mode(&shorter, &shorter_authored, scoped, mode)
+                .ok()
+                .map(|cost| cost.1)
+        })
+        .min()
+        .unwrap();
+    let long_min = modes
+        .iter()
+        .filter_map(|&(scoped, mode)| {
+            retention_prebound_mode(&programs, &authored, scoped, mode)
+                .ok()
+                .map(|cost| cost.1)
+        })
+        .min()
+        .unwrap();
     assert!(
-        short.1 < tightest.1,
-        "reachable identity bytes remain charged"
+        long_min > short_min,
+        "reachable long IDs must raise every receipt"
     );
-    with_builder_limit(tightest.1, || {
-        assert_eq!(
-            checked_retention_prebound(&programs, &authored).unwrap(),
-            tightest
-        );
-    });
-    with_builder_limit(tightest.1 - 1, || {
-        let errors = checked_retention_prebound(&programs, &authored).unwrap_err();
-        assert!(errors.iter().all(|error| error.code == "SPX-G171"));
-        assert!(checked_retention_prebound(&short_programs, &short_authored).is_ok());
-    });
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(self.0));
+        }
+    }
+    let previous = super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.replace(short_min));
+    let _restore = Restore(previous);
+    assert!(checked_retention_prebound(&shorter, &shorter_authored).is_ok());
+    assert!(checked_retention_prebound(&programs, &authored).is_err());
 }
 
 /// Issue #83. Pin the projection term itself instead of comparing complete

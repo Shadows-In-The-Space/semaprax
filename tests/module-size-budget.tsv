@@ -5,6 +5,8 @@ crates/semaprax-native-host/src/callable_wire_v3.rs	2367
 crates/semaprax-native-host/src/descriptor_v3.rs	1691
 crates/semaprax-native-host/src/lib.rs	1809
 crates/semaprax-native-loader/src/settlement.rs	1633
+src/agent_lifecycle/authorization/target_protocol.rs	1549
+src/agent_lifecycle/iterative/effects.rs	1853
 src/agent_runtime/private.rs	4071
 src/agent_runtime/tests.rs	1741
 src/cleanup_plan/build.rs	6818
@@ -22,12 +24,13 @@ src/hir/validation.rs	8812
 src/interpreter.rs	6807
 src/native_settlement.rs	2055
 src/native_settlement/tests.rs	1667
+src/outbound_host_adapter/mod.rs	1519
 src/parser.rs	1870
 src/patch.rs	3280
 src/patch_evidence.rs	1914
 src/properties.rs	1549
+src/project/npm.rs	1519
 src/semantic_workspace_change.rs	3043
-src/semantic_workspace_change/artifact.rs	1504
 src/semantic_workspace_change/tests.rs	2299
 src/semantic_workspace_operations.rs	2601
 src/semantic_workspace_operations/tests.rs	2729

@@ -506,7 +506,7 @@ fn base_fixture_with_order(reverse_sources: bool) -> BaseFixture {
     base_fixture_with_extra_sources(reverse_sources, 0)
 }
 
-fn base_fixture_with_extra_sources(reverse_sources: bool, extra: usize) -> BaseFixture {
+fn base_fixture_with_extra_sources(reverse_sources: bool, extra_sources: usize) -> BaseFixture {
     let mut sources = vec![
         semantic_workspace::SemanticWorkspaceSource {
             path: "a/provider.spx".to_owned(),
@@ -525,16 +525,17 @@ fn base_fixture_with_extra_sources(reverse_sources: bool, extra: usize) -> BaseF
             source: entry(),
         },
     ];
-    sources.extend((0..extra).map(|index| {
-        let path = format!("s/extra{index:02}.spx");
-        let source = canonical(
-            &format!(
-                "module structural.extra{index};\n@id(\"extra{index}.f\") fn f() -> i64 {{ 0 }}\n"
+    for index in 0..extra_sources {
+        sources.push(semantic_workspace::SemanticWorkspaceSource {
+            path: format!("q/{index:02}.spx"),
+            source: canonical(
+                &format!(
+                    "module structural.extra{index};\n@id(\"structural.extra{index}.helper\") fn helper() -> i64 {{ 0 }}\n"
+                ),
+                &format!("q/{index:02}.spx"),
             ),
-            &path,
-        );
-        semantic_workspace::SemanticWorkspaceSource { path, source }
-    }));
+        });
+    }
     let mut paths = sources
         .iter()
         .map(|source| source.path.clone())
@@ -866,22 +867,42 @@ fn overlay_preserves_exact_move_bytes_and_enforces_final_cardinality() {
     );
     assert_eq!(supplied_bytes, created().len() + entry_replacement().len());
 
-    // A 20-file authenticated base reaches 32/33 without exceeding 16 operations.
-    for additions in [12, 13] {
-        let base = base_fixture_with_extra_sources(false, 16);
-        assert_eq!(base.sources.len(), 20);
-        let operations = (0..additions)
-            .map(|index| create_operation(&format!("x/{index:02}.spx"), ""))
-            .collect::<Vec<_>>();
-        let change =
-            parse_proposal(&proposal(&base.revision, "structural.entry", &operations)).unwrap();
-        let result = derive_candidate_overlay(&base.revision, base.sources, &change);
-        if additions == 12 {
-            assert_eq!(result.unwrap().into_parts().1.len(), 32);
-        } else {
-            assert_eq!(error_code(result), "SPX-G190");
-        }
-    }
+    let base = base_fixture_with_extra_sources(false, 16);
+    let exact_operations = (0..12)
+        .map(|index| create_operation(&format!("x/{index:02}.spx"), ""))
+        .collect::<Vec<_>>();
+    let exact = parse_proposal(&proposal(
+        &base.revision,
+        "structural.entry",
+        &exact_operations,
+    ))
+    .unwrap();
+    assert_eq!(
+        derive_candidate_overlay(&base.revision, base.sources, &exact)
+            .unwrap()
+            .into_parts()
+            .1
+            .len(),
+        32
+    );
+    let base = base_fixture_with_extra_sources(false, 16);
+    let over_operations = (0..13)
+        .map(|index| create_operation(&format!("x/{index:02}.spx"), ""))
+        .collect::<Vec<_>>();
+    let over = parse_proposal(&proposal(
+        &base.revision,
+        "structural.entry",
+        &over_operations,
+    ))
+    .unwrap();
+    assert_eq!(
+        error_code(derive_candidate_overlay(
+            &base.revision,
+            base.sources,
+            &over
+        )),
+        "SPX-G190"
+    );
 
     let base = base_fixture();
     let exact_min = parse_proposal(&proposal(
@@ -2630,42 +2651,5 @@ fn structural_apply_rejects_windows_readonly_permission_drift() {
 }
 
 #[cfg(windows)]
-#[test]
-fn structural_apply_rejects_windows_same_byte_file_index_substitution() {
-    let (fixture, evidence_path) = application_fixture("windows-file-index");
-    let active_path = fixture.root.join(".semaprax-workspace/ACTIVE");
-    let active_before = std::fs::read(&active_path).unwrap();
-    let identities = std::cell::RefCell::new(None::<(u64, u64)>);
-    let error = diagnostic(apply_authenticated_with_hook(
-        &fixture.root,
-        &fixture.proposal_path,
-        &evidence_path,
-        |point, _, _, candidate| {
-            if !matches!(
-                point,
-                StructuralApplyPoint::Workspace(
-                    workspace::SemanticChangeApplyPoint::BeforeFirstFinalCheck
-                )
-            ) {
-                return Ok(());
-            }
-            let path = candidate.unwrap().join("files/z/entry.spx");
-            let before = winapi_util::Handle::from_path_any(&path)
-                .and_then(winapi_util::file::information)?
-                .file_index();
-            let bytes = std::fs::read(&path)?;
-            std::fs::remove_file(&path)?;
-            std::fs::write(&path, bytes)?;
-            let after = winapi_util::Handle::from_path_any(&path)
-                .and_then(winapi_util::file::information)?
-                .file_index();
-            assert_ne!(before, after);
-            *identities.borrow_mut() = Some((before, after));
-            Ok(())
-        },
-    ));
-    assert_eq!(error.code, "SPX-G153");
-    assert!(identities.into_inner().is_some());
-    assert_eq!(std::fs::read(&active_path).unwrap(), active_before);
-    fixture.assert_exclusive_reacquire();
-}
+#[path = "tests/windows_file_index.rs"]
+mod windows_file_index;

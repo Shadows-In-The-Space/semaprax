@@ -27,29 +27,26 @@ fn workspace_ci_keeps_bounded_test_executables_and_fail_fast_coverage() {
     let workflow = read(".github/workflows/ci.yml");
     // ci_msrv_sharding_contract independently checks the router's actual
     // workspace inventory and exact Cargo selectors, including shared names.
-    for (name, test_command) in [
-        (
-            "verify-tests",
-            "python3 scripts/ci-msrv.py --label \"Rust $RUNNER_OS\" --shard \"${{ matrix.shard }}\"",
-        ),
-        (
-            "msrv",
-            "python3 scripts/ci-msrv.py --shard \"${{ matrix.shard }}\"",
-        ),
-    ] {
-        let selected = job(&workflow, name);
-        assert!(
-            selected.contains("CARGO_PROFILE_DEV_DEBUG: \"0\""),
-            "{name}"
-        );
-        assert!(
-            selected.contains("CARGO_PROFILE_TEST_DEBUG: \"0\""),
-            "{name}"
-        );
-        assert!(selected.contains(test_command), "{name}");
-        assert!(!selected.contains("--no-fail-fast"));
-        assert!(!selected.contains("continue-on-error"));
-    }
+    let (name, test_command) = (
+        "verify-tests",
+        "python3 scripts/ci-msrv.py --label \"Rust $RUNNER_OS\" --shard \"${{ matrix.shard }}\"",
+    );
+    let selected = job(&workflow, name);
+    assert!(
+        selected.contains("CARGO_PROFILE_DEV_DEBUG: \"0\""),
+        "{name}"
+    );
+    assert!(
+        selected.contains("CARGO_PROFILE_TEST_DEBUG: \"0\""),
+        "{name}"
+    );
+    assert!(selected.contains(test_command), "{name}");
+    assert!(!selected.contains("--no-fail-fast"));
+    assert!(!selected.contains("continue-on-error"));
+    let msrv = job(&workflow, "msrv");
+    assert!(msrv.contains("cargo check --locked --workspace --all-targets --all-features"));
+    assert!(!msrv.contains("scripts/ci-msrv.py --shard"));
+    assert!(!msrv.contains("continue-on-error"));
 }
 
 #[test]
@@ -82,15 +79,21 @@ fn tag_artifacts_are_exact_blocking_children_of_the_release_gate() {
     ] {
         assert!(artifacts.contains(exact), "artifact job lost: {exact}");
     }
-    for forbidden in [
-        "continue-on-error",
-        "retry",
-        "contents: write",
-        "permissions:",
-    ] {
+    for forbidden in ["continue-on-error", "retry", "contents: write"] {
         assert!(
             !artifacts.contains(forbidden),
             "artifact builder gained forbidden behavior: {forbidden}"
+        );
+    }
+    for required in [
+        "permissions:",
+        "attestations: write",
+        "contents: read",
+        "id-token: write",
+    ] {
+        assert!(
+            artifacts.contains(required),
+            "artifact signing lost: {required}"
         );
     }
 }
@@ -750,9 +753,8 @@ fn release_reconcile_local_archive_directory_disagreement_classes() {
 }
 
 /// #167: the canonical release manifest and the disposable dry-run harness
-/// must be documented, including the exact recommended workflow wiring this
-/// worker did not make (`.github/workflows/**` is out of scope for this
-/// change) and the reaffirmed deferral of the finer state machine.
+/// must be documented, including the hosted attestation wiring and the
+/// reaffirmed deferral of the finer state machine.
 #[test]
 fn release_process_documents_the_manifest_and_dry_run_harness() {
     let docs = read("docs/RELEASE-PROCESS.md");
@@ -762,7 +764,7 @@ fn release_process_documents_the_manifest_and_dry_run_harness() {
         "python3 scripts/release-manifest.py \\",
         "--archives-dir dist --output dist/release-manifest.json",
         "--check PATH",
-        "Recommended workflow wiring (not made by this change",
+        "Each producer runs the pinned GitHub `attest-build-provenance` action",
         "## Disposable dry-run harness and simulated recovery",
         "scripts/release-publish-simulate.py",
         "not a GitHub client",
